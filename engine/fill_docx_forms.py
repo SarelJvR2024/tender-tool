@@ -36,7 +36,7 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons):
     fills = {
         "The Service Provider is \t": comp["legal_name"],
         "Address: \t": comp["registered_address"],
-        "Name: \t": henning["name"] + " (Business Development Manager)",
+        "Name: \t": henning["name"] + f" ({henning['signatory_capacity']})",
     }
     telephone_seen = 0
     for p in cell.paragraphs:
@@ -92,7 +92,7 @@ def fill_form_of_offer(src_dir, out_dir, comp, henning):
             else:
                 p.add_run("  [PENDING - needs a real witness name, not the signatory]")
         if p.text.startswith("CAPACITY: "):
-            p.add_run("  [DRAFT - pending director authorisation] Business Development Manager")
+            p.add_run(f"  [DRAFT - pending director authorisation] {henning['signatory_capacity']}")
     d.save(f"{out_dir}/C.1.1.1_Form_of_Offer_FILLED.docx")
 
 
