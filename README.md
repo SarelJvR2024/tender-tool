@@ -45,6 +45,28 @@ per contract even when the macro source is identical — or it may mean these ar
 template version. Either way the tool is refusing to guess, as designed; it needs a decision on
 whether macro hash should be part of the family fingerprint or compared separately from the rest.
 
+## Stream 4: discovery (list, detail, download, daily run)
+
+- `engine/discovery/list_tenders.py` — pulls the full open-tenders list via the site's own
+  DataTables AJAX endpoint (confirmed: 137+ tenders, not the 10 the rendered page shows). No
+  auth, no personal data.
+- `engine/discovery/detail.py` — per-tender metadata (file size/count, create/last-updated
+  dates) from the public detail page. No auth, no personal data.
+- `engine/discovery/download_documents.py` — actually fetches a tender's document pack. This
+  **does** submit personal data (full name, company, phone, email) through the site's real
+  "Download Documents" form, via a real browser (Playwright/Chromium) clicking the real button —
+  not a captcha-solving workaround, just normal use of a reCAPTCHA v3 (invisible) protected form.
+  Requires `--fullname`/`--company`/`--phone`/`--email` explicitly; refuses to guess at identity.
+- `engine/discovery/run_discovery.py` — the daily run: fetches the full list + detail metadata
+  for every open tender (free, no identity data), diffs against the previous run, and only
+  submits the download form for tenders that are **new or changed** since then — not all ~137
+  every day. Unzips each downloaded pack and runs `fingerprint.py` on every `.xlsm` inside.
+  Identity comes from a local `--contact-file` (see `config/contact.json.example`), never
+  committed, never hardcoded.
+
+Compliance check done 2026-10-15: robots.txt allows all paths for all agents; the published
+Terms & Conditions cover only copyright/disclaimer/linking — nothing about automated access.
+
 ## Do not
 
 - Use openpyxl on any `.xlsm` here — it drops the form controls and data validations.

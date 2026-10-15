@@ -1,3 +1,6 @@
 __pycache__/
 *.pyc
 .tmp_*
+config/contact.json
+state/
+templates/incoming/
