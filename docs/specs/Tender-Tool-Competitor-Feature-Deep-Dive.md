@@ -1,0 +1,432 @@
+# Tender Tool – Competitor Feature Deep-Dive & Phased Feature List
+
+Oct 15, 2026 · @Sarel
+
+## Summary
+
+The niche still holds, but it is narrower than we said by voice: nobody I could verify matches a tender's requirements to the right CVs, reformats them, and merges your existing loose files into one submission pack for South African tenders. Every other piece (discovery, deadlines, compliance tracking, AI analysis) is already sold locally.
+
+## Product stance: SaaS from day one, Sarel's requirements set the priority order
+
+This is being built as a multi-tenant SaaS product, not a one-off application for a single client. "Build for my requirements first" means something specific: Sarel's own SANRAL, ACSA and SASSA tenders decide which features get built first and prove that each one works, not that the product is designed only for him.
+
+What this means in practice:
+
+- **Prioritisation, not scope-narrowing:** his real tenders choose the order of Phase 1 features (per the combined feature list) and supply the test scenarios (per the build-discipline section above). A feature is not added just because a future customer might want it; it is added because Sarel's own tenders need it next.
+- **Architecture assumes other tenants from the start:** data model, storage and access control are built for multiple separate companies' documents and CVs from the first version, even while Sarel is the only user. Do not hard-code assumptions that only his company, his CVs, or his SANRAL account exist.
+- **Generalise the document handling:** the SANRAL, PDF and Word template work (build-discipline section) is built so another company's templates could be added later without a rebuild, even though only Sarel's own templates are used to build and test it now.
+- **Pricing stays deferred, not decided:** as agreed, no pricing work now. This does not change the SaaS architecture decision above.
+
+If this stance changes later, the Phase 1 scope and the architecture choice should both be revisited together, since they were decided as one piece.
+
+Two things I told you earlier were wrong or too strong:
+
+- **A local tool does export a bid pack.** TenderProSA lists a PDF export with table of contents, page numbers, separated technical, pricing and compliance sections, and digital signatures ([features page](https://tenderprosa.co.za/features)). It is built for construction BoQ pricing and I found no CV feature, so the gap is CV matching and merging your own files, not "any pack export".
+- **The R300 to R800 per month SME band is already occupied**, and cheaper in places. TenderProSA is R299 to R799 per month; Tender Aid is R699 per year. The mid-market locals charge more: TenderFlow R1,900 per month; AITenders' current site shows R199 and R899 per month. Price cannot be the differentiator on its own.
+
+What to build first, in one line: CV library, requirement-to-CV matching, CV reformatting to the tender's template, and a one-click merge of CVs plus compliance documents into one ordered PDF. Deadline tracking is included as supporting table stakes. HR, resource allocation and project finance stay on the later roadmap.
+
+Not verified: I could not find any live page for Tenderplus.io or Track My Tenders, so they are not in the tables below.
+
+## Guiding goal: save time and get tender work done efficiently
+
+Every feature earns its place by cutting the hours spent per tender; anything that does not is deferred. The pain Sarel described is finding the right CV, reformatting it, and gathering loose files into one pack, so those steps are measured first.
+
+| Measure | How to capture it | Target to set |
+| --- | --- | --- |
+| Hours from tender received to pack ready | Time two or three recent tenders by hand now, as the baseline | Set after baseline; the product should beat it clearly |
+| Minutes to choose and reformat key-person CVs | Time it per tender | Set after baseline |
+| Minutes to assemble and check the final PDF | Time it per tender | Set after baseline |
+| Documents re-entered per tender | Count repeated company details | Zero: entered once, reused |
+
+No time-saving figures are claimed in this document: none of the competitor pages I opened published a measured saving I could verify, so the baseline must come from Sarel's own tenders.
+
+### Manual step each feature removes
+
+Phase 1 and 2 features, with the manual task each one replaces. Time saved is described, not quantified, until the baseline above is measured. Item numbers match the combined feature list.
+
+| Item | Feature | Manual step it removes |
+| --- | --- | --- |
+| 1 | Document vault with expiry dates | Hunting through folders and email for the latest certificates; noticing too late that one has expired |
+| 2 | CV library with structured fields | Opening old CVs to remember who has which experience |
+| 3 | Tender upload and requirement extraction | Reading a long tender document to build the list of required documents and key-personnel needs |
+| 4 | Staff-to-requirement matching | Deciding by memory or by rereading CVs who fits each key-person role |
+| 5 | CV reformatting to the tender template | Retyping or restyling each CV by hand for every tender |
+| 6 | Ordered pack builder with merge | Dragging loose files into one PDF, ordering them, and adding page numbers |
+| 7 | Pre-submission check | Manually checking that every document is present and still valid on the closing date |
+| 8 | Deadline and milestone reminders | Keeping closing dates, briefings and clarification deadlines in a separate calendar or spreadsheet |
+| 9 | Reuse of past submissions | Starting each pack from scratch |
+| 10 | Pipeline board | Tracking submitted and won tenders in a spreadsheet |
+| 12 | SBD form fill | Retyping company details into the same forms for every tender |
+| 13 | SANRAL template automation | Selecting hundreds of dropdown entries by hand and generating the PDF print reports one at a time |
+| 14 | B-BBEE and CIDB checks | Checking by hand whether the company qualifies for a tender |
+
+The efficiency case rests on repeated company and CV data being entered once and reused across every tender, so the product's value grows with each additional tender a customer submits.
+
+## Design priority: UI and UX from day one
+
+UI and UX are a non-negotiable priority from the first build, and possibly the main selling point: Sarel wants the product modern, clean and enjoyable to use, so people choose it over tools that do roughly the same things.
+
+Plain rules for the build, drawn from the earlier design research in the voice chat (not re-checked in this document):
+
+- **No training needed.** No mandatory tutorial; help appears in place, such as a hover tip.
+- **Show the next decision only.** New users see the minimum for their next step; more appears as they go.
+- **Start view by role.** A tender manager and an admin capturing documents open to different screens.
+- **Proactive but calm.** The app flags an expiring document before the user looks, without alarming or black-box wording.
+- **Basics done well.** Consistent layout, clear labels, little clutter, subtle polished transitions.
+
+Competitor interfaces were not assessed in this research. Before design starts, screenshot the trial flows of TenderFlow, TenderProSA and Tender Aid and note where each takes the most clicks to produce a pack. Design acceptance criteria for Phase 1 (for example, a new user builds a pack without help) should be written before any screens are built.
+
+## UI/UX research and design framework
+
+The research supports one design stance: make the product feel familiar, show one decision at a time, and let help stay optional. Each row below states what a source says, then how it applies to the tender tool.
+
+| Principle | What the source says | Applied to the tender tool |
+| --- | --- | --- |
+| Progressive disclosure | Reveal complexity gradually; "each screen should present only the content needed for one task or decision"; hidden features must still be findable ([UXPin](https://www.uxpin.com/studio/?p=41489)). | Pack builder as a step-by-step flow: pick tender, confirm requirements, choose people, review pack, export. Advanced settings sit behind one visible control. |
+| Match existing expectations | Users expect a product to work like the ones they already use; innovate only where the new interaction is intuitive and tested ([Helio on Jakob's Law](https://helio.zurb.com/ux-research/laws-of-ux/jakobs-law/)). | Use familiar patterns: left navigation, drag-and-drop upload, a checklist with ticks, a standard PDF preview. Spend the originality on the CV-to-pack flow, not on navigation. |
+| Role-based start view | Segment dashboards by persona and tailor them in onboarding; customisation alone leaves many users to churn before reaching value ([insightsoftware](https://insightsoftware.com/blog/the-role-of-persona-segmented-dashboards-in-user-onboarding/)). | One question at signup ("What will you do most?"). Tender manager lands on the pipeline and next deadlines; document-capture person lands on the vault and expiring items. Allow a switch back to the default layout. |
+| Optional, ambient help | Keep tours short (3 to 5 tooltips, about 140 characters each); full-screen takeovers only for required input; never put essential information in a tooltip ([Appcues](https://www.appcues.com/blog/user-onboarding-guide)). | Persistent setup checklist and a help button; hover tips for non-essential terms. No blocking walkthrough. One required first step: add company details. |
+| Trustworthy AI | Show the plan before action, a short plain reason ("Because X, I did Y"), a confidence signal, an action log with undo, and ask when unsure ([Smashing Magazine](https://shop.smashingmagazine.com/2026/02/designing-agentic-ai-practical-ux-patterns/)). Suggestions beat automatic actions; separate AI-generated from user content ([Goji Labs](https://gojilabs.com/blog/ux-patterns-that-increase-trust-in-ai/)). | Expiry flags read "B-BBEE certificate expires 12 days before closing date. Replace it?" with a button, not a red alarm. CV matches show why each person ranks where they do and a "low confidence" tag when a requirement is unclear. AI never edits a document without a preview and undo. |
+| Polish and micro-interactions | Each micro-interaction needs a purpose; 200 to 500 milliseconds with smooth easing for most; consider users with visual, motor or cognitive impairments ([Cieden](https://cieden.com/book/sub-atomic/microinteractions/designing-neat-microinteractions)). | Subtle progress and success motion when a pack builds; reduced-motion setting; no decorative animation. Consistent spacing, labels and one visual language across screens. |
+
+### Design vision for the core flow
+
+1. **First run:** company details, then upload the first documents; the product shows the expiry dates it found.
+2. **Home:** role-based; the single most useful next action is the largest element.
+3. **New tender:** drop in the tender file; the product lists required documents and key-personnel needs.
+4. **People:** ranked CV suggestions with reasons; the user picks; the CV is reformatted with a live preview.
+5. **Pack:** ordered checklist on the left, merged PDF preview on the right; problems listed in plain words with a fix button.
+6. **Export:** one button, with a clear "ready to upload" state.
+
+### Phase 1 design acceptance criteria
+
+- A new user builds a first pack with no tutorial and no help call.
+- Every error message states what is wrong and offers a fix.
+- Nothing the AI changes is applied without a preview and an undo.
+- Every screen has one clearly primary action.
+
+### Limits of this research
+
+These are mostly practitioner and vendor blogs (UXPin, Appcues and insightsoftware sell related software), plus one Smashing Magazine article, so treat them as guidance, not measured proof. I did not read Nielsen Norman Group directly; Jakob's Law is cited through a secondary summary. Appcues does not say to avoid tours entirely; it says keep them short and optional, so the earlier voice summary ("avoid forced tutorials") is slightly stronger than the source. The figures (3 to 5 tooltips, 200 to 500 milliseconds) are one article's recommendations, not standards. None of this replaces testing with real tender staff.
+
+## Competitor landscape
+
+South Africa has at least five local tools at SME to mid-market prices, while the CV and proposal-automation tools are foreign and not localised. Prices are from vendor pages, in the currency shown there.
+
+| Tool | Origin | Aimed at | Published price | Source |
+| --- | --- | --- | --- | --- |
+| TenderProSA | South Africa | Construction contractors, BoQ pricing | R299, R799, R1,999 per month (plus higher tiers) | [pricing](https://tenderprosa.co.za/pricing) |
+| BidsStack | South Africa | Tender discovery and award intelligence | R300 (Starter), R750 (Pro) per month | [features](https://app.bidsstack.com/features) |
+| Tender Aid | South Africa | Government bids, compliance vault | R699 or R1,749 per year; R799 once-off | [Capterra](https://www.capterra.com/p/10045780/Tender-Aid/) |
+| TenderFlow | South Africa | Tender management for SA and Africa | Free; R1,900 per month; R3,500 per month; R12,000 or R25,000 per year | [site](https://www.tenderflow.co.za) |
+| AITenders.co.za | South Africa (Cape Town) | Discovery plus bid management | R199 (Starter) or R899 (Pro) per month on its current site; R2,900 per month in a sponsored article | [eNCA](https://www.enca.com/promotions/local-ai-company-launches-platform-help-businesses-win-tenders-faster) |
+| Flowcase | Norway | Consulting and engineering firms, CV and case-study database | Not published | [Flowcase](https://www.flowcase.com/cv-and-case-study-tool-for-enterprise-professional-services) |
+| GovDash | US | US federal contractors | Quote only | [GovDash](https://www.govdash.com/proposal) |
+| Loopio | Canada | Proposal teams, answer library | Quote only; third-party estimate about $20,000 per year, unconfirmed by Loopio | [SiftHub](https://www.sifthub.io/blog/loopio-rfp) |
+| AutoRFP.ai | International | Teams handling 40 to 200 tenders a year | $899 or $1,299 per month | [AutoRFP.ai](https://autorfp.ai/blog/tender-software.md) |
+| mytender.io | UK | Small to mid-sized bid teams | Not published | [Capterra](https://www.capterra.com/p/10031061/mytender-io/) |
+
+Caveats: Tender Aid's Capterra page shows zero reviews, and its "98% extraction accuracy" is the vendor's own claim. Loopio's limitations come from a competitor's blog. AutoRFP.ai's comparison page is written by AutoRFP.ai.
+
+## Feature inventory across competitors
+
+Discovery, deadlines and compliance tracking are widespread; CV tailoring and bid-pack export each appear in only one or two tools. "Offered by" lists only tools whose own page or listing I opened; a missing name means not found, not confirmed absent.
+
+| Category | Feature | Offered by |
+| --- | --- | --- |
+| Discovery | Search and browse tenders by category, region, institution, value, deadline | TenderFlow, BidsStack, AITenders, TenderProSA, Tender Aid (eTenders.gov.za integration) |
+| Discovery | Profile-based tender recommendations | AITenders, Tenders Agent (listing, India-priced) |
+| Discovery | Keyword and saved-filter email alerts | BidsStack, TenderFlow |
+| Discovery | Awarded-tender and competitor intelligence (winners, pricing patterns, history to 2018) | BidsStack Pro, AITenders |
+| Tracking | Deadline reminders and calendar integration | TenderFlow, TenderProSA, AutoRFP.ai (portal extension) |
+| Tracking | Working-day deadline calculator excluding SA public holidays | TenderFlow (free tool) |
+| Tracking | Pipeline from discovery to submission, task owners, comments | AITenders, TenderFlow, Loopio (project management), Tender Aid (3-Gate workflow) |
+| Tracking | Go/No-Go screening | AutoRFP.ai, GovDash ("Score & Decide") |
+| Compliance | Document vault with expiry alerts (B-BBEE, tax, certificates) | TenderFlow, Tender Aid, TenderProSA |
+| Compliance | CIDB grade check against tender value and work class | TenderProSA, TenderFlow (free calculator) |
+| Compliance | B-BBEE preference-point calculation, SMME affidavit prep | TenderProSA, TenderFlow (free calculator) |
+| Compliance | Eligibility and document-readiness dashboard against company profile | TenderFlow |
+| Compliance | Audit trail for PFMA and MFMA | Tender Aid |
+| AI analysis | Read tender PDF, extract requirements, criteria, deadlines | TenderFlow, Tender Aid, TenderProSA, AutoRFP.ai, mytender.io, GovDash |
+| AI analysis | Compliance matrix traced to source clauses | GovDash |
+| AI drafting | Cover letter, executive summary, capability statement, methodology | TenderFlow, mytender.io, AutoRFP.ai, GovDash |
+| AI drafting | Method statements, quality plans, risk assessment | TenderProSA |
+| Content library | Reusable approved answers and case studies | Loopio, AutoRFP.ai, mytender.io, GovDash (past performance) |
+| Pricing | Automated BoQ pricing with SA rates, supplier RFQs, quote comparison | TenderProSA |
+| CVs | Searchable CV and case-study database with master-data cleanup (TenderFlow has a simpler employee CV repository on paid plans) | Flowcase |
+| CVs | Tailored CV versions per bid, aligned to RFP requirements | Flowcase |
+| CVs | Score key personnel against requirements and show staffing gaps (resume-template filling not confirmed) | GovDash |
+| CVs | Word, PDF, PowerPoint export with consistent templates | Flowcase |
+| Pack assembly | PDF bid pack with contents page, sections, branding, digital signature, size optimisation | TenderProSA |
+| Pack assembly | "Compile the bid pack" from verified repository documents (merge behaviour not described) | TenderFlow |
+| Output | Word export; export in buyer's original format | TenderFlow (.docx); Loopio, AutoRFP.ai |
+| Collaboration | Roles, version history, comment threads, approvals | TenderProSA, TenderFlow, Loopio, AutoRFP.ai |
+| Integrations | Salesforce, Microsoft 365, SharePoint, Slack and Teams, REST API | Loopio, AutoRFP.ai, GovDash (Word add-in), Flowcase (API) |
+| Platform | Android app with offline mode | TenderProSA |
+| Security | POPIA and GDPR statement | TenderFlow |
+| Learning | Paid tender course with AI tutor | TenderFlow Tender Academy (R4,995 once-off) |
+
+Sources: [TenderFlow](https://www.tenderflow.co.za), [TenderFlow compliance guide](https://www.tenderflow.co.za/blog/tenderflow-product-comparisons/product-guides/how-tenderflow-simplifies-tender-compliance/), [TenderProSA features](https://tenderprosa.co.za/features), [Tender Aid](https://www.capterra.com/p/10045780/Tender-Aid/), [BidsStack](https://app.bidsstack.com/features), [AITenders](https://www.enca.com/promotions/local-ai-company-launches-platform-help-businesses-win-tenders-faster), [Flowcase](https://www.flowcase.com/cv-and-case-study-tool-for-enterprise-professional-services), [GovDash](https://www.govdash.com/proposal), [Loopio](https://www.sifthub.io/blog/loopio-rfp), [AutoRFP.ai and mytender.io](https://autorfp.ai/blog/tender-software.md).
+
+## Gap analysis: where the niche is
+
+The open space is the last mile between "we know what is required" and "one signed PDF ready to upload": picking people, reformatting their CVs, and merging your own documents in the right order. TenderFlow has an employee CV repository on its paid plans, but I found no South African tool that matches CVs to requirements or reformats them (absence is not proven).
+
+| Gap | What exists today | What is missing | Confidence |
+| --- | --- | --- | --- |
+| Requirement-to-CV matching | Flowcase tailors CVs per bid and GovDash scores key personnel against requirements, both foreign and not localised; TenderFlow stores CVs | A local tool that reads the tender's key-personnel clauses and ranks your staff against them | Medium to high: TenderFlow stores CVs; no matching or reformatting found in any local tool, but absence is not proven |
+| CV reformatting to tender template | Flowcase exports Word, PDF, PowerPoint templates; GovDash shows staffing gaps | Reformat to the specific format a SANRAL or ACSA tender demands, with gaps flagged | High for SA; medium overall |
+| Merge your own loose files into one pack | TenderProSA exports a PDF pack of its own generated sections; TenderFlow says it compiles a bid pack but does not describe merging | Upload certificates, SBD forms and CVs, order them per the tender checklist, merge, number pages, one file | Medium: TenderProSA may cover part of this, and its pack merge behaviour on uploaded files is untested |
+| Pack validation | Document-readiness dashboards (TenderFlow), pre-submission audit (Tender Aid) | Check the finished pack: expiry dates still valid at closing date, signatures present, page limits, file size | Medium |
+| Non-construction focus | TenderProSA leans on BoQ pricing for contractors | Services, consulting and engineering tenders where CVs and experience dominate scoring | Medium |
+| Price point | Locals range from R199 per month (AITenders Starter) and R299 per month (TenderProSA) up to R1,900 per month (TenderFlow Professional) | A price below TenderFlow and AITenders with CV and pack features | Low as a differentiator: R300 to R800 per month already has competitors |
+
+What this means for scope: the two features competitors do not show are CV matching with reformatting, and ordered merge of uploaded documents into one validated PDF. Treat everything else as table stakes to match, not to win on.
+
+To test before committing: take three of your real past tenders and check whether TenderProSA's trial or TenderFlow's bid pack would assemble the pack from your existing files. If either does, the merge half of the niche shrinks and CV matching carries the product.
+
+## Later-phase roadmap (not in the first build)
+
+Three later phases extend the same people-and-projects data the CV engine already holds; each enters a different competitive space and should start only after the earlier phase has paying users.
+
+| Phase | Scope | Why it follows the core | Watch-out |
+| --- | --- | --- | --- |
+| A: HR-lite | Employee onboarding, self-service CV and credential capture, certificate and registration expiry reminders | Credentials feed CV matching and tender compliance, and an expired certificate can disqualify a bid | Flowcase's page does not describe certification tracking, so the closest direct comparison is thin; leave management would meet established SA payroll and HR tools (named earlier by voice, not researched here) |
+| B: Resource allocation | Assign people to won projects, availability and utilisation view, capacity check against the tender pipeline | Won tender becomes a project that needs staffing | Mature resource-planning tools exist; keep it to "can we staff this bid?" |
+| C: Project financials | Budget versus actual, margin against the bid price, cost per person | Links bid price to delivered margin | Largest scope; accounting integration is a separate product |
+| Optional: Leave | Leave balances and requests | Natural once employee records exist | Different competitive set; defer until A has users |
+
+## Combined feature list, phased
+
+Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the table-stakes features a paying customer expects; Phases 3 onward are the roadmap. "Type" says whether competitors already have it (Existing), nobody local does (Gap), or it is roadmap.
+
+| # | Feature | Type | Phase |
+| --- | --- | --- | --- |
+| 1 | Company document vault with expiry dates: CIPC registration, CSD summary, SARS tax status, B-BBEE affidavit or certificate, bank letter, CIDB, COID, ID copies | Existing | 1 |
+| 2 | Staff CV library with structured fields: qualifications, registrations, project experience, years per skill | Gap (local) | 1 |
+| 3 | Upload a tender and extract its required documents, forms and key-personnel requirements | Existing | 1 |
+| 4 | Match staff to key-personnel requirements and rank them, with reasons and gaps | Gap | 1 |
+| 5 | Reformat chosen CVs into the tender's required template, output PDF and Word | Gap | 1 |
+| 6 | Ordered pack builder: arrange vault documents, CVs and completed forms per the tender checklist, merge into one PDF with contents and page numbers | Gap | 1 |
+| 7 | Pre-submission check on the pack: documents valid on the closing date, missing items, file size and page limits | Existing (partial) | 1 |
+| 8 | Tender record with closing date, briefing, clarification, submission and signature milestones; email reminders | Existing | 1 |
+| 9 | Reuse of past submissions: copy a previous pack as the starting point | Gap | 2 |
+| 10 | Tender pipeline board: found, bidding, submitted, won, lost; submitted and won history | Existing | 2 |
+| 11 | Tender discovery: continuously scrape public portals (eTenders, provincial, municipal, SANRAL's own listings), store a full opportunity database, download each tender's own documents and forms, and auto-check new tenders against the vault and CV library to flag readiness gaps (see build shape, stream 5) | Existing | 2 |
+| 12 | Fill standard SBD forms from company data (SBD 1, 4, 6.1, 8, 9) | Gap (to verify) | 2 |
+| 13 | SANRAL template automation: fill SANRAL's macro-heavy Excel tender workbook from stored company data and the key-person CV, then generate its PDF print reports (see the SANRAL section below) | Gap | 2 |
+| 14 | B-BBEE points and CIDB grade checks against a tender | Existing | 2 |
+| 15 | Team roles, comments, version history | Existing | 2 |
+| 16 | AI-drafted narrative sections: executive summary, methodology, capability statement | Existing | 3 |
+| 17 | Awarded-tender and competitor intelligence | Existing | 3 |
+| 18 | Go/No-Go scoring | Existing | 3 |
+| 19 | Case-study and past-project library with tailored write-ups | Existing (Flowcase, GovDash) | 3 |
+| 20 | Employee onboarding and self-service CV and credential capture | Roadmap (HR-lite) | 4 |
+| 21 | Credential and certificate expiry reminders per person | Roadmap (HR-lite) | 4 |
+| 22 | Leave management | Roadmap (optional) | 4+ |
+| 23 | Resource allocation and utilisation across projects | Roadmap | 5 |
+| 24 | Project financials: budget versus actual, margin against bid | Roadmap | 6 |
+| 25 | POPIA-compliant storage of ID copies and personal data (needed from Phase 1 because the vault holds them) | Existing | 1 |
+| 26 | Record who on the team submitted each tender, and any revenue-share or commission tied to that person | Gap | 3 |
+| 27 | Record the company's own submitted price per tender, building an internal pricing history by tender type, client and sector | Gap | 3 |
+| 28 | Capture public award outcomes (winner and price) from buyers that publish them, such as SANRAL, to show market-pricing trends | Gap | 3 |
+
+Access to external data is the main risk to Phase 2: portal scraping terms and eTenders access need checking before item 11 is promised, including whether each portal's terms of service permit downloading its documents, not only listing its tenders. Item 12 needs checking that the SBD form templates can be filled legally and reliably; I did not verify that any competitor does it.
+
+## Build discipline: finish and test before moving on
+
+Even within Phase 1, build one feature at a time, test it properly against real tenders, and only then start the next. Do not run two features in parallel at half-finished quality.
+
+- **Order inside Phase 1:** document vault, then tender upload and requirement extraction, then CV matching, then CV reformatting, then pack merge, then the pre-submission check. Each one should work reliably on a real tender before the next starts.
+- **"Properly tested" means:** run it on at least 2 or 3 of Sarel's own real tenders (SANRAL, ACSA, SASSA), not a sample file, and check the output by hand against what he would have produced manually.
+- **Gate before moving on:** a feature is done when it produces a correct result unattended on a real tender, not merely when the code runs.
+- **Applies to SANRAL automation too:** treat it as its own feature inside item 13, built and tested on its own before anything else in Phase 2 starts.
+
+* **Applies across file types, not only SANRAL's Excel workbook:** the same template-by-template, field-by-field approach applies to any tender document type Sarel works with, including PDF forms (often fillable fields, or static layouts that need populating and flattening without losing the form's structure) and Word templates (placeholder text or tables that need company and CV data dropped in without breaking formatting). For each document type: get a real blank example, map which fields are constant (company details, key-person CVs) versus tender-specific (project name, number, dates), then test against Sarel's real past submissions before trusting the output.
+
+## Build shape: five streams
+
+The build breaks into five streams. The first four are ordered; Sarel's own tenders set the pace and supply the test cases, per the build-discipline rule above. Stream 5 is lower priority than streams 2 to 4, because discovery and tracking are already well covered by competitors (see the feature inventory); the CV and pack work is the niche and the reason to build this at all.
+
+1. **Foundation:** multi-tenant data model, authentication, and the document vault with expiry tracking. Everything else depends on documents already being stored against the right company.
+2. **Tender intake:** upload a tender document, extract its requirements. Real tenders become the test cases here.
+3. **CV layer:** the CV library, requirement-to-CV matching, and reformatting. This is the core niche.
+4. **Pack builder:** merge documents and CVs into one ordered, validated PDF, plus the pre-submission check.
+5. **Discovery, wired to the vault and CV library, not a standalone feed:** continuously search and store tenders from public portals (eTenders, provincial, municipal, SANRAL's own listings) to build a full opportunity database. Download the tender's own documents and forms as part of discovery, not only its listing, so the full pack is already in the system before a customer logs in; a customer can still upload their own copy, but the product is not dependent on that upload. As each new tender arrives, run it through the same checks as a manually uploaded one: match it against stored CVs and compliance documents, and flag or fix what is missing or needs attention automatically, rather than waiting for a customer to upload a tender and ask. This turns discovery from a list of opportunities into an automatic readiness check, with the paperwork already in hand, on every one.
+
+SANRAL, PDF and Word template automation (see the build-discipline section) runs alongside these as its own stream, tested separately once blank examples are available.
+
+**Open items for stream 5, to settle before building it:** which portals to start with (SANRAL's own listings first is the closest fit to Sarel's immediate need); whether each portal's terms of service permit scraping, checked before building against it; and how to avoid duplicate or stale listings across portals.
+
+## Tender financial and market-intelligence records
+
+This is a new item, distinct from the later-phase "project financials" roadmap entry (budget versus actual on won projects): it is about recording tender-level submission and outcome data, both internal and public, to build pricing and market intelligence over time.
+
+- **Internal submission records:** for each tender submitted, record who on the team worked on or submitted it, and any revenue-share or commission arrangement tied to that person for that tender.
+- **Submitted pricing history:** record the price the company submitted at for each tender, building an internal pricing history over time by tender type, client and sector.
+- **Public award data:** where a buyer publishes it (SANRAL, for example, posts award outcomes on its website), capture who won each tender and at what price. Over time this builds a market-pricing trend across tender types, not just Sarel's own submissions.
+- **A use case beyond the bidder:** this award data has value to people who are not bidding themselves, such as suppliers or competitors wanting to know who won a tender so they can approach the winning contractor. This could be a distinct feature or a separate audience from the core product, worth treating as its own idea rather than assuming it is the same buyer as the rest of this document.
+
+This depends on stream 5 (discovery) already capturing and storing tender listings, and extends it to capture outcomes too, not only opportunities. Not yet researched: which buyers publish award outcomes and in what format, and whether scraping award pages raises the same terms-of-service questions as scraping open-tender listings.
+
+## SANRAL project document preparation
+
+SANRAL template automation is an explicit Phase 2 feature (item 13) and is the product's first real-world test case, because Sarel already does this work by hand. What follows is from his own description; I have not opened the template, so SANRAL's actual form list must be taken from the workbook itself.
+
+- **The problem:** SANRAL issues a standardised Excel tender workbook with heavy VBA macros and hundreds of dropdown form controls, reissued per tender with the project name and number pre-filled. Public SANRAL notices show per-contract macro-enabled workbooks (for example Financial Submission.xlsm and Technical Submission.xlsm) and a Form A1.1 certificate of intention to submit, and the loaded specification shows two template families, not one (see below). Completing it by hand is very slow.
+- **What to automate:** fill the workbook from stored company data and the key-person CV, then generate the PDF print reports the workbook produces, for several SANRAL tenders reusing the same information.
+- **Non-negotiable:** the automation must not corrupt SANRAL's macros, formulas or print setup, and must not risk disqualification. Treat the workbook as read-only except the input cells, and check every output against the untouched original before it is offered for submission.
+- **How it ties to the niche:** the same stored company record and CV library feed both the SANRAL workbook and the generic pack builder. The SANRAL printed reports then become pack sections, so one source of truth produces the whole submission.
+- **Scope guard:** SANRAL is one buyer with a fixed template. Build it as a separate importer so a template change does not break the rest of the product.
+
+The loaded specification (below) now answers which sections repeat and which are tender-specific; its open issues are listed at the end of this section.
+
+### SANRAL specification (loaded 15 October 2026)
+
+A specification from Sarel's earlier SANRAL work is saved in Drive as [SANRAL Tender Automation Specification](https://drive.google.com/file/d/1-R6hR6Onqk432O57hJaYOj42_nCM2vi8/view) with the [source-code appendix](https://drive.google.com/file/d/12NUzoLQiGXoPpN_Y7pufMRhUuDVmKwBS/view), in the Tender Tool folder. It labels each fact Observed or Assumed. Its main findings, as written there:
+
+| Topic | What the specification says |
+| --- | --- |
+| Template families | Two exist: RRM Consultant Tender (15 sheets, about 873 dropdowns) and Conventional Consultant Tender (9 sheets, about 867 dropdowns). The main tender sheet (TEND 1X) uses the same layout for Forms B1 to B7 in both. SANRAL pre-fills the SETUP sheet (contract number, closing date, position codes), and the tool must never override it. |
+| Inputs | Input cells are those that are unlocked and not formulas, not just yellow ones. A yellow-only scan missed several. |
+| Dropdowns | They are legacy form controls storing a 1-based index; a date is three dropdowns (year, month, day). The tool sets dropdowns by label, read from the template's own list. |
+| Macros | They only set print areas and page set-up; none prints. The tool replicates that page set-up to produce the PDFs. |
+| Outputs per tender | The filled workbook plus 5 or 6 PDFs (Forms B1-B2 per position, B3, B4, B5, B7). |
+| Method | Edit the workbook's XML directly and copy every other part byte for byte. Never use a library that rewrites the package (openpyxl dropped validations and form controls). Never write to a formula cell. |
+| Verification | A 12-point checklist: zip integrity, XML validity, macro file identical, same part count, values read back, dropdown labels, PDF page counts, no formula errors, text present, visual check, package hash, and open in real Excel. |
+
+**Lessons that become product requirements:**
+
+- **Silent wrong data is the main risk.** A first delivery left the B-BBEE level at SANRAL's default of 9 and the targeted-enterprise block blank in seven tenders. It was caught and fixed, but it shows why the product needs a read-back check of every required field before any pack is released.
+- **Check the rendered page, not extracted text.** Hidden values under dropdowns showed up as false alarms in PDF text.
+- **The PDFs come from LibreOffice, not Excel.** They were never compared with a real Excel print, and no filled file has been opened in Excel yet. Do this before any submission relies on the product.
+- **Personal data in the data pack.** The pack holds ID numbers, professional registration numbers and contact details, so it falls under the POPIA section above.
+
+**Open issues from the specification** (to settle before calling SANRAL end-to-end): C2.4 hours and budgets are pending per tender; Form B3 partner names and the director list are blank; B4 and B5 attachments (quality certificate, programme) are not produced; the B6 past-performance sheets and the BEE A3 reports are not generated; alternate key positions are blank; RRM outputs were not re-verified; and the RRM pack may still clip long institution names. The specification lists ten questions for Sarel; Q1 to Q10 are in its section 8.2.
+
+### Required first step: check the template before filling
+
+Every run must begin by checking whether the incoming template or document has changed, because SANRAL and other buyers reissue them and a silent change could produce a wrong submission. If the check fails, the tool stops and flags it; it does not fill.
+
+- **Fingerprint what the tool already depends on:** sheet names and count, number of dropdowns, checkboxes and buttons, each dropdown's list range and options, the SETUP layout (position codes in row 6), print areas, and the macro file's hash. The specification records known values: Conventional 9 sheets and 867 dropdowns, RRM 15 sheets and 873 dropdowns.
+- **Known family, no change:** fill as normal.
+- **Known family, something differs:** stop, show exactly what differs, and ask for review before any filling.
+- **Unknown document or new family:** do not guess; send it for a field-by-field review like the ones used to build the first two families, and add it as a new family once reviewed.
+- **Status today:** the specification lists a changed template as scenario S14, not tested, so this check is new work.
+
+### Two-envelope submissions
+
+Many tenders require the technical and the pricing proposals in two separately sealed envelopes. The structure below is taken from the cover pages of last week's SASSA submission in your Drive (bid number, company registration and contact details left out here); it shows what the product must produce.
+
+| Part | What it contains |
+| --- | --- |
+| Outer envelope cover | Bid number, tender title, closing date and time, delivery address, bidder details, a note that it holds two separately sealed envelopes, and contents (Envelope 1: 1 original and 1 copy; Envelope 2: 1 original and 1 copy) |
+| Inner cover 1 of 2: Technical proposal | Same header details; a tab list (covering letter and index; SBD forms, authority, CIPC, CSD, tax status, B-BBEE; ISO, project leader, experience; proposal, CVs, profile, insurance); the statement that it contains no pricing information |
+| Inner cover 2 of 2: Pricing proposal | Same header details; tab A pricing covering letter, tab 1 SBD 3.1 pricing schedule, tab 2 Annexure C pricing per region; the statement that it is opened only after technical evaluation |
+
+Requirements that follow:
+
+- **Two separate packs:** build the technical and pricing packs separately, each as its own PDF with its own tab dividers and page numbering; the file names in Drive show about 358 pages for the technical envelope and 8 for pricing.
+- **Envelope covers generated from tender data:** outer and both inner covers filled from the tender's bid number, title, closing time, address and the bidder record, with the correct tab list for each tender.
+- **Pricing guard:** scan the technical pack and block release if it contains pricing; confirm the pricing pack holds only pricing.
+- **Copies:** record how many originals and copies each envelope needs.
+- **SANRAL:** public notices show separate Technical Submission and Financial Submission workbooks for SANRAL tenders. The loaded specification covers only the technical workbook (Forms B1 to B7); the financial workbook and its envelope are not yet specified and need a workbook example.
+
+I took "Sonnet" in the last voice note to mean SANRAL or SASSA; the two-envelope example here is SASSA's, and the SANRAL part is limited to what the specification and public notices show.
+
+### Discovery: what SANRAL's website offers (checked 15 October 2026)
+
+SANRAL publishes a public list of open tenders with structured fields, but each tender pack sits behind a download form, so fully automatic download needs a decision first. Source: SANRAL's [open tenders list](https://www.nra.co.za/sanral-tenders/list/open-tenders) and one [tender detail page](https://www.nra.co.za/sanral-tenders/detail/sanral-x-004-099-2022-1f).
+
+- **List:** 10 open tenders at the time of checking, each with a reference, project type, closing date and time, region and a link to a detail page. This list was incomplete: six further consultant tenders (R.334-030, R.343-020, R.352-020, R.352-030, R.394-010 and R.396-010, all 2025/1F) close on 22 October 2026 at 12:00 and were reachable only through their detail pages. Discovery must therefore not trust the open-tenders list alone.
+- **Other lists:** the site also links closed, awarded, cancelled and archived tenders, second-tier procurement (a separate site) and SAP Ariba tenders. These could hold the tender you meant; I did not open them.
+- **Detail page:** description, dates, submission rules, contact email, and a zipped tender document (one example was 31 MB). Award and opening results fields exist and fill in later, which supports the award-data feature.
+- **Download:** no login was needed, but a form asks for name, company, phone, email and agreement to the privacy policy before the file downloads.
+- **Not checked:** the site's terms of use were not readable in my fetch, so whether automated collection is allowed is unknown. Settle this with SANRAL's terms and, if needed, SANRAL itself before building the scraper.
+
+## South African tender compliance coverage
+
+The feature list covers the common national requirements below; four rows (financial standing, local content, industry registrations, SANRAL-specific forms) are tender-specific and must be confirmed against each tender's own checklist. Requirements are from [TenderFlow](https://www.tenderflow.co.za/q/what-documents-with-tender-response/), [GovChain](https://www.govchain.co.za/blog/documents-needed-to-apply-for-tender-south-africa) and [TenderProSA](https://tenderprosa.co.za/features).
+
+| Requirement | Typical evidence | Product feature | Covered in list |
+| --- | --- | --- | --- |
+| Company registration | CIPC certificate (COR14.3) or incorporation notice (COR14.1) | Vault with expiry or validity | Item 1 |
+| Supplier database | CSD registration summary and supplier number | Vault; check validity at closing date | Item 1 |
+| Tax compliance | SARS tax compliance status PIN | Vault; check status at closing date | Items 1, 7 |
+| B-BBEE | Affidavit or SANAS-accredited certificate, as each tender specifies; SBD 6.1 preference claim (the 2022 regulations award points for specific goals, so follow each tender's form) | Vault, points check, SBD 6.1 fill | Items 1, 12, 14 |
+| CIDB grading | CIDB registration, grade against tender value (use CIDB's current limits; the 2019 limits run from Grade 1 R500,000 to Grade 9 unlimited, and some sites still show older figures) | Grade check and expiry | Item 14 |
+| Conflict of interest | SBD 4 declaration of interest | Form fill | Item 12 |
+| Anti-collusion | SBD 9 independent bid determination | Form fill | Item 12 |
+| Past supply-chain practices | SBD 8 | Form fill | Item 12 |
+| Invitation and pricing forms | SBD 1, SBD 3.3 pricing schedule | Form fill | Item 12 |
+| Banking | Stamped bank confirmation letter dated within 3 months | Vault with age rule | Item 1 |
+| Financial standing | Audited financials or management accounts; surety or guarantee capacity letter | Vault; tender-specific; I found no authoritative source requiring it generally | Item 1 (add per tender) |
+| Local content and preferencing | Local production and content declaration (SBD 6.2) for designated sectors | Form fill where the tender designates the sector; SBD 6.2 is listed on National Treasury's practice-notes page | Item 12 |
+| Industry registrations | PSiRA, ECSA, NHBRC, FSP, COID letter of good standing, health and safety file | Vault with expiry, per tender | Item 1 |
+| Identity and address | Certified ID copies of directors, recent utility bill | Vault; certification date rule | Items 1, 25 |
+| Experience | References, completion certificates, signed past contracts, CVs | CV and project library | Items 2, 4, 5, 19 |
+| Insurance and municipal | Professional indemnity cover, municipal account compliance | Vault with expiry | Item 1 |
+
+The table covers the common national requirements; several rows are set per tender, so the tender's own wording always decides. The pre-submission check (item 7) should read the tender's own returnable-documents list as the final authority and flag anything not in the vault.
+
+**Added after an independent fact-check (15 October 2026):** the table above omits several items the check found in public tenders: SBD 7 (contract form), municipal MBD forms, SANRAL Form A1.1 (certificate of intention to submit, which gates receipt of addenda), compulsory briefing sessions, VAT registration, joint-venture agreements, and an up-to-date COID letter of good standing. Add them to the vault and pack checklist as tender-specific items.
+
+**Legal framework to recheck before launch:** the 2022 Preferential Procurement Regulations took effect on 16 January 2023 (80/20 up to R50 million, 90/10 above). The Public Procurement Act 28 of 2024 was signed, but I could not confirm whether it is in force in October 2026, and draft General Public Procurement Regulations, 2026 were reported for comment. Check National Treasury's site before fixing any rule in the product.
+
+## POPIA compliance requirements
+
+POPIA compliance is a foundational requirement from the first build, because the product stores customers' company documents and their employees' personal CVs, ID copies and credentials. Clients are likely to ask for it before signing. This section is a research summary, not legal advice; have a South African attorney review the final terms.
+
+**Likely roles (my reading, to confirm with a lawyer):** each customer company is the "responsible party" for its staff's information, and the product is its "operator" processing that information on its behalf. For the product's own account and billing data about customers, the product is a responsible party.
+
+| Obligation | What the sources say | Product requirement |
+| --- | --- | --- |
+| Written operator agreement (s 21) | A written contract with any operator is mandatory; its absence is itself a contravention. It should cover scope, security, breach notice, deletion or return, sub-processors and audit rights ([MJK](https://mjkinc.co.za/software-technology-law/popia-for-tech-companies)). | Standard data processing agreement signed at signup; list sub-processors (hosting, AI provider, email). |
+| Security safeguards (s 19) | Responsible parties must secure integrity and confidentiality; operators must keep personal information confidential ([MJK](https://mjkinc.co.za/software-technology-law/popia-for-tech-companies)). | Encryption in transit and at rest, role-based access, access logs, backups, no staff browsing of customer files without permission. |
+| Breach notification (s 22) | Operator must tell the responsible party immediately; the responsible party notifies the Information Regulator and affected people as soon as reasonably possible. No fixed deadline in the Act; the Regulator has indicated about 72 hours as a guideline ([MJK](https://mjkinc.co.za/software-technology-law/popia-for-tech-companies)). | Documented incident procedure; alert customers immediately; keep an audit trail to show what was accessed. |
+| Telling people their information is collected (s 18) | Data subjects must be told about collection and use ([MJK](https://mjkinc.co.za/software-technology-law/popia-for-tech-companies)). | Privacy notice; a way for customers to record staff consent or notice for CV storage. |
+| Access, correction and deletion | Data subjects have these rights; build deletion and export into the platform ([MJK](https://mjkinc.co.za/software-technology-law/popia-for-tech-companies)); the page does not set out the rights in detail, so check the Act. | Per-person view, edit, export and delete; when a person leaves, their CV and credentials can be removed; delete on account closure. |
+| Cross-border transfer (s 72) | Transfers outside South Africa need at least one condition: adequate foreign law, binding corporate rules, a binding agreement, consent, or contract necessity; the source says the US is no longer regarded as adequate, and GDPR terms should not be assumed to satisfy POPIA ([Michalsons](https://www.michalsons.com/focus-areas/privacy-and-data-protection/transfers-of-personal-information-outside-south-africa), [MJK](https://mjkinc.co.za/software-technology-law/popia-for-tech-companies)). | Prefer South African hosting if available; otherwise record the s 72 basis for every country the data reaches, including AI providers that read uploaded CVs. |
+| Information officer | Each organisation has one by default (a company's CEO or equivalent); register with the Information Regulator before duties start, on its eServices Portal ([Michalsons](https://www.michalsons.com/focus-areas/privacy-and-data-protection/information-officer-popi-paia)). | Register Sarel's business and appoint the information officer before launch. |
+
+Two product decisions follow from this: collect only the personal information needed for a tender (a CV and qualifications, not unneeded ID data), and be clear about where uploaded CVs go when an AI feature reads them. The sources I opened are law-firm articles; I did not read the Act's text or the Information Regulator's own guidance, so confirm section numbers there before relying on them.
+
+## Go-to-market plan (lean, solo, part-time)
+
+Sell by conversation first and proof second, with no paid advertising until a few customers pay. The plan fits a founder with about 20 to 30 hours a week alongside a day job and no marketing budget; every step below costs time, not money. Durations are my estimates and depend on how fast the product is built.
+
+| Phase | Goal | What to do | Done when |
+| --- | --- | --- | --- |
+| 1. Validate and build a list | Learn if the pain is real; start a pipeline | Talk to 5 to 10 South African SMEs that tender regularly, drawn from your own network (SANRAL, ACSA and your other tender work). Ask how long CVs and pack assembly take per bid, what they use now, and what they pay. Ask each to be a first tester. | You have 5 or more interviews and 3 or more people who want to try it |
+| 2. Prove it on your own tenders | Create the case study | Use the product on real submissions and record the hours before and after against the baseline in the time-saving section. Write one short case study with the numbers. | One real tender with measured before and after times |
+| 3. Free pilots | Get usage and feedback | Give the testers free access in return for feedback and permission to quote them. Watch where they stall; fix that before adding features. | 3 testers each complete a pack unaided |
+| 4. Show up where tenderers talk | Build trust before selling | Join LinkedIn groups, WhatsApp groups and forums where South African SMMEs discuss tenders. Answer questions, share a compliance checklist or template, and mention the product only when asked. | Inbound questions or messages from people you did not know |
+| 5. First paying customers | Prove willingness to pay | Convert pilots to paid at a price set after the pricing decision. Offer a free trial like the others do. | 3 to 5 paying customers |
+| 6. Referrals | Grow through networks | Ask paying users for introductions to others who bid on similar tenders; offer a month free for each referral that subscribes. | Referrals are a regular source of new trials |
+
+**Core pitch:** lead with measured time saved on a real tender ("this took X hours, now Y"), not the feature list. Do not publish a time-saved figure until you have measured it.
+
+**Competitors already offer free entry:** TenderFlow has a free plan and a 14-day trial ([site](https://www.tenderflow.co.za)), TenderProSA offers a free trial ([pricing](https://tenderprosa.co.za/pricing)) and Tender Aid has a free trial ([Capterra](https://www.capterra.com/p/10045780/Tender-Aid/)). Expect buyers to want a trial; plan one.
+
+**Cautions:**
+
+- **Confidentiality:** a case study from real SANRAL or ACSA tenders must not reveal confidential tender content, pricing or personal details. Use anonymised numbers and check any contract terms or get the client's agreement first.
+- **Honesty in groups:** say you built the product when you recommend it; undisclosed promotion in community groups can cost trust.
+- **POPIA:** do not collect or store prospects' personal information beyond what they give you for the pilot; follow the POPIA section above.
+- **Time:** with limited weekly hours, phases 1 and 2 matter most; skip a community channel rather than do it badly.
+
+Open questions: Which tender groups does Sarel already belong to? How many SMEs does he know personally who tender? Neither is known to me yet, and I did not research which communities exist, so this plan names channel types, not specific groups.
+
+## Validation caveats and open questions
+
+Demand is not yet proven, and some competitor claims rest on vendor marketing or one listing.
+
+- **Not found:** Tenderplus.io and Track My Tenders returned no pages I could open. Either they are very small or the names differ. Ask in tender groups before assuming they do not exist.
+- **Vendor claims, not tested:** every feature above is from the vendor's own page or a Capterra listing. I did not run any trial. Tender Aid shows zero reviews; its accuracy figure is self-reported.
+- **Pack merge is the key unknown:** run a trial of TenderProSA and TenderFlow with three of your real tenders (one SANRAL, one ACSA, one SASSA) before building item 6.
+- **Tender requirements:** the required-documents list in item 1 comes from [TenderFlow's guidance](https://www.tenderflow.co.za/q/what-documents-with-tender-response/) and [GovChain](https://www.govchain.co.za/blog/documents-needed-to-apply-for-tender-south-africa). Neither lists CVs as standard; National Treasury professional-services bids do require strict-format CVs (for example 4 pages maximum, with references and certified qualifications), so CV demand depends on the tender type; check this against your own submissions.
+- **Price point:** decide between undercutting TenderFlow and AITenders, or matching TenderProSA's R299 to R800 band, once you know which features customers will pay for.
+- **Demand:** talk to five other South African SMEs that tender regularly and ask how long CVs and pack assembly take them per bid.
+
+As of 15 October 2026. Pages opened: [TenderFlow](https://www.tenderflow.co.za), [TenderFlow compliance](https://www.tenderflow.co.za/blog/tenderflow-product-comparisons/product-guides/how-tenderflow-simplifies-tender-compliance/), [TenderProSA features](https://tenderprosa.co.za/features), [TenderProSA pricing](https://tenderprosa.co.za/pricing), [Tender Aid on Capterra](https://www.capterra.com/p/10045780/Tender-Aid/), [BidsStack](https://app.bidsstack.com/features), [AITenders on eNCA](https://www.enca.com/promotions/local-ai-company-launches-platform-help-businesses-win-tenders-faster), [Flowcase](https://www.flowcase.com/cv-and-case-study-tool-for-enterprise-professional-services), [GovDash](https://www.govdash.com/proposal), [Loopio via SiftHub](https://www.sifthub.io/blog/loopio-rfp), [AutoRFP.ai tender software guide](https://autorfp.ai/blog/tender-software.md), [mytender.io on Capterra](https://www.capterra.com/p/10031061/mytender-io/).

@@ -1,0 +1,44 @@
+{
+  "_first_seen": "2026-10-15",
+  "_source_file": "R.334-030-2025.1F_ran.xlsm",
+  "cell_layout_hashes": {
+    "Affidavit for Past Performance": "f0d1fc712c36de0f2f3300728ed7828fffa1df0599fd7441be8d5b9234ff4183",
+    "Annex 1 PSP Perf. Report": "f72e30f6d79009016c33a872fef949d891b9fc4ea06df4572ae1aef29dc156ec",
+    "B6 - Scoring - Past Performance": "110da459d238aac5a26de1fc83728d436c75f1c125b0168ccec845c7544a8418",
+    "FORM C2.4 TECH": "755bd094f3da34982c321bced4ae07ca8c5d9964a30f2ea191238a1d31d319d1",
+    "Proj Relevance Codes": "f7b4d87ac55821392f9f36470d3f0ee5dfdcc2f2a1a6dcc5b1680a4a9525fd66",
+    "Reference Letter for PP": "05883bca9813dac105239e1d7a05e98b424ee6faf65bf22241b7c0021667e982",
+    "SETUP": "6f43f1dd1fd859af504eb6169b5408ee6055e73abac349607355c4c55ccfd66c",
+    "TEND 1X": "4b3eb5126c94e3f8a208fde4d0ca1d2d81c3e797c3ff913e5797451ebeaa51d5",
+    "WORKINGS MATRIX": "a21ae62c7ca8670fb12059c1b86324644af72515d1fb9647dcb6c8119b66c681"
+  },
+  "dropdown_counts": {
+    "Annex 1 PSP Perf. Report": 81,
+    "TEND 1X": 867
+  },
+  "dropdown_total": 948,
+  "family": "Conventional Consultant Tender",
+  "file_sha256": "a919d9ed56a42f2f370e005b6c1dfb8382da63ca007ab24912f4314b6d72ad7e",
+  "macro": {
+    "present": true,
+    "sha256": "64beb90dbd1727a60aa2f59e63d51ebf15958e53fffb634362f7cc438b33d807"
+  },
+  "named_ranges": {
+    "MarkupCost": "'[1]Break down'!$L$5",
+    "MarkupExternal": "'[1]Break down'!$L$6",
+    "_xlnm.Print_Area": "'TEND 1X'!$A$3901:$N$3951",
+    "_xlnm.Print_Titles": "SETUP!$A:$A"
+  },
+  "sheet_names": [
+    "TEND 1X",
+    "B6 - Scoring - Past Performance",
+    "WORKINGS MATRIX",
+    "Annex 1 PSP Perf. Report",
+    "Reference Letter for PP",
+    "Affidavit for Past Performance",
+    "FORM C2.4 TECH",
+    "Proj Relevance Codes",
+    "SETUP"
+  ],
+  "zip_part_count": 1031
+}
