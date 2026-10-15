@@ -18,9 +18,9 @@ Companion documents, not duplicated here:
 
 | # | Step | Script | Input | Output |
 |---|---|---|---|---|
-| 0 | Daily discovery - list all open SANRAL tenders, detect new/changed ones, download documents only for those | `engine/discovery/run_discovery.py` (orchestrates `list_tenders.py`, `detail.py`, `download_documents.py`) | `config/contact.json` (submitter identity for SANRAL's download form), `state/discovery_state.json` (diff baseline) | New tender folders under `templates/incoming/`, updated `state/discovery_state.json` |
+| 0 | Daily discovery - list all open SANRAL tenders, detect new/changed ones, surface document downloads for those | `engine/discovery/run_discovery.py` (orchestrates `list_tenders.py`, `detail.py`, `download_documents.py`) | `config/contact.json` (submitter identity for SANRAL's download form), `state/discovery_state.json` (diff baseline) | **The list/detail/diff part is fully automated** (confirmed working on a real VPS, 2026-10-15: 137 tenders fetched, diffed cleanly). **The actual document download is NOT automatable** - see the reCAPTCHA finding below. Default behaviour now prints direct manual-completion links for new/changed tenders instead of attempting the form |
 | 1 | Fingerprint check - confirm the downloaded template matches a known family/baseline before touching it | `engine/fingerprint.py` | The downloaded `.xlsm` | Pass/fail + a stored baseline in `fingerprints/` if new |
-| 2 | Build the data pack - the one YAML file that drives everything else | hand-authored today; this is the biggest automation target | `config/klipcorp_profile.json` + this tender's required positions (read from `SETUP` row 6) + a human decision on who fills which position | `packs/<contract>.yaml` |
+| 2 | Build the data pack - the one YAML file that drives everything else | **Automated, 2026-10-15**: `engine/pack_generator/suggest_pack.py` + `confirm_pack.py`. Reads required positions straight from the template's own `SETUP` sheet, scores every candidate on file against each position (keyword overlap, flags unevidenced specialisms), computes experience dynamically from each candidate's qualification date rather than trusting a stored number. Never decides on its own - `confirm_pack.py` refuses to produce a pack unless a named human has written an explicit `confirmed_person` for every position | `config/klipcorp_profile.json` + the template's own `SETUP` row 6 (positions) and `C3` (closing date) + a human's written confirmation | `pack_suggestions.md` (for review) -> human edits `pack_selections.yaml` -> `pack.yaml` |
 | 3 | Fill Technical Submission | `fill_conventional.py` (Conventional family) or `fill_tender.py` (RRM family) | Real blank `.xlsm` template + the pack | `<contract>_FILLED.xlsm` |
 | 4 | Verify Technical Submission | `print_reports.py` + manual PDF render/visual check | The filled `.xlsm` | V1-V10 pass/fail report (see §6) |
 | 5 | Fill Financial Submission (mechanical fields only - company name, key-person names) | `fill_financial.py` | Real blank Financial `.xlsm` + the pack | `<contract>_Financial_FILLED.xlsm` (hours/pricing sheets untouched) |
@@ -32,6 +32,34 @@ Companion documents, not duplicated here:
 | 11 | Audit / cross-check pass - re-verify every filled field against requirements and against every OTHER filled field for internal consistency (names, titles, dates must all agree across every document) | manual this round, following the same method each time: open every output, read field-by-field, diff against source | All outputs from steps 3-10 | Findings doc, e.g. `audit-r334-030-2025-1f.md` |
 | 12 | Human review & signature | **always manual, by design** | Printed/reviewed pack | Signed originals |
 | 13 | Physical/electronic submission | **not attempted, not automated** | Signed pack | Submitted tender |
+
+## 1a. Confirmed, closed: the document download form cannot be automated
+
+Tested live on real infrastructure, 2026-10-15 - not a guess, a closed investigation:
+
+- **Original finding** (earlier round): the shared sandbox IP got reCAPTCHA v3's "invalid
+  source" rejection. Hypothesis at the time: a bad IP reputation on a shared/known-automation
+  IP range; a dedicated clean IP should fix it.
+- **Disproven**: provisioned a dedicated VPS specifically to get a clean IP. Same exact
+  rejection, word for word, on every one of 6 real tenders.
+- **Second hypothesis tested**: headless Chromium has a detectable fingerprint; try headed
+  mode. Required installing `xvfb` (no X server on a headless VPS) to even launch headed
+  Chromium. Same exact rejection again.
+- **Conclusion**: the common factor across every failure is that Playwright controls the
+  browser via CDP, which sets `navigator.webdriver = true` - one of the most basic signals
+  any bot-detection system checks, independent of IP and independent of headless/headed. This
+  is reCAPTCHA v3 correctly identifying real automation, not a bug to patch around.
+- **Decision**: not pursued further. The standard fixes (stealth plugins suppressing
+  `navigator.webdriver`, residential proxy rotation, browser-fingerprint spoofing) exist
+  specifically to disguise automated traffic as human - that is out of scope for this
+  project, full stop, regardless of how close it would get working automation.
+- **What this means for the pipeline**: everything upstream and downstream of this one form
+  stays fully automated (list/detail/diff, fingerprinting, pack generation, form-filling,
+  letter/envelope generation). This one step needs a human to click through manually -
+  `run_discovery.py` now prints direct links for exactly the tenders that need it, so that's
+  a few clicks per day, not a research task. `--attempt-automated-download` still exists as
+  an explicit opt-in, clearly labelled as expected to fail, in case SANRAL's defenses or
+  terms ever change.
 
 ## 2. Verification checklist (V1-V12), consolidated
 
@@ -165,9 +193,7 @@ Do not let an automated pipeline silently trust these without a human gate:
 
 ## 6. What's still manual today (automation targets, roughly in priority order)
 
-1. **Data-pack generation** (step 2) - currently hand-authored YAML. The biggest lever:
-   a script that reads `SETUP` row 6 for required positions, prompts for/looks up who's
-   assigned to each, and assembles the pack from `klipcorp_profile.json` automatically.
+1. ~~Data-pack generation (step 2)~~ - **done, 2026-10-15**: `engine/pack_generator/`.
 2. **B6 matcher** - automatically search Drive for a performance report matching each
    project's client+contract number, flag confirmed/mismatched/missing instead of a
    manual search each time.
@@ -176,7 +202,9 @@ Do not let an automated pipeline silently trust these without a human gate:
 4. **Cross-document consistency check** - an automated version of the step-11 audit:
    diff every name/title/date that appears in more than one output document and flag
    any disagreement, instead of relying on a manual read-through every round.
-5. B4/B5 content generation is deliberately NOT a target - this is professional
+5. The document-download step (now §1a) is deliberately NOT on this list - it's closed,
+   not pending; see §1a for why.
+6. B4/B5 content generation is deliberately NOT a target - this is professional
    engineering judgment and a real representation to a government client; the tool's
    job there stays "produce a clean skeleton and flag what's missing," not write the
    content.

@@ -106,6 +106,12 @@ def main():
     ap.add_argument("--fingerprint-store", default=os.path.join(HERE, "..", "..", "fingerprints"))
     ap.add_argument("--dry-run", action="store_true",
                      help="report what would be downloaded, without touching the download form")
+    ap.add_argument("--attempt-automated-download", action="store_true",
+                     help="try the Playwright-driven download form instead of printing manual "
+                          "links (see the 2026-10-15 finding in the module docstring - this is "
+                          "expected to fail with reCAPTCHA's 'invalid source' rejection "
+                          "regardless of IP or headless/headed mode, confirmed on a clean VPS; "
+                          "kept as an opt-in in case SANRAL's defenses or terms change)")
     args = ap.parse_args()
 
     contact = json.load(open(args.contact_file))
@@ -147,7 +153,10 @@ def main():
         print(f"  -> {slug}: {reason}", file=sys.stderr)
 
     results = []
-    if not args.dry_run and to_download:
+    if args.dry_run:
+        if to_download:
+            print("(--dry-run: not touching the download form)", file=sys.stderr)
+    elif args.attempt_automated_download:
         from download_documents import sync_playwright, download_one
         with sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
@@ -169,7 +178,18 @@ def main():
             finally:
                 browser.close()
     elif to_download:
-        print("(--dry-run: not touching the download form)", file=sys.stderr)
+        # Confirmed 2026-10-15: the download form's reCAPTCHA v3 check rejects every
+        # Playwright-controlled browser with "invalid source" regardless of IP (clean VPS,
+        # not just the original flagged sandbox) or headless/headed mode (tested both, via
+        # xvfb). That's automation-detection working correctly, not a bug - not something to
+        # patch around with stealth/fingerprint-evasion techniques. The one non-automatable
+        # step in the whole pipeline is a human completing this form; printing direct links
+        # makes that as fast as a few clicks instead of a manual search each time.
+        print(f"{len(to_download)} tender(s) need the download form completed manually "
+              f"(automated submission is reliably rejected - see module docstring):",
+              file=sys.stderr)
+        for slug, reason in to_download:
+            print(f"  https://www.nra.co.za/open-tenders/{slug}  ({reason})", file=sys.stderr)
 
     save_state(state_path, new_state)
 
@@ -178,6 +198,11 @@ def main():
         "total_open_tenders": len(new_state),
         "new_or_changed": [{"slug": s, "reason": r} for s, r in to_download],
         "download_results": results,
+        "manual_download_links": (
+            [] if args.dry_run or args.attempt_automated_download else
+            [{"slug": s, "reason": r, "url": f"https://www.nra.co.za/open-tenders/{s}"}
+             for s, r in to_download]
+        ),
     }
     print(json.dumps(report, indent=2))
 

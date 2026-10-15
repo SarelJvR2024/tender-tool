@@ -9,9 +9,7 @@ browser and reading its own JS, not guessed):
      phone, email, and an accept_policy checkbox.
   2. Clicking ".btn-download-email" calls `grecaptcha.execute(SITEKEY,
      {action:'homepage'})`. This is reCAPTCHA **v3** - invisible, score-based,
-     no puzzle to solve. A real browser that loads the page and clicks the
-     real button the way a human would gets a legitimate token the same way
-     any visitor's browser does; nothing is being defeated or bypassed.
+     no puzzle to solve.
   3. The page POSTs the form as multipart FormData to
      /sanral-tenders/download/<slug>, expects back JSON, and on
      {"success": true, "link": "..."} navigates to that link to get the file.
@@ -20,6 +18,22 @@ Compliance check done 2026-10-15: robots.txt allows all paths for all
 agents; the published Terms & Conditions only cover copyright, disclaimer
 and linking policy - nothing about automated access, bots or scraping.
 Nothing found prohibiting this.
+
+CONFIRMED 2026-10-15, live, on real infrastructure: reCAPTCHA v3 reliably rejects
+every submission from this script with "We detected that submission is from an
+invalid source, please try again" - on the original flagged sandbox IP, AND on a
+clean dedicated VPS IP, AND with headless=False via xvfb (ruling out display mode).
+The common factor across every failure is that Playwright controls the browser via
+CDP, which sets navigator.webdriver=true - one of the most basic signals any
+automation detector checks, reCAPTCHA v3 included. This is NOT an IP-reputation or
+display-mode problem; it is the anti-bot control correctly identifying real
+automation. The standard fixes (stealth plugins that suppress navigator.webdriver,
+residential proxy rotation, fingerprint spoofing) all exist specifically to disguise
+automated traffic as human - that is out of scope for this project regardless of how
+close it would get us to working automation. run_discovery.py's default behaviour
+reflects this: it prints direct links for a human to complete manually rather than
+attempting this form, with --attempt-automated-download as an explicit, clearly-
+labelled-as-expected-to-fail opt-in kept in case SANRAL's defenses or terms change.
 
 What this script does NOT do: run unattended with fabricated identity data.
 fullname and company_name are REQUIRED arguments with no default - this
