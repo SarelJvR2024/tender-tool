@@ -2,15 +2,15 @@
   "_first_seen": "2026-10-15",
   "_source_file": "R.334-030-2025.1F_ran.xlsm",
   "cell_layout_hashes": {
-    "Affidavit for Past Performance": "f0d1fc712c36de0f2f3300728ed7828fffa1df0599fd7441be8d5b9234ff4183",
-    "Annex 1 PSP Perf. Report": "f72e30f6d79009016c33a872fef949d891b9fc4ea06df4572ae1aef29dc156ec",
-    "B6 - Scoring - Past Performance": "110da459d238aac5a26de1fc83728d436c75f1c125b0168ccec845c7544a8418",
-    "FORM C2.4 TECH": "755bd094f3da34982c321bced4ae07ca8c5d9964a30f2ea191238a1d31d319d1",
-    "Proj Relevance Codes": "f7b4d87ac55821392f9f36470d3f0ee5dfdcc2f2a1a6dcc5b1680a4a9525fd66",
-    "Reference Letter for PP": "05883bca9813dac105239e1d7a05e98b424ee6faf65bf22241b7c0021667e982",
-    "SETUP": "6f43f1dd1fd859af504eb6169b5408ee6055e73abac349607355c4c55ccfd66c",
-    "TEND 1X": "4b3eb5126c94e3f8a208fde4d0ca1d2d81c3e797c3ff913e5797451ebeaa51d5",
-    "WORKINGS MATRIX": "a21ae62c7ca8670fb12059c1b86324644af72515d1fb9647dcb6c8119b66c681"
+    "Affidavit for Past Performance": "819c611a6019852c9096009bc3c17568ca1bce6c3c36610e1d22b68013c34509",
+    "Annex 1 PSP Perf. Report": "a945c978ac9a1067a381b339c230e3f62021fe3b0d9c605495bc693a67d753c4",
+    "B6 - Scoring - Past Performance": "4d914e5ee1178f0c2d5a1f94632e737fef1bfb6f73f565042209be8f868cfaba",
+    "FORM C2.4 TECH": "0dfe2b71d38b9dd66920f95a86ef414eb7129d1f73c64d4a216eae7d0560be33",
+    "Proj Relevance Codes": "498585121fd2ae66faf59c9c8c2220b4f8c1a69ffa34fceffcbec07a42d22a6b",
+    "Reference Letter for PP": "be3109adc0426743ce264e148a1e8b6177f38000ed8397055518dbb014e6557a",
+    "SETUP": "23ee5eae60db79f11dfc1fc0f731328c3d0949f75e26e09c1a350340d8f9511b",
+    "TEND 1X": "9ff1fe89022208fd9ec595abe8ccc8344ccb18b48008927edf59f07d32f6d030",
+    "WORKINGS MATRIX": "0760164b9d1b94479bb3153aceb9133891e8a9985280c05d86a135a5e1215590"
   },
   "dropdown_counts": {
     "Annex 1 PSP Perf. Report": 81,
@@ -40,5 +40,5 @@
     "Proj Relevance Codes",
     "SETUP"
   ],
-  "zip_part_count": 1031
+  "zip_part_count": 1022
 }

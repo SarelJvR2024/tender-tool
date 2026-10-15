@@ -29,6 +29,24 @@ date, etc.) while still catching an added, removed or moved cell. It will
 NOT catch a cell that silently changed from unlocked to locked, or vice
 versa, without any cell being added or removed. A tighter fingerprint based
 on lock/formula status is future work, not yet built.
+
+Three known-noisy signals, found and root-caused 2026-10-15 comparing 4 real
+downloaded templates against the R.334-030-2025.1F baseline (every one of
+them differed on first check; all three causes below were confirmed benign
+by direct inspection, not assumed):
+  - zip_part_count used to include customXml/* parts, which are SharePoint/
+    document-management metadata stamped on some downloads and not others -
+    nothing to do with template structure. Now excluded from the count.
+  - cell_layout_hashes used to include cells with no value and no formula,
+    just a style attribute (e.g. a stray border/fill a few columns past the
+    real form, confirmed by inspecting the raw XML: `<c r="EA1" s="804"/>`,
+    no <v> or <f>). Now only counts cells with actual content.
+  - macro hash varies per independently-saved copy even when the VBA source
+    is unchanged - this is a well-known compiled-bytecode artifact (the
+    PerformanceCache section Excel embeds), not something a fingerprint
+    comparison can meaningfully use. A macro-only difference (everything
+    else matches) is now reported as a warning, not a blocking mismatch;
+    any OTHER difference alongside it still stops the run as before.
 """
 import sys, os, re, json, hashlib, zipfile, argparse, datetime
 from sanral_fill import Workbook
@@ -74,7 +92,12 @@ def cell_layout_hashes(wb):
     for sheet, path in wb.sheet_path.items():
         root = wb._xml(path)
         data = root.find("m:sheetData", N)
-        refs = [c.get("r") for row in data.findall("m:row", N) for c in row.findall("m:c", N)]
+        # Only cells with an actual value or formula count as "occupied" - a cell with
+        # just a style attribute and no <v>/<f> is formatting noise (confirmed 2026-10-15:
+        # a block of style-only cells a few columns past the real form differed between two
+        # genuinely identical-layout templates and nothing else did).
+        refs = [c.get("r") for row in data.findall("m:row", N) for c in row.findall("m:c", N)
+                if c.find("m:v", N) is not None or c.find("m:f", N) is not None]
         out[sheet] = hashlib.sha256(",".join(sorted(refs)).encode()).hexdigest()
     return out
 
@@ -98,10 +121,15 @@ def build_fingerprint(path):
     wb = Workbook(path)
     sheets = sheet_order(wb)
     counts = dropdown_counts(wb)
+    # customXml/* parts are SharePoint/document-management metadata stamped on some
+    # downloads and not others (confirmed 2026-10-15: the only diff between two
+    # genuinely identical-layout templates was 9 customXml/itemN.xml-family parts) -
+    # not template structure, excluded from the structural part count.
+    structural_parts = [p for p in wb.order if not p.startswith("customXml/")]
     return {
         "family": detect_family(sheets),
         "sheet_names": sheets,
-        "zip_part_count": len(wb.order),
+        "zip_part_count": len(structural_parts),
         "dropdown_counts": counts,
         "dropdown_total": sum(counts.values()),
         "named_ranges": named_ranges(wb),
@@ -112,16 +140,23 @@ def build_fingerprint(path):
 
 
 def diff(stored, current):
-    changes = []
+    """Returns (blocking_changes, warnings). 'macro' alone is demoted to a warning - it's
+    known to vary per independently-saved copy even with unchanged VBA source (see module
+    docstring) - but if ANYTHING else also differs, macro is folded back into the blocking
+    list too, since at that point there's no reason to extend it the benefit of the doubt."""
+    changes, warnings = [], []
     for key in ("family", "sheet_names", "zip_part_count", "dropdown_counts",
-                "dropdown_total", "named_ranges", "macro"):
+                "dropdown_total", "named_ranges"):
         if stored.get(key) != current.get(key):
             changes.append((key, stored.get(key), current.get(key)))
     s_layout, c_layout = stored.get("cell_layout_hashes", {}), current.get("cell_layout_hashes", {})
     for sheet in sorted(set(s_layout) | set(c_layout)):
         if s_layout.get(sheet) != c_layout.get(sheet):
             changes.append((f"cell_layout[{sheet}]", s_layout.get(sheet), c_layout.get(sheet)))
-    return changes
+    if stored.get("macro") != current.get("macro"):
+        entry = ("macro", stored.get("macro"), current.get("macro"))
+        (warnings if not changes else changes).append(entry)
+    return changes, warnings
 
 
 def main():
@@ -153,11 +188,14 @@ def main():
         sys.exit(0)
 
     stored = json.load(open(store_path))
-    changes = diff(stored, current)
+    changes, warnings = diff(stored, current)
     if not changes:
         print(f"OK: {os.path.basename(args.template)} matches the stored '{family}' "
               f"fingerprint (first seen {stored.get('_first_seen')}, "
               f"baseline file {stored.get('_source_file')})")
+        for key, old, new in warnings:
+            print(f"  WARNING (non-blocking, known-noisy signal): {key}:\n"
+                  f"    was: {old}\n    now: {new}")
         sys.exit(0)
 
     print(f"MISMATCH: {os.path.basename(args.template)} differs from the stored '{family}' "
