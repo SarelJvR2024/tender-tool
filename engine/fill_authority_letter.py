@@ -73,25 +73,12 @@ def build_letter(profile_path, logo_path, out_path, signatory_name, signatory_ca
     d.add_paragraph("Your's Sincerely")
     d.add_paragraph()
     d.add_paragraph()
-    d.add_paragraph("_____________________________  [DRAFT - pending actual signature]")
+    d.add_paragraph("_____________________________")
     d.add_paragraph(director["name"])
     d.add_paragraph("DIRECTOR")
 
-    d.add_paragraph()
-    note = d.add_paragraph(
-        "[This letter was generated as a draft from the tool's own precedent-format "
-        f"template, mirroring Klipcorp's own letter used before. It is NOT a valid "
-        f"authorisation until {director['name']} reviews it, signs a printed copy, and "
-        f"it is placed on the company's actual letterhead paper/stamp if that is the "
-        f"company's normal practice. Logo image here is the digital letterhead mark "
-        f"only - confirm whether a physical letterhead template with additional "
-        f"registration/address details in the header/footer is also required.]"
-    )
-    note.runs[0].italic = True
-    note.runs[0].font.size = Pt(9)
-
     d.save(out_path)
-    print(f"Wrote DRAFT authority letter to {out_path}")
+    print(f"Wrote authority letter to {out_path}")
 
 
 def main():
