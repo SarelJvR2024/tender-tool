@@ -48,7 +48,7 @@ projects:
     position_held: Contract Engineer
     position_code: CE
     contact: "Kamogelo Molawa\nProject Manager"
-    contact_number: "PENDING - not on file"  # PLACEHOLDER
+    contact_number: "061 077 1225 / 010 270 2364"  # UNCONFIRMED match - source form (Form B6b) is titled contract ORT 140/2017, not ORT5737/2018/RFP; same referee name, different contract number - verify before real use
     start: "2018-01-01"  # PLACEHOLDER - exact date not on file
     end: "2019-06-01"  # PLACEHOLDER - exact date not on file
   project_2:
@@ -69,8 +69,8 @@ projects:
     value_rm: 50
     position_held: Contract Engineer
     position_code: CE
-    contact: "Referee contact not on file"  # PLACEHOLDER
-    contact_number: "PENDING - not on file"  # PLACEHOLDER
+    contact: "Mohlalifi Choma\nProject Manager"  # CONFIRMED - source form Form B6c is titled contract ORT 48141, exact match
+    contact_number: "062 467 4133 / 011 921 2005"  # CONFIRMED, same source
     start: "2021-01-01"  # PLACEHOLDER
     end: "2022-03-01"  # PLACEHOLDER
 
