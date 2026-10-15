@@ -52,13 +52,60 @@ path at scale; noted here rather than quietly ignored.
 
 | Piece | Status |
 |---|---|
-| Financial Submission filler | **Does not exist.** Only the structure is mapped (see `financial-submission-workbook.md`). Writing `TENDERER INPUT DATA` (company name, key-person names/positions) is mechanical and could be built next. The actual hours and pricing figures are a business decision — the engine should refuse to guess these, the same way it already refuses to guess C2.4 on the Technical side. |
-| Form B4 (quality systems) | No template exists anywhere. Needs real content drafted per tender, not filled from data. Not something to auto-generate from a data pack — it's professional-judgment content. |
-| Form B5 (programme) | Same — no template, needs a real Gantt/programme specific to this contract's dates and scope. |
-| Form B6 (past performance / reference checks) | No template exists, but Henning's 3 ACSA projects (already in the pack) are a strong starting point for the narrative — this one's realistic to semi-automate once a standard B6 layout is agreed. |
-| A-Forms bundle (Authority of Signatory, B-BBEE affidavit, bank details) | Not attempted this round. Authority of Signatory needs a real director sign-off naming the signatory for these specific bid numbers — not something to fabricate. B-BBEE affidavit and bank details are already-known data (`config/klipcorp_profile.json`) that could be mechanically inserted into the docx template once that's built. |
-| C.1.1.1 Form of Offer / C.1.2.3 Contract Data | Not attempted this round. Price-in-words/figures depends on the Financial Submission being complete first. |
-| Compulsory briefing attendance (17 Sep 2026) | Not a document-generation problem — needs confirming with Sarel directly, separately from any of this. |
+| Financial Submission filler (mechanical fields) | **Built**, round 2: `fill_financial.py` fills `TENDERER INPUT DATA` (company name, key-person names). Hours/pricing sheets deliberately untouched - that's the BOQ, out of scope by instruction. |
+| C.1.2.3 Contract Data | **Built and filled**, round 2 - see above. |
+| C.1.1.1 Form of Offer | **Built and filled**, round 2, except the price field itself (BOQ-dependent, out of scope). |
+| A18 bank details | **Built and filled**, round 2. |
+| Form A2 (Authority of Signatory) | **Deliberately not automated** - the template itself says the example page, completed, isn't valid authorisation. Needs a real board resolution. |
+| Form A12 (B-BBEE) | **Deliberately not automated** - needs the actual certificate/affidavit attached, not text in a template. |
+| Form B6 (past performance) | **Compiled, not drafted**, round 2 - matched real existing performance reports to each project; 1 of 3 confirmed, 1 unconfirmed (contract number mismatch), 1 missing entirely. See `B6_past_performance_compilation.md`. |
+| Form B4 (quality systems) | **Skeleton built**, round 2 - structure and confirmed facts filled in; the QMS content itself is marked `[NEEDS INPUT]`, not invented. |
+| Form B5 (programme) | **Skeleton built**, round 2 - same approach; contract dates/scope filled in from real tender data, programme content marked `[NEEDS INPUT]`. |
+| Compulsory briefing attendance (17 Sep 2026) | Still not a document-generation problem - needs confirming with Sarel directly. |
+| Still fully untouched | The actual Financial Submission hours/pricing figures (BOQ) - a business decision, out of scope by instruction. |
+
+## Round 2 (2026-10-15): the docx forms, except the BOQ
+
+Per instruction, completed everything that's safely completable without touching the
+pricing/BOQ. Downloaded the real per-contract docx templates from Drive (not reconstructed
+from memory, since the headers/NRA numbers differ per contract) and built
+`engine/fill_docx_forms.py`.
+
+- **C.1.2.3 Contract Data** — fully filled: company contact details, key-person table
+  (both roles, per the stand-in instruction), directors table. Two fields flagged as
+  genuinely missing rather than guessed: the company's own telephone number, and Henning's
+  email address (neither is on file anywhere).
+- **C.1.1.1 Form of Offer** — B-BBEE level and organisation name/address filled. Price
+  deliberately left untouched (the BOQ). Signatory name filled as an explicit
+  `[DRAFT - pending signature]` — never presented as if actually signed.
+- **A Forms bundle** — only Form A18 (bank details) was filled: account holder name, bank
+  name, branch number. Account number deliberately left out (withheld even locally).
+  **Form A2** (Authority of Signatory) was deliberately NOT filled — its own notes say
+  submitting the example page completed "shall not be accepted as authorisation"; it needs
+  a real board resolution on letterhead. **Form A12** (B-BBEE) was deliberately NOT filled —
+  it needs the tenderer's actual certificate/affidavit attached, not text typed into a
+  template.
+- **Form B6 (past performance)** — not drafted, *compiled*: matched Henning's 3 listed
+  projects against real signed client performance reports found in Drive. One confirmed
+  exact match (project 3, contract numbers match exactly), one unconfirmed (project 1's
+  source report is titled a different contract number than the one in the CV), one with no
+  source report found at all (project 2). See `B6_past_performance_compilation.md`.
+- **Forms B4 and B5** — built as structural skeletons with every confirmed fact filled in
+  (company details, contract scope/dates/key positions), but the actual professional content
+  (QMS description, programme milestones) is marked `[NEEDS INPUT]` rather than invented.
+  No blank template exists for either anywhere, and fabricating a quality-system description
+  or programme for a real government tender isn't something to automate — that's a real
+  representation to a client, not a data-entry field.
+
+**A real bug caught during this round:** a naive "fill every NAME (IN CAPITALS) field"
+approach on the Form of Offer put the signatory's own name into the witness signature fields
+too. Witnesses must be different real people. Fixed before saving the output — caught by
+actually reading the filled document back, not by trusting the fill logic.
+
+All filled outputs live in `out/R.334-030-2025.1F/forms/` (gitignored - contains real company
+contact data). The blank source templates are committed under
+`templates/forms/R.334-030-2025.1F/` since they contain no tenant data, only SANRAL's own
+boilerplate for this specific contract.
 
 ## Recommended next build order
 
