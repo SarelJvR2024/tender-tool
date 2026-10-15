@@ -48,8 +48,67 @@ from playwright.sync_api import sync_playwright
 BASE = "https://www.nra.co.za/open-tenders/"
 
 
+def _dump_debug(page, out_dir, slug, tag):
+    """On any failure, save a screenshot + the page's HTML so the next attempt is a real
+    diagnosis instead of a bare timeout message - there is no way to see what was actually
+    on screen (a cookie banner, the reCAPTCHA badge, a half-open modal) otherwise."""
+    debug_dir = os.path.join(out_dir, "_debug")
+    os.makedirs(debug_dir, exist_ok=True)
+    base = os.path.join(debug_dir, f"{slug}_{tag}")
+    try:
+        page.screenshot(path=base + ".png", full_page=True)
+        open(base + ".html", "w", encoding="utf-8").write(page.content())
+    except Exception as e:
+        print(f"  (debug capture also failed: {e})", file=sys.stderr)
+    return base
+
+
+def _dismiss_cookie_banner(page):
+    """Confirmed root cause of the click timeouts (2026-10-15 VPS run): a GDPR cookie
+    banner (#gdpr-cookie-message) sits over the page and its subtree intercepts pointer
+    events, so Playwright's actionability check never clears and every click times out -
+    nothing to do with reCAPTCHA or a block. Dismissing it is exactly what a real visitor
+    does before using the page; try a real click on whatever accept/consent control it
+    has, and only fall back to hiding it via JS if no clickable control is found."""
+    banner = page.locator("#gdpr-cookie-message")
+    try:
+        if banner.count() == 0 or not banner.is_visible():
+            return
+    except Exception:
+        return
+    for sel in ["button:has-text('Accept')", "button:has-text('accept')",
+                "button:has-text('I Agree')", "button:has-text('Agree')",
+                "button:has-text('OK')", "a:has-text('Accept')", "button", "a"]:
+        ctrl = banner.locator(sel).first
+        if ctrl.count():
+            try:
+                ctrl.click(timeout=3000)
+                page.wait_for_timeout(300)
+                return
+            except Exception:
+                continue
+    # No clickable control found at all - hide it directly rather than leave it
+    # blocking every subsequent click on the page.
+    page.evaluate("""() => {
+        const el = document.querySelector('#gdpr-cookie-message');
+        if (el) el.style.display = 'none';
+    }""")
+
+
 def download_one(page, slug, fullname, company, phone, email, out_dir, accept_policy=True):
-    page.goto(BASE + slug, wait_until="networkidle", timeout=30000)
+    # networkidle waits for ALL background network activity (analytics, the reCAPTCHA
+    # badge's own polling, etc.) to stop, which real-world sites often never do within any
+    # reasonable timeout - that was the actual cause of the goto timeouts, not a block.
+    # domcontentloaded + an explicit wait for the one element we actually need is the
+    # standard fix and doesn't change what the browser does or sends.
+    try:
+        page.goto(BASE + slug, wait_until="domcontentloaded", timeout=30000)
+        page.wait_for_selector(".btn-download", state="visible", timeout=15000)
+        _dismiss_cookie_banner(page)
+    except Exception:
+        _dump_debug(page, out_dir, slug, "goto_failed")
+        raise
+
     page.click(".btn-download")
     page.wait_for_selector("form.sanral-tender-download", state="visible", timeout=10000)
 
@@ -62,10 +121,20 @@ def download_one(page, slug, fullname, company, phone, email, out_dir, accept_po
         if checkbox.count() and not checkbox.is_checked():
             checkbox.check()
 
-    with page.expect_response(
-        lambda r: f"/sanral-tenders/download/{slug}" in r.url, timeout=20000
-    ) as resp_info:
-        page.click(".btn-download-email")
+    try:
+        # Wait for the button to actually be ready, not just present - the modal opening
+        # is a CSS transition, and clicking before it settles is exactly what produces a
+        # "locator resolved but click never completes" timeout.
+        page.wait_for_selector(".btn-download-email", state="visible", timeout=10000)
+        _dismiss_cookie_banner(page)  # the actual failure point in the 2026-10-15 run - still here
+        page.wait_for_timeout(500)
+        with page.expect_response(
+            lambda r: f"/sanral-tenders/download/{slug}" in r.url, timeout=20000
+        ) as resp_info:
+            page.click(".btn-download-email", timeout=15000)
+    except Exception:
+        _dump_debug(page, out_dir, slug, "click_failed")
+        raise
     resp = resp_info.value
     result = resp.json()
 
