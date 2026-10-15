@@ -56,7 +56,7 @@ path at scale; noted here rather than quietly ignored.
 | C.1.2.3 Contract Data | **Built and filled**, round 2 - see above. |
 | C.1.1.1 Form of Offer | **Built and filled**, round 2, except the price field itself (BOQ-dependent, out of scope). |
 | A18 bank details | **Built and filled**, round 2. |
-| Form A2 (Authority of Signatory) | **Deliberately not automated** - the template itself says the example page, completed, isn't valid authorisation. Needs a real board resolution. |
+| Form A2 (Authority of Signatory) | **Built, round 3** - not the template itself (still not valid authorisation per its own notes), but a DRAFT letter on letterhead mirroring Klipcorp's own real precedent format. See `docs/specs/audit-r334-030-2025-1f.md`. Still needs a real signature. |
 | Form A12 (B-BBEE) | **Deliberately not automated** - needs the actual certificate/affidavit attached, not text in a template. |
 | Form B6 (past performance) | **Compiled, not drafted**, round 2 - matched real existing performance reports to each project; 1 of 3 confirmed, 1 unconfirmed (contract number mismatch), 1 missing entirely. See `B6_past_performance_compilation.md`. |
 | Form B4 (quality systems) | **Skeleton built**, round 2 - structure and confirmed facts filled in; the QMS content itself is marked `[NEEDS INPUT]`, not invented. |
@@ -106,6 +106,28 @@ All filled outputs live in `out/R.334-030-2025.1F/forms/` (gitignored - contains
 contact data). The blank source templates are committed under
 `templates/forms/R.334-030-2025.1F/` since they contain no tenant data, only SANRAL's own
 boilerplate for this specific contract.
+
+## Round 3 (2026-10-15): A2 letterhead letter, envelope covers, audit pass
+
+Per instruction: "For A2, in the app should create a template letter with all the
+details on an uploaded company letterhead. Double check the tender requirements and
+forms and that everything is completed correctly. Also create envelope covers for the
+technical and financial submissions with the company logo."
+
+- **`engine/fill_authority_letter.py`** (new) - generates the A2 letterhead letter
+  described above, reproducing Klipcorp's own real 2023 precedent letter format with
+  this tender's real details substituted in. DRAFT only, blank signature line.
+- **`engine/make_envelope_covers.py`** (new) - generates Outer + Envelope 1 (Technical)
+  + Envelope 2 (Financial) cover sheets, with the company logo, real contract/NRA/
+  closing-date facts, and the pricing-disclosure statement appropriate to each envelope.
+- **Full audit pass** - see `docs/specs/audit-r334-030-2025-1f.md` for the complete
+  findings. Headline: caught and fixed a real signatory-title inconsistency
+  ("Senior Manager" vs "Business Development Manager") between the new letter and the
+  round-2 forms before it could reach a real submission. Also discovered and recorded
+  the real closing date (2026-10-22) directly from the template's SETUP sheet, and
+  found the company logo decoded in round 2 was actually corrupt (passed a magic-byte
+  check but failed to load) - re-extracted correctly and verified with a full image
+  load this time.
 
 ## Recommended next build order
 
