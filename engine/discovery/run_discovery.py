@@ -142,9 +142,9 @@ def main():
 
     results = []
     if not args.dry_run and to_download:
-        from download_documents import sync_playwright, CHROMIUM_PATH, download_one
+        from download_documents import sync_playwright, download_one
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(executable_path=CHROMIUM_PATH, headless=True)
+            browser = pw.chromium.launch(headless=True)
             try:
                 page = browser.new_page(accept_downloads=True)
                 for slug, reason in to_download:

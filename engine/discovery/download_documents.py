@@ -41,7 +41,10 @@ import time
 
 from playwright.sync_api import sync_playwright
 
-CHROMIUM_PATH = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
+# No hardcoded browser path here on purpose: this runs `playwright install
+# chromium` wherever it's deployed and lets Playwright find its own managed
+# browser normally. A hardcoded path only makes sense pinned to one specific
+# machine's layout, which breaks the moment this moves to a different host.
 BASE = "https://www.nra.co.za/open-tenders/"
 
 
@@ -95,7 +98,7 @@ def main():
 
     results = []
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(executable_path=CHROMIUM_PATH, headless=not args.headed)
+        browser = pw.chromium.launch(headless=not args.headed)
         try:
             page = browser.new_page(accept_downloads=True)
             for slug in args.slugs:
