@@ -15,10 +15,16 @@ live file's XML, not assumed):
                             write them)
   TENDERER INPUT DATA!C13 - Design Specialist 1's name (same: B13/D13 are formulas)
 
-Only PL (row 12) and DS1 (row 13) are confirmed for this contract (it only has
-those two SETUP positions). A contract with more key positions would need more
-rows mapped here - not assumed, add them once confirmed against that contract's
-own file, the same way these two were.
+PL (row 12) and DS1 (row 13) are confirmed - not assumed - across 5 real downloaded
+contracts (R.334-030, R.343-020, R.352-030, R.352-020, R.394-010-2025/1F), 2026-10-15:
+each file's own B/D columns (formulas, never written to) were read back and all 5
+agree: row 12 = PL / "Project Leader", row 13 = DS1 / "Design Specialist 1 - Pavement
+and Materials". Keyed by position CODE, not by the Technical workbook's internal
+block_row scheme (37/137 etc.) - the Financial workbook's own TENDERER INPUT DATA
+table is literally laid out one row per position code, so this is the natural key, not
+an assumption carried over from a different sheet's internal numbering. A contract
+whose SETUP sheet lists a position code not in ROW_FOR_POSITION needs that row
+confirmed against ITS OWN file before adding it here - never assumed from this list.
 
 Usage: python3 fill_financial.py <template.xlsm> <pack.yaml> <output.xlsm>
 """
@@ -28,10 +34,10 @@ from sanral_fill import Workbook
 
 SHEET = "TENDERER INPUT DATA"
 
-# block_row (as used in the Technical workbook / pack's key_persons list) -> the
-# row on THIS sheet holding that position's name field. Confirmed for this
-# contract only - see module docstring.
-ROW_FOR_BLOCK = {37: 12, 137: 13}
+# position code (as used in the pack's key_persons list, read from the Technical
+# workbook's own SETUP sheet) -> the row on THIS sheet holding that position's name
+# field. Confirmed across 5 real contracts - see module docstring.
+ROW_FOR_POSITION = {"PL": 12, "DS1": 13}
 
 
 def main(tpl, pack_path, out):
@@ -41,11 +47,11 @@ def main(tpl, pack_path, out):
     wb.set_value(SHEET, "D1", pack["company"]["name"])
 
     for kp in pack["key_persons"]:
-        row = ROW_FOR_BLOCK.get(kp.get("block_row"))
+        row = ROW_FOR_POSITION.get(kp.get("position"))
         if row is None:
             raise ValueError(
-                f"No confirmed TENDERER INPUT DATA row for block_row {kp.get('block_row')} - "
-                "add it to ROW_FOR_BLOCK only after confirming against this contract's own file"
+                f"No confirmed TENDERER INPUT DATA row for position '{kp.get('position')}' - "
+                "add it to ROW_FOR_POSITION only after confirming against this contract's own file"
             )
         person = pack["people"][kp["person"]]
         wb.set_value(SHEET, f"C{row}", person["name"])
