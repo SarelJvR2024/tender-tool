@@ -120,10 +120,16 @@ def main():
 
     new_state = {}
     to_download = []
-    for row in rows:
+    for i, row in enumerate(rows, 1):
         slug = row["slug"]
         if not slug:
             continue
+        # Detail pages are fetched one at a time (a real HTTP request per tender, up to a
+        # 30s timeout each) with no other output in between - on a cold run with ~137 open
+        # tenders that's long enough to look exactly like a hang on a console. Print progress
+        # every 10 so a stalled run and a slow-but-working one are never ambiguous again.
+        if i == 1 or i % 10 == 0 or i == len(rows):
+            print(f"  detail fetch {i}/{len(rows)}: {slug}", file=sys.stderr)
         try:
             d = detail_mod.fetch_detail(slug)
         except Exception as e:
