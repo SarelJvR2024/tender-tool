@@ -50,7 +50,12 @@ def blocks_for(wb, code):
 
 def fill_person(wb, base, person, projects_lib):
     wb.set_value(T, at(B["name"], base), person["name"])
-    wb.set_value(T, at(B["id"], base), int(person["id_number"]))
+    # Written as text, not int(): SA ID numbers routinely start with 0 (anyone born
+    # 2000 or later), and int() silently drops leading zeros - confirmed as a real
+    # defect 2026-10-15 by rendering a sample PDF: the template itself prints "ID
+    # NUMBER SHOULD BE 13 DIGITS" right next to the field, and a leading-zero ID
+    # written via int() would visibly fail that on a real submission.
+    wb.set_value(T, at(B["id"], base), str(person["id_number"]))
     wb.set_value(T, at(B["description"], base), person.get("description", ""))
     projs = [projects_lib[p] if isinstance(p, str) else p for p in person["projects"]]
     if len(projs) > B["max_projects"]:

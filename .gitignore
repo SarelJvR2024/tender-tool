@@ -5,3 +5,4 @@ config/contact.json
 state/
 templates/incoming/
 config/klipcorp_profile.json
+out/

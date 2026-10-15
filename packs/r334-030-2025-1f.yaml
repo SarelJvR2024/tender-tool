@@ -1,0 +1,85 @@
+# SAMPLE pack for R.334-030-2025/1F - NOT for real submission.
+# Built 2026-10-15 to document the pack-compilation process, per Sarel's instruction
+# to use Henning Jansen van Rensburg for BOTH key positions (PL and DS1) as a stand-in,
+# since no Pavement and Materials Design Specialist CV is on file yet.
+#
+# PLACEHOLDER values are marked inline. Real data comes from config/klipcorp_profile.json
+# (gitignored) and the Drive source files it cites. This file itself contains no
+# withheld/sensitive numbers - only the placeholders needed to make the engine run.
+
+company:
+  name: Klipcorp (Pty) Ltd
+  bee_level: 1
+  black_ownership_pct: 100
+  status: QSE
+  head_office: Pretoria  # per Form B3 precedent; flagged elsewhere as inconsistent with the registered address - needs reconciling before a real submission
+  other_offices: 0
+  ecsa_registered: 4
+  sacpcmp_registered: 1
+  total_employees: 12
+  jv_share_pct: 100
+
+people:
+  henning:
+    name: Henning Jansen van Rensburg
+    id_number: "0000000000000"  # PLACEHOLDER - real ID withheld (see Drive: 01 Forms B1-B2 Position 1.pdf)
+    description: Contract Engineer
+    employment: Key Person is a full time employee of the tenderer
+    projects: [project_1, project_2, project_3]
+    qualifications:
+      ecsa_level: Professional Engineer
+      ecsa_number: "20150155"
+      ecsa_date: "2015-05-04"
+      highest_level: Masters Degree
+      highest_description: MEng (Civil Engineering)
+      highest_institution: Univ of Stellenbosch
+      highest_graduated: "2015-01-01"  # PLACEHOLDER - only the year (2015) is confirmed on file
+      years_experience: 17
+      initial_description: BEng (Civil Engineering)
+      initial_institution: Univ of Pretoria
+      initial_graduated: "2010-01-01"  # PLACEHOLDER - only the year (2010) is confirmed on file
+
+projects:
+  project_1:
+    client_and_number: "ACSA (OR Tambo Airport)\nORT5737/2018/RFP"
+    client_type: Relevant SOE
+    project_type: DS
+    value_rm: 150
+    position_held: Contract Engineer
+    position_code: CE
+    contact: "Kamogelo Molawa\nProject Manager"
+    contact_number: "PENDING - not on file"  # PLACEHOLDER
+    start: "2018-01-01"  # PLACEHOLDER - exact date not on file
+    end: "2019-06-01"  # PLACEHOLDER - exact date not on file
+  project_2:
+    client_and_number: "ACSA (OR Tambo Airport)\nORT 3961"
+    client_type: Relevant SOE
+    project_type: DS
+    value_rm: 78
+    position_held: Contract Engineer
+    position_code: CE
+    contact: "Mohlalifi Choma\nProject Manager"
+    contact_number: "PENDING - not on file"  # PLACEHOLDER
+    start: "2019-07-01"  # PLACEHOLDER
+    end: "2020-12-01"  # PLACEHOLDER
+  project_3:
+    client_and_number: "ACSA (OR Tambo Airport)\nACSA 48141/ORT48141"
+    client_type: Relevant SOE
+    project_type: DS
+    value_rm: 50
+    position_held: Contract Engineer
+    position_code: CE
+    contact: "Referee contact not on file"  # PLACEHOLDER
+    contact_number: "PENDING - not on file"  # PLACEHOLDER
+    start: "2021-01-01"  # PLACEHOLDER
+    end: "2022-03-01"  # PLACEHOLDER
+
+key_persons:
+  - block_row: 37   # Position 1 = PL, per this contract's own SETUP!B6
+    person: henning
+  - block_row: 137  # Position 2 = DS1 "Pavement and Materials", per SETUP!C6
+    person: henning  # same person in both roles, per Sarel's explicit instruction for this sample
+
+tender: {}
+  # targeted_enterprise: omitted - Form B7 confirmed NOT required for this tender
+  # c2_4: omitted - real hours/budget figures are a business decision, never guessed

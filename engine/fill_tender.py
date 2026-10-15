@@ -41,7 +41,9 @@ def blocks_for(wb, code):
 
 def fill_person(wb, base, person, projects_lib):
     wb.set_value(T, at(B["name"], base), person["name"])
-    wb.set_value(T, at(B["id"], base), int(person["id_number"]))
+    # Written as text, not int(): see fill_conventional.py for why - int() silently
+    # drops a leading zero, which a real SA ID number can start with.
+    wb.set_value(T, at(B["id"], base), str(person["id_number"]))
     wb.set_value(T, at(B["description"], base), person.get("description", ""))
     projs = [projects_lib[p] if isinstance(p, str) else p for p in person["projects"]]
     if len(projs) > B["max_projects"]:
