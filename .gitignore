@@ -7,3 +7,4 @@ templates/incoming/
 config/klipcorp_profile.json
 out/
 assets/
+packs/generated/
