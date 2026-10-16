@@ -106,7 +106,7 @@ create table generated_cvs (
 comment on table generated_cvs is
   'One row per requested generate_cv.py output (format x detail x standard-or-tender-specific). Status starts "requested" and is advanced by engine/cv/process_cv_jobs.py, a human-run or scheduled process that actually runs generate_cv.py and uploads the result - the web app cannot run Python/LibreOffice (Vercel serverless), so this is never filled synchronously by a web request. See engine/cv/README.md.';
 
-create index generated_cvs_person_idx on generated_cvs (person_id, tender_id, created_at desc);
+create index generated_cvs_person_idx on generated_cvs (person_id, tender_id, requested_at desc);
 create index generated_cvs_status_idx on generated_cvs (status);
 
 -- ============================================================================

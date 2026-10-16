@@ -1,6 +1,6 @@
 """
 Bridge between the web app's CV request tables (app/supabase/migrations/
-0007_cv_uploads.sql: generated_cvs) and the one real CV generator,
+0008_cv_uploads.sql: generated_cvs) and the one real CV generator,
 engine/cv/generate_cv.py.
 
 Why this exists at all (the architectural problem stated in the brief): the

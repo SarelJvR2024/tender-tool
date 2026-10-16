@@ -171,7 +171,7 @@ export async function deleteProject(formData: FormData) {
  *                 ever records the request, never blocks on a result.
  *
  * Storage path convention: "<company_id>/people/<person_id>/uploads/<uuid>-
- * <filename>" under the private 'cv-documents' bucket (0007_cv_uploads.sql),
+ * <filename>" under the private 'cv-documents' bucket (0008_cv_uploads.sql),
  * same "path in storage, not the file itself" pattern as
  * companies.logo_storage_path.
  */
