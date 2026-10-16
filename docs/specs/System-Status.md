@@ -6,8 +6,9 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-16 (first pass — file created this run; updated once more the same
-run after `engine/cv/` landed mid-pass — see its own section below).
+Last full pass: 2026-10-16 (first pass — file created this run; updated twice more the same
+run, once after `engine/cv/` landed mid-pass, once after Sarel's "test company" rename and
+the CV upload-as-is spec addition arrived via a cross-session message — see below).
 
 ## Repo shape, in one paragraph
 
@@ -15,7 +16,7 @@ Two independent codebases share this repo: `engine/` (Python, no shared runtime 
 app — invoked by hand or cron, writes to Supabase via the service-role key, never imported by
 Next.js) and `app/` (Next.js 16 web app, reads/writes Supabase directly under RLS). They meet
 only at the Supabase schema (`app/supabase/migrations/`) and at `config/klipcorp_profile.json`
-(gitignored real data; `config/dummy_companies/*.json` are the committed synthetic stand-ins).
+(gitignored real data; `config/test_companies/*.json` are the committed synthetic stand-ins).
 Three buyer-filling engines now exist side by side under `engine/`: SANRAL (mature, root-level
 scripts), `engine/general/` (one script, `.docx`-only SBD forms, built today), and
 `engine/cv/` (CV document generator, also built today — see below). All three share the same
@@ -25,13 +26,13 @@ pattern: real, verified Python scripts with **no caller anywhere in `app/`** —
 
 | Area | What it does | How verified |
 | --- | --- | --- |
-| SANRAL workbook fill (`engine/fill_tender.py`, `fill_conventional.py`, `fill_a_forms.py`, `fill_financial*.py`) | Fills both template families (Conventional 9-sheet, RRM 15-sheet), A-Forms bundle, financial/hours sheets | `engine/admin_harness.py` regression-tests this against 3 dummy companies on every run; real tender runs recorded in git history (e.g. `afad9d2`, `6658b73`) |
+| SANRAL workbook fill (`engine/fill_tender.py`, `fill_conventional.py`, `fill_a_forms.py`, `fill_financial*.py`) | Fills both template families (Conventional 9-sheet, RRM 15-sheet), A-Forms bundle, financial/hours sheets | `engine/admin_harness.py` regression-tests this against 3 test companies on every run; real tender runs recorded in git history (e.g. `afad9d2`, `6658b73`) |
 | Template fingerprinting (`engine/fingerprint.py`) | Detects a changed SANRAL template before filling | Documented false-positive case already found and understood (README's own "open question") |
 | Field-level provenance (`engine/provenance.py`, migration `0002_field_provenance.sql`) | Every written field tagged confirmed/computed/assumed_default/missing | **Now wired end-to-end, not just a CLI/DB concept** — `app/app/tenders/[id]/page.tsx` reads `field_provenance` directly and renders the 3-bucket readiness report (item 32). Spec text calling this "Supabase table only, not yet wired to the web app" is stale — see Drift section below. |
 | National tender discovery (`engine/discovery/etenders_national.py`, `assess_tender.py`) | Pulls OCDS feed, scores fit against company profile | `app/app/discovery/page.tsx` reads `discovered_opportunities` and renders the same verdict buckets (`strong_fit`/`possible`/`needs_review`/`not_a_fit`) `assess_tender.py` produces — genuinely wired, not a disconnected feed |
 | General (non-SANRAL) SBD form fill (`engine/general/fill_sbd_docx.py`) | Fills SBD1/4/6.1 **`.docx` edition only**, label-matched, refuses PDF/`.doc` | Verified against real downloaded Treasury/RAF samples (see `General-Tender-Engine-Findings.md`); drop-in with `generate_action_checklist.py` | 
-| Admin test-company harness (`engine/admin_harness.py`, item 30) | Runs dummy companies through the real SANRAL pipeline, flags shape changes vs. stored baseline | Self-verifying by design (3 real bugs caught per its own commit `d86c84e`) — but **SANRAL-only**, see Gaps |
-| Admin results console (`app/app/admin/page.tsx`, item 31) | Plain list of harness runs (dummy company × tender, status, last run) | Real, reads `admin_harness_runs` (migration `0005`), populated by `engine/write_admin_harness_results.py`. **Simpler than the spec's description** — no inline rendering of generated documents, no "mark reviewed" workflow yet; it's the diagnostic list half of item 31, not the full visual queue. Spec marks item 31 "Gap" — that's now wrong, see Drift section. |
+| Admin test-company harness (`engine/admin_harness.py`, item 30) | Runs test companies through the real SANRAL pipeline, flags shape changes vs. stored baseline | Self-verifying by design (3 real bugs caught per its own commit `d86c84e`) — but **SANRAL-only**, see Gaps |
+| Admin results console (`app/app/admin/page.tsx`, item 31) | Plain list of harness runs (test company × tender, status, last run) | Real, reads `admin_harness_runs` (migration `0005`, column renamed by `0006`), populated by `engine/write_admin_harness_results.py`. **Simpler than the spec's description** — no inline rendering of generated documents, no "mark reviewed" workflow yet; it's the diagnostic list half of item 31, not the full visual queue. Spec marks item 31 "Gap" — that's now wrong, see Drift section. |
 | Company vault (`app/app/company/page.tsx`) | Company profile + COID expiry badge | Read-only + edit form both real; expiry coloring now shared (see Fixes below) |
 | Onboarding (`app/app/onboarding/`) | One field (legal name) → company + owner row, atomically via `create_company_and_join` | Matches spec's "minimum to get started" principle exactly, verified by reading the SQL function and the page |
 | Route guard (`app/proxy.ts`) | Redirects signed-out users to `/login`, no-company users to `/onboarding` | Covers every real app route (`/dashboard`, `/onboarding`, `/tenders`, `/discovery`, `/company`, `/people`, `/admin`) |
@@ -45,10 +46,50 @@ pattern: real, verified Python scripts with **no caller anywhere in `app/`** —
 ## Known gaps (named, not just "incomplete")
 
 1. **Two of today's three new engine capabilities have zero path into the web app — this is the headline finding of this pass.** `engine/general/fill_sbd_docx.py` (general SBD form fill) and `engine/cv/generate_cv.py` (CV generation — the product's actual stated niche, items 2/4/5) are both real, verified CLI scripts with **no caller anywhere in `app/`** — confirmed by grep across `app/`, zero hits for either. Both also still read `config/klipcorp_profile.json` directly rather than Supabase, so even a hypothetical caller couldn't reach them per-tenant without further work. This is exactly the kind of gap Sarel asked this review to watch for: real, tested capability that a customer using the actual product cannot reach at all today. Concretely, `app/app/people/page.tsx` (where CV generation would surface) has no button, link, or server action anywhere that calls `generate_cv.py` or anything like it. Needs a product decision (own page? a "Generate CV" action on the people/[id] page? folded into a future pack builder?) before either is "done" in any customer-facing sense — flagged for Sarel's call, not built unilaterally here since it's a UI/product design decision, not a mechanical fix.
-2. **`admin_harness.py` still only exercises the SANRAL path.** It calls `fill_docx_forms` and `fill_a_forms` only — confirmed by reading its imports. Neither the general-engine filler (`fill_sbd_docx.py`) nor the new CV generator (`generate_cv.py`) has **any dummy-company regression coverage**. If a buyer wording variance ever breaks the label-matcher, or a future `people`/`projects` schema change breaks CV generation silently, nothing catches it automatically the way SANRAL template changes are caught.
+2. **`admin_harness.py` still only exercises the SANRAL path.** It calls `fill_docx_forms` and `fill_a_forms` only — confirmed by reading its imports. Neither the general-engine filler (`fill_sbd_docx.py`) nor the new CV generator (`generate_cv.py`) has **any test-company regression coverage**. If a buyer wording variance ever breaks the label-matcher, or a future `people`/`projects` schema change breaks CV generation silently, nothing catches it automatically the way SANRAL template changes are caught.
 3. **CV upload-and-AI-extract (item 2) is not built.** `app/app/people/page.tsx` and `[id]/page.tsx` are still manual add/edit forms, real columns only. This matches what the spec already says (flagged 2026-10-16 as the highest-priority gap in the people flow) — restated here as current-state confirmation, not a new finding.
-4. **Dummy-company coverage is 3 profiles, not 4.** `config/dummy_companies/` has `complete_co`, `expired_certs_co`, `new_co`. The spec's own item-30 description names a 4th scenario — "no confirmed specialist for a position the tender requires" — with no matching fixture. Low priority (the spec itself lists "how many dummy companies is enough" as an open question), noted so it isn't silently forgotten.
-5. **Dummy companies are not implemented the way the spec describes them.** Spec text (item 30) says dummy companies live "in the same `companies` table as real tenants" behind an `is_test_company` flag. Reality: no such column exists anywhere in the schema (confirmed by grep across all migrations) — dummy companies are local JSON fixtures (`config/dummy_companies/*.json`) consumed only by the Python harness, and `admin_harness_runs` is deliberately *not* tenant-scoped at all (its own migration comment explains why). This is arguably a safer design than the spec's (no risk of a test row ever leaking into a real customer's dashboard by a flag being missed), but it's a real divergence from the written spec. Recommend updating the spec's item 30 description to match reality rather than building the `is_test_company` column it currently calls for — flagging for Sarel's call, not deciding unilaterally since it's a product-doc change, not a code fix.
+4. **Test-company coverage is 3 profiles, not 4.** `config/test_companies/` has `complete_co`, `expired_certs_co`, `new_co`. The spec's own item-30 description names a 4th scenario — "no confirmed specialist for a position the tender requires" — with no matching fixture. Low priority (the spec itself lists "how many test companies is enough" as an open question), noted so it isn't silently forgotten.
+5. **Test companies are not implemented the way the spec describes them.** Spec text (item 30) says test companies live "in the same `companies` table as real tenants" behind an `is_test_company` flag. Reality: no such column exists anywhere in the schema (confirmed by grep across all migrations) — test companies are local JSON fixtures (`config/test_companies/*.json`) consumed only by the Python harness, and `admin_harness_runs` is deliberately *not* tenant-scoped at all (its own migration comment explains why). This is arguably a safer design than the spec's (no risk of a test row ever leaking into a real customer's dashboard by a flag being missed), but it's a real divergence from the written spec. Recommend updating the spec's item 30 description to match reality rather than building the `is_test_company` column it currently calls for — flagging for Sarel's call, not deciding unilaterally since it's a product-doc change, not a code fix.
+
+## Terminology fix applied this pass
+
+**"Dummy company" renamed to "test company" everywhere, per Sarel's explicit instruction**
+(received via a cross-session message, verified against the spec commit `2acb495` before
+acting on it). Code-level rename landed in `f942bed`: `config/dummy_companies/` →
+`config/test_companies/` (directory + every "Dummy"-prefixed value inside the 3 fixtures),
+`engine/admin_harness.py`, `engine/write_admin_harness_results.py`, comment-only mentions in
+`fill_a_forms.py`/`fill_docx_forms.py`, a new migration `0006_rename_dummy_to_test_company.sql`
+(`admin_harness_runs.dummy_company` → `test_company`; `0005` itself left untouched as applied
+history), and `app/app/admin/page.tsx` + `HarnessRunRow.tsx`. Verified for real: ran
+`python3 engine/admin_harness.py --reset` after the rename — 18 clean runs (3 test companies ×
+6 tenders), 0 flagged, 0 failures; `npm run typecheck` and `npm run lint` pass clean; `next
+build` compiles and type-checks successfully (same pre-existing prerender-only failure as
+every other build attempt in this environment, unrelated to this change).
+
+## New spec requirement this pass: CV "use as-is" (no AI interference)
+
+Landed as `docs/specs/Tender-Tool-Competitor-Feature-Deep-Dive.md`'s own update (`2acb495`): a
+third CV path alongside AI-extract-to-fields and AI-generate (`engine/cv/generate_cv.py`) — a
+company can upload a CV and have it attached to a submission **exactly as uploaded**, no
+extraction, no reformatting, not run through `generate_cv.py` at all. Not necessarily this
+session's to build (it's a people-page/CV-flow UI decision), but the judgment call asked for:
+**does this change anything about how `people`/storage should be shaped now, rather than
+later?** Yes, in one concrete way, checked directly against the schema: `people` currently has
+no file-storage column of any kind — confirmed by reading `0001_init_schema.sql`'s `people`
+table definition. The pattern already exists elsewhere in the same schema
+(`companies.logo_storage_path text -- path in Supabase Storage, not the file itself`,
+`tender_documents.storage_path`, `generated_documents.storage_path`), just not yet applied to
+`people`. This isn't a need created by the new "use as-is" path alone — the *already-planned*
+AI-extract path also needs the original uploaded file kept (to show back on the confirm/correct
+screen, and so a re-upload can replace "the same person's CV" rather than only their extracted
+fields) — but "use as-is" makes it unambiguous that storing the original file is not an
+optional nice-to-have for later, it's the common foundation all three CV paths need. Recommend
+whoever builds the people-page CV upload flow add a `people` storage-path column (or a small
+`person_documents` table if more than one file per person turns out to be needed - e.g. an
+old CV being replaced rather than overwritten) as part of that same piece of work, not bolt it
+on afterward. Flagging this reasoning here rather than writing the migration myself, since the
+actual shape (column vs. side table, one file vs. a history of them) is a decision for whoever
+builds the upload UI and should be made alongside it, not predicted in isolation.
 
 ## Duplication found and fixed this pass
 
@@ -68,4 +109,5 @@ Two commits, same session (`session_01PAw7oeNsQgNdYpS5qH2b1R`), one minute apart
 ## Open items for Sarel's own call (not decided here)
 
 - Gap #1 and #2 above (general SBD engine *and* the new CV engine both have no web-app entry point, and neither has harness coverage) — these are product/architecture decisions (where does CV generation live in the UI — people page? a new tender workspace action? is a second harness worth building now or after a second real non-SANRAL customer?), not something to build unilaterally in a status-doc pass. Given the CV niche is the product's actual stated differentiator (see the competitor deep-dive's own gap analysis), this is the highest-value gap to close next, ahead of more engine depth.
-- Gap #5 (dummy-company mechanism vs. spec text) — recommend updating the spec rather than building the `is_test_company` column, but that's a call on the spec document, left to Sarel or the agent who wrote that section.
+- Gap #5 (test-company mechanism vs. spec text) — recommend updating the spec rather than building the `is_test_company` column, but that's a call on the spec document, left to Sarel or the agent who wrote that section.
+- The `people`/CV storage-path decision raised above (new spec requirement section) — flagged with reasoning, not decided, since it belongs with whoever builds the upload UI.
