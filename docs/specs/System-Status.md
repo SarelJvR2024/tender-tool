@@ -19,6 +19,102 @@ still clean. Nothing to fix, nothing new to flag — recorded here rather than s
 the check-in, so a quiet pass is visible as "checked, nothing changed" rather than looking like
 it didn't happen.
 
+## Check-in: role-based daily digest engine (2026-10-16, this pass)
+
+Built in response to Sarel's explicit request: define tender-workflow roles first, then a
+role-based daily digest. Landed alongside, in the same shared working tree, concurrently with
+another agent's document-expiry/tender-task work (`engine/compliance/watch_deadlines.py`,
+migration `0009_tender_tasks.sql`) - confirmed by `git log`/`ls` mid-pass, not duplicated;
+this pass's engine **calls** that script's functions rather than re-reading `tender_tasks` or
+`companies` itself. Migration number collision avoided by renumbering this pass's migration
+from `0009` to `0010` once the other agent's `0009_tender_tasks.sql` was seen on disk.
+
+**Built:**
+- **Role definitions + notification content matrix** - new section in
+  `docs/specs/Tender-Tool-Competitor-Feature-Deep-Dive.md` ("Roles and the role-based daily
+  digest"). Five roles (full_cycle, validator, cv_admin, finance, viewer), each tied to real
+  pages/actions, not an abstract permission system - per the doc's own scope-discipline rule.
+  Flagged explicitly rather than guessed: workflow role is global-per-user, not
+  per-tender-assignment (no `tender_assignments`-style table exists anywhere in the schema to
+  hang a per-tender role off), and the matrix's filtering for `cv_admin`/`finance`/`validator`
+  is approximated by keyword-matching free-text fields (`tender_tasks.description`,
+  `field_provenance.field_key`) since neither has a real category/criticality tag today -
+  both approximations are named as such in the spec and in the code, not hidden.
+- **Migration `0010_add_tender_workflow_role.sql`** - `company_members.tender_role`
+  (nullable text, checked against the five role values; null = full_cycle). Verified for
+  real: replayed the full migration chain (`0001`→`0007`, `0009`, `0010`; `0008` skipped - it
+  needs a live Supabase `storage` schema, not reproducible on vanilla Postgres, a pre-existing
+  limitation unrelated to this change) against a scratch local Postgres 16 instance with a
+  stubbed `auth.users`/`auth.uid()`; all applied cleanly, `company_members.tender_role`
+  confirmed present with the right type/nullability/check constraint via
+  `information_schema.columns`.
+- **`engine/notify/daily_digest.py`** - builds one filtered digest per person per the matrix
+  above. Reuses, does not reimplement: `assess_tender.py`'s `assess_release()` for new-tender
+  fit (via a fresh OCDS fetch, same as `watch_new_tenders.py`); `watch_new_tenders.py`'s own
+  `REPORT_WORTHY_VERDICTS` constant (imported, not redeclared); `watch_deadlines.py`'s
+  `find_due_documents()`/`find_due_tasks()` directly, unchanged, for live-mode document-expiry
+  and tender-task signals. New code only for reading `field_provenance` (nothing else in the
+  repo reads it outside the Next.js app) - implemented with its own seen-store
+  (`state/seen_digest_readiness.json`, same pattern as the other two watch scripts) so it
+  reports genuine status *changes*, not just "currently flagged" on every run.
+- **Two run modes**, because this environment still has no live Supabase project (confirmed
+  again this pass: no `app/.env.local`, no `NEXT_PUBLIC_SUPABASE_URL`/
+  `SUPABASE_SERVICE_ROLE_KEY` set). `--mode live` reads Supabase directly (company_members,
+  companies, tender_tasks, field_provenance) - **written but not run against a real project,
+  flagged honestly, same gap every Supabase-reading script in this repo has had since day
+  one**. `--mode local` (the mode actually run and verified) uses a small roster JSON
+  (`config/team_roster.json`, gitignored like `klipcorp_profile.json`; `.example.json`
+  committed) standing in for `company_members` until a live project exists, and reads
+  document-expiry straight from the company profile JSON (richer today than the Supabase
+  schema - COID, SARS TCS PIN, professional indemnity, all three real fields in
+  `klipcorp_profile.json`) since `watch_deadlines.py`'s own `TRACKED_EXPIRY_FIELDS` is
+  (correctly, per that script's own docstring) limited to the one expiry column the schema
+  actually has.
+- **No new UI built.** Checked first and confirmed by grep: there is no team-members/roster
+  page anywhere in `app/app/` today - `company_members` has zero UI surface, not even a list.
+  Adding a role picker would mean building that whole page from nothing, which is a bigger
+  piece of product/UI work than "assigning a role to a person needs a minimal picker" (the
+  instruction's own bar) - flagged for Sarel's call, not built unilaterally. Until it exists,
+  `tender_role` is set directly via the Supabase dashboard/SQL (documented in the column's own
+  comment).
+
+**Verified for real, not just syntax-checked:**
+- Migration replay against scratch Postgres (above).
+- `npm run typecheck` and `npm run lint` both pass clean on the current tree (no TS/TSX files
+  touched by this pass - no UI was built, see above).
+- `python3 daily_digest.py --mode local --roster config/team_roster.json --days 3
+  --no-fetch-documents` run against the real national OCDS feed and the real
+  `klipcorp_profile.json`: fetched 100 real releases (hit the OCDS API's own known ~500-record
+  page-2 500-error limit, degraded gracefully per `etenders_national.py`'s existing handling,
+  exactly as documented elsewhere in this file), produced 5 real per-person digests (one per
+  role) with correct section visibility per role confirmed by reading the output JSON back:
+  `full_cycle` got all 5 sections, `cv_admin` got only `tender_tasks`/`readiness_changes` (both
+  empty - no live Supabase data to read, expected), `viewer` got the 3 count-only sections with
+  numeric counts not raw rows, `document_expiry` correctly empty for everyone (both real expiry
+  dates on file - COID 2027-04-30, SARS TCS 2027-06-24 - are >60 days out, so nothing should
+  have fired, and nothing did). `--mode live` with no env vars set correctly refuses with a
+  clear error rather than crashing.
+- `--mode live`'s Supabase-reading paths (`find_readiness_changes`, `load_roster_live`,
+  `watch_deadlines`'s own functions) are **not** verified against a real project - no live
+  Supabase project exists in this environment, same limitation this file has recorded for
+  every other Supabase-writing/reading engine script to date.
+
+**Known gaps, named:**
+- Readiness-change and tender-task signals are empty in every digest produced so far, purely
+  because local mode has no fixture for either (both are Supabase-only data) - not a bug, a
+  consequence of this environment's missing live project, same as the rest of this file's
+  running "no live Supabase" caveat.
+- The `cv_admin`/`finance`/`validator` keyword-based filtering (see spec section) will
+  misclassify some real free-text task descriptions and field keys - acceptable as a first
+  pass per the matrix's own "when uncertain, omit rather than over-include" rule, but should
+  be replaced with a real tag/category column on `tender_tasks` and `field_provenance` once
+  real usage shows which keywords actually matter.
+- No real email is sent by this script (same explicit boundary as `watch_new_tenders.py` and
+  `watch_deadlines.py` - confirmed again this pass by grepping the whole repo for
+  smtp/sendgrid/resend/nodemailer/send_email/mailgun: zero hits anywhere). The only real
+  notification channel today is the scheduled check-in that emails Sarel directly from these
+  scripts' JSON output - this script's `--out` JSON is written to be read the same way.
+
 ## Repo shape, in one paragraph
 
 Two independent codebases share this repo: `engine/` (Python, no shared runtime with the web

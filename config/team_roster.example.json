@@ -1,0 +1,11 @@
+{
+  "_note": "Local-mode stand-in for company_members until a real team-members UI/table read exists - see docs/specs/Tender-Tool-Competitor-Feature-Deep-Dive.md's 'Roles and the role-based daily digest' section and engine/notify/daily_digest.py's module docstring. Copy to team_roster.json (gitignored, same pattern as klipcorp_profile.json) and fill in real people.",
+  "company_legal_name": "Klipcorp (Pty) Ltd",
+  "members": [
+    { "name": "Sarel", "email": "sarel@example.com", "tender_role": "full_cycle" },
+    { "name": "Example Validator", "email": "validator@example.com", "tender_role": "validator" },
+    { "name": "Example CV Admin", "email": "cv-admin@example.com", "tender_role": "cv_admin" },
+    { "name": "Example Finance", "email": "finance@example.com", "tender_role": "finance" },
+    { "name": "Example Viewer", "email": "viewer@example.com", "tender_role": "viewer" }
+  ]
+}

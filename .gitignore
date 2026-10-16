@@ -6,6 +6,7 @@ state/*
 !state/seen_tenders.json
 templates/incoming/
 config/klipcorp_profile.json
+config/team_roster.json
 out/
 assets/
 packs/generated/
