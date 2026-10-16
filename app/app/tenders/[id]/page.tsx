@@ -197,6 +197,12 @@ export default async function TenderWorkspacePage({
 
   const left = daysLeft(tenderFacts?.closing_date ?? null);
   const packStatus = tenderPack ? PACK_STATUS_LABEL[tenderPack.status] : null;
+  // Drives the at-a-glance summary chips on the facts card, so "are we ready
+  // to submit" is answerable without scrolling past Tasks & Key positions.
+  const overdueTaskCount = tasks.filter((t) => {
+    const taskLeft = taskDaysLeft(t.due_date);
+    return taskLeft !== null && taskLeft < 0 && t.status !== "done";
+  }).length;
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
@@ -238,9 +244,24 @@ export default async function TenderWorkspacePage({
                   </span>
                 )}
               </div>
-            </div>
 
-            <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} />
+              {tenderPack && provenance.length > 0 && (
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEE6" }}>
+                  {confirmedRows.length > 0 && (
+                    <SummaryChip count={confirmedRows.length} label="confirmed" bg="#DCFCE7" color="#15803D" />
+                  )}
+                  {reviewRows.length > 0 && (
+                    <SummaryChip count={reviewRows.length} label="to review" bg="#FEF3C7" color="#B45309" />
+                  )}
+                  {missingRows.length > 0 && (
+                    <SummaryChip count={missingRows.length} label="missing" bg="#FEE2E2" color="#B91C1C" />
+                  )}
+                  {overdueTaskCount > 0 && (
+                    <SummaryChip count={overdueTaskCount} label={overdueTaskCount === 1 ? "task overdue" : "tasks overdue"} bg="#FEE2E2" color="#B91C1C" />
+                  )}
+                </div>
+              )}
+            </div>
 
             {packError && <ErrorBanner message={`Could not load this company's pack for this tender: ${packError.message}`} />}
 
@@ -249,6 +270,77 @@ export default async function TenderWorkspacePage({
                 No tender pack exists yet for this tender at your company - nothing to review until one is created.
               </div>
             )}
+
+            {tenderPack && (
+              <>
+                {provenanceError && <ErrorBanner message={`Could not load the readiness report: ${provenanceError.message}`} />}
+
+                {provenance.length === 0 && !provenanceError && (
+                  <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#6B6758" }}>
+                    No readiness data recorded yet for this pack.
+                  </div>
+                )}
+
+                {provenance.length > 0 && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, marginBottom: 16 }}>
+                    <ReportCard
+                      title="Already confirmed"
+                      count={confirmedRows.length}
+                      accent="#15803D"
+                      bg="#DCFCE7"
+                      emptyText="Nothing confirmed yet."
+                    >
+                      {confirmedRows.map((row) => (
+                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #F0EEE6" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
+                          <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
+                        </div>
+                      ))}
+                    </ReportCard>
+
+                    <ReportCard
+                      title="Please review"
+                      count={reviewRows.length}
+                      accent="#B45309"
+                      bg="#FEF3C7"
+                      emptyText="Nothing waiting on review."
+                    >
+                      {reviewRows.map((row) => (
+                        <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid #F0EEE6" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
+                            <ReviewButton fieldKey={row.field_key} />
+                          </div>
+                          <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word", marginTop: 2 }}>{row.value ?? "-"}</div>
+                          {row.reason && (
+                            <div style={{ fontSize: 11, color: "#B45309", marginTop: 3 }}>{row.reason}</div>
+                          )}
+                        </div>
+                      ))}
+                    </ReportCard>
+
+                    <ReportCard
+                      title="Needs your input"
+                      count={missingRows.length}
+                      accent="#B91C1C"
+                      bg="#FEE2E2"
+                      emptyText="Nothing missing."
+                    >
+                      {missingRows.map((row) => (
+                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #F0EEE6" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
+                          {row.reason && (
+                            <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 2 }}>{row.reason}</div>
+                          )}
+                        </div>
+                      ))}
+                    </ReportCard>
+                  </div>
+                )}
+              </>
+            )}
+
+            <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} />
 
             {tenderPack && assignments.length > 0 && (
               <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
@@ -320,75 +412,6 @@ export default async function TenderWorkspacePage({
                   );
                 })}
               </div>
-            )}
-
-            {tenderPack && (
-              <>
-                {provenanceError && <ErrorBanner message={`Could not load the readiness report: ${provenanceError.message}`} />}
-
-                {provenance.length === 0 && !provenanceError && (
-                  <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#6B6758" }}>
-                    No readiness data recorded yet for this pack.
-                  </div>
-                )}
-
-                {provenance.length > 0 && (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
-                    <ReportCard
-                      title="Already confirmed"
-                      count={confirmedRows.length}
-                      accent="#15803D"
-                      bg="#DCFCE7"
-                      emptyText="Nothing confirmed yet."
-                    >
-                      {confirmedRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #F0EEE6" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
-                          <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
-                        </div>
-                      ))}
-                    </ReportCard>
-
-                    <ReportCard
-                      title="Please review"
-                      count={reviewRows.length}
-                      accent="#B45309"
-                      bg="#FEF3C7"
-                      emptyText="Nothing waiting on review."
-                    >
-                      {reviewRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid #F0EEE6" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
-                            <ReviewButton fieldKey={row.field_key} />
-                          </div>
-                          <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word", marginTop: 2 }}>{row.value ?? "-"}</div>
-                          {row.reason && (
-                            <div style={{ fontSize: 11, color: "#B45309", marginTop: 3 }}>{row.reason}</div>
-                          )}
-                        </div>
-                      ))}
-                    </ReportCard>
-
-                    <ReportCard
-                      title="Needs your input"
-                      count={missingRows.length}
-                      accent="#B91C1C"
-                      bg="#FEE2E2"
-                      emptyText="Nothing missing."
-                    >
-                      {missingRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #F0EEE6" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
-                          {row.reason && (
-                            <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 2 }}>{row.reason}</div>
-                          )}
-                        </div>
-                      ))}
-                    </ReportCard>
-                  </div>
-                )}
-              </>
             )}
           </>
         )}
@@ -508,6 +531,17 @@ function TaskTimeline({
         </button>
       </form>
     </div>
+  );
+}
+
+// At-a-glance counts on the facts card, so "is this ready to submit" is
+// answerable without scrolling past Tasks & Key positions to the report
+// cards below - same idea as a compliance dashboard's top-of-page summary.
+function SummaryChip({ count, label, bg, color }: { count: number; label: string; bg: string; color: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color }}>
+      {count} {label}
+    </span>
   );
 }
 
