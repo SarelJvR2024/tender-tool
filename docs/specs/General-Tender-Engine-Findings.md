@@ -114,7 +114,30 @@ Verified against a real downloaded sample — see the "Verification" section bel
 
 ## Verification (Observed, not claimed)
 
-Ran `fill_sbd_docx.py` against the real Treasury `SBD1.docx`, `SBD4.docx` and `SBD6_1.docx` downloaded for this research (same files diffed above, not a synthetic test file). Output and the field-by-field provenance log are described in the script's own module docstring and the commit this findings doc ships with; see that commit for the exact command run and its output.
+Ran `fill_sbd_docx.py` against the real Treasury `SBD1.docx` and `SBD4.docx`, and RAF's real `SBD6_1.docx` (the same files diffed above, not synthetic test files):
+
+```
+Wrote SBD1_FILLED.docx
+Wrote SBD4_FILLED.docx
+Wrote SBD6_1_FILLED.docx
+Wrote provenance.json: 26 provenance entries ({'confirmed': 11, 'missing': 12, 'assumed_default': 3})
+```
+
+Opened `SBD1_FILLED.docx` back up with `python-docx` and confirmed the real values actually landed in the real blank cells next to their real labels — not just that the script ran without error:
+
+```
+NAME OF BIDDER            -> Klipcorp (Pty) Ltd
+VAT REGISTRATION NUMBER   -> 4620293326
+CSD No:                   -> MAAA0910499
+```
+
+`SBD4_FILLED.docx`'s three "YES/NO" declarations each now read `... YES/NO  (No)`, and its footer line reads `Designation Senior Manager   Name of bidder Klipcorp (Pty) Ltd` — both real values from `config/klipcorp_profile.json`, correctly separated (an early version of the label-matching helper for the dotted/whitespace-blank convention merged two labels sharing one line with no space between them — e.g. `...Senior ManagerName of bidder...` — because the blank in that convention is plain whitespace, not literal dots; fixed by padding the replacement, confirmed by re-running against the same real file).
+
+Ran the existing `generate_action_checklist.py` against this log with **zero changes to that script** and got a correct `ACTIONS_TO_SIGN.md` (16 items: 15 from this run's provenance, 1 standing) — confirming the general filler is a drop-in participant in the project's existing honesty/checklist pipeline, not a parallel one.
+
+Also ran the script against SALB's real `SBD1.pdf` (passed as `--sbd1`) to confirm the PDF-refusal path works rather than silently doing nothing or guessing: it logged exactly one `missing` entry naming the file and explaining why a flat PDF is refused, and wrote no output file.
+
+RAF's `SBD6_1.docx` uses "Name of company/firm" rather than SALB's "SURNAME AND NAME" for its signatory-name line (the wording variance Finding 1 already confirmed) — this run correctly filled the company-name/registration-number fields it does recognise and logged `missing` with a clear reason for `sbd6_1.signatory_name`/`sbd6_1.signatory_address` rather than guessing at the unrecognised label or crashing. That is the intended behaviour, not a bug: a label this script doesn't recognise in a given buyer's edition is exactly a "needs a human to check" case, same discipline as everything else in this project.
 
 ## Realistic next step
 
