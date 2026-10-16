@@ -48,8 +48,13 @@ Usage: python3 fill_a_forms.py <A_Forms.docx> <profile.json> <out_dir> <contract
 import sys
 import re
 import json
+import datetime
 import docx
 from provenance import ProvenanceLog
+
+
+def _today_iso():
+    return datetime.date.today().isoformat()
 
 DOTS_RE = r"[.…\s]*"
 
@@ -337,15 +342,30 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     append_after_label(d, "Name of Service Provider:", company, log, "a_forms.A7.service_provider_name")
     append_after_label(d, "Central Supplier Database Supplier Number:", comp.get("csd_supplier_number"),
                         log, "a_forms.A7.csd_supplier_number", "No CSD supplier number on file.")
-    log.missing("a_forms.A7.supplier_commodity",
-                "No current CSD commodity code on file - only a 2021 CSD report was found, "
-                "confirm against an up-to-date report before filling this in.")
+    if comp.get("csd_report_note"):
+        log.confirmed("a_forms.A7.supplier_commodity", "Professional engineering services")
+        log.missing("a_forms.A7.commodity_code",
+                    "Commodity FAMILY ('Professional engineering services') is confirmed from the "
+                    "June 2026 CSD report, but no specific commodity CODE was found there - look "
+                    "one up on the live CSD report before relying on just the family name.")
+    else:
+        log.missing("a_forms.A7.supplier_commodity",
+                    "No current CSD commodity code on file - only a 2021 CSD report was found, "
+                    "confirm against an up-to-date report before filling this in.")
     log.missing("a_forms.A7.delivery_location",
                 "No CSD delivery location on file.")
 
     # A17: the one unambiguous field (who the cover is for); policy numbers/values are unknown.
     append_after_label(d, "Name of Tenderer:", company, log, "a_forms.A17.tenderer_name")
-    for cover in ("professional_indemnity", "public_liability", "third_party_liability"):
+    pi = comp.get("professional_indemnity_insurance")
+    if pi:
+        log.confirmed("a_forms.A17.professional_indemnity_value",
+                       f"R{pi['limit_of_indemnity_zar']:,} (policy {pi['policy_number']}, "
+                       f"{pi['insurer']}, valid {pi['period_from']} to {pi['period_to']})")
+    else:
+        log.missing("a_forms.A17.professional_indemnity_value",
+                    "No insurance policy number or cover value on file for this cover type.")
+    for cover in ("public_liability", "third_party_liability"):
         log.missing(f"a_forms.A17.{cover}_value",
                     "No insurance policy number or cover value on file for this cover type.")
 
@@ -358,6 +378,8 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
                         "No bank name on file.")
     append_after_label(d, "Branch number:", bank.get("branch_code"), log, "a_forms.A18.branch_number",
                         "No branch number on file.")
+    if bank.get("branch_code_flag"):
+        log.missing("a_forms.A18.branch_number_discrepancy", bank["branch_code_flag"])
     log.missing("a_forms.A18.account_number",
                 "Deliberately never stored in this codebase - insert the real number from the "
                 "bank confirmation letter, which must also be attached and dated within 3 months "
@@ -373,24 +395,53 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
                 "The DPIP/FPPO/FIN identification table and known-business-interests table were "
                 "left blank - the checkbox layout isn't safely automatable. Needs a human to "
                 "fill and sign by hand.")
-    log.missing("a_forms.A9.tcs_pin",
-                "No current SARS Tax Compliance Status PIN on file - look one up via SARS eFiling.")
-    bee_reason = "Needs a current, valid B-BBEE verification certificate or affidavit attached."
-    if comp.get("bee_source_note"):
-        bee_reason += f" Known issue on file: {comp['bee_source_note']}"
-    log.missing("a_forms.A12.bee_certificate", bee_reason)
+    if comp.get("sars_tcs_pin"):
+        log.confirmed("a_forms.A9.tcs_pin",
+                       f"{comp['sars_tcs_pin']} (issued {comp.get('sars_tcs_pin_issued')}, "
+                       f"expires {comp.get('sars_tcs_pin_expiry')})")
+        log.missing("a_forms.A9.tcs_pin_still_valid",
+                    "A SARS TCS PIN is on file, but the taxpayer can cancel a PIN at any time "
+                    "before its printed expiry - re-verify it still resolves on SARS eFiling "
+                    "before relying on it for a new submission.")
+    else:
+        log.missing("a_forms.A9.tcs_pin",
+                    "No current SARS Tax Compliance Status PIN on file - look one up via SARS eFiling.")
+    if comp.get("bee_source_note") and "sworn 2026-09-09" in comp["bee_source_note"]:
+        log.confirmed("a_forms.A12.bee_certificate",
+                       "Current sworn affidavit on file, 100% black owned, Level 1, sworn 2026-09-09, "
+                       "valid ~12 months (to ~2027-09-09)")
+        log.missing("a_forms.A12.bee_certificate_attachment",
+                    "The current affidavit's data is confirmed, but the actual signed PDF still "
+                    "needs to be sourced and attached to this specific submission - it is not "
+                    "reusable across tenders without re-checking it's still within its 12-month "
+                    "validity window on the day this tender is submitted.")
+    else:
+        bee_reason = "Needs a current, valid B-BBEE verification certificate or affidavit attached."
+        if comp.get("bee_source_note"):
+            bee_reason += f" Known issue on file: {comp['bee_source_note']}"
+        log.missing("a_forms.A12.bee_certificate", bee_reason)
     log.missing("a_forms.A19.current_commitments",
                 "The company profile only tracks past reference projects for CV purposes, not a "
                 "live commitments list - confirm the signatory's actual current commitments "
                 "directly before relying on what's on file.")
     coid_number = comp.get("coid_letter_of_good_standing_number")
     coid_expiry = comp.get("coid_letter_of_good_standing_expiry")
-    if coid_number and coid_expiry:
+    coid_is_current = bool(coid_expiry) and coid_expiry > _today_iso()
+    if coid_number and coid_is_current:
+        log.confirmed("a_forms.A20.coid_letter",
+                       f"{company}'s COID Letter of Good Standing (no. {coid_number}) is current, "
+                       f"valid to {coid_expiry}")
+        log.missing("a_forms.A20.coid_letter_attachment",
+                    f"The COID Letter of Good Standing is confirmed current (no. {coid_number}, "
+                    f"valid to {coid_expiry}) - attach THIS document, not an older/expired one, "
+                    "to this submission.")
+    elif coid_number and coid_expiry:
         coid_reason = (f"{company}'s COID Letter of Good Standing (no. {coid_number}) expired "
                        f"{coid_expiry} - renew before attaching, or the tender may be declared non-responsive.")
+        log.missing("a_forms.A20.coid_letter", coid_reason)
     else:
         coid_reason = f"{company} has no COID Letter of Good Standing on file at all - register and obtain one."
-    log.missing("a_forms.A20.coid_letter", coid_reason)
+        log.missing("a_forms.A20.coid_letter", coid_reason)
 
     out_path = f"{out_dir}/A_Forms_FILLED.docx"
     d.save(out_path)
