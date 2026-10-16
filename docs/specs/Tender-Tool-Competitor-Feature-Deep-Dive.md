@@ -220,7 +220,7 @@ Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the ta
 | 15 | Team roles, comments, version history | Existing | 2 |
 | 16 | AI-drafted narrative sections: executive summary, methodology, capability statement | Existing | 3 |
 | 17 | Awarded-tender and competitor intelligence | Existing | 3 |
-| 18 | Go/No-Go scoring | Existing (competitors); first version built for this product 2026-10-16 - `engine/discovery/assess_tender.py`, category + eligibility signals + fit verdict against a company profile, run against the widened national discovery feed (item 11) | 3 |
+| 18 | Go/No-Go scoring | Existing (competitors); built 2026-10-16, hardened 2026-10-16 - `engine/discovery/assess_tender.py`, category + eligibility signals + fit verdict against a company profile loaded from the tenant's own profile JSON (not a hardcoded company), run against the widened national discovery feed (item 11). Hardening pass: closed-tender short-circuit (no wasted document fetch), duplicate-release removal upstream in `etenders_national.py`, multi-document handling per tender, graceful degrade on a failed/corrupt document download, and the OCDS `mainProcurementCategory` folded in as a fallback label when keyword categorisation finds nothing | 3 |
 | 19 | Case-study and past-project library with tailored write-ups | Existing (Flowcase, GovDash) | 3 |
 | 20 | Employee onboarding and self-service CV and credential capture | Roadmap (HR-lite) | 4 |
 | 21 | Credential and certificate expiry reminders per person | Roadmap (HR-lite) | 4 |

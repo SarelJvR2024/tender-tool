@@ -31,6 +31,7 @@ did not create and cannot fully control the quality of.
 Usage:
     python3 assess_tender.py <national_report.json> [--limit N] [--category-keyword K]
 """
+import os
 import sys
 import re
 import json
@@ -38,6 +39,7 @@ import subprocess
 import tempfile
 import argparse
 import urllib.request
+import urllib.error
 
 STRUCTURAL_MARKERS = [
     "tender data", "returnable schedule", "conditions of tender",
@@ -64,17 +66,31 @@ BRIEFING_RE = re.compile(r"compulsory\s*(?:clarification\s*)?brief", re.IGNORECA
 
 
 def fetch_pdf_text(url, timeout=30):
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            tmp.write(r.read())
-        path = tmp.name
+    """Returns (text, fetch_error). A failed download or a non-PDF/corrupt file
+    degrades to ("", <reason>) rather than raising - one bad document link on a
+    public buyer's own site must not take out the whole assessment run, only
+    that release's document-confirmed signals."""
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                tmp.write(r.read())
+            path = tmp.name
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+        return "", f"could not download document: {e}"
     try:
         out = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True,
                               timeout=30, text=True)
-        return out.stdout
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
+        if out.returncode != 0:
+            return "", f"pdftotext could not read this file (not a valid PDF?): {out.stderr.strip()[:200]}"
+        return out.stdout, None
+    except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+        return "", f"pdftotext failed: {e}"
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def document_depth(text):
@@ -124,10 +140,21 @@ def extract_signals(text, depth):
     return signals, confidence
 
 
-def categorize(title, description):
+def categorize(title, description, procurement_category=None):
+    """Keyword-bucket discipline matching, with the OCDS structured
+    mainProcurementCategory (goods/services/works) folded in as a fallback
+    signal rather than discarded: when no keyword bucket matches, a plain
+    "uncategorized" told a reviewer nothing about what the tender even was.
+    Tagging it with the buyer's own declared category at least distinguishes
+    "unrecognised works tender" from "unrecognised goods tender", and stays
+    honest - it is NOT a discipline match, just better-labelled uncertainty."""
     text = f"{title or ''} {description or ''}".lower()
     matches = [cat for cat, kws in DISCIPLINE_KEYWORDS.items() if any(kw in text for kw in kws)]
-    return matches or ["uncategorized"]
+    if matches:
+        return matches
+    if procurement_category:
+        return [f"uncategorized_{procurement_category.lower()}"]
+    return ["uncategorized"]
 
 
 def assess_fit(categories, signals, depth, profile):
@@ -136,10 +163,16 @@ def assess_fit(categories, signals, depth, profile):
     verdict = "possible"
 
     discipline_match = any(c in profile.get("disciplines", []) for c in categories)
+    uncategorized = all(c.startswith("uncategorized") for c in categories)
     if discipline_match:
         reasons.append(f"Discipline match: {', '.join(categories)} is within scope.")
-    elif categories == ["uncategorized"]:
-        reasons.append("Could not determine discipline from title/description alone - needs a human look.")
+    elif uncategorized:
+        if categories != ["uncategorized"]:
+            reasons.append(f"Could not match a discipline from title/description alone "
+                            f"(buyer's own OCDS category: {categories[0].removeprefix('uncategorized_')}) "
+                            "- needs a human look.")
+        else:
+            reasons.append("Could not determine discipline from title/description alone - needs a human look.")
         verdict = "needs_review"
     else:
         reasons.append(f"Discipline ({', '.join(categories)}) doesn't match the company's known disciplines.")
@@ -164,24 +197,88 @@ def assess_fit(categories, signals, depth, profile):
     return verdict, reasons
 
 
-# A real, minimal profile - not invented. BEE level 1, known discipline (civil/roads
-# consulting engineering, per klipcorp_profile.json), and the already-documented gap:
-# "No CIDB grading document found anywhere" (klipcorp_profile.json's own gaps list).
-KLIPCORP_PROFILE = {
-    "disciplines": ["roads_civil", "professional_services"],
-    "bee_level": 1,
+DEFAULT_PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "klipcorp_profile.json")
+
+# Used only when no profile file can be read at all - this module is meant to
+# run for any tenant's company profile (see load_company_profile), not just
+# Klipcorp, so a missing file degrades to an honestly-generic fallback rather
+# than silently reusing Klipcorp's own disciplines for a different company.
+FALLBACK_PROFILE = {
+    "disciplines": [],
+    "bee_level": None,
     "has_cidb_grading": False,
 }
 
 
-def assess_release(release, fetch_document=True):
-    categories = categorize(release.get("title"), release.get("description"))
+def load_company_profile(path=None):
+    """Loads disciplines/bee_level/has_cidb_grading straight from the tenant's
+    own company profile JSON (the same file engine/fill_*.py read) instead of
+    a constant hardcoded for one company - so this module can score fit for
+    any company profile, not only Klipcorp's. has_cidb_grading is derived from
+    the profile's own `gaps` list when there is no explicit field, since that
+    is where this currently lives in the real data."""
+    path = path or DEFAULT_PROFILE_PATH
+    try:
+        profile = json.load(open(path))
+    except (OSError, json.JSONDecodeError) as e:
+        print(f"  WARNING: could not load company profile from {path} ({e}) - "
+              f"using an empty fallback profile (every tender will need a human look).")
+        return dict(FALLBACK_PROFILE)
+    company = profile.get("company", {})
+    gaps = " ".join(profile.get("gaps", [])).lower()
+    has_cidb = company.get("has_cidb_grading")
+    if has_cidb is None:
+        has_cidb = "no cidb grading" not in gaps if gaps else False
+    return {
+        "disciplines": company.get("disciplines", []),
+        "bee_level": company.get("bee_level"),
+        "has_cidb_grading": bool(has_cidb),
+    }
+
+
+def assess_release(release, profile, fetch_document=True, max_documents=3):
+    categories = categorize(release.get("title"), release.get("description"),
+                             release.get("procurement_category"))
+
+    if release.get("is_closed"):
+        verdict, reasons = "closed", ["Closing date already passed - kept for reference, not actionable."]
+        return {
+            "contract_number": release.get("contract_number"),
+            "buyer": release.get("buyer"),
+            "title": release.get("title"),
+            "closing_date": release.get("closing_date"),
+            "categories": categories,
+            "document_depth": "not_fetched",
+            "signals": {},
+            "confidence_note": "Document not fetched - this tender's closing date has already passed.",
+            "verdict": verdict,
+            "reasons": reasons,
+        }
+
     depth, signals, confidence = "metadata_only", {}, "No document was fetched for this assessment."
-    if fetch_document and release.get("documents"):
-        text = fetch_pdf_text(release["documents"][0]["url"])
-        depth = document_depth(text)
-        signals, confidence = extract_signals(text, depth)
-    verdict, reasons = assess_fit(categories, signals, depth, KLIPCORP_PROFILE)
+    docs = release.get("documents") or []
+    if fetch_document and docs:
+        fetch_notes = []
+        for doc in docs[:max_documents]:
+            text, err = fetch_pdf_text(doc["url"])
+            if err:
+                fetch_notes.append(f"{doc.get('title') or doc['url']}: {err}")
+                continue
+            this_depth = document_depth(text)
+            this_signals, this_confidence = extract_signals(text, this_depth)
+            # Keep the deepest result seen across this tender's documents (a
+            # buyer sometimes attaches a thin advert alongside the real RFP,
+            # or several volumes - stop as soon as one gives the full picture).
+            if this_depth == "full_document" or depth == "metadata_only":
+                depth, signals, confidence = this_depth, this_signals, this_confidence
+            if this_depth == "full_document":
+                break
+        if depth == "metadata_only" and fetch_notes:
+            depth = "no_extractable_text"
+            confidence = "Every attached document failed to download or read: " + "; ".join(fetch_notes)
+            signals, _ = extract_signals("", depth)
+
+    verdict, reasons = assess_fit(categories, signals, depth, profile)
     return {
         "contract_number": release.get("contract_number"),
         "buyer": release.get("buyer"),
@@ -203,8 +300,14 @@ def main():
                      help="max releases to fetch documents for (politeness limit on a public server)")
     ap.add_argument("--category-keyword", default=None,
                      help="only assess releases whose title/description contains this (case-insensitive)")
+    ap.add_argument("--profile", default=None,
+                     help=f"path to a company profile JSON (default: {DEFAULT_PROFILE_PATH})")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
+
+    profile = load_company_profile(args.profile)
+    print(f"Company profile: disciplines={profile['disciplines']}, "
+          f"bee_level={profile['bee_level']}, has_cidb_grading={profile['has_cidb_grading']}")
 
     report = json.load(open(args.report_path))
     releases = report["releases"]
@@ -212,13 +315,19 @@ def main():
         needle = args.category_keyword.lower()
         releases = [r for r in releases
                     if needle in (r.get("title") or "").lower() or needle in (r.get("description") or "").lower()]
-    releases = releases[:args.limit]
+    # Assess every closed release (cheap - metadata only, no document fetch)
+    # but only spend the document-fetch budget (--limit) on ones still open,
+    # so a wide date window doesn't burn the whole budget on expired tenders.
+    closed = [r for r in releases if r.get("is_closed")]
+    open_releases = [r for r in releases if not r.get("is_closed")][:args.limit]
+    releases = closed + open_releases
 
-    print(f"Assessing {len(releases)} release(s) (document fetch, {args.limit} max)...")
+    print(f"Assessing {len(releases)} release(s) ({len(open_releases)} open, document fetch "
+          f"up to {args.limit}; {len(closed)} already closed, metadata only)...")
     results = []
     for r in releases:
         try:
-            result = assess_release(r)
+            result = assess_release(r, profile)
         except Exception as e:
             result = {"contract_number": r.get("contract_number"), "error": str(e)}
         results.append(result)

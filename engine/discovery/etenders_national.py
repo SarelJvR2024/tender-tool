@@ -79,6 +79,26 @@ def fetch_page(date_from, date_to, page, retries=3, backoff=2.0):
     raise RuntimeError(f"Failed to fetch page {page} after {retries} attempts: {last_err}")
 
 
+def dedupe_releases(raw):
+    """OCDS paging has a confirmed real quirk: the same release (identical
+    release `id`) sometimes turns up twice, usually straddling a page
+    boundary. Keeps the first occurrence of each release id; a release with
+    no `id` at all (seen on a handful of older records) falls back to its
+    ocid instead of being dropped outright. Returns (deduped, dupes_removed)."""
+    seen = set()
+    out = []
+    dupes = 0
+    for r in raw:
+        key = r.get("id") or r.get("ocid")
+        if key is not None and key in seen:
+            dupes += 1
+            continue
+        if key is not None:
+            seen.add(key)
+        out.append(r)
+    return out, dupes
+
+
 def fetch_releases(date_from, date_to, max_pages=MAX_PAGES):
     """Pages through the API for one date window. Confirmed live 2026-10-16: the
     API itself breaks with HTTP 500 around page 5-6 (roughly 500-600 records in),
@@ -102,7 +122,10 @@ def fetch_releases(date_from, date_to, max_pages=MAX_PAGES):
         all_releases.extend(releases)
         if not data.get("links", {}).get("next"):
             break
-    return all_releases
+    deduped, dupes = dedupe_releases(all_releases)
+    if dupes:
+        print(f"  removed {dupes} duplicate release(s) (same release id seen twice)")
+    return deduped
 
 
 def normalize(release):
@@ -110,6 +133,8 @@ def normalize(release):
     buyer = release.get("buyer", {}) or {}
     period = tender.get("tenderPeriod", {}) or {}
     docs = tender.get("documents", []) or []
+    closing_date = period.get("endDate")
+    now = datetime.datetime.now().isoformat()
     return {
         "ocid": release.get("ocid"),
         "contract_number": tender.get("id"),
@@ -117,8 +142,11 @@ def normalize(release):
         "description": tender.get("description"),
         "buyer": buyer.get("name"),
         "procurement_category": tender.get("mainProcurementCategory"),
-        "closing_date": period.get("endDate"),
+        "closing_date": closing_date,
         "opening_date": period.get("startDate"),
+        # True only when we have a closing date and it has passed - no closing
+        # date on file is NOT treated as closed (it's unknown, not expired).
+        "is_closed": bool(closing_date and closing_date <= now),
         "documents": [{"title": d.get("title"), "url": d.get("url")} for d in docs],
         "awards": release.get("awards", []),
         "contracts": release.get("contracts", []),
@@ -149,8 +177,7 @@ def main():
         normalized = [r for r in normalized if r["buyer"] and needle in r["buyer"].lower()]
         print(f"  {len(normalized)} match buyer filter '{args.buyer}'")
 
-    open_now = [r for r in normalized
-                if r["closing_date"] and r["closing_date"] > datetime.datetime.now().isoformat()]
+    open_now = [r for r in normalized if r["closing_date"] and not r["is_closed"]]
     with_awards = [r for r in normalized if r["has_award_data"]]
 
     print(f"\nStill open (closing date in the future): {len(open_now)}")
