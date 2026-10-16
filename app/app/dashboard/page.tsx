@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { daysUntil } from "@/lib/dates";
 import { SiteNav } from "../_components/SiteNav";
 
 // This page depends on the signed-in user's session (via RLS) on every
@@ -15,12 +16,6 @@ type TenderRow = {
   closing_date: string | null;
   tender_packs: { status: string }[];
 };
-
-function daysLeft(closingDate: string | null): number | null {
-  if (!closingDate) return null;
-  const ms = new Date(closingDate).getTime() - Date.now();
-  return Math.ceil(ms / (1000 * 60 * 60 * 24));
-}
 
 function statusFor(tender: TenderRow): { label: string; bg: string; color: string } {
   const pack = tender.tender_packs?.[0];
@@ -75,7 +70,7 @@ export default async function DashboardPage() {
           )}
           {rows.map((t) => {
             const st = statusFor(t);
-            const left = daysLeft(t.closing_date);
+            const left = daysUntil(t.closing_date);
             return (
               <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.3fr 2.4fr 1fr 1.3fr", gap: 12, alignItems: "center", padding: "11px 18px", borderTop: "1px solid #F0EEE6" }}>
                 <div>

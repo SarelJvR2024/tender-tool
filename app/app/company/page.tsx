@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { expiryStatus, type StatusChip } from "@/lib/dates";
 import { updateCompanyProfile } from "./actions";
 import { SiteNav } from "../_components/SiteNav";
 
@@ -27,32 +28,6 @@ type CompanyRow = {
   bank_name: string | null;
   bank_branch_code: string | null;
 };
-
-type ExpiryStatus = {
-  label: string;
-  bg: string;
-  color: string;
-};
-
-// Shared rule, driven directly by the real incident this page exists to
-// prevent: the CLI engine flagging a COID Letter of Good Standing as
-// "expired" on every generated tender because nobody had a clear view of
-// the expiry date on file. >60 days out = current, <=60 days = renew soon,
-// past = expired, no date on file = grey/unknown (never treated as expired).
-function expiryStatus(expiry: string | null): ExpiryStatus {
-  if (!expiry) {
-    return { label: "Not on file", bg: "#F0EEE6", color: "#6B6758" };
-  }
-  const expiryDate = new Date(expiry);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const msPerDay = 1000 * 60 * 60 * 24;
-  const daysLeft = Math.ceil((expiryDate.getTime() - today.getTime()) / msPerDay);
-
-  if (daysLeft < 0) return { label: "Expired", bg: "#FEE2E2", color: "#B91C1C" };
-  if (daysLeft <= 60) return { label: "Renew soon", bg: "#FEF3C7", color: "#B45309" };
-  return { label: "Current", bg: "#DCFCE7", color: "#15803D" };
-}
 
 export default async function CompanyPage({
   searchParams,
@@ -146,7 +121,7 @@ function Field({ label, value }: { label: string; value: string | number | null 
   );
 }
 
-function Badge({ status }: { status: ExpiryStatus }) {
+function Badge({ status }: { status: StatusChip }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: status.bg, color: status.color }}>
       {status.label}
