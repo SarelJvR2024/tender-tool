@@ -67,10 +67,34 @@ def set_paragraph_text(p, text):
         p.add_run(text)
 
 
+NAME_HINT_RE = re.compile(r"\(name\)", re.IGNORECASE)
+POSITION_HINT_RE = re.compile(r"\(position\)", re.IGNORECASE)
+COMPANY_HINT_RE = re.compile(r"\(name of company\)", re.IGNORECASE)
+
+
 def fill_declaration_blanks(doc, name, position, company, log):
     """Fills the recurring 'I, the undersigned, ...' declaration openers and the
     '(name)' / '(position)' / '(name of company)' hint-label blanks that appear
-    throughout the bundle (A4, A6, A9, A11, A14, A15, A21, A22, A23)."""
+    throughout the bundle (A4, A6, A9, A11, A14, A15, A21, A22, A23).
+
+    Two different shapes, handled differently - found by Sarel reviewing the
+    generated output and confirmed by inspecting the real paragraph text:
+
+    1. 'I, the undersigned, ....................' - the dots sit directly after
+       the label with no separate hint text, so substituting the whole matched
+       span (label + dots) for 'I, the undersigned, HENNING...' actually REMOVES
+       the dots - this one is safe to fill inline, and usually shortens the line.
+    2. 'I, ....................(name), the undersigned in my capacity as
+       ....................(position), on behalf of ....................(name of
+       company), herewith grant consent...' (A14) and similar - here '(name)' etc.
+       are short hint markers sitting right against a long dotted blank that is
+       NOT part of the match. Substituting just the hint text leaves the dots
+       fully intact right next to a full-size typed name, which is far longer
+       than the blank was ever sized for and reliably wraps the sentence onto an
+       extra line. Fix: never touch that dotted sentence at all - add one short
+       line directly above it stating the real values plainly, so the sentence's
+       own layout never has to reflow.
+    """
     undersigned_re = re.compile(
         r"(I,\s*the\s*undersigned,)" + DOTS_RE + r"(\(name\))?" + DOTS_RE,
         re.IGNORECASE,
@@ -81,18 +105,29 @@ def fill_declaration_blanks(doc, name, position, company, log):
         if not text.strip():
             continue
         new_text, n = undersigned_re.subn(f"I, the undersigned, {name.upper()} ", text, count=1)
-        changed = bool(n)
-        if changed:
-            text = new_text
-        for pat, val in ((r"\(name\)", name.upper()), (r"\(position\)", position),
-                          (r"\(name of company\)", company)):
-            new_text2, n2 = re.subn(pat, val, text, flags=re.IGNORECASE)
-            if n2:
-                text = new_text2
-                changed = True
-        if changed:
-            set_paragraph_text(p, text)
+        if n:
+            set_paragraph_text(p, new_text)
             any_match = True
+            continue
+
+        found = []
+        if NAME_HINT_RE.search(text):
+            found.append(name.upper())
+        if POSITION_HINT_RE.search(text):
+            found.append(position)
+        if COMPANY_HINT_RE.search(text):
+            found.append(company)
+        if not found:
+            continue
+        summary = found[0]
+        if len(found) >= 2:
+            summary += f", {found[1]}"
+        if len(found) >= 3:
+            summary += f", on behalf of {found[2]}"
+        new_p = p.insert_paragraph_before(summary)
+        if new_p.runs:
+            new_p.runs[0].bold = True
+        any_match = True
     if any_match:
         log.confirmed("a_forms.declarations.signatory_name", name)
 

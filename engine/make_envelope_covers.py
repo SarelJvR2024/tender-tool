@@ -24,6 +24,18 @@ from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 
+def _set_margins(d):
+    """Default python-docx margins (1in top/bottom, 1.25in sides) leave too little
+    room for a cover with a letterhead, 3 heading blocks and a full address/bidder
+    block - confirmed by testing: every outer cover generated so far spills exactly
+    one line (the CIPC registration number) onto an otherwise-blank second page.
+    Tightening margins is purely a page-layout change - it touches no tender fact
+    or field, same principle as the dots-vs-text-above-dots fix below."""
+    s = d.sections[0]
+    s.top_margin = s.bottom_margin = Inches(0.75)
+    s.left_margin = s.right_margin = Inches(0.9)
+
+
 def _letterhead(d, logo_path):
     p = d.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
@@ -70,6 +82,7 @@ def make_outer(profile, logo_path, out_dir, contract_no, nra_ref, description,
                closing_date, closing_time):
     comp = profile["company"]
     d = docx.Document()
+    _set_margins(d)
     _letterhead(d, logo_path)
     _heading(d, "OUTER ENVELOPE", 18)
     d.add_paragraph()
@@ -94,6 +107,7 @@ def make_inner(profile, logo_path, out_dir, contract_no, nra_ref, description,
                closing_date, closing_time, envelope_no, envelope_name, pricing_statement):
     comp = profile["company"]
     d = docx.Document()
+    _set_margins(d)
     _letterhead(d, logo_path)
     _heading(d, f"ENVELOPE {envelope_no} - {envelope_name}", 18)
     d.add_paragraph()
