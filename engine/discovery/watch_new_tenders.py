@@ -48,7 +48,19 @@ DEFAULT_SEEN_STORE = os.path.join(os.path.dirname(__file__), "..", "..", "state"
 # "not_a_fit" (wrong discipline/no CIDB match) are scored and recorded in the
 # seen store like everything else, but never reported - reporting those would
 # train him to ignore the alerts.
-REPORT_WORTHY_VERDICTS = {"strong_fit", "possible", "needs_review"}
+#
+# "needs_review" is deliberately NOT in the default set, confirmed by running
+# this for real against the live national feed (2026-10-16, no buyer filter):
+# of 74 report-worthy releases, 72 were needs_review and only 2 were
+# strong_fit - almost all of that needs_review bulk was categorize()'s
+# "could not match a discipline, could be anything" fallback firing on
+# obviously unrelated procurement (kitchen consumables, a diamond valuator,
+# a GSM lift intercom system), not a genuine "might be relevant, worth a
+# look" case. An email with 72 irrelevant tenders in it trains the reader to
+# stop opening it. --include-needs-review opts back into the wider sweep for
+# someone doing a manual review, not for the automated daily alert.
+REPORT_WORTHY_VERDICTS = {"strong_fit", "possible"}
+REPORT_WORTHY_VERDICTS_WIDE = REPORT_WORTHY_VERDICTS | {"needs_review"}
 
 
 def load_seen(path):
@@ -76,8 +88,13 @@ def main():
     ap.add_argument("--buyer", default=None,
                      help="case-insensitive substring filter on the buyer/organ-of-state name")
     ap.add_argument("--out", default=None, help="write the full list of newly-seen, report-worthy releases to this JSON file")
+    ap.add_argument("--include-needs-review", action="store_true",
+                     help="also report needs_review verdicts, not just strong_fit/possible - noisy on the "
+                          "unfiltered national feed (confirmed: 72 of 74 on a real run were irrelevant "
+                          "categories), use for a manual sweep, not the automated daily alert")
     args = ap.parse_args()
 
+    report_worthy = REPORT_WORTHY_VERDICTS_WIDE if args.include_needs_review else REPORT_WORTHY_VERDICTS
     profile = assess_tender.load_company_profile(args.profile)
     seen = load_seen(args.seen_store)
 
@@ -107,13 +124,13 @@ def main():
             "title": r.get("title"),
             "verdict": result.get("verdict"),
         }
-        if result.get("verdict") in REPORT_WORTHY_VERDICTS:
+        if result.get("verdict") in report_worthy:
             new_releases.append({**result, "ocid": r.get("ocid"), "documents": r.get("documents")})
 
     save_seen(args.seen_store, seen)
 
     print(f"\n{len(new_releases)} new, report-worthy release(s) (never seen before, "
-          f"verdict in {sorted(REPORT_WORTHY_VERDICTS)}):")
+          f"verdict in {sorted(report_worthy)}):")
     for r in new_releases:
         docs = ", ".join(d["url"] for d in (r.get("documents") or []) if d.get("url")) or "(no document URL on file)"
         print(f"  {r.get('contract_number'):>14}  {r['verdict']:<14}  {r.get('buyer')}  -  {r.get('title')}")
