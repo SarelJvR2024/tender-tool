@@ -10,6 +10,15 @@ Last full pass: 2026-10-16 (first pass — file created this run; updated twice 
 run, once after `engine/cv/` landed mid-pass, once after Sarel's "test company" rename and
 the CV upload-as-is spec addition arrived via a cross-session message — see below).
 
+**Check-in at 16:12 UTC the same day:** scheduled routine fired, ran the full checklist again.
+`git log` on `origin/main` is unchanged since the last commit this file records (`27e418e`) —
+no other agent landed anything in between. Re-confirmed the two headline gaps are still open
+(no caller anywhere in `app/` for `engine/cv/generate_cv.py` or `engine/general/fill_sbd_docx.py`
+— re-ran the same grep, still zero hits) and re-ran `npm run typecheck` / `npm run lint`, both
+still clean. Nothing to fix, nothing new to flag — recorded here rather than silently skipping
+the check-in, so a quiet pass is visible as "checked, nothing changed" rather than looking like
+it didn't happen.
+
 ## Repo shape, in one paragraph
 
 Two independent codebases share this repo: `engine/` (Python, no shared runtime with the web
