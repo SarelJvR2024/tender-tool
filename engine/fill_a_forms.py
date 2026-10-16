@@ -234,6 +234,35 @@ def mark_sbd4_no_answers(doc, company, log):
                             break
 
 
+def fill_a10_no_deviations(doc, company, log):
+    """Found by re-checking form coverage 2026-10-16: A10's body is a block of
+    blank lines for listing any deviations or qualifications from the tender
+    conditions - the footer (Name/Position/Tenderer) already gets filled by the
+    generic fill_footer() sweep, but the schedule itself was being left
+    completely blank. A blank returnable schedule reads as an oversight, not
+    as 'none' - the same non-responsiveness risk already guarded against for
+    A3 (not a JV), A8 (no litigation) and A16 (no addenda), just missed here
+    until now."""
+    paras = doc.paragraphs
+    for i, p in enumerate(paras):
+        if p.text.strip().upper().startswith("FORM A10"):
+            # the NRA reference line sits directly under the heading; insert
+            # the statement into the first blank line below that, not the heading.
+            target = paras[i + 2] if i + 2 < len(paras) else p
+            new_p = target.insert_paragraph_before(
+                f"No deviations or qualifications from the tender conditions are recorded for "
+                f"{company} as at the date these documents were prepared."
+            )
+            new_p.runs[0].italic = True
+            log.assumed_default(
+                "a_forms.A10.deviations_or_qualifications", "None",
+                f"Nothing on file indicates {company} intends to deviate from or qualify any "
+                "tender condition - confirm this is still true immediately before signing, since "
+                "a real deviation discovered after submission can't be added back in."
+            )
+            return
+
+
 def fill_a16_no_addenda(doc, log):
     p = para_matching(doc, "We confirm that the following communications")
     if p is not None:
@@ -265,6 +294,7 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     fill_declaration_blanks(d, name, position, company, log)
     fill_a3_not_applicable(d, company, log)
     fill_a8_litigation_table(d, company, log)
+    fill_a10_no_deviations(d, company, log)
     mark_sbd4_no_answers(d, company, log)
     fill_a16_no_addenda(d, log)
 
