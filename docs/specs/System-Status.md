@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-16, 18:10 UTC check-in.
+Last full pass: 2026-10-16, 20:10 UTC check-in.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -56,7 +56,7 @@ root-level scripts), `engine/general/` (one script, `.docx`-only SBD forms), and
 | Company vault (`app/app/company/page.tsx`, migration `0014`) | Company profile plus six tracked compliance documents: COID, SARS TCS PIN, PI insurance, ISO 9001, bank confirmation letter (generated 3-month validity), and B-BBEE proof (certificate or QSE/EME affidavit). Each has an expiry badge and an upload/replace to the private `company-documents` bucket | Read-only + edit form both real; expiry coloring shared via `app/lib/dates.ts`. `0014` was replayed with functional SQL checks (generated column, check constraint, tenant-scoped update and storage prefix). The upload has never been run against a live project |
 | Onboarding (`app/app/onboarding/`) | One field (legal name) → company + owner row, atomically via `create_company_and_join` | Matches spec's "minimum to get started" principle exactly |
 | Route guard (`app/proxy.ts`) | Redirects signed-out users to `/login`, no-company users to `/onboarding` | Covers every real app route, including `/experience` (added this round) |
-| RLS policy set (`0001`–`0014`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date |
+| RLS policy set (`0001`–`0016`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 16 migrations against a fresh scratch Postgres this pass, all still apply cleanly |
 
 ## In progress / partially built
 
@@ -73,10 +73,17 @@ root-level scripts), `engine/general/` (one script, `.docx`-only SBD forms), and
 5. **`is_test_company` exists in the schema; nothing reads or sets it yet.** `engine/admin_harness.py` still reads `config/test_companies/*.json`, not a real company row from Supabase — that's a genuine rewrite needing a live Supabase project to build and verify against, not a column add. No UI sets the flag either. Both are named follow-ups, not silently dropped — full history and sourcing caveats in the pass-history section below.
 6. **No `people` storage-path column yet for the original uploaded CV file.** `cv_uploads.storage_path` actually covers this now (see Built table) — this gap from an earlier pass is **resolved**, recorded here only so the history entry below isn't mistaken for still-open.
 7. **`tender_requirements`' SETUP facts (managerial flag, tender project type, DS specialism description) are unseeded**, so the SANRAL score estimate is wider than it needs to be, and every DS1 shows role fit as "Confirm by hand" (a DS role can't be matched to a tag without its specialism). `tenders.evaluation_rules` is also unseeded until `engine/seed_tender_evaluation_rules.py --write` runs against a live project. The vault-field half of this gap (TCS PIN, insurance, ISO, bank-letter date, B-BBEE proof) is **closed** by `0014`. Two related items remain: Klipcorp's ISO 9001 certificate number and expiry are still unknown, and CSD registration validity has no column.
-9. **Uploads are capped at ~4.4 MB** (Server Action body `4.5mb`, which is Vercel's hard 413 limit). Sarel asked for more. Larger files need a direct browser-to-Storage upload via signed upload URLs, which isn't built. This affects CVs, experience and the vault alike.
-8. **No live Supabase project exists anywhere in this project.** This is the single biggest standing verification gap — every Supabase-reading/writing piece built across every pass (CV uploads, experience library, compliance report, daily digest live mode, admin harness Supabase wiring) is verified only by schema replay and/or local-mode runs, never against real rows. Named once here rather than repeated in every table row.
+8. **Uploads are capped at ~4.4 MB** (Server Action body `4.5mb`, which is Vercel's hard 413 limit). Sarel asked for more. Larger files need a direct browser-to-Storage upload via signed upload URLs, which isn't built. This affects CVs, experience and the vault alike.
+9. **No live Supabase project exists anywhere in this project.** This is the single biggest standing verification gap — every Supabase-reading/writing piece built across every pass (CV uploads, experience library, compliance report, daily digest live mode, admin harness Supabase wiring) is verified only by schema replay and/or local-mode runs, never against real rows. Named once here rather than repeated in every table row.
+10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
-## Fixed this pass (2026-10-16, 18:10 UTC)
+## Fixed this pass (2026-10-16, 20:10 UTC)
+
+- **Known-gaps numbering bug** (items 8/9 had swapped into the wrong order, and two in-doc cross-references — "Gap #9" for the upload cap, "Gap #8" for no-live-Supabase — pointed at the wrong item after the swap): corrected the order and both references.
+- **Re-verified all 16 migrations replay cleanly** against a fresh scratch Postgres (full `auth`/`storage` stub) rather than trusting the prior passes' own claims at face value — confirmed, no regression.
+- **New finding, flagged not fixed**: `company_members.tender_role` (workflow digest-visibility role) and the new `tender_roles` table (47-row SANRAL/buyer position catalog) are unrelated concepts with near-identical names, built independently by different agents the same day — see Gap #10.
+
+## Fixed in the prior pass (2026-10-16, 18:10 UTC)
 
 - **Migration `0008_cv_uploads.sql` had a real bug, flagged by three separate prior passes as "not mine to fix" and never actually fixed:** `generated_cvs_person_idx` referenced a `created_at` column that doesn't exist on `generated_cvs` (the real column is `requested_at`). Since `0008` has never been applied to any real database (no live Supabase project exists anywhere in this project), it was safe to correct in place rather than write a new patch migration. **Verified for real**: stood up a scratch local Postgres 16, stubbed `auth`/`storage` fully (including `storage.buckets`/`storage.objects`/`storage.foldername()`, which earlier passes' stubs were missing), replayed all 13 migrations (`0001`→`0013`) in order — all now apply cleanly, confirmed the corrected index definition via `pg_indexes`.
 - **Two stale doc-comment references** to `0007_cv_uploads.sql` (the file was renumbered to `0008` after a same-day migration-number collision, but two comments elsewhere never got updated): `app/app/people/actions.ts` and `engine/cv/process_cv_jobs.py`, both corrected to say `0008`.
@@ -95,7 +102,7 @@ root-level scripts), `engine/general/` (one script, `.docx`-only SBD forms), and
 - Gap #1 (general SBD engine has no web-app entry point) and Gap #2 (neither new engine has harness coverage) — product/architecture decisions, not mechanical fixes. Given the CV engine's equivalent gap just closed, the general SBD engine is now the single highest-value remaining "built but unreachable" capability.
 - Gap #5 follow-up: rewriting `admin_harness.py` to read a real company's data from Supabase instead of local JSON fixtures, and deciding where an `is_test_company` toggle should live in the admin UI. Both need a live Supabase project to build and verify against properly.
 - Gap #7 vault fields: **answered and built** (Sarel's 8/9/10, migration `0014`). Still open: Klipcorp's ISO certificate number and expiry, and whether the EME affidavit is accepted the same way as the QSE one (assumed, not confirmed).
-- Gap #9: is a direct-to-Storage upload worth building to get past ~4.4 MB?
+- Gap #8: is a direct-to-Storage upload worth building to get past ~4.4 MB?
 - Questions 3/5/6/11 (evidence rules, roles, role tagging, office locations): **answered and built** (`0015`, `0016`). New questions are at the end of `Tender-Evaluation-Engine-Audit.md` "Round 2":
   - Klipcorp's real offices;
   - which roles to tag Henning for;
@@ -233,5 +240,5 @@ This pass closes Sarel's answers 3, 5, 6 and 11 from the evaluation audit. Quote
 - Role-fit, evidence and locality logic were run against the real Klipcorp profile plus test offices.
 - `npm run typecheck` / `npm run lint` are clean.
 
-**Not verified:** nothing has run against a live Supabase project (Gap #8). No tender has stored rules yet, so the compliance report shows the labelled "Assumed rule" fallback until the seed script is run with `--write`.
+**Not verified:** nothing has run against a live Supabase project (Gap #9). No tender has stored rules yet, so the compliance report shows the labelled "Assumed rule" fallback until the seed script is run with `--write`.
 
