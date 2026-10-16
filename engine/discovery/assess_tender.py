@@ -28,6 +28,12 @@ Absence of a signal (no CIDB mention found) in a THIN document is reported as
 missing distinction as engine/provenance.py, applied to data this pipeline
 did not create and cannot fully control the quality of.
 
+Suitability vs. score: assess_fit() below answers "is this our kind of work"
+(discipline + CIDB + document depth -> a categorical verdict). It does NOT
+predict how the company would score. That separate answer is
+score_outlook.py's estimate_score_outlook(), attached to every result as
+"score_outlook" - see docs/specs/Tender-Evaluation-Engine-Audit.md.
+
 Usage:
     python3 assess_tender.py <national_report.json> [--limit N] [--category-keyword K]
 """
@@ -40,6 +46,9 @@ import tempfile
 import argparse
 import urllib.request
 import urllib.error
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from score_outlook import estimate_score_outlook  # noqa: E402
 
 STRUCTURAL_MARKERS = [
     "tender data", "returnable schedule", "conditions of tender",
@@ -60,6 +69,9 @@ DISCIPLINE_KEYWORDS = {
 }
 
 CIDB_RE = re.compile(r"CIDB\s*(?:CONTRACTOR\s*)?GRADING?\s*(?:OF\s*)?(?:AT\s*LEAST\s*)?([0-9]+\s*[A-Z]{1,3})", re.IGNORECASE)
+# Known-weak, kept only for output-shape compatibility: on SANRAL's Book 1 it
+# captures "1" from "B-BBEE Level 1", not a points value. Nothing reads it;
+# score_outlook.py's specific_goals is the real (and honest) replacement.
 BBEE_POINTS_RE = re.compile(r"B-?BBEE[^0-9]{0,60}?([0-9]{1,2})\s*(?:POINTS|PTS)?", re.IGNORECASE)
 JV_RE = re.compile(r"joint\s*venture", re.IGNORECASE)
 BRIEFING_RE = re.compile(r"compulsory\s*(?:clarification\s*)?brief", re.IGNORECASE)
@@ -206,6 +218,7 @@ DEFAULT_PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "conf
 FALLBACK_PROFILE = {
     "disciplines": [],
     "bee_level": None,
+    "black_ownership_pct": None,
     "has_cidb_grading": False,
 }
 
@@ -232,6 +245,7 @@ def load_company_profile(path=None):
     return {
         "disciplines": company.get("disciplines", []),
         "bee_level": company.get("bee_level"),
+        "black_ownership_pct": company.get("black_ownership_pct"),
         "has_cidb_grading": bool(has_cidb),
     }
 
@@ -253,9 +267,11 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
             "confidence_note": "Document not fetched - this tender's closing date has already passed.",
             "verdict": verdict,
             "reasons": reasons,
+            "score_outlook": estimate_score_outlook("", "not_fetched", profile),
         }
 
     depth, signals, confidence = "metadata_only", {}, "No document was fetched for this assessment."
+    best_text = ""
     docs = release.get("documents") or []
     if fetch_document and docs:
         fetch_notes = []
@@ -271,6 +287,7 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
             # or several volumes - stop as soon as one gives the full picture).
             if this_depth == "full_document" or depth == "metadata_only":
                 depth, signals, confidence = this_depth, this_signals, this_confidence
+                best_text = text
             if this_depth == "full_document":
                 break
         if depth == "metadata_only" and fetch_notes:
@@ -279,6 +296,10 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
             signals, _ = extract_signals("", depth)
 
     verdict, reasons = assess_fit(categories, signals, depth, profile)
+    # Suitability (verdict/reasons above) and scoring outlook are deliberately
+    # separate answers: a strong-fit tender can still be one the company would
+    # score poorly on, and vice versa. See score_outlook.py's docstring.
+    outlook = estimate_score_outlook(best_text, depth, profile, signals.get("cidb_grading"))
     return {
         "contract_number": release.get("contract_number"),
         "buyer": release.get("buyer"),
@@ -290,6 +311,7 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
         "confidence_note": confidence,
         "verdict": verdict,
         "reasons": reasons,
+        "score_outlook": outlook,
     }
 
 

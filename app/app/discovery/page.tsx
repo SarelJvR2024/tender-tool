@@ -18,6 +18,9 @@ type OpportunityRow = {
   reasons: string[] | null;
   document_urls: DocumentUrl[] | null;
   first_seen: string;
+  // engine/discovery/score_outlook.py's result (migration 0013) - null for
+  // rows assessed before it existed.
+  score_outlook: { estimable?: string; summary?: string[] } | null;
 };
 
 type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit";
@@ -71,7 +74,7 @@ export default async function DiscoveryPage({
   // this query shape works the same regardless of which company is asking.
   const { data: opportunities, error } = await supabase
     .from("discovered_opportunities")
-    .select("id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen")
+    .select("id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook")
     .order("first_seen", { ascending: false });
 
   const rows = (opportunities ?? []) as unknown as OpportunityRow[];
@@ -235,6 +238,21 @@ export default async function DiscoveryPage({
                         </li>
                       ))}
                     </ul>
+                  )}
+
+                  {/* Fit (above) answers "is this our kind of work"; this answers
+                      "how would we be scored" - kept visibly separate on purpose. */}
+                  {(o.score_outlook?.summary ?? []).length > 0 && (
+                    <div style={{ marginTop: 8, padding: "8px 12px", background: "#F6F5F1", border: "1px solid #E5E1D5", borderRadius: 9 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: "#16233B", marginBottom: 3 }}>How it&apos;s scored</div>
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#4B5563" }}>
+                        {(o.score_outlook?.summary ?? []).map((line, i) => (
+                          <li key={i} style={{ marginBottom: 2 }}>
+                            {line}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
                   )}
                 </div>
 

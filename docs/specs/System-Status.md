@@ -148,6 +148,52 @@ Built because Sarel asked for it: capture company experience evidence (letters o
   - Do ACSA or SASSA ask for experience differently? Only one non-SANRAL sample had an experience requirement.
   - Is the 4 MB upload cap enough for multi-page close-out reports?
 
+## Check-in: tender evaluation audit, score estimate, per-tender compliance check (2026-10-16)
+
+Sarel asked for two things. First, an assessment of each opportunity that shows how well suited it is ("in terms of the service") and how the company would score on it. Second, once a tender is being pursued, a compliance check of which documents, CVs and experience the company has and doesn't have. Full evidence and limits: `docs/specs/Tender-Evaluation-Engine-Audit.md`.
+
+**Audit finding: `assess_tender.py` answers suitability only, not score.** Its verdict is categorical: discipline keywords, CIDB present or absent, and document depth. It never estimates points:
+
+- `bee_level` is loaded and never used.
+- The `possible` verdict is unreachable. No path leaves it in place, and the 25-release live run produced none.
+- `bbee_points_mentioned` returns noise (it captures "1" from "Level 1"). It is unused and is now commented as such.
+
+**Built:**
+
+- `engine/discovery/score_outlook.py`, wired into `assess_release()` as a separate `score_outlook` key. The verdict logic is unchanged. It reads the tender's own document for:
+  - the preference system (80/20, 90/10 or ambiguous);
+  - the specific-goals basis (B-BBEE table, ownership or locality);
+  - the functionality threshold and whether SANRAL's method applies.
+
+  It returns points only where the profile genuinely answers: a full SANRAL B-BBEE level table, or a "100% black ownership" row as a floor. Price is never estimated: it is scored against the lowest bid.
+- Migration **`0013_discovery_score_outlook.sql`** adds `discovered_opportunities.score_outlook jsonb`, nullable. `seed_supabase_opportunities.py` writes it, and `/discovery` shows a "How it's scored" box under each card's fit reasons. **The seed script now needs 0013 applied before it runs.**
+- `app/lib/sanralScoring.ts` implements SANRAL's published consultant functionality method (Book 1 Annexure A matrices transcribed: project type, period, position held, client). Workplan (30), quality system and unknown inputs are always ranges.
+- `app/lib/tenderCompliance.ts` and `app/app/tenders/[id]/compliance-report.tsx` mount one component on the Tender Workspace, with no new page:
+  - **Required documents** in three groups: Don't have, Confirm by hand, On file. The list is SANRAL's T2.1 returnables plus the Stage 2 mandatory criteria, checked against the `companies` vault (COID expiry against the closing date), `field_provenance`, `financial_captures` (C2.4) and the briefing task.
+  - **Key people & CVs**: the C3.1.11 minimums (ECSA Pr Eng/Pr Tech Eng and years), `cv_uploads`, `generated_cvs`, and project count.
+  - **Company experience**, wired to the **Experience Library**, which landed mid-pass in `f5a7023`. It is used through its own `findMatchingExperience()`, with no shape guessed.
+  - **Functionality score estimate** with range bars against the 70 threshold.
+
+  Only the SANRAL "Conventional Consultant Tender" family is mapped. Other families get an explicit "not mapped yet" message.
+
+**Verified for real:**
+
+- **Outlook on real text.** `score_outlook` was run on 11 real texts and a 25-release live OCDS run with documents fetched. Live results: preference stated on 11, functionality thresholds found on 2 (70 and 80), and 1 specific-goals floor (DPWI). Two false positives were found and fixed: a definitions-clause "functionality", and B-BBEE proof boilerplate read as a points table.
+- **SANRAL estimate on real data.** Run against Henning's real projects and R.396's real SETUP facts: technical 24.5/30, management 13.5/15, total 44-93. Hand-checked against the matrices. As the page sees it today (no SETUP facts stored), the total is 38.5-96.8.
+- **Compliance on real data.** The checks were run against the real Klipcorp vault values and the real `out/R.396-010-2025.1F/field_provenance.json`, plus edge cases (Pr Techni fails, under 10 years fails, expired COID shows red).
+- **Migration chain.** `0001`-`0013` replayed on scratch Postgres 16. `0013` applied clean. `0008`'s pre-existing `created_at` index bug is still there and not touched.
+- `npm run typecheck` and `npm run lint` are clean.
+
+**Known gaps, named:**
+
+- No live Supabase project, so the workspace sections have never rendered against real rows.
+- `tender_requirements` is seeded by nothing, so the SETUP facts (managerial flag, tender project type) are unknown to the page and the SANRAL estimate is wider than it needs to be.
+- The vault has no fields for the SARS TCS PIN, insurance, ISO certificate, bank-letter date or B-BBEE proof expiry. Those rows show "Confirm by hand", never "Don't have".
+- Specific goals outside SANRAL (women, youth, disability ownership and locality) can't be estimated, because the profile doesn't capture them.
+- Years since first degree is a labelled proxy for SANRAL's "relevant experience".
+
+Open questions for Sarel are listed at the end of the audit doc.
+
 ## Repo shape, in one paragraph
 
 Two independent codebases share this repo: `engine/` (Python, no shared runtime with the web

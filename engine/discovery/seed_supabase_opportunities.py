@@ -110,6 +110,9 @@ def main():
             "reasons": r.get("reasons") or [],
             "ocid": r.get("ocid"),
             "document_urls": [{"url": d.get("url"), "title": d.get("title")} for d in documents if d.get("url")],
+            # assess_release()'s scoring outlook (score_outlook.py) - null for
+            # JSON written before that existed, never a fabricated default.
+            "score_outlook": r.get("score_outlook"),
         }
 
     if with_ocid:

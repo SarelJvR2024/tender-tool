@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { ReviewButton } from "./review-button";
 import { TaskStatusButton } from "./task-status-button";
 import { TaskAssigneeSelect, type AssignablePerson } from "./task-assignee-select";
+import { ComplianceReport } from "./compliance-report";
 import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 
@@ -355,6 +356,9 @@ export default async function TenderWorkspacePage({
                 )}
               </>
             )}
+
+            {/* Document/CV compliance + functionality score estimate for pursuing this tender. */}
+            <ComplianceReport tenderId={id} />
 
             <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
 
