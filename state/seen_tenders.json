@@ -1,0 +1,602 @@
+{
+  "ocds-9t57fa-174000": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174000",
+    "title": "TN051/2026",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174028": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174028",
+    "title": "PWR 39/26",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174041": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174041",
+    "title": "DRT 09/09/2026",
+    "verdict": "strong_fit"
+  },
+  "ocds-9t57fa-174175": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174175",
+    "title": "SASSA17-26-GA-KZN",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174193": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174193",
+    "title": "SCMU5-26/27-0007SB",
+    "verdict": "strong_fit"
+  },
+  "ocds-9t57fa-174204": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174204",
+    "title": "COGTA 01/01/2026",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174349": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174349",
+    "title": "RFQ OVF-2026-HAR-01-84 A P",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174350": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174350",
+    "title": "RFQ OVF-2026-HAR-1 BR  ADV",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174351": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174351",
+    "title": "RFQ OVF-2026-HAR-1-00 MAC  WOR",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174352": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174352",
+    "title": "RFQ OVF-2026-HAR-1-01 VEHICLE",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174359": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174359",
+    "title": "WTE1062CE",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174360": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174360",
+    "title": "TPT/2026/06/0650/7337/RFP",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174361": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174361",
+    "title": "SCMU 03 - 2026 2027 RE-ADVERTISED",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174364": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174364",
+    "title": "5/2/2/1 (008) 2026-2027",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174366": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174366",
+    "title": "NWNW381/CORPS23-08/2026/2027",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174369": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174369",
+    "title": "E3689GXMPLET",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174370": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174370",
+    "title": "AW2026/27/04",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174372": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174372",
+    "title": "Q 2026/034",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174373": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174373",
+    "title": "Q 2026/060",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174375": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174375",
+    "title": "Q 2026/061",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174377": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174377",
+    "title": "Q 2026/063",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174381": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174381",
+    "title": "E3693DXLIMOU",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174382": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174382",
+    "title": "RFX6000003683",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174385": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174385",
+    "title": "KIMPF52/2026",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174388": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174388",
+    "title": "KIMPF53/2026",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174389": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174389",
+    "title": "JHB 26/08",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174390": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174390",
+    "title": "NOTICE 11 OF 2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174391": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174391",
+    "title": "RFQ 26 OF 2026 ",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174392": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174392",
+    "title": "RFQ 178-2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174394": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174394",
+    "title": "RFQ 11/10/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174395": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174395",
+    "title": "WTE1063CE",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174396": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174396",
+    "title": "RFQ 13092",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174399": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174399",
+    "title": "KZN ULM 15/26/27",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174400": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174400",
+    "title": "RFQJW54SN26",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174408": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174408",
+    "title": "MISA/PRPH/ELM/NC/024/2026/27",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174409": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174409",
+    "title": "RFQ 012893",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174412": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174412",
+    "title": "PO02/26/27",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174414": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174414",
+    "title": "OPSC 001/26",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174415": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174415",
+    "title": "TNPA/2026/08/0002/114674/RFQ",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174418": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174418",
+    "title": "FOSPHB-RFP-23-26/27",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174419": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174419",
+    "title": " SCMU10-26/27-0017 A-F",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174421": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174421",
+    "title": "E3690GXMPLET",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174422": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174422",
+    "title": "RFQ/SAEON/FYNBOS/BOTANICAL RESURVEY/178/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174423": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174423",
+    "title": "TASEZ/RFQ070/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174427": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174427",
+    "title": "RFQ NUMBER 10375061",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174431": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174431",
+    "title": "CATHS/AS/05/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174432": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174432",
+    "title": "ECR/RAIL/TO/02/10/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174433": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174433",
+    "title": "NECSA-2026-0002",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174434": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174434",
+    "title": "CATHS/RPL/03/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174435": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174435",
+    "title": "KZN/PRASA/2026/10/04/Q",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174438": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174438",
+    "title": "CATHS/QAS/02/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174439": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174439",
+    "title": "Q12-2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174441": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174441",
+    "title": "KUR/02 26/27",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174442": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174442",
+    "title": "FQ-73/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174443": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174443",
+    "title": "5/2/2/2 - DLRRD NC 001 (2026/2027)",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174444": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174444",
+    "title": "SSA/17/2026-27",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174445": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174445",
+    "title": "RFQ 4646b26",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174446": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174446",
+    "title": "5/2/2/2 - DLRRD NC 002 (2026/2027)",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174447": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174447",
+    "title": "INF012609RFQ16",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174448": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174448",
+    "title": "5/2/2/2 - DLRRD NC 003 (2026/2027)",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174450": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174450",
+    "title": "5/2/2/2 - DLRRD NC 004 (2026/2027)",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174451": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174451",
+    "title": "Rec 5447(a)",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174452": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174452",
+    "title": "TNPA/2026/08/0002/114684/RFP",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174454": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174454",
+    "title": "IHLM/59/2026-27/ADMIN",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174455": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174455",
+    "title": "E3682GXPOU",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174456": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174456",
+    "title": "IHLM/58/2026-27/ADMIN",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174457": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174457",
+    "title": "WTE1059CE",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174458": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174458",
+    "title": "TPT/2026/10/1393/13028/RFP",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174460": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174460",
+    "title": "        RFQ/SASSETA/2627112",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174461": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174461",
+    "title": "E3683GXMPHEN",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174466": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174466",
+    "title": "CGS-2026-046NM",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174467": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174467",
+    "title": "IO20",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174469": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174469",
+    "title": "RFQ/SASSETA/2627118 ",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174471": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174471",
+    "title": "RFQ/LAB/SINGLESTAGE/2026/10",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174473": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174473",
+    "title": "RFX 60000003737",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174474": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174474",
+    "title": "T2027-09",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174475": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174475",
+    "title": "Iziko-RFQ-CEO-COURIER SERVICE-OCTOBER 2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174476": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174476",
+    "title": "RFQ GSM081/2026 ",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174477": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174477",
+    "title": "SCMU3-2627-0038-AN",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174478": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174478",
+    "title": "Q/NC062/06/2026-2027",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174479": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174479",
+    "title": "RFQ AB 25/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174480": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174480",
+    "title": "REQ06108",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174481": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174481",
+    "title": "SCMU5-26/27-010 JGR",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174482": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174482",
+    "title": "RFQ AB 29/2026",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174483": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174483",
+    "title": "RFQ2026/32",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174484": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174484",
+    "title": "  ISP/10/2026",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174485": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174485",
+    "title": "QCTO 15/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174486": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174486",
+    "title": "RFQ 9-2027",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174488": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174488",
+    "title": "E3290GXMPHENR",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174489": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174489",
+    "title": "SAT 352/26",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174490": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174490",
+    "title": "KZNGFA RFQ 2026 - 14",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174491": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174491",
+    "title": "RFQ 202109",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174493": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174493",
+    "title": "viability assessments ",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174494": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174494",
+    "title": "RFQ168 2026/27",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174496": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174496",
+    "title": "WRC-RFI-001-2026/27",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174497": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174497",
+    "title": "02/2026 and 08/2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174498": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174498",
+    "title": "viability assessments - Dairy",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174500": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174500",
+    "title": "RFQJW146TN26",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174501": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174501",
+    "title": "RFP/SASSETA/26271100",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174502": {
+    "first_seen": "2026-10-16",
+    "contract_number": "174502",
+    "title": "E3695DXGOU",
+    "verdict": "needs_review"
+  }
+}
