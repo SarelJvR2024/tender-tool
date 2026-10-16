@@ -154,7 +154,7 @@ export default async function ExperiencePage({
             </div>
           </div>
           <div style={{ marginTop: 12 }}>
-            <label style={label}>Document (PDF, Word or scan - up to 4 MB)</label>
+            <label style={label}>Document (PDF, Word or scan - up to 4.4 MB)</label>
             <input style={{ ...field, paddingTop: 10 }} type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
           </div>
           <button

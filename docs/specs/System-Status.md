@@ -18,6 +18,63 @@ narrative "Check-in: ..." sections directly after the header, which is exactly t
 append-only-log drift this file's own original purpose warns against — restructured this pass
 to separate the two, nothing deleted, all moved into the history section below.
 
+## Check-in: Document Vault compliance fields, B-BBEE affidavit, upload cap (2026-10-16)
+
+This pass closes Sarel's answers 4, 8, 9 and 10 from the evaluation audit and experience-library questions. They are quoted in `Tender-Evaluation-Engine-Audit.md`, under "Answers received".
+
+**Built:**
+
+- **Migration `0014_vault_compliance_documents.sql`.** It follows the COID pattern: plain columns on `companies`, covered by the existing `is_company_member(id)` policies, with no new table policy. It adds:
+  - `sars_tcs_pin` and its expiry;
+  - `pi_insurance_insurer`, policy number, cover in rand, and expiry;
+  - `iso_9001_certified` (nullable: null means "not stated", not "no"), certificate number and expiry;
+  - `bank_confirmation_letter_date`, plus a **generated** `bank_confirmation_letter_valid_until` (date + 3 months, which is the FNB stamp validity and the common buyer rule);
+  - `bee_proof_type` (`certificate` / `qse_affidavit` / `eme_affidavit`) and `bee_proof_expiry`. `bee_level` already existed and is reused.
+  - a `*_path` column per document (COID included), plus a private `company-documents` bucket with the same path-prefix storage RLS as `cv-documents` and `experience-documents`.
+- **Document Vault (`/company`).** Each of the six documents has a row with its facts, the same expiry `Badge` the COID row had, a signed link to the uploaded copy, and an Upload/Replace form (`uploadVaultDocument`, `app/lib/vaultDocuments.ts`). The edit form captures every new field. The bank letter badge uses a 30-day "renew soon" window instead of 60, because the letter is only valid for 3 months.
+- **Compliance check (`tenderCompliance.ts`, `compliance-report.tsx`).** A9, A12, A17, A18 and B4 now get real On file / Don't have status from the vault against the closing date, with a "Renew soon" chip when the document is valid at closing but renewal is due within 60 days (30 for the bank letter). "Confirm by hand" now only means a detail is missing, such as no expiry date or no proof type recorded.
+  - **B-BBEE:** a QSE or EME sworn affidavit valid at closing is "On file" and described as equivalent evidence. It is never treated as a missing certificate.
+  - **B4:** a valid ISO certificate fixes the score estimate's quality system at 10. The specific-goals note now reads the B-BBEE proof's validity.
+- **`watch_deadlines.py`.** `TRACKED_EXPIRY_FIELDS` now holds six columns, no longer only COID, with a per-field lead-time override (the bank letter uses 30 days). CSD validity is still untracked: it has no column.
+- **Seeding.** `seed_supabase_company.py` maps the new fields from `config/klipcorp_profile.json`, the same source the COID data comes from. The local, gitignored profile now records ISO certified = true (number and expiry unknown), the bank letter date 2026-09-09, and the QSE affidavit expiring 2027-09-09.
+- **Upload cap.** `next.config.ts` goes from `4mb` to **`4.5mb`**. That is Vercel Functions' hard request-body limit (413 `FUNCTION_PAYLOAD_TOO_LARGE`, confirmed on Vercel's limits page today), so the 15-20 MB that was asked for can't work through a Server Action on Vercel. The vault rejects files over 4.4 MB with a clear message, leaving room for multipart overhead.
+
+**Verified:**
+
+- `npm run typecheck` and `npm run lint` are clean. `next build` compiles, then fails at `/login` prerender for the same pre-existing reason as before (no Supabase credentials).
+- Replayed `0001` to `0014` on a scratch Postgres 16 with the same `auth`/`storage` stubs. Everything applies except the pre-existing `0008` `created_at` bug, which is still untouched. On the replayed database:
+  - the generated column gives 2026-09-09 → 2026-12-09 and rejects direct writes;
+  - the `bee_proof_type` check constraint rejects junk;
+  - under `set role authenticated`, a member updates only their own company and cannot write a storage object under another company's prefix.
+- The seed script's new payload, built from the real profile values, inserts cleanly into the migrated `companies` table.
+- **Compliance lib on Klipcorp's real values** (R.396 closing 2026-10-22):
+
+  | Row | Result |
+  | --- | --- |
+  | A9 TCS PIN | On file (to 2027-06-24) |
+  | A12 B-BBEE | On file: QSE affidavit, accepted as equivalent |
+  | A17 PI insurance | On file (to 2027-03-31) |
+  | A18 bank letter | On file (letter usable to 2026-12-09) |
+  | B4 ISO 9001 | Confirm by hand: certified, but no expiry on file |
+
+  Edge cases also checked:
+  - an affidavit lapsing before closing → Don't have, 0 preference points;
+  - proof type unrecorded → Confirm by hand;
+  - closing after the bank letter's 3 months → Don't have;
+  - insurance expiring soon after closing → On file + Renew soon;
+  - ISO = no → Don't have;
+  - empty vault → four Don't have rows.
+- **`watch_deadlines.py`'s own `find_due_documents()`,** with `supabase_request` served from the replayed database. On today's date, Klipcorp's real dates report nothing, which is correct: the bank letter has 54 days left against its 30-day window. A test company with near and past dates reports the PIN (20 days), insurance (expired 3 days ago), ISO (59 days) and bank letter (22 days), and omits B-BBEE at 61 days. A second run reports 0 new items (seen store). At a simulated 2027-03-01, Klipcorp reports COID at 60 days, PI at 30, and the bank letter expired.
+
+**Open / not done:**
+
+- **Never rendered against a live Supabase project.** This environment doesn't have one, which is true of every app page.
+- **Klipcorp's ISO 9001 certificate number and expiry are unknown.** No document in this repo shows them. The real NRA 2026/0084 Form B4 was an **in-house QMS** write-up, which scores 5, not ISO's 10. Sarel should upload the certificate through the vault and make sure it goes into future packs.
+- **Uploads above ~4.4 MB need a direct browser-to-Storage upload** (`createSignedUploadUrl`). That covers CVs, experience and vault documents alike, and it isn't built.
+- **Real files have not been uploaded.** The PIN letter, AON schedule, bank letter and affidavit exist in `templates/incoming/completed_sample`. They go in through the vault UI once a live project exists.
+- **CSD registration validity** still has no column.
+- **The EME affidavit is assumed accepted.** Sarel confirmed the QSE affidavit; the EME affidavit is the same DTIC sworn-affidavit regime and is treated the same way, but he didn't explicitly confirm it for SANRAL.
+
 ## Repo shape, in one paragraph
 
 Two independent codebases share this repo: `engine/` (Python, no shared runtime with the web

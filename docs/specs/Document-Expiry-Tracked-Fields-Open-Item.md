@@ -36,3 +36,18 @@ type can exist over time - same shape question already open for CV uploads,
 see `System-Status.md`) to capture them? Once that's answered and a
 migration adds the real column(s), adding them to `TRACKED_EXPIRY_FIELDS` is
 a one-line change, not a rewrite.
+
+## Resolved (2026-10-16)
+
+Sarel answered "10. Yes." to the audit's vault-fields question. Migration
+`0014_vault_compliance_documents.sql` added real expiry columns, and
+`TRACKED_EXPIRY_FIELDS` now holds six entries:
+
+- `coid_letter_of_good_standing_expiry`
+- `sars_tcs_pin_expiry`
+- `pi_insurance_expiry`
+- `iso_9001_expiry`
+- `bank_confirmation_letter_valid_until` (generated: letter date + 3 months, 30-day lead time)
+- `bee_proof_expiry` (certificate or QSE/EME sworn affidavit)
+
+**Still not tracked:** CSD registration validity. It has no column, and Sarel's answer didn't cover it.

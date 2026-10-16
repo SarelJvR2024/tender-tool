@@ -37,18 +37,23 @@ mechanism as document-expiry reminders, not a second one):
    "showing amber on the vault page" mean the same threshold) or already
    expired.
 
-   TRACKED_EXPIRY_FIELDS below is the one column confirmed by actually
-   reading the schema (app/supabase/migrations/0001_init_schema.sql):
-   companies.coid_letter_of_good_standing_expiry. The spec text that asked
-   for this script says "COID, B-BBEE, insurance, CSD etc." but the schema
-   only has a real expiry *date* column for COID today - B-BBEE/insurance/CSD
-   have no expiry column anywhere in companies or any other table as of
-   migration 0009. Rather than guess at column names that don't exist, this
-   is flagged as an open item in
-   docs/specs/Document-Expiry-Tracked-Fields-Open-Item.md and
-   TRACKED_EXPIRY_FIELDS is written as a short, explicit list specifically so
-   adding a real column later (e.g. `bee_certificate_expiry`) is a one-line
-   addition here, not a rewrite.
+   TRACKED_EXPIRY_FIELDS below lists only columns that really exist on
+   `companies`: COID (0001_init_schema.sql) plus the five added by
+   0014_vault_compliance_documents.sql after Sarel confirmed them
+   ("10. Yes.", 2026-10-16) - SARS TCS PIN, professional indemnity
+   insurance, ISO 9001 certificate, bank confirmation letter and B-BBEE
+   proof (certificate or QSE/EME sworn affidavit). That closes the
+   COID-only limitation recorded in
+   docs/specs/Document-Expiry-Tracked-Fields-Open-Item.md. CSD registration
+   still has no expiry column (not part of Sarel's answer), so it is still
+   not tracked.
+
+   The bank letter has an issue date, not an expiry; the tracked column is
+   the generated bank_confirmation_letter_valid_until (letter date + 3
+   months), with its own 30-day lead time - a 60-day window on a 3-month
+   letter would fire a month after it was issued. Matches
+   app/lib/vaultDocuments.ts BANK_LETTER_RENEW_SOON_DAYS, so the vault badge
+   and the reminder agree.
 
 2. Tender task due dates (tender_tasks, migration 0009_tender_tasks.sql -
    app/app/tenders/[id]/page.tsx's task/deadline timeline). Reports any
@@ -87,11 +92,16 @@ import urllib.error
 
 DEFAULT_SEEN_STORE = os.path.join(os.path.dirname(__file__), "..", "..", "state", "seen_deadlines.json")
 
-# See module docstring part 1 - only a column actually confirmed present on
-# `companies` by reading app/supabase/migrations/0001_init_schema.sql goes
-# here. (field_column, human_label).
+# See module docstring part 1 - only columns that really exist on `companies`
+# (0001 + 0014) go here. (field_column, human_label, lead_days_override);
+# None = use --doc-lead-days.
 TRACKED_EXPIRY_FIELDS = [
-    ("coid_letter_of_good_standing_expiry", "COID Letter of Good Standing"),
+    ("coid_letter_of_good_standing_expiry", "COID Letter of Good Standing", None),
+    ("sars_tcs_pin_expiry", "SARS Tax Compliance Status PIN", None),
+    ("pi_insurance_expiry", "Professional indemnity insurance", None),
+    ("iso_9001_expiry", "ISO 9001 certificate", None),
+    ("bank_confirmation_letter_valid_until", "Bank confirmation letter (3-month validity)", 30),
+    ("bee_proof_expiry", "B-BBEE proof (certificate or sworn affidavit)", None),
 ]
 
 DEFAULT_DOC_LEAD_DAYS = 60  # matches app/lib/dates.ts's renewSoonWithinDays default
@@ -136,17 +146,17 @@ def days_until(date_str, today):
 
 
 def find_due_documents(url, key, seen, today, lead_days):
-    select_cols = "id,legal_name," + ",".join(col for col, _ in TRACKED_EXPIRY_FIELDS)
+    select_cols = "id,legal_name," + ",".join(col for col, _, _ in TRACKED_EXPIRY_FIELDS)
     companies = supabase_request(url, key, f"companies?select={select_cols}")
 
     due = []
     for company in companies:
-        for col, label in TRACKED_EXPIRY_FIELDS:
+        for col, label, lead_override in TRACKED_EXPIRY_FIELDS:
             expiry = company.get(col)
             if not expiry:
                 continue
             left = days_until(expiry, today)
-            if left is None or left > lead_days:
+            if left is None or left > (lead_override if lead_override is not None else lead_days):
                 continue  # not expired and outside the reminder window
 
             seen_key = f"doc::{company['id']}::{col}::{expiry}"

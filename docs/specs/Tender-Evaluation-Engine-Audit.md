@@ -179,3 +179,12 @@ The concurrent Experience Library work **landed on `main` during this pass** (`f
 5. **B-BBEE proof:** SANRAL's specific-goals note asks for a "valid B-BBEE verification certificate". Klipcorp holds a QSE sworn affidavit. Has SANRAL accepted the affidavit on past submissions?
 6. **Vault fields:** the compliance check can't see the SARS TCS PIN, insurance, ISO certificate, bank-letter date or B-BBEE proof expiry, because the schema has no fields for them (several are already in the profile JSON). Add them? This overlaps `Document-Expiry-Tracked-Fields-Open-Item.md`.
 7. **Ownership facts for specific goals:** buyers outside SANRAL score women, youth and disability ownership and locality. Should the company profile capture those (percentage owned by black women, youth, people with disability, and office municipalities) so the outlook can estimate them?
+
+## Answers received (2026-10-16) and what changed
+
+Sarel's answers, verbatim. His numbering follows the combined question list, not the 1-7 above.
+
+- **"4. Might be enough, but would rather increase it to a bit."** This is the upload cap (Experience Library question 4). `bodySizeLimit` went from `4mb` to `4.5mb`, which is Vercel's hard request-body cap. A higher value can't work through a Server Action on Vercel. See `next.config.ts` and System-Status.
+- **"8. They have iso 9001."** This answers question 4 above. `companies.iso_9001_certified` / `_certificate_number` / `_expiry` / `_document_path` were added. When the certificate is valid at closing, the score estimate's quality system is fixed at 10 instead of the 0-10 range. Note: Klipcorp's real NRA 2026/0084 submission put an **in-house QMS** write-up in Form B4, not an ISO certificate. That scores 5, not 10, so the certificate should go into future packs.
+- **"9. Yes it is a standard acceptable template."** This answers question 5 above. `companies.bee_proof_type` (`certificate` / `qse_affidavit` / `eme_affidavit`) and `bee_proof_expiry` were added. Any proof type valid on the closing date gives "On file". An affidavit is described as equivalent evidence, never as a missing certificate.
+- **"10. Yes."** This answers question 6 above. Migration `0014` added the SARS TCS PIN, PI insurance, ISO 9001, bank-letter date and B-BBEE proof fields, with uploads to a private `company-documents` bucket. The compliance check's A9 / A12 / A17 / A18 / B4 rows are now real On file / Don't have checks, with a "Renew soon" chip. "Confirm by hand" now only means a detail is missing (for example, an expiry date).

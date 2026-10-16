@@ -12,11 +12,14 @@
 // docs/specs/General-Tender-Engine-Findings.md - each buyer's returnable list
 // differs), so this module only claims to cover that one family.
 //
-// The vault is the `companies` row (0001) - there is no per-document upload
-// table, so "has the document" means "the identifying number/date is on
-// file". Where the schema has no field at all for a required document
-// (SARS TCS PIN, insurance, ISO certificate...), the status is "check", never
-// "have" - absence of a field is not evidence the company lacks the document.
+// The vault is the `companies` row (0001, extended by 0014): "has the
+// document" means "the identifying number/date is on file and valid on the
+// closing date". 0014 added real fields for the SARS TCS PIN, PI insurance,
+// ISO 9001, the bank-letter date and the B-BBEE proof type/expiry (Sarel's
+// answer 10, 2026-10-16), so those are now real have/missing checks rather
+// than "Confirm by hand". An uploaded copy (the *_path columns) is reported
+// in the detail text but doesn't change the status - same as COID, whose
+// status has always come from the number + expiry on file.
 
 import { daysUntil } from "./dates";
 
@@ -29,6 +32,9 @@ export type ComplianceItem = {
   status: ComplianceStatus;
   mandatory: boolean; // Stage 2 "Mandatory Administration Criteria" - failing it disqualifies
   detail: string;
+  // Valid on the closing date, but renewal falls within RENEW_SOON_DAYS of
+  // today - shown as an amber "Renew soon" chip next to an "On file" row.
+  expiring?: boolean;
 };
 
 export type CompanyVault = {
@@ -41,7 +47,84 @@ export type CompanyVault = {
   status: string | null; // e.g. "QSE"
   bank_name: string | null;
   director_name: string | null;
+  // 0014_vault_compliance_documents.sql
+  coid_letter_document_path: string | null;
+  sars_tcs_pin: string | null;
+  sars_tcs_pin_expiry: string | null;
+  sars_tcs_pin_document_path: string | null;
+  pi_insurance_insurer: string | null;
+  pi_insurance_policy_number: string | null;
+  pi_insurance_expiry: string | null;
+  pi_insurance_document_path: string | null;
+  iso_9001_certified: boolean | null;
+  iso_9001_certificate_number: string | null;
+  iso_9001_expiry: string | null;
+  iso_9001_document_path: string | null;
+  bank_confirmation_letter_date: string | null;
+  bank_confirmation_letter_valid_until: string | null; // generated: letter date + 3 months
+  bank_confirmation_letter_path: string | null;
+  bee_proof_type: "certificate" | "qse_affidavit" | "eme_affidavit" | null;
+  bee_proof_expiry: string | null;
+  bee_proof_document_path: string | null;
 };
+
+/** Column list for a supabase select() of CompanyVault. */
+export const COMPANY_VAULT_COLUMNS =
+  "id, legal_name, csd_supplier_number, income_tax_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, status, bank_name, director_name, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path";
+
+const RENEW_SOON_DAYS = 60; // same threshold as app/lib/dates.ts expiryStatus()
+
+const fmt = (d: string) => new Date(d).toLocaleDateString();
+
+/**
+ * Validity of a dated document on this tender's closing date. "missing" when
+ * it lapses before closing (or has already lapsed, when there's no closing
+ * date); "have" otherwise, with `expiring` set when it needs renewing soon.
+ */
+export function validityAtClosing(
+  expiry: string,
+  closingDate: string | null,
+  renewSoonDays = RENEW_SOON_DAYS,
+): { status: "have" | "missing"; expiring: boolean; text: string } {
+  const expLeft = daysUntil(expiry) as number;
+  const closingLeft = daysUntil(closingDate);
+  if (expLeft < 0) return { status: "missing", expiring: false, text: `expired ${fmt(expiry)}` };
+  if (closingLeft !== null && expLeft < closingLeft) {
+    return { status: "missing", expiring: false, text: `expires ${fmt(expiry)}, before this tender closes - renew it first` };
+  }
+  const expiring = expLeft <= renewSoonDays;
+  return {
+    status: "have",
+    expiring,
+    text: `valid until ${fmt(expiry)}${closingLeft !== null ? " - covers the closing date" : ""}${expiring ? " (renew soon)" : ""}`,
+  };
+}
+
+const copyNote = (path: string | null) => (path ? " Copy uploaded to the vault." : " No copy uploaded to the vault yet.");
+
+export const BEE_PROOF_LABEL: Record<string, string> = {
+  certificate: "B-BBEE verification certificate",
+  qse_affidavit: "QSE sworn affidavit",
+  eme_affidavit: "EME sworn affidavit",
+};
+
+/**
+ * Is there valid B-BBEE proof for this level on the closing date? A QSE (or
+ * EME) sworn affidavit is the standard DTIC template and counts as equivalent
+ * evidence to a verification certificate - Sarel, 2026-10-16: "Yes it is a
+ * standard acceptable template." So proof type never makes this fail; only a
+ * missing level, an unrecorded proof type, or an expiry before closing does.
+ */
+export function beeProofValidAtClosing(c: CompanyVault | null, closingDate: string | null): boolean {
+  if (!c?.bee_level || !c.bee_proof_type || !c.bee_proof_expiry) return false;
+  return validityAtClosing(c.bee_proof_expiry, closingDate).status === "have";
+}
+
+/** SANRAL Form B4 quality-system input for sanralScoring.ts, from the vault. */
+export function qualitySystemFromVault(c: CompanyVault | null, closingDate: string | null): "iso" | null {
+  if (!c?.iso_9001_certified || !c.iso_9001_expiry) return null; // not stated / no expiry -> leave as a range
+  return validityAtClosing(c.iso_9001_expiry, closingDate).status === "have" ? "iso" : null;
+}
 
 export type ProvenanceLite = { field_key: string; status: string };
 
@@ -118,7 +201,7 @@ export function sanralConventionalDocumentChecks(input: {
       detail = `Expired ${new Date(exp).toLocaleDateString()}.`;
     } else {
       status = "have";
-      detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${new Date(exp).toLocaleDateString()} - covers the closing date.`;
+      detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${new Date(exp).toLocaleDateString()} - covers the closing date.` + copyNote(c?.coid_letter_document_path ?? null);
     }
     const fill = formFillNote(input.provenance, ["a_forms.A20"], input.hasPack);
     items.push({ key: "coid", form: "A20", label: "COID Letter of Good Standing", mandatory: true, status: status === "have" && fill.status ? fill.status : status, detail: detail + fill.note });
@@ -150,33 +233,70 @@ export function sanralConventionalDocumentChecks(input: {
       : { status: "check" as const, detail: "No briefing task on this tender. Add one under Tasks & milestones with its date - the date isn't extracted from the tender document yet." }),
   });
 
-  // A9 - tax compliance status (SARS TCS PIN).
-  items.push({
-    key: "tax",
-    form: "A9",
-    label: "Tax compliance status (SARS TCS PIN)",
-    mandatory: false,
-    status: "check",
-    detail:
-      "The vault has no field for the SARS TCS PIN or its expiry yet" +
-      (c?.income_tax_number ? ` (income tax number ${c.income_tax_number} is on file, but that is not the PIN)` : "") +
-      " - confirm you have a current PIN." +
-      formFillNote(input.provenance, ["a_forms.A9"], input.hasPack).note,
-  });
+  // A9 - tax compliance status (SARS TCS PIN). Real fields since 0014.
+  {
+    const fill = formFillNote(input.provenance, ["a_forms.A9"], input.hasPack);
+    let status: ComplianceStatus;
+    let detail: string;
+    let expiring = false;
+    if (!c?.sars_tcs_pin) {
+      status = "missing";
+      detail =
+        "No SARS Tax Compliance Status PIN on file" +
+        (c?.income_tax_number ? ` (income tax number ${c.income_tax_number} is on file, but that is not the PIN)` : "") +
+        ". Request one on SARS eFiling and add it to the vault.";
+    } else if (!c.sars_tcs_pin_expiry) {
+      status = "check";
+      detail = `PIN ${c.sars_tcs_pin} on file but no expiry date - add it to the vault so this can be checked against the closing date.`;
+    } else {
+      const v = validityAtClosing(c.sars_tcs_pin_expiry, input.closingDate);
+      status = v.status;
+      expiring = v.expiring;
+      detail = `PIN ${c.sars_tcs_pin} ${v.text}. SARS lets the taxpayer cancel a PIN early, so re-verify it on eFiling before submitting.`;
+    }
+    items.push({
+      key: "tax",
+      form: "A9",
+      label: "Tax compliance status (SARS TCS PIN)",
+      mandatory: false,
+      status: status === "have" && fill.status ? fill.status : status,
+      expiring,
+      detail: detail + (c?.sars_tcs_pin ? copyNote(c.sars_tcs_pin_document_path) : "") + fill.note,
+    });
+  }
 
   // A12 / SBD 6.1 - B-BBEE (specific goals points; not a disqualifier at SANRAL).
-  items.push({
-    key: "bbbee",
-    form: "A12",
-    label: "B-BBEE proof for preference points (SBD 6.1)",
-    mandatory: false,
-    ...(c?.bee_level
-      ? {
-          status: "check" as const,
-          detail: `Level ${c.bee_level}${c.status ? ` (${c.status})` : ""} on file. SANRAL asks for a valid B-BBEE verification certificate - if you hold a QSE/EME sworn affidavit instead, confirm SANRAL accepts it. Its expiry isn't tracked in the vault. Without valid proof you score 0 of the 10/20 preference points (not disqualified).`,
-        }
-      : { status: "missing" as const, detail: "No B-BBEE level on file - you would score 0 of the 10/20 preference points." }),
-  });
+  // A QSE/EME sworn affidavit is valid, equivalent evidence (Sarel's answer 9) -
+  // never reported as "no certificate".
+  {
+    let status: ComplianceStatus;
+    let detail: string;
+    let expiring = false;
+    const levelText = c?.bee_level ? `Level ${c.bee_level}${c.status ? ` (${c.status})` : ""}` : "";
+    if (!c?.bee_level) {
+      status = "missing";
+      detail = "No B-BBEE level on file - you would score 0 of the 10/20 preference points.";
+    } else if (!c.bee_proof_type) {
+      status = "check";
+      detail = `${levelText} on file, but not which proof backs it. Record whether it's a verification certificate or a QSE/EME sworn affidavit, and its expiry - either is accepted.`;
+    } else if (!c.bee_proof_expiry) {
+      status = "check";
+      detail = `${levelText}, ${BEE_PROOF_LABEL[c.bee_proof_type]} on file, but no expiry date - add it so it can be checked against the closing date.`;
+    } else {
+      const v = validityAtClosing(c.bee_proof_expiry, input.closingDate);
+      status = v.status;
+      expiring = v.expiring;
+      const accepted =
+        c.bee_proof_type === "certificate"
+          ? ""
+          : " The sworn affidavit is the standard accepted template - equivalent evidence to a verification certificate.";
+      detail =
+        `${levelText}, ${BEE_PROOF_LABEL[c.bee_proof_type]} ${v.text}.${accepted}` +
+        (v.status === "missing" ? " Without valid proof you score 0 of the 10/20 preference points (not disqualified)." : "") +
+        copyNote(c.bee_proof_document_path);
+    }
+    items.push({ key: "bbbee", form: "A12", label: "B-BBEE proof for preference points (SBD 6.1)", mandatory: false, status, expiring, detail });
+  }
 
   // A2 - authority for signatory.
   {
@@ -191,27 +311,60 @@ export function sanralConventionalDocumentChecks(input: {
     });
   }
 
-  // A17 - insurance cover.
-  items.push({
-    key: "insurance",
-    form: "A17",
-    label: "Certificate of insurance cover (professional indemnity)",
-    mandatory: false,
-    status: "check",
-    detail: "Insurance isn't tracked in the vault yet - confirm the policy schedule is current on the closing date." + formFillNote(input.provenance, ["a_forms.A17"], input.hasPack).note,
-  });
+  // A17 - professional indemnity insurance. Real fields since 0014.
+  {
+    const fill = formFillNote(input.provenance, ["a_forms.A17"], input.hasPack);
+    let status: ComplianceStatus;
+    let detail: string;
+    let expiring = false;
+    const policy = c?.pi_insurance_policy_number ? `Policy ${c.pi_insurance_policy_number}${c.pi_insurance_insurer ? ` (${c.pi_insurance_insurer})` : ""}` : "";
+    if (!c?.pi_insurance_policy_number && !c?.pi_insurance_expiry) {
+      status = "missing";
+      detail = "No professional indemnity policy on file - add the policy number and period-to date to the vault.";
+    } else if (!c.pi_insurance_expiry) {
+      status = "check";
+      detail = `${policy} on file but no expiry (period to) date - add it so cover on the closing date can be checked.`;
+    } else {
+      const v = validityAtClosing(c.pi_insurance_expiry, input.closingDate);
+      status = v.status;
+      expiring = v.expiring;
+      detail = `${policy || "Policy"} ${v.text}.` + copyNote(c.pi_insurance_document_path);
+    }
+    items.push({
+      key: "insurance",
+      form: "A17",
+      label: "Certificate of insurance cover (professional indemnity)",
+      mandatory: false,
+      status: status === "have" && fill.status ? fill.status : status,
+      expiring,
+      detail: detail + fill.note,
+    });
+  }
 
-  // A18 - bank details / FSP letter.
-  items.push({
-    key: "bank",
-    form: "A18",
-    label: "Bank confirmation letter",
-    mandatory: false,
-    status: c?.bank_name ? "check" : "missing",
-    detail: c?.bank_name
-      ? `Bank (${c.bank_name}) on file, but the letter's date isn't tracked - most buyers want one dated within 3 months.`
-      : "No bank details on file.",
-  });
+  // A18 - bank confirmation letter. Usable for 3 months from its date
+  // (bank_confirmation_letter_valid_until, a generated column in 0014).
+  {
+    let status: ComplianceStatus;
+    let detail: string;
+    let expiring = false;
+    if (!c?.bank_confirmation_letter_date || !c.bank_confirmation_letter_valid_until) {
+      status = "missing";
+      detail = c?.bank_name
+        ? `Bank (${c.bank_name}) on file, but no confirmation letter date - get a letter dated within 3 months of closing and add its date to the vault.`
+        : "No bank details or confirmation letter on file.";
+    } else {
+      const v = validityAtClosing(c.bank_confirmation_letter_valid_until, input.closingDate, 30); // 3-month letter: 30-day window, as on the vault
+      status = v.status;
+      expiring = v.expiring;
+      detail =
+        `Letter dated ${fmt(c.bank_confirmation_letter_date)}` +
+        (v.status === "have"
+          ? `, within 3 months of closing (${v.text}).`
+          : ` - older than 3 months by the closing date; get a fresh one.`) +
+        copyNote(c.bank_confirmation_letter_path);
+    }
+    items.push({ key: "bank", form: "A18", label: "Bank confirmation letter", mandatory: false, status, expiring, detail });
+  }
 
   // A4-A23 declarations - filled from data by fill_a_forms.py, signed by hand.
   {
@@ -227,15 +380,35 @@ export function sanralConventionalDocumentChecks(input: {
     });
   }
 
-  // B4 - quality system certificate (10 functionality points).
-  items.push({
-    key: "quality_system",
-    form: "B4",
-    label: "Certificate of quality systems (ISO 9001 or in-house)",
-    mandatory: false,
-    status: "check",
-    detail: "Not tracked in the vault. Worth 10 functionality points: ISO certified 10, submitted for ISO 7, in-house 5, none 0.",
-  });
+  // B4 - quality system certificate (10 functionality points). Real fields since 0014.
+  {
+    let status: ComplianceStatus;
+    let detail: string;
+    let expiring = false;
+    const points = "Worth 10 functionality points: ISO certified 10, submitted for ISO 7, in-house 5, none 0.";
+    if (c?.iso_9001_certified === true) {
+      const cert = `ISO 9001 certified${c.iso_9001_certificate_number ? ` (certificate ${c.iso_9001_certificate_number})` : ""}`;
+      if (!c.iso_9001_expiry) {
+        status = "check";
+        detail = `${cert}, but no certificate expiry date on file - add it so validity on the closing date can be checked. ${points}`;
+      } else {
+        const v = validityAtClosing(c.iso_9001_expiry, input.closingDate);
+        status = v.status;
+        expiring = v.expiring;
+        detail =
+          `${cert}, ${v.text}.` +
+          (v.status === "have" ? " Submit the certificate with Form B4 for the full 10 points." : ` Without it, an in-house QMS scores 5. ${points}`) +
+          copyNote(c.iso_9001_document_path);
+      }
+    } else if (c?.iso_9001_certified === false) {
+      status = "missing";
+      detail = `Not ISO 9001 certified. An in-house QMS on Form B4 scores 5. ${points}`;
+    } else {
+      status = "check";
+      detail = `ISO 9001 certification not stated in the vault yet. ${points}`;
+    }
+    items.push({ key: "quality_system", form: "B4", label: "Certificate of quality systems (ISO 9001 or in-house)", mandatory: false, status, expiring, detail });
+  }
 
   // B6 - past performance (15 functionality points) - company experience.
   if (!input.experienceAvailable) {

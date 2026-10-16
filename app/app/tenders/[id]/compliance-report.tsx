@@ -4,6 +4,9 @@ import {
   SANRAL_CONVENTIONAL_FAMILY,
   checkMinimumRequirement,
   sanralConventionalDocumentChecks,
+  COMPANY_VAULT_COLUMNS,
+  beeProofValidAtClosing,
+  qualitySystemFromVault,
   type CompanyVault,
   type ComplianceItem,
   type ComplianceStatus,
@@ -63,7 +66,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
   const [{ data: company }, { data: pack }, { data: requirementRows }, { data: financial }, { data: briefing }] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, legal_name, csd_supplier_number, income_tax_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, status, bank_name, director_name")
+      .select(COMPANY_VAULT_COLUMNS)
       .maybeSingle(),
     supabase.from("tender_packs").select("id").eq("tender_id", tenderId).maybeSingle(),
     supabase.from("tender_requirements").select("position_code, position_description, managerial, is_alternate").eq("tender_id", tenderId),
@@ -130,8 +133,11 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     ratedCount: expItems.filter((i) => isScoreableEvidence(i.document_type) && !!i.performance_rating).length,
   };
 
+  const vault = (company as unknown as CompanyVault | null) ?? null;
+  const qualitySystem = qualitySystemFromVault(vault, closingDate);
+  const beeProofValid = beeProofValidAtClosing(vault, closingDate);
   const docItems = sanralConventionalDocumentChecks({
-    company: (company as CompanyVault | null) ?? null,
+    company: vault,
     closingDate,
     provenance,
     hasPack: !!packId,
@@ -166,6 +172,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
             person: p.person ? { name: p.person.name, projects: p.personProjects } : null,
           })),
           pastPerformance: experienceAvailable ? pastPerformanceFromExperience(expItems) : null,
+          qualitySystem,
         })
       : null;
 
@@ -183,8 +190,8 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
         <SectionTitle title="Compliance check - required documents" />
         <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
           SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria, checked against your
-          company vault on the closing date. &quot;Confirm by hand&quot; means Tender Tool doesn&apos;t track that document
-          yet - not that you don&apos;t have it.
+          company vault on the closing date. &quot;Confirm by hand&quot; means something on file needs a detail added (an
+          expiry date, the proof type) or a step only you can confirm - not that you don&apos;t have it.
         </div>
         {mandatoryFailing > 0 && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#B91C1C", fontWeight: 600 }}>
@@ -279,16 +286,33 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
       <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} />
 
       {/* Score estimate */}
-      {estimate && <ScoreEstimate estimate={estimate} beeLevel={(company?.bee_level as number | null) ?? null} />}
+      {estimate && (
+        <ScoreEstimate
+          estimate={estimate}
+          beeLevel={(company?.bee_level as number | null) ?? null}
+          beeProofValid={beeProofValid}
+          qualityFromVault={qualitySystem !== null}
+        />
+      )}
     </>
   );
 }
 
-function ScoreEstimate({ estimate, beeLevel }: { estimate: ReturnType<typeof estimateSanralConventional>; beeLevel: number | null }) {
+function ScoreEstimate({
+  estimate,
+  beeLevel,
+  beeProofValid,
+  qualityFromVault,
+}: {
+  estimate: ReturnType<typeof estimateSanralConventional>;
+  beeLevel: number | null;
+  beeProofValid: boolean;
+  qualityFromVault: boolean;
+}) {
   const rows: { label: string; range: Range; max: number; note: string }[] = [
     { label: "Technical experience (B1)", range: estimate.technical, max: 30, note: "From key people's project history" },
     { label: "Management ability (B2)", range: estimate.management, max: 15, note: "From key people's clients" },
-    { label: "Quality system (B4)", range: estimate.qualitySystem, max: 10, note: "Not tracked yet" },
+    { label: "Quality system (B4)", range: estimate.qualitySystem, max: 10, note: qualityFromVault ? "ISO 9001 certificate in your vault" : "Set ISO 9001 in the vault" },
     { label: "Past performance (B6)", range: estimate.pastPerformance, max: 15, note: "From your Experience Library" },
     { label: "Workplan hours (C2.4)", range: estimate.workplan, max: 30, note: "Depends on other bidders" },
   ];
@@ -339,7 +363,13 @@ function ScoreEstimate({ estimate, beeLevel }: { estimate: ReturnType<typeof est
       <div style={{ borderTop: "1px solid #F0EEE6", marginTop: 10, paddingTop: 10, fontSize: 12, color: "#6B6758" }}>
         <strong style={{ color: "#16233B" }}>After functionality:</strong> price (80 or 90 points) is scored against the lowest
         acceptable bid, so it can&apos;t be estimated before closing. Specific goals at SANRAL follow the B-BBEE level table
-        {beeLevel ? ` - level ${beeLevel} on file gives ${beeLevel === 1 ? "the full 10 of 10 (90/10) or 20 of 20 (80/20)" : "points per SANRAL's table"}, if the proof is valid at closing` : " - no level on file, so 0"}.
+        {beeLevel
+          ? ` - level ${beeLevel} on file gives ${beeLevel === 1 ? "the full 10 of 10 (90/10) or 20 of 20 (80/20)" : "points per SANRAL's table"}${
+              beeProofValid
+                ? " (proof on file is valid at closing - certificate or sworn affidavit both count)"
+                : ", once valid proof (certificate or QSE/EME sworn affidavit) with an expiry after closing is in the vault"
+            }`
+          : " - no level on file, so 0"}.
       </div>
     </div>
   );
@@ -437,6 +467,7 @@ function DocRow({ item }: { item: ComplianceItem }) {
         <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, color: "#16233B", background: "#F0EEE6", borderRadius: 100, padding: "2px 7px" }}>{item.form}</span>
         <span style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{item.label}</span>
         {item.mandatory && <span style={{ fontSize: 10, fontWeight: 700, color: "#B91C1C" }}>MANDATORY</span>}
+        {item.expiring && <Chip label="Renew soon" bg="#FEF3C7" color="#B45309" />}
       </div>
       <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3, wordBreak: "break-word" }}>{item.detail}</div>
     </div>

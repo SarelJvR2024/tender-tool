@@ -61,6 +61,9 @@ def main():
     comp = profile["company"]
     henning = profile["key_people"][0]
 
+    pi = comp.get("professional_indemnity_insurance") or {}
+    iso = comp.get("iso_9001") or {}
+
     print("Upserting company...")
     company_rows = supabase_request(url, key, "POST", "companies", [{
         "legal_name": comp["legal_name"],
@@ -88,6 +91,21 @@ def main():
         "bank_name": comp.get("bank", {}).get("bank_name"),
         "bank_branch_code": comp.get("bank", {}).get("branch_code"),
         "director_name": comp.get("director", {}).get("name"),
+        # 0014_vault_compliance_documents.sql - same source (profile JSON) as
+        # the COID fields above. Uploaded copies (*_path) are not seeded: the
+        # files go in through the Document Vault upload, not this script.
+        "sars_tcs_pin": comp.get("sars_tcs_pin"),
+        "sars_tcs_pin_expiry": comp.get("sars_tcs_pin_expiry"),
+        "pi_insurance_insurer": pi.get("insurer"),
+        "pi_insurance_policy_number": pi.get("policy_number"),
+        "pi_insurance_cover_zar": pi.get("limit_of_indemnity_zar"),
+        "pi_insurance_expiry": pi.get("period_to"),
+        "iso_9001_certified": iso.get("certified"),
+        "iso_9001_certificate_number": iso.get("certificate_number"),
+        "iso_9001_expiry": iso.get("expiry"),
+        "bank_confirmation_letter_date": comp.get("bank", {}).get("confirmation_letter_date"),
+        "bee_proof_type": comp.get("bee_proof_type"),
+        "bee_proof_expiry": comp.get("bee_proof_expiry"),
     }])
     company_id = company_rows[0]["id"]
     print(f"  company_id = {company_id}")
