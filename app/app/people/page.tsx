@@ -1,0 +1,146 @@
+import Link from "next/link";
+import { createClient } from "@/lib/supabase/server";
+
+// Reads the signed-in user's own company's roster on every request (via RLS) -
+// can't be prerendered. Same Cache Components escape hatch as dashboard/page.tsx.
+export const instant = false;
+
+type PersonRow = {
+  id: string;
+  name: string;
+  role: string | null;
+  description: string | null;
+  ecsa_level: string | null;
+  ecsa_number: string | null;
+  sacpcmp_number: string | null;
+  highest_description: string | null;
+};
+
+function registrationSummary(p: PersonRow): { label: string; bg: string; color: string }[] {
+  const tags: { label: string; bg: string; color: string }[] = [];
+  if (p.ecsa_level) {
+    tags.push({ label: `ECSA: ${p.ecsa_level}`, bg: "#DCFCE7", color: "#15803D" });
+  } else {
+    tags.push({ label: "No ECSA on file", bg: "#FEF3C7", color: "#B45309" });
+  }
+  if (p.sacpcmp_number) {
+    tags.push({ label: "SACPCMP registered", bg: "#DCFCE7", color: "#15803D" });
+  }
+  return tags;
+}
+
+export default async function PeoplePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ error?: string }>;
+}) {
+  const { error: errorParam } = await searchParams;
+  const supabase = await createClient();
+
+  // Deliberately NOT selecting id_number here - this is a list/summary view, and
+  // 0001_init_schema.sql's own comment on people.id_number says real PII never
+  // belongs in one of those, same rule companies.director_id_number states.
+  const { data: people, error } = await supabase
+    .from("people")
+    .select("id, name, role, description, ecsa_level, ecsa_number, sacpcmp_number, highest_description")
+    .order("name", { ascending: true });
+
+  const rows = (people ?? []) as PersonRow[];
+
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
+      <style>{`
+        @media (max-width: 600px) {
+          .people-grid { grid-template-columns: 1fr !important; }
+          .people-header-row { flex-direction: column; align-items: flex-start !important; gap: 10px !important; }
+        }
+      `}</style>
+
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 32px", background: "#16233B", color: "#FFFFFF" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>T</div>
+          <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
+        </div>
+        <Link href="/dashboard" style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", textDecoration: "none" }}>
+          ← Dashboard
+        </Link>
+      </div>
+
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+        <div className="people-header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>People / CV Library</h1>
+            <div style={{ fontSize: 13, color: "#6B6758", marginTop: 2 }}>
+              Staff on file for key-position matching against SANRAL tenders.
+            </div>
+          </div>
+          <Link
+            href="/people/new"
+            style={{
+              display: "inline-flex", alignItems: "center", justifyContent: "center",
+              minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#D97706",
+              color: "#FFFFFF", fontWeight: 600, fontSize: 14, textDecoration: "none",
+            }}
+          >
+            + Add person
+          </Link>
+        </div>
+
+        {errorParam && (
+          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+            {decodeURIComponent(errorParam)}
+          </div>
+        )}
+
+        {error && (
+          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+            Could not load people: {error.message}
+          </div>
+        )}
+
+        {rows.length === 0 && !error && (
+          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
+            No one on file yet. Add the first person to make them available for tender pack matching.
+          </div>
+        )}
+
+        <div className="people-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
+          {rows.map((p) => {
+            const tags = registrationSummary(p);
+            return (
+              <Link
+                key={p.id}
+                href={`/people/${p.id}`}
+                style={{
+                  display: "block", background: "#FFFFFF", border: "1px solid #E5E1D5",
+                  borderRadius: 11, padding: "14px 16px", textDecoration: "none", minHeight: 44,
+                }}
+              >
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
+                  {p.role || p.description || "Role not set"}
+                </div>
+                {p.highest_description && (
+                  <div style={{ fontSize: 11, color: "#9A9684", marginTop: 4 }}>{p.highest_description}</div>
+                )}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                  {tags.map((t) => (
+                    <span
+                      key={t.label}
+                      style={{
+                        display: "inline-flex", alignItems: "center", padding: "3px 10px",
+                        borderRadius: 100, fontSize: 11, fontWeight: 600, background: t.bg, color: t.color,
+                      }}
+                    >
+                      {t.label}
+                    </span>
+                  ))}
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
