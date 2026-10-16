@@ -231,6 +231,10 @@ Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the ta
 | 26 | Record who on the team submitted each tender, and any revenue-share or commission tied to that person | Gap | 3 |
 | 27 | Record the company's own submitted price per tender, building an internal pricing history by tender type, client and sector | Gap | 3 |
 | 28 | Capture public award outcomes (winner and price) from buyers that publish them, such as SANRAL, to show market-pricing trends | Gap | 3 |
+| 29 | Field-level provenance tagging on every generated value: confirmed, computed, assumed-default, or missing - the data foundation items 30-32 below depend on | Gap | 1 |
+| 30 | Admin test-company harness: every open tender automatically runs full pack generation against several dummy companies at different data-completeness levels | Gap | 2 |
+| 31 | Admin review console: visual queue of every dummy-company generation result, for Sarel to confirm correctness before a real customer relies on that tender template | Gap | 2 |
+| 32 | User-facing tender readiness report: before and during pack generation, a plain breakdown of what's already known (with the value), what's missing, and what's uncertain and needs review | Gap | 1 |
 
 Access to external data is the main risk to Phase 2: portal scraping terms and eTenders access need checking before item 11 is promised, including whether each portal's terms of service permit downloading its documents, not only listing its tenders. Item 12 needs checking that the SBD form templates can be filled legally and reliably; I did not verify that any competitor does it.
 
@@ -260,6 +264,43 @@ The build breaks into five streams. The first four are ordered; Sarel's own tend
 SANRAL, PDF and Word template automation (see the build-discipline section) runs alongside these as its own stream, tested separately once blank examples are available.
 
 **Open items for stream 5, to settle before building it:** which portals to start with (SANRAL's own listings first is the closest fit to Sarel's immediate need); whether each portal's terms of service permit scraping, checked before building against it; and how to avoid duplicate or stale listings across portals.
+
+## Admin maintenance console and tender readiness reporting
+
+Raised 2026-10-16: Sarel needs a way to maintain the app himself as new tenders and new SANRAL template versions arrive, without waiting for a real customer to hit a broken field first. This is two views onto one underlying mechanism - an admin-facing QA harness, and a user-facing readiness report - so they are specified together rather than as separate features.
+
+### The shared foundation: field-level provenance, not just a filled document
+
+Every value this product writes into a document already comes from one of a small number of sources - the fingerprint check (`engine/fingerprint.py`), the pack generator's suggest/confirm flow (`engine/pack_generator/`), the financial-hours capture (`engine/fill_financial_hours.py`, which already refuses to fill a value that is still null rather than silently writing zero) all already distinguish "known and confirmed" from "not yet known" internally. What's missing is making that distinction a first-class, queryable part of the data model instead of something each script handles its own way. Every generated value needs one of four states, recorded alongside it, not just inside a comment or a console warning:
+
+- **Confirmed:** came from a value a human explicitly entered or approved for this company (a CV field, a confirmed key-person assignment, a captured hours figure).
+- **Computed:** derived mechanically from confirmed values with no judgment call (years of experience from a graduation date and the tender's closing date is the existing example - see `klipcorp_profile.json`'s own note on why this is never stored as a static number).
+- **Assumed-default:** filled with the best available answer when nothing on file contradicts it, but not independently re-verified for this specific submission (the SBD4 "No" answers in `fill_a_forms.py` are the existing example - each one is also a named line on `ACTIONS_TO_SIGN.md`, which is this same idea, just not yet a structured field).
+- **Missing:** genuinely not available - left blank in the document, listed as an action item.
+
+This status already exists, scattered across module docstrings and checklist files. Item 29 above is making it one consistent structure (most naturally: a column or side-table alongside `generated_documents` and `financial_captures` in the Supabase schema) that both views below read from, rather than four different scripts each inventing their own way to say "I'm not sure about this."
+
+### Admin side: a test-company harness and review console (items 30-31)
+
+**The harness:** maintain several dummy companies in the same `companies` table as real tenants (a simple `is_test_company` flag, never surfaced to real users or counted in any customer-facing report), each representing a different realistic completeness level - for example: a company with every document and CV complete and current; one with an expired certificate (COID, B-BBEE) to prove expiry checks actually block instead of silently passing; one with no confirmed specialist for a position the tender requires, to prove the specialism-warning path still fires; one brand-new company with almost nothing on file, to see what the product does with the worst case rather than only the best one. Every time stream 5's discovery picks up a new tender, or the fingerprint check on an existing tender's template comes back changed (not just "first seen" - an actual MISMATCH, which today stops the pipeline and prints a diff, per `fingerprint.py`), the harness runs full pack generation for every dummy company against it automatically, before any real customer's data goes anywhere near that template.
+
+**The review console:** a visual queue, not a log file - each dummy-company-×-tender run shows its generated documents inline (same rendering the user-facing document review screen already uses, per the `DocumentReview.dc.html` design) alongside its provenance breakdown, so Sarel can actually look at the filled Technical Submission or A-Forms bundle and confirm it reads correctly, not just that the script exited 0. A run is flagged for review whenever: a confirmed/computed field came out empty where the dummy company's own data should have produced a value (a real bug); an assumed-default fired somewhere it hadn't before (SANRAL added a new declaration, for instance); or the fingerprint check's warning path fired (the known-noisy macro-hash signal, say) on a template that hadn't shown it before. Sarel clears a flagged run by marking it reviewed, which is the record that this tender/template combination is now trusted for real customers - not an assumption baked into the code.
+
+### User side: the tender readiness report (item 32)
+
+The same provenance data, read by a real customer instead of Sarel, answering the exact question in his request: *what's going into this tender, where did it come from, and what do I need to do about it.* Shown before a customer commits to starting a pack, and kept visible while they work on it - not a one-time gate. Grouped the same way the provenance states are defined above:
+
+- **Already have it** - the field and its actual value, so the customer can skim and object to something wrong before it's buried forty pages into a filled workbook, not catch it on the printed copy.
+- **Missing - needs your input** - exactly what item 32's own existing cousins already do (the financial-hours capture's refusal to fill a null, `ACTIONS_TO_SIGN.md`'s per-form checklist): named fields, not a vague "incomplete" badge.
+- **Uncertain - please review** - an assumed-default or a specialism-style warning, with the reason stated plainly (why the product picked this answer, and what evidence would change it), so the customer makes the actual call instead of trusting a silent guess.
+
+This is the same pre-submission check already named as item 7, widened from "is everything present" to "here's exactly what's in it and why" - the natural next step for that feature, not a separate one, and it should replace rather than duplicate item 7 once built.
+
+### Open questions, not yet settled
+
+- How many dummy companies, and which failure modes, are actually worth maintaining long-term versus a one-time test during development - this could grow without bound if not scoped.
+- Whether "tender template changed" (a fingerprint MISMATCH) should pause real customers' in-progress packs on that template until Sarel clears a review, or only block *new* packs starting after the change - pausing in-progress work has its own cost.
+- Where the line sits between "assumed-default" and "missing" for a given field is a judgment call per field, not a mechanical rule - needs deciding form-by-form as item 29 is built, the same way `fill_a_forms.py`'s own module docstring already works through it form-by-form today.
 
 ## Tender financial and market-intelligence records
 
