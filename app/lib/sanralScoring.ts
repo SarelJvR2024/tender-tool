@@ -23,106 +23,22 @@
 //     functionality threshold - not part of this score.
 // Every unknown is a range, never a guessed point value.
 
+import {
+  CLIENT_POINTS,
+  MAN_POSITION_COLUMNS,
+  MAN_POSITION_ROWS,
+  PROJECT_TYPE_MATRICES,
+  TECH_POSITION_COLUMNS,
+  TECH_POSITION_ROWS,
+  baseCode,
+  matrixForPosition,
+  normType,
+} from "./sanralMatrices";
+
 export type Range = { min: number; max: number };
 
-const PROJECT_TYPE_MATRICES: Record<string, { columns: string[]; rows: Record<string, number[]> }> = {
-  // "PL, CE, RE - Conventional" (T-18).
-  PL_CE_RE_CONVENTIONAL: {
-    columns: ["MO/MA", "MP/MS", "DS", "DI", "DN", "CD"],
-    rows: {
-      NONE: [0, 0, 0, 0, 0, 0],
-      "MO/MA": [5, 3, 1, 1, 1, 2],
-      "MP/MS": [5, 5, 2, 2, 2, 3],
-      DS: [5, 5, 5, 3, 3, 4],
-      DI: [5, 5, 5, 5, 4, 5],
-      DN: [5, 5, 5, 5, 5, 5],
-      CD: [4, 3, 2, 2, 2, 5],
-    },
-  },
-  // "DS Pavement and Materials" (T-19). Experience DI and DN share one row.
-  DS_PAVEMENT_MATERIALS: {
-    columns: ["MP/MS", "MSC", "DS", "DI/DN"],
-    rows: {
-      NONE: [0, 0, 0, 0],
-      "MP/MS": [5, 0, 2, 2],
-      MSC: [0, 5, 0, 0],
-      DS: [5, 3, 5, 4],
-      DI: [5, 3, 5, 5],
-      DN: [5, 3, 5, 5],
-    },
-  },
-};
-
-// Technical "Position Held" matrix (T-24): rows = position held on the past
-// project, columns = position tendered for.
-const TECH_POSITION_COLUMNS = [
-  "PL", "APL", "DS", "DA", "CE", "ACE", "RE", "ARE", "RM", "ARM", "SMT", "CM", "SA", "MT",
-  "ETS", "DS(T)", "CE(T)", "CM(T)", "ETS(T)", "ES", "MS", "PE(E)", "UNDEFINED",
-];
-const TECH_POSITION_ROWS: Record<string, number[]> = {
-  PL: [5, 5, 2.5, 5, 5, 5, 5, 5, 5, 5, 2.5, 2.5, 2.5, 2.5, 0, 0, 2.5, 2.5, 0, 0, 0, 2.5, 0],
-  APL: [2.5, 5, 2.5, 5, 3.75, 5, 5, 5, 5, 5, 2.5, 2.5, 2.5, 2.5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  DS: [2.5, 2.5, 5, 5, 3.75, 5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 0, 2.5, 0, 0, 0, 0, 0, 2.5, 0],
-  DA: [0, 0, 2.5, 5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  CE: [5, 5, 2.5, 5, 5, 5, 5, 5, 5, 5, 2.5, 2.5, 2.5, 2.5, 0, 0, 2.5, 2.5, 0, 0, 0, 2.5, 0],
-  ACE: [2.5, 5, 2.5, 5, 3.75, 5, 5, 5, 5, 5, 2.5, 2.5, 2.5, 2.5, 0, 0, 0, 0, 0, 0, 0, 2.5, 0],
-  RE: [2.5, 2.5, 2.5, 2.5, 4.5, 2.5, 5, 5, 5, 5, 2.5, 2.5, 2.5, 2.5, 0, 0, 0, 2.5, 0, 0, 0, 2.5, 0],
-  ARE: [2.5, 2.5, 0, 2.5, 2.5, 0, 2.5, 5, 5, 5, 2.5, 0, 0, 2.5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  RM: [2.5, 2.5, 0, 2.5, 3.75, 0, 2.5, 5, 5, 5, 2.5, 0, 0, 2.5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  ARM: [0, 0, 0, 0, 2.5, 0, 0, 2.5, 2.5, 5, 2.5, 0, 0, 2.5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  SMT: [0, 0, 2.5, 2.5, 1.25, 0, 2.5, 2.5, 2.5, 2.5, 5, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  CM: [2.5, 5, 2.5, 5, 5, 2.5, 5, 5, 5, 5, 2.5, 5, 5, 2.5, 0, 0, 2.5, 2.5, 0, 0, 0, 2.5, 0],
-  SA: [2.5, 2.5, 2.5, 2.5, 3.75, 2.5, 5, 5, 5, 5, 2.5, 2.5, 5, 2.5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  MT: [0, 0, 2.5, 2.5, 0, 0, 2.5, 2.5, 2.5, 2.5, 5, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  ETS: [0, 0, 2.5, 2.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 2.5, 0],
-  "DS(T)": [0, 0, 2.5, 2.5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 2.5, 2.5, 0, 2.5, 2.5, 0, 0],
-  "CE(T)": [2.5, 2.5, 2.5, 2.5, 5, 5, 2.5, 5, 2.5, 5, 0, 5, 2.5, 0, 2.5, 2.5, 5, 5, 2.5, 2.5, 2.5, 2.5, 0],
-  "CM(T)": [2.5, 2.5, 2.5, 2.5, 5, 5, 2.5, 5, 2.5, 5, 0, 5, 2.5, 0, 2.5, 2.5, 2.5, 5, 2.5, 2.5, 2.5, 2.5, 0],
-  "ETS(T)": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 2.5, 2.5, 0, 0],
-  ES: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2.5, 5, 2.5, 0, 0],
-  MS: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2.5, 0, 0, 0, 2.5, 2.5, 5, 0, 0],
-  "PE(E)": [2.5, 5, 2.5, 5, 5, 2.5, 2.5, 5, 5, 5, 0, 2.5, 2.5, 0, 0, 2.5, 2.5, 2.5, 0, 0, 0, 5, 0],
-};
-
-// Managerial "Position Held" matrix (T-26) - only for managerial positions.
-const MAN_POSITION_COLUMNS = ["PL", "CE", "RE", "RM", "PL(T)", "CE(T)", "CM(T)"];
-const MAN_POSITION_ROWS: Record<string, number[]> = {
-  PL: [5, 5, 5, 5, 2.5, 2.5, 2.5],
-  APL: [2.5, 3.75, 5, 5, 0, 0, 0],
-  DS: [2.5, 2.5, 2.5, 2.5, 0, 0, 0],
-  DA: [0, 0, 0, 0, 0, 0, 0],
-  CE: [5, 5, 5, 5, 0, 2.5, 0],
-  ACE: [2.5, 3.75, 5, 5, 0, 0, 0],
-  RE: [2.5, 5, 5, 5, 0, 0, 0],
-  ARE: [2.5, 2.5, 2.5, 2.5, 0, 0, 0],
-  RM: [2.5, 5, 2.5, 5, 0, 0, 0],
-  ARM: [0, 2.5, 0, 2.5, 0, 0, 0],
-  SMT: [0, 0, 2.5, 2.5, 0, 0, 0],
-  CM: [5, 5, 5, 5, 0, 0, 2.5],
-  SA: [2.5, 5, 5, 5, 0, 0, 0],
-  MT: [0, 0, 2.5, 2.5, 0, 0, 0],
-  ETS: [0, 0, 0, 0, 0, 0, 0],
-  "DS(T)": [0, 0, 0, 0, 2.5, 2.5, 2.5],
-  "CE(T)": [2.5, 5, 2.5, 2.5, 5, 5, 5],
-  "CM(T)": [0, 5, 2.5, 2.5, 2.5, 2.5, 5],
-  "ETS(T)": [0, 0, 0, 0, 2.5, 2.5, 2.5],
-  ES: [0, 0, 0, 0, 0, 0, 2.5],
-  MS: [0, 0, 0, 0, 0, 0, 2.5],
-  "PE(E)": [2.5, 5, 2.5, 2.5, 2.5, 2.5, 2.5],
-};
-
-// Management knowledge "Client" points (T-26). Same codes projects.client_type holds.
-const CLIENT_POINTS: Record<string, number> = {
-  "National Roads Authority": 5,
-  Concessionaire: 5,
-  "Provincial Authority": 5,
-  "Relevant SOE": 4.5,
-  "Metro Council": 4.5,
-  Municipality: 4,
-  Private: 3.75,
-  Other: 3.75,
-};
-
+// Matrices (project type x 9, position held, managerial position held,
+// client points) live in sanralMatrices.ts as structured data.
 export type SanralProject = {
   client_type: string | null;
   project_type: string | null;
@@ -172,18 +88,6 @@ const add = (a: Range, b: Range): Range => r(a.min + b.min, a.max + b.max);
 const round1 = (n: number) => Math.round(n * 10) / 10;
 const roundR = (x: Range): Range => r(round1(x.min), round1(x.max));
 
-function baseCode(positionCode: string): string {
-  // "DS1" -> "DS", "CE2" -> "CE", "PL(T)" stays.
-  return positionCode.replace(/\d+$/, "");
-}
-
-function matrixFor(positionCode: string, description: string | null): string | null {
-  const code = baseCode(positionCode);
-  if (code === "PL" || code === "CE" || code === "RE") return "PL_CE_RE_CONVENTIONAL";
-  if (code === "DS" && description && /pavement\s+and\s+materials/i.test(description)) return "DS_PAVEMENT_MATERIALS";
-  return null;
-}
-
 function yearsBetween(a: Date, b: Date): number {
   return (b.getTime() - a.getTime()) / (365.25 * 24 * 3600 * 1000);
 }
@@ -208,9 +112,9 @@ function periodPoints(p: SanralProject, closing: Date): Range {
 function projectTypePoints(matrixKey: string | null, tenderType: string | null, experienceType: string | null): Range {
   if (!matrixKey) return r(0, 5);
   const m = PROJECT_TYPE_MATRICES[matrixKey];
-  const row = m.rows[(experienceType ?? "NONE").toUpperCase()] ?? m.rows.NONE;
+  const row = m.rows[normType(experienceType) || "NONE"] ?? m.rows.NONE;
   if (tenderType) {
-    const idx = m.columns.indexOf(tenderType.toUpperCase());
+    const idx = m.columns.indexOf(normType(tenderType));
     if (idx >= 0) return r(row[idx], row[idx]);
   }
   return r(Math.min(...row), Math.max(...row));
@@ -230,7 +134,7 @@ function capSum(values: Range[], cap: number): Range {
 
 export function estimatePosition(input: SanralPositionInput, closing: Date): PositionEstimate {
   const required = baseCode(input.positionCode);
-  const matrix = matrixFor(input.positionCode, input.description);
+  const matrix = matrixForPosition(input.positionCode, input.description);
   const notes: string[] = [];
   // SANRAL's managerial position-held matrix only has PL/CE/RE/RM (+ toll)
   // columns, so any other position is scored as non-managerial.
@@ -248,7 +152,7 @@ export function estimatePosition(input: SanralPositionInput, closing: Date): Pos
     .slice(0, 5);
   if (projects.length === 0) notes.push("No project history on file for this person - technical and management points are 0.");
   if (projects.length > 0 && projects.length < 3) notes.push(`Only ${projects.length} project(s) on file - up to 3 count, so points are being left on the table.`);
-  if (!matrix) notes.push("This position's project-type matrix isn't in the tender book excerpt on file - project-type points shown as 0-5 per project.");
+  if (!matrix) notes.push("Book 1 publishes no project-type matrix for this position (or its DS specialism isn't in the description) - project-type points shown as 0-5 per project.");
   else if (!input.tenderProjectType) notes.push("Tender's own project type for this position isn't stored - project-type points shown as a range.");
 
   const typePts = projects.map((p) => projectTypePoints(matrix, input.tenderProjectType, p.project_type));

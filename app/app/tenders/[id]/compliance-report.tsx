@@ -14,6 +14,9 @@ import {
 } from "@/lib/tenderCompliance";
 import { estimateSanralConventional, pastPerformanceFromExperience, type Range, type SanralProject } from "@/lib/sanralScoring";
 import { DOCUMENT_TYPES, findMatchingExperience, isScoreableEvidence, labelFor, type ExperienceItem } from "@/lib/experience";
+import { acceptedDocTypes, chooseEvidenceRule, describeRule, evaluateEvidence, type ChosenRule, type EvaluationRules } from "@/lib/experienceEvidence";
+import { TENDER_ROLE_COLUMNS, roleFitCheck, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
+import { COMPANY_OFFICE_COLUMNS, matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
 
 /**
  * Compliance check + score estimate for one tender (Sarel, 2026-10-16: "once
@@ -45,10 +48,13 @@ const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E
 export async function ComplianceReport({ tenderId }: { tenderId: string }) {
   const supabase = await createClient();
 
-  const { data: tender } = await supabase.from("tenders").select("id, closing_date, family").eq("id", tenderId).maybeSingle();
+  const { data: tender } = await supabase.from("tenders").select("id, closing_date, family, evaluation_rules").eq("id", tenderId).maybeSingle();
   if (!tender) return null;
   const closingDate = (tender.closing_date as string | null) ?? null;
   const family = (tender.family as string | null) ?? null;
+  // What THIS tender's own document says (migration 0016), extracted by
+  // engine/discovery/score_outlook.py - null until it has been read.
+  const evaluationRules = (tender.evaluation_rules as EvaluationRules | null) ?? null;
 
   if (family !== SANRAL_CONVENTIONAL_FAMILY) {
     return (
@@ -63,7 +69,16 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     );
   }
 
-  const [{ data: company }, { data: pack }, { data: requirementRows }, { data: financial }, { data: briefing }] = await Promise.all([
+  const [
+    { data: company },
+    { data: pack },
+    { data: requirementRows },
+    { data: financial },
+    { data: briefing },
+    { data: roleRows },
+    { data: tagRows },
+    { data: officeRows },
+  ] = await Promise.all([
     supabase
       .from("companies")
       .select(COMPANY_VAULT_COLUMNS)
@@ -72,7 +87,15 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     supabase.from("tender_requirements").select("position_code, position_description, managerial, is_alternate").eq("tender_id", tenderId),
     supabase.from("financial_captures").select("status").eq("tender_id", tenderId).maybeSingle(),
     supabase.from("tender_tasks").select("status, due_date").eq("tender_id", tenderId).eq("kind", "briefing").maybeSingle(),
+    // 0016: role catalog + the company's own "this CV fits role X" tags.
+    supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS).order("sort_order"),
+    supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
+    // 0015: structured office locations for locality rows.
+    supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS),
   ]);
+  const roles = (roleRows ?? []) as TenderRole[];
+  const roleTags = (tagRows ?? []) as RoleTag[];
+  const offices = (officeRows ?? []) as CompanyOffice[];
 
   const packId = (pack?.id as string | undefined) ?? null;
   let provenance: { field_key: string; status: string }[] = [];
@@ -97,7 +120,10 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
   const positionCodes = Array.from(new Set([...requirements.map((r) => r.position_code), ...assignments.map((a) => a.position_code)]));
 
   const personIds = Array.from(
-    new Set(assignments.flatMap((a) => [a.confirmed_person_id, a.suggested_person_id]).filter((x): x is string => !!x)),
+    new Set([
+      ...assignments.flatMap((a) => [a.confirmed_person_id, a.suggested_person_id]).filter((x): x is string => !!x),
+      ...roleTags.map((t) => t.person_id), // people tagged for a role, to name them on unfilled positions
+    ]),
   );
   let people: PersonRow[] = [];
   let projects: ProjectRow[] = [];
@@ -116,14 +142,21 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     generatedCvs = (gen ?? []) as GeneratedCvRow[];
   }
 
-  // Company experience (Experience Library, migration 0012): SANRAL B6 asks
-  // for completed projects "of similar scope" in the last 10 years. Every
-  // tender in this family is SANRAL roads consulting, so "similar scope" is
-  // read as the roads_civil discipline tag - stated in the UI, not hidden.
+  // Company experience (Experience Library, migration 0012), checked against
+  // THIS tender's own evidence rule (tenders.evaluation_rules) - or, only
+  // when that hasn't been read, SANRAL's B6 pattern labelled as an
+  // assumption (experienceEvidence.ts). Every tender in this family is SANRAL
+  // roads consulting, so "similar scope" is read as the roads_civil
+  // discipline tag - stated in the UI, not hidden.
+  const chosenRule = chooseEvidenceRule(evaluationRules);
   const companyId = (company?.id as string | undefined) ?? null;
   const asOf = closingDate ? closingDate.slice(0, 10) : undefined;
   const experience = companyId
-    ? await findMatchingExperience(supabase, companyId, { disciplines: ["roads_civil"], completedWithinYears: 10, asOf })
+    ? await findMatchingExperience(supabase, companyId, {
+        disciplines: ["roads_civil"],
+        ...(chosenRule.rule.window_years ? { completedWithinYears: chosenRule.rule.window_years } : {}),
+        asOf,
+      })
     : { items: [] as ExperienceItem[], error: "No company record." };
   const experienceAvailable = experience.error === null;
   const expItems = experience.items;
@@ -145,6 +178,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     briefingTask: (briefing as { status: string; due_date: string | null } | null) ?? null,
     experience: experienceSummary,
     experienceAvailable,
+    evidence: experienceAvailable ? evaluateEvidence(chosenRule, expItems, true) : null,
   });
 
   const personById = new Map(people.map((p) => [p.id, p]));
@@ -157,7 +191,18 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     const cv = person ? cvUploads.find((c) => c.person_id === person.id) ?? null : null;
     const tenderCv = generatedCvs.find((g) => g.position_code === code) ?? null;
     const personProjects = person ? projects.filter((p) => p.person_id === person.id) : [];
-    return { code, req, asg, person, suggested, min, cv, tenderCv, personProjects };
+    // Role fit comes from the company's own tag (0016); the C3.1.11
+    // heuristic above is kept only as a cross-check (tenderRoles.ts).
+    const fit = roleFitCheck({
+      positionCode: code,
+      description: req?.position_description ?? null,
+      person: person ? { id: person.id, name: person.name } : null,
+      tags: roleTags,
+      roles,
+      peopleById: personById,
+      heuristic: person ? min : null,
+    });
+    return { code, req, asg, person, suggested, min, cv, tenderCv, personProjects, fit };
   });
 
   const estimate =
@@ -223,8 +268,9 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
       <div style={card}>
         <SectionTitle title="Key people & CVs" />
         <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
-          Each key position against SANRAL&apos;s minimum requirements (C3.1.11), with the CV on file and the
-          tender-specific CV status.
+          Whether each position is filled by someone <strong>your company has tagged</strong> as fitting that role (set on
+          the person&apos;s People page - Tender Tool doesn&apos;t guess role fit), with SANRAL&apos;s C3.1.11 minimums checked
+          against the records on file as a cross-check, the CV on file and the tender-specific CV status.
         </div>
         {positionRows.length === 0 && (
           <div style={{ fontSize: 12, color: "#9A9684" }}>
@@ -233,6 +279,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
         )}
         {positionRows.map((p) => {
           const minSt = STATUS_STYLE[p.min.status];
+          const fitSt = STATUS_STYLE[p.fit.status];
           return (
             <div key={p.code} style={{ borderTop: "1px solid #F0EEE6", padding: "11px 0" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -248,11 +295,21 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
                         ? `Not confirmed (suggested: ${p.suggested.name})`
                         : "No key person confirmed"}
                   </div>
+                  {p.fit.roleTitle && <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>Role: {p.fit.roleTitle}</div>}
                   {p.min.requirement && <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>Needs: {p.min.requirement}</div>}
                 </div>
-                <Chip label={`Minimum: ${minSt.label === "On file" ? "met" : minSt.label === "Don't have" ? "not met" : "unconfirmed"}`} bg={minSt.bg} color={minSt.color} />
+                <Chip
+                  label={`Role fit: ${p.fit.status === "have" ? "tagged" : p.fit.status === "missing" ? "unfilled" : "confirm"}`}
+                  bg={fitSt.bg}
+                  color={fitSt.color}
+                />
               </div>
-              <div style={{ fontSize: 12, color: p.min.status === "missing" ? "#B91C1C" : "#6B6758", marginTop: 4 }}>{p.min.detail}</div>
+              <div style={{ fontSize: 12, color: p.fit.status === "missing" ? "#B91C1C" : "#16233B", marginTop: 4 }}>{p.fit.detail}</div>
+              {p.person && (
+                <div style={{ fontSize: 11, color: p.min.status === "missing" ? "#B91C1C" : "#6B6758", marginTop: 3 }}>
+                  Cross-check from records on file (minimum {minSt.label === "On file" ? "met" : minSt.label === "Don't have" ? "not met" : "unconfirmed"}): {p.min.detail}
+                </div>
+              )}
               {p.person && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
                   {p.cv ? (
@@ -283,7 +340,10 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
       </div>
 
       {/* Company experience (Experience Library) */}
-      <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} />
+      <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} chosen={chosenRule} />
+
+      {/* Locality (office locations vs the tender's own locality rows) */}
+      <LocalitySection rules={evaluationRules} offices={offices} />
 
       {/* Score estimate */}
       {estimate && (
@@ -380,45 +440,73 @@ function ExperienceSection({
   error,
   items,
   closingDate,
+  chosen,
 }: {
   available: boolean;
   error: string | null;
   items: ExperienceItem[];
   closingDate: string | null;
+  chosen: ChosenRule;
 }) {
+  const { rule, source } = chosen;
+  const ruleBox = (
+    <div
+      style={{
+        background: source === "tender_document" ? "#F6F5F1" : "#FEF3C7",
+        border: `1px solid ${source === "tender_document" ? "#E5E1D5" : "#F5D08A"}`,
+        borderRadius: 9,
+        padding: "9px 12px",
+        margin: "6px 0 10px",
+        fontSize: 12,
+        color: source === "tender_document" ? "#16233B" : "#92400E",
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 2 }}>
+        {source === "tender_document" ? "What this tender accepts as proof (read from its own document)" : "Assumed rule - this tender's own evidence rule hasn't been read yet"}
+      </div>
+      <div>{describeRule(rule)}{rule.scope ? ` - scope: ${rule.scope}` : ""}.</div>
+      <div style={{ fontStyle: "italic", color: "#6B6758", marginTop: 3, wordBreak: "break-word" }}>&ldquo;{rule.quote}&rdquo;</div>
+      {source === "assumed" && (
+        <div style={{ marginTop: 3 }}>
+          This is SANRAL&apos;s Form B6 pattern, not a fact about this tender. Run engine/seed_tender_evaluation_rules.py on
+          the tender document to replace it.
+        </div>
+      )}
+      {chosen.otherRules > 0 && <div style={{ marginTop: 3 }}>The document states {chosen.otherRules} more experience rule(s) - check which one applies.</div>}
+    </div>
+  );
   if (!available) {
     return (
       <div style={{ ...card, background: "#FFFBEB", border: "1px dashed #F5D08A" }}>
         <SectionTitle title="Company experience" />
-        <div style={{ fontSize: 12, color: "#92400E" }}>
-          Couldn&apos;t read the Experience Library ({error}). SANRAL scores past performance (Form B6, 15 points) on 3
-          completed projects of similar scope in the last 10 years, evidenced by rated reference letters or CIDB PSP
-          reports.
-        </div>
+        <div style={{ fontSize: 12, color: "#92400E" }}>Couldn&apos;t read the Experience Library ({error}).</div>
+        {ruleBox}
       </div>
     );
   }
-  const scoreable = items.filter((i) => isScoreableEvidence(i.document_type));
-  const ok = scoreable.length >= 3;
+  const accepted = acceptedDocTypes(rule);
+  const qualifying = items.filter((i) => accepted.has(i.document_type));
+  const need = rule.projects_required ?? 0;
+  const ok = need > 0 && qualifying.length >= need;
   return (
     <div style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
         <SectionTitle title="Company experience" />
         <Chip
-          label={`${scoreable.length} of 3 for Form B6`}
-          bg={ok ? "#DCFCE7" : scoreable.length > 0 ? "#FEF3C7" : "#FEE2E2"}
-          color={ok ? "#15803D" : scoreable.length > 0 ? "#B45309" : "#B91C1C"}
+          label={need ? `${qualifying.length} of ${need} qualifying` : `${qualifying.length} qualifying`}
+          bg={ok ? "#DCFCE7" : qualifying.length > 0 ? "#FEF3C7" : "#FEE2E2"}
+          color={ok ? "#15803D" : qualifying.length > 0 ? "#B45309" : "#B91C1C"}
         />
       </div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 8 }}>
-        Tagged roads &amp; civil projects in your Experience Library completed within 10 years of
-        {closingDate ? ` ${new Date(closingDate).toLocaleDateString()}` : " closing"}. SANRAL&apos;s Form B6 scores reference
-        letters and CIDB performance reports; other evidence proves the project but doesn&apos;t score.
+      <div style={{ fontSize: 12, color: "#6B6758" }}>
+        Tagged roads &amp; civil projects in your Experience Library
+        {rule.window_years ? ` completed within ${rule.window_years} years of` : " up to"}
+        {closingDate ? ` ${new Date(closingDate).toLocaleDateString()}` : " closing"}.
       </div>
+      {ruleBox}
       {items.length === 0 && (
         <div style={{ fontSize: 12, color: "#B91C1C" }}>
-          None tagged yet. <Link href="/experience" style={{ color: "#D97706", fontWeight: 600 }}>Add experience</Link> - without
-          it, B6 falls back to the sworn affidavit at &apos;Adequate&apos;.
+          None tagged yet. <Link href="/experience" style={{ color: "#D97706", fontWeight: 600 }}>Add experience</Link>.
         </div>
       )}
       {items.map((i) => (
@@ -431,17 +519,66 @@ function ExperienceSection({
               {i.completion_date ? ` · completed ${new Date(i.completion_date).toLocaleDateString()}` : ""}
             </div>
           </div>
-          {isScoreableEvidence(i.document_type) ? (
-            i.performance_rating ? (
-              <Chip label={`Rated ${i.performance_rating}`} bg="#DCFCE7" color="#15803D" />
+          {accepted.has(i.document_type) ? (
+            isScoreableEvidence(i.document_type) && !i.performance_rating ? (
+              <Chip label="Counts - rating not tagged" bg="#FEF3C7" color="#B45309" />
             ) : (
-              <Chip label="Rating not tagged" bg="#FEF3C7" color="#B45309" />
+              <Chip label={i.performance_rating ? `Counts - rated ${i.performance_rating}` : "Counts"} bg="#DCFCE7" color="#15803D" />
             )
           ) : (
-            <Chip label="Doesn't score for B6" bg="#F0EEE6" color="#6B6758" />
+            <Chip label="Not accepted by this tender" bg="#F0EEE6" color="#6B6758" />
           )}
         </div>
       ))}
+    </div>
+  );
+}
+
+function LocalitySection({ rules, offices }: { rules: EvaluationRules | null; offices: CompanyOffice[] }) {
+  const rows = (rules?.locality?.rows ?? []) as LocalityRow[];
+  const mand = rules?.locality?.mandatory_local_office ?? null;
+  // Nothing to say when the tender's rules have been read and it has no
+  // locality rows (SANRAL scores specific goals on the B-BBEE table only).
+  if (rules && rows.length === 0 && !mand) return null;
+  return (
+    <div style={card}>
+      <SectionTitle title="Office location (locality)" />
+      {!rules ? (
+        <div style={{ fontSize: 12, color: "#6B6758" }}>
+          This tender&apos;s document hasn&apos;t been read for locality rows yet, so office-location points aren&apos;t checked.
+          {offices.length === 0 ? " No office locations on file either - add them on the Company page." : ""}
+        </div>
+      ) : (
+        <>
+          {(["specific_goals", "functionality"] as const).map((kind) => {
+            const kindRows = rows.filter((r) => r.kind === kind);
+            if (kindRows.length === 0) return null;
+            const m = matchLocality(kindRows, offices);
+            const st = m.status === "matched" ? STATUS_STYLE.have : m.status === "no_match" ? STATUS_STYLE.missing : STATUS_STYLE.check;
+            return (
+              <div key={kind} style={{ borderTop: "1px solid #F0EEE6", padding: "8px 0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>
+                    {kind === "specific_goals" ? "Specific-goals points" : "Functionality criterion"}:{" "}
+                    {kindRows.map((r) => `${r.area} ${r.points}${r.system ? ` (${r.system})` : ""}`).join(" · ")}
+                  </span>
+                  <Chip label={m.status === "matched" ? `${m.points} pts` : m.status === "no_match" ? "0 pts" : "Unknown"} bg={st.bg} color={st.color} />
+                </div>
+                <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3 }}>{m.reason}</div>
+              </div>
+            );
+          })}
+          {mand && (
+            <div style={{ borderTop: "1px solid #F0EEE6", padding: "8px 0", fontSize: 12, color: "#B91C1C" }}>
+              <strong>Mandatory:</strong> a local office in {mand.area}
+              {mand.disqualifies ? " - non-responsive without one" : ""}.{" "}
+              {matchLocality([{ area: mand.area, level: "municipality", province: null, points: 0, system: null, kind: "specific_goals" }], offices).status === "matched"
+                ? "You have an office there on file."
+                : "No office there on file."}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

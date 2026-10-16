@@ -188,3 +188,130 @@ Sarel's answers, verbatim. His numbering follows the combined question list, not
 - **"8. They have iso 9001."** This answers question 4 above. `companies.iso_9001_certified` / `_certificate_number` / `_expiry` / `_document_path` were added. When the certificate is valid at closing, the score estimate's quality system is fixed at 10 instead of the 0-10 range. Note: Klipcorp's real NRA 2026/0084 submission put an **in-house QMS** write-up in Form B4, not an ISO certificate. That scores 5, not 10, so the certificate should go into future packs.
 - **"9. Yes it is a standard acceptable template."** This answers question 5 above. `companies.bee_proof_type` (`certificate` / `qse_affidavit` / `eme_affidavit`) and `bee_proof_expiry` were added. Any proof type valid on the closing date gives "On file". An affidavit is described as equivalent evidence, never as a missing certificate.
 - **"10. Yes."** This answers question 6 above. Migration `0014` added the SARS TCS PIN, PI insurance, ISO 9001, bank-letter date and B-BBEE proof fields, with uploads to a private `company-documents` bucket. The compliance check's A9 / A12 / A17 / A18 / B4 rows are now real On file / Don't have checks, with a "Renew soon" chip. "Confirm by hand" now only means a detail is missing (for example, an expiry date).
+
+## Round 2: answers 3, 5, 6 and 11 (2026-10-16)
+
+Sarel, verbatim:
+
+- **"3. experience evidence is specific to each tender, need to assess each tender what counts as evidence they normally specify in the functional requirements."**
+- **"5. Yes, have a look at tenders what the categories are that they normally ask for. Also the roles and disciplines."**
+- **"6. Not sure, companies need to specify which sanral roles a persons cv fits."**
+- **"11. Yes office location sometimes counts for scoring."**
+
+### Corpus read (Observed)
+
+- **SANRAL:** Book 1 of all six Conventional tenders (`pdftotext -layout`; the B6 and Annexure A text is identical in all six). Also SANRAL's own Consultant Technical Submission workbook from two RRM tenders: Klipcorp's completed NRA 2026/0084 (`templates/incoming/completed_sample/`) and MP RRM Batch 3 (NRA 2026/0019). The `SETUP`, `WORKINGS MATRIX` and `Proj Relevance Codes` sheets were read.
+- **Non-SANRAL, 14 real documents:** the 5 from the first pass (Gauteng DRT 09/09/2026, DPWI EC SCMU5-26/27-0007SB, Transnet TPT/2026/06/0650/7337/RFP, Cape Winelands Q 2026/034) plus Dawid Kruiper TN051/2026. Eight more were fetched from the same live OCDS window for this pass: uMlalazi LM KZN ULM 15/26/27 (road repairs, CIDB 2CE), TNPA asbestos removal, TNPA North Groyne ablution block, Overberg DM lifeguards, Sentech structural-engineer RFQ, LEDA valuation panel, BCMDA security and DLRRD N14 precinct plan. Three more (SASSA, Dept of Employment & Labour, EC Roads generators) were scanned images with no text layer and can't be read.
+
+### (a) Experience evidence is worded differently by every buyer (Observed)
+
+| Buyer | Verbatim (abridged) | What counts | Count / window | Consequence |
+| --- | --- | --- | --- | --- |
+| SANRAL (all 6) | "Past Performance reports must be submitted ... for any 3 (three) completed projects of similar scope in the last 10 (ten) years" | CIDB Annex 1 PSP report or client reference letter, rated; affidavit fallback | 3 / 10 yrs | Points (15) |
+| Gauteng DRT, Schedule A | "Bidders must submit Completion Certificates ... Practical completion certificate will not be accepted ... issued since the year 2000" | Completion certificates only | 1-5 scored per project / since 2000 | 0 points without |
+| Gauteng DRT, Schedule B (same tender) | "reference letter(s) with an aligned appointment letter(s), signed by all relevant parties and supported by corresponding award letter(s)" | Reference letter AND appointment letter | 1-5 scored per project | 0 points without |
+| Transnet TPT | "Five (5) traceable Purchase Orders or Award Letters or Appointment letters with Completion Letters or Completion Certificates ... within the last ten (10) years ... Proof of completion submitted without proof of appointment will not be evaluated" | Appointment AND completion proof | 5 (40 pts), 4 (20), 3 (10) / 10 yrs | Points; untraceable proof disqualifies |
+| DPWI EC | "a minimum of three (3) written contactable references ... as a Professional Architect ... or similar nature"; schedule "COMPLETED PROJECTS THREE OF WHICH IN THE LAST FIVE (05) YEARS" | Contactable written references | 3 / 5 yrs | Responsiveness |
+| uMlalazi LM | "previously completed similar projects in the past 6 years ... Attach appointment letters and completion certificates" | Appointment AND completion | 4+ (30 pts) ... 1 (5) / 6 yrs | Points |
+| TNPA asbestos | "A Minimum of three (3) reference letters/completion certificates not older than 10 years" | Reference letter or completion certificate | 3 / 10 yrs | Points |
+| TNPA ablution | "traceable references ... in the last 10 years (Project must have been completed in December 2015 onwards) ... shall supply completion certificates" | Completion certificates | 1-5 scored / 10 yrs | Points |
+| LEDA | "Fully signed reference letters AND appointment letters / purchase order ... (not older than 10 years)" | Reference letter AND appointment | 4+ (40) ... 1 (10) / 10 yrs | Points |
+| Overberg DM | "1-2 Positive References = 5, 3-4 = 15, 5+ = 20"; eligibility "At least three (3) reference letters" | Reference letters | 5+ / none | Points |
+| Dawid Kruiper | "3 Contactable references (Signed reference letters with clients' letterhead will only be accepted as proof of experience) ... non-responsive" | Signed letters on letterhead | 3 / none | Disqualifies |
+| Sentech | "Signed reference letters on a client's letterhead, a completion certificate, or an affidavit (... supporting documents such as appointment letter, purchase order)" | Any of these | 5 listed | Responsiveness |
+
+Every axis varies: the evidence type, whether appointment and completion must be **paired**, the count, the window (5, 6 or 10 years, "since 2000", "Dec 2015 onwards"), and whether a shortfall costs points or disqualifies. SANRAL's B6 is one row of twelve, not the norm.
+
+### (b) Roles and disciplines (Observed)
+
+- **SANRAL Book 1 defines 23 key-person codes (T-18)**: PL, APL, DS, DA, CE, ACE, RE, ARE, RM, ARM, SMT, CM, SA, MT, ETS, PL(T), DS(T), CE(T), CM(T), ETS(T), ES, MS, PE(E).
+- **Book 1 publishes 9 project-type matrices, not 2.** They are on T-18 to T-23: PL/CE/RE Conventional, plus DS Pavement & Materials, Structures, Electrical, Geometrics, Traffic & Transportation, Geotechnical, Electronic Systems and Engineering Geologist. *Correction to the first pass, which said "the other matrices ... live in SANRAL's spreadsheet and aren't transcribed".* Only the RRM matrix ("CE, RM/ARM - RRM", listed in the workbook's `Proj Relevance Codes`) is absent from Book 1.
+- **A Design Specialist is tendered per specialism.** The workbook says "DS2 Design Specialist 2 - Structures" and "DS3 ... Geometrics"; the six SETUP sheets say "DS1 ... Pavement and Materials". A person who fits one DS specialism doesn't fit another, so "DS" is not one role.
+- **"Managerial" is set per tender, not per role.** SANRAL's master position list (`WORKINGS MATRIX`) marks PL1, CE1, RE1, RM1, PL(T), CE(T) and CM(T) as "MANAGERIAL POSITION" and the rest "NON-MANAGERIAL". But all six Conventional SETUP sheets mark PL "Non-Man", and both RRM SETUP sheets (NRA 2026/0084, NRA 2026/0019) mark CE1 "Man". This settles the first pass's question 2: the tender's own SETUP decides.
+- **Roles other buyers name:**
+  - Construction contractor key personnel: Contract Manager, Site Agent and Foreman (uMlalazi, each scored on diploma plus years); Supervisor and Project Manager/Site (TNPA).
+  - Safety Officer, registered with SACPCMP. DRT: "Candidate registration is not acceptable". Also uMlalazi C3.1.18 and the TNPA organogram.
+  - Registered professionals: Pr Eng (Sentech, ECSA), Professional Architect and Architectural Technologist (DPWI, SACAP), Town and Regional Planner as Project Leader (DLRRD, SACPLAN, scored on post-registration years), Property Valuer (LEDA, SACPVP), Quantity Surveyor (DPWI, named but not scored).
+  - Trades: trade-tested Mechanic and Auto Electrician/Millwright (Transnet, SAQA), trade-tested Carpenter (TNPA).
+  - Services: Certified and Assistant Pest Control Operator (DRT), PSIRA-registered Security Officers (Dawid Kruiper, BCMDA).
+- **Disciplines** beyond the existing 7 `DISCIPLINE_KEYWORDS` buckets: architecture fits `buildings`; pest control, valuation and town planning don't fit any existing bucket. No new discipline key was added. These tenders came from a feed Klipcorp doesn't bid in, and adding a key also means changing migration 0012's check constraint (see open questions).
+
+### (c) Locality wording (Observed)
+
+| Buyer | Verbatim | Level | Points |
+| --- | --- | --- | --- |
+| DPWI EC | "Locality: (a) Within Eastern Cape 4 (b) Outside Eastern Cape 0" | Province | 4 of 20 |
+| Cape Winelands DM | "enterprise head office or primary place of business or regional or satellite office is located within the boundaries of the Cape Winelands District Municipal Area" 5 (80/20) / 2.5 (90/10); "... Western Cape Province" 5 / 2.5 | District, province; any office | 5 |
+| Overberg DM | "Within the boundaries of Overberg District 6 / Within the boundaries of the Western Cape 4", verified from the "CIPC/CIPRO ... Address of registered office" | District, province; registered office only | 6 |
+| uMlalazi LM | "Enterprise Located within uMlalazi Municipality 4 / within District Municipality 2 / within the Province 1"; **also** a functionality criterion: "Bidder operating within uMlalazi Municipality (Points = 10) ... King Cetshwayo District (5) ... Kwazulu Natal province (2)" | Local, district, province | 4 SG + 10 functionality |
+| LEDA | "Enterprises located within Limpopo 3" | Province | 3 |
+| Dawid Kruiper | "Within the boundaries of Dawid Kruper 20.00" (sic) **and** "must have a local office in the Dawid Kruiper Municipal Jurisdiction ... non-responsive" | Local | 20, and mandatory |
+
+The proof buyers name: municipal account not older than 90 days or 3 months, a lease, a bank letter confirming the business address, utilities, an affidavit, or the CIPC registered office. SANRAL's specific goals are the B-BBEE level table only, with no locality row on any of the six tenders.
+
+### What was built
+
+1. **`score_outlook.py`: `extract_experience_evidence()` and `extract_locality()`/`match_locality()`.**
+   - Each evidence rule records the count, whether it is scored per project, the window (years or "since" year), the accepted evidence, whether appointment and completion are paired, the practical-completion exclusion, scope, consequence, and a verbatim quote.
+   - Locality rows are recorded with area, level, points, preference system and kind (specific goals vs functionality), plus any mandatory local office. Rows are matched against the company's offices.
+   - These are wired into `estimate_score_outlook()` as `experience_evidence` and `locality` keys, and as `/discovery` summary lines.
+   - `assess_tender.load_company_profile()` now carries `offices`: `company.offices[]` when present, otherwise one office **derived from the registered address's province and flagged `derived`**. The summary says so.
+2. **Migration `0015_company_offices.sql`:** a tenant-scoped `company_offices` table with province (check-constrained to the 9), district/metro, local municipality, town, office kind (registered/head/branch/site) and proof type and date.
+3. **Migration `0016_tender_roles.sql`:**
+   - `tender_roles`: a shared catalog of **47 roles**. There are 30 SANRAL entries: the 23 codes, with DS split into the 8 Book 1 specialisms. There are 17 roles from other buyers. Every row has a `source` citation. `default_managerial` holds the master-list value, **for information only**.
+   - `person_role_eligibility`: the company's manual tag. RLS also checks that the person belongs to the same company.
+   - `tenders.evaluation_rules jsonb`.
+4. **`app/lib/sanralMatrices.ts`:** all 9 Book 1 project-type matrices, the position-held and managerial matrices and client points, as structured data. Also `matrixForPosition()` and `sanralRoleCodeForPosition()` (DS resolved by specialism from the description). `sanralScoring.ts` now reads from it, and its output is unchanged on the R.396 regression.
+5. **People page:** "Tender roles this CV qualifies for", a checkbox list grouped by family. Hovering a role shows its source tender. Saved by `saveRoleEligibility`.
+6. **Company page:** an "Office locations" section (`OfficeLocations.tsx`, `officeActions.ts`) to add, edit and remove offices.
+7. **Compliance report:**
+   - **Role fit comes from the tag.** The C3.1.11 heuristic is shown beneath it as a "cross-check from records on file". When the heuristic contradicts a tag, the row turns amber, because SANRAL Stage 2 still disqualifies a key person below minimum. An unfilled position names the people tagged for that role.
+   - **B6 and Company experience use `tenders.evaluation_rules`** (count, window, accepted document types, paired-proof rule). Each tagged item is marked "Counts" or "Not accepted by this tender". When no rule is stored, the SANRAL B6 pattern is used under an amber **"Assumed rule"** banner.
+   - **A Locality section** appears when the tender's rules contain locality rows, and is hidden when they were read and contain none (SANRAL).
+8. **`engine/seed_tender_evaluation_rules.py`:** reads a tender document (PDF or text), prints what it found (dry run) and, with `--write`, stores it on `tenders.evaluation_rules` with the service role.
+
+### Verification (Observed)
+
+- **Extraction on real text.** All 12 rules in table (a) were extracted correctly, with a verbatim quote each. All six SANRAL Book 1s gave the identical rule: 3 projects, 10 years, performance report / reference letter (affidavit fallback), points. Every locality table in (c) was read with the right level and points: CW 5/2.5 per system, DPWI 4, Overberg 6/4, uMlalazi 4/2/1 (SG) and 10/5/2 (functionality), LEDA 3, Dawid Kruiper 20 plus the mandatory office.
+  - Fixed along the way:
+    - key-personnel "contactable references" (DRT Forms B1, uMlalazi CVs) wrongly read as company evidence;
+    - the "30 (4) Project value" table cell read as a count;
+    - interleaved table columns hiding "last ten ... (10) years" (Transnet);
+    - the Cape Winelands row index read as points;
+    - "South Africa or abroad" read as an area.
+- **No regression.** The old and new `estimate_score_outlook()` were compared on 38 real texts. Preference system, functionality and specific goals are identical on 37. On LEDA, `locality` is now correctly added as a basis ("Enterprises located within Limpopo").
+- **Real profile.** Klipcorp's registered address is Gauteng (derived office). It gets "no office in the preferred area" on DPWI, Cape Winelands, Dawid Kruiper (plus "non-responsive without a local office") and LEDA. A test Stellenbosch office matches Cape Winelands for 5 points under 80/20. A test Upington / Dawid Kruiper office matches the misspelled "Dawid Kruper" row for 20.
+- **SANRAL estimate is unchanged after the refactor.** Old and new `sanralScoring.ts` were run side by side on Henning's real projects: 24.5 / 13.5 / 44-93 with SETUP facts, and 23.5-27.5 / 13.5-14 / 43-96.5 as the page sees it today. (The first pass's write-up quotes 38.5-96.8 for the second case. The HEAD code before this pass already gives 43-96.5, so that figure was a write-up slip, not a regression.) A new DS2 Structures case was hand-checked: 7 + 12.5 + 12.5 = 32.
+- **Role fit:** tagged PL plus Pr Eng gives On file. Tagged PL plus Pr Techni gives amber, with the contradiction spelled out. Untagged DS1 gives amber and names who is tagged. DS1 with no description gives amber ("tendered per specialism"). Unfilled gives Don't have, listing tagged people.
+- **Evidence evaluation:** the R.396 own rule and the assumed fallback were each run against an empty library and a 4-item library. The Transnet paired rule doesn't count award letters on their own. DRT Schedule A counts only completion certificates since 2000 and reports the second rule.
+- **Migrations `0015` and `0016`** were replayed after `0001`-`0014` (including the concurrent `0014`) on scratch Postgres 16, and all applied cleanly. RLS tests as `authenticated`:
+  - a user's own tags and offices are accepted;
+  - a tag on another company's person (under one's own company id) is rejected by the with-check;
+  - inserting into another company is rejected;
+  - an unknown role is rejected by the FK, and a duplicate tag by the unique key;
+  - "Natal" as a province is rejected;
+  - the other tenant sees 0 rows;
+  - deleting a person cascades their tags.
+
+  The real R.396 rules JSON was stored on `tenders.evaluation_rules` and read back.
+- `npm run typecheck` and `npm run lint` are clean.
+
+### Still approximate or assumption-based (flagged in the UI and code)
+
+- **No tender row has `evaluation_rules` until `seed_tender_evaluation_rules.py --write` is run.** No live Supabase project exists. Until then, every tender shows the amber "Assumed rule" (SANRAL B6) banner, which is the intended fallback, labelled as such.
+- **When a tender states several rules** (DRT, one per schedule), the compliance row uses the first and says how many more there are. It doesn't know which schedule the company is bidding.
+- **Experience items are single documents.** For "appointment AND completion" rules, the check counts completion documents and asks the user to confirm each project also has its appointment letter. Pairing isn't modelled.
+- **Matching still uses `roads_civil` for SANRAL.** The rule's `scope` (e.g. "similar scope", "Port Freight Haulers") is shown verbatim for a human to judge, not matched.
+- **DS positions need a description to map to a role.** `tender_requirements` is still unseeded (question 1 of the first round), so on today's data every DS1 is "Confirm by hand".
+- **Rotated matrix headers.** Column order for the 7 new matrices was taken from header positions in `-layout` output and the workbook's code-list order, then checked for the diagonal. The DS Geotechnical columns (DNG/DIG/DSG/MSG) have no diagonal to check against.
+- **Locality extraction is regex over `-layout` text.** Unnamed rows ("within District Municipality") borrow a district named elsewhere in the same document when there is exactly one, flagged `area_inferred`. "Within the Province" takes the document's most-mentioned province.
+- **Discovery reads offices from the profile JSON**, not `company_offices`. Klipcorp's profile has no `offices`, so its one office is derived from the registered address's province and labelled as derived. District and municipality are never guessed from a street address.
+- **Proof age isn't checked yet.** `company_offices.proof_date` is captured, but buyers' "not older than 90 days / 3 months" limit isn't enforced in the check.
+
+### New open questions
+
+1. **Which offices does Klipcorp actually have?** Add them on the Company page with district and local municipality. The registered address (Modderfontein/Edenvale) suggests City of Ekurhuleni, Gauteng, but that hasn't been confirmed, and none of the locality tenders seen so far is in Gauteng.
+2. **Tag Henning's roles.** His record shows CE on all three ACSA projects, and the CLI pack put him in both PL and DS1, with the specialism warning "no evidence of Pavement and Materials experience". Should he be tagged PL only, or PL plus DS Pavement & Materials?
+3. **Seed `tender_requirements`** (first-round question 1)? It now matters twice: it gives DS positions their specialism (so role tags can match), and it gives the managerial flag and tender project type (which narrows the estimate).
+4. **New discipline buckets?** Architecture, pest control, valuation and town planning showed up in the feed. Add discipline keys only if Klipcorp will bid outside roads/civil; each one also changes `DISCIPLINE_KEYWORDS` and 0012's check constraint.
+5. **Multi-schedule tenders:** should a compliance check be per schedule (DRT A vs B) rather than per tender?

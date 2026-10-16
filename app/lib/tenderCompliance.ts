@@ -165,6 +165,11 @@ export function sanralConventionalDocumentChecks(input: {
   briefingTask: { status: string; due_date: string | null } | null;
   experience: ExperienceSummary | null;
   experienceAvailable: boolean;
+  // The tender's own experience-evidence rule, evaluated against the
+  // Experience Library (experienceEvidence.ts evaluateEvidence) - labelled
+  // as an assumption there when the tender's rule hasn't been read. When
+  // given, it replaces the fixed SANRAL-B6 reading below.
+  evidence?: { status: ComplianceStatus; label: string; detail: string } | null;
 }): ComplianceItem[] {
   const c = input.company;
   const items: ComplianceItem[] = [];
@@ -411,7 +416,9 @@ export function sanralConventionalDocumentChecks(input: {
   }
 
   // B6 - past performance (15 functionality points) - company experience.
-  if (!input.experienceAvailable) {
+  if (input.experienceAvailable && input.evidence) {
+    items.push({ key: "past_performance", form: "B6", label: input.evidence.label, mandatory: false, status: input.evidence.status, detail: input.evidence.detail });
+  } else if (!input.experienceAvailable) {
     items.push({
       key: "past_performance",
       form: "B6",

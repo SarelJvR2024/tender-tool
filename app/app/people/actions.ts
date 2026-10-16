@@ -238,3 +238,44 @@ export async function uploadCv(formData: FormData) {
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}`);
 }
+
+/**
+ * Which tender roles this person's CV qualifies them for - set by the
+ * company, by hand (Sarel, 2026-10-16: "companies need to specify which
+ * sanral roles a persons cv fits"). Writes person_role_eligibility (0016):
+ * the submitted checkbox set replaces the person's current tags. RLS checks
+ * the person belongs to the caller's company.
+ */
+export async function saveRoleEligibility(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const personId = str(formData, "person_id");
+  if (!personId) redirect("/people");
+  const wanted = new Set(formData.getAll("role_code").map((v) => String(v)).filter(Boolean));
+
+  const { data: current, error: readError } = await supabase
+    .from("person_role_eligibility")
+    .select("role_code")
+    .eq("person_id", personId);
+  if (readError) redirect(`/people/${personId}?error=${encodeURIComponent(readError.message)}`);
+  const have = new Set((current ?? []).map((r) => r.role_code as string));
+
+  const toRemove = [...have].filter((c) => !wanted.has(c));
+  const toAdd = [...wanted].filter((c) => !have.has(c));
+
+  if (toRemove.length > 0) {
+    const { error } = await supabase.from("person_role_eligibility").delete().eq("person_id", personId).in("role_code", toRemove);
+    if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}`);
+  }
+  if (toAdd.length > 0) {
+    const { error } = await supabase.from("person_role_eligibility").insert(
+      toAdd.map((role_code) => ({ company_id: companyId, person_id: personId, role_code, tagged_by: user?.id ?? null }))
+    );
+    if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/people/${personId}`);
+  redirect(`/people/${personId}?roles_saved=1`);
+}

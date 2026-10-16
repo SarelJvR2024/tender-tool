@@ -11,6 +11,7 @@ import {
   type VaultDocumentKind,
 } from "@/lib/vaultDocuments";
 import { SiteNav } from "../_components/SiteNav";
+import { OfficeLocations } from "./OfficeLocations";
 
 // Depends on the signed-in user's session/company row on every request
 // (via RLS), same reason as dashboard/page.tsx - can't be prerendered.
@@ -136,6 +137,14 @@ export default async function CompanyPage({
         )}
 
         {row && (editing ? <EditForm company={row} /> : <ReadOnlyView company={row} docUrls={docUrls} />)}
+
+        {/* Office locations (0015) - self-contained, its own forms. */}
+        {row && !editing && saved === "office" && (
+          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+            Office locations updated.
+          </div>
+        )}
+        {row && !editing && <OfficeLocations />}
       </div>
     </div>
   );

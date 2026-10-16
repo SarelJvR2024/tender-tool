@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { savePerson, deletePerson, saveProject, deleteProject, uploadCv } from "../actions";
+import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility } from "../actions";
 import { SiteNav } from "../../_components/SiteNav";
+import { ROLE_FAMILY_LABEL, ROLE_FAMILY_ORDER, TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 
 // Per-request: loads one real person's record (or a blank "new" form) under
 // RLS. Same Cache Components escape hatch as dashboard/page.tsx and ../page.tsx.
@@ -115,10 +116,10 @@ export default async function PersonDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; roles_saved?: string }>;
 }) {
   const { id } = await params;
-  const { error: errorParam } = await searchParams;
+  const { error: errorParam, roles_saved: rolesSaved } = await searchParams;
   const isNew = id === "new";
   const supabase = await createClient();
 
@@ -127,10 +128,22 @@ export default async function PersonDetailPage({
   let cvUploads: CvUpload[] = [];
   let generatedCvs: GeneratedCv[] = [];
   let signedUrls: Record<string, string> = {};
+  let roleCatalog: TenderRole[] = [];
+  let taggedRoles = new Set<string>();
+  let rolesError: string | null = null;
 
   if (!isNew) {
     const { data } = await supabase.from("people").select("*").eq("id", id).maybeSingle();
     person = data as Person | null;
+
+    // Tender role catalog + this person's tags (migration 0016).
+    const [{ data: roleRows, error: roleErr }, { data: tagRows }] = await Promise.all([
+      supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS).order("sort_order"),
+      supabase.from("person_role_eligibility").select("role_code").eq("person_id", id),
+    ]);
+    roleCatalog = (roleRows ?? []) as TenderRole[];
+    taggedRoles = new Set((tagRows ?? []).map((r) => r.role_code as string));
+    rolesError = roleErr?.message ?? null;
 
     const { data: projectRows } = await supabase
       .from("projects")
@@ -285,6 +298,65 @@ export default async function PersonDetailPage({
 
         {!isNew && (
           <>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+              Tender roles this CV qualifies for
+            </h2>
+            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+              Your company decides which tender roles {person!.name}&apos;s CV fits - Tender Tool uses this tag on each
+              tender&apos;s compliance check instead of guessing from years of experience or registration. The roles are the
+              ones real tenders ask for: SANRAL&apos;s Book 1 key-person codes (a Design Specialist is tendered per
+              specialism) and the key personnel other buyers name. Hover a role to see which tender it came from.
+            </div>
+            {rolesSaved === "1" && (
+              <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "9px 14px", marginBottom: 12, fontSize: 13, color: "#15803D" }}>
+                Role tags saved.
+              </div>
+            )}
+            {rolesError ? (
+              <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 14px", marginBottom: 20, fontSize: 12, color: "#92400E" }}>
+                Couldn&apos;t load the role catalog ({rolesError}) - migration 0016 may not be applied yet.
+              </div>
+            ) : (
+              <form action={saveRoleEligibility} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", marginBottom: 24 }}>
+                <input type="hidden" name="person_id" value={person!.id} />
+                <div style={{ fontSize: 12, color: "#16233B", marginBottom: 8 }}>
+                  {taggedRoles.size === 0
+                    ? "Not tagged for any role yet."
+                    : `Tagged for: ${roleCatalog.filter((r) => taggedRoles.has(r.code)).map((r) => r.title).join(", ")}.`}
+                </div>
+                {ROLE_FAMILY_ORDER.map((family) => {
+                  const familyRoles = roleCatalog.filter((r) => r.family === family);
+                  if (familyRoles.length === 0) return null;
+                  const count = familyRoles.filter((r) => taggedRoles.has(r.code)).length;
+                  return (
+                    <details key={family} open={count > 0 || family === "sanral_consultant"} style={{ borderTop: "1px solid #F0EEE6", padding: "8px 0" }}>
+                      <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#16233B" }}>
+                        {ROLE_FAMILY_LABEL[family] ?? family}
+                        {count > 0 && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#15803D", background: "#DCFCE7", borderRadius: 100, padding: "2px 8px" }}>{count} tagged</span>}
+                      </summary>
+                      <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px", marginTop: 8 }}>
+                        {familyRoles.map((r) => (
+                          <label key={r.code} title={r.source} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: "#16233B", minHeight: 32 }}>
+                            <input type="checkbox" name="role_code" value={r.code} defaultChecked={taggedRoles.has(r.code)} style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }} />
+                            <span>
+                              {r.title}
+                              {r.registration_body && <span style={{ color: "#9A9684", fontSize: 11 }}> · {r.registration_body}</span>}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </details>
+                  );
+                })}
+                <button
+                  type="submit"
+                  style={{ marginTop: 10, minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}
+                >
+                  Save role tags
+                </button>
+              </form>
+            )}
+
             <h2 style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
               CV documents
             </h2>

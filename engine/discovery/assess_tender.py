@@ -48,7 +48,7 @@ import urllib.request
 import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from score_outlook import estimate_score_outlook  # noqa: E402
+from score_outlook import estimate_score_outlook, PROVINCES  # noqa: E402
 
 STRUCTURAL_MARKERS = [
     "tender data", "returnable schedule", "conditions of tender",
@@ -220,6 +220,7 @@ FALLBACK_PROFILE = {
     "bee_level": None,
     "black_ownership_pct": None,
     "has_cidb_grading": False,
+    "offices": [],
 }
 
 
@@ -247,7 +248,27 @@ def load_company_profile(path=None):
         "bee_level": company.get("bee_level"),
         "black_ownership_pct": company.get("black_ownership_pct"),
         "has_cidb_grading": bool(has_cidb),
+        "offices": offices_from_company(company),
     }
+
+
+def offices_from_company(company):
+    """Structured office locations for locality scoring (score_outlook.py
+    match_locality): company.offices[] if the profile has them - same shape
+    as the app's company_offices table (province, district_municipality,
+    local_municipality, town). Otherwise, if the registered address names a
+    province, ONE office is derived from it and flagged derived=True, so the
+    outlook says it's an inference from the address, not a confirmed office
+    record. The district/municipality is never guessed from a street address."""
+    offices = company.get("offices")
+    if isinstance(offices, list) and offices:
+        return offices
+    addr = company.get("registered_address") or ""
+    for prov in PROVINCES:
+        if re.search(re.escape(prov).replace(r"\-", "[- ]?"), addr, re.IGNORECASE):
+            return [{"province": prov, "district_municipality": None, "local_municipality": None,
+                     "town": None, "office_kind": "registered_office", "derived": True}]
+    return []
 
 
 def assess_release(release, profile, fetch_document=True, max_documents=3):
