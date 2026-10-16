@@ -91,3 +91,95 @@ export async function requestTenderCv(formData: FormData) {
 export async function markFieldReviewed(fieldKey: string): Promise<void> {
   void fieldKey; // kept in the signature for when reviewed_at lands - see TODO above.
 }
+
+/**
+ * Tender task/deadline timeline (Tender Workspace page, alongside the
+ * readiness report per the build task's own requirement). Standard
+ * milestones (closing/briefing/clarification/submission) and manual tasks
+ * live in the same table (tender_tasks, migration 0009) - this action only
+ * ever inserts a manual one: free-text description + due date, no fixed
+ * dropdown of task types, per the explicit spec requirement ("this must NOT
+ * be a fixed enum of anticipated task types"). kind/is_standard are left at
+ * their defaults (null/false) - only the auto-seed path below sets kind.
+ */
+export async function addTenderTask(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const tenderId = formData.get("tender_id") as string | null;
+  const description = (formData.get("description") as string | null)?.trim();
+  const dueDate = (formData.get("due_date") as string | null) || null;
+
+  if (!tenderId) redirect("/tenders");
+  if (!description) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("A task needs a description.")}`);
+  }
+
+  const { error } = await supabase.from("tender_tasks").insert({
+    company_id: companyId,
+    tender_id: tenderId,
+    description,
+    due_date: dueDate,
+    created_by: user?.id ?? null,
+  });
+  if (error) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}`);
+  }
+
+  revalidatePath(`/tenders/${tenderId}`);
+  redirect(`/tenders/${tenderId}`);
+}
+
+const TASK_STATUSES = ["not_started", "in_progress", "done"] as const;
+export type TenderTaskStatus = (typeof TASK_STATUSES)[number];
+
+/**
+ * Inline status advance ("not started" -> "in progress" -> "done"), the real
+ * persisted equivalent of review-button.tsx's pattern (same tap-a-button-to-
+ * advance shape, but this one actually writes - tender_tasks.status exists,
+ * unlike field_provenance.reviewed_at which review-button.tsx is stuck
+ * without).
+ */
+export async function advanceTaskStatus(taskId: string, tenderId: string, currentStatus: TenderTaskStatus) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+
+  const idx = TASK_STATUSES.indexOf(currentStatus);
+  const next = TASK_STATUSES[Math.min(idx + 1, TASK_STATUSES.length - 1)];
+
+  await supabase
+    .from("tender_tasks")
+    .update({ status: next })
+    .eq("id", taskId)
+    .eq("company_id", companyId);
+
+  revalidatePath(`/tenders/${tenderId}`);
+}
+
+/**
+ * Idempotent auto-seed of the one standard milestone whose date is already
+ * known elsewhere (tenders.closing_date) - briefing/clarification/submission
+ * stay manual-entry-only until their dates are actually extracted somewhere
+ * (see migration 0009's header comment). Uses upsert + ignoreDuplicates
+ * against the partial unique index on (company_id, tender_id, kind) so two
+ * concurrent page views can't both insert a duplicate closing-milestone row
+ * - no select-then-insert race.
+ */
+export async function ensureClosingMilestone(tenderId: string, closingDate: string | null) {
+  if (!closingDate) return;
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+
+  await supabase.from("tender_tasks").upsert(
+    {
+      company_id: companyId,
+      tender_id: tenderId,
+      description: "Tender closes",
+      due_date: closingDate.slice(0, 10),
+      kind: "closing",
+      is_standard: true,
+    },
+    { onConflict: "company_id,tender_id,kind", ignoreDuplicates: true }
+  );
+}

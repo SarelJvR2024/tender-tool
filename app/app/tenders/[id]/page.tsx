@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ReviewButton } from "./review-button";
-import { requestTenderCv } from "./actions";
+import { TaskStatusButton } from "./task-status-button";
+import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
@@ -37,6 +38,15 @@ type Assignment = {
   // 0001_init_schema.sql's tender_pack_assignments.confirmed_person_id
   // references people(id).
   people: { name: string } | null;
+};
+
+type TenderTask = {
+  id: string;
+  description: string;
+  due_date: string | null;
+  status: TenderTaskStatus;
+  kind: string | null;
+  is_standard: boolean;
 };
 
 type GeneratedCv = {
@@ -109,6 +119,25 @@ export default async function TenderWorkspacePage({
   }
 
   const tenderFacts = tender as TenderFacts | null;
+
+  // Tender task/deadline timeline (alongside the readiness report, not a
+  // separate page - explicit build requirement). Auto-seed the one standard
+  // milestone whose date is already known (closing_date) before reading the
+  // list back, so it's never missing on first view. Independent of whether
+  // a tender_pack exists yet - tasks ("line up a subcontractor", "ask the
+  // client about a reference") are often relevant before a pack is created.
+  let tasks: TenderTask[] = [];
+  let tasksError: { message: string } | null = null;
+  if (tenderFacts) {
+    await ensureClosingMilestone(id, tenderFacts.closing_date);
+    const { data: taskRows, error } = await supabase
+      .from("tender_tasks")
+      .select("id, description, due_date, status, kind, is_standard")
+      .eq("tender_id", id)
+      .order("due_date", { ascending: true, nullsFirst: false });
+    tasks = (taskRows ?? []) as TenderTask[];
+    tasksError = error ? { message: error.message } : null;
+  }
 
   // RLS scopes this to the signed-in user's own company - there's at most
   // one pack per (company, tender) per the unique constraint in
@@ -210,6 +239,8 @@ export default async function TenderWorkspacePage({
                 )}
               </div>
             </div>
+
+            <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} />
 
             {packError && <ErrorBanner message={`Could not load this company's pack for this tender: ${packError.message}`} />}
 
@@ -362,6 +393,120 @@ export default async function TenderWorkspacePage({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+const KIND_TAG: Record<string, string> = {
+  closing: "Closing",
+  briefing: "Briefing",
+  clarification: "Clarification",
+  submission: "Submission",
+};
+
+function taskDaysLeft(dueDate: string | null): number | null {
+  if (!dueDate) return null;
+  const target = new Date(dueDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+/**
+ * Task/deadline timeline - standard milestones (kind set, auto-seeded where
+ * the date is known) plus free-text manual tasks, same table, same list,
+ * ordered by due date. The "add task" form is deliberately just description
+ * + due date - no dropdown of task types, per the explicit spec requirement.
+ */
+function TaskTimeline({
+  tenderId,
+  tasks,
+  error,
+}: {
+  tenderId: string;
+  tasks: TenderTask[];
+  error: { message: string } | null;
+}) {
+  const addTaskWithId = addTenderTask;
+
+  return (
+    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Tasks &amp; milestones</div>
+      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+        Closing date is seeded automatically. Briefing, clarification and submission dates aren&apos;t
+        extracted automatically yet - add them here when known. Add anything else specific to this
+        tender (lining up a subcontractor, sourcing a product, a reference letter from a client) as a
+        plain task - there&apos;s no fixed list to pick from.
+      </div>
+
+      {error && <ErrorBanner message={`Could not load tasks: ${error.message}`} />}
+
+      {!error && tasks.length === 0 && (
+        <div style={{ fontSize: 12, color: "#9A9684", padding: "6px 0 12px" }}>No tasks yet.</div>
+      )}
+
+      {!error && tasks.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", marginBottom: 14 }}>
+          {tasks.map((t) => {
+            const left = taskDaysLeft(t.due_date);
+            const overdue = left !== null && left < 0 && t.status !== "done";
+            return (
+              <div
+                key={t.id}
+                style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: "10px 0", borderTop: "1px solid #F0EEE6" }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{t.description}</span>
+                    {t.kind && (
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#16233B", background: "#F0EEE6", borderRadius: 100, padding: "2px 8px" }}>
+                        {KIND_TAG[t.kind] ?? t.kind}
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: overdue ? "#B91C1C" : "#6B6758", marginTop: 2 }}>
+                    {t.due_date ? `Due ${new Date(t.due_date).toLocaleDateString()}` : "No due date set"}
+                    {left !== null && t.status !== "done" && (
+                      <span style={{ marginLeft: 6, fontWeight: 600 }}>
+                        ({left >= 0 ? `${left} day${left === 1 ? "" : "s"} left` : `${-left} day${-left === 1 ? "" : "s"} overdue`})
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <TaskStatusButton taskId={t.id} tenderId={tenderId} status={t.status} />
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <form action={addTaskWithId} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: tasks.length > 0 ? "1px solid #F0EEE6" : undefined, paddingTop: tasks.length > 0 ? 14 : 0 }}>
+        <input type="hidden" name="tender_id" value={tenderId} />
+        <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Add a task</label>
+          <input
+            type="text"
+            name="description"
+            placeholder="e.g. Confirm subcontractor for electrical works"
+            required
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit" }}
+          />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Due date</label>
+          <input
+            type="date"
+            name="due_date"
+            style={{ minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit" }}
+          />
+        </div>
+        <button
+          type="submit"
+          style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          Add task
+        </button>
+      </form>
     </div>
   );
 }
