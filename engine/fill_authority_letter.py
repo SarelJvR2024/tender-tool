@@ -38,13 +38,17 @@ def build_letter(profile_path, logo_path, out_path, signatory_name, signatory_ca
 
     d = docx.Document()
 
-    # Letterhead: company logo at the top of the page.
-    p = d.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = p.add_run()
-    run.add_picture(logo_path, width=Inches(1.8))
+    # Letterhead: company logo at the top of the page. A company with no logo
+    # uploaded yet (companies.logo_storage_path null - e.g. a synthetic test
+    # company, engine/pack/assemble_pack.py) gets the same letter without it,
+    # rather than no letter at all.
+    if logo_path:
+        p = d.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run()
+        run.add_picture(logo_path, width=Inches(1.8))
 
-    d.add_paragraph()
+        d.add_paragraph()
 
     p = d.add_paragraph("TO WHOM IT MAY CONCERN")
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER

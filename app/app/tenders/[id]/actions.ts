@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 
 /**
  * Tenant check, same pattern as app/app/people/actions.ts's own
@@ -71,6 +72,81 @@ export async function requestTenderCv(formData: FormData) {
 
   revalidatePath(`/tenders/${tenderId}`);
   redirect(`/tenders/${tenderId}`);
+}
+
+/**
+ * "Generate submission pack" (Tender Workspace). Records a request in
+ * pack_generation_jobs (migration 0017) - same shape as requestTenderCv() -
+ * that engine/pack/process_pack_jobs.py fulfils out-of-band by running the
+ * real SANRAL fill engines and merging one ordered, page-numbered PDF.
+ *
+ * Gating is recomputed here from the compliance report's own data
+ * (loadTenderCompliance), not trusted from the form:
+ *   - hard stop: a required position with no confirmed key person, a missing
+ *     blank template, or a pack already queued/generating - the bridge would
+ *     only fail (or duplicate the work);
+ *   - explicit acknowledgement: any gap the report shows (mandatory or not,
+ *     "confirm by hand", or a family whose returnable list isn't mapped).
+ *     The gaps shown at request time are stored with the row.
+ */
+export async function requestSubmissionPack(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const tenderId = formData.get("tender_id") as string | null;
+  const tenderPackId = formData.get("tender_pack_id") as string | null;
+  const acknowledged = formData.get("acknowledge_gaps") === "on";
+  if (!tenderId) redirect("/tenders");
+  const fail = (msg: string) => redirect(`/tenders/${tenderId}?error=${encodeURIComponent(msg)}#submission-pack`);
+  if (!tenderPackId) fail("Create and confirm a tender pack for this tender before generating a submission pack.");
+
+  const readiness = packReadiness(await loadTenderCompliance(tenderId));
+  if (readiness.unfilledPositions.length > 0) {
+    fail(`Confirm a key person for ${readiness.unfilledPositions.join(", ")} before generating the pack.`);
+  }
+
+  const { data: docRows } = await supabase.from("tender_documents").select("doc_type").eq("tender_id", tenderId);
+  const onFile = new Set((docRows ?? []).map((d) => d.doc_type as string));
+  const missingTemplates = PACK_REQUIRED_TEMPLATES.filter((t) => !onFile.has(t));
+  if (missingTemplates.length > 0) {
+    fail(`This tender's blank SANRAL templates aren't uploaded yet (${missingTemplates.join(", ")}).`);
+  }
+
+  const { data: active } = await supabase
+    .from("pack_generation_jobs")
+    .select("id")
+    .eq("tender_id", tenderId)
+    .in("status", ["requested", "generating"])
+    .limit(1);
+  if (active && active.length > 0) fail("A submission pack is already queued for this tender.");
+
+  const hasGaps =
+    !readiness.checked ||
+    readiness.mandatoryMissing.length + readiness.missing.length + readiness.toConfirm.length > 0;
+  if (hasGaps && !acknowledged) {
+    fail("The compliance check shows gaps - tick the box to generate a draft pack anyway.");
+  }
+
+  const { error } = await supabase.from("pack_generation_jobs").insert({
+    company_id: companyId,
+    tender_id: tenderId,
+    tender_pack_id: tenderPackId,
+    status: "requested",
+    readiness_snapshot: {
+      checked: readiness.checked,
+      mandatory_missing: readiness.mandatoryMissing,
+      missing: readiness.missing,
+      to_confirm: readiness.toConfirm,
+      unfilled_positions: readiness.unfilledPositions,
+    },
+    acknowledged_gaps: hasGaps && acknowledged,
+    requested_by: user?.id ?? null,
+  });
+  if (error) fail(error.message);
+
+  revalidatePath(`/tenders/${tenderId}`);
+  redirect(`/tenders/${tenderId}#submission-pack`);
 }
 
 /**

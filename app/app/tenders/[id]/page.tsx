@@ -7,6 +7,7 @@ import { ComplianceReport } from "./compliance-report";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
 import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
+import { SubmissionPack } from "./submission-pack";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -110,10 +111,15 @@ function daysLeft(closingDate: string | null): number | null {
 
 export default async function TenderWorkspacePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ error?: string }>;
 }) {
   const { id } = await params;
+  // Every action on this page (requestTenderCv, addTenderTask,
+  // requestSubmissionPack) reports a refusal as ?error=... - shown at the top.
+  const { error: actionError } = await searchParams;
   const supabase = await createClient();
 
   const { data: tender, error: tenderError } = await supabase
@@ -226,12 +232,18 @@ export default async function TenderWorkspacePage({
   // document/people/experience/score sections for this one family - every
   // other family gets a single "not mapped yet" card with nothing to jump to.
   const isSanralFamily = tenderFacts?.family === SANRAL_CONVENTIONAL_FAMILY;
+  // The submission pack runs the SANRAL fill engines, which handle both SANRAL
+  // template families (engine/pack/assemble_pack.py FILLERS) - not other buyers.
+  const showSubmissionPack =
+    !!tenderPack && (isSanralFamily || tenderFacts?.family === "RRM Consultant Tender");
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
       <SiteNav active="dashboard" />
 
       <div style={{ flex: 1, padding: "20px 16px", maxWidth: 820, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+        {actionError && <ErrorBanner message={actionError} />}
+
         {tenderError && (
           <ErrorBanner message={`Could not load this tender: ${tenderError.message}`} />
         )}
@@ -312,6 +324,7 @@ export default async function TenderWorkspacePage({
                 {isSanralFamily && <JumpLink href="#score-estimate" label="Score" />}
                 <JumpLink href="#tasks-milestones" label="Tasks" />
                 {tenderPack && assignments.length > 0 && <JumpLink href="#key-positions" label="CVs" />}
+                {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" />}
               </div>
             )}
 
@@ -468,6 +481,9 @@ export default async function TenderWorkspacePage({
                 })}
               </div>
             )}
+
+            {/* Whole SANRAL submission pack as one PDF (pack_generation_jobs, 0017). */}
+            {showSubmissionPack && tenderPack && <SubmissionPack tenderId={id} tenderPackId={tenderPack.id} />}
           </>
         )}
       </div>

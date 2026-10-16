@@ -15,10 +15,17 @@ FROM python:3.13-slim
 
 # LibreOffice Writer (headless, no GUI) for generate_cv.py's .docx -> .pdf step,
 # plus metric-compatible fonts so Word layouts (Arial/Times/Calibri) don't reflow.
+# The pack bridge (engine/pack/process_pack_jobs.py) also needs Calc and the
+# Python-UNO bridge: print_reports.py drives LibreOffice through `import uno`
+# to recalculate the filled SANRAL workbook and print the Form B reports.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      libreoffice-writer-nogui fonts-liberation fonts-crosextra-carlito fonts-dejavu-core \
+      libreoffice-writer-nogui libreoffice-calc-nogui python3-uno \
+      fonts-liberation fonts-crosextra-carlito fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
+# python3-uno installs for Debian's own python3; expose it to this image's
+# python3 too. A .pth line is appended to sys.path, so pip's packages still win.
+RUN echo /usr/lib/python3/dist-packages > "$(python3 -c 'import site; print(site.getsitepackages()[0])')/debian-uno.pth"
 
 WORKDIR /srv/tender-tool
 COPY engine/worker/requirements.txt engine/worker/requirements.txt

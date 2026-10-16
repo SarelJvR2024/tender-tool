@@ -24,13 +24,15 @@ Two independent codebases share this repo: `engine/` (Python, no shared runtime 
 app — invoked by hand, cron, or the always-on bridge worker (`engine/worker/`), writes to Supabase via the
 service-role key, never imported by Next.js) and `app/` (Next.js 16 web app, reads/writes
 Supabase directly under RLS). They meet only at the Supabase schema
-(`app/supabase/migrations/`, now `0001`–`0016`) and at `config/klipcorp_profile.json`
+(`app/supabase/migrations/`, now `0001`–`0017`) and at `config/klipcorp_profile.json`
 (gitignored real data; `config/test_companies/*.json` are the committed synthetic stand-ins).
 Three buyer-filling/generation engines exist side by side under `engine/`: SANRAL (mature,
 root-level scripts), `engine/general/` (one script, `.docx`-only SBD forms), and `engine/cv/`
 (CV document generator). The CV engine now has two real integration points in `app/`
 (upload-mode choice, tender-specific generation request) bridged asynchronously by
-`engine/cv/process_cv_jobs.py` — the general SBD filler still has none. See Gaps.
+`engine/cv/process_cv_jobs.py`. The SANRAL engines now also have one: the whole submission pack
+(`engine/pack/`, migration `0017`), bridged by `engine/pack/process_pack_jobs.py` the same way —
+the general SBD filler still has none. See Gaps.
 
 ## Built and verified — working today
 
@@ -52,24 +54,25 @@ root-level scripts), `engine/general/` (one script, `.docx`-only SBD forms), and
 | Role-based daily digest (`engine/notify/daily_digest.py`, migration `0010`'s `tender_role`) | One filtered digest per person per a 5-role matrix (full_cycle/validator/cv_admin/finance/viewer), reusing `assess_tender.py`, `watch_new_tenders.py`'s constants, and `watch_deadlines.py`'s functions directly rather than reimplementing any of them | Run in `--mode local` against the real OCDS feed + real company profile: 5 correct per-role digests with correct section visibility confirmed by reading the output JSON back. `--mode live` is written but unverified — no live Supabase project exists |
 | Document-expiry + tender-task reminders (`engine/compliance/watch_deadlines.py`) | Finds documents/tasks entering their reminder lead-time window, against a seen-store so a given (item, date) only reports once. Tracks the six vault expiry columns above (no longer COID-only); the bank letter uses a 30-day lead | Same family/boundary as `watch_new_tenders.py` (report-only, no send); lead times matched to `app/lib/dates.ts`'s existing 60-day threshold rather than inventing a second number for the same concept |
 | Bridge worker: automatic fulfilment of queued CV/pack requests (`engine/worker/`: `poll_loop.py`, `run_bridges.py`, `Dockerfile`; `process_cv_jobs.py --loop`; CI `.github/workflows/bridge-worker-ci.yml`) | One always-on process runs every bridge (`process_cv_jobs.py` now; `engine/pack/process_pack_jobs.py` picked up automatically when it lands at that path with `--once`) every 30 s. A failed poll doesn't kill it, and SIGTERM stops it cleanly. Jobs are claimed atomically (`requested`→`generating` only if still `requested`), so overlapping workers don't double-build. One-shot stays the default. **Built and tested, NOT deployed**: the recommended host is Railway Hobby ($5/mo), and it needs Sarel's own account and the Supabase keys. Steps in `docs/specs/Automated-Fulfillment-Deployment.md` | `engine/worker/test_poll_loop.py` against an in-memory fake Supabase: a job inserted during the sleep is picked up on the next cycle, a failed poll is survived, a pre-claimed row is skipped, SIGTERM mid-sleep exits in under 1 s. The container was built and run locally: real `.docx`+`.pdf` produced inside it, 9 MiB idle. `--once`, `--self-test` and no-credentials output are identical to the pre-change code on the same 3-job queue. Never run against a live Supabase (Gap #9) |
-| Admin test-company harness (`engine/admin_harness.py`, item 30) | Runs test companies through the real SANRAL pipeline, flags shape changes vs. stored baseline | Self-verifying by design (3 real bugs caught per its own commit `d86c84e`) — but **SANRAL-only**, see Gaps |
+| SANRAL submission pack: one ordered PDF (`engine/pack/`: `assemble_pack.py`, `pdf_merge.py`, `process_pack_jobs.py`; migration `0017` `pack_generation_jobs`; "Generate submission pack" card on the Tender Workspace, `submission-pack.tsx`) | Runs the real engines in order — `fingerprint.py` check, `fill_conventional.py`/`fill_tender.py`, `print_reports.py` (Forms B1-B2 per slot, B3, B4, B5, B7), `fill_financial.py` (+ hours only from a complete capture), `run_forms_pipeline.py` (C.1.1.1, C.1.2.3, A-Forms, `ACTIONS_TO_SIGN.md`), `fill_authority_letter.py`, `make_envelope_covers.py` — then merges them with the vault documents (0014) and each position's newest ready tender CV, else as-is CV upload, into one PDF. The PDF has an outer cover, a contents page with page ranges and a "Not included" table with reasons, "Page X of N" on every page, and bookmarks per envelope and section. The filled `.xlsm` workbooks, `ACTIONS_TO_SIGN.md` and the manifest are uploaded alongside it. The card gates on the compliance report's own gaps (shared loader `compliance-data.ts`). It hard-stops on an unconfirmed position, missing blank templates or a pack already queued, and needs an explicit "generate a draft anyway" tick for any other gap; the gaps shown are stored on the row | Real chain on **real Klipcorp data + the real downloaded R.396-010-2025/1F templates** (local run, not committed: PII): 78 pages, 1-page contents, every contents entry matches its real start page, stamps read back on pages 1/2/41/43/56/58/78, 23 bookmarks resolve to the right pages, Henning's ID on his B1 page. Bridge `process_job()` driven end-to-end against all 17 migrations replayed on scratch Postgres (`engine/pack/bridge_selftest.py`): job `requested`→`ready`, 65-page PDF, `verify_pack()` clean, unconfirmed-position job → `failed` with confirm gate's reason, stale `generating` → `failed`. `0017` RLS: cross-company insert rejected, bad status rejected, other company's storage prefix rejected. Built in the bridge-worker Docker image: a 69-page pack builds inside it. **Never run against a live Supabase (Gap #9)** |
+| Admin test-company harness (`engine/admin_harness.py`, item 30) | Runs test companies through the real SANRAL pipeline, flags shape changes vs. stored baseline | Self-verifying by design (3 real bugs caught per its own commit `d86c84e`) — but **SANRAL-only**, see Gaps. `--pack` (opt-in, needs LibreOffice, ~1 min per run) also runs the whole submission-pack chain per test company, including `generate_cv.py`. It reads the PDF back and baselines its shape (`state/admin_harness_pack_baselines/`). Today: `complete_co` builds (71 pages on this host, 69 in the worker image: different LibreOffice/fonts, so baselines are per-environment). `expired_certs_co` and `new_co` are refused by the real filler (`'MO/MA'` is not a Conventional project-type option; ECSA level null), which is recorded as their baseline outcome |
 | Admin results console (`app/app/admin/page.tsx`, item 31) | Plain list of harness runs (test company × tender, status, last run) | Real, reads `admin_harness_runs` (migration `0005`, column renamed by `0006`). **Simpler than the spec's description** — no inline rendering of generated documents, no "mark reviewed" workflow yet |
 | Company vault (`app/app/company/page.tsx`, migration `0014`) | Company profile plus six tracked compliance documents: COID, SARS TCS PIN, PI insurance, ISO 9001, bank confirmation letter (generated 3-month validity), and B-BBEE proof (certificate or QSE/EME affidavit). Each has an expiry badge and an upload/replace to the private `company-documents` bucket | Read-only + edit form both real; expiry coloring shared via `app/lib/dates.ts`. `0014` was replayed with functional SQL checks (generated column, check constraint, tenant-scoped update and storage prefix). The upload has never been run against a live project |
 | Onboarding (`app/app/onboarding/`) | One field (legal name) → company + owner row, atomically via `create_company_and_join` | Matches spec's "minimum to get started" principle exactly |
 | Route guard (`app/proxy.ts`) | Redirects signed-out users to `/login`, no-company users to `/onboarding` | Covers every real app route, including `/experience` (added this round) |
-| RLS policy set (`0001`–`0016`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 16 migrations against a fresh scratch Postgres this pass, all still apply cleanly |
+| RLS policy set (`0001`–`0017`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 16 migrations against a fresh scratch Postgres this pass, all still apply cleanly |
 
 ## In progress / partially built
 
 - **Item 31 (admin review console)** — data side and a plain list UI exist; the richer "look at the actual filled document inline, mark reviewed" workflow described in the spec does not yet.
 - **CV upload-and-AI-extract** — `cv_uploads.mode = 'ai_extract'` records the request and a status column exists for it, but the actual extraction step (reading the file, proposing field values for confirm/correct) is not built. The "use as-is" path (`mode = 'as_is'`) works end to end; AI-extract stops at "request recorded."
-- **Automatic CV/pack fulfilment** — the worker is built and tested (Built table), but nothing runs it until Sarel deploys it (Railway steps in `Automated-Fulfillment-Deployment.md`). Until then, queued requests wait in `requested`, or someone runs `python3 engine/worker/run_bridges.py --loop` by hand. The pack bridge (`process_pack_jobs.py`) itself is another agent's in-progress work.
+- **Automatic CV/pack fulfilment** — the worker is built and tested (Built table), but nothing runs it until Sarel deploys it (Railway steps in `Automated-Fulfillment-Deployment.md`). Until then, queued requests wait in `requested`, or someone runs `python3 engine/worker/run_bridges.py --loop` by hand. The pack bridge (`engine/pack/process_pack_jobs.py`) has landed at the path `run_bridges.py` expects, with the same `--once`/`--loop` contract. `run_bridges.py --once --bridge pack` drives it, and the worker Dockerfile now installs Calc + `python3-uno` for it.
 - **Role-based digest's `--mode live`** — written, reads the real schema shape, but never run against a live Supabase project (none exists in this environment).
 
 ## Known gaps (named, not just "incomplete")
 
 1. **The general SBD engine still has zero path into the web app.** `engine/general/fill_sbd_docx.py` is a real, verified CLI script with no caller anywhere in `app/` — confirmed by grep, zero hits. This is narrower than it was two passes ago: the CV engine's equivalent gap is now closed (see Built table), so this is the one remaining engine capability with no way for a real customer to reach it. Needs a product decision (own page? folded into a general pack builder?), not a mechanical fix.
-2. **`admin_harness.py` still only exercises the SANRAL path.** Neither the general-engine filler nor the CV generator has any test-company regression coverage. A buyer wording variance or a `people`/`projects` schema change could silently break either and nothing would catch it the way SANRAL template changes are caught.
+2. **`admin_harness.py` still only exercises the SANRAL path.** Narrowed: `--pack` now covers the SANRAL submission pack end to end, and the tender-customised CV generation inside it. The general-engine filler still has no test-company regression coverage, and two of the three fixtures stop at the filler (see Built table). A buyer wording variance or a `people`/`projects` schema change could silently break either and nothing would catch it the way SANRAL template changes are caught.
 3. **CV AI-extraction is not built** (see In progress). `app/app/people/page.tsx` capture is otherwise real — upload, as-is mode, and standard-format pre-generation all work; only the AI-extract step itself is a recorded-but-unfulfilled request today.
 4. **Test-company coverage is 3 profiles, not 4.** The spec's own item-30 description names a 4th scenario — "no confirmed specialist for a position" — with no matching fixture. Low priority, spec itself calls this an open question.
 5. **`is_test_company` exists in the schema; nothing reads or sets it yet.** `engine/admin_harness.py` still reads `config/test_companies/*.json`, not a real company row from Supabase — that's a genuine rewrite needing a live Supabase project to build and verify against, not a column add. No UI sets the flag either. Both are named follow-ups, not silently dropped — full history and sourcing caveats in the pass-history section below.
@@ -79,7 +82,14 @@ root-level scripts), `engine/general/` (one script, `.docx`-only SBD forms), and
 9. **No live Supabase project exists anywhere in this project.** This is the single biggest standing verification gap — every Supabase-reading/writing piece built across every pass (CV uploads, experience library, compliance report, daily digest live mode, admin harness Supabase wiring) is verified only by schema replay and/or local-mode runs, never against real rows. Named once here rather than repeated in every table row.
 10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
-11. **A hard-killed worker leaves a job stuck in `generating`.** This happens on out-of-memory or a host crash; a normal SIGTERM is handled. `generated_cvs` has no claimed-at timestamp, so the worker can't tell a stuck job from a slow one. The fix is a small migration (`claimed_at`) plus a reclaim rule. It was deliberately not added alongside the concurrent `0017`, to avoid a migration-number collision. Until then, reset a stuck row to `requested` by hand.
+11. **A hard-killed worker leaves a job stuck in `generating`** (CV jobs; pack jobs are handled — `pack_generation_jobs.started_at` lets `process_pack_jobs.py` fail a job stuck for 60 min with a plain "request again" reason). This happens on out-of-memory or a host crash; a normal SIGTERM is handled. `generated_cvs` has no claimed-at timestamp, so the worker can't tell a stuck job from a slow one. The fix is a small migration (`claimed_at`) plus a reclaim rule. It was deliberately not added alongside the concurrent `0017`, to avoid a migration-number collision. Until then, reset a stuck row to `requested` by hand.
+
+12. **Submission pack — what still stands between it and "no manual input except the tender's own questions":**
+    - **No UI creates a `tender_packs` row or confirms `tender_pack_assignments`.** Only `seed_supabase_company.py` writes them. The pack card says "no confirmed key person" until one exists. Confirming who fills each position is exactly the kind of question the user should answer in the UI, and there's nowhere to answer it yet.
+    - **Nothing puts the blank SANRAL templates into `tender_documents` / the `tender-documents` bucket.** The download can't be automated (reCAPTCHA, playbook §1a). The bucket exists now (`0017`), but there is no upload UI or script. Until there is, the card hard-stops on "blank templates not uploaded".
+    - **The Financial workbook isn't in the PDF.** No print path exists for it. The filled `.xlsm` ships alongside, and the contents page says so.
+    - **The signatory comes from `people.signatory_capacity`** (first person with one set). `fill_docx_forms.py` still writes that one person into both C.1.2.3 key-person rows (pre-existing).
+    - **Human-only items stay human**, and the contents page and `ACTIONS_TO_SIGN.md` list them: signatures, witness, pricing, and the B4/B5 narratives.
 
 ## This pass (2026-10-16, 22:11 UTC)
 
@@ -105,10 +115,10 @@ note added to the Built table above; nothing new to flag.
 ## QA / stability
 
 - **One-command verification**: `npm run typecheck` / `npm run lint` / `npm run verify` in `app/package.json`, so every agent has one thing to run instead of three.
-- **Migration numbering**: `0001`–`0016`, sequential, no live collisions — one near-collision (two agents both reaching for `0007`/`0009` the same day) was caught and resolved by renumbering before landing, confirmed by git history.
+- **Migration numbering**: `0001`–`0017`, sequential, no live collisions — one near-collision (two agents both reaching for `0007`/`0009` the same day) was caught and resolved by renumbering before landing, confirmed by git history.
 - **RLS review**: every policy either follows the tenant-isolation default (`is_company_member(company_id)`) or carries an explicit comment explaining why it doesn't. No mismatched pattern found across any pass to date.
 - **Cross-pass reuse discipline is holding up well**, worth stating plainly rather than only hunting for problems: `score_outlook.py` explicitly defers to `sanralScoring.ts` instead of reimplementing it; `daily_digest.py` imports `assess_tender`/`watch_new_tenders`/`watch_deadlines` directly rather than re-deriving their logic; `tenderCompliance.ts` reuses `app/lib/dates.ts`'s `daysUntil` rather than a third expiry implementation. Each of these was checked this pass, not assumed.
-- **`admin_harness.py` currency**: real and still running the SANRAL path correctly, but see Gap #2 — it has not grown to cover either of the two newer engines.
+- **`admin_harness.py` currency**: real and still running the SANRAL path correctly. `--pack` adds the submission pack (and CV generation inside it), see Gap #2. Separately: on this host, the **local** form-fill baselines (`state/`, gitignored) flag 15 of 18 runs. All 15 are `a_forms.A10.deviations_or_qualifications` → assumed_default, plus a date-driven COID flip for `complete_co`. These come from earlier `fill_a_forms.py` changes, not this pass. The baselines were left as-is for the owner to accept with `--reset`.
 
 ## Open items for Sarel's own call (not decided here)
 
@@ -122,6 +132,7 @@ note added to the Built table above; nothing new to flag.
   - seeding `tender_requirements`;
   - new discipline buckets;
   - per-schedule compliance.
+- **Submission pack (Gap #12):** where should position confirmation live (the Key positions card on the Tender Workspace is the natural home)? Who uploads the blank SANRAL templates per tender, and from where? Should the Financial envelope be a separate PDF, since it is sealed separately?
 - **Deploying the bridge worker** (Railway Hobby, $5/mo, recommended; steps in `Automated-Fulfillment-Deployment.md`). It needs a Railway account plus the Supabase URL and service-role key, so it can only happen once a live Supabase project exists. A scheduled GitHub Action was considered and rejected, with evidence, in that doc (GitHub's Actions terms, 5-min floor, auto-disable after 60 idle days).
 - Whether/how to wire real notification sending (email) for the daily digest and the document-expiry/task reminders — both currently report-only by design, pending a decision on the send mechanism.
 
@@ -285,3 +296,49 @@ The goal was to remove the manual step of someone typing `process_cv_jobs.py` fo
 - never run against a live Supabase;
 - the stuck-`generating` reclaim (Gap #11) isn't built;
 - the pack bridge itself isn't written (the other agent's work).
+
+### SANRAL submission pack: one ordered PDF, generated from the Tender Workspace (2026-10-16)
+
+Sarel's goal: SANRAL tenders go "end-to-end without any manual input in the process besides answering all necessary questions needed for the tender." This pass closes the pack half of that. Before it, the CV engine had a request/fulfil bridge, but the SANRAL document pack itself was produced by running each script by hand and zipping the outputs (e.g. the R.396 zip of loose PDFs).
+
+**Built:**
+
+- **Migration `0017_pack_generation_jobs.sql`.** One row per request. It carries:
+  - status, from `requested` through `generating` to `ready` or `failed`;
+  - the include flags (default: everything currently ready);
+  - the readiness snapshot shown at request time, and whether the gaps were acknowledged;
+  - the output PDF path, the other outputs, page count, manifest, error, and timestamps.
+
+  Access is tenant RLS via `is_company_member`. The migration also adds two buckets: `submission-packs` (path-prefix RLS) and `tender-documents`. The second is the bucket `tender_documents.storage_path` never had: read-only for signed-in users, written by the service role.
+- **`engine/pack/pdf_merge.py`.** Checked first: nothing in `engine/` merged PDFs, and the real completed submissions were assembled by hand. It merges with pypdf, which was already used here. The contents page goes through python-docx and soffice via `generate_cv._convert_to_pdf`, reused. The "Page X of N" stamp is raw PDF text operators, so no new drawing library was added. `verify_pack()` reads the result back: page count, stamps, every contents entry against its real start page, omitted items listed, and bookmarks.
+- **`engine/pack/assemble_pack.py`.** Runs the real engines and nothing reimplemented: fingerprint, fill_conventional/fill_tender, print_reports, fill_financial(+hours), run_forms_pipeline, the authority letter and the covers. Section order follows the real completed submission's two-envelope structure. Vault scans can be PDF, image or Word. A combined tender's repeated slots each get their B1-B2, and the CV appears once.
+- **`engine/pack/process_pack_jobs.py`.** Same shape as `process_cv_jobs.py`: one-shot by default, `--once`/`--loop` via `engine/worker/poll_loop.py`, and an atomic claim.
+  - pack.yaml is built through `confirm_pack.confirm()`, so its human-confirmation gate applies, fed from `tender_pack_assignments.confirmed_person_id`. Every position on the template's own SETUP sheet must be confirmed.
+  - A job is only marked `ready` if `verify_pack()` passes.
+  - A job stuck in `generating` for more than 60 minutes is marked failed.
+- **Tender Workspace.**
+  - `compliance-data.ts` holds the compliance report's reads, moved out of `compliance-report.tsx` unchanged and wrapped in React `cache()`, so the report and the new card share one load and one set of gaps.
+  - The "Submission pack" card (`submission-pack.tsx`) has hard stops, a "generate a draft anyway" acknowledgement, and an inline status list with signed download links and the not-included items. While a job is active, it refreshes every 15 s.
+  - The `requestSubmissionPack()` server action re-checks every gate server-side.
+  - The page now shows `?error=` messages. Before this, every action's refusal on this page, including `requestTenderCv`, was silently dropped.
+- **Harness.** `admin_harness.py --pack` plus `engine/pack/harness_pack.py`, described in the Built table.
+- **Small changes to existing code.**
+  - `make_envelope_covers.py` and `fill_authority_letter.py` now accept no logo, for a company without one uploaded.
+  - Three fixture fixes found by the first full-chain run: `complete_co` project position `DS1` → `DS` (not a SANRAL option), and `highest_level` labels changed to SANRAL's exact text.
+  - Worker `requirements.txt` gains Pillow; the Dockerfile gains Calc + `python3-uno`.
+
+**Verified (evidence, not "ran without crashing"):**
+
+- **Real Klipcorp profile, real R.396 Technical/Financial downloads, real vault PDFs from the completed sample, Henning's real tender CV: a 78-page PDF.**
+  - The contents page is 1 page. Each of its 20 rows matched the real section start pages (`verify_pack` clean), and it was checked visually.
+  - The page-number stamp reads back on pages 1, 2, 41, 43 (over AON's own "Page 1 of 8" footer, and legible there), 56, 58 and 78.
+  - All 23 bookmarks resolve to the right pages.
+  - Henning's real ID number is on the B1 page.
+  - Not included, each with a reason: TCS PIN and ISO (no copy on file), and the Financial workbook.
+- **Bridge, on a scratch Postgres with 0001–0017 replayed.** `bridge_selftest.py` drives the real `process_pending()`. The job went `requested`→`ready` with a 65-page PDF that passed read-back. The B-BBEE copy lapsing before closing was flagged. The DS1 CV with no file was listed as not included. An unconfirmed DS1 failed with the gate's message, and a 2-hour-old `generating` row was failed. A 5-minute-old one was left alone.
+- **RLS on 0017:** own insert OK; cross-company insert, bad status and other-prefix storage write all rejected.
+- **Worker image** built with the new Dockerfile (sandbox CA variant): `import uno` works, and a 69-page pack builds and verifies inside it.
+- `run_bridges.py --once --bridge pack` drives the new script.
+- `npm run typecheck` and `npm run lint` are clean. `next build` compiles and type-checks, then fails at the same pre-existing `/login` prerender (no Supabase credentials).
+
+**Not done / still manual:** see Gap #12.

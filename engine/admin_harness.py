@@ -17,7 +17,17 @@ when the shape of the result changes. A changed shape means one of:
 This script does not render anything for a human to look at - that's item
 31's review console. It produces the flagged/clean list that console reads.
 
-Usage: python3 admin_harness.py [--store DIR] [--reset]
+--pack (added 2026-10-16) also runs the full submission-pack chain for each
+test company - suggest/confirm -> fill_conventional/fill_tender ->
+print_reports -> fill_financial -> run_forms_pipeline -> letter + covers ->
+generate_cv.py -> one merged PDF (engine/pack/assemble_pack.py) - reads the
+PDF back (page count, page-number stamps, contents page, bookmarks) and
+compares the pack's shape (ordered sections + page counts, what was left out)
+against its own baseline in state/admin_harness_pack_baselines/. Opt-in
+because it needs LibreOffice and takes about a minute per run; by default it
+covers one tender (--pack-tenders all for every tender on file).
+
+Usage: python3 admin_harness.py [--store DIR] [--reset] [--pack] [--pack-tenders SLUG,...|all]
 """
 import os
 import sys
@@ -33,6 +43,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TEST_COMPANY_DIR = os.path.join(HERE, "..", "config", "test_companies")
 TEMPLATES_DIR = os.path.join(HERE, "..", "templates", "forms")
 DEFAULT_STORE = os.path.join(HERE, "..", "state", "admin_harness_baselines")
+DEFAULT_PACK_STORE = os.path.join(HERE, "..", "state", "admin_harness_pack_baselines")
+DEFAULT_PACK_TENDERS = ["R.396-010-2025.1F"]
+PACK_RUN_OUT_DIR = "/tmp/admin_harness_pack_runs"
 RUN_OUT_DIR = "/tmp/admin_harness_runs"
 
 
@@ -59,7 +72,58 @@ def summarize(entries):
     return counts, sig
 
 
-def main(store_dir=DEFAULT_STORE, reset=False):
+def compare_to_baseline(store_dir, run_key, sig):
+    """Shared first-seen / match / flag rule. Returns ("clean"|"flagged", message)."""
+    baseline_path = f"{store_dir}/{run_key}.json"
+    if not os.path.exists(baseline_path):
+        json.dump(sig, open(baseline_path, "w"), indent=2)
+        return "clean", "first run, baseline stored"
+    baseline = json.load(open(baseline_path))
+    if baseline == sig:
+        return "clean", "matches baseline"
+    changes = []
+    for k in sorted(set(baseline) | set(sig)):
+        old, new = baseline.get(k), sig.get(k)
+        if old == new:
+            continue
+        if isinstance(old, list) and isinstance(new, list):
+            added, removed = [x for x in new if x not in old], [x for x in old if x not in new]
+            changes.append(f"{k}: +{added} -{removed}" if (added or removed) else f"{k}: order changed")
+        else:
+            changes.append(f"{k}: {old} -> {new}")
+    return "flagged", "; ".join(changes)
+
+
+def run_pack_checks(test_profiles, store_dir=DEFAULT_PACK_STORE, tenders=None, reset=False):
+    """--pack: the whole submission-pack chain per (test company, tender) - see
+    module docstring and engine/pack/harness_pack.py."""
+    sys.path.insert(0, os.path.join(HERE, "pack"))
+    import harness_pack
+    if reset and os.path.exists(store_dir):
+        shutil.rmtree(store_dir)
+    os.makedirs(store_dir, exist_ok=True)
+    flagged, clean, failed = [], [], []
+    for profile_path in test_profiles:
+        company_name = os.path.basename(profile_path).replace(".json", "")
+        for slug in tenders or DEFAULT_PACK_TENDERS:
+            run_key = f"{company_name}__{slug}"
+            try:
+                result = harness_pack.run_pack_one(profile_path, slug, f"{PACK_RUN_OUT_DIR}/{run_key}")
+            except Exception as e:
+                failed.append((run_key, f"{type(e).__name__}: {e}"))
+                continue
+            if result["outcome"] == "built" and result["problems"]:
+                failed.append((run_key, "merged PDF failed read-back: " + "; ".join(result["problems"][:5])))
+                continue
+            sig = harness_pack.signature(result)
+            status, msg = compare_to_baseline(store_dir, run_key, sig)
+            detail = (f"{sig['page_count']} pages, {len(sig['sections'])} sections, {len(sig['omitted'])} not included"
+                      if sig["outcome"] == "built" else f"refused at {sig['stage']}: {sig['reason'][:120]}")
+            (clean if status == "clean" else flagged).append((run_key, f"{msg} - {detail}"))
+    return {"clean": clean, "flagged": flagged, "failed": failed}
+
+
+def main(store_dir=DEFAULT_STORE, reset=False, pack=False, pack_tenders=None):
     if reset and os.path.exists(store_dir):
         shutil.rmtree(store_dir)
     os.makedirs(store_dir, exist_ok=True)
@@ -114,13 +178,34 @@ def main(store_dir=DEFAULT_STORE, reset=False):
     for k, msg in clean:
         print(f"  OK          {k}: {msg}")
 
-    return {"clean": clean, "flagged": flagged, "failed": failed}
+    result = {"clean": clean, "flagged": flagged, "failed": failed}
+    if pack:
+        tenders = None
+        if pack_tenders == "all":
+            tenders = [os.path.basename(d) for d in tender_dirs]
+        elif pack_tenders:
+            tenders = pack_tenders.split(",")
+        p = run_pack_checks(test_profiles, tenders=tenders, reset=reset)
+        print(f"\nSubmission-pack check: {len(p['clean'])} clean, {len(p['flagged'])} flagged for review, "
+              f"{len(p['failed'])} run failures\n")
+        for k, msg in p["failed"]:
+            print(f"  RUN FAILED  {k}: {msg}")
+        for k, msg in p["flagged"]:
+            print(f"  FLAGGED     {k}: {msg}")
+        for k, msg in p["clean"]:
+            print(f"  OK          {k}: {msg}")
+        result["pack"] = p
+    return result
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--store", default=DEFAULT_STORE)
     ap.add_argument("--reset", action="store_true", help="wipe stored baselines and start fresh")
+    ap.add_argument("--pack", action="store_true", help="also run the full submission-pack chain (needs LibreOffice)")
+    ap.add_argument("--pack-tenders", help=f"comma-separated tender slugs, or 'all' (default {DEFAULT_PACK_TENDERS[0]})")
     args = ap.parse_args()
-    result = main(args.store, args.reset)
-    sys.exit(1 if (result["flagged"] or result["failed"]) else 0)
+    result = main(args.store, args.reset, args.pack, args.pack_tenders)
+    pack = result.get("pack") or {}
+    bad = result["flagged"] or result["failed"] or pack.get("flagged") or pack.get("failed")
+    sys.exit(1 if bad else 0)

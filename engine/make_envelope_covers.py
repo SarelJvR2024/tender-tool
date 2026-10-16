@@ -37,6 +37,10 @@ def _set_margins(d):
 
 
 def _letterhead(d, logo_path):
+    # No logo on file (companies.logo_storage_path null): same cover, no logo,
+    # rather than refusing to make the cover at all.
+    if not logo_path:
+        return
     p = d.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.add_run().add_picture(logo_path, width=Inches(1.6))
