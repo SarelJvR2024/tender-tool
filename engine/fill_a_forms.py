@@ -190,7 +190,7 @@ def append_after_label(doc, label, value, log, field_key, missing_reason=None):
     """For 'Label:' paragraphs where the value belongs inline right after the
     colon (A7's CSD fields) rather than a dotted blank. value=None is a real
     case, not an edge case - the admin harness (spec item 30) found this the
-    first time it ran a dummy company with incomplete bank/company details,
+    first time it ran a test company with incomplete bank/company details,
     which crashed python-docx's run-text setter outright. Logs missing
     (with a reason) instead of writing and moving on, same as every other
     not-on-file field in this module."""

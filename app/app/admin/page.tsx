@@ -10,7 +10,7 @@ export const instant = false;
 type RunRow = {
   id: string;
   run_at: string;
-  dummy_company: string;
+  test_company: string;
   tender_ref: string;
   status: string;
   details: string | null;
@@ -24,7 +24,7 @@ export default async function AdminPage() {
 
   const { data: runs, error } = await supabase
     .from("admin_harness_runs")
-    .select("id, run_at, dummy_company, tender_ref, status, details")
+    .select("id, run_at, test_company, tender_ref, status, details")
     .order("run_at", { ascending: false });
 
   const rows = (runs ?? []) as RunRow[];
@@ -37,7 +37,7 @@ export default async function AdminPage() {
       <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Admin harness results</h1>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
-          Results of running every dummy test company through the real tender-filling pipeline (engine/admin_harness.py),
+          Results of running every test company through the real tender-filling pipeline (engine/admin_harness.py),
           checked against the stored baseline for each. {flaggedCount > 0
             ? `${flaggedCount} flagged for review.`
             : "Nothing currently flagged."}
@@ -51,7 +51,7 @@ export default async function AdminPage() {
 
         <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
           <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1.6fr 0.8fr 1.3fr", gap: 12, padding: "9px 18px", fontSize: 11, fontWeight: 600, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: "1px solid #F0EEE6" }}>
-            <div>Dummy company</div><div>Tender</div><div>Status</div><div>Last run</div>
+            <div>Test company</div><div>Tender</div><div>Status</div><div>Last run</div>
           </div>
           {rows.length === 0 && !error && (
             <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
@@ -61,7 +61,7 @@ export default async function AdminPage() {
           {rows.map((r) => (
             <HarnessRunRow
               key={r.id}
-              dummyCompany={r.dummy_company}
+              testCompany={r.test_company}
               tenderRef={r.tender_ref}
               status={r.status}
               runAt={r.run_at}

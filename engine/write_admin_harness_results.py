@@ -1,13 +1,14 @@
 """
 Bridge for spec item 31 (admin review console): runs admin_harness.py's existing
-logic and upserts one row per (dummy_company, tender_ref) into the web app's
-admin_harness_runs table (app/supabase/migrations/0005_admin_harness_results.sql),
-so Sarel can see harness results at /admin instead of only in a terminal.
+logic and upserts one row per (test_company, tender_ref) into the web app's
+admin_harness_runs table (app/supabase/migrations/0005_admin_harness_results.sql,
+renamed by 0006_rename_dummy_to_test_company.sql), so Sarel can see harness
+results at /admin instead of only in a terminal.
 
 Deliberately imports and calls admin_harness.main() directly rather than shelling
 out to it - its main() is already a plain function that returns a clean
 {"clean": [...], "flagged": [...], "failed": [...]} structure (each entry a
-(run_key, message) tuple, run_key = "<dummy_company>__<tender_slug>"), so no
+(run_key, message) tuple, run_key = "<test_company>__<tender_slug>"), so no
 refactoring of admin_harness.py was needed to reuse it.
 
 The per-run (counts, sig) summary that admin_harness.py computes is read back
@@ -52,9 +53,9 @@ def supabase_request(url, service_key, method, path, body=None):
 
 
 def run_key_parts(run_key):
-    # run_key is "<dummy_company>__<tender_slug>" - admin_harness.py's own format.
-    dummy_company, _, tender_ref = run_key.partition("__")
-    return dummy_company, tender_ref
+    # run_key is "<test_company>__<tender_slug>" - admin_harness.py's own format.
+    test_company, _, tender_ref = run_key.partition("__")
+    return test_company, tender_ref
 
 
 def summary_for(run_key, store_dir):
@@ -79,9 +80,9 @@ def main():
     now = datetime.now(timezone.utc).isoformat()
     rows = []
     for run_key, msg in result["clean"]:
-        dummy_company, tender_ref = run_key_parts(run_key)
+        test_company, tender_ref = run_key_parts(run_key)
         rows.append({
-            "dummy_company": dummy_company,
+            "test_company": test_company,
             "tender_ref": tender_ref,
             "status": "ok",
             "summary": summary_for(run_key, store_dir),
@@ -89,9 +90,9 @@ def main():
             "run_at": now,
         })
     for run_key, msg in result["flagged"]:
-        dummy_company, tender_ref = run_key_parts(run_key)
+        test_company, tender_ref = run_key_parts(run_key)
         rows.append({
-            "dummy_company": dummy_company,
+            "test_company": test_company,
             "tender_ref": tender_ref,
             "status": "flagged",
             "summary": summary_for(run_key, store_dir),
@@ -101,9 +102,9 @@ def main():
     # Run failures (exceptions, not shape mismatches) still get a visible row -
     # better Sarel sees "RUN FAILED" in the console than nothing at all.
     for run_key, msg in result["failed"]:
-        dummy_company, tender_ref = run_key_parts(run_key)
+        test_company, tender_ref = run_key_parts(run_key)
         rows.append({
-            "dummy_company": dummy_company,
+            "test_company": test_company,
             "tender_ref": tender_ref,
             "status": "flagged",
             "summary": {},
@@ -112,7 +113,7 @@ def main():
         })
 
     if not rows:
-        print("No harness rows to write (no dummy company profiles found).")
+        print("No harness rows to write (no test company profiles found).")
         return
 
     print(f"Upserting {len(rows)} admin_harness_runs rows...")

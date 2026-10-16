@@ -2,7 +2,7 @@
   "_note": "SYNTHETIC TEST FIXTURE for the admin harness (spec item 30) - worst case: a brand-new company with almost nothing on file. Tests what the pipeline does with missing data, not just the happy path.",
   "_profile_name": "new_co",
   "company": {
-    "legal_name": "Dummy New Startup (Pty) Ltd",
+    "legal_name": "Test New Startup (Pty) Ltd",
     "csd_trading_name": null,
     "cipc_registration_number": "2026/000099/07",
     "vat_number": null,
@@ -32,14 +32,14 @@
       "account_number": null
     },
     "director": {
-      "name": "Nomi Dummy-Founder",
+      "name": "Nomi Test-Founder",
       "id_number": "WITHHELD - synthetic",
       "role": "sole director"
     }
   },
   "key_people": [
     {
-      "name": "Nomi Dummy-Founder",
+      "name": "Nomi Test-Founder",
       "role": "Director / fielded as Project Leader (only person on staff)",
       "id_number": "0000000000099",
       "qualifications": {

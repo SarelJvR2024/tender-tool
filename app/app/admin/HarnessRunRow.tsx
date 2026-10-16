@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 type Props = {
-  dummyCompany: string;
+  testCompany: string;
   tenderRef: string;
   status: string;
   runAt: string;
@@ -13,7 +13,7 @@ type Props = {
 // Client-only because of the expand/collapse click state - everything else on
 // this page is plain server-rendered data, so this is the one small piece that
 // needs "use client" (and therefore can't carry the page's `instant = false`).
-export default function HarnessRunRow({ dummyCompany, tenderRef, status, runAt, details }: Props) {
+export default function HarnessRunRow({ testCompany, tenderRef, status, runAt, details }: Props) {
   const [open, setOpen] = useState(false);
   const ok = status === "ok";
   const chip = ok
@@ -39,7 +39,7 @@ export default function HarnessRunRow({ dummyCompany, tenderRef, status, runAt, 
           font: "inherit",
         }}
       >
-        <div style={{ fontSize: 13, color: "#16233B", fontWeight: 600 }}>{dummyCompany}</div>
+        <div style={{ fontSize: 13, color: "#16233B", fontWeight: 600 }}>{testCompany}</div>
         <div style={{ fontSize: 12, fontFamily: "monospace", color: "#4B5563" }}>{tenderRef}</div>
         <div>
           <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: chip.bg, color: chip.color }}>

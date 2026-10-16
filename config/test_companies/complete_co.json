@@ -2,8 +2,8 @@
   "_note": "SYNTHETIC TEST FIXTURE for the admin harness (spec item 30) - every name, number and address here is made up for testing, not a real company. Represents the 'best case': every document current, CIDB grading on file, specialist confirmed with no warning.",
   "_profile_name": "complete_co",
   "company": {
-    "legal_name": "Dummy Complete Engineering (Pty) Ltd",
-    "csd_trading_name": "Dummy Complete Engineering",
+    "legal_name": "Test Complete Engineering (Pty) Ltd",
+    "csd_trading_name": "Test Complete Engineering",
     "cipc_registration_number": "2010/000001/07",
     "vat_number": "4000000001",
     "income_tax_number": "9000000001",
@@ -27,19 +27,19 @@
     "total_employees": 20,
     "typical_jv_share_pct": 100,
     "bank": {
-      "bank_name": "Dummy Bank",
+      "bank_name": "Test Bank",
       "branch_code": "000000",
       "account_number": "WITHHELD - synthetic, never a real number"
     },
     "director": {
-      "name": "Jane Dummy-Director",
+      "name": "Jane Test-Director",
       "id_number": "WITHHELD - synthetic",
       "role": "signs BEE affidavit / CSD"
     }
   },
   "key_people": [
     {
-      "name": "Pat Dummy-Specialist",
+      "name": "Pat Test-Specialist",
       "role": "Senior Engineer (signatory) / fielded as Design Specialist - Pavement and Materials",
       "id_number": "0000000000000",
       "qualifications": {
@@ -59,12 +59,12 @@
       },
       "projects": [
         {
-          "client_and_number": "Dummy Province DoT\nDUMMY/2020/001",
+          "client_and_number": "Test Province DoT\nTEST/2020/001",
           "value_rm": 80,
           "position_held": "Design Specialist - Pavement and Materials",
-          "contact": "Sam Dummy-Referee\nProject Manager",
+          "contact": "Sam Test-Referee\nProject Manager",
           "contact_phone": "000 000 0000",
-          "contact_email": "sam.dummy@example.test",
+          "contact_email": "sam.test@example.test",
           "start": "2019-01-01",
           "end": "2021-12-31",
           "client_type": "Provincial Authority",

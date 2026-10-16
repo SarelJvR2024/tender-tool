@@ -2,8 +2,8 @@
   "_note": "SYNTHETIC TEST FIXTURE for the admin harness (spec item 30) - an established company whose compliance documents have lapsed, and whose only available specialist doesn't have a confirmed discipline match. Structurally mirrors the real risk pattern already found in Klipcorp's own profile (expired COID, specialism warning), with fabricated data, to prove those detection paths keep firing for ANY company, not just the one they were first found on.",
   "_profile_name": "expired_certs_co",
   "company": {
-    "legal_name": "Dummy Lapsed Compliance (Pty) Ltd",
-    "csd_trading_name": "Dummy Lapsed Compliance",
+    "legal_name": "Test Lapsed Compliance (Pty) Ltd",
+    "csd_trading_name": "Test Lapsed Compliance",
     "cipc_registration_number": "2015/000050/07",
     "vat_number": "4000000050",
     "income_tax_number": "9000000050",
@@ -27,19 +27,19 @@
     "total_employees": 8,
     "typical_jv_share_pct": 100,
     "bank": {
-      "bank_name": "Dummy Bank",
+      "bank_name": "Test Bank",
       "branch_code": "000050",
       "account_number": "WITHHELD - synthetic"
     },
     "director": {
-      "name": "Lee Dummy-Director",
+      "name": "Lee Test-Director",
       "id_number": "WITHHELD - synthetic",
       "role": "signs BEE affidavit / CSD"
     }
   },
   "key_people": [
     {
-      "name": "Jordan Dummy-Generalist",
+      "name": "Jordan Test-Generalist",
       "role": "Senior Engineer (signatory) / fielded as Design Specialist - Pavement and Materials",
       "id_number": "0000000000050",
       "qualifications": {
@@ -57,12 +57,12 @@
       },
       "projects": [
         {
-          "client_and_number": "Dummy Municipality\nDUMMY/2019/010",
+          "client_and_number": "Test Municipality\nTEST/2019/010",
           "value_rm": 30,
           "position_held": "Contract Engineer",
-          "contact": "Sam Dummy-Referee\nProject Manager",
+          "contact": "Sam Test-Referee\nProject Manager",
           "contact_phone": "000 000 0050",
-          "contact_email": "sam.dummy@example.test",
+          "contact_email": "sam.test@example.test",
           "start": "2018-01-01",
           "end": "2020-12-31",
           "client_type": "Municipality",
@@ -76,7 +76,7 @@
   ],
   "gaps": [
     "COID Letter of Good Standing expired 2022-02-28 - needs renewal",
-    "Jordan Dummy-Generalist has no pavement/materials-specific project evidence on file - same specialism gap pattern as Klipcorp's real profile",
+    "Jordan Test-Generalist has no pavement/materials-specific project evidence on file - same specialism gap pattern as Klipcorp's real profile",
     "No CIDB grading on file"
   ]
 }

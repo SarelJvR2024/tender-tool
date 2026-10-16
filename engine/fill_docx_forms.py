@@ -51,7 +51,7 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
     for p in cell.paragraphs:
         if p.text.startswith("……………"):
             # this dotted line IS the postal-address blank, not a label to append after.
-            # Found by the admin harness (spec item 30) running a brand-new dummy
+            # Found by the admin harness (spec item 30) running a brand-new test
             # company with no postal address on file - the blank was left untouched
             # (not even an empty string write) rather than crashing python-docx's
             # run-text setter on None, which is what happened before this fix.

@@ -1,10 +1,10 @@
 """
-Spec item 30: runs every known tender's templates against several dummy
-companies at different data-completeness levels (config/dummy_companies/),
+Spec item 30: runs every known tender's templates against several test
+companies at different data-completeness levels (config/test_companies/),
 so breakage is caught before a real customer's data goes near a template.
 
 Mirrors fingerprint.py's own first-seen/mismatch pattern deliberately, not
-by coincidence: the first clean run for a (dummy company, tender)
+by coincidence: the first clean run for a (test company, tender)
 combination becomes a stored baseline (state/admin_harness_baselines/);
 every later run is compared against it and FLAGGED - not silently accepted -
 when the shape of the result changes. A changed shape means one of:
@@ -30,17 +30,17 @@ import fill_a_forms
 from provenance import merge_and_save, load
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-DUMMY_DIR = os.path.join(HERE, "..", "config", "dummy_companies")
+TEST_COMPANY_DIR = os.path.join(HERE, "..", "config", "test_companies")
 TEMPLATES_DIR = os.path.join(HERE, "..", "templates", "forms")
 DEFAULT_STORE = os.path.join(HERE, "..", "state", "admin_harness_baselines")
 RUN_OUT_DIR = "/tmp/admin_harness_runs"
 
 
-def run_one(dummy_profile_path, tender_dir, out_dir):
+def run_one(test_profile_path, tender_dir, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     slug = os.path.basename(tender_dir.rstrip("/"))
-    docx_log = fill_docx_forms.main(tender_dir, dummy_profile_path, out_dir)
-    _, a_forms_log = fill_a_forms.main(f"{tender_dir}/A_Forms.docx", dummy_profile_path, out_dir, slug, "")
+    docx_log = fill_docx_forms.main(tender_dir, test_profile_path, out_dir)
+    _, a_forms_log = fill_a_forms.main(f"{tender_dir}/A_Forms.docx", test_profile_path, out_dir, slug, "")
     merged_path = f"{out_dir}/field_provenance.json"
     merge_and_save(merged_path, docx_log, a_forms_log)
     return load(merged_path)
@@ -64,14 +64,14 @@ def main(store_dir=DEFAULT_STORE, reset=False):
         shutil.rmtree(store_dir)
     os.makedirs(store_dir, exist_ok=True)
 
-    dummy_profiles = sorted(glob.glob(f"{DUMMY_DIR}/*.json"))
+    test_profiles = sorted(glob.glob(f"{TEST_COMPANY_DIR}/*.json"))
     tender_dirs = sorted(d for d in glob.glob(f"{TEMPLATES_DIR}/*") if os.path.isdir(d))
-    if not dummy_profiles:
-        print(f"No dummy company profiles found in {DUMMY_DIR}")
+    if not test_profiles:
+        print(f"No test company profiles found in {TEST_COMPANY_DIR}")
         sys.exit(1)
 
     flagged, clean, failed = [], [], []
-    for profile_path in dummy_profiles:
+    for profile_path in test_profiles:
         company_name = os.path.basename(profile_path).replace(".json", "")
         for tender_dir in tender_dirs:
             slug = os.path.basename(tender_dir.rstrip("/"))
