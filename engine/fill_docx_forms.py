@@ -35,9 +35,10 @@ forms vary per contract, e.g. different NRA reference numbers in the headers).
 import sys
 import json
 import docx
+from provenance import ProvenanceLog
 
 
-def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, actions):
+def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
     d = docx.Document(f"{src_dir}/C.1.2.3_Contract_Data.docx")
     cell = d.tables[0].rows[0].cells[0]
 
@@ -53,21 +54,25 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, actions):
             p.runs[0].text = comp["postal_address"]
             for r in p.runs[1:]:
                 r.text = ""
+            log.confirmed("c123.postal_address", comp["postal_address"])
             continue
         if p.text == "Telephone: \t":
             telephone_seen += 1
             if telephone_seen == 2 and henning.get("phone"):
                 p.add_run(henning["phone"])
+                log.confirmed("c123.representative_telephone", henning["phone"])
             elif telephone_seen == 2:
-                actions.append("C.1.2.3 Contract Data: insert Henning's telephone number (none on file)")
+                log.missing("c123.representative_telephone", "Henning's telephone number is not on file.")
             else:
-                actions.append("C.1.2.3 Contract Data: insert Klipcorp's company telephone number (none on file)")
+                log.missing("c123.company_telephone", "Klipcorp's company telephone number is not on file.")
             continue
         if p.text == "E-mail Address: \t":
-            actions.append("C.1.2.3 Contract Data: insert Henning's email address (none on file)")
+            log.missing("c123.representative_email", "Henning's email address is not on file.")
             continue
         if p.text in fills:
-            p.add_run(fills[p.text])
+            label = p.text
+            p.add_run(fills[label])
+            log.confirmed(f"c123.{_slug(label)}", fills[label])
 
     kp_table = d.tables[1]
     for row_idx, label_substr in [(1, "Project Leader"), (3, "Design Specialist")]:
@@ -77,15 +82,21 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, actions):
         if person:
             row.cells[1].text = person["name"]
             row.cells[2].text = "Permanent"
+            log.confirmed(f"c123.key_person_row_{row_idx}", person["name"])
 
     dir_table = d.tables[2]
     dir_table.rows[1].cells[0].text = comp["director"]["name"]
     dir_table.rows[1].cells[2].text = "Director"
+    log.confirmed("c123.director_name", comp["director"]["name"])
 
     d.save(f"{out_dir}/C.1.2.3_Contract_Data_FILLED.docx")
 
 
-def fill_form_of_offer(src_dir, out_dir, comp, henning, actions):
+def _slug(label):
+    return label.strip().rstrip(":\t").lower().replace(" ", "_")
+
+
+def fill_form_of_offer(src_dir, out_dir, comp, henning, log):
     d = docx.Document(f"{src_dir}/C.1.1.1_Form_of_Offer.docx")
     name_in_caps_count = 0
     for p in d.paragraphs:
@@ -93,34 +104,42 @@ def fill_form_of_offer(src_dir, out_dir, comp, henning, actions):
             for r in p.runs:
                 if ".........." in r.text:
                     r.text = r.text.replace("..........", f" {comp['bee_level']} ", 1)
+                    log.confirmed("c111.bee_level", comp["bee_level"])
         if p.text.startswith("NAME AND ADDRESS OF ORGANISATION:"):
             p.add_run(f"  {comp['legal_name']}, {comp['registered_address']}")
+            log.confirmed("c111.organisation_name_address", f"{comp['legal_name']}, {comp['registered_address']}")
         if p.text.startswith("NAME (IN CAPITALS): "):
             name_in_caps_count += 1
             if name_in_caps_count == 1:
                 p.add_run(f"  {henning['name'].upper()}")
+                log.confirmed("c111.signatory_name", henning["name"].upper())
             # witness field (2nd+ occurrence) stays blank - a witness must be a real,
             # different person; see module docstring.
         if p.text.startswith("CAPACITY: "):
             p.add_run(f"  {henning['signatory_capacity']}")
+            log.confirmed("c111.signatory_capacity", henning["signatory_capacity"])
     d.save(f"{out_dir}/C.1.1.1_Form_of_Offer_FILLED.docx")
-    actions.append("C.1.1.1 Form of Offer: get a witness to sign and print their name (must be a different person from the signatory)")
+    log.missing("c111.witness_name_signature",
+                "Needs a witness to sign and print their name - must be a different real person "
+                "from the signatory, never fabricated.")
 
 
-def main(src_dir, profile_path, out_dir):
+def main(src_dir, profile_path, out_dir, provenance_out=None):
     profile = json.load(open(profile_path))
     comp = profile["company"]
     henning = profile["key_people"][0]
     # block_row -> (table row index) mapping, same convention as fill_conventional.py's
     # key_persons list: 37 = PL = table row 1, 137 = DS1 = table row 3
     key_persons = {1: henning, 3: henning}
-    actions = []
+    log = ProvenanceLog(source="fill_docx_forms.py")
 
-    fill_contract_data(src_dir, out_dir, comp, henning, key_persons, actions)
-    fill_form_of_offer(src_dir, out_dir, comp, henning, actions)
+    fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log)
+    fill_form_of_offer(src_dir, out_dir, comp, henning, log)
     print(f"Wrote 2 filled docx forms to {out_dir}")
-    return actions
+    if provenance_out:
+        log.save(provenance_out)
+    return log
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])

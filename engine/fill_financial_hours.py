@@ -28,11 +28,12 @@ turn "nobody has supplied this yet" into what looks like a completed zero.
 
 Usage:
     python3 fill_financial_hours.py suggest <pack.yaml> <out_capture.yaml>
-    python3 fill_financial_hours.py fill <financial.xlsm> <capture.yaml> <out.xlsm>
+    python3 fill_financial_hours.py fill <financial.xlsm> <capture.yaml> <out.xlsm> [provenance_out.json]
 """
 import sys
 import yaml
 from sanral_fill import Workbook
+from provenance import ProvenanceLog
 
 DISCIPLINE_SHEETS = [
     "Hours Roadworks", "Hours Structures", "Hours Electrical",
@@ -70,9 +71,10 @@ def suggest(pack_path, out_path):
     print(f"Wrote blank capture skeleton to {out_path} - fill in real hours before running 'fill'")
 
 
-def fill(tpl, capture_path, out):
+def fill(tpl, capture_path, out, provenance_out=None):
     capture = yaml.safe_load(open(capture_path))
     wb = Workbook(tpl)
+    log = ProvenanceLog(source="fill_financial_hours.py")
 
     missing = []
     writes = 0
@@ -87,11 +89,16 @@ def fill(tpl, capture_path, out):
             for pos, hours in positions.items():
                 if pos not in KEY_PERSON_OFFSET:
                     raise ValueError(f"Unknown position '{pos}' in capture file")
+                field_key = f"financial_hours.{sheet_key}.{cat}.{pos}"
                 if hours is None:
                     missing.append(f"{sheet_key}/{cat}/{pos}")
                     continue
                 row = base + KEY_PERSON_OFFSET[pos]
                 wb.set_value(sheet, f"E{row}", hours)
+                # Confirmed, not computed: this number came straight from a human-
+                # supplied capture file (see suggest()'s own refusal-while-null rule),
+                # never calculated or guessed by this script.
+                log.confirmed(field_key, hours)
                 writes += 1
 
     if missing:
@@ -102,7 +109,11 @@ def fill(tpl, capture_path, out):
         )
 
     wb.save(out)
+    if provenance_out:
+        log.save(provenance_out)
+        print(f"Wrote {provenance_out}: {len(log.entries)} provenance entries")
     print(f"Wrote {out}: {writes} hours entries written across {len(DISCIPLINE_SHEETS)} discipline sheets")
+    return log
 
 
 def main():
@@ -113,7 +124,7 @@ def main():
     if cmd == "suggest":
         suggest(sys.argv[2], sys.argv[3])
     elif cmd == "fill":
-        fill(sys.argv[2], sys.argv[3], sys.argv[4])
+        fill(sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5] if len(sys.argv) > 5 else None)
     else:
         print(__doc__)
         sys.exit(1)
