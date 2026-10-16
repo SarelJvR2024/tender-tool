@@ -42,6 +42,7 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/discovery") ||
     path.startsWith("/company") ||
     path.startsWith("/people") ||
+    path.startsWith("/experience") ||
     path.startsWith("/admin");
 
   if (!user && guarded) {
@@ -80,6 +81,7 @@ export const config = {
     "/discovery/:path*",
     "/company/:path*",
     "/people/:path*",
+    "/experience/:path*",
     "/admin/:path*",
   ],
 };

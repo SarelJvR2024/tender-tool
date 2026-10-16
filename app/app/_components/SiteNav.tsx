@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
-type NavKey = "dashboard" | "discovery" | "company" | "people" | "admin";
+type NavKey = "dashboard" | "discovery" | "company" | "people" | "experience" | "admin";
 
 const NAV_ITEMS: { key: NavKey; href: string; label: string }[] = [
   { key: "dashboard", href: "/dashboard", label: "Tenders" },
   { key: "discovery", href: "/discovery", label: "Discovery" },
   { key: "company", href: "/company", label: "Company" },
   { key: "people", href: "/people", label: "People" },
+  { key: "experience", href: "/experience", label: "Experience" },
 ];
 
 // Shared top bar for every signed-in page. Before this, each page (dashboard,

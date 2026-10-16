@@ -115,6 +115,39 @@ from `0009` to `0010` once the other agent's `0009_tender_tasks.sql` was seen on
   notification channel today is the scheduled check-in that emails Sarel directly from these
   scripts' JSON output - this script's `--out` JSON is written to be read the same way.
 
+## Check-in: company experience library (2026-10-16)
+
+Built because Sarel asked for it: capture company experience evidence (letters of award, reference letters, close-out reports, completion certificates), tag it by hand, and make it matchable to tenders. Confirmed by grep before building that nothing like it existed. `projects` is one person's key-person CV history, not company experience. The research and the reasoning behind the taxonomy are in `docs/specs/Experience-Library-Findings.md`.
+
+**Headline evidence finding:** the real completed Klipcorp submission (NRA 2026/0084, `templates/incoming/completed_sample/.../Form B6.pdf`) contains a sworn affidavit declaring **0 completed projects** for SANRAL Form B6 (past performance, 15 of 100 functionality points; it needs 3 completed similar-scope projects in 10 years, each evidenced by a reference letter or CIDB Annex 1 report). This library is where that evidence would live.
+
+**Built:**
+- Migration `0012_experience_items.sql`. It adds an `experience_items` table (tenant RLS via `is_company_member`, `updated_at` trigger) and a private `experience-documents` bucket with the same path-prefix storage RLS as `cv-documents` (`0008`). It also adds the SQL function `experience_matches(p_company_id, p_disciplines, p_project_types, p_client_types, p_min_value_rm, p_completed_within_years, p_as_of)`, which is the documented "does this company have matching experience" query. It returns tagged rows only.
+- Taxonomy: discipline uses **exactly** the `assess_tender.py` `DISCIPLINE_KEYWORDS` keys (multi-valued, matched by overlap). Client type and project type use SANRAL's own codes, the same values `projects` already stores. Service stages come from CIDB Annex 1. Value is in R millions. Start and completion dates support the 10-year rule. The rating (poor/adequate/good/excellent) follows B6 scoring. The contactable reference is there because the municipal tender requires it.
+- `app/lib/experience.ts`: taxonomy constants plus `findMatchingExperience()` (an RPC wrapper). **For the tender readiness-report work:** call it with the tender's `categorize()` disciplines, `completedWithinYears: 10` and `asOf: closing date`, and use `.length` as the count.
+- `/experience` (a new "Experience" nav tab, also added to `proxy.ts` guard and matcher): capture form, "past-performance evidence N of 3" line, discipline filter running `experience_matches()`, and a list with Needs tagging / No document / rating chips. `/experience/[id]`: the tag editor, which can attach or replace the document later. Capture and tagging are separate steps (`tagged_at` stays null until tags are saved), as Sarel asked.
+- `next.config.ts`: `experimental.serverActions.bodySizeLimit = "4mb"`, up from Next's 1 MB default, which a scanned letter or CV can exceed. This also affects the existing CV upload.
+
+**Verified:**
+- `npm run typecheck` and `npm run lint` are clean. `next build` compiles and type-checks, then fails at the prerender step on `/login` for the same pre-existing reason as before (no Supabase credentials in this environment).
+- Replayed `0001` to `0012` against a scratch local Postgres 16 with stubbed `auth` and `storage` (now including a `storage.objects` table and `storage.foldername()`). Every migration applied except **`0008`, which still fails on its own pre-existing bug**: `generated_cvs_person_idx` references `created_at`, but the column is `requested_at`. This was flagged in an earlier pass, is still unfixed and is not mine to fix. It will also fail on real Supabase.
+- Functional SQL tests on the replayed database:
+  - Check constraints reject an unknown discipline, a non-SANRAL client code, and a file path with no filename.
+  - `experience_matches` returns the right counts for each filter: discipline, 10-year window as of a closing date (excludes a 2009 completion), client type plus minimum value, project-type list, and untagged rows excluded.
+  - Under `set role authenticated` with a stubbed `auth.uid()`, a user sees only their own company's rows, gets 0 rows when calling the RPC for another company, cannot insert into another company's tenant, and storage inserts outside their own `<company_id>/` prefix are rejected.
+- The taxonomy was checked by script against the real data: the library list, the migration constraint and `DISCIPLINE_KEYWORDS` are identical. `klipcorp_profile.json`'s `disciplines` (`roads_civil`, `professional_services`) are both in the list. Klipcorp's real projects' `client_type` (`Relevant SOE`) and `project_type` (`DS`) are both in the lists.
+- **Not verified:** the pages and upload against a live Supabase project, which this environment does not have (same caveat as every other app page).
+
+**Deferred / open (details in the findings doc):**
+- No AI extraction of tags from uploaded letters; tagging is manual.
+- No B6 / Annex 1 / reference-letter-request generation.
+- No tender-side compliance UI; that belongs to the readiness-report owner.
+- Questions for Sarel:
+  - Are Henning's ACSA projects Klipcorp company experience?
+  - How should JV-partner evidence be recorded?
+  - Do ACSA or SASSA ask for experience differently? Only one non-SANRAL sample had an experience requirement.
+  - Is the 4 MB upload cap enough for multi-page close-out reports?
+
 ## Repo shape, in one paragraph
 
 Two independent codebases share this repo: `engine/` (Python, no shared runtime with the web
