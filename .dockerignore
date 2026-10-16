@@ -1,0 +1,15 @@
+# For engine/worker/Dockerfile (build context = repo root). The worker only
+# needs engine/, templates/ and config/test_companies/; keep the Next.js
+# app, its node_modules, generated output and local state out of the image.
+.git
+app
+out
+packs
+state
+assets
+templates/incoming
+config/klipcorp_profile.json
+config/contact.json
+config/team_roster.json
+**/__pycache__
+**/*.pyc

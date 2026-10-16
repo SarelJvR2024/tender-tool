@@ -1,0 +1,77 @@
+# CI for the document-fulfilment worker (engine/worker/). TESTING ONLY.
+#
+# This workflow does NOT fulfil real jobs and needs NO secrets. It checks, on
+# every push that touches the engine, that:
+#   1. the polling loop still loops (engine/worker/test_poll_loop.py, which
+#      runs against an in-memory fake Supabase, never a real one);
+#   2. the one-shot CV bridge's row adapters still work (--self-test);
+#   3. the worker container (engine/worker/Dockerfile) still builds and its
+#      bridge runner starts inside it.
+#
+# Why the real worker is not a scheduled GitHub Action (cron) instead: GitHub's
+# own Actions terms say not to use Actions "as part of a serverless application",
+# scheduled runs are at best every 5 minutes and "can be delayed" or "dropped"
+# under load, and in a public repo they switch themselves off after 60 days with
+# no commits. The production worker is the always-on container. Full reasoning
+# and evidence: docs/specs/Automated-Fulfillment-Deployment.md.
+name: bridge-worker-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "engine/**"
+      - "templates/forms/**"
+      - ".dockerignore"
+      - ".github/workflows/bridge-worker-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bridge-worker-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install LibreOffice (for the .docx -> .pdf step) and Python deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer
+          pip install -r engine/worker/requirements.txt
+
+      - name: CV bridge self-test (row adapters -> generate_cv.py)
+        run: python3 engine/cv/process_cv_jobs.py --self-test --out-dir "$RUNNER_TEMP/cv-self-test"
+
+      - name: Polling-loop smoke test (fake Supabase, no secrets)
+        run: python3 engine/worker/test_poll_loop.py
+
+  container-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the worker image
+        run: docker build -f engine/worker/Dockerfile -t tender-worker:ci .
+
+      - name: Runner starts inside the image and refuses to run without credentials
+        # One pass with no Supabase env vars must fail loudly (exit 1 from the
+        # CV bridge), proving the image has Python, the engine code and its
+        # imports in place, and that it never runs half-configured.
+        run: |
+          set +e
+          out=$(docker run --rm tender-worker:ci python3 engine/worker/run_bridges.py --once 2>&1)
+          code=$?
+          echo "$out"
+          test "$code" -eq 1 && echo "$out" | grep -q "set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY"

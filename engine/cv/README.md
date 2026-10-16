@@ -59,13 +59,22 @@ synchronously.
 **Chosen approach**: `process_cv_jobs.py` is a bridge script, in the same spirit as
 `engine/write_admin_harness_results.py` bridging `admin_harness.py`'s CLI output into
 Supabase. The web app only ever writes a **request row** (`generated_cvs`, status
-`requested`) — it never calls this script. `process_cv_jobs.py`, run by a human (on a
-machine with Python + LibreOffice) or on a schedule, polls for `requested` rows, builds a
+`requested`) — it never calls this script. `process_cv_jobs.py`, run by the always-on
+worker (see below) or by hand on a machine with Python + LibreOffice, polls for `requested` rows, builds a
 `generate_cv.py`-shaped profile dict from the real Supabase `people`/`projects`/`companies`
 rows (see `adapt_person_row`/`adapt_project_row`/`adapt_company_row`), calls
 `generate_cv.py`'s own `build_sanral_keyperson`/`build_world_bank` functions directly (never
 a reimplementation), uploads the result to Supabase Storage, and marks the row `ready` (or
 `failed`). The UI shows `requested`/`generating`/`ready`/`failed`, never blocks on a result.
+
+**Running it without a person (2026-10-16):** `process_cv_jobs.py` with no flag (or `--once`)
+processes the queue once and exits. `--loop [--interval 30]` keeps polling. In production
+it runs inside the always-on worker container (`engine/worker/Dockerfile`, which runs
+`engine/worker/run_bridges.py --loop` for both the CV bridge and the pack bridge). Jobs are
+claimed atomically, so two workers never build the same CV twice. Deployment options,
+the recommendation (Railway) and Sarel's setup steps are in
+`docs/specs/Automated-Fulfillment-Deployment.md`. Smoke test:
+`python3 engine/worker/test_poll_loop.py`.
 
 Rejected: duplicating `generate_cv.py`'s logic in TypeScript to run synchronously in a
 Vercel function — the brief is explicit that this would create two implementations that

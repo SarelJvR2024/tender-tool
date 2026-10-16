@@ -42,19 +42,39 @@ fixture shaped exactly like real Supabase rows, no live project required).
 
 Usage:
     python3 process_cv_jobs.py [--once] [--out-dir <dir>]
+    python3 process_cv_jobs.py --loop [--interval SECONDS] [--max-cycles N]
     python3 process_cv_jobs.py --self-test
+
+Run modes (changed 2026-10-16, see docs/specs/Automated-Fulfillment-Deployment.md):
+  - default / --once: process every 'requested' row once, then exit. This is
+    what a cron entry or a person runs. (Before this change, running with NO
+    flag looped forever with a hard-coded 30s sleep and no error handling,
+    and only --once exited. Nothing in the repo invoked it without --once,
+    confirmed by grep, and a cron entry calling it without --once would have
+    stacked up a new never-ending process every time. --once still works
+    exactly as before.)
+  - --loop: the always-on worker mode. Polls every --interval seconds
+    (default 30) via engine/worker/poll_loop.py, survives a failed poll,
+    stops cleanly on SIGTERM. This is what engine/worker/run_bridges.py and
+    the worker container run.
+
+Each job is claimed with a conditional update (status requested ->
+generating, only if it is still 'requested'), so two workers running at
+once (say a hosted worker plus someone running --once by hand) never build
+the same CV twice.
 """
 import os
 import sys
 import json
-import time
 import argparse
 import urllib.request
 import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "worker"))
 from generate_cv import generate_as_is  # noqa: E402
 import generate_cv  # noqa: E402
+from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_OUT_DIR = os.path.join(HERE, "..", "..", "out", "generated_cvs")
@@ -224,8 +244,22 @@ def fetch_job_context(url, key, job):
     return profile, tender_ctx
 
 
+def claim_job(url, key, job):
+    """Atomically move one row requested -> generating. PostgREST applies the
+    status=eq.requested filter and the update in one statement, and returns
+    the updated rows (Prefer: return=representation), so an empty result
+    means another worker already took it."""
+    claimed = supabase_request(
+        url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}&status=eq.requested",
+        {"status": "generating"},
+    )
+    return bool(claimed)
+
+
 def process_job(url, key, job, out_dir):
-    supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}", {"status": "generating"})
+    if not claim_job(url, key, job):
+        print(f"[skipped] {job['id']}: already claimed by another worker")
+        return False
     try:
         profile, tender_ctx = fetch_job_context(url, key, job)
         person = profile["key_people"][0]
@@ -264,6 +298,7 @@ def process_job(url, key, job, out_dir):
             "status": "failed", "error_message": str(e),
         })
         print(f"[failed] {job['id']}: {e}")
+    return True
 
 
 def _now_iso():
@@ -271,7 +306,19 @@ def _now_iso():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
-def run(out_dir, once):
+def poll_once(url, key, out_dir, quiet_when_empty=False):
+    """One pass over the queue. Returns how many jobs this call handled."""
+    jobs = supabase_request(url, key, "GET", "generated_cvs?status=eq.requested&select=*&order=requested_at.asc")
+    if not jobs and not quiet_when_empty:
+        print("No pending generated_cvs jobs.")
+    handled = 0
+    for job in jobs:
+        if process_job(url, key, job, out_dir):
+            handled += 1
+    return handled
+
+
+def run(out_dir, loop=False, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None):
     url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     if not url or not key:
@@ -279,15 +326,14 @@ def run(out_dir, once):
               "(see app/.env.local.example) before running this.")
         sys.exit(1)
 
-    while True:
-        jobs = supabase_request(url, key, "GET", "generated_cvs?status=eq.requested&select=*")
-        if not jobs:
-            print("No pending generated_cvs jobs.")
-        for job in jobs:
-            process_job(url, key, job, out_dir)
-        if once:
-            return
-        time.sleep(30)
+    if not loop:
+        poll_once(url, key, out_dir)
+        return
+
+    # In loop mode an empty queue is the normal state; printing "No pending
+    # jobs" every 30s would bury the lines that matter in the host's logs.
+    poll_forever(lambda: poll_once(url, key, out_dir, quiet_when_empty=True),
+                 interval=interval, max_cycles=max_cycles, name="process_cv_jobs")
 
 
 # ============================================================================
@@ -346,15 +392,25 @@ def self_test(out_dir):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out-dir", default=DEFAULT_OUT_DIR)
-    ap.add_argument("--once", action="store_true", help="process pending jobs once and exit (no polling loop)")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true",
+                      help="process pending jobs once and exit (the default; kept as an explicit flag)")
+    mode.add_argument("--loop", "--daemon", dest="loop", action="store_true",
+                      help="keep polling for requested jobs until stopped (always-on worker mode)")
+    ap.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_SECONDS,
+                    help=f"seconds between polls in --loop mode (default {DEFAULT_INTERVAL_SECONDS})")
+    ap.add_argument("--max-cycles", type=int, default=None,
+                    help="--loop mode only: stop after this many polls (for tests)")
     ap.add_argument("--self-test", action="store_true", help="verify the row-shape adapters with no live Supabase project")
     args = ap.parse_args()
 
     if args.self_test:
         self_test(args.out_dir)
         return
+    if args.interval <= 0:
+        ap.error("--interval must be a positive number of seconds")
 
-    run(args.out_dir, args.once)
+    run(args.out_dir, loop=args.loop, interval=args.interval, max_cycles=args.max_cycles)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,11 @@
+# Python packages the bridge worker container installs (engine/worker/Dockerfile).
+# Versions match what the engine was verified with in this environment (2026-10-16).
+# engine/cv/process_cv_jobs.py -> generate_cv.py (python-docx, which pulls in lxml)
+#   -> pack_generator/suggest_pack.py (PyYAML) -> sanral_fill.py (lxml)
+# engine/pack/ (pack_generation_jobs bridge, in progress by another agent as of
+#   2026-10-16): pdf_merge.py imports pypdf. When process_pack_jobs.py lands,
+#   check its imports against this list (and any system package it needs
+#   against the Dockerfile's apt-get line).
+python-docx==1.2.0
+PyYAML==6.0.1
+pypdf==6.17.0

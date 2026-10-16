@@ -1,0 +1,39 @@
+# Always-on worker that fulfils the web app's queued document requests
+# (generated_cvs today, pack_generation_jobs once engine/pack/process_pack_jobs.py
+# lands). The web app on Vercel cannot run Python or LibreOffice; this container
+# can. See docs/specs/Automated-Fulfillment-Deployment.md.
+#
+# Build context is the REPO ROOT (the worker needs engine/; the pack bridge's
+# engine/pack/ code reads templates/samples/ and templates/forms/):
+#   docker build -f engine/worker/Dockerfile -t tender-worker .
+#   docker run --rm -e NEXT_PUBLIC_SUPABASE_URL=... -e SUPABASE_SERVICE_ROLE_KEY=... tender-worker
+#
+# On Railway: set the service variable RAILWAY_DOCKERFILE_PATH=engine/worker/Dockerfile,
+# plus NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. No port, no domain:
+# this is a background worker, it only makes outbound calls to Supabase.
+FROM python:3.13-slim
+
+# LibreOffice Writer (headless, no GUI) for generate_cv.py's .docx -> .pdf step,
+# plus metric-compatible fonts so Word layouts (Arial/Times/Calibri) don't reflow.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      libreoffice-writer-nogui fonts-liberation fonts-crosextra-carlito fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /srv/tender-tool
+COPY engine/worker/requirements.txt engine/worker/requirements.txt
+RUN pip install --no-cache-dir -r engine/worker/requirements.txt
+
+COPY engine engine
+COPY templates templates
+COPY config/test_companies config/test_companies
+
+# Unbuffered so log lines reach the host's log viewer immediately; a non-root
+# user with a writable HOME, because LibreOffice writes a profile there.
+ENV PYTHONUNBUFFERED=1 HOME=/tmp
+RUN useradd --system --no-create-home worker && mkdir -p out && chown worker out
+USER worker
+
+# Poll every 30s (override with BRIDGE_POLL_INTERVAL). SIGTERM on redeploy
+# finishes the current job, then exits.
+CMD ["python3", "engine/worker/run_bridges.py", "--loop"]
