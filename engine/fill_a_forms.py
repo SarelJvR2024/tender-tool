@@ -146,12 +146,22 @@ def para_matching(doc, prefix):
     return None
 
 
-def append_after_label(doc, label, value):
+def append_after_label(doc, label, value, log, field_key, missing_reason=None):
     """For 'Label:' paragraphs where the value belongs inline right after the
-    colon (A7's CSD fields) rather than a dotted blank."""
+    colon (A7's CSD fields) rather than a dotted blank. value=None is a real
+    case, not an edge case - the admin harness (spec item 30) found this the
+    first time it ran a dummy company with incomplete bank/company details,
+    which crashed python-docx's run-text setter outright. Logs missing
+    (with a reason) instead of writing and moving on, same as every other
+    not-on-file field in this module."""
     p = para_matching(doc, label)
-    if p is not None:
+    if p is None:
+        return
+    if value:
         set_paragraph_text(p, p.text.rstrip() + "  " + value)
+        log.confirmed(field_key, value)
+    else:
+        log.missing(field_key, missing_reason or f"No value on file for '{label.strip()}'.")
 
 
 def fill_a3_not_applicable(doc, company, log):
@@ -182,7 +192,7 @@ def fill_a8_litigation_table(doc, company, log):
             )
 
 
-def mark_sbd4_no_answers(doc, log):
+def mark_sbd4_no_answers(doc, company, log):
     """The A11/SBD4 simple yes/no table and the 4.1-4.4 restricted-supplier /
     tender-defaulter / fraud-conviction / contract-termination table. Marked No
     on every row - nothing on file indicates otherwise - but every one of these
@@ -192,11 +202,11 @@ def mark_sbd4_no_answers(doc, log):
         "a_forms.A11.employed_by_state":
             "Nothing on file shows the bidder or its directors are employed by the state.",
         "a_forms.A11.restricted_supplier_register":
-            "Nothing on file shows Klipcorp or its directors on National Treasury's Restricted Suppliers Database - not independently checked against the live register today.",
+            f"Nothing on file shows {company} or its directors on National Treasury's Restricted Suppliers Database - not independently checked against the live register today.",
         "a_forms.A11.tender_defaulters_register":
-            "Nothing on file shows Klipcorp or its directors on the Register for Tender Defaulters - not independently checked against the live register today.",
+            f"Nothing on file shows {company} or its directors on the Register for Tender Defaulters - not independently checked against the live register today.",
         "a_forms.A11.fraud_conviction":
-            "No fraud or corruption conviction on file for Klipcorp or its directors in the past 5 years.",
+            f"No fraud or corruption conviction on file for {company} or its directors in the past 5 years.",
         "a_forms.A11.contract_terminated":
             "No organ-of-state contract termination for non-performance on file in the past 5 years.",
     }
@@ -255,14 +265,13 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     fill_declaration_blanks(d, name, position, company, log)
     fill_a3_not_applicable(d, company, log)
     fill_a8_litigation_table(d, company, log)
-    mark_sbd4_no_answers(d, log)
+    mark_sbd4_no_answers(d, company, log)
     fill_a16_no_addenda(d, log)
 
     # A7: CSD registration - mechanical fields only, inline after the label.
-    append_after_label(d, "Name of Service Provider:", company)
-    log.confirmed("a_forms.A7.service_provider_name", company)
-    append_after_label(d, "Central Supplier Database Supplier Number:", comp["csd_supplier_number"])
-    log.confirmed("a_forms.A7.csd_supplier_number", comp["csd_supplier_number"])
+    append_after_label(d, "Name of Service Provider:", company, log, "a_forms.A7.service_provider_name")
+    append_after_label(d, "Central Supplier Database Supplier Number:", comp.get("csd_supplier_number"),
+                        log, "a_forms.A7.csd_supplier_number", "No CSD supplier number on file.")
     log.missing("a_forms.A7.supplier_commodity",
                 "No current CSD commodity code on file - only a 2021 CSD report was found, "
                 "confirm against an up-to-date report before filling this in.")
@@ -270,8 +279,7 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
                 "No CSD delivery location on file.")
 
     # A17: the one unambiguous field (who the cover is for); policy numbers/values are unknown.
-    append_after_label(d, "Name of Tenderer:", company)
-    log.confirmed("a_forms.A17.tenderer_name", company)
+    append_after_label(d, "Name of Tenderer:", company, log, "a_forms.A17.tenderer_name")
     for cover in ("professional_indemnity", "public_liability", "third_party_liability"):
         log.missing(f"a_forms.A17.{cover}_value",
                     "No insurance policy number or cover value on file for this cover type.")
@@ -279,12 +287,12 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     # A18: bank details. Account number is deliberately never written to this repo -
     # see profile note - left blank in the document too; the real number comes from
     # the bank confirmation letter attached alongside this form, not typed in here.
-    append_after_label(d, "Name of account holder:", company)
-    log.confirmed("a_forms.A18.account_holder_name", company)
-    append_after_label(d, "Bank name:", comp["bank"]["bank_name"])
-    log.confirmed("a_forms.A18.bank_name", comp["bank"]["bank_name"])
-    append_after_label(d, "Branch number:", comp["bank"]["branch_code"])
-    log.confirmed("a_forms.A18.branch_number", comp["bank"]["branch_code"])
+    append_after_label(d, "Name of account holder:", company, log, "a_forms.A18.account_holder_name")
+    bank = comp.get("bank") or {}
+    append_after_label(d, "Bank name:", bank.get("bank_name"), log, "a_forms.A18.bank_name",
+                        "No bank name on file.")
+    append_after_label(d, "Branch number:", bank.get("branch_code"), log, "a_forms.A18.branch_number",
+                        "No branch number on file.")
     log.missing("a_forms.A18.account_number",
                 "Deliberately never stored in this codebase - insert the real number from the "
                 "bank confirmation letter, which must also be attached and dated within 3 months "
@@ -293,7 +301,7 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     # Forms this script deliberately never touches - see module docstring - but the gap is
     # still real and still belongs in the provenance record, not only in prose.
     log.missing("a_forms.A2.board_resolution",
-                "Needs a real, signed board resolution on Klipcorp's own letterhead - the "
+                f"Needs a real, signed board resolution on {company}'s own letterhead - the "
                 "template's own notes say completing the example page is not accepted as "
                 "authorisation.")
     log.missing("a_forms.A5.dpip_identification",
@@ -302,18 +310,22 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
                 "fill and sign by hand.")
     log.missing("a_forms.A9.tcs_pin",
                 "No current SARS Tax Compliance Status PIN on file - look one up via SARS eFiling.")
-    log.missing("a_forms.A12.bee_certificate",
-                "Needs a current, valid B-BBEE verification certificate or affidavit attached - "
-                "the profile flags that the 2026 affidavit and 2021 CSD report disagree on some "
-                "details, so get a fresh one rather than relying on either as-is.")
+    bee_reason = "Needs a current, valid B-BBEE verification certificate or affidavit attached."
+    if comp.get("bee_source_note"):
+        bee_reason += f" Known issue on file: {comp['bee_source_note']}"
+    log.missing("a_forms.A12.bee_certificate", bee_reason)
     log.missing("a_forms.A19.current_commitments",
                 "The company profile only tracks past reference projects for CV purposes, not a "
-                "live commitments list, and none of the three on file are still open as of today - "
-                "confirm Henning's actual current commitments with him directly.")
+                "live commitments list - confirm the signatory's actual current commitments "
+                "directly before relying on what's on file.")
+    coid_number = comp.get("coid_letter_of_good_standing_number")
     coid_expiry = comp.get("coid_letter_of_good_standing_expiry")
-    log.missing("a_forms.A20.coid_letter",
-                f"Klipcorp's COID Letter of Good Standing (no. {comp.get('coid_letter_of_good_standing_number')}) "
-                f"expired {coid_expiry} - renew before attaching, or the tender may be declared non-responsive.")
+    if coid_number and coid_expiry:
+        coid_reason = (f"{company}'s COID Letter of Good Standing (no. {coid_number}) expired "
+                       f"{coid_expiry} - renew before attaching, or the tender may be declared non-responsive.")
+    else:
+        coid_reason = f"{company} has no COID Letter of Good Standing on file at all - register and obtain one."
+    log.missing("a_forms.A20.coid_letter", coid_reason)
 
     out_path = f"{out_dir}/A_Forms_FILLED.docx"
     d.save(out_path)

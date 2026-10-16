@@ -1,0 +1,82 @@
+{
+  "_note": "SYNTHETIC TEST FIXTURE for the admin harness (spec item 30) - an established company whose compliance documents have lapsed, and whose only available specialist doesn't have a confirmed discipline match. Structurally mirrors the real risk pattern already found in Klipcorp's own profile (expired COID, specialism warning), with fabricated data, to prove those detection paths keep firing for ANY company, not just the one they were first found on.",
+  "_profile_name": "expired_certs_co",
+  "company": {
+    "legal_name": "Dummy Lapsed Compliance (Pty) Ltd",
+    "csd_trading_name": "Dummy Lapsed Compliance",
+    "cipc_registration_number": "2015/000050/07",
+    "vat_number": "4000000050",
+    "income_tax_number": "9000000050",
+    "paye_number": "7000000050",
+    "csd_supplier_number": "MAAA0000050",
+    "coid_registration_number": "1000050",
+    "coid_letter_of_good_standing_number": "2021000050",
+    "coid_letter_of_good_standing_expiry": "2022-02-28",
+    "coid_status_flag": "EXPIRED - needs renewal before relying on this for any submission",
+    "cidb_grading": null,
+    "bee_level": 2,
+    "black_ownership_pct": 60,
+    "bee_procurement_recognition_pct": 100,
+    "status": "QSE",
+    "registered_address": "50 Lapsed Avenue, Durban, KwaZulu-Natal, 4001",
+    "postal_address": "PO Box 50, Durban",
+    "head_office_per_form_b3": "Durban",
+    "other_offices": 0,
+    "ecsa_registered_staff_count": 2,
+    "sacpcmp_registered_staff_count": 0,
+    "total_employees": 8,
+    "typical_jv_share_pct": 100,
+    "bank": {
+      "bank_name": "Dummy Bank",
+      "branch_code": "000050",
+      "account_number": "WITHHELD - synthetic"
+    },
+    "director": {
+      "name": "Lee Dummy-Director",
+      "id_number": "WITHHELD - synthetic",
+      "role": "signs BEE affidavit / CSD"
+    }
+  },
+  "key_people": [
+    {
+      "name": "Jordan Dummy-Generalist",
+      "role": "Senior Engineer (signatory) / fielded as Design Specialist - Pavement and Materials",
+      "id_number": "0000000000050",
+      "qualifications": {
+        "ecsa_level": "Professional Engineer",
+        "ecsa_number": "20000050",
+        "ecsa_date": "2014-01-01",
+        "highest_level": "Bachelors Degree",
+        "highest_description": "BEng (Civil Engineering)",
+        "highest_institution": "Test University",
+        "highest_graduated": "2010-01-01",
+        "initial_description": "BEng (Civil Engineering)",
+        "initial_institution": "Test University",
+        "initial_graduated": "2010-01-01",
+        "years_experience": null
+      },
+      "projects": [
+        {
+          "client_and_number": "Dummy Municipality\nDUMMY/2019/010",
+          "value_rm": 30,
+          "position_held": "Contract Engineer",
+          "contact": "Sam Dummy-Referee\nProject Manager",
+          "contact_phone": "000 000 0050",
+          "contact_email": "sam.dummy@example.test",
+          "start": "2018-01-01",
+          "end": "2020-12-31",
+          "client_type": "Municipality",
+          "project_type": "MO/MA",
+          "position_code": "CE"
+        }
+      ],
+      "phone": "+27 00 000 0050",
+      "signatory_capacity": "Senior Engineer"
+    }
+  ],
+  "gaps": [
+    "COID Letter of Good Standing expired 2022-02-28 - needs renewal",
+    "Jordan Dummy-Generalist has no pavement/materials-specific project evidence on file - same specialism gap pattern as Klipcorp's real profile",
+    "No CIDB grading on file"
+  ]
+}

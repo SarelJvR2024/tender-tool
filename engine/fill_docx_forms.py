@@ -50,11 +50,18 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
     telephone_seen = 0
     for p in cell.paragraphs:
         if p.text.startswith("……………"):
-            # this dotted line IS the postal-address blank, not a label to append after
-            p.runs[0].text = comp["postal_address"]
-            for r in p.runs[1:]:
-                r.text = ""
-            log.confirmed("c123.postal_address", comp["postal_address"])
+            # this dotted line IS the postal-address blank, not a label to append after.
+            # Found by the admin harness (spec item 30) running a brand-new dummy
+            # company with no postal address on file - the blank was left untouched
+            # (not even an empty string write) rather than crashing python-docx's
+            # run-text setter on None, which is what happened before this fix.
+            if comp.get("postal_address"):
+                p.runs[0].text = comp["postal_address"]
+                for r in p.runs[1:]:
+                    r.text = ""
+                log.confirmed("c123.postal_address", comp["postal_address"])
+            else:
+                log.missing("c123.postal_address", "No postal address on file.")
             continue
         if p.text == "Telephone: \t":
             telephone_seen += 1
@@ -71,8 +78,12 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
             continue
         if p.text in fills:
             label = p.text
-            p.add_run(fills[label])
-            log.confirmed(f"c123.{_slug(label)}", fills[label])
+            value = fills[label]
+            if value:
+                p.add_run(value)
+                log.confirmed(f"c123.{_slug(label)}", value)
+            else:
+                log.missing(f"c123.{_slug(label)}", f"No value on file for '{label.strip()}'.")
 
     kp_table = d.tables[1]
     for row_idx, label_substr in [(1, "Project Leader"), (3, "Design Specialist")]:

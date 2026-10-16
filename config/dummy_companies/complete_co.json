@@ -1,0 +1,81 @@
+{
+  "_note": "SYNTHETIC TEST FIXTURE for the admin harness (spec item 30) - every name, number and address here is made up for testing, not a real company. Represents the 'best case': every document current, CIDB grading on file, specialist confirmed with no warning.",
+  "_profile_name": "complete_co",
+  "company": {
+    "legal_name": "Dummy Complete Engineering (Pty) Ltd",
+    "csd_trading_name": "Dummy Complete Engineering",
+    "cipc_registration_number": "2010/000001/07",
+    "vat_number": "4000000001",
+    "income_tax_number": "9000000001",
+    "paye_number": "7000000001",
+    "csd_supplier_number": "MAAA0000001",
+    "coid_registration_number": "1000001",
+    "coid_letter_of_good_standing_number": "2026000001",
+    "coid_letter_of_good_standing_expiry": "2027-04-30",
+    "coid_status_flag": "CURRENT",
+    "cidb_grading": "6CE",
+    "bee_level": 1,
+    "black_ownership_pct": 100,
+    "bee_procurement_recognition_pct": 135,
+    "status": "QSE",
+    "registered_address": "1 Test Street, Sandton, Gauteng, 2196",
+    "postal_address": "PO Box 1, Sandton",
+    "head_office_per_form_b3": "Sandton",
+    "other_offices": 1,
+    "ecsa_registered_staff_count": 6,
+    "sacpcmp_registered_staff_count": 2,
+    "total_employees": 20,
+    "typical_jv_share_pct": 100,
+    "bank": {
+      "bank_name": "Dummy Bank",
+      "branch_code": "000000",
+      "account_number": "WITHHELD - synthetic, never a real number"
+    },
+    "director": {
+      "name": "Jane Dummy-Director",
+      "id_number": "WITHHELD - synthetic",
+      "role": "signs BEE affidavit / CSD"
+    }
+  },
+  "key_people": [
+    {
+      "name": "Pat Dummy-Specialist",
+      "role": "Senior Engineer (signatory) / fielded as Design Specialist - Pavement and Materials",
+      "id_number": "0000000000000",
+      "qualifications": {
+        "ecsa_level": "Professional Engineer",
+        "ecsa_number": "20000001",
+        "ecsa_date": "2012-01-01",
+        "sacpcmp_number": null,
+        "highest_level": "Masters Degree",
+        "highest_description": "MEng (Pavement Engineering)",
+        "highest_institution": "Test University",
+        "highest_graduated": "2012-01-01",
+        "initial_description": "BEng (Civil Engineering)",
+        "initial_institution": "Test University",
+        "initial_graduated": "2008-01-01",
+        "years_experience": null,
+        "years_experience_note": "Computed at pack-generation time, same rule as the real profile."
+      },
+      "projects": [
+        {
+          "client_and_number": "Dummy Province DoT\nDUMMY/2020/001",
+          "value_rm": 80,
+          "position_held": "Design Specialist - Pavement and Materials",
+          "contact": "Sam Dummy-Referee\nProject Manager",
+          "contact_phone": "000 000 0000",
+          "contact_email": "sam.dummy@example.test",
+          "start": "2019-01-01",
+          "end": "2021-12-31",
+          "client_type": "Provincial Authority",
+          "project_type": "DS",
+          "position_code": "DS1"
+        }
+      ],
+      "phone": "+27 00 000 0000",
+      "signatory_capacity": "Senior Engineer"
+    }
+  ],
+  "gaps": [],
+  "_single_key_person_note": "fill_docx_forms.py's current main() always uses key_people[0] as the signatory for both the PL and DS1 CV-summary rows (matches real Klipcorp data, which also has one key person covering both positions) - this fixture matches that, rather than testing a two-signatory scenario the scripts don't support yet."
+}

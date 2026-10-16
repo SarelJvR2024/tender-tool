@@ -1,0 +1,69 @@
+{
+  "_note": "SYNTHETIC TEST FIXTURE for the admin harness (spec item 30) - worst case: a brand-new company with almost nothing on file. Tests what the pipeline does with missing data, not just the happy path.",
+  "_profile_name": "new_co",
+  "company": {
+    "legal_name": "Dummy New Startup (Pty) Ltd",
+    "csd_trading_name": null,
+    "cipc_registration_number": "2026/000099/07",
+    "vat_number": null,
+    "income_tax_number": null,
+    "paye_number": null,
+    "csd_supplier_number": null,
+    "coid_registration_number": null,
+    "coid_letter_of_good_standing_number": null,
+    "coid_letter_of_good_standing_expiry": null,
+    "coid_status_flag": "NOT REGISTERED YET",
+    "cidb_grading": null,
+    "bee_level": null,
+    "black_ownership_pct": null,
+    "bee_procurement_recognition_pct": null,
+    "status": "EME",
+    "registered_address": "99 New Street, Midrand, Gauteng, 1685",
+    "postal_address": null,
+    "head_office_per_form_b3": "Midrand",
+    "other_offices": 0,
+    "ecsa_registered_staff_count": 0,
+    "sacpcmp_registered_staff_count": 0,
+    "total_employees": 2,
+    "typical_jv_share_pct": 100,
+    "bank": {
+      "bank_name": null,
+      "branch_code": null,
+      "account_number": null
+    },
+    "director": {
+      "name": "Nomi Dummy-Founder",
+      "id_number": "WITHHELD - synthetic",
+      "role": "sole director"
+    }
+  },
+  "key_people": [
+    {
+      "name": "Nomi Dummy-Founder",
+      "role": "Director / fielded as Project Leader (only person on staff)",
+      "id_number": "0000000000099",
+      "qualifications": {
+        "ecsa_level": null,
+        "ecsa_number": null,
+        "ecsa_date": null,
+        "highest_level": "Bachelors Degree",
+        "highest_description": "BEng (Civil Engineering)",
+        "highest_institution": "Test University",
+        "highest_graduated": "2023-01-01",
+        "initial_description": "BEng (Civil Engineering)",
+        "initial_institution": "Test University",
+        "initial_graduated": "2023-01-01",
+        "years_experience": null
+      },
+      "projects": [],
+      "phone": null,
+      "signatory_capacity": "Director"
+    }
+  ],
+  "gaps": [
+    "No CVs on file beyond the sole director",
+    "Not yet registered on the Central Supplier Database",
+    "No CIDB grading",
+    "No COID registration"
+  ]
+}
