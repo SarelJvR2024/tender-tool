@@ -231,7 +231,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
   return (
     <>
       {/* Required documents */}
-      <div style={card}>
+      <div id="compliance-check" style={card}>
         <SectionTitle title="Compliance check - required documents" />
         <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
           SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria, checked against your
@@ -265,7 +265,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
       </div>
 
       {/* Key people & CVs */}
-      <div style={card}>
+      <div id="key-people" style={card}>
         <SectionTitle title="Key people & CVs" />
         <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
           Whether each position is filled by someone <strong>your company has tagged</strong> as fitting that role (set on
@@ -385,7 +385,7 @@ function ScoreEstimate({
   const fmt = (r: Range) => (r.min === r.max ? `${r.min}` : `${r.min}-${r.max}`);
 
   return (
-    <div style={card}>
+    <div id="score-estimate" style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
         <SectionTitle title="Functionality score estimate" />
         <Chip label={outlookStyle.label} bg={outlookStyle.bg} color={outlookStyle.color} />
@@ -477,7 +477,7 @@ function ExperienceSection({
   );
   if (!available) {
     return (
-      <div style={{ ...card, background: "#FFFBEB", border: "1px dashed #F5D08A" }}>
+      <div id="company-experience" style={{ ...card, background: "#FFFBEB", border: "1px dashed #F5D08A" }}>
         <SectionTitle title="Company experience" />
         <div style={{ fontSize: 12, color: "#92400E" }}>Couldn&apos;t read the Experience Library ({error}).</div>
         {ruleBox}
@@ -489,7 +489,7 @@ function ExperienceSection({
   const need = rule.projects_required ?? 0;
   const ok = need > 0 && qualifying.length >= need;
   return (
-    <div style={card}>
+    <div id="company-experience" style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
         <SectionTitle title="Company experience" />
         <Chip
@@ -541,7 +541,7 @@ function LocalitySection({ rules, offices }: { rules: EvaluationRules | null; of
   // locality rows (SANRAL scores specific goals on the B-BBEE table only).
   if (rules && rows.length === 0 && !mand) return null;
   return (
-    <div style={card}>
+    <div id="locality" style={card}>
       <SectionTitle title="Office location (locality)" />
       {!rules ? (
         <div style={{ fontSize: 12, color: "#6B6758" }}>

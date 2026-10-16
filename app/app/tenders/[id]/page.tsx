@@ -4,6 +4,7 @@ import { ReviewButton } from "./review-button";
 import { TaskStatusButton } from "./task-status-button";
 import { TaskAssigneeSelect, type AssignablePerson } from "./task-assignee-select";
 import { ComplianceReport } from "./compliance-report";
+import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
 import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 
@@ -17,6 +18,7 @@ type TenderFacts = {
   nra_reference: string | null;
   description: string | null;
   closing_date: string | null;
+  family: string | null;
 };
 
 type TenderPack = {
@@ -116,7 +118,7 @@ export default async function TenderWorkspacePage({
 
   const { data: tender, error: tenderError } = await supabase
     .from("tenders")
-    .select("id, contract_no, nra_reference, description, closing_date")
+    .select("id, contract_no, nra_reference, description, closing_date, family")
     .eq("id", id)
     .maybeSingle();
 
@@ -220,6 +222,10 @@ export default async function TenderWorkspacePage({
     const taskLeft = taskDaysLeft(t.due_date);
     return taskLeft !== null && taskLeft < 0 && t.status !== "done";
   }).length;
+  // Drives which jump-nav links are shown: ComplianceReport only renders its
+  // document/people/experience/score sections for this one family - every
+  // other family gets a single "not mapped yet" card with nothing to jump to.
+  const isSanralFamily = tenderFacts?.family === SANRAL_CONVENTIONAL_FAMILY;
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
@@ -280,6 +286,35 @@ export default async function TenderWorkspacePage({
               )}
             </div>
 
+            {/* Jump nav - this page stacks up to 9 report/management cards once
+                a pack exists, so a sticky row of anchors beats blind-scrolling
+                to find one (same idea as Stripe's data-dense dashboards: a
+                wayfinding strip, not more scrolling, when a screen gets long). */}
+            {(tenderPack || isSanralFamily) && (
+              <div
+                style={{
+                  position: "sticky",
+                  top: 0,
+                  zIndex: 5,
+                  display: "flex",
+                  gap: 6,
+                  overflowX: "auto",
+                  WebkitOverflowScrolling: "touch",
+                  background: "#F6F5F1",
+                  padding: "8px 2px",
+                  marginBottom: 12,
+                }}
+              >
+                {tenderPack && provenance.length > 0 && <JumpLink href="#readiness-report" label="Readiness" />}
+                {isSanralFamily && <JumpLink href="#compliance-check" label="Documents" />}
+                {isSanralFamily && <JumpLink href="#key-people" label="Key people" />}
+                {isSanralFamily && <JumpLink href="#company-experience" label="Experience" />}
+                {isSanralFamily && <JumpLink href="#score-estimate" label="Score" />}
+                <JumpLink href="#tasks-milestones" label="Tasks" />
+                {tenderPack && assignments.length > 0 && <JumpLink href="#key-positions" label="CVs" />}
+              </div>
+            )}
+
             {packError && <ErrorBanner message={`Could not load this company's pack for this tender: ${packError.message}`} />}
 
             {!tenderPack && !packError && (
@@ -299,7 +334,7 @@ export default async function TenderWorkspacePage({
                 )}
 
                 {provenance.length > 0 && (
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, marginBottom: 16 }}>
+                  <div id="readiness-report" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, marginBottom: 16 }}>
                     <ReportCard
                       title="Already confirmed"
                       count={confirmedRows.length}
@@ -363,7 +398,7 @@ export default async function TenderWorkspacePage({
             <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
 
             {tenderPack && assignments.length > 0 && (
-              <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+              <div id="key-positions" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Key positions</div>
                 <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
                   Generates the tender-customized CV (requirement-matching cover page) for a
@@ -475,7 +510,7 @@ function TaskTimeline({
   const addTaskWithId = addTenderTask;
 
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+    <div id="tasks-milestones" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Tasks &amp; milestones</div>
       <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
         Closing date is seeded automatically. Briefing, clarification and submission dates aren&apos;t
@@ -582,6 +617,31 @@ function SummaryChip({ count, label, bg, color }: { count: number; label: string
     <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color }}>
       {count} {label}
     </span>
+  );
+}
+
+function JumpLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      style={{
+        flexShrink: 0,
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 32,
+        padding: "0 12px",
+        borderRadius: 100,
+        fontSize: 12,
+        fontWeight: 600,
+        textDecoration: "none",
+        background: "#FFFFFF",
+        color: "#16233B",
+        border: "1px solid #E5E1D5",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </a>
   );
 }
 
