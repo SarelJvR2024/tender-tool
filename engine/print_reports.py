@@ -186,6 +186,6 @@ def export(src, outdir, names=None):
 
 if __name__ == "__main__":
     made, skipped, (n, shown) = export(sys.argv[1], sys.argv[2], sys.argv[3:] or None)
-    print(f"{top} controls aligned to Excel positions, {shown} dropdowns showing a selection")
+    print(f"{n} controls aligned to Excel positions, {shown} dropdowns showing a selection")
     for m in made: print("PDF", m)
     for s in skipped: print("skipped (no candidate):", s)

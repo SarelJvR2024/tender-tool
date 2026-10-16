@@ -66,7 +66,7 @@ def fill_person(wb, base, person, projects_lib):
     if q.get("ecsa_number"): wb.set_value(T, at(B["ecsa_number"], base), q["ecsa_number"])
     if q.get("ecsa_date"): wb.set_date(T, at(B["ecsa_date"], base), q["ecsa_date"])
     if q.get("sacpcmp_date"): wb.set_date(T, at(B["sacpcmp_date"], base), q["sacpcmp_date"])
-    wb.set_dropdown(T, at(B["highest_qual"], base), q["highest_leevle"])
+    wb.set_dropdown(T, at(B["highest_qual"], base), q["highest_level"])
     wb.set_value(T, at(B["highest_desc"], base), q["highest_description"])
     wb.set_value(T, at(B["highest_inst"], base), q["highest_institution"])
     wb.set_date(T, at(B["highest_date"], base), q["highest_graduated"])
@@ -111,8 +111,9 @@ def main(tpl, pack_path, out):
                          "they come pre-filled in each new template")
     serial = lambda v: (datetime.date(1899, 12, 30) + datetime.timedelta(days=int(v))) if isinstance(v, (int, float)) else v
     close, b7 = serial(wb.cached("SETUP", "C3")), serial(wb.cached(T, "F125"))
-    print("Tender (from SANRAL template):", wb.cached("SETUP", "O2"), "|",
-          wb.cached("SETUP", "P2"), "| closes", close)
+    # Contract number lives at SETUP!C2 (B2 holds the "Contract Number:" label) -
+    # O2/P2 are blank on the real template; this print was reading the wrong cells.
+    print("Tender (from SANRAL template):", wb.cached("SETUP", "C2"), "| closes", close)
     if close != b7:
         print(f"WARNING: Form B7 closing date {b7} differs from SETUP closing date {close}")
 
