@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ReviewButton } from "./review-button";
 import { TaskStatusButton } from "./task-status-button";
+import { TaskAssigneeSelect, type AssignablePerson } from "./task-assignee-select";
 import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 
@@ -47,6 +48,10 @@ type TenderTask = {
   status: TenderTaskStatus;
   kind: string | null;
   is_standard: boolean;
+  assigned_to: string | null;
+  // PostgREST embedding via the assigned_to FK - see 0011_tender_task_assignee.sql's
+  // tender_tasks.assigned_to references people(id).
+  people: { name: string } | null;
 };
 
 type GeneratedCv = {
@@ -132,12 +137,23 @@ export default async function TenderWorkspacePage({
     await ensureClosingMilestone(id, tenderFacts.closing_date);
     const { data: taskRows, error } = await supabase
       .from("tender_tasks")
-      .select("id, description, due_date, status, kind, is_standard")
+      .select("id, description, due_date, status, kind, is_standard, assigned_to, people:assigned_to(name)")
       .eq("tender_id", id)
       .order("due_date", { ascending: true, nullsFirst: false });
-    tasks = (taskRows ?? []) as TenderTask[];
+    tasks = (taskRows ?? []) as unknown as TenderTask[];
     tasksError = error ? { message: error.message } : null;
   }
+
+  // The company's own roster for the task-assignee dropdown (migration
+  // 0011) - same table/page as "People / CV Library"
+  // (app/app/people/page.tsx), reused as-is rather than inventing a second
+  // team-members concept. RLS (people: tenant isolation) already scopes this
+  // to the signed-in user's own company.
+  const { data: assignablePeopleRows } = await supabase
+    .from("people")
+    .select("id, name")
+    .order("name", { ascending: true });
+  const assignablePeople = (assignablePeopleRows ?? []) as AssignablePerson[];
 
   // RLS scopes this to the signed-in user's own company - there's at most
   // one pack per (company, tender) per the unique constraint in
@@ -340,7 +356,7 @@ export default async function TenderWorkspacePage({
               </>
             )}
 
-            <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} />
+            <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
 
             {tenderPack && assignments.length > 0 && (
               <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
@@ -445,10 +461,12 @@ function TaskTimeline({
   tenderId,
   tasks,
   error,
+  people,
 }: {
   tenderId: string;
   tasks: TenderTask[];
   error: { message: string } | null;
+  people: AssignablePerson[];
 }) {
   const addTaskWithId = addTenderTask;
 
@@ -496,7 +514,10 @@ function TaskTimeline({
                     )}
                   </div>
                 </div>
-                <TaskStatusButton taskId={t.id} tenderId={tenderId} status={t.status} />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <TaskAssigneeSelect taskId={t.id} tenderId={tenderId} assignedTo={t.assigned_to} people={people} />
+                  <TaskStatusButton taskId={t.id} tenderId={tenderId} status={t.status} />
+                </div>
               </div>
             );
           })}
@@ -522,6 +543,21 @@ function TaskTimeline({
             name="due_date"
             style={{ minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit" }}
           />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Assign to (optional)</label>
+          <select
+            name="assigned_to"
+            defaultValue=""
+            style={{ minHeight: 40, padding: "0 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" }}
+          >
+            <option value="">Unassigned</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
         </div>
         <button
           type="submit"

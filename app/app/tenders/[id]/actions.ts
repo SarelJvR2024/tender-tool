@@ -110,6 +110,9 @@ export async function addTenderTask(formData: FormData) {
   const tenderId = formData.get("tender_id") as string | null;
   const description = (formData.get("description") as string | null)?.trim();
   const dueDate = (formData.get("due_date") as string | null) || null;
+  // Optional assignee (migration 0011) - who's responsible for this task.
+  // "" from the dropdown's own placeholder option means "leave unassigned".
+  const assignedTo = (formData.get("assigned_to") as string | null) || null;
 
   if (!tenderId) redirect("/tenders");
   if (!description) {
@@ -121,6 +124,7 @@ export async function addTenderTask(formData: FormData) {
     tender_id: tenderId,
     description,
     due_date: dueDate,
+    assigned_to: assignedTo,
     created_by: user?.id ?? null,
   });
   if (error) {
@@ -129,6 +133,25 @@ export async function addTenderTask(formData: FormData) {
 
   revalidatePath(`/tenders/${tenderId}`);
   redirect(`/tenders/${tenderId}`);
+}
+
+/**
+ * Reassign (or unassign, via an empty personId) an existing task/milestone
+ * row - the "reassign later" half of migration 0011's assigned_to column.
+ * Same inline tap-to-update shape as advanceTaskStatus above: no redirect,
+ * just a scoped update + revalidate, called from a client component.
+ */
+export async function reassignTenderTask(taskId: string, tenderId: string, personId: string | null) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+
+  await supabase
+    .from("tender_tasks")
+    .update({ assigned_to: personId || null })
+    .eq("id", taskId)
+    .eq("company_id", companyId);
+
+  revalidatePath(`/tenders/${tenderId}`);
 }
 
 const TASK_STATUSES = ["not_started", "in_progress", "done"] as const;
