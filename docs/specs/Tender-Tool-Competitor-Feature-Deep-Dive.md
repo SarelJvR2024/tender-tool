@@ -220,7 +220,7 @@ Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the ta
 | 15 | Team roles, comments, version history | Existing | 2 |
 | 16 | AI-drafted narrative sections: executive summary, methodology, capability statement | Existing | 3 |
 | 17 | Awarded-tender and competitor intelligence | Existing | 3 |
-| 18 | Go/No-Go scoring | Existing | 3 |
+| 18 | Go/No-Go scoring | Existing (competitors); first version built for this product 2026-10-16 - `engine/discovery/assess_tender.py`, category + eligibility signals + fit verdict against a company profile, run against the widened national discovery feed (item 11) | 3 |
 | 19 | Case-study and past-project library with tailored write-ups | Existing (Flowcase, GovDash) | 3 |
 | 20 | Employee onboarding and self-service CV and credential capture | Roadmap (HR-lite) | 4 |
 | 21 | Credential and certificate expiry reminders per person | Roadmap (HR-lite) | 4 |
@@ -231,10 +231,10 @@ Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the ta
 | 26 | Record who on the team submitted each tender, and any revenue-share or commission tied to that person | Gap | 3 |
 | 27 | Record the company's own submitted price per tender, building an internal pricing history by tender type, client and sector | Gap | 3 |
 | 28 | Capture public award outcomes (winner and price) from buyers that publish them, such as SANRAL, to show market-pricing trends | Gap | 3 |
-| 29 | Field-level provenance tagging on every generated value: confirmed, computed, assumed-default, or missing - the data foundation items 30-32 below depend on | Gap | 1 |
-| 30 | Admin test-company harness: every open tender automatically runs full pack generation against several dummy companies at different data-completeness levels | Gap | 2 |
+| 29 | Field-level provenance tagging on every generated value: confirmed, computed, assumed-default, or missing - the data foundation items 30-32 below depend on | Built (CLI/engine layer; Supabase table only, not yet wired to the web app) | 1 |
+| 30 | Admin test-company harness: every open tender automatically runs full pack generation against several dummy companies at different data-completeness levels | Built (CLI: `engine/admin_harness.py`; "automatically" on discovery, and the web console in item 31, are not yet built) | 2 |
 | 31 | Admin review console: visual queue of every dummy-company generation result, for Sarel to confirm correctness before a real customer relies on that tender template | Gap | 2 |
-| 32 | User-facing tender readiness report: before and during pack generation, a plain breakdown of what's already known (with the value), what's missing, and what's uncertain and needs review | Gap | 1 |
+| 32 | User-facing tender readiness report: before and during pack generation, a plain breakdown of what's already known (with the value), what's missing, and what's uncertain and needs review | Gap (the data it would read already exists, per item 29) | 1 |
 
 Access to external data is the main risk to Phase 2: portal scraping terms and eTenders access need checking before item 11 is promised, including whether each portal's terms of service permit downloading its documents, not only listing its tenders. Item 12 needs checking that the SBD form templates can be filled legally and reliably; I did not verify that any competitor does it.
 
