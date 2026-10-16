@@ -4,6 +4,8 @@ import { ReviewButton } from "./review-button";
 import { TaskStatusButton } from "./task-status-button";
 import { TaskAssigneeSelect, type AssignablePerson } from "./task-assignee-select";
 import { ComplianceReport } from "./compliance-report";
+import { GeneralTenderWorkspace } from "./general-workspace";
+import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
 import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
@@ -114,12 +116,12 @@ export default async function TenderWorkspacePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; saved?: string }>;
 }) {
   const { id } = await params;
   // Every action on this page (requestTenderCv, addTenderTask,
   // requestSubmissionPack) reports a refusal as ?error=... - shown at the top.
-  const { error: actionError } = await searchParams;
+  const { error: actionError, saved } = await searchParams;
   const supabase = await createClient();
 
   const { data: tender, error: tenderError } = await supabase
@@ -236,6 +238,9 @@ export default async function TenderWorkspacePage({
   // template families (engine/pack/assemble_pack.py FILLERS) - not other buyers.
   const showSubmissionPack =
     !!tenderPack && (isSanralFamily || tenderFacts?.family === "RRM Consultant Tender");
+  // Non-SANRAL tenders (pursued from Discovery, migration 0018) get the
+  // general preparation flow instead of the SANRAL compliance report.
+  const isGeneralFamily = tenderFacts?.family === GENERAL_FAMILY;
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
@@ -322,6 +327,10 @@ export default async function TenderWorkspacePage({
                 {isSanralFamily && <JumpLink href="#key-people" label="Key people" />}
                 {isSanralFamily && <JumpLink href="#company-experience" label="Experience" />}
                 {isSanralFamily && <JumpLink href="#score-estimate" label="Score" />}
+                {isGeneralFamily && <JumpLink href="#general-preparation" label="Needs" />}
+                {isGeneralFamily && <JumpLink href="#general-documents" label="Documents" />}
+                {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
+                {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" />}
                 <JumpLink href="#tasks-milestones" label="Tasks" />
                 {tenderPack && assignments.length > 0 && <JumpLink href="#key-positions" label="CVs" />}
                 {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" />}
@@ -406,7 +415,7 @@ export default async function TenderWorkspacePage({
             )}
 
             {/* Document/CV compliance + functionality score estimate for pursuing this tender. */}
-            <ComplianceReport tenderId={id} />
+            {isGeneralFamily ? <GeneralTenderWorkspace tenderId={id} saved={saved ?? null} /> : <ComplianceReport tenderId={id} />}
 
             <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
 

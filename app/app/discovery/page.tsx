@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../_components/SiteNav";
+import { pursueOpportunity } from "./actions";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -61,9 +62,9 @@ function verdictChip(verdict: string): { label: string; bg: string; color: strin
 export default async function DiscoveryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ verdict?: string }>;
+  searchParams: Promise<{ verdict?: string; error?: string }>;
 }) {
-  const { verdict: verdictParam } = await searchParams;
+  const { verdict: verdictParam, error: actionError } = await searchParams;
   const activeFilter: VerdictFilter = FILTERS.some((f) => f.key === verdictParam)
     ? (verdictParam as VerdictFilter)
     : "all";
@@ -102,6 +103,11 @@ export default async function DiscoveryPage({
         {error && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
             Could not load discovered opportunities: {error.message}
+          </div>
+        )}
+        {actionError && (
+          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
+            {actionError}
           </div>
         )}
 
@@ -261,6 +267,19 @@ export default async function DiscoveryPage({
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 10 }}>
                     {o.closing_date ? new Date(o.closing_date).toLocaleDateString() : "-"}
                   </div>
+                  {/* Into the Tender Workspace: what this tender needs, the questions
+                      only you can answer, and a generated pack (migration 0018). */}
+                  {o.verdict !== "closed" && (
+                    <form action={pursueOpportunity} style={{ marginBottom: 10 }}>
+                      <input type="hidden" name="opportunity_id" value={o.id} />
+                      <button
+                        type="submit"
+                        style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                      >
+                        Prepare this tender
+                      </button>
+                    </form>
+                  )}
                   {docs.length === 0 && (
                     <div style={{ fontSize: 11, color: "#9A9684" }}>No document URL on file</div>
                   )}

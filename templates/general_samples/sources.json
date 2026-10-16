@@ -1,0 +1,68 @@
+{
+ "_note": "Real, public non-SANRAL tender documents downloaded 2026-10-16 from each release's own etenders.gov.za document links (National Treasury OCDS API, PDDL licence - see engine/discovery/etenders_national.py). Regression inputs for engine/general/general_harness.py. Only the files needed for the requirement/form cases are kept; titles/ids below are as published.",
+ "samples": {
+  "dsti_rfq15": {
+   "ocid": "ocds-9t57fa-174180",
+   "buyer": "Science & Technology",
+   "reference": "RFQ15/10/2026",
+   "description": "Appointment of a service provider to offer internal audit training programmes",
+   "closing_date": "2026-10-23T11:00:00Z"
+  },
+  "treasury_rt83": {
+   "ocid": "ocds-9t57fa-174464",
+   "buyer": "National Treasury",
+   "reference": "RT83-2026RA",
+   "description": "APPOINTMENT OF A PANEL OF SERVICE PROVIDERS FOR THE SUPPLY, DELIVERY, INSTALLATION, DEINSTALLATION, REPAIRS, MAINTENANCE, COMMISSIONING, DECOMMISSIONING, DISPOSAL OF FUEL TANKS, LEASING OF ELECTRONIC ",
+   "closing_date": "2026-11-16T11:00:00Z"
+  },
+  "raf_pr10118921": {
+   "ocid": "ocds-9t57fa-174266",
+   "buyer": "Road Accident Fund",
+   "reference": "PR10118921",
+   "description": "The Road Accident Fund (RAF) wishes to appoint a suitable service provider to Flush Plumbing lines at the Head Office in Block F. ",
+   "closing_date": "2026-10-21T11:00:00Z"
+  },
+  "mthashana_tvet": {
+   "ocid": "ocds-9t57fa-174283",
+   "buyer": "Mthashana TVET",
+   "reference": "MTH/P/MHW/2026      ",
+   "description": "PANEL OF SERVICE PROVIDERS THAT DEAL WITH MENTAL HEALTH AND WELL-BEING OF ALL MTHASHANA COLLEGE EMPLOYEES (THREE-YEAR CONTRACT",
+   "closing_date": "2026-11-05T12:00:00Z"
+  },
+  "tourism_nb143": {
+   "ocid": "ocds-9t57fa-174192",
+   "buyer": "Tourism",
+   "reference": "NB143/2026",
+   "description": "Request for quotation : e Library Subscription for 2026-2029",
+   "closing_date": "2026-10-20T10:00:00Z"
+  },
+  "ssa_change_mgmt": {
+   "ocid": "ocds-9t57fa-174444",
+   "buyer": "State Security Agency",
+   "reference": "SSA/17/2026-27",
+   "description": "APPOINTMENT OF A SERVICE PROVIDER TO RENDER CHANGE MANAGEMENT SERVICES TO THE STATE SECURITY AGENCY FOR A PERIOD OF THREE YEARS",
+   "closing_date": "2026-11-06T11:00:00Z"
+  },
+  "salb_15-10-2026": {
+   "ocid": "ocds-9t57fa-174225",
+   "buyer": "South African Library for the Blind",
+   "reference": "SALB 15/10/2026",
+   "description": "Request for quotation for 24-hour alarm monitoring and emergency responses services at the SALB premises.",
+   "closing_date": "2026-11-05T17:00:00Z"
+  },
+  "dawid_kruiper_tn051": {
+   "ocid": "ocds-9t57fa-174000",
+   "buyer": "Dawid kruiper Local Municipality",
+   "reference": "TN051/2026",
+   "description": "APPOINTMENT OF EXTERNAL SECURITY SERVICES AT THE EILAND HOLIDAY RESORT, ROSE PARK & REITZPARK UNTIL 31 JANUARY 2027",
+   "closing_date": "2026-10-30T14:00:00Z"
+  },
+  "eskom_e3689": {
+   "ocid": "ocds-9t57fa-174369",
+   "buyer": "ESKOM",
+   "reference": "E3689GXMPLET",
+   "description": "Supply and delivery of Thermocouples for a period of five (5) years at Lethabo Power Station on an \u201cas and when required basis.",
+   "closing_date": "2026-11-06T10:00:00Z"
+  }
+ }
+}

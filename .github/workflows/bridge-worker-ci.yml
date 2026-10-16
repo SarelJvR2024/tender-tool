@@ -6,7 +6,12 @@
 #      runs against an in-memory fake Supabase, never a real one);
 #   2. the one-shot CV bridge's row adapters still work (--self-test);
 #   3. the worker container (engine/worker/Dockerfile) still builds and its
-#      bridge runner starts inside it.
+#      bridge runner starts inside it;
+#   4. the general (non-SANRAL) bridge reads real tender documents, fills the
+#      forms and builds a verified pack against the same kind of fake
+#      (engine/general/test_general_bridge.py), and every sample tender still
+#      yields the requirement manifest read from it by hand
+#      (engine/general/general_harness.py --no-pack).
 #
 # Why the real worker is not a scheduled GitHub Action (cron) instead: GitHub's
 # own Actions terms say not to use Actions "as part of a serverless application",
@@ -22,6 +27,7 @@ on:
     paths:
       - "engine/**"
       - "templates/forms/**"
+      - "templates/general_samples/**"
       - ".dockerignore"
       - ".github/workflows/bridge-worker-ci.yml"
   workflow_dispatch:
@@ -55,6 +61,15 @@ jobs:
 
       - name: Polling-loop smoke test (fake Supabase, no secrets)
         run: python3 engine/worker/test_poll_loop.py
+
+      - name: General engine - bridge end to end (fake Supabase, real tender documents)
+        run: |
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          pip install reportlab  # test fixtures only
+          python3 engine/general/test_general_bridge.py
+
+      - name: General engine - requirement manifests of the sample tenders
+        run: python3 engine/general/general_harness.py --no-pack --store "$RUNNER_TEMP/general-harness"
 
   container-build:
     runs-on: ubuntu-24.04

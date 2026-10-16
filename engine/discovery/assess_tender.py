@@ -281,6 +281,7 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
             "contract_number": release.get("contract_number"),
             "buyer": release.get("buyer"),
             "title": release.get("title"),
+            "description": release.get("description"),
             "closing_date": release.get("closing_date"),
             "categories": categories,
             "document_depth": "not_fetched",
@@ -325,6 +326,9 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
         "contract_number": release.get("contract_number"),
         "buyer": release.get("buyer"),
         "title": release.get("title"),
+        # the OCDS tender.description - kept so a pursued tender (migration
+        # 0018 pursue_discovered_opportunity) has a real description
+        "description": release.get("description"),
         "closing_date": release.get("closing_date"),
         "categories": categories,
         "document_depth": depth,

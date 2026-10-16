@@ -2,13 +2,13 @@
 Runs every async bridge script on a schedule, in one process, so nobody has
 to type a command for a queued CV or pack request to get fulfilled.
 
-What it drives: any script that follows the bridge contract below. Two are
+What it drives: any script that follows the bridge contract below. Three are
 registered by name:
 
-    cv    engine/cv/process_cv_jobs.py      (generated_cvs, exists)
-    pack  engine/pack/process_pack_jobs.py  (pack_generation_jobs, being built
-                                             by a separate agent; skipped with a
-                                             log line until the file exists)
+    cv       engine/cv/process_cv_jobs.py           (generated_cvs)
+    pack     engine/pack/process_pack_jobs.py       (pack_generation_jobs, SANRAL)
+    general  engine/general/process_general_jobs.py (tender_engine_jobs: non-SANRAL
+                                                     requirement extraction + packs)
 
 and any other one can be added with --script PATH.
 
@@ -54,12 +54,14 @@ from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
 BRIDGES = {
     "cv": "engine/cv/process_cv_jobs.py",
     "pack": "engine/pack/process_pack_jobs.py",
+    # non-SANRAL requirement extraction + pack generation (tender_engine_jobs, 0018)
+    "general": "engine/general/process_general_jobs.py",
 }
 
 # A pass that finds nothing prints exactly this kind of line. In loop mode that
 # would be two log lines every 30 seconds forever, burying the ones that matter,
 # so passes whose only output is these lines are not echoed.
-QUIET_PREFIXES = ("No pending",)
+QUIET_PREFIXES = ("No pending",)  # "No pending general engine jobs." too
 
 DEFAULT_BRIDGE_TIMEOUT = 30 * 60  # a whole tender pack can take a while; a hung soffice can't stall forever
 

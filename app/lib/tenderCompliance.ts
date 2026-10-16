@@ -8,9 +8,12 @@
 // (T-11); key-person minimums from Book 2/3, C3.1.11(d) "Minimum
 // requirements" (C3-14). Same template family ("Conventional Consultant
 // Tender") as all six SANRAL tenders seeded in app/supabase/seed_tenders.sql.
-// Non-SANRAL tenders have no extracted requirement list yet (see
-// docs/specs/General-Tender-Engine-Findings.md - each buyer's returnable list
-// differs), so this module only claims to cover that one family.
+// Non-SANRAL tenders (family "General (non-SANRAL)") don't come through here:
+// each buyer's returnable list differs (docs/specs/General-Tender-Engine-
+// Findings.md), so theirs is read from the tender's own documents by
+// engine/general/requirements.py and checked by app/lib/generalTender.ts /
+// app/app/tenders/[id]/general-workspace.tsx. This module covers the SANRAL
+// Conventional family only.
 //
 // The vault is the `companies` row (0001, extended by 0014): "has the
 // document" means "the identifying number/date is on file and valid on the

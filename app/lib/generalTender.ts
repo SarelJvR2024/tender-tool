@@ -1,0 +1,256 @@
+// Non-SANRAL ("general") tender preparation on the Tender Workspace.
+//
+// What THIS tender needs is never assumed from the buyer type: it is read
+// from the tender's own documents by engine/general/requirements.py and stored
+// on tenders.document_requirements (migration 0018). This module only:
+//   - types that manifest (the Python side is the single source of the form /
+//     returnable / question catalogue - see requirements.py FORMS, RETURNABLES,
+//     QUESTIONS, COMPANY_FIELDS);
+//   - resolves each supporting document against what the company already has
+//     (the companies vault row, 0001/0014) or uploaded for this tender
+//     (tender_answers 'upload:<key>' rows);
+//   - says which questions are answered and which still need a human.
+// Evidence for every rule: docs/specs/General-Tender-Engine-Findings.md and
+// docs/specs/General-Tender-Preparation-Findings.md.
+
+import { BEE_PROOF_LABEL, validityAtClosing, type CompanyVault, type ComplianceStatus } from "./tenderCompliance";
+import type { EvidenceRule } from "./experienceEvidence";
+import type { LocalityRow } from "./locality";
+
+export const GENERAL_FAMILY = "General (non-SANRAL)";
+
+export type ManifestForm = {
+  code: string; // "1", "4", "6.1", "8", "9", "3", "7"...
+  label: string; // "SBD 4" / "MBD 4"
+  title: string;
+  status: "auto" | "by_hand" | "attach";
+  reason: string;
+  mentions: number;
+  quote: string | null;
+  editions: { document: string; format: string; editable: boolean }[];
+};
+
+export type ManifestReturnable = {
+  key: string;
+  label: string;
+  vault: "csd" | "tax" | "bbbee" | "coid" | "cidb" | "bank" | "insurance" | null;
+  conditional: string | null;
+  strength: "required" | "mentioned";
+  mentions: number;
+  document: string;
+  quote: string;
+};
+
+export type ManifestQuestion = {
+  key: string;
+  form?: string;
+  condition?: string;
+  group: string;
+  type: "yes_no" | "text" | "person";
+  label: string;
+  help: string;
+  optional?: boolean;
+  derived_default?: string;
+};
+
+export type ManifestCompanyField = {
+  key: string;
+  column: "telephone" | "cellphone" | "email" | "cidb_grading";
+  label: string;
+  help: string;
+  optional?: boolean;
+};
+
+export type RequirementManifest = {
+  version: number;
+  extracted_at: string;
+  form_suite: "SBD" | "MBD" | null;
+  documents: { name: string; format: string; kind: string; forms: string[]; editable: boolean; converted_from_doc: boolean; unreadable: string | null }[];
+  forms: ManifestForm[];
+  buyer_forms: { key: string; label: string; document: string; format: string; reason: string; quote?: string }[];
+  returnables: ManifestReturnable[];
+  roles: { role_code: string; mentions: number; document: string; quote: string }[];
+  cidb: { grading: string; quote: string } | null;
+  briefing: { compulsory: boolean; quote: string } | null;
+  scoring: {
+    preference_system: { system: string; reason?: string };
+    functionality: { present?: boolean | null; threshold?: number | null; reason?: string };
+    specific_goal_bases: string[];
+  };
+  experience_evidence: { source: string; rules: EvidenceRule[] };
+  locality: { rows: LocalityRow[]; mandatory_local_office: { area: string; disqualifies: boolean; quote: string } | null };
+  questions: ManifestQuestion[];
+  company_fields: ManifestCompanyField[];
+  gaps: string[];
+};
+
+export type GeneralCompany = CompanyVault & {
+  id: string;
+  cipc_registration_number: string | null;
+  vat_number: string | null;
+  postal_address: string | null;
+  registered_address: string | null;
+  telephone: string | null;
+  cellphone: string | null;
+  email: string | null;
+  cidb_grading: string | null;
+};
+
+export const GENERAL_COMPANY_COLUMNS =
+  "cipc_registration_number, vat_number, postal_address, registered_address, telephone, cellphone, email, cidb_grading";
+
+export type TenderAnswer = {
+  field_key: string;
+  value: string | null;
+  storage_path: string | null;
+  original_filename: string | null;
+  updated_at: string;
+};
+
+export const UPLOAD_PREFIX = "upload:";
+
+export type ReturnableCheck = {
+  key: string;
+  label: string;
+  status: ComplianceStatus;
+  detail: string;
+  quote: string;
+  strength: "required" | "mentioned";
+  uploadable: boolean; // offer an "upload for this tender" slot
+  vaultLink: boolean; // fix it on the Company page instead
+  upload: TenderAnswer | null;
+  expiring?: boolean;
+};
+
+const fmt = (d: string) => new Date(d).toLocaleDateString();
+
+/**
+ * One supporting document against the vault / this tender's uploads.
+ * "have" only when there is something real on file that's valid on the
+ * closing date; "check" when a fact is on file but the copy to attach isn't;
+ * "missing" when nothing is.
+ */
+export function checkReturnable(
+  r: ManifestReturnable,
+  c: GeneralCompany | null,
+  closingDate: string | null,
+  answers: TenderAnswer[],
+  biddingAsJv: boolean | null,
+): ReturnableCheck {
+  const upload = answers.find((a) => a.field_key === UPLOAD_PREFIX + r.key && a.storage_path) ?? null;
+  const base = { key: r.key, label: r.label, quote: r.quote, strength: r.strength, upload };
+  const uploaded = upload ? ` Uploaded for this tender: ${upload.original_filename}.` : "";
+
+  if (r.conditional === "jv" && biddingAsJv === false) {
+    return { ...base, status: "have", detail: "Not bidding as a joint venture - not needed.", uploadable: false, vaultLink: false };
+  }
+
+  switch (r.vault) {
+    case "csd":
+      if (!c?.csd_supplier_number) {
+        return { ...base, status: "missing", detail: "No CSD supplier number on file - register on the CSD and add the number on the Company page.", uploadable: true, vaultLink: true };
+      }
+      return upload
+        ? { ...base, status: "have", detail: `CSD number ${c.csd_supplier_number} on file.${uploaded}`, uploadable: true, vaultLink: false }
+        : { ...base, status: "check", detail: `CSD number ${c.csd_supplier_number} on file. Attach a current CSD summary report for this tender.`, uploadable: true, vaultLink: false };
+    case "tax": {
+      if (!c?.sars_tcs_pin) return { ...base, status: "missing", detail: "No SARS TCS PIN in the vault.", uploadable: true, vaultLink: true };
+      if (!c.sars_tcs_pin_expiry) return { ...base, status: "check", detail: `PIN ${c.sars_tcs_pin} on file but no expiry - add it on the Company page.`, uploadable: true, vaultLink: true };
+      const v = validityAtClosing(c.sars_tcs_pin_expiry, closingDate);
+      const hasCopy = !!c.sars_tcs_pin_document_path || !!upload;
+      return { ...base, status: v.status === "have" && !hasCopy ? "check" : v.status, expiring: v.expiring, detail: `PIN ${c.sars_tcs_pin} ${v.text}.${hasCopy ? (upload ? uploaded : " PIN letter in the vault.") : " Upload the PIN letter (vault or this tender) so it goes into the pack."}`, uploadable: !c.sars_tcs_pin_document_path, vaultLink: !c.sars_tcs_pin_document_path };
+    }
+    case "bbbee": {
+      if (!c?.bee_level || !c.bee_proof_type) {
+        return { ...base, status: c?.bee_level ? "check" : "missing", detail: c?.bee_level ? `Level ${c.bee_level} on file, but not which proof backs it - record it on the Company page.` : "No B-BBEE level on file - preference points for B-BBEE would be 0.", uploadable: false, vaultLink: true };
+      }
+      if (!c.bee_proof_expiry) return { ...base, status: "check", detail: `${BEE_PROOF_LABEL[c.bee_proof_type]} on file but no expiry date.`, uploadable: false, vaultLink: true };
+      const v = validityAtClosing(c.bee_proof_expiry, closingDate);
+      return { ...base, status: v.status === "have" && !c.bee_proof_document_path ? "check" : v.status, expiring: v.expiring, detail: `Level ${c.bee_level}, ${BEE_PROOF_LABEL[c.bee_proof_type]} ${v.text}.${c.bee_proof_document_path ? "" : " Upload the copy to the vault so it goes into the pack."}`, uploadable: false, vaultLink: !c.bee_proof_document_path };
+    }
+    case "coid": {
+      const exp = c?.coid_letter_of_good_standing_expiry ?? null;
+      if (!c?.coid_letter_of_good_standing_number && !exp) return { ...base, status: "missing", detail: "No COID Letter of Good Standing on file.", uploadable: false, vaultLink: true };
+      if (!exp) return { ...base, status: "check", detail: "COID letter on file but no expiry date.", uploadable: false, vaultLink: true };
+      const v = validityAtClosing(exp, closingDate);
+      return { ...base, status: v.status === "have" && !c?.coid_letter_document_path ? "check" : v.status, expiring: v.expiring, detail: `COID letter ${v.text}.${c?.coid_letter_document_path ? "" : " Upload the copy to the vault so it goes into the pack."}`, uploadable: false, vaultLink: !c?.coid_letter_document_path };
+    }
+    case "bank": {
+      if (!c?.bank_confirmation_letter_valid_until) return { ...base, status: "missing", detail: "No bank confirmation letter date on file.", uploadable: false, vaultLink: true };
+      const v = validityAtClosing(c.bank_confirmation_letter_valid_until, closingDate, 30);
+      return { ...base, status: v.status === "have" && !c.bank_confirmation_letter_path ? "check" : v.status, expiring: v.expiring, detail: `Letter dated ${fmt(c.bank_confirmation_letter_date as string)}${v.status === "have" ? `, usable at closing (${v.text})` : " - older than 3 months by closing; get a fresh one"}.`, uploadable: false, vaultLink: true };
+    }
+    case "insurance": {
+      if (!c?.pi_insurance_expiry) return { ...base, status: "missing", detail: "No professional indemnity policy period on file.", uploadable: false, vaultLink: true };
+      const v = validityAtClosing(c.pi_insurance_expiry, closingDate);
+      return { ...base, status: v.status === "have" && !c.pi_insurance_document_path ? "check" : v.status, expiring: v.expiring, detail: `Policy ${c.pi_insurance_policy_number ?? ""} ${v.text}.`, uploadable: false, vaultLink: !c.pi_insurance_document_path };
+    }
+    case "cidb":
+      return c?.cidb_grading
+        ? { ...base, status: upload ? "have" : "check", detail: `CIDB grading ${c.cidb_grading} on file.${uploaded || " Attach the CIDB registration certificate for this tender."}`, uploadable: true, vaultLink: false }
+        : { ...base, status: "missing", detail: "No CIDB grading recorded - answer the CIDB question below (leave blank if you have none).", uploadable: true, vaultLink: false };
+    default:
+      return upload
+        ? { ...base, status: "have", detail: `Uploaded for this tender: ${upload.original_filename}.`, uploadable: true, vaultLink: false }
+        : { ...base, status: r.strength === "required" ? "missing" : "check", detail: r.strength === "required" ? "Not in the vault - upload a copy for this tender." : "Mentioned in the documents - check whether it applies, and upload it if so.", uploadable: true, vaultLink: false };
+  }
+}
+
+export type QuestionState = {
+  q: ManifestQuestion;
+  value: string | null;
+  answered: boolean;
+  defaultValue: string | null; // pre-selection shown when not answered yet
+};
+
+export function questionStates(questions: ManifestQuestion[], answers: TenderAnswer[], company: GeneralCompany | null): QuestionState[] {
+  return questions.map((q) => {
+    const a = answers.find((x) => x.field_key === q.key);
+    const value = a?.value ?? null;
+    let defaultValue: string | null = null;
+    if (q.derived_default && q.key === "sbd1.foreign_based" && company?.cipc_registration_number) defaultValue = q.derived_default;
+    return { q, value, answered: value !== null && value !== "", defaultValue };
+  });
+}
+
+export function companyFieldStates(fields: ManifestCompanyField[], company: GeneralCompany | null) {
+  return fields.map((f) => {
+    const value = (company?.[f.column] as string | null | undefined) ?? null;
+    return { f, value, answered: !!value };
+  });
+}
+
+export const FORM_STATUS_STYLE: Record<ManifestForm["status"], { label: string; bg: string; color: string }> = {
+  auto: { label: "Filled for you", bg: "#DCFCE7", color: "#15803D" },
+  attach: { label: "From the vault", bg: "#DCFCE7", color: "#15803D" },
+  by_hand: { label: "Complete by hand", bg: "#FEF3C7", color: "#B45309" },
+};
+
+export type EngineJob = {
+  id: string;
+  kind: "extract_requirements" | "generate_pack";
+  status: "requested" | "generating" | "ready" | "failed";
+  storage_path_pdf: string | null;
+  output_files: Record<string, string>;
+  page_count: number | null;
+  manifest: {
+    sections?: { title: string; envelope: string; start_page: number; end_page: number }[];
+    omitted?: { title: string; envelope: string; reason: string }[];
+    by_hand?: { title: string; reason: string }[];
+    provenance_summary?: Record<string, number>;
+  } | null;
+  error_message: string | null;
+  requested_at: string;
+  completed_at: string | null;
+};
+
+export const JOB_COLUMNS = "id, kind, status, storage_path_pdf, output_files, page_count, manifest, error_message, requested_at, completed_at";
+
+export const JOB_STATUS_STYLE: Record<EngineJob["status"], { label: string; bg: string; color: string }> = {
+  requested: { label: "Queued", bg: "#FEF3C7", color: "#B45309" },
+  generating: { label: "Working…", bg: "#FEF3C7", color: "#B45309" },
+  ready: { label: "Ready", bg: "#DCFCE7", color: "#15803D" },
+  failed: { label: "Failed", bg: "#FEE2E2", color: "#B91C1C" },
+};
+
+export const PACK_BUCKET = "submission-packs"; // created by 0017, reused (0018)

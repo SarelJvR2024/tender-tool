@@ -18,9 +18,11 @@ FROM python:3.13-slim
 # The pack bridge (engine/pack/process_pack_jobs.py) also needs Calc and the
 # Python-UNO bridge: print_reports.py drives LibreOffice through `import uno`
 # to recalculate the filled SANRAL workbook and print the Form B reports.
+# The general bridge (engine/general/process_general_jobs.py) reads tender PDFs
+# with pdftotext (poppler-utils), same as engine/discovery/assess_tender.py.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      libreoffice-writer-nogui libreoffice-calc-nogui python3-uno \
+      libreoffice-writer-nogui libreoffice-calc-nogui python3-uno poppler-utils \
       fonts-liberation fonts-crosextra-carlito fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 # python3-uno installs for Debian's own python3; expose it to this image's

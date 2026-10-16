@@ -103,6 +103,7 @@ def main():
             "contract_number": r.get("contract_number"),
             "buyer": r.get("buyer"),
             "title": r.get("title"),
+            "description": r.get("description"),  # 0018; null for JSON written before it
             "closing_date": r.get("closing_date"),
             "categories": r.get("categories") or [],
             "document_depth": r.get("document_depth"),
