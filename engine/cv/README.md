@@ -28,15 +28,67 @@ Every value written is logged through `engine/provenance.py`'s `ProvenanceLog`
 (confirmed/computed/assumed_default/missing, with a reason) to a `.provenance.json` file
 alongside the output.
 
+## Web app wiring (this pass)
+
+Two integration points now exist in the web app, per Sarel's own direction (2026-10-16):
+
+- **People page** (`app/app/people/[id]/page.tsx` + `actions.ts`): upload a CV once, choose
+  `as_is` (no AI at all, the file is the submission attachment) or `ai_extract` (which also
+  pre-generates the standard sanral_keyperson/world_bank × summary/detailed formats right
+  away). Recorded in `cv_uploads`.
+- **Tender Workspace page** (`app/app/tenders/[id]/page.tsx`): "Generate tender-specific CV"
+  for a confirmed key person, recorded in `generated_cvs` with `tender_id`/`position_code` set.
+
+Both record a **request**, not a synchronous result — see the next section for why, and
+`process_cv_jobs.py` for what actually fulfills the request.
+
+## Use-as-is mode
+
+`generate_as_is(source_path, out_dir, person_name)` — the "Use as-is" path (see the
+competitor-deep-dive spec): copies the uploaded file through **untouched** (no AI, no
+reformatting) and writes a `.provenance.json` recording that fact, same honesty discipline
+as every other document in this project. CLI: `--as-is-source <file> --person-name <name>`.
+
+## The Python-execution problem, and how it's solved
+
+The web app is Next.js on Vercel, which cannot run Python or LibreOffice — this script
+depends on both (`python-docx` + a `soffice` subprocess), same as `engine/print_reports.py`.
+So a Next.js route cannot call this script directly and return a generated document
+synchronously.
+
+**Chosen approach**: `process_cv_jobs.py` is a bridge script, in the same spirit as
+`engine/write_admin_harness_results.py` bridging `admin_harness.py`'s CLI output into
+Supabase. The web app only ever writes a **request row** (`generated_cvs`, status
+`requested`) — it never calls this script. `process_cv_jobs.py`, run by a human (on a
+machine with Python + LibreOffice) or on a schedule, polls for `requested` rows, builds a
+`generate_cv.py`-shaped profile dict from the real Supabase `people`/`projects`/`companies`
+rows (see `adapt_person_row`/`adapt_project_row`/`adapt_company_row`), calls
+`generate_cv.py`'s own `build_sanral_keyperson`/`build_world_bank` functions directly (never
+a reimplementation), uploads the result to Supabase Storage, and marks the row `ready` (or
+`failed`). The UI shows `requested`/`generating`/`ready`/`failed`, never blocks on a result.
+
+Rejected: duplicating `generate_cv.py`'s logic in TypeScript to run synchronously in a
+Vercel function — the brief is explicit that this would create two implementations that
+drift apart, and `generate_cv.py` is the one real one.
+
 ## What's genuinely not done yet
 
-- No web-app wiring: there is no UI for picking format/standard-vs-customized. This is a
-  standalone engine, verified to work correctly on real data — the web app route is a
-  separate pass (see the main task's summary in the project history).
-- No live Supabase read: reads `config/klipcorp_profile.json` directly (no live Supabase
-  project exists in this environment), per the schema in
-  `app/supabase/migrations/0001_init_schema.sql` — the shape matches `people`/`projects`
-  field-for-field, so swapping the loader for a real Supabase query later is additive.
+- **No live Supabase run of `process_cv_jobs.py`** — no live Supabase project exists in this
+  environment (same limitation every session building this app has hit today). What IS
+  verified, for real, in this pass: the row-shape adapters (Supabase's flat `people`/
+  `projects` columns → `generate_cv.py`'s nested profile-dict shape) feed `build_sanral_
+  keyperson`/`build_world_bank` correctly and produce a real `.docx` — run
+  `python3 process_cv_jobs.py --self-test` to re-check this without any Supabase credentials.
+  The REST-call plumbing itself (`supabase_request`/`storage_upload`) follows the exact
+  pattern already proven working in `write_admin_harness_results.py`/`seed_supabase_company.py`,
+  but is untested end-to-end against a real project until Sarel connects one.
+- **AI extraction of structured fields from an uploaded CV (the `ai_extract` mode's actual
+  field-extraction step) is not built in this pass.** `cv_uploads.status` can reach
+  `extraction_requested`, but nothing yet reads the uploaded file's content and proposes
+  `people`/`projects` field values for confirm/correct. This is the single biggest remaining
+  piece of "upload once, never recapture" — flagged here rather than stubbed with a fake
+  extractor, per this project's honesty discipline. The standard-format **pre-generation**
+  half of `ai_extract` mode (queuing `generated_cvs` rows immediately on upload) IS wired.
 - World Bank format fields the schema doesn't capture (nationality, languages, countries of
   work experience, other professional memberships) are shown as `MISSING` with a reason —
   never fabricated. Adding those columns to `people` is a product decision for when a real

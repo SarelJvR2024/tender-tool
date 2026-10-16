@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { savePerson, deletePerson, saveProject, deleteProject } from "../actions";
+import { savePerson, deletePerson, saveProject, deleteProject, uploadCv } from "../actions";
 import { SiteNav } from "../../_components/SiteNav";
 
 // Per-request: loads one real person's record (or a blank "new" form) under
@@ -28,6 +28,47 @@ type Person = {
   initial_description: string | null;
   initial_institution: string | null;
   initial_graduated: string | null;
+};
+
+type CvUpload = {
+  id: string;
+  storage_path: string;
+  original_filename: string;
+  mode: "as_is" | "ai_extract";
+  status: string;
+  created_at: string;
+};
+
+type GeneratedCv = {
+  id: string;
+  format: "sanral_keyperson" | "world_bank";
+  detail: "summary" | "detailed";
+  status: string;
+  storage_path_docx: string | null;
+  storage_path_pdf: string | null;
+  error_message: string | null;
+  tender_id: string | null;
+  requested_at: string;
+};
+
+const CV_UPLOAD_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
+  uploaded: { label: "Uploaded - used as-is", bg: "#DCFCE7", color: "#15803D" },
+  extraction_requested: { label: "AI extraction requested", bg: "#FEF3C7", color: "#B45309" },
+  extracting: { label: "Extracting…", bg: "#FEF3C7", color: "#B45309" },
+  extracted: { label: "Extracted - review fields above", bg: "#DCFCE7", color: "#15803D" },
+  extraction_failed: { label: "Extraction failed", bg: "#FEE2E2", color: "#B91C1C" },
+};
+
+const GENERATED_CV_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
+  requested: { label: "Requested", bg: "#FEF3C7", color: "#B45309" },
+  generating: { label: "Generating…", bg: "#FEF3C7", color: "#B45309" },
+  ready: { label: "Ready", bg: "#DCFCE7", color: "#15803D" },
+  failed: { label: "Failed", bg: "#FEE2E2", color: "#B91C1C" },
+};
+
+const CV_FORMAT_LABEL: Record<string, string> = {
+  sanral_keyperson: "SANRAL key-person (Form B1.1/B2.1 shape)",
+  world_bank: "World Bank format",
 };
 
 type Project = {
@@ -83,6 +124,9 @@ export default async function PersonDetailPage({
 
   let person: Person | null = null;
   let projects: Project[] = [];
+  let cvUploads: CvUpload[] = [];
+  let generatedCvs: GeneratedCv[] = [];
+  let signedUrls: Record<string, string> = {};
 
   if (!isNew) {
     const { data } = await supabase.from("people").select("*").eq("id", id).maybeSingle();
@@ -94,6 +138,39 @@ export default async function PersonDetailPage({
       .eq("person_id", id)
       .order("start_date", { ascending: false });
     projects = (projectRows ?? []) as Project[];
+
+    const { data: uploadRows } = await supabase
+      .from("cv_uploads")
+      .select("id, storage_path, original_filename, mode, status, created_at")
+      .eq("person_id", id)
+      .order("created_at", { ascending: false });
+    cvUploads = (uploadRows ?? []) as CvUpload[];
+
+    // Standard (non-tender-specific) CVs only here - tender_id is null.
+    // Tender-customized CVs are requested and shown on that tender's own
+    // Workspace page (app/app/tenders/[id]/page.tsx), not duplicated here.
+    const { data: genRows } = await supabase
+      .from("generated_cvs")
+      .select("id, format, detail, status, storage_path_docx, storage_path_pdf, error_message, tender_id, requested_at")
+      .eq("person_id", id)
+      .is("tender_id", null)
+      .order("requested_at", { ascending: false });
+    generatedCvs = (genRows ?? []) as GeneratedCv[];
+
+    // Signed URLs for anything actually downloadable (private bucket) -
+    // generated once at render time, short-lived, never stored.
+    const paths = [
+      ...cvUploads.map((u) => u.storage_path),
+      ...generatedCvs.flatMap((g) => [g.storage_path_docx, g.storage_path_pdf].filter((p): p is string => !!p)),
+    ];
+    if (paths.length > 0) {
+      const results = await Promise.all(
+        paths.map((p) => supabase.storage.from("cv-documents").createSignedUrl(p, 600))
+      );
+      signedUrls = Object.fromEntries(
+        results.map((r, i) => [paths[i], r.data?.signedUrl ?? ""]).filter(([, url]) => url)
+      );
+    }
   }
 
   if (!isNew && !person) {
@@ -208,6 +285,115 @@ export default async function PersonDetailPage({
 
         {!isNew && (
           <>
+            <h2 style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+              CV documents
+            </h2>
+            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+              Upload {person!.name}&apos;s CV once. Choose <strong>use as-is</strong> to attach
+              the exact file to submissions with no AI involvement, or{" "}
+              <strong>AI-extract</strong> to also queue the standard CV template formats so
+              they&apos;re ready to view here any time - see docs/specs/Tender-Tool-Competitor-Feature-Deep-Dive.md.
+            </div>
+
+            <form
+              action={uploadCv}
+              encType="multipart/form-data"
+              style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", marginBottom: 16 }}
+            >
+              <input type="hidden" name="person_id" value={person!.id} />
+              <Field>
+                <label style={label}>CV file</label>
+                <input style={field} type="file" name="file" required accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
+              </Field>
+              <div style={{ display: "flex", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 13, color: "#16233B", maxWidth: 320 }}>
+                  <input type="radio" name="mode" value="ai_extract" defaultChecked style={{ marginTop: 3 }} />
+                  <span>
+                    <strong>AI-extract</strong> the fields and pre-generate the standard CV
+                    formats right away.
+                  </span>
+                </label>
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 13, color: "#16233B", maxWidth: 320 }}>
+                  <input type="radio" name="mode" value="as_is" style={{ marginTop: 3 }} />
+                  <span>
+                    <strong>Use as-is</strong> - attach this exact file to submissions, no AI
+                    involvement at all.
+                  </span>
+                </label>
+              </div>
+              <button
+                type="submit"
+                style={{ minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}
+              >
+                Upload CV
+              </button>
+            </form>
+
+            {cvUploads.length > 0 && (
+              <div style={{ marginBottom: 16 }}>
+                {cvUploads.map((u) => {
+                  const st = CV_UPLOAD_STATUS_LABEL[u.status] ?? { label: u.status, bg: "#F0EEE6", color: "#6B6758" };
+                  const url = signedUrls[u.storage_path];
+                  return (
+                    <div key={u.id} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "10px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{u.original_filename}</div>
+                        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>
+                          {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {new Date(u.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
+                          {st.label}
+                        </span>
+                        {url && (
+                          <a href={url} style={{ fontSize: 12, fontWeight: 600, color: "#D97706" }}>
+                            Download
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {generatedCvs.length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+                  Standard generated CVs
+                </div>
+                <div style={{ fontSize: 11, color: "#9A9684", marginBottom: 8 }}>
+                  Fulfilled out-of-band by engine/cv/process_cv_jobs.py (the web app cannot run
+                  Python/LibreOffice) - status updates here once that process runs.
+                </div>
+                {generatedCvs.map((g) => {
+                  const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#F0EEE6", color: "#6B6758" };
+                  const docxUrl = g.storage_path_docx ? signedUrls[g.storage_path_docx] : null;
+                  const pdfUrl = g.storage_path_pdf ? signedUrls[g.storage_path_pdf] : null;
+                  return (
+                    <div key={g.id} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "10px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
+                          {CV_FORMAT_LABEL[g.format] ?? g.format} · {g.detail}
+                        </div>
+                        {g.error_message && (
+                          <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 2 }}>{g.error_message}</div>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
+                          {st.label}
+                        </span>
+                        {docxUrl && <a href={docxUrl} style={{ fontSize: 12, fontWeight: 600, color: "#D97706" }}>Word</a>}
+                        {pdfUrl && <a href={pdfUrl} style={{ fontSize: 12, fontWeight: 600, color: "#D97706" }}>PDF</a>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <h2 style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
               Project / reference history
             </h2>

@@ -3,6 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { randomUUID } from "node:crypto";
 
 /**
  * Every write here goes through the signed-in user's own Supabase client, so
@@ -145,6 +146,95 @@ export async function deleteProject(formData: FormData) {
   if (!projectId || !personId) redirect("/people");
 
   await supabase.from("projects").delete().eq("id", projectId);
+  revalidatePath(`/people/${personId}`);
+  redirect(`/people/${personId}`);
+}
+
+/**
+ * CV upload - the "upload once, never recapture" flow (docs/specs/Tender-Tool-
+ * Competitor-Feature-Deep-Dive.md). Two modes, per Sarel's own direction
+ * (2026-10-16):
+ *
+ *   as_is       - the uploaded file IS the submission attachment. No AI
+ *                 involvement at all - recorded in cv_uploads and nothing else
+ *                 happens. (See the spec's "Use as-is option" paragraph.)
+ *   ai_extract  - queues field extraction (cv_uploads.status =
+ *                 'extraction_requested' - the actual extraction step is not
+ *                 built yet, see engine/cv/README.md "What's genuinely not done
+ *                 yet") AND immediately queues the standard (non-tender-
+ *                 specific) CV formats for pre-generation (generated_cvs rows,
+ *                 status 'requested'), so they're sitting there ready to view
+ *                 any time someone looks at this person, not generated lazily
+ *                 on first view. Actual generation happens out-of-band - see
+ *                 engine/cv/process_cv_jobs.py and its README section on why
+ *                 (Vercel can't run Python/LibreOffice) - this action only
+ *                 ever records the request, never blocks on a result.
+ *
+ * Storage path convention: "<company_id>/people/<person_id>/uploads/<uuid>-
+ * <filename>" under the private 'cv-documents' bucket (0007_cv_uploads.sql),
+ * same "path in storage, not the file itself" pattern as
+ * companies.logo_storage_path.
+ */
+const STANDARD_CV_FORMATS = ["sanral_keyperson", "world_bank"] as const;
+const STANDARD_CV_DETAILS = ["summary", "detailed"] as const;
+
+export async function uploadCv(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const personId = str(formData, "person_id");
+  const mode = str(formData, "mode");
+  const file = formData.get("file") as File | null;
+
+  if (!personId) redirect("/people");
+  if (mode !== "as_is" && mode !== "ai_extract") {
+    redirect(`/people/${personId}?error=${encodeURIComponent("Choose how this CV should be used: as-is or AI-extract.")}`);
+  }
+  if (!file || file.size === 0) {
+    redirect(`/people/${personId}?error=${encodeURIComponent("Choose a CV file to upload.")}`);
+  }
+
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const storagePath = `${companyId}/people/${personId}/uploads/${randomUUID()}-${safeName}`;
+
+  const { error: uploadError } = await supabase.storage
+    .from("cv-documents")
+    .upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
+  if (uploadError) {
+    redirect(`/people/${personId}?error=${encodeURIComponent(`Could not upload file: ${uploadError.message}`)}`);
+  }
+
+  const { error: insertError } = await supabase.from("cv_uploads").insert({
+    company_id: companyId,
+    person_id: personId,
+    storage_path: storagePath,
+    original_filename: file.name,
+    mode,
+    status: mode === "as_is" ? "uploaded" : "extraction_requested",
+    uploaded_by: user?.id ?? null,
+  });
+  if (insertError) {
+    redirect(`/people/${personId}?error=${encodeURIComponent(insertError.message)}`);
+  }
+
+  if (mode === "ai_extract") {
+    const standardJobs = STANDARD_CV_FORMATS.flatMap((format) =>
+      STANDARD_CV_DETAILS.map((detail) => ({
+        company_id: companyId,
+        person_id: personId,
+        format,
+        detail,
+        status: "requested" as const,
+        requested_by: user?.id ?? null,
+      }))
+    );
+    const { error: jobsError } = await supabase.from("generated_cvs").insert(standardJobs);
+    if (jobsError) {
+      redirect(`/people/${personId}?error=${encodeURIComponent(`CV uploaded, but could not queue standard formats: ${jobsError.message}`)}`);
+    }
+  }
+
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}`);
 }

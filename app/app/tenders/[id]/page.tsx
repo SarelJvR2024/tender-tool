@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ReviewButton } from "./review-button";
+import { requestTenderCv } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
@@ -25,6 +26,36 @@ type ProvenanceRow = {
   status: "confirmed" | "computed" | "assumed_default" | "missing";
   value: string | null;
   reason: string | null;
+};
+
+type Assignment = {
+  id: string;
+  position_code: string;
+  confirmed_person_id: string | null;
+  suggested_person_id: string | null;
+  // PostgREST embedding via the confirmed_person_id FK - see
+  // 0001_init_schema.sql's tender_pack_assignments.confirmed_person_id
+  // references people(id).
+  people: { name: string } | null;
+};
+
+type GeneratedCv = {
+  id: string;
+  position_code: string | null;
+  person_id: string;
+  format: string;
+  detail: string;
+  status: string;
+  storage_path_docx: string | null;
+  storage_path_pdf: string | null;
+  error_message: string | null;
+};
+
+const GENERATED_CV_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
+  requested: { label: "Requested", bg: "#FEF3C7", color: "#B45309" },
+  generating: { label: "Generating…", bg: "#FEF3C7", color: "#B45309" },
+  ready: { label: "Ready", bg: "#DCFCE7", color: "#15803D" },
+  failed: { label: "Failed", bg: "#FEE2E2", color: "#B91C1C" },
 };
 
 // tender_packs.status is a flat enum ('suggested' | 'confirmed' | 'filled') -
@@ -106,6 +137,35 @@ export default async function TenderWorkspacePage({
   const reviewRows = provenance.filter((r) => r.status === "assumed_default");
   const missingRows = provenance.filter((r) => r.status === "missing");
 
+  // Key positions + "Generate tender-specific CV" (integration point B,
+  // Sarel's own direction 2026-10-16) - only meaningful once a pack exists.
+  let assignments: Assignment[] = [];
+  let generatedCvs: GeneratedCv[] = [];
+  if (tenderPack) {
+    const { data: assignmentRows } = await supabase
+      .from("tender_pack_assignments")
+      .select("id, position_code, confirmed_person_id, suggested_person_id, people:confirmed_person_id(name)")
+      .eq("tender_pack_id", tenderPack.id)
+      .order("position_code", { ascending: true });
+    assignments = (assignmentRows ?? []) as unknown as Assignment[];
+
+    const { data: genRows } = await supabase
+      .from("generated_cvs")
+      .select("id, position_code, person_id, format, detail, status, storage_path_docx, storage_path_pdf, error_message")
+      .eq("tender_id", id)
+      .order("requested_at", { ascending: false });
+    generatedCvs = (genRows ?? []) as GeneratedCv[];
+  }
+
+  const cvSignedUrls: Record<string, string> = {};
+  const cvPaths = generatedCvs.flatMap((g) => [g.storage_path_docx, g.storage_path_pdf].filter((p): p is string => !!p));
+  if (cvPaths.length > 0) {
+    const results = await Promise.all(cvPaths.map((p) => supabase.storage.from("cv-documents").createSignedUrl(p, 600)));
+    results.forEach((r, i) => {
+      if (r.data?.signedUrl) cvSignedUrls[cvPaths[i]] = r.data.signedUrl;
+    });
+  }
+
   const left = daysLeft(tenderFacts?.closing_date ?? null);
   const packStatus = tenderPack ? PACK_STATUS_LABEL[tenderPack.status] : null;
 
@@ -156,6 +216,78 @@ export default async function TenderWorkspacePage({
             {!tenderPack && !packError && (
               <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#6B6758" }}>
                 No tender pack exists yet for this tender at your company - nothing to review until one is created.
+              </div>
+            )}
+
+            {tenderPack && assignments.length > 0 && (
+              <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Key positions</div>
+                <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+                  Generates the tender-customized CV (requirement-matching cover page) for a
+                  confirmed key person on this position. Fulfilled out-of-band by
+                  engine/cv/process_cv_jobs.py - the web app cannot run Python/LibreOffice -
+                  so this records a request, not an instant result.
+                </div>
+                {assignments.map((a) => {
+                  const personName = a.people?.name ?? null;
+                  const positionJobs = generatedCvs.filter((g) => g.position_code === a.position_code);
+                  return (
+                    <div key={a.id} style={{ borderTop: "1px solid #F0EEE6", padding: "12px 0" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{a.position_code}</div>
+                          <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
+                            {personName ? `Confirmed: ${personName}` : "No key person confirmed yet for this position"}
+                          </div>
+                        </div>
+                        {a.confirmed_person_id && (
+                          <form action={requestTenderCv} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                            <input type="hidden" name="tender_id" value={id} />
+                            <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
+                            <input type="hidden" name="position_code" value={a.position_code} />
+                            <input type="hidden" name="person_id" value={a.confirmed_person_id} />
+                            <select name="format" defaultValue="sanral_keyperson" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px" }}>
+                              <option value="sanral_keyperson">SANRAL key-person</option>
+                              <option value="world_bank">World Bank format</option>
+                            </select>
+                            <select name="detail" defaultValue="summary" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px" }}>
+                              <option value="summary">Summary</option>
+                              <option value="detailed">Detailed</option>
+                            </select>
+                            <button
+                              type="submit"
+                              style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                            >
+                              Generate tender-specific CV
+                            </button>
+                          </form>
+                        )}
+                      </div>
+                      {positionJobs.length > 0 && (
+                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                          {positionJobs.map((g) => {
+                            const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#F0EEE6", color: "#6B6758" };
+                            return (
+                              <div key={g.id} style={{ fontSize: 11, color: "#6B6758", display: "flex", alignItems: "center", gap: 8 }}>
+                                <span>{g.format} / {g.detail}</span>
+                                <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: st.bg, color: st.color }}>
+                                  {st.label}
+                                </span>
+                                {g.error_message && <span style={{ color: "#B91C1C" }}>{g.error_message}</span>}
+                                {g.storage_path_docx && cvSignedUrls[g.storage_path_docx] && (
+                                  <a href={cvSignedUrls[g.storage_path_docx]} style={{ color: "#D97706", fontWeight: 600 }}>Word</a>
+                                )}
+                                {g.storage_path_pdf && cvSignedUrls[g.storage_path_pdf] && (
+                                  <a href={cvSignedUrls[g.storage_path_pdf]} style={{ color: "#D97706", fontWeight: 600 }}>PDF</a>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 

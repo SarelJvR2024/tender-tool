@@ -40,6 +40,7 @@ Usage:
 import sys
 import os
 import json
+import shutil
 import argparse
 import datetime
 import subprocess
@@ -477,6 +478,43 @@ def generate(profile_path, person_index, out_dir, fmt, detail, tender_path=None,
     return docx_path, pdf_path, prov_path
 
 
+def generate_as_is(source_path, out_dir, person_name):
+    """
+    The "use as-is" path (docs/specs/Tender-Tool-Competitor-Feature-Deep-Dive.md,
+    "Use as-is option"): a company can upload a CV and have it used exactly as
+    uploaded, with zero AI interference - no re-extraction, no reformatting, not
+    run through build_sanral_keyperson/build_world_bank at all. There is
+    genuinely nothing to "generate" here; what this function does is the one
+    real thing left to do honestly: copy the file through untouched (never
+    mutate the original upload in place) and record via ProvenanceLog that this
+    document was attached as-is, so the as-is path leaves the same kind of audit
+    trail every other document in this project does, rather than being the one
+    silent, unlogged exception.
+
+    Returns (copied_path, provenance_path), matching generate()'s own return
+    shape closely enough that a caller (process_cv_jobs.py) can treat both the
+    same way.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    if not os.path.exists(source_path):
+        raise FileNotFoundError(f"as-is source file does not exist: {source_path}")
+
+    base_name = f"{person_name.replace(' ', '_')}_as_is{os.path.splitext(source_path)[1]}"
+    copied_path = os.path.join(out_dir, base_name)
+    shutil.copyfile(source_path, copied_path)
+
+    log = ProvenanceLog(source="engine/cv/generate_cv.py:generate_as_is")
+    log.confirmed("cv.as_is.source_file", os.path.basename(source_path))
+    log.confirmed("cv.as_is.mode", "as_is - uploaded file attached untouched, no AI extraction or reformatting applied")
+
+    prov_path = os.path.join(out_dir, base_name + ".provenance.json")
+    log.save(prov_path)
+
+    print(f"Wrote {copied_path} (as-is copy, no reformatting)")
+    print(f"Wrote {prov_path} - provenance summary: {log.summary()}")
+    return copied_path, prov_path
+
+
 def _convert_to_pdf(docx_path, out_dir):
     try:
         subprocess.run(
@@ -492,16 +530,32 @@ def _convert_to_pdf(docx_path, out_dir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("profile_path")
-    ap.add_argument("person_index", type=int)
+    ap.add_argument("profile_path", nargs="?",
+                     help="not used with --as-is-source (which needs only a person's name, "
+                          "not their profile record - nothing is read from it)")
+    ap.add_argument("person_index", type=int, nargs="?")
     ap.add_argument("out_dir")
-    ap.add_argument("--format", required=True, choices=["sanral_keyperson", "world_bank"])
-    ap.add_argument("--detail", required=True, choices=["summary", "detailed"])
+    ap.add_argument("--format", choices=["sanral_keyperson", "world_bank"])
+    ap.add_argument("--detail", choices=["summary", "detailed"])
     ap.add_argument("--tender", help="path to a pack_suggestions.json to build a "
                      "tender-customized CV with the requirement-matching cover page")
     ap.add_argument("--position", help="position code within --tender's pack_suggestions.json")
     ap.add_argument("--logo", default=None)
+    ap.add_argument("--as-is-source", dest="as_is_source", default=None,
+                     help="use-as-is path: a file to copy through untouched (with a provenance "
+                          "record) instead of generating sanral_keyperson/world_bank at all")
+    ap.add_argument("--person-name", dest="person_name", default=None,
+                     help="required with --as-is-source, since no profile is read")
     args = ap.parse_args()
+
+    if args.as_is_source:
+        if not args.person_name:
+            ap.error("--person-name is required with --as-is-source")
+        generate_as_is(args.as_is_source, args.out_dir, args.person_name)
+        return
+
+    if not args.profile_path or args.person_index is None or not args.format or not args.detail:
+        ap.error("profile_path, person_index, --format and --detail are required unless --as-is-source is given")
     generate(args.profile_path, args.person_index, args.out_dir, args.format, args.detail,
               args.tender, args.position, args.logo)
 
