@@ -77,6 +77,31 @@ Plain rules for the build, drawn from the earlier design research in the voice c
 
 Competitor interfaces were not assessed in this research. Before design starts, screenshot the trial flows of TenderFlow, TenderProSA and Tender Aid and note where each takes the most clicks to produce a pack. Design acceptance criteria for Phase 1 (for example, a new user builds a pack without help) should be written before any screens are built.
 
+### Scope discipline: a specific process, not a general platform
+
+Sarel's explicit instruction (2026-10-16): this is **not** an ERP system that has to accommodate hundreds of fields and arbitrary processes. It automates one specific, already-known process - a known buyer's known document set, known required information, known steps. Design and build like that's true:
+
+- **No field or screen earns its place just because "a system like this might need it."** Every field captured must map to something a real generated document or a real decision actually uses - check against the real schema (`app/supabase/migrations/`) and the real templates (`templates/forms/`) before adding one, not against what a generic tender-management product might offer.
+- **No flow for a case that doesn't happen.** Don't build configurability, multi-path branching or settings for hypothetical future buyers/processes Klipcorp doesn't actually work with yet - extend when a real one shows up, not before.
+- **Every screen should feel like it was built for exactly this job**, not adapted from a general-purpose records system. If a screen reads like a generic CRUD admin panel, it's wrong, even if it's "complete."
+- **Prefer fewer, sharper screens over more, flexible ones.** The win over a general tender-management tool is depth on this one process, not breadth.
+
+### CVs: upload once, never recapture
+
+A specific, named pain point (Sarel, 2026-10-16): nobody wants to retype a CV into form fields. CV capture must be upload-and-done:
+
+- A person uploads their CV in whatever format they actually have it in (PDF, Word, scanned image - whatever exists), once.
+- An AI step extracts the structured fields the `people` table and the tender forms actually need (qualifications, ECSA/SACPCMP registration + dates, project/reference history, years of experience inputs) from that document - the human never re-types what's already written on their own CV.
+- The extracted result is shown back for a quick confirm/correct, not blind-trusted and not a second manual form to fill in from scratch - correcting a wrong field beats typing every field.
+- Re-uploading a newer CV version should update the same person's record, not force recapturing everything again.
+- This is the single most time-consuming manual step in the whole process today (CVs for every key person, on every tender) - solving it properly is worth real effort, more than most other individual screens.
+
+Not yet built as of 2026-10-16: `app/app/people/` currently has a manual add/edit form (real columns, no invented fields - see that page's own build notes), not CV upload/parsing yet. That's the gap to close, not a reason to add more manual-entry polish to the form itself.
+
+### Onboarding: guided, not a wall of fields
+
+Company onboarding (`app/app/onboarding/`) should stay true to the same discipline: the minimum to get a company into the system (today: just a legal name), with everything else - registration numbers, BEE, CIDB, bank details, documents - filled in progressively afterward through the Document Vault, never demanded upfront as a long signup form. A new user should reach something useful (their dashboard, a first tender to look at) in well under a minute, not after a multi-page intake form.
+
 ## UI/UX research and design framework
 
 The research supports one design stance: make the product feel familiar, show one decision at a time, and let help stay optional. Each row below states what a source says, then how it applies to the tender tool.
@@ -95,7 +120,7 @@ The research supports one design stance: make the product feel familiar, show on
 1. **First run:** company details, then upload the first documents; the product shows the expiry dates it found.
 2. **Home:** role-based; the single most useful next action is the largest element.
 3. **New tender:** drop in the tender file; the product lists required documents and key-personnel needs.
-4. **People:** ranked CV suggestions with reasons; the user picks; the CV is reformatted with a live preview.
+4. **People:** upload a CV once in whatever format it's in, AI extracts the structured fields for a quick confirm (never a manual recapture form); ranked CV suggestions with reasons; the user picks; the CV is reformatted with a live preview.
 5. **Pack:** ordered checklist on the left, merged PDF preview on the right; problems listed in plain words with a fix button.
 6. **Export:** one button, with a clear "ready to upload" state.
 
@@ -204,7 +229,7 @@ Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the ta
 | # | Feature | Type | Phase |
 | --- | --- | --- | --- |
 | 1 | Company document vault with expiry dates: CIPC registration, CSD summary, SARS tax status, B-BBEE affidavit or certificate, bank letter, CIDB, COID, ID copies | Existing | 1 |
-| 2 | Staff CV library with structured fields: qualifications, registrations, project experience, years per skill | Gap (local) | 1 |
+| 2 | Staff CV library with structured fields: qualifications, registrations, project experience, years per skill. Must be upload-and-AI-extract, never manual recapture - see "CVs: upload once, never recapture" above (flagged 2026-10-16, highest-effort-justified gap in the people flow) | Gap (local) - `app/app/people/` has manual add/edit today, CV upload/AI extraction not yet built | 1 |
 | 3 | Upload a tender and extract its required documents, forms and key-personnel requirements | Existing | 1 |
 | 4 | Match staff to key-personnel requirements and rank them, with reasons and gaps | Gap | 1 |
 | 5 | Reformat chosen CVs into the tender's required template, output PDF and Word | Gap | 1 |
