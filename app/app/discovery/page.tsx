@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { SiteNav } from "../_components/SiteNav";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -65,7 +66,6 @@ export default async function DiscoveryPage({
     : "all";
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
 
   // Scoped to the signed-in user's company via RLS (is_company_member) -
   // this query shape works the same regardless of which company is asking.
@@ -87,13 +87,7 @@ export default async function DiscoveryPage({
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 32px", background: "#16233B", color: "#FFFFFF" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>T</div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
-        </div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.65)" }}>{user?.email}</div>
-      </div>
+      <SiteNav active="discovery" />
 
       <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovery</h1>

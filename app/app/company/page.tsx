@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { updateCompanyProfile } from "./actions";
+import { SiteNav } from "../_components/SiteNav";
 
 // Depends on the signed-in user's session/company row on every request
 // (via RLS), same reason as dashboard/page.tsx - can't be prerendered.
@@ -62,7 +63,6 @@ export default async function CompanyPage({
   const editing = edit === "1";
 
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
 
   // RLS ("companies: members can select") returns only the signed-in user's
   // own company - this .single() read works the same regardless of tenant.
@@ -77,13 +77,7 @@ export default async function CompanyPage({
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 16px", background: "#16233B", color: "#FFFFFF", flexWrap: "wrap", gap: 8 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B", flexShrink: 0 }}>T</div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
-        </div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.65)" }}>{user?.email}</div>
-      </div>
+      <SiteNav active="company" />
 
       <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { SiteNav } from "../_components/SiteNav";
 
 // Reads the signed-in user's own company's roster on every request (via RLS) -
 // can't be prerendered. Same Cache Components escape hatch as dashboard/page.tsx.
@@ -56,15 +57,7 @@ export default async function PeoplePage({
         }
       `}</style>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 32px", background: "#16233B", color: "#FFFFFF" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>T</div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
-        </div>
-        <Link href="/dashboard" style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", textDecoration: "none" }}>
-          ← Dashboard
-        </Link>
-      </div>
+      <SiteNav active="people" />
 
       <div style={{ flex: 1, padding: "24px 16px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <div className="people-header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>

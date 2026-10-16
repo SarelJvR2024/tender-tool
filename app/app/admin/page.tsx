@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import HarnessRunRow from "./HarnessRunRow";
+import { SiteNav } from "../_components/SiteNav";
 
 // Reads per-request session/DB data (admin_harness_runs, gated by RLS on the
 // signed-in user being a company owner) - same escape hatch as
@@ -31,13 +32,7 @@ export default async function AdminPage() {
 
   return (
     <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 32px", background: "#16233B", color: "#FFFFFF" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>T</div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
-        </div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.65)" }}>Admin review console</div>
-      </div>
+      <SiteNav active="admin" />
 
       <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Admin harness results</h1>

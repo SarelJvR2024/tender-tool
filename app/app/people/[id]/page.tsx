@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { savePerson, deletePerson, saveProject, deleteProject } from "../actions";
+import { SiteNav } from "../../_components/SiteNav";
 
 // Per-request: loads one real person's record (or a blank "new" form) under
 // RLS. Same Cache Components escape hatch as dashboard/page.tsx and ../page.tsx.
@@ -114,15 +115,7 @@ export default async function PersonDetailPage({
         }
       `}</style>
 
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 32px", background: "#16233B", color: "#FFFFFF" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>T</div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
-        </div>
-        <Link href="/people" style={{ fontSize: 13, color: "rgba(255,255,255,0.75)", textDecoration: "none" }}>
-          ← People
-        </Link>
-      </div>
+      <SiteNav active="people" />
 
       <div style={{ flex: 1, padding: "24px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
