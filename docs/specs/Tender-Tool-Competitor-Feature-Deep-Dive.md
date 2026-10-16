@@ -104,6 +104,19 @@ Not yet built as of 2026-10-16: `app/app/people/` currently has a manual add/edi
 
 Company onboarding (`app/app/onboarding/`) should stay true to the same discipline: the minimum to get a company into the system (today: just a legal name), with everything else - registration numbers, BEE, CIDB, bank details, documents - filled in progressively afterward through the Document Vault, never demanded upfront as a long signup form. A new user should reach something useful (their dashboard, a first tender to look at) in well under a minute, not after a multi-page intake form.
 
+### Document expiry reminders, and a tender task/deadline timeline (Sarel, 2026-10-16)
+
+Two related but separate gaps, both real, neither built yet:
+
+**1. Document expiry reminders.** The Document Vault (`app/app/company/page.tsx`) already color-codes expiry (green/amber/red) when someone looks at the page, but that's passive - nothing actively tells anyone a document needs renewing with enough lead time. Needs a real reminder: before a tracked document (COID, B-BBEE, insurance, CSD, and anything else with a real expiry date on file) expires, by enough margin to actually get it renewed in time - not a same-day surprise. Same notification channel already built for the daily tender-watch email (`engine/discovery/watch_new_tenders.py` + the scheduled check-in that emails Sarel) is the natural reuse, not a new channel invented from scratch.
+
+**2. A tender task/deadline timeline, standard steps plus manual ones.** Item 8 ("Tender record with closing date, briefing, clarification, submission and signature milestones; email reminders") is marked Existing (competitors have it) but isn't built here yet. What it needs to actually do:
+
+- Standard tender milestones where the date is known (closing date - already captured; briefing/clarification dates - `assess_tender.py`'s signal extraction already detects "compulsory briefing mentioned" in a document, but doesn't currently capture the actual date; this needs extending or a manual entry point when extraction can't get the exact date).
+- **Manual, tender-specific tasks** - real examples Sarel gave, to ground this rather than build an abstract generic task system: selecting a partner/subcontractor for a specific tender, sourcing the right product/material, arranging a reference letter or confirmation from an existing client, asking an existing client whether they're willing to act as a reference if the tender reaches a second stage. These don't follow a fixed template - the system needs a genuinely free-form "add a task for this tender" with a description and a due date, not a fixed dropdown of anticipated task types. (One example in Sarel's own words - "ask them if they're willing to do a sidewalk" - wasn't fully clear in the source transcript; whoever builds this should ask Sarel directly what that one meant rather than guess, but the general free-text task capability covers it regardless of the exact wording.)
+- Each task (standard or manual) needs: a due date, a status (not started/in progress/done), and eventually a reminder before its due date - reusing the same reminder mechanism as the document-expiry reminders above, not a second parallel notification system.
+- This lives at the tender level (`tenders/[id]`, the Tender Workspace page already built) - alongside the readiness report, not a separate disconnected page.
+
 ## UI/UX research and design framework
 
 The research supports one design stance: make the product feel familiar, show one decision at a time, and let help stay optional. Each row below states what a source says, then how it applies to the tender tool.
