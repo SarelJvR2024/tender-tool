@@ -23,6 +23,8 @@ type PackJob = {
   manifest: {
     omitted?: { title: string; envelope: string; reason: string }[];
     warnings?: string[];
+    // Envelope 2 (Financial) is its own PDF - engine/pack/assemble_pack.py.
+    financial?: { page_count?: number; omitted?: { title: string; envelope: string; reason: string }[] };
   } | null;
   error_message: string | null;
   acknowledged_gaps: boolean;
@@ -36,6 +38,7 @@ const STATUS: Record<PackJob["status"], { label: string; bg: string; color: stri
 };
 
 const OUTPUT_LABEL: Record<string, string> = {
+  financial_pdf: "Envelope 2 - Financial Submission PDF",
   technical_xlsm: "Technical workbook (.xlsm)",
   financial_xlsm: "Financial workbook (.xlsm)",
   actions_to_sign: "What to sign (ACTIONS_TO_SIGN.md)",
@@ -65,7 +68,9 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     ...(readiness.unfilledPositions.length > 0
       ? [`No confirmed key person for ${readiness.unfilledPositions.join(", ")}`]
       : []),
-    ...(missingTemplates.length > 0 ? [`Blank SANRAL templates not uploaded: ${missingTemplates.join(", ")}`] : []),
+    ...(missingTemplates.length > 0
+      ? [`Blank SANRAL templates not uploaded (Blank tender templates, above): ${missingTemplates.join(", ")}`]
+      : []),
     ...(active ? ["A pack is already queued or generating for this tender"] : []),
   ];
   const gaps = [
@@ -93,10 +98,12 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       <PackAutoRefresh active={active} />
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Submission pack</div>
       <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
-        One PDF, in submission order, with a contents page and page numbers: envelope covers, authority letter,
-        A-Forms, your vault documents, Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B7, and the
-        Form of Offer. The filled Technical and Financial workbooks come with it. Anything missing is listed on the
-        contents page. Signatures, pricing and the B4/B5 write-ups stay with you.
+        Two PDFs, one per sealed envelope, each in submission order with a contents page and page numbers. The
+        submission pack: outer cover, then Envelope 1 (Technical) - authority letter, A-Forms, your vault documents,
+        Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B7. Envelope 2 (Financial), separately: its
+        cover, the Form of Offer and the printed Financial workbook - kept out of the technical pack because it is
+        opened only after technical evaluation. The filled .xlsm workbooks come with them. Anything missing is listed
+        on the contents pages. Signatures, pricing and the B4/B5 write-ups stay with you.
       </div>
 
       {blockers.length > 0 && (
@@ -147,7 +154,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column" }}>
           {jobs.map((j) => {
             const st = STATUS[j.status] ?? { label: j.status, bg: "#F0EEE6", color: "#6B6758" };
-            const omitted = j.manifest?.omitted ?? [];
+            const omitted = [...(j.manifest?.omitted ?? []), ...(j.manifest?.financial?.omitted ?? [])];
             const warnings = j.manifest?.warnings ?? [];
             return (
               <div key={j.id} style={{ borderTop: "1px solid #F0EEE6", padding: "10px 0", fontSize: 12, color: "#4B5563" }}>

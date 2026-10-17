@@ -1,5 +1,5 @@
 """
-Builds one ordered, page-numbered SANRAL submission-pack PDF from local files,
+Builds the ordered, page-numbered SANRAL submission-pack PDFs from local files,
 by running the REAL existing fill engines - never a reimplementation of them:
 
   fingerprint.py           template-change check (refuses on a real mismatch)
@@ -8,14 +8,29 @@ by running the REAL existing fill engines - never a reimplementation of them:
   print_reports.py         Forms B1-B2 per position, B3, B4, B5, B7 as PDF
   fill_financial.py        Financial workbook, mechanical fields only
   fill_financial_hours.py  hours sheets, only when a complete human capture exists
+  print_financial.py       the filled Financial workbook's visible sheets as PDF
   run_forms_pipeline.py    C.1.1.1, C.1.2.3, A-Forms bundle, ACTIONS_TO_SIGN.md,
                            merged field_provenance.json
   fill_authority_letter.py A2 authority letter (DRAFT, unsigned)
   make_envelope_covers.py  outer / technical / financial covers
 
-then merges those with the company's vault documents and any CVs into one PDF
-(engine/pack/pdf_merge.py) with a contents page that also lists, with a
-reason, everything that is NOT in the pack.
+then merges those with the company's vault documents and any CVs into two
+PDFs (engine/pack/pdf_merge.py), each with a contents page that also lists, with a
+reason, everything that is NOT in it:
+
+  - the submission pack PDF: outer envelope cover + Envelope 1 (Technical);
+  - a SEPARATE Envelope 2 (Financial) PDF: its cover, the Form of Offer and
+    the printed Financial workbook.
+
+Two PDFs, not one, because that is the documented two-envelope convention:
+the two envelopes are sealed separately and Envelope 2 is opened only after
+technical evaluation, so nothing with pricing may sit in the technical pack
+(docs/specs/Tender-Tool-Claude-Code-Handover.md section 5 "pricing guard" and
+section 7 "one PDF per envelope"; Tender-Tool-Competitor-Feature-Deep-Dive.md
+"Two-envelope submissions": "build the technical and pricing packs
+separately, each as its own PDF ... page numbering"). Klipcorp's real
+completed submission keeps its "Pricing Schedule" set (Form of Offer, Form
+C2.4, printed pricing workbook) apart from its technical returnables too.
 
 This module only knows about local files. engine/pack/process_pack_jobs.py is
 the Supabase adapter (downloads the inputs, calls build_submission_pack(),
@@ -160,7 +175,10 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
                  own SETUP sheet; nothing else is ever invented
     vault_docs:  {key: local path or None} for the keys in VAULT_ORDER / ISO_KEY
     cv_docs:     {position_code: {"path", "person", "source"}} or {position_code: None}
-    Returns (pdf_path, manifest).
+    Returns (pdf_path, manifest). pdf_path is the technical pack; the separate
+    Envelope 2 PDF is manifest["outputs"]["financial_pdf"], described by
+    manifest["financial"] (same shape as the top-level manifest's
+    page_count/sections/omitted, so pdf_merge.verify_pack() reads it back too).
     """
     vault_docs = vault_docs or {}
     cv_docs = cv_docs or {}
@@ -225,6 +243,24 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     else:
         financial_note = "No blank Financial Submission workbook on file for this tender."
 
+    # 4b. Print the filled Financial workbook (its visible sheets - the same set
+    # Klipcorp's real submission printed; see print_financial.py). Imported here
+    # for the same `uno` reason as print_reports below.
+    financial_pdf = c24_pdf = None
+    c24_note = financial_note
+    if financial_out:
+        import print_financial
+        financial_pdf = os.path.join(work_dir, "financial_print", f"{slug}_Financial_workbook.pdf")
+        c24_pdf = os.path.join(work_dir, "financial_print", f"{slug}_Form_C2.4_FIN.pdf")
+        try:
+            print_financial.export(financial_out, financial_pdf, c24_pdf)
+            if not os.path.exists(c24_pdf):
+                c24_pdf, c24_note = None, "this Financial workbook has no visible FORM C2.4 FIN sheet"
+        except Exception as e:  # a print failure must not lose the technical pack
+            financial_pdf = c24_pdf = None
+            financial_note = c24_note = (f"the filled workbook could not be printed to PDF ({type(e).__name__}: {e}) - "
+                                         "print it from Excel; the filled .xlsm is supplied with this pack")
+
     # 5. docx returnables: C.1.1.1, C.1.2.3, A-Forms + checklist + provenance
     run_forms_pipeline.main(forms_dir, profile_path, forms_out, contract_label, nra_ref or "", pack_yaml)
 
@@ -264,6 +300,7 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     # 7. Ordered sections. Order follows the two-envelope structure of the real
     # completed submission (templates/incoming/completed_sample): returnables and
     # Form B reports in the technical envelope, Form of Offer with pricing.
+    # Envelope 2 goes into its own PDF (fin_sections) - see the module docstring.
     sections = []
     sections.append(sec("Outer envelope cover", OUTER, docx_pdf(covers and covers["outer"]), cover_reason))
 
@@ -320,16 +357,28 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     for form in ("Form B3", "Form B4"):
         sections.append(sec(form, TECHNICAL, reports.get(form)))
     sections.append(vault_section(*ISO_KEY, TECHNICAL))
-    for form in ("Form B5", "Form B7"):
-        sections.append(sec(form, TECHNICAL, reports.get(form)))
+    sections.append(sec("Form B5", TECHNICAL, reports.get("Form B5")))
+    # SANRAL's own note on the FORM C2.4 FIN sheet: "to be completed, printed and
+    # included in the tenderer's technical proposal as a PDF copy" - zero points
+    # for workplan appropriateness otherwise. Hours only, no rand amounts, so it
+    # is the one Financial-workbook page that belongs in Envelope 1 as well.
+    sections.append(sec("Form C2.4 FIN - key persons' normalised hours (copy from the Financial workbook, "
+                        "as generated)", TECHNICAL, c24_pdf, c24_note))
+    sections.append(sec("Form B7", TECHNICAL, reports.get("Form B7")))
 
-    sections.append(sec("Envelope 2 cover - Financial Submission", FINANCIAL,
-                        docx_pdf(covers and covers["financial"]), cover_reason))
-    sections.append(sec("C.1.1.1 - Form of Offer and Acceptance, completed", FINANCIAL,
-                        docx_pdf(os.path.join(forms_out, "C.1.1.1_Form_of_Offer_FILLED.docx"))))
-    sections.append(sec("Financial Submission workbook (pricing schedule, C2.4 FIN)", FINANCIAL, None,
-                        financial_note or "supplied as the filled .xlsm alongside this PDF - pricing and hours "
-                        "are the tenderer's own input in Excel; no print-to-PDF path exists for this workbook yet"))
+    fin_sections = [
+        sec("Envelope 2 cover - Financial Submission", FINANCIAL,
+            docx_pdf(covers and covers["financial"]), cover_reason),
+        sec("C.1.1.1 - Form of Offer and Acceptance, completed", FINANCIAL,
+            docx_pdf(os.path.join(forms_out, "C.1.1.1_Form_of_Offer_FILLED.docx"))),
+        # "as generated": pricing and hours are typed into the .xlsm by the
+        # tenderer, so this print only shows what was on file when the pack was
+        # built - the title says so rather than passing it off as final.
+        sec("Financial Submission workbook (Tenderer Input Data, hours, Form C2.4 FIN, Pricing Schedule, "
+            "Summary Tendered Fee) - as generated; re-print after entering pricing", FINANCIAL,
+            financial_pdf, financial_note),
+    ]
+    fin_name = f"{slug}_Envelope2_Financial_Submission.pdf"
 
     notes = [
         "DRAFT FOR REVIEW AND SIGNATURE. Generated by Tender Tool from the data on file. Signatures, the "
@@ -340,6 +389,9 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
         notes.append(f"Closing time {closing_time} is taken from the tender record - confirm it against the "
                      "Tender Data (C2.15) before submission.")
     notes += warnings
+    tech_notes = notes + [f"Envelope 2 (Financial Submission: cover, Form of Offer, Financial workbook) is a "
+                          f"SEPARATE PDF, {fin_name} - it is sealed in its own envelope and opened only after "
+                          "technical evaluation, so no pricing is bound into this one."]
 
     out_pdf = os.path.join(work_dir, f"{slug}_Submission_Pack.pdf")
     company = profile["company"]["legal_name"]
@@ -349,14 +401,25 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
                f"Closing: {closing}" + (f" at {closing_time}" if closing_time else ""),
                f"Generated {datetime.date.today().isoformat()}"]
     manifest = merge_with_contents(sections, out_pdf, os.path.join(work_dir, "contents"),
-                                   [h for h in heading if h], notes=notes,
+                                   [h for h in heading if h], notes=tech_notes,
                                    front_count=1 if sections[0]["pdf"] else 0, stamp_label=contract_no)
+
+    # Envelope 2 as its own PDF: own contents page, own "Page X of N".
+    fin_pdf = os.path.join(work_dir, fin_name)
+    fin_manifest = merge_with_contents(
+        fin_sections, fin_pdf, os.path.join(work_dir, "contents_financial"),
+        [h for h in heading if h], notes=notes, front_count=1 if fin_sections[0]["pdf"] else 0,
+        stamp_label=f"{contract_no} Envelope 2", title="ENVELOPE 2 - FINANCIAL SUBMISSION - CONTENTS",
+        pdf_title=f"Financial submission (Envelope 2) {contract_no}")
+    fin_manifest["file"] = fin_name
     manifest.update({
         "family": family,
         "contract_no": contract_no,
         "warnings": warnings,
+        "financial": fin_manifest,
         "outputs": {
             "pdf": out_pdf,
+            "financial_pdf": fin_pdf,
             "technical_xlsm": filled_xlsm,
             "financial_xlsm": financial_out,
             "actions_to_sign": os.path.join(forms_out, "ACTIONS_TO_SIGN.md"),

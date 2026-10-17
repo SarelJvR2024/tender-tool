@@ -25,12 +25,20 @@ so two workers never build the same job), and then:
      fill_conventional/fill_tender, print_reports, fill_financial,
      run_forms_pipeline, fill_authority_letter and make_envelope_covers, and
      merges everything into one PDF with a contents page and page numbers;
-  4. reads the merged PDF back (pdf_merge.verify_pack) - a job is only marked
+  4. reads both merged PDFs back (pdf_merge.verify_pack) - the technical pack
+     and the separate Envelope 2 (Financial) PDF; a job is only marked
      'ready' if the page count, the page-number stamps, the contents page
-     entries and the bookmarks all check out;
-  5. uploads the PDF + filled workbooks + ACTIONS_TO_SIGN.md + manifest to
+     entries and the bookmarks all check out in each;
+  5. uploads both PDFs + filled workbooks + ACTIONS_TO_SIGN.md + manifest to
      'submission-packs' and marks the row 'ready' (or 'failed' with the
      reason - e.g. confirm_pack.py's or fingerprint.py's own refusal text).
+
+Every poll also fills in tender_requirements for any tender whose blank
+Technical workbook has been uploaded (Tender Workspace, tender_documents) but
+whose key positions haven't been read yet: straight from that workbook's own
+SETUP sheet (suggest_pack.read_required_positions - the same reader the pack
+build's confirm gate uses), never guessed. That is what lists the positions
+on the Tender Workspace's Key positions card for a person to confirm.
 
 Same CLI contract as process_cv_jobs.py: one-shot (process whatever is queued,
 then exit) is the default and `--once` says so explicitly - that is what
@@ -135,6 +143,11 @@ class SupabaseRest:
     def select(self, table, filters=None, order=None):
         q = ["select=*"] + self._filters(filters) + ([f"order={order}"] if order else [])
         return json.loads(self._req("GET", f"/rest/v1/{table}?{'&'.join(q)}") or b"[]")
+
+    def insert(self, table, row):
+        out = self._req("POST", f"/rest/v1/{table}", row,
+                        {"Content-Type": "application/json", "Prefer": "return=representation"})
+        return (json.loads(out or b"[]") or [None])[0]
 
     def update(self, table, filters, body):
         q = self._filters(filters)
@@ -416,6 +429,10 @@ def process_job(client, job, work_root, keep=False):
         problems = verify_pack(pdf, manifest)
         if problems:
             raise RuntimeError("merged PDF failed its read-back check: " + "; ".join(problems[:5]))
+        fin_problems = verify_pack(manifest["outputs"]["financial_pdf"], manifest["financial"])
+        if fin_problems:
+            raise RuntimeError("Envelope 2 (Financial) PDF failed its read-back check: "
+                               + "; ".join(fin_problems[:5]))
 
         prefix = f"{job['company_id']}/tenders/{job['tender_id']}/{job['id']}"
         outputs = manifest.pop("outputs")
@@ -435,7 +452,8 @@ def process_job(client, job, work_root, keep=False):
             "page_count": manifest["page_count"], "manifest": manifest, "completed_at": _ts(),
         })
         print(f"[ready] {job['id']}: {manifest['page_count']} pages, {len(manifest['sections'])} sections, "
-              f"{len(manifest['omitted'])} not included -> {pdf_remote}")
+              f"{len(manifest['omitted'])} not included -> {pdf_remote}; Envelope 2: "
+              f"{manifest['financial']['page_count']} pages -> {uploaded.get('financial_pdf')}")
         return manifest
     except Exception as e:
         msg = f"{type(e).__name__}: {e}" if not isinstance(e, ValueError) else str(e)
@@ -470,9 +488,51 @@ def fail_stale_jobs(client, now=None):
             print(f"[failed] {job['id']}: stale 'generating' since {started}")
 
 
+def _managerial(v):
+    s = str(v or "").strip().lower().replace("-", "").replace(" ", "")
+    return s in ("man", "managerial", "yes", "y")
+
+
+def sync_tender_requirements(client, work_root):
+    """tender_requirements from each uploaded blank Technical workbook's own
+    SETUP sheet, for tenders that have none yet (see module docstring).
+    Primary positions and their ALT slots, with SETUP's own description and
+    Man/Non-Man flag. Returns {tender_id: [codes]} for what it wrote. A
+    workbook that can't be read is reported and skipped - it never stops the
+    pack jobs below."""
+    written = {}
+    docs = client.select("tender_documents", {"doc_type": "technical_xlsm"})
+    if not docs:
+        return written
+    have = {r["tender_id"] for r in client.select("tender_requirements", {"tender_id": [d["tender_id"] for d in docs]})}
+    for d in docs:
+        if d["tender_id"] in have:
+            continue
+        local = os.path.join(work_root, "requirements", d["tender_id"], "technical.xlsm")
+        try:
+            client.download("tender-documents", d["storage_path"], local)
+            primary, alternates = read_required_positions(Workbook(local))
+            rows = [(p, False) for p in primary] + [(a, True) for alts in alternates.values() for a in alts[:1]]
+            for p, alt in rows:
+                client.insert("tender_requirements", {
+                    "tender_id": d["tender_id"], "position_code": p["code"],
+                    "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
+                    "managerial": _managerial(p.get("managerial")), "is_alternate": alt})
+            written[d["tender_id"]] = [p["code"] for p, alt in rows if not alt]
+            print(f"[requirements] tender {d['tender_id']}: {len(primary)} position(s) from SETUP "
+                  f"({', '.join(written[d['tender_id']])}), {len(rows) - len(primary)} ALT")
+        except Exception as e:
+            print(f"[requirements] tender {d['tender_id']}: could not read the uploaded Technical workbook's "
+                  f"SETUP sheet ({type(e).__name__}: {e})")
+        finally:
+            shutil.rmtree(os.path.dirname(local), ignore_errors=True)
+    return written
+
+
 def process_pending(client, work_root, keep=False, quiet_when_empty=False):
     os.makedirs(work_root, exist_ok=True)
     fail_stale_jobs(client)
+    sync_tender_requirements(client, work_root)
     jobs = client.select("pack_generation_jobs", {"status": "requested"}, order="requested_at.asc")
     if not jobs and not quiet_when_empty:
         print("No pending pack_generation_jobs.")

@@ -155,6 +155,8 @@ def run_pack_one(profile_path, slug, out_dir):
         return {"outcome": "refused", "stage": "build_submission_pack", "reason": str(e)}
 
     problems = verify_pack(pdf, manifest)
+    problems += [f"Envelope 2 PDF: {p}" for p in verify_pack(manifest["outputs"]["financial_pdf"],
+                                                              manifest["financial"])]
     return {"outcome": "built", "pdf": pdf, "manifest": manifest, "problems": problems}
 
 
@@ -164,6 +166,7 @@ def signature(result):
     if result["outcome"] != "built":
         return {"outcome": result["outcome"], "stage": result["stage"], "reason": result["reason"]}
     m = result["manifest"]
+    f = m["financial"]
     return {
         "outcome": "built",
         "family": m["family"],
@@ -172,4 +175,10 @@ def signature(result):
                      for s in m["sections"]],
         "omitted": sorted(f"{o['envelope']} | {o['title']}" for o in m["omitted"]),
         "warning_count": len(m["warnings"]),
+        "financial": {
+            "page_count": f["page_count"],
+            "sections": [f"{s['envelope']} | {s['title']} | {s['end_page'] - s['start_page'] + 1}p"
+                         for s in f["sections"]],
+            "omitted": sorted(f"{o['envelope']} | {o['title']}" for o in f["omitted"]),
+        },
     }

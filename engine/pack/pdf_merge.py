@@ -99,13 +99,13 @@ def _set_widths(table, inches):
             cell.width = Inches(w)
 
 
-def _contents_docx(path, heading_lines, rows, omitted, notes):
+def _contents_docx(path, heading_lines, rows, omitted, notes, title="SUBMISSION PACK - CONTENTS"):
     d = docx.Document()
     s = d.sections[0]
     s.top_margin = s.bottom_margin = Inches(0.7)
     s.left_margin = s.right_margin = Inches(0.8)
 
-    p = d.add_paragraph("SUBMISSION PACK - CONTENTS")
+    p = d.add_paragraph(title)
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.runs[0].bold = True
     p.runs[0].font.size = Pt(15)
@@ -176,10 +176,13 @@ def _page_count(path):
 
 
 def merge_with_contents(sections, out_pdf, work_dir, heading_lines, notes=(),
-                        front_count=1, stamp_label=""):
+                        front_count=1, stamp_label="", title="SUBMISSION PACK - CONTENTS",
+                        pdf_title=None):
     """sections: ordered list (see module docstring). The first `front_count`
     included sections (the outer envelope cover) go before the contents page;
-    everything else after it. Returns a manifest dict."""
+    everything else after it. `title` heads the contents page; one call per
+    PDF, so a two-envelope submission calls this once per envelope with its
+    own work_dir. Returns a manifest dict."""
     os.makedirs(work_dir, exist_ok=True)
     included = [s for s in sections if s.get("pdf")]
     omitted = [s for s in sections if not s.get("pdf")]
@@ -200,7 +203,7 @@ def merge_with_contents(sections, out_pdf, work_dir, heading_lines, notes=(),
                          "start": page, "end": page + s["page_count"] - 1})
             page += s["page_count"]
         docx_path = os.path.join(work_dir, "00a_Contents.docx")
-        _contents_docx(docx_path, heading_lines, rows, omitted, notes)
+        _contents_docx(docx_path, heading_lines, rows, omitted, notes, title)
         contents_pdf = _convert_to_pdf(docx_path, work_dir)
         if not contents_pdf:
             raise RuntimeError("could not render the contents page to PDF (soffice failed)")
@@ -236,7 +239,7 @@ def merge_with_contents(sections, out_pdf, work_dir, heading_lines, notes=(),
     for i, pg in enumerate(writer.pages, start=1):
         _stamp(pg, f"{prefix}Page {i} of {total}")
 
-    writer.add_metadata({"/Title": f"Submission pack {stamp_label}".strip(),
+    writer.add_metadata({"/Title": pdf_title or f"Submission pack {stamp_label}".strip(),
                          "/Producer": "Tender Tool engine/pack",
                          "/CreationDate": datetime.datetime.now().strftime("D:%Y%m%d%H%M%S")})
     with open(out_pdf, "wb") as f:

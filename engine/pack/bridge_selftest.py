@@ -236,7 +236,23 @@ def main():
         print(f"  NOT INCLUDED [{o['envelope']}] {o['title']}: {o['reason']}")
     for w in row["manifest"]["warnings"]:
         print(f"  WARNING {w}")
-    sys.exit(1 if problems else 0)
+
+    # Envelope 2 is its own PDF (assemble_pack.py module docstring).
+    fin = row["manifest"]["financial"]
+    fin_pdf = os.path.join(storage, "submission-packs", row["output_files"]["financial_pdf"])
+    fin_problems = verify_pack(fin_pdf, fin)
+    print(f"Envelope 2 PDF = {row['output_files']['financial_pdf']}: {fin['page_count']} pages; "
+          f"read-back problems = {fin_problems}")
+    for s in fin["sections"]:
+        print(f"  p{s['start_page']:>3}-{s['end_page']:<3} [{s['envelope']}] {s['title']}")
+    for o in fin["omitted"]:
+        print(f"  NOT INCLUDED [{o['envelope']}] {o['title']}: {o['reason']}")
+
+    # Key positions read from the uploaded Technical workbook's SETUP sheet.
+    reqs = client.select("tender_requirements", {"tender_id": job["tender_id"]}, order="position_code.asc")
+    print("tender_requirements from SETUP: " + ", ".join(
+        f"{r['position_code']}{' (ALT)' if r['is_alternate'] else ''}" for r in reqs))
+    sys.exit(1 if problems or fin_problems or not reqs else 0)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,10 @@ import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTask
 import { SiteNav } from "../../_components/SiteNav";
 import { SubmissionPack } from "./submission-pack";
 import { IntakeCard } from "./intake-card";
+import { TenderTemplates } from "./tender-templates";
+import { PositionPersonSelect } from "./position-person-select";
+import { startTenderPack } from "./pack-inputs-actions";
+import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -197,9 +201,24 @@ export default async function TenderWorkspacePage({
 
   // Key positions + "Generate tender-specific CV" (integration point B,
   // Sarel's own direction 2026-10-16) - only meaningful once a pack exists.
+  // Positions = the tender's own SETUP-sheet rows (tender_requirements, read
+  // from the uploaded Technical workbook by engine/pack/process_pack_jobs.py)
+  // plus any position the pack already has an assignment row for.
   let assignments: Assignment[] = [];
   let generatedCvs: GeneratedCv[] = [];
+  let requirementRows: { position_code: string; position_description: string | null }[] = [];
+  let roleTags: RoleTag[] = [];
+  const roleTitles = new Map<string, string>();
   if (tenderPack) {
+    const [{ data: reqRows }, { data: tagRows }, { data: roleRows }] = await Promise.all([
+      supabase.from("tender_requirements").select("position_code, position_description").eq("tender_id", id).eq("is_alternate", false),
+      supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
+      supabase.from("tender_roles").select("code, title"),
+    ]);
+    requirementRows = (reqRows ?? []) as typeof requirementRows;
+    roleTags = (tagRows ?? []) as RoleTag[];
+    for (const r of (roleRows ?? []) as { code: string; title: string }[]) roleTitles.set(r.code, r.title);
+
     const { data: assignmentRows } = await supabase
       .from("tender_pack_assignments")
       .select("id, position_code, confirmed_person_id, suggested_person_id, people:confirmed_person_id(name)")
@@ -224,6 +243,11 @@ export default async function TenderWorkspacePage({
     });
   }
 
+  const positions = Array.from(
+    new Set([...requirementRows.map((r) => r.position_code), ...assignments.map((a) => a.position_code)]),
+  ).sort();
+  const peopleName = new Map(assignablePeople.map((p) => [p.id, p.name]));
+
   const left = daysLeft(tenderFacts?.closing_date ?? null);
   const packStatus = tenderPack ? PACK_STATUS_LABEL[tenderPack.status] : null;
   // Drives the at-a-glance summary chips on the facts card, so "are we ready
@@ -238,8 +262,8 @@ export default async function TenderWorkspacePage({
   const isSanralFamily = tenderFacts?.family === SANRAL_CONVENTIONAL_FAMILY;
   // The submission pack runs the SANRAL fill engines, which handle both SANRAL
   // template families (engine/pack/assemble_pack.py FILLERS) - not other buyers.
-  const showSubmissionPack =
-    !!tenderPack && (isSanralFamily || tenderFacts?.family === "RRM Consultant Tender");
+  const isSanralPackFamily = isSanralFamily || tenderFacts?.family === "RRM Consultant Tender";
+  const showSubmissionPack = !!tenderPack && isSanralPackFamily;
   // Non-SANRAL tenders (pursued from Discovery, migration 0018) get the
   // general preparation flow instead of the SANRAL compliance report.
   const isGeneralFamily = tenderFacts?.family === GENERAL_FAMILY;
@@ -339,15 +363,27 @@ export default async function TenderWorkspacePage({
                 {isGeneralFamily && <JumpLink href="#general-documents" label="Documents" />}
                 {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
                 <JumpLink href="#tasks-milestones" label="Tasks" />
-                {tenderPack && assignments.length > 0 && <JumpLink href="#key-positions" label="CVs" />}
+                {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
+                {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
               </div>
             )}
 
             {packError && <ErrorBanner message={`Could not load this company's pack for this tender: ${packError.message}`} />}
 
             {!tenderPack && !packError && (
-              <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#6B6758" }}>
+              <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#6B6758", marginBottom: 16 }}>
                 No tender pack exists yet for this tender at your company - nothing to review until one is created.
+                {isSanralPackFamily && (
+                  <form action={startTenderPack} style={{ marginTop: 12 }}>
+                    <input type="hidden" name="tender_id" value={id} />
+                    <button
+                      type="submit"
+                      style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" }}
+                    >
+                      Start a pack for this tender
+                    </button>
+                  </form>
+                )}
               </div>
             )}
 
@@ -436,33 +472,86 @@ export default async function TenderWorkspacePage({
 
             <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
 
-            {tenderPack && assignments.length > 0 && (
+            {tenderPack && (positions.length > 0 || isSanralPackFamily) && (
               <div id="key-positions" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-                <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Key positions</div>
-                <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
-                  Generates the tender-customized CV (requirement-matching cover page) for a
-                  confirmed key person on this position. Fulfilled out-of-band by
-                  engine/cv/process_cv_jobs.py - the web app cannot run Python/LibreOffice -
-                  so this records a request, not an instant result.
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Key positions</div>
+                  {positions.length > 0 && (() => {
+                    const open = positions.filter((code) => !assignments.find((a) => a.position_code === code)?.confirmed_person_id).length;
+                    return (
+                      <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", background: open ? "#FEF3C7" : "#DCFCE7", color: open ? "#B45309" : "#15803D" }}>
+                        {open ? `${open} of ${positions.length} to confirm` : "All confirmed"}
+                      </span>
+                    );
+                  })()}
                 </div>
-                {assignments.map((a) => {
-                  const personName = a.people?.name ?? null;
-                  const positionJobs = generatedCvs.filter((g) => g.position_code === a.position_code);
+                <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+                  Choose who fills each position on this tender - the submission pack is built with exactly these
+                  people and won&apos;t generate until every position has one. People tagged on their People page as
+                  fitting the role are listed first. Once confirmed, you can request the tender-customized CV
+                  (requirement-matching cover page); that is fulfilled out-of-band by engine/cv/process_cv_jobs.py, so it
+                  records a request, not an instant result.
+                </div>
+                {positions.length === 0 && (
+                  <div style={{ fontSize: 12, color: "#9A9684", borderTop: "1px solid #F0EEE6", paddingTop: 10 }}>
+                    No positions listed yet. They are read from this tender&apos;s own Technical Submission workbook (its
+                    SETUP sheet) - upload it under Blank tender templates below, and they appear here once the pack
+                    builder has read it.
+                  </div>
+                )}
+                {assignablePeople.length === 0 && positions.length > 0 && (
+                  <div style={{ fontSize: 12, color: "#B45309", marginBottom: 8 }}>
+                    No one is captured on the People page yet - add your key people there first.
+                  </div>
+                )}
+                {positions.map((code) => {
+                  const a = assignments.find((x) => x.position_code === code) ?? null;
+                  const req = requirementRows.find((r) => r.position_code === code) ?? null;
+                  const roleCode = roleCodeForPosition(code, req?.position_description ?? null);
+                  const taggedIds = new Set(roleCode ? roleTags.filter((t) => t.role_code === roleCode).map((t) => t.person_id) : []);
+                  const tagged = assignablePeople.filter((p) => taggedIds.has(p.id));
+                  const others = assignablePeople.filter((p) => !taggedIds.has(p.id));
+                  const confirmedId = a?.confirmed_person_id ?? null;
+                  const suggestedName = !confirmedId && a?.suggested_person_id ? peopleName.get(a.suggested_person_id) ?? null : null;
+                  const positionJobs = generatedCvs.filter((g) => g.position_code === code);
                   return (
-                    <div key={a.id} style={{ borderTop: "1px solid #F0EEE6", padding: "12px 0" }}>
+                    <div key={code} style={{ borderTop: "1px solid #F0EEE6", padding: "12px 0" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-                        <div>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{a.position_code}</div>
-                          <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
-                            {personName ? `Confirmed: ${personName}` : "No key person confirmed yet for this position"}
+                        <div style={{ minWidth: 0, flex: "1 1 200px" }}>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{code}</div>
+                          {req?.position_description && (
+                            <div style={{ fontSize: 12, color: "#6B6758", marginTop: 1 }}>{req.position_description}</div>
+                          )}
+                          <div style={{ fontSize: 12, color: confirmedId ? "#15803D" : "#B45309", marginTop: 2, fontWeight: 600 }}>
+                            {confirmedId
+                              ? `Confirmed: ${a?.people?.name ?? peopleName.get(confirmedId) ?? "person on file"}`
+                              : suggestedName
+                                ? `Not confirmed - suggested: ${suggestedName}`
+                                : "Not confirmed yet"}
                           </div>
+                          {roleCode && tagged.length === 0 && (
+                            <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>
+                              No one is tagged as fitting {roleTitles.get(roleCode) ?? code} yet (People page).
+                            </div>
+                          )}
                         </div>
-                        {a.confirmed_person_id && (
+                        <PositionPersonSelect
+                          tenderId={id}
+                          tenderPackId={tenderPack.id}
+                          positionCode={code}
+                          confirmedPersonId={confirmedId}
+                          tagged={tagged}
+                          others={others}
+                          roleTitle={roleCode ? roleTitles.get(roleCode) ?? null : null}
+                        />
+                      </div>
+                      {confirmedId && (
+                        <div style={{ marginTop: 8 }}>
                           <form action={requestTenderCv} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                             <input type="hidden" name="tender_id" value={id} />
                             <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
-                            <input type="hidden" name="position_code" value={a.position_code} />
-                            <input type="hidden" name="person_id" value={a.confirmed_person_id} />
+                            <input type="hidden" name="position_code" value={code} />
+                            <input type="hidden" name="person_id" value={confirmedId} />
                             <select name="format" defaultValue="sanral_keyperson" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px" }}>
                               <option value="sanral_keyperson">SANRAL key-person</option>
                               <option value="world_bank">World Bank format</option>
@@ -478,8 +567,8 @@ export default async function TenderWorkspacePage({
                               Generate tender-specific CV
                             </button>
                           </form>
-                        )}
-                      </div>
+                        </div>
+                      )}
                       {positionJobs.length > 0 && (
                         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                           {positionJobs.map((g) => {
@@ -508,7 +597,10 @@ export default async function TenderWorkspacePage({
               </div>
             )}
 
-            {/* Whole SANRAL submission pack as one PDF (pack_generation_jobs, 0017). */}
+            {/* The tender's blank SANRAL templates, uploaded by hand (0025). */}
+            {showSubmissionPack && <TenderTemplates tenderId={id} saved={saved === "template"} />}
+
+            {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
             {showSubmissionPack && tenderPack && <SubmissionPack tenderId={id} tenderPackId={tenderPack.id} />}
           </>
         )}
