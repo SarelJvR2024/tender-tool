@@ -306,7 +306,10 @@ export default async function TenderWorkspacePage({
             {/* Jump nav - this page stacks up to 9 report/management cards once
                 a pack exists, so a sticky row of anchors beats blind-scrolling
                 to find one (same idea as Stripe's data-dense dashboards: a
-                wayfinding strip, not more scrolling, when a screen gets long). */}
+                wayfinding strip, not more scrolling, when a screen gets long).
+                The pack link (the page's actual deliverable) leads the row in
+                its "primary" color, so it's never scrolled out of view on a
+                narrow screen behind the report links ahead of it. */}
             {(tenderPack || isSanralFamily) && (
               <div
                 style={{
@@ -322,6 +325,8 @@ export default async function TenderWorkspacePage({
                   marginBottom: 12,
                 }}
               >
+                {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
+                {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" variant="primary" />}
                 {tenderPack && provenance.length > 0 && <JumpLink href="#readiness-report" label="Readiness" />}
                 {isSanralFamily && <JumpLink href="#compliance-check" label="Documents" />}
                 {isSanralFamily && <JumpLink href="#key-people" label="Key people" />}
@@ -330,10 +335,8 @@ export default async function TenderWorkspacePage({
                 {isGeneralFamily && <JumpLink href="#general-preparation" label="Needs" />}
                 {isGeneralFamily && <JumpLink href="#general-documents" label="Documents" />}
                 {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
-                {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" />}
                 <JumpLink href="#tasks-milestones" label="Tasks" />
                 {tenderPack && assignments.length > 0 && <JumpLink href="#key-positions" label="CVs" />}
-                {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" />}
               </div>
             )}
 
@@ -645,7 +648,11 @@ function SummaryChip({ count, label, bg, color }: { count: number; label: string
   );
 }
 
-function JumpLink({ href, label }: { href: string; label: string }) {
+// variant "primary" marks the jump-nav's one link to the page's actual
+// deliverable (the submission pack) - every other link is a report or an
+// input form along the way, so it shouldn't look like just one more pill
+// in the row once this page stacks up to 10 cards.
+function JumpLink({ href, label, variant = "default" }: { href: string; label: string; variant?: "default" | "primary" }) {
   return (
     <a
       href={href}
@@ -657,12 +664,12 @@ function JumpLink({ href, label }: { href: string; label: string }) {
         padding: "0 12px",
         borderRadius: 100,
         fontSize: 12,
-        fontWeight: 600,
+        fontWeight: variant === "primary" ? 700 : 600,
         textDecoration: "none",
-        background: "#FFFFFF",
-        color: "#16233B",
-        border: "1px solid #E5E1D5",
         whiteSpace: "nowrap",
+        background: variant === "primary" ? "#D97706" : "#FFFFFF",
+        color: variant === "primary" ? "#FFFFFF" : "#16233B",
+        border: variant === "primary" ? "1px solid #D97706" : "1px solid #E5E1D5",
       }}
     >
       {label}
