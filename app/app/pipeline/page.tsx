@@ -6,6 +6,8 @@ import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { NEXT_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { SiteNav } from "../_components/SiteNav";
 import { moveTenderStage } from "./actions";
+import { derivedSector, ECONOMICS_COLUMNS, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
+import { EconomicsForm, type CreditPerson } from "./economics-form";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -22,7 +24,7 @@ type TenderRow = {
   status: string;
   ocid: string | null;
   // Only this company's own pack comes back, via RLS (one per company per tender).
-  tender_packs: { pipeline_stage: PipelineStage; stage_changed_at: string; submitted_at: string | null }[];
+  tender_packs: ({ pipeline_stage: PipelineStage; stage_changed_at: string; submitted_at: string | null } & PackEconomics)[];
 };
 
 type Card = {
@@ -35,6 +37,8 @@ type Card = {
   stageChangedAt: string | null;
   submittedAt: string | null;
   verdict: string | null;
+  economics: PackEconomics | null;
+  defaultSector: PriceSector | null;
 };
 
 // Same chip vocabulary as app/app/discovery/page.tsx's verdictChip().
@@ -71,19 +75,27 @@ export default async function PipelinePage({
   const { error: actionError } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: tenders, error }, { data: opportunities }] = await Promise.all([
+  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows }] = await Promise.all([
     supabase
       .from("tenders")
-      .select("id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at)")
+      .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, ${ECONOMICS_COLUMNS})`)
       .order("closing_date", { ascending: true }),
     // Discovery's fit verdict, where this tender came from the scored feed.
-    supabase.from("discovered_opportunities").select("ocid, contract_number, verdict"),
+    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories"),
+    // Who can get credit for a submission (item 26, migration 0034): the
+    // company's people roster, same list the task assignee picker uses.
+    supabase.from("people").select("id, name").order("name"),
   ]);
+  const people = (peopleRows ?? []) as CreditPerson[];
 
   const verdictByKey = new Map<string, string>();
-  for (const o of (opportunities ?? []) as { ocid: string | null; contract_number: string | null; verdict: string }[]) {
-    if (o.ocid) verdictByKey.set(`ocid:${o.ocid}`, o.verdict);
-    if (o.contract_number) verdictByKey.set(`no:${o.contract_number}`, o.verdict);
+  const categoriesByKey = new Map<string, string[]>();
+  for (const o of (opportunities ?? []) as { ocid: string | null; contract_number: string | null; tender_id: string | null; verdict: string; categories: string[] | null }[]) {
+    for (const key of [o.ocid && `ocid:${o.ocid}`, o.contract_number && `no:${o.contract_number}`, o.tender_id && `id:${o.tender_id}`]) {
+      if (!key) continue;
+      verdictByKey.set(key, o.verdict);
+      if (o.categories?.length) categoriesByKey.set(key, o.categories);
+    }
   }
 
   const cards: Card[] = [];
@@ -106,6 +118,11 @@ export default async function PipelinePage({
       stageChangedAt: pack?.stage_changed_at ?? null,
       submittedAt: pack?.submitted_at ?? null,
       verdict: (t.ocid && verdictByKey.get(`ocid:${t.ocid}`)) || (t.contract_no && verdictByKey.get(`no:${t.contract_no}`)) || null,
+      economics: pack ?? null,
+      defaultSector: derivedSector(
+        t.family,
+        categoriesByKey.get(`id:${t.id}`) ?? (t.ocid ? categoriesByKey.get(`ocid:${t.ocid}`) : undefined) ?? (t.contract_no ? categoriesByKey.get(`no:${t.contract_no}`) : undefined)
+      ),
     });
   }
 
@@ -123,7 +140,12 @@ export default async function PipelinePage({
       <SiteNav active="pipeline" />
 
       <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Pipeline</h1>
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Pipeline</h1>
+          <Link href="/pipeline/pricing" style={{ fontSize: 13, fontWeight: 600, color: "#D97706", textDecoration: "none" }}>
+            Pricing history →
+          </Link>
+        </div>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
           Every tender you&apos;re tracking, by stage. Open a card for its workspace; move it on when something changes.
         </p>
@@ -164,7 +186,7 @@ export default async function PipelinePage({
                       </div>
                     )}
                     {column.map((c) => (
-                      <TenderCard key={c.id} card={c} />
+                      <TenderCard key={c.id} card={c} people={people} />
                     ))}
                   </div>
 
@@ -183,7 +205,7 @@ export default async function PipelinePage({
   );
 }
 
-function TenderCard({ card }: { card: Card }) {
+function TenderCard({ card, people }: { card: Card; people: CreditPerson[] }) {
   const verdict = card.verdict ? VERDICT_CHIP[card.verdict] : null;
   const left = daysUntil(card.closingDate);
   const open = card.stage === "found" || card.stage === "bidding";
@@ -230,6 +252,17 @@ function TenderCard({ card }: { card: Card }) {
           ))}
           {back && <StageButton tenderId={card.id} stage={back} />}
         </div>
+      )}
+
+      {/* Price & credit (items 26/27): from Bidding on, once a pack row exists. */}
+      {card.stage !== "found" && (
+        <EconomicsForm
+          tenderId={card.id}
+          economics={card.economics}
+          people={people}
+          defaultSector={card.defaultSector}
+          prompt={!open && card.economics?.submitted_price_zar == null}
+        />
       )}
     </div>
   );
