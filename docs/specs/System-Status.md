@@ -399,6 +399,24 @@ place that name was ever written down, and the "decision" it was meant to record
 Item (b) (`how_we_work` on the Tender Workspace) is untouched by this pass, per instruction, and
 stays open below.
 
+## This pass (2026-10-17, standing QA/robustness review - third run)
+
+Rotated to the non-SANRAL pack engine (`engine/general/`). Pulled latest `main` first - a large
+concurrent pass had landed, including `docs/specs/Hardcoded-Assumptions-Audit.md`, a dedicated
+sweep run directly off a Sarel quote nearly identical to this review's own mandate. Checked first
+whether that audit had touched this review's two prior fixes: it independently re-found and more
+generally fixed the first run's `fill_docx_forms.py` signatory bug (§3.1 - `key_persons_by_row()`
+now matches any position by label, not just PL/DS1), keeping this review's own narrower
+`role_people` mapping as a graceful fallback rather than conflicting with it; the second run's
+`assess_tender.py` empty-disciplines fix is untouched and still in place under the new discipline
+taxonomy. No regression either way - confirmed by re-running `admin_harness.py`.
+
+Found and fixed one small, low-severity real bug: `engine/general/fill_sbd_docx.py`'s legacy,
+production-unreachable CLI function `fill_sbd6_1()` hardcoded every company's legal form as
+"(Pty) Limited" with no check against the actual company - the already-fixed production path
+(`fill_sbd_document()`, same file) does this correctly. Fixed to match. Full evidence in
+`docs/specs/QA-Edge-Case-Findings.md` (Finding 4).
+
 ## This pass (2026-10-17, standing QA/robustness review - second run)
 
 Rotated to the discovery engine (`engine/discovery/`) per the standing mandate. Pulled latest

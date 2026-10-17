@@ -253,7 +253,17 @@ def fill_sbd6_1(path, comp, name, position, log):
     fill_dotted_paragraph(d, "Company registration number", comp.get("cipc_registration_number"), log,
                           "sbd6_1.company_registration_number",
                           "No CIPC registration number on file." if not comp.get("cipc_registration_number") else None)
-    log.confirmed("sbd6_1.company_type", "(Pty) Limited")
+    # Klipcorp's legal name happens to say "(Pty) Limited"; this stood
+    # hardcoded for every company until this pass (round-1 CLI, superseded by
+    # fill_sbd_document()'s own correct conditional check for the real
+    # pipeline - see Hardcoded-Assumptions-Audit.md 3.2 for the sibling
+    # telephone/email fix on this same legacy path) - a CC, sole proprietor,
+    # trust or public company run through this CLI would have had a false
+    # "(Pty) Limited" declaration confirmed on a real SBD6.1 form.
+    if re.search(r"\(Pty\)", comp.get("legal_name") or ""):
+        log.confirmed("sbd6_1.company_type", "(Pty) Limited")
+    else:
+        log.missing("sbd6_1.company_type", "Tick the company type by hand on this form.")
     log.missing("sbd6_1.specific_goals_points_claimed",
                 "Each buyer sets its own specific-goal categories and weightings for this table "
                 "(confirmed from real samples: SALB's and RAF's category lists are not identical) "

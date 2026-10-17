@@ -237,3 +237,82 @@ looked complete because the one path someone happened to test (intake) was cover
 - Malformed/boundary OCDS releases (missing title, non-ASCII buyer names, a closing date with no
   timezone) through `assess_release()` end-to-end - not reached this pass, which focused on the
   fit-scoring gate itself once it was found to be wrong for literally every company.
+
+---
+
+## 2026-10-17 (third run): non-SANRAL pack engine - checked against a concurrent, very thorough
+audit; one small real fix landed
+
+**Context:** rotated to `engine/general/` per the standing mandate. Pulled latest `main` first
+(fast-forward - a large concurrent pass had landed: discipline taxonomy overhaul, tender-update
+watching, company-documents engine, person registration expiry, and a dedicated
+`docs/specs/Hardcoded-Assumptions-Audit.md` run directly off a quote from Sarel - "don't base
+limitations and specs only on klipcorp's submissions... scan all code to make sure our sample of
+tenders and klipcorp info is not assumed... as the only source" - which is essentially this same
+standing review's mandate, run as a one-off deep pass). Checked first, before doing any new work,
+whether that audit had already covered - or broken - anything this review had touched:
+
+- **Finding 1 (fill_docx_forms.py's C.1.2.3 signatory bug, first run of this review) was
+  independently found again by that audit** (its own §3.1, same root cause, same evidence
+  shape - a different person confirmed for PL vs DS1) and fixed **more generally** than this
+  review's own fix: `key_persons_by_row()` now matches ANY position by its printed Book 1 title,
+  not just PL/DS1, reading employment status from a new `people.employment_status` field instead
+  of assuming "Permanent" for everyone. This review's narrower `role_people` PL/DS mapping
+  (`process_pack_jobs.py`) is kept as a fallback for callers with no full `pack.yaml` (confirmed
+  by reading the current code: `key_persons = assignments_from_pack(pack_path); if key_persons is
+  None and profile.get("role_people"): ...`) - not a conflict, a graceful layering. Re-ran
+  `admin_harness.py` to confirm `multi_specialist_co.json` (added by this review for exactly this
+  shape) still runs clean under the new, more general code.
+- **Finding 3 (assess_tender.py's empty-disciplines bug, second run)** is untouched by the new
+  discipline-taxonomy work (`engine/discovery/taxonomy.py`) - confirmed `known_disciplines` and
+  the `elif not known_disciplines:` branch this review added are both still present, just now
+  feeding a richer `tax.overlap()` call instead of a plain `in` check. Not a regression.
+
+Both checks are good news, not wasted effort: independent convergence on the same two real bugs
+from a different angle is exactly the kind of cross-check this review is for.
+
+### Finding 4 (CONFIRMED, FIXED, low severity): `fill_sbd_docx.fill_sbd6_1()`'s legacy CLI path
+hardcoded every company's legal form as "(Pty) Limited"
+
+**Where:** `engine/general/fill_sbd_docx.py`, the standalone `fill_sbd6_1()` function (and its
+siblings `fill_sbd1()`/`fill_sbd4()`, called only via this file's own `main()` CLI entry point -
+confirmed by `grep`ing the whole repo that `build_general_pack.py`/`process_general_jobs.py`
+(the real production pipeline) call `fill_sbd_docx.fill_sbd_file()` -> `fill_sbd_document()`
+instead, a separate, newer, more careful implementation in the same file).
+
+**What was found:** `fill_sbd6_1()` always wrote `log.confirmed("sbd6_1.company_type", "(Pty)
+Limited")` with no check against the company's actual legal form - true for every fixture in
+this repo (all 4 are "(Pty) Ltd"), but a Close Corporation, sole proprietor, trust or public
+("Limited") company run through this CLI would get a materially false declaration confirmed on a
+real SBD6.1 "Preference Points Claimed" form. The production path (`fill_sbd_document()`, same
+file) already does this correctly - `if re.search(r"\(Pty\)", legal or ""): ...` - so this was a
+real, live discrepancy between two implementations of the same form, not a theorised one.
+`docs/specs/Hardcoded-Assumptions-Audit.md` §3.2 had already flagged this exact legacy CLI
+(`fill_sbd1()`'s telephone/email hardcoding) as a "before" artifact while fixing the production
+path only - this is the sibling bug in `fill_sbd6_1()` that was left behind in the same pass.
+
+**Severity, honestly stated:** low - this CLI is not reachable from the web app or the job queue,
+only from someone running `python3 fill_sbd_docx.py` by hand (as `General-Tender-Engine-
+Findings.md`'s own original verification run did, against real Treasury/RAF samples). Fixing
+it anyway because it's cheap, it's a real false-declaration risk on a government form if anyone
+ever does run it that way again, and leaving a known-wrong answer next to its own
+already-fixed sibling in the same file is confusing for whoever reads this code next.
+
+**Fix:** same conditional check as the production path, copied in rather than reimplemented
+differently - `if re.search(r"\(Pty\)", comp.get("legal_name") or ""): confirmed ... else:
+missing ("Tick the company type by hand...")`.
+
+**Verification:** regex check against a `(Pty) Ltd` name and a `CC` name branches correctly;
+`python3 -m py_compile` clean; `test_general_bridge.py` ALL PASSED; `general_harness.py
+--no-pack` 44/0/0 (this file's production path, `fill_sbd_document()`, wasn't touched by this
+fix at all, so this is confirming no regression rather than testing the fix itself - the fix's
+own correctness was verified by direct logic check, since no test exercises the dead CLI path).
+
+### Not pursued this pass
+
+Given how much of this exact territory the concurrent Hardcoded-Assumptions-Audit had just
+covered in depth (SANRAL position-matching, telephone/email, toll code spelling, experience
+discipline defaults, C3.1.11 "SANRAL-wide" framing, the non-SANRAL role catalog's own honesty
+about its limits), this pass stayed short and cross-checking rather than duplicating that work.
+Next rotation (per the standing list): CV, intake, compliance/reminders, notify, or
+worker/job-queue - none of which that audit touched.
