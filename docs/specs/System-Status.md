@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-16, 22:11 UTC check-in.
+Last full pass: 2026-10-17, 00:11 UTC check-in.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -62,7 +62,7 @@ bridged by `engine/general/process_general_jobs.py`.
 | Company vault (`app/app/company/page.tsx`, migration `0014`) | Company profile plus six tracked compliance documents: COID, SARS TCS PIN, PI insurance, ISO 9001, bank confirmation letter (generated 3-month validity), and B-BBEE proof (certificate or QSE/EME affidavit). Each has an expiry badge and an upload/replace to the private `company-documents` bucket | Read-only + edit form both real; expiry coloring shared via `app/lib/dates.ts`. `0014` was replayed with functional SQL checks (generated column, check constraint, tenant-scoped update and storage prefix). The upload has never been run against a live project |
 | Onboarding (`app/app/onboarding/`) | One field (legal name) → company + owner row, atomically via `create_company_and_join` | Matches spec's "minimum to get started" principle exactly |
 | Route guard (`app/proxy.ts`) | Redirects signed-out users to `/login`, no-company users to `/onboarding` | Covers every real app route, including `/experience` (added this round) |
-| RLS policy set (`0001`–`0017`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 16 migrations against a fresh scratch Postgres this pass, all still apply cleanly |
+| RLS policy set (`0001`–`0019`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 19 migrations against a fresh scratch Postgres this pass, all still apply cleanly |
 
 ## In progress / partially built
 
@@ -84,7 +84,7 @@ bridged by `engine/general/process_general_jobs.py`.
 9. **No live Supabase project exists anywhere in this project.** This is the single biggest standing verification gap — every Supabase-reading/writing piece built across every pass (CV uploads, experience library, compliance report, daily digest live mode, admin harness Supabase wiring) is verified only by schema replay and/or local-mode runs, never against real rows. Named once here rather than repeated in every table row.
 10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
-11. **A hard-killed worker leaves a job stuck in `generating`** (CV jobs; pack jobs are handled — `pack_generation_jobs.started_at` lets `process_pack_jobs.py` fail a job stuck for 60 min with a plain "request again" reason). This happens on out-of-memory or a host crash; a normal SIGTERM is handled. `generated_cvs` has no claimed-at timestamp, so the worker can't tell a stuck job from a slow one. The fix is a small migration (`claimed_at`) plus a reclaim rule. It was deliberately not added alongside the concurrent `0017`, to avoid a migration-number collision. Until then, reset a stuck row to `requested` by hand.
+11. ~~A hard-killed worker leaves a CV job stuck in `generating`~~ — **fixed this pass.** Migration `0019_generated_cvs_claimed_at.sql` adds `generated_cvs.claimed_at` (set the moment a worker claims a row), and `process_cv_jobs.py` gained `fail_stale_jobs()`, same shape and 60-minute threshold as `process_pack_jobs.py`'s own, called at the top of every `poll_once()`. Verified: migration replays cleanly as part of the full `0001`→`0019` chain; `python3 engine/cv/process_cv_jobs.py --self-test` still passes unchanged; a direct functional test (monkeypatched `supabase_request`, no live Supabase needed) confirmed `fail_stale_jobs()` fails only a job claimed >60 minutes ago and leaves a 5-minute-old job and an unclaimed job alone.
 
 12. **Submission pack — what still stands between it and "no manual input except the tender's own questions":**
     - **No UI creates a `tender_packs` row or confirms `tender_pack_assignments`.** Only `seed_supabase_company.py` writes them. The pack card says "no confirmed key person" until one exists. Confirming who fills each position is exactly the kind of question the user should answer in the UI, and there's nowhere to answer it yet.
@@ -93,7 +93,32 @@ bridged by `engine/general/process_general_jobs.py`.
     - **The signatory comes from `people.signatory_capacity`** (first person with one set). `fill_docx_forms.py` still writes that one person into both C.1.2.3 key-person rows (pre-existing).
     - **Human-only items stay human**, and the contents page and `ACTIONS_TO_SIGN.md` list them: signatures, witness, pricing, and the B4/B5 narratives.
 
-## This pass (2026-10-16, 22:11 UTC)
+## This pass (2026-10-17, 00:11 UTC)
+
+Orient: three substantial commits landed since the last check-in (`4ec219e` bridge worker,
+`0879f5e` SANRAL submission pack, `d050bdb` general tender preparation) — 7,400+ insertions
+across 64 files, closing both of this doc's own headline gaps (general SBD engine now reaches
+the web app; `admin_harness.py` now has `--pack` and the general engine has its own parallel
+harness). All three were already thoroughly self-documented and self-verified in this file by
+their authors, following the tables/appendix convention correctly, including explicitly naming
+their own remaining gaps (11, 12) rather than hiding them.
+
+Independently re-verified rather than trusting the claims at face value: replayed all 18
+migrations (`0001`→`0018`) against a fresh scratch Postgres, all clean; read the new
+`.github/workflows/bridge-worker-ci.yml` directly to confirm it needs no secrets, has
+`permissions: contents: read`, a concurrency guard, and path-scoped triggers — no cost or
+safety concern; confirmed by querying the replayed schema directly that `generated_cvs` really
+does lack a claimed/started timestamp while `pack_generation_jobs` has one, exactly as Gap #11
+described.
+
+**Fixed Gap #11** (see the gap entry itself for the full writeup): added migration `0019`
+(`generated_cvs.claimed_at`) and a `fail_stale_jobs()` function in `process_cv_jobs.py`,
+mirroring `process_pack_jobs.py`'s already-reviewed pattern exactly. Verified with the full
+19-migration replay, the existing `--self-test` (still passes unchanged), and a new functional
+test (monkeypatched `supabase_request`, no live Supabase needed) proving it fails only a
+job claimed >60 minutes ago.
+
+`npm run typecheck`/`lint` clean (no TS touched). No new duplication found in the new work.
 
 Quiet pass: one new commit since the last check-in (`3deea1a`, sticky jump-nav on the Tender
 Workspace page) — small, additive-only (id anchors + nav markup, no logic touched), already
@@ -117,7 +142,7 @@ note added to the Built table above; nothing new to flag.
 ## QA / stability
 
 - **One-command verification**: `npm run typecheck` / `npm run lint` / `npm run verify` in `app/package.json`, so every agent has one thing to run instead of three.
-- **Migration numbering**: `0001`–`0017`, sequential, no live collisions — one near-collision (two agents both reaching for `0007`/`0009` the same day) was caught and resolved by renumbering before landing, confirmed by git history.
+- **Migration numbering**: `0001`–`0019`, sequential, no live collisions — one near-collision (two agents both reaching for `0007`/`0009` the same day) was caught and resolved by renumbering before landing, confirmed by git history.
 - **RLS review**: every policy either follows the tenant-isolation default (`is_company_member(company_id)`) or carries an explicit comment explaining why it doesn't. No mismatched pattern found across any pass to date.
 - **Cross-pass reuse discipline is holding up well**, worth stating plainly rather than only hunting for problems: `score_outlook.py` explicitly defers to `sanralScoring.ts` instead of reimplementing it; `daily_digest.py` imports `assess_tender`/`watch_new_tenders`/`watch_deadlines` directly rather than re-deriving their logic; `tenderCompliance.ts` reuses `app/lib/dates.ts`'s `daysUntil` rather than a third expiry implementation. Each of these was checked this pass, not assumed.
 - **`admin_harness.py` currency**: real and still running the SANRAL path correctly. `--pack` adds the submission pack (and CV generation inside it), see Gap #2. Separately: on this host, the **local** form-fill baselines (`state/`, gitignored) flag 15 of 18 runs. All 15 are `a_forms.A10.deviations_or_qualifications` → assumed_default, plus a date-driven COID flip for `complete_co`. These come from earlier `fill_a_forms.py` changes, not this pass. The baselines were left as-is for the owner to accept with `--reset`.
