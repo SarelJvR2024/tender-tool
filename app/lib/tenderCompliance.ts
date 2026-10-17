@@ -127,6 +127,10 @@ export const BEE_PROOF_LABEL: Record<string, string> = {
  * evidence to a verification certificate - Sarel, 2026-10-16: "Yes it is a
  * standard acceptable template." So proof type never makes this fail; only a
  * missing level, an unrecorded proof type, or an expiry before closing does.
+ * OPEN (regulatory review 2026-10-17, Tender-Regulatory-Compliance-Review.md
+ * §5): SANRAL's own A12 text accepts an affidavit only from an EME under
+ * R1.8m (Construction Sector Code) - this rule is for Sarel / a B-BBEE
+ * verification professional to confirm, not changed here.
  */
 export function beeProofValidAtClosing(c: CompanyVault | null, closingDate: string | null): boolean {
   if (!c?.bee_level || !c.bee_proof_type || !c.bee_proof_expiry) return false;
@@ -302,7 +306,7 @@ export function sanralConventionalDocumentChecks(input: {
       detail = "No B-BBEE level on file - you would score 0 of the 10/20 preference points.";
     } else if (!c.bee_proof_type) {
       status = "check";
-      detail = `${levelText} on file, but not which proof backs it. Record whether it's a verification certificate or a QSE/EME sworn affidavit, and its expiry - either is accepted.`;
+      detail = `${levelText} on file, but not which proof backs it. Record whether it's a verification certificate or a QSE/EME sworn affidavit, and its expiry - R.396's Form A12 asks for a SANAS certificate and takes an affidavit only from an EME under R1.8m.`;
     } else if (!c.bee_proof_expiry) {
       status = "check";
       detail = `${levelText}, ${BEE_PROOF_LABEL[c.bee_proof_type]} on file, but no expiry date - add it so it can be checked against the closing date.`;
@@ -310,10 +314,20 @@ export function sanralConventionalDocumentChecks(input: {
       const v = validityAtClosing(c.bee_proof_expiry, input.closingDate);
       status = v.status;
       expiring = v.expiring;
+      // Regulatory review 2026-10-17 (docs/specs/Tender-Regulatory-Compliance-Review.md
+      // §5): R.396's own Form A12 (Book 1 T-48) and SANRAL's Interim
+      // Preferential Procurement Policy (28 Nov 2023, §6.4.1) ask for a SANAS
+      // verification certificate under the amended Construction Sector Code;
+      // A12 accepts a sworn affidavit / CIPC certificate only from an EME with
+      // annual revenue under R1.8 million. Status is unchanged (Sarel's answer
+      // 9 stands until he decides otherwise) - the detail now says what the
+      // tender's own text says, so a company can check before relying on it.
       const accepted =
         c.bee_proof_type === "certificate"
           ? ""
-          : " The sworn affidavit is the standard accepted template - equivalent evidence to a verification certificate.";
+          : c.bee_proof_type === "qse_affidavit"
+            ? " Check before relying on it: R.396's Form A12 asks for a SANAS-accredited verification certificate under the amended Construction Sector Code, and accepts a sworn affidavit only from an EME with annual revenue under R1.8 million - a QSE affidavit is not listed. Confirm this tender's A12 accepts it, or the 10/20 specific-goal points may score 0."
+            : " R.396's Form A12 accepts an EME sworn affidavit (or CIPC certificate) only for annual revenue under R1.8 million (amended Construction Sector Code); above that it asks for a SANAS-accredited certificate - confirm against this tender's A12.";
       detail =
         `${levelText}, ${BEE_PROOF_LABEL[c.bee_proof_type]} ${v.text}.${accepted}` +
         (v.status === "missing" ? " Without valid proof you score 0 of the 10/20 preference points (not disqualified)." : "") +

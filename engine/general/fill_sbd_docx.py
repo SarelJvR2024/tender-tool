@@ -234,8 +234,10 @@ def fill_sbd4(path, comp, name, position, log):
     )
     mark_declaration_no(
         d, "interest in any other related enterprise", log, "sbd4.interest_in_related_enterprise",
-        f"Nothing on file shows {comp['legal_name']}'s directors having an interest in another "
-        "enterprise bidding for this contract - not independently re-checked today.",
+        f"Nothing on file shows {comp['legal_name']}'s directors having an interest in any other "
+        "related enterprise (the form asks whether or not that enterprise is bidding for this "
+        "contract) - not independently re-checked today. If any director holds another "
+        "CSD-registered company, the answer is Yes and every such company must be listed.",
     )
     fill_dotted_paragraph(d, "Name of bidder", comp["legal_name"], log, "sbd4.name_of_bidder_footer")
     fill_dotted_paragraph(d, "Designation", position, log, "sbd4.designation_footer")

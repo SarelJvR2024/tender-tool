@@ -268,8 +268,8 @@ function ScoreEstimate({
         {beeLevel
           ? ` - level ${beeLevel} on file gives ${beeLevel === 1 ? "the full 10 of 10 (90/10) or 20 of 20 (80/20)" : "points per SANRAL's table"}${
               beeProofValid
-                ? " (proof on file is valid at closing - certificate or sworn affidavit both count)"
-                : ", once valid proof (certificate or QSE/EME sworn affidavit) with an expiry after closing is in the vault"
+                ? " (proof on file is valid at closing - R.396's Form A12 asks for a SANAS verification certificate, and takes an affidavit only from an EME under R1.8m: see the B-BBEE row)"
+                : ", once valid proof with an expiry after closing is in the vault (R.396's Form A12 asks for a SANAS verification certificate; an affidavit only from an EME under R1.8m)"
             }`
           : " - no level on file, so 0"}.
       </div>

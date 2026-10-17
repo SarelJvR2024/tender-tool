@@ -528,7 +528,7 @@ The table covers the common national requirements; several rows are set per tend
 
 **Added after an independent fact-check (15 October 2026):** the table above omits several items the check found in public tenders: SBD 7 (contract form), municipal MBD forms, SANRAL Form A1.1 (certificate of intention to submit, which gates receipt of addenda), compulsory briefing sessions, VAT registration, joint-venture agreements, and an up-to-date COID letter of good standing. Add them to the vault and pack checklist as tender-specific items.
 
-**Legal framework to recheck before launch:** the 2022 Preferential Procurement Regulations took effect on 16 January 2023 (80/20 up to R50 million, 90/10 above). The Public Procurement Act 28 of 2024 was signed, but I could not confirm whether it is in force in October 2026, and draft General Public Procurement Regulations, 2026 were reported for comment. Check National Treasury's site before fixing any rule in the product.
+**Legal framework to recheck before launch:** the 2022 Preferential Procurement Regulations took effect on 16 January 2023 (80/20 up to R50 million, 90/10 above). The Public Procurement Act 28 of 2024 was signed, but I could not confirm whether it is in force in October 2026, and draft General Public Procurement Regulations, 2026 were reported for comment. Check National Treasury's site before fixing any rule in the product. **Answered 2026-10-17 (`Tender-Regulatory-Compliance-Review.md`):** the Act never commenced, and the Constitutional Court declared it invalid on 17 September 2026; the PPPFA and the 2022 regulations remain the law.
 
 ## POPIA compliance requirements
 

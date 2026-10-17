@@ -603,8 +603,11 @@ QUESTIONS = [
      "label": "Does anyone connected with the bidder have a relationship with an employee of THIS buyer?",
      "help": "SBD 4 2.2 - specific to this buyer, so it's asked per tender."},
     {"key": "sbd4.interest_in_related_enterprise", "form": "4", "group": "Declarations (SBD 4)", "type": "yes_no",
-     "label": "Does the bidder or any director have an interest in another related enterprise bidding for this contract?",
-     "help": "SBD 4 2.3."},
+     "label": "Does the bidder or any director / shareholder / person with a controlling interest have an interest in any other related enterprise, whether or not it is bidding for this contract?",
+     "help": "SBD 4 'interest in any other related enterprise' (2.3 in older editions, 2.4 in Treasury's current one). "
+             "The form asks about ANY related enterprise, not only ones bidding here. If yes, Treasury's current "
+             "edition requires every CSD-registered company linked to the directors (MAAA number and status) - "
+             "'failure to disclose ... will lead to disqualification'. That table is completed by hand."},
     # --- SBD/MBD 6.1 -----------------------------------------------------
     {"key": "sbd6_1.points_claimed", "form": "6.1", "group": "Preference points (SBD 6.1)", "type": "text", "optional": True,
      "label": "Specific-goal points you claim, per this buyer's table",

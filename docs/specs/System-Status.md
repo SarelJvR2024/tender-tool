@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039` - below); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks - below); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters (below); ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e) (test companies in Discovery, Discovery seen store in the database, digest live mode per company); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7 (MO/MA equivalence, per-company Discovery, company-owned letters); ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
+Last full pass: 2026-10-17, ~21:00 UTC tender regulatory compliance review (Public Procurement Act 2024 struck down; B-BBEE affidavit vs SANRAL A12 - below); ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039` - below); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks - below); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters (below); ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e) (test companies in Discovery, Discovery seen store in the database, digest live mode per company); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7 (MO/MA equivalence, per-company Discovery, company-owned letters); ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -116,6 +116,18 @@ bridged by `engine/general/process_general_jobs.py`.
     - **The biggest gap:** the schema holds **one director and one ownership %**. Real tenders want a full directors/shareholders register, certified IDs, and ownership by black / women / youth / disabled.
     - **Next gaps in rank order:** CIPC documents and entity type; municipal accounts per company **and per director**; the CSD report file; B-BBEE proof variants (CIPC/dtic certificates, certificate number); the authority resolution in the general pack; CIDB CRS number and multi-class grading; buyer supplier-database registrations; a generic company/person registrations store; public liability insurance; a plant/vehicle register; AFS and turnover.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
+
+15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), SANRAL Form B7 / 30% Targeted-Enterprise subcontracting never captured (G3), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-17, ~21:00 UTC): tender regulatory compliance review
+
+Full write-up with citations: `Tender-Regulatory-Compliance-Review.md`. Research pass with two wording fixes; no schema change, no migration.
+
+- **Public Procurement Act 2024:** never proclaimed; ConCourt declared it invalid in its entirety on 17 Sept 2026 (public participation; not suspended). Draft General Public Procurement Regulations, 2026 have no enabling Act. Nothing in the product was built against it.
+- **PPR 2022** (GG 47452) re-read from the gazette: 80/20 <= R50m, 90/10 above, Pmin formula, buyer-defined specific goals, deadlock on specific goals - `score_outlook.py` / `sanralScoring.ts` match. No amendment since found.
+- **SBD forms:** current Treasury set downloaded (REVISED SBD1, SBD 4 Bidder's Disclosure under PFMA SCM Instruction 03 of 2021/22 - absorbs old SBD 8/9 content -, SBD 6.1 PPR 2022, MBD suite). The product fills the buyer's own edition, so no stored form is outdated. **Fixed:** the SBD 4 related-enterprise question said "bidding for this contract"; the form says "whether or not they are bidding" (`requirements.py`, `fill_sbd_docx.py`, `pastSubmissionReuse.ts`).
+- **B-BBEE:** **Fixed (wording only):** the SANRAL A12 row no longer tells every company a QSE/EME affidavit is "equivalent evidence"; it quotes A12's actual condition (`tenderCompliance.ts`, `compliance-report.tsx`). Status logic unchanged pending Sarel (Q-R1).
+- **Verified:** `test_general_bridge.py` ALL PASSED; `py_compile`; `tsc --noEmit` and `eslint` clean.
 
 ## This pass (2026-10-17, ~20:00 UTC): company master data list (research only)
 

@@ -46,7 +46,7 @@ export const ANSWER_REUSE: Record<string, { label: string; rule: ReuseRule; why:
   "sbd8.contract_terminated": { label: "Contract terminated (SBD 8)", rule: "company_fact", why: "About the company's record, not the buyer." },
   "sbd4.relationship_with_employee": { label: "Relationship with a buyer employee (SBD 4)", rule: "same_buyer", why: "About employees of this buyer - only carried over from a tender for the same buyer." },
   total_bid_price: { label: "Total bid price", rule: "this_tender_only", why: "Price is set per tender." },
-  "sbd4.interest_in_related_enterprise": { label: "Interest in a related enterprise bidding (SBD 4)", rule: "this_tender_only", why: "About who else is bidding for this contract." },
+  "sbd4.interest_in_related_enterprise": { label: "Interest in any other related enterprise (SBD 4)", rule: "this_tender_only", why: "Directors' other companies change over time and a wrong answer disqualifies the bid - re-check it for every tender." },
   "sbd6_1.points_claimed": { label: "Specific-goal points claimed (SBD 6.1)", rule: "this_tender_only", why: "Each buyer sets its own specific-goal table." },
   bidding_as_jv: { label: "Bidding as a joint venture", rule: "this_tender_only", why: "Bid structure is decided per tender." },
   briefing_attended: { label: "Compulsory briefing attended", rule: "this_tender_only", why: "A briefing belongs to one tender." },
