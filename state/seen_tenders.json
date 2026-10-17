@@ -598,5 +598,71 @@
     "contract_number": "174502",
     "title": "E3695DXGOU",
     "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174383": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174383",
+    "title": "IHLM/67/2026-27/ADMIN",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174403": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174403",
+    "title": "IHLM-58/2026-27/PLAN",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174404": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174404",
+    "title": "RFQ  4646/26",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174406": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174406",
+    "title": "IHLM-59/2026-27/ADMIN",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174429": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174429",
+    "title": "ELM-4/R020/2025-2026",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174436": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174436",
+    "title": "BSM 25/27",
+    "verdict": "not_a_fit"
+  },
+  "ocds-9t57fa-174508": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174508",
+    "title": "JGDM2026/27-RFQ-04",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174516": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174516",
+    "title": "E3375DXMPOU",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174517": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174517",
+    "title": "1224369",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174519": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174519",
+    "title": "RFQ 202103",
+    "verdict": "needs_review"
+  },
+  "ocds-9t57fa-174537": {
+    "first_seen": "2026-10-17",
+    "contract_number": "174537",
+    "title": "RFQJW139TN26",
+    "verdict": "needs_review"
   }
 }
