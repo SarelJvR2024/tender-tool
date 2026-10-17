@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, 06:10 UTC check-in.
+Last full pass: 2026-10-17, 08:11 UTC check-in.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -64,7 +64,7 @@ bridged by `engine/general/process_general_jobs.py`.
 | Company vault (`app/app/company/page.tsx`, migration `0014`) | Company profile plus six tracked compliance documents: COID, SARS TCS PIN, PI insurance, ISO 9001, bank confirmation letter (generated 3-month validity), and B-BBEE proof (certificate or QSE/EME affidavit). Each has an expiry badge and an upload/replace to the private `company-documents` bucket. A chip row at the top now summarizes all six at a glance ("N expired" / "N renewing soon" / "N not on file" / a single "documents current") | Read-only + edit form both real; expiry coloring shared via `app/lib/dates.ts`. `0014` was replayed with functional SQL checks (generated column, check constraint, tenant-scoped update and storage prefix). The upload has never been run against a live project. The summary chip is computed from the same `expiryStatus()` calls the six document rows use — checked, can't drift out of sync |
 | Onboarding (`app/app/onboarding/`) | One field (legal name) → company + owner row, atomically via `create_company_and_join` | Matches spec's "minimum to get started" principle exactly |
 | Route guard (`app/proxy.ts`) | Redirects signed-out users to `/login`, no-company users to `/onboarding` | Covers every real app route, including `/experience` (added this round) |
-| RLS policy set (`0001`–`0022`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 19 migrations against a fresh scratch Postgres this pass, all still apply cleanly. `0026` (unified job queue) replaces 0017's "for all" policy on `pack_generation_jobs` with select + strict insert for every engine, keeping update/delete for SANRAL rows only; tested on the `0001`→`0026` replay |
+| RLS policy set (`0001`–`0026`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 25 migrations (`0020` was never a real file — see QA section) against a fresh scratch Postgres this pass, all still apply cleanly. `0026` (unified job queue) replaces `0017`'s "for all" policy on `pack_generation_jobs` with select + strict insert for every engine, keeping update/delete for SANRAL rows only — independently re-tested, not just read: called `pursue_discovered_opportunity()` for real against the replayed schema, confirmed its insert through the `tender_engine_jobs` compatibility view lands in `pack_generation_jobs` with `engine='general'` set by the view's default, and that calling it a second time correctly no-ops via `ON CONFLICT` rather than erroring or duplicating |
 
 ## In progress / partially built
 
@@ -81,7 +81,7 @@ bridged by `engine/general/process_general_jobs.py`.
 5. **`is_test_company` exists in the schema; nothing reads or sets it yet.** `engine/admin_harness.py` still reads `config/test_companies/*.json`, not a real company row from Supabase — that's a genuine rewrite needing a live Supabase project to build and verify against, not a column add. No UI sets the flag either. Both are named follow-ups, not silently dropped — full history and sourcing caveats in the pass-history section below.
 6. **No `people` storage-path column yet for the original uploaded CV file.** `cv_uploads.storage_path` actually covers this now (see Built table) — this gap from an earlier pass is **resolved**, recorded here only so the history entry below isn't mistaken for still-open.
 7. **`tender_requirements`' SETUP facts (managerial flag, tender project type, DS specialism description) are unseeded**, so the SANRAL score estimate is wider than it needs to be, and every DS1 shows role fit as "Confirm by hand" (a DS role can't be matched to a tag without its specialism). `tenders.evaluation_rules` is also unseeded until `engine/seed_tender_evaluation_rules.py --write` runs against a live project. The vault-field half of this gap (TCS PIN, insurance, ISO, bank-letter date, B-BBEE proof) is **closed** by `0014`. Two related items remain: Klipcorp's ISO 9001 certificate number and expiry are still unknown, and CSD registration validity has no column.
-8. **Uploads are capped at ~4.4 MB** (Server Action body `4.5mb`, which is Vercel's hard 413 limit). Sarel asked for more. Larger files need a direct browser-to-Storage upload via signed upload URLs, which isn't built. This affects CVs, experience and the vault alike.
+8. **Uploads are capped at ~4.4 MB** (Server Action body `4.5mb`, which is Vercel's hard 413 limit) for CVs, experience and the vault. **Narrowed this pass**: the pattern to fix it now exists and is proven — `app/app/tenders/new/manual-tender-form.tsx` uploads straight from the browser to the `tender-documents` bucket via the Supabase client (`supabase.storage.from(...).upload(...)`, RLS-gated by `manualPrefix()`), never touching a Server Action body at all. That's a real answer to "is it worth building" (the open item below) for one path; the other three (CVs, experience, vault) still go through a capped Server Action and haven't been migrated to this pattern yet.
 9. **No live Supabase project exists anywhere in this project.** This is the single biggest standing verification gap — every Supabase-reading/writing piece built across every pass (CV uploads, experience library, compliance report, daily digest live mode, admin harness Supabase wiring) is verified only by schema replay and/or local-mode runs, never against real rows. Named once here rather than repeated in every table row.
 10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
@@ -94,6 +94,61 @@ bridged by `engine/general/process_general_jobs.py`.
     - **`seed_supabase_company.py` doesn't seed `initial_graduated` or any `projects`** for Henning, so a pack built from seeded data alone would stop at `confirm_pack.py`'s gate - real data goes in through the People page.
     - **No automated "pricing guard" scan** (Handover §5) - Envelope 1 is kept price-free by construction (no pricing document is placed in it), not by scanning the output.
     - **`print_reports.Office.__exit__` runs `pkill -9 -x soffice.bin`**, which kills every LibreOffice on the host, including another job's. Seen this pass: one run lost its Financial print to a concurrent process (caught, reported in the pack as "Not included", rest of the pack built). Harmless with one worker; worth scoping to its own PID before running bridges in parallel.
+
+## This pass (2026-10-17, 08:11 UTC): independent review of the 6-agent landing
+
+A cross-session heads-up named 6 agents working concurrently (SANRAL pack-gap closure, general
+engine gap closure, an adversarial multi-scenario test pass, CV AI-extraction, a tender pipeline
+board, admin review console). Scheduled myself an early check-in via `send_later` rather than
+waiting the full 2-hour cycle, given the heads-up flagged shared-infra risk (job-queue
+consolidation touching the bridge worker's claiming logic — code I'd just added
+`fail_stale_jobs()` to). By the time the early check-in fired, 6 commits had landed
+(`b45f4e4`→`584ea26`); **while writing this entry, a 7th landed mid-pass** (`464b6c3`, the
+job-queue consolidation itself) — caught by re-checking `git log` before committing, not missed.
+
+**Independently re-verified, not taken on the authors' word:**
+- Replayed all 25 migrations (`0001`→`0026`, `0020` unused) against a fresh scratch Postgres —
+  clean. Confirmed by searching full git history that `0020` was never a real file, just a
+  same-window numbering race that settled before anything landed (see QA section).
+- Read `process_pack_jobs.py`'s diff from `584ea26` line by line: the atomic claim-and-skip
+  update (`status=requested` → `generating`) is untouched; the new work (Envelope 2 verification,
+  `sync_tender_requirements`) is purely additive. The shared-infra risk the heads-up named did not
+  materialize in that commit.
+- Read `engine/cv/extract_cv_fields.py` in full: South African ID numbers are matched by checksum
+  and redacted locally **before** any text reaches the Anthropic API; the model never sees or
+  returns an ID number. Every proposed field carries a verbatim CV quote that's re-checked against
+  the source text, and a value whose quote doesn't actually appear is left unticked rather than
+  trusted. `test_extract_cv_fields.py` is wired into CI with a stub client — no `ANTHROPIC_API_KEY`
+  needed to test the plumbing, confirmed by grep.
+- **The job-queue consolidation did land (`464b6c3`, migration `0026_unified_job_queue.sql`) —
+  and this pass tested its trickiest claim for real, not just read it.** `pack_generation_jobs`
+  gains `engine`/`kind` columns; `tender_engine_jobs` is dropped and recreated as an updatable
+  `security_invoker` view filtered to `engine = 'general'`, so code written against the old table
+  (`pursue_discovered_opportunity()`, `load_manual_tender()`, `add_manual_tender_documents()`) was
+  deliberately left untouched — the migration's own comment says inserts through the view "keep
+  working," including their `ON CONFLICT` clauses. That is exactly the kind of claim to verify,
+  not trust: built fixture data on the replayed schema (a real company, a real
+  `discovered_opportunities` row, a real `auth.uid()`-backed membership), called
+  `pursue_discovered_opportunity()` twice. First call: a real row landed in `pack_generation_jobs`
+  with `engine` correctly defaulted to `'general'` by the view. Second call: correctly no-opped via
+  `ON CONFLICT` (still exactly one row) rather than erroring or duplicating. Also confirmed both
+  bridges poll and claim only their own engine's rows (`process_pack_jobs.py`: `engine='sanral'`;
+  `process_general_jobs.py`: `engine='general'`, both in the select and the claim), and that the
+  new unique index (`company_id, tender_id, engine, kind` where open) and poll index exist as
+  documented. No regression found.
+- **Positive finding, worth stating plainly**: the tender pipeline board's own migration
+  (`0021_tender_pipeline_stage.sql`) opens with a paragraph checking `tenders.status`,
+  `tender_packs.status` and `tender_tasks.kind` in turn and explaining why none of them can hold
+  found/bidding/submitted/won/lost, before adding a new, clearly-named column on the existing
+  `tender_packs` row rather than a new table. This is exactly the duplication-check this review
+  exists to insist on, done unprompted (or in response to the proactive flag sent to the
+  originating session before this landed — either way, the right outcome).
+- `npm run typecheck`/`lint` clean across the whole batch.
+
+Replying to the originating session with these findings (follow-up to the "nothing landed yet"
+reply sent when the heads-up first arrived). Updated Gap #8 (the manual-tender-load upload now
+proves the direct-to-Storage pattern works, for one of four capped paths) and the
+migration-numbering note; everything else in the current-state tables above was already accurate.
 
 ## This pass (2026-10-17, ~08:00 UTC): SANRAL pack end-to-end inputs (Gap #12)
 
@@ -195,7 +250,7 @@ note added to the Built table above; nothing new to flag.
 ## QA / stability
 
 - **One-command verification**: `npm run typecheck` / `npm run lint` / `npm run verify` in `app/package.json`, so every agent has one thing to run instead of three.
-- **Migration numbering**: `0001`–`0026` (no `0020` file; `0026_unified_job_queue` was drafted as `0022` and renumbered twice before landing as other agents' `0022`–`0025` landed), no live collisions — one near-collision (two agents both reaching for `0007`/`0009` the same day) was caught and resolved by renumbering before landing, confirmed by git history.
+- **Migration numbering**: `0001`–`0026`, with `0020` never used — five-plus agents raced for migration numbers in the same window (`0023` was independently claimed by both the CV-extraction and manual-tender-load work; the admin-review-console commit's own message shows it briefly believed `0020` was CV-extraction's and `0021` was the pipeline board's; `0026_unified_job_queue` was itself drafted as `0022` and renumbered twice before landing, as other agents' `0022`–`0025` landed first). One real collision (`0023`) was caught and resolved by renumbering (`487b964`, manual tender load → `0024`) before anything landed; the `0020` gap is a harmless side effect of the same scramble, not a missing or hidden migration — confirmed by searching the full git history for any file that ever used it (none). No live collisions in the final state, verified by a full `0001`→`0026` replay.
 - **RLS review**: every policy either follows the tenant-isolation default (`is_company_member(company_id)`) or carries an explicit comment explaining why it doesn't. No mismatched pattern found across any pass to date.
 - **Cross-pass reuse discipline is holding up well**, worth stating plainly rather than only hunting for problems: `score_outlook.py` explicitly defers to `sanralScoring.ts` instead of reimplementing it; `daily_digest.py` imports `assess_tender`/`watch_new_tenders`/`watch_deadlines` directly rather than re-deriving their logic; `tenderCompliance.ts` reuses `app/lib/dates.ts`'s `daysUntil` rather than a third expiry implementation. Each of these was checked this pass, not assumed.
 - **`admin_harness.py` currency**: real and still running the SANRAL path correctly. `--pack` adds the submission pack (and CV generation inside it), see Gap #2. Separately: on this host, the **local** form-fill baselines (`state/`, gitignored) flag 15 of 18 runs. All 15 are `a_forms.A10.deviations_or_qualifications` → assumed_default, plus a date-driven COID flip for `complete_co`. These come from earlier `fill_a_forms.py` changes, not this pass. The baselines were left as-is for the owner to accept with `--reset`.
@@ -207,7 +262,7 @@ note added to the Built table above; nothing new to flag.
 - General engine (Gap #1): (a) overlay - **built** (label-anchored, not fixed x/y; Round 4). Open: is a "check, then sign" review of each typed page acceptable to Sarel, or should typed pages need an explicit "reviewed" tick before the pack is marked ready? (b) buyer forms - **built** for the CEQ and Form of Offer (the evidence put the CIDB forms ahead of ESKOM's for Klipcorp's disciplines); next from the backlog: certificate of authority? (c) should the company telephone / e-mail / CIDB grading (0018) also be editable on the Company page (today: captured on the Tender Workspace), and should a CIDB registration (CRS) number column be added for the CEQ? (d) **built** by the manual-tender-load work (0024).
 - Gap #5 follow-up: rewriting `admin_harness.py` to read a real company's data from Supabase instead of local JSON fixtures, and deciding where an `is_test_company` toggle should live in the admin UI. Both need a live Supabase project to build and verify against properly.
 - Gap #7 vault fields: **answered and built** (Sarel's 8/9/10, migration `0014`). Still open: Klipcorp's ISO certificate number and expiry, and whether the EME affidavit is accepted the same way as the QSE one (assumed, not confirmed).
-- Gap #8: is a direct-to-Storage upload worth building to get past ~4.4 MB?
+- Gap #8: the manual-tender-load path proves direct-to-Storage upload works past ~4.4 MB — worth porting the same pattern to CV uploads, experience evidence and the vault, or is per-path effort not justified yet?
 - Questions 3/5/6/11 (evidence rules, roles, role tagging, office locations): **answered and built** (`0015`, `0016`). New questions are at the end of `Tender-Evaluation-Engine-Audit.md` "Round 2":
   - Klipcorp's real offices;
   - which roles to tag Henning for;
