@@ -12,6 +12,7 @@ import { SiteNav } from "../../_components/SiteNav";
 import { SubmissionPack } from "./submission-pack";
 import { IntakeCard } from "./intake-card";
 import { ActivityLog } from "./activity-log";
+import { ReusePastSubmission } from "./reuse-past-submission";
 import { TenderTemplates } from "./tender-templates";
 import { PositionPersonSelect } from "./position-person-select";
 import { startTenderPack } from "./pack-inputs-actions";
@@ -135,12 +136,12 @@ export default async function TenderWorkspacePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; saved?: string; activity?: string }>;
+  searchParams: Promise<{ error?: string; saved?: string; activity?: string; reuse_from?: string; reused?: string }>;
 }) {
   const { id } = await params;
   // Every action on this page (requestTenderCv, addTenderTask,
   // requestSubmissionPack) reports a refusal as ?error=... - shown at the top.
-  const { error: actionError, saved, activity } = await searchParams;
+  const { error: actionError, saved, activity, reuse_from: reuseFrom, reused } = await searchParams;
   const supabase = await createClient();
 
   const { data: tender, error: tenderError } = await supabase
@@ -469,6 +470,10 @@ export default async function TenderWorkspacePage({
                 )}
               </>
             )}
+
+            {/* Feature item 9: carry over last time's reusable answers /
+                key-position people from a submitted tender (reuse-past-submission.tsx). */}
+            <ReusePastSubmission tenderId={id} reuseFrom={reuseFrom} saved={saved} reused={reused} />
 
             {/* Intake (0024): how the documents were read and routed - SANRAL
                 pack flow vs. general - and the fit for this company. */}
