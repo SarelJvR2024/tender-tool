@@ -111,6 +111,16 @@ Not yet built as of 2026-10-16: `app/app/people/` currently has a manual add/edi
 - This is explicitly a cross-cutting spec requirement, not a single feature/page: whoever builds or extends any engine going forward must check whether company-specific voice/approach data should flow into that engine's output, the same way "evidence-first, don't assume Klipcorp's data is universal" is already a cross-cutting discipline for this project.
 - Keep this proportionate to what's actually used today - most of this product's real output (filled forms, CVs, compliance reports) is NOT free-prose narrative, so this is mainly a readiness requirement for when a genuinely free-text/narrative output point exists, plus the few output points that do have some company-specific framing today (e.g. `generate_cv.py`'s cover page). Don't build a narrative-generation feature just to have somewhere to use this field - that reintroduces exactly the "every submission looks the same" problem being solved here.
 
+**Built 2026-10-17:** `companies.how_we_work` (migration `0030`), edited in the "How we work" section of the Company page. Audit of every current output point: `Company-Voice-Audit.md`. Result: no engine produces company-descriptive prose today, so nothing is wired in yet. The one real narrative point, SANRAL Form B4/B5, is written by hand on purpose.
+
+**Standing discipline for anyone building or extending a company-facing or buyer-facing output** (same standing as "evidence-first, don't assume Klipcorp's data is universal"):
+
+1. Before adding any text to a generated document, ask: is this text the same for every tenant? If it describes the company or its approach, it must come from `companies.how_we_work` (or another field the company filled in itself), not from a template sentence or an LLM.
+2. Use the company's text **verbatim**. Don't paraphrase it, summarise it, "improve" it or extend it with an LLM. If it needs to be shorter for a particular form, show the company its full text and let it decide what to cut. The tool doesn't make that choice.
+3. If `how_we_work` is empty, leave the spot visibly blank and add a to-do on the action checklist (provenance `missing`). Never fill in generic wording instead.
+4. Text written to the company's own staff (completion guides, digests, the readiness report) isn't company voice, but it doesn't belong in the submitted documents either. Keep tool-internal wording (script names, file paths, scoring internals) out of anything the buyer sees. `Company-Voice-Audit.md` records one existing case of this, in the CV cover page.
+5. When a new output point does use the field, add a row for it to `Company-Voice-Audit.md`.
+
 ### Onboarding: guided, not a wall of fields
 
 Company onboarding (`app/app/onboarding/`) should stay true to the same discipline: the minimum to get a company into the system (today: just a legal name), with everything else - registration numbers, BEE, CIDB, bank details, documents - filled in progressively afterward through the Document Vault, never demanded upfront as a long signup form. A new user should reach something useful (their dashboard, a first tender to look at) in well under a minute, not after a multi-page intake form.

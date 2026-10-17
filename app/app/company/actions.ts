@@ -52,6 +52,9 @@ const NUMERIC_FIELDS = [
 
 const BEE_PROOF_VALUES = BEE_PROOF_TYPES.map((t) => t.value) as string[];
 
+// Matches companies_how_we_work_length (0030).
+const HOW_WE_WORK_MAX_CHARS = 10000;
+
 /**
  * Updates the signed-in user's company row. RLS's "companies: members can
  * update" policy (is_company_member(id)) gates this, so a plain client
@@ -85,6 +88,20 @@ export async function updateCompanyProfile(companyId: string, formData: FormData
     if (raw === null) continue;
     const trimmed = (raw as string).trim();
     update[field] = trimmed === "" ? null : Number(trimmed);
+  }
+
+  // "How we work" (0030): the company's own words, stored as typed - only the
+  // browser's CRLF line endings are normalised and the ends trimmed. Never
+  // rewritten or summarised (docs/specs/Company-Voice-Audit.md).
+  const howWeWork = formData.get("how_we_work");
+  if (howWeWork !== null) {
+    const text = (howWeWork as string).replace(/\r\n?/g, "\n").trim();
+    if (text.length > HOW_WE_WORK_MAX_CHARS) {
+      redirect(
+        `/company?edit=1&error=${encodeURIComponent(`"How we work" is ${text.length} characters - keep it under ${HOW_WE_WORK_MAX_CHARS}.`)}`,
+      );
+    }
+    update.how_we_work = text === "" ? null : text;
   }
 
   // Tri-state: "" = not stated (null), never silently "not certified".

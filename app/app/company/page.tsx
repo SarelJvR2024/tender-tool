@@ -57,6 +57,8 @@ type CompanyRow = {
   bee_proof_type: string | null;
   bee_proof_expiry: string | null;
   bee_proof_document_path: string | null;
+  // 0030_company_how_we_work.sql
+  how_we_work: string | null;
 };
 
 type DocUrls = Partial<Record<VaultDocumentKind, string>>;
@@ -76,7 +78,7 @@ export default async function CompanyPage({
   const { data: company, error: loadError } = await supabase
     .from("companies")
     .select(
-      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path"
+      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work"
     )
     .single();
 
@@ -252,6 +254,25 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
         </div>
       </Section>
 
+      <Section title="How we work">
+        {company.how_we_work ? (
+          <div style={{ fontSize: 14, color: "#16233B", lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+            {company.how_we_work}
+          </div>
+        ) : (
+          <div style={{ fontSize: 13, color: "#6B6758", lineHeight: 1.5 }}>
+            Not written yet. Describe who you are and how you actually approach a tender or project, in your own
+            words - your real methodology, not a template.{" "}
+            <a href="/company?edit=1" style={{ color: "#D97706", fontWeight: 600, textDecoration: "none" }}>
+              Add it
+            </a>
+          </div>
+        )}
+        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
+          Kept for any part of a tender that needs your own description - used word-for-word, never rewritten by AI.
+        </div>
+      </Section>
+
       <Section title="Compliance documents">
         <div style={{ display: "flex", flexDirection: "column" }}>
           <DocumentRow
@@ -373,6 +394,25 @@ function EditForm({ company }: { company: CompanyRow }) {
           <TextInput name="registered_address" label="Registered address" defaultValue={company.registered_address} textarea />
           <TextInput name="postal_address" label="Postal address" defaultValue={company.postal_address} textarea />
         </div>
+      </Section>
+
+      <Section title="How we work">
+        <label htmlFor="how_we_work" style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: "#16233B", marginBottom: 5 }}>
+          Who you are and how you approach a tender, in your own words
+        </label>
+        <div style={{ fontSize: 12, color: "#6B6758", lineHeight: 1.5, marginBottom: 8 }}>
+          Your real methodology, what you are known for, how you run a project - written the way you would say it.
+          Tender Tool reproduces this exactly as written; it never rewrites or pads it.
+        </div>
+        <textarea
+          id="how_we_work"
+          name="how_we_work"
+          defaultValue={company.how_we_work ?? ""}
+          rows={10}
+          maxLength={10000}
+          style={{ width: "100%", boxSizing: "border-box", minHeight: 180, padding: "10px 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit", lineHeight: 1.5, resize: "vertical" }}
+        />
+        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 6 }}>Up to 10 000 characters.</div>
       </Section>
 
       <Section title="Compliance documents">
