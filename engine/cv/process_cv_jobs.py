@@ -248,12 +248,44 @@ def claim_job(url, key, job):
     """Atomically move one row requested -> generating. PostgREST applies the
     status=eq.requested filter and the update in one statement, and returns
     the updated rows (Prefer: return=representation), so an empty result
-    means another worker already took it."""
+    means another worker already took it. Sets claimed_at (migration 0019)
+    so fail_stale_jobs() below can tell a stuck job from a slow one."""
     claimed = supabase_request(
         url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}&status=eq.requested",
-        {"status": "generating"},
+        {"status": "generating", "claimed_at": _now_iso()},
     )
     return bool(claimed)
+
+
+STALE_AFTER_MINUTES = 60  # same threshold and reasoning as process_pack_jobs.py's
+                          # fail_stale_jobs() - a CV is one document, not a merged
+                          # pack, so this is generous, not tight
+
+
+def fail_stale_jobs(url, key, now=None):
+    """A worker killed mid-job (OOM, host crash) leaves its row in
+    'generating' forever (System-Status Gap #11). claimed_at (migration 0019)
+    makes that detectable here: after STALE_AFTER_MINUTES the row is marked
+    'failed' with a plain reason, so the UI stops showing "Generating..." and
+    the person can request again. Deliberately not re-queued: a job that
+    crashed the worker once would crash it again in a loop - same rule
+    process_pack_jobs.py's own fail_stale_jobs() already follows."""
+    import datetime
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
+    stuck = supabase_request(url, key, "GET", "generated_cvs?status=eq.generating&select=*")
+    for job in stuck:
+        claimed = job.get("claimed_at")
+        if not claimed:
+            continue
+        claimed_dt = datetime.datetime.fromisoformat(claimed.replace("Z", "+00:00"))
+        if claimed_dt < cutoff:
+            supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}&status=eq.generating", {
+                "status": "failed", "completed_at": _now_iso(),
+                "error_message": f"The CV builder stopped mid-job (no result after {STALE_AFTER_MINUTES} "
+                                 "minutes). Nothing was produced - request the CV again.",
+            })
+            print(f"[failed] {job['id']}: stale 'generating' since {claimed}")
 
 
 def process_job(url, key, job, out_dir):
@@ -308,6 +340,7 @@ def _now_iso():
 
 def poll_once(url, key, out_dir, quiet_when_empty=False):
     """One pass over the queue. Returns how many jobs this call handled."""
+    fail_stale_jobs(url, key)
     jobs = supabase_request(url, key, "GET", "generated_cvs?status=eq.requested&select=*&order=requested_at.asc")
     if not jobs and not quiet_when_empty:
         print("No pending generated_cvs jobs.")
