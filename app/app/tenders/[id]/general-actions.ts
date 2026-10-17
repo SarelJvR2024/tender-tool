@@ -10,6 +10,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
+import { advanceFoundToBidding } from "@/lib/pipeline";
 
 async function requireMember() {
   const supabase = await createClient();
@@ -134,6 +135,11 @@ async function requestJob(formData: FormData, kind: "extract_requirements" | "ge
   });
   // 23505 = one already open (unique partial index) - that's fine, it's queued.
   if (error && error.code !== "23505") redirect(back(tenderId, `?error=${encodeURIComponent(error.message)}`));
+  // Pipeline board (0021): asking for a pack means we're bidding.
+  if (kind === "generate_pack" && pack?.id) {
+    await advanceFoundToBidding(supabase, pack.id as string);
+    revalidatePath("/pipeline");
+  }
   revalidatePath(`/tenders/${tenderId}`);
   redirect(back(tenderId, kind === "generate_pack" ? "?saved=pack" : "?saved=extract"));
 }

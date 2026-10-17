@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
-type NavKey = "dashboard" | "discovery" | "company" | "people" | "experience" | "admin";
+type NavKey = "dashboard" | "pipeline" | "discovery" | "company" | "people" | "experience" | "admin";
 
 const NAV_ITEMS: { key: NavKey; href: string; label: string }[] = [
   { key: "dashboard", href: "/dashboard", label: "Tenders" },
+  { key: "pipeline", href: "/pipeline", label: "Pipeline" },
   { key: "discovery", href: "/discovery", label: "Discovery" },
   { key: "company", href: "/company", label: "Company" },
   { key: "people", href: "/people", label: "People" },

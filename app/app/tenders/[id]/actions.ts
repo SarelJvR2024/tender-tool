@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
+import { advanceFoundToBidding } from "@/lib/pipeline";
 
 /**
  * Tenant check, same pattern as app/app/people/actions.ts's own
@@ -144,8 +145,11 @@ export async function requestSubmissionPack(formData: FormData) {
     requested_by: user?.id ?? null,
   });
   if (error) fail(error.message);
+  // Pipeline board (0021): asking for a pack means we're bidding.
+  await advanceFoundToBidding(supabase, tenderPackId!);
 
   revalidatePath(`/tenders/${tenderId}`);
+  revalidatePath("/pipeline");
   redirect(`/tenders/${tenderId}#submission-pack`);
 }
 
