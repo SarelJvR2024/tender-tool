@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, 08:11 UTC check-in (+ ~09:30 UTC scenario pass, see below).
+Last full pass: 2026-10-17, 10:11 UTC check-in.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -97,6 +97,37 @@ bridged by `engine/general/process_general_jobs.py`.
     - **`print_reports.Office.__exit__` runs `pkill -9 -x soffice.bin`**, which kills every LibreOffice on the host, including another job's. Seen this pass: one run lost its Financial print to a concurrent process (caught, reported in the pack as "Not included", rest of the pack built). Harmless with one worker; worth scoping to its own PID before running bridges in parallel.
 
 13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; documents can't be attached to a shared discovered tender (load a private copy instead); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once.
+
+## This pass (2026-10-17, 10:11 UTC): independent spot-check of the scenario pass + UI review
+
+This is the standing regression-risk review `Engine-Scenario-Test-Results.md` (below) itself
+flagged as worth checking closely. Spot-checked rather than re-running the whole thing, since the
+findings doc's own evidence was already unusually thorough:
+
+- **`app/lib/dates.ts`'s `closingDayOf()` fix** (the off-by-one-at-closing bug) — read the whole
+  file: additive only, `daysUntil`/`expiryStatus` untouched, correctly wired into
+  `tenderCompliance.ts` at both call sites that needed it.
+- **`discovered_opportunities`'s partial-index → plain-constraint fix** — read the actual SQL in
+  `0024` (not just the prose claim) and independently replayed all 25 migrations (`0001`→`0026`)
+  against a fresh scratch Postgres: still clean, and the two new unique constraints
+  (`company_id, ocid` / `company_id, tender_id`) exist exactly as documented, confirmed via
+  `pg_constraint`.
+- **`test_watch_deadlines_urgency.py`** — ran it directly rather than trusting "8/8 pass": genuine
+  pass, including the two escalation cases (a document reported again once it actually expires, a
+  task reported again once overdue) and the "lapses before a pursued tender's closing date, even
+  outside the normal window" case.
+- **CI wiring** — confirmed by grep that only `test_watch_deadlines_urgency.py` is actually wired
+  into `bridge-worker-ci.yml`; `test_manual_intake.py` needs Postgres so isn't (matches the
+  findings doc's own "Still open" list — not a gap I'm finding, a gap they already named).
+- **`npm run typecheck`/`lint`** clean across the whole batch.
+
+Also reviewed `0a021c6` (a design-review pass across the three newest UI features — CV
+extraction review, pipeline board, admin console): found one real inconsistency (the pipeline
+board's primary advance-stage button was 32px, half the 44px minimum every other primary action
+in the app uses) and fixed it, correctly leaving the lighter "← Back" link alone. Good, proactive
+design-consistency catch, not something I needed to do myself.
+
+No new duplication, no regression, nothing left for me to fix this pass beyond this note.
 
 ## This pass (2026-10-17, ~09:30 UTC): manual tender load + multi-scenario engine test
 
