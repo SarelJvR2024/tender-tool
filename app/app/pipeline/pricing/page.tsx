@@ -156,6 +156,12 @@ export default async function PricingHistoryPage({
   const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#6B6758", padding: "8px 10px", borderBottom: "1px solid #E5E1D5", whiteSpace: "nowrap" };
   const td: CSSProperties = { fontSize: 13, color: "#16233B", padding: "8px 10px", borderBottom: "1px solid #F0EEE6", verticalAlign: "top" };
   const num: CSSProperties = { ...td, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" };
+  // The "Tenders" table below is 10 columns wide (minWidth: 980) and scrolls
+  // sideways on a phone - without a frozen first column, scrolling right to
+  // see Price/Credit/Commission/Edit loses track of which tender the row
+  // even is. Pins the identifying column in place, same idea as a frozen
+  // header column in a spreadsheet.
+  const stickyCol: CSSProperties = { position: "sticky", left: 0, zIndex: 1, background: "#FFFFFF", boxShadow: "2px 0 4px rgba(22,35,59,0.06)" };
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
@@ -238,7 +244,7 @@ export default async function PricingHistoryPage({
                 These rows mix VAT-inclusive and VAT-exclusive prices; the summary adds them as typed.
               </p>
             )}
-            <div style={{ overflowX: "auto", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, marginBottom: 20 }}>
+            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, marginBottom: 20 }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
@@ -270,11 +276,11 @@ export default async function PricingHistoryPage({
             <h2 style={{ fontSize: 15, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>
               Tenders ({rows.length})
             </h2>
-            <div style={{ overflowX: "auto", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11 }}>
+            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
                 <thead>
                   <tr>
-                    <th style={th}>Tender</th>
+                    <th style={{ ...th, ...stickyCol }}>Tender</th>
                     <th style={th}>Client</th>
                     <th style={th}>Type</th>
                     <th style={th}>Sector</th>
@@ -291,7 +297,7 @@ export default async function PricingHistoryPage({
                     const meta = STAGE_META[r.stage];
                     return (
                       <tr key={r.tenderId}>
-                        <td style={{ ...td, maxWidth: 260 }}>
+                        <td style={{ ...td, ...stickyCol, maxWidth: 260 }}>
                           <Link href={`/tenders/${r.tenderId}`} style={{ color: "#16233B", textDecoration: "none" }}>
                             {r.contractNo && <div style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600 }}>{r.contractNo}</div>}
                             <div style={{ fontSize: 12 }}>{r.title}</div>
