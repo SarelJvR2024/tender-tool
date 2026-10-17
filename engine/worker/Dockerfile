@@ -50,6 +50,9 @@ COPY engine engine
 COPY fingerprints fingerprints
 COPY templates templates
 COPY config/test_companies config/test_companies
+# Discipline taxonomy seed (0040): the offline fallback when the
+# discipline_categories table can't be read (engine/discovery/taxonomy.py).
+COPY config/discipline_taxonomy.json config/discipline_taxonomy.json
 
 # Unbuffered so log lines reach the host's log viewer immediately; a non-root
 # user with a writable HOME, because LibreOffice writes a profile there.

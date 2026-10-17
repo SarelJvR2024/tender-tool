@@ -60,8 +60,9 @@ mechanism as document-expiry reminders, not a second one):
    expiry columns that really exist on `people`: ECSA and SACPCMP
    (0035_person_registration_expiry.sql - before it, people only had the
    date each registration was GRANTED, ecsa_date/sacpcmp_date, which is not
-   an expiry). Same lead-time window, same seen-store, same status
-   escalation as the company documents: both go through _expiry_window(),
+   an expiry), and SACNASP and SAGC (0040 - optional, recorded only where a
+   tender asks for them). Same lead-time window, same seen-store, same status
+   escalation as the company documents: all go through _expiry_window(),
    one mechanism, not a second one. Other professional bodies (SACAP,
    SACPLAN, ...) have no registration column on people yet, so they are not
    tracked.
@@ -129,6 +130,11 @@ TRACKED_EXPIRY_FIELDS = [
 TRACKED_PERSON_EXPIRY_FIELDS = [
     ("ecsa_expiry", "ECSA professional registration", None, "ecsa_number"),
     ("sacpcmp_expiry", "SACPCMP professional registration", None, "sacpcmp_number"),
+    # 0040 (audit Q5): optional registrations, recorded only for the people a
+    # tender needs them for - a person with none recorded has a null expiry
+    # and is skipped by _expiry_window(), exactly like ECSA/SACPCMP.
+    ("sacnasp_expiry", "SACNASP (Pr Sci.Nat) professional registration", None, "sacnasp_number"),
+    ("sagc_expiry", "SAGC (Geomatics) professional registration", None, "sagc_number"),
 ]
 
 DEFAULT_DOC_LEAD_DAYS = 60  # matches app/lib/dates.ts's renewSoonWithinDays default

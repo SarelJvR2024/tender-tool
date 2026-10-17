@@ -7,6 +7,7 @@ import { NEXT_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type Pipeline
 import { SiteNav } from "../_components/SiteNav";
 import { moveTenderStage } from "./actions";
 import { derivedSector, ECONOMICS_COLUMNS, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
+import { loadDisciplineTaxonomy, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
 import { EconomicsForm, type CreditPerson } from "./economics-form";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
@@ -87,6 +88,7 @@ export default async function PipelinePage({
     supabase.from("people").select("id, name").order("name"),
   ]);
   const people = (peopleRows ?? []) as CreditPerson[];
+  const taxonomy = await loadDisciplineTaxonomy(supabase);
 
   const verdictByKey = new Map<string, string>();
   const categoriesByKey = new Map<string, string[]>();
@@ -186,7 +188,7 @@ export default async function PipelinePage({
                       </div>
                     )}
                     {column.map((c) => (
-                      <TenderCard key={c.id} card={c} people={people} />
+                      <TenderCard key={c.id} card={c} people={people} taxonomy={taxonomy} />
                     ))}
                   </div>
 
@@ -205,7 +207,7 @@ export default async function PipelinePage({
   );
 }
 
-function TenderCard({ card, people }: { card: Card; people: CreditPerson[] }) {
+function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPerson[]; taxonomy: DisciplineTaxonomy }) {
   const verdict = card.verdict ? VERDICT_CHIP[card.verdict] : null;
   const left = daysUntil(card.closingDate);
   const open = card.stage === "found" || card.stage === "bidding";
@@ -261,6 +263,7 @@ function TenderCard({ card, people }: { card: Card; people: CreditPerson[] }) {
           economics={card.economics}
           people={people}
           defaultSector={card.defaultSector}
+          taxonomy={taxonomy}
           prompt={!open && card.economics?.submitted_price_zar == null}
         />
       )}

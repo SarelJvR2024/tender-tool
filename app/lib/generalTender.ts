@@ -91,6 +91,11 @@ export type RequirementManifest = {
   }[];
   returnables: ManifestReturnable[];
   roles: { role_code: string; mentions: number; document: string; quote: string; from_ocr?: boolean }[];
+  // 0040 / audit Q5: per-person registrations this tender requires that are
+  // not on every person's record (requirements.py find_person_registrations).
+  // Absent when the tender doesn't ask - the People page then keeps the
+  // SACNASP / SAGC fields out of the way.
+  person_registrations?: { body: "SACNASP" | "SAGC"; mentions: number; document: string; quote: string; from_ocr?: boolean }[];
   cidb: { grading: string; quote: string } | null;
   briefing: { compulsory: boolean; quote: string } | null;
   scoring: {

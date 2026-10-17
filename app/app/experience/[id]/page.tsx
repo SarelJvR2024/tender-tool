@@ -1,10 +1,10 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../../_components/SiteNav";
+import { isTaxonomySlug, loadDisciplineTaxonomy, taxonomyGroups } from "@/lib/disciplineTaxonomy";
 import { saveExperienceTags, deleteExperience } from "../actions";
 import {
   DOCUMENT_TYPES,
-  DISCIPLINES,
   CLIENT_TYPES,
   SERVICE_STAGES,
   PERFORMANCE_RATINGS,
@@ -48,6 +48,8 @@ export default async function ExperienceDetailPage({
 
   const { data } = await supabase.from("experience_items").select("*").eq("id", id).maybeSingle();
   const item = data as ExperienceItem | null;
+  const taxonomy = await loadDisciplineTaxonomy(supabase);
+  const customTags = (item?.disciplines ?? []).filter((t) => !isTaxonomySlug(taxonomy, t));
 
   if (!item) {
     return (
@@ -151,18 +153,51 @@ export default async function ExperienceDetailPage({
 
           <div style={sectionTitle}>What the work was</div>
           <label style={label}>Discipline * <span style={{ fontWeight: 400 }}>(tick all that apply - tenders are matched on this)</span></label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-            {[...DISCIPLINES.map((d) => d.value as string), ...item.disciplines.filter((t) => !DISCIPLINES.some((d) => d.value === t))].map((v) => (
-              <label key={v} style={checkLabel}>
-                <input type="checkbox" name="disciplines" value={v} defaultChecked={item.disciplines.includes(v)} />
-                {disciplineLabel(v)}
-              </label>
-            ))}
+          <div style={hint}>
+            Tender Tool&apos;s own discipline list, built from real tenders and growing as new kinds of tender come in. Ticking a
+            whole group (e.g. Roads, bridges &amp; civil works) matches every discipline in it.
+            {taxonomy.source === "fallback" && ` (Showing the original 7 groups only - the full list couldn't be read: ${taxonomy.error}.)`}
+          </div>
+          <div style={{ margin: "6px 0 12px" }}>
+            {taxonomyGroups(taxonomy).map(({ group, children }) => {
+              const ticked = [group, ...children].filter((c) => item.disciplines.includes(c.slug)).length;
+              return (
+                <details key={group.slug} open={ticked > 0} style={{ borderTop: "1px solid #F0EEE6", padding: "6px 0" }}>
+                  <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#16233B", minHeight: 32, display: "flex", alignItems: "center", gap: 8 }}>
+                    {group.label}
+                    {ticked > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#DCFCE7", borderRadius: 100, padding: "2px 8px" }}>{ticked} ticked</span>}
+                  </summary>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                    <label style={{ ...checkLabel, fontWeight: 600 }}>
+                      <input type="checkbox" name="disciplines" value={group.slug} defaultChecked={item.disciplines.includes(group.slug)} />
+                      All of {group.label.toLowerCase()}
+                    </label>
+                    {children.map((c) => (
+                      <label key={c.slug} style={checkLabel}>
+                        <input type="checkbox" name="disciplines" value={c.slug} defaultChecked={item.disciplines.includes(c.slug)} />
+                        {c.label}
+                      </label>
+                    ))}
+                  </div>
+                </details>
+              );
+            })}
+            {customTags.length > 0 && (
+              <div style={{ borderTop: "1px solid #F0EEE6", paddingTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "#6B6758", alignSelf: "center" }}>Your own tags:</span>
+                {customTags.map((v) => (
+                  <label key={v} style={checkLabel}>
+                    <input type="checkbox" name="disciplines" value={v} defaultChecked />
+                    {disciplineLabel(v)}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
           <Field>
             <label style={label}>Other disciplines <span style={{ fontWeight: 400 }}>(optional, comma-separated)</span></label>
-            <input style={field} name="other_disciplines" placeholder="e.g. Geotechnical investigation, Environmental assessment" />
-            <div style={hint}>For work the list above doesn&apos;t cover. Discovered tenders are only sorted into the listed disciplines, so also tick the closest one if there is one.</div>
+            <input style={field} name="other_disciplines" placeholder="e.g. Hydrographic survey, Heritage conservation" />
+            <div style={hint}>For work the list doesn&apos;t cover yet. It is saved as your own tag; the list itself is reviewed and extended as new kinds of tender come in, so also tick the closest listed discipline if there is one.</div>
           </Field>
           <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field>

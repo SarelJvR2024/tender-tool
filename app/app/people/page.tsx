@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../_components/SiteNav";
-import { credentialChipLabel, credentialExpiries } from "@/lib/personCredentials";
+import { PERSON_CREDENTIAL_COLUMNS, credentialChipLabel, credentialExpiries, type PersonCredentialFields } from "@/lib/personCredentials";
 
 // Reads the signed-in user's own company's roster on every request (via RLS) -
 // can't be prerendered. Same Cache Components escape hatch as dashboard/page.tsx.
 export const instant = false;
 
-type PersonRow = {
+type PersonRow = PersonCredentialFields & {
   id: string;
   name: string;
   role: string | null;
@@ -51,7 +51,7 @@ export default async function PeoplePage({
   // belongs in one of those, same rule companies.director_id_number states.
   const { data: people, error } = await supabase
     .from("people")
-    .select("id, name, role, description, ecsa_level, ecsa_number, sacpcmp_number, ecsa_expiry, sacpcmp_expiry, highest_description")
+    .select(`id, name, role, description, ${PERSON_CREDENTIAL_COLUMNS}, highest_description`)
     .order("name", { ascending: true });
 
   const rows = (people ?? []) as PersonRow[];

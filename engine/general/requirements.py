@@ -471,6 +471,43 @@ def find_roles(docs):
 
 
 # ---------------------------------------------------------------------------
+# Per-person professional registrations a tender asks for that are NOT on
+# every person's record (migration 0040, audit Q5): SACNASP (Pr Sci.Nat - e.g.
+# an engineering geologist, environmental scientist) and SAGC (land /
+# engineering surveyors; PLATO is the council's former name). Sarel: "don't
+# specifically ask for it unless the tender requires it" - so this list is
+# what makes the People page show those fields and the workspace name who
+# holds them. Same context rule as the roles: a glossary line or a passing
+# mention doesn't count.
+# ---------------------------------------------------------------------------
+
+PERSON_REGISTRATION_PATTERNS = [
+    ("SACNASP", r"\bSACNASP\b|\bPr\.?\s?Sci\.?\s?Nat\b|natural\s+scientific\s+professions|professional\s+natural\s+scientist"),
+    ("SAGC", r"\bSAGC\b|geomatics\s+council|\bPLATO\b|professional\s+land\s+surveyor"),
+]
+
+
+def find_person_registrations(docs):
+    out = []
+    for body, pat in PERSON_REGISTRATION_PATTERNS:
+        rx = re.compile(pat, re.IGNORECASE)
+        hit, n = None, 0
+        for d in docs:
+            t = d.get("text") or ""
+            for m in rx.finditer(t):
+                if GLOSSARY_LINE_RE.match(_line_at(t, m.start())):
+                    continue
+                if not ROLE_CONTEXT_RE.search(t[max(0, m.start() - 250): m.end() + 250]):
+                    continue
+                n += 1
+                if hit is None:
+                    hit = (d["name"], _quote(t, m.start(), m.end()))
+        if hit:
+            out.append({"body": body, "mentions": n, "document": hit[0], "quote": hit[1]})
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Buyer-specific forms: things a bidder must complete that are not an SBD/MBD
 # form. The engine has no template for these - they are listed honestly as
 # "complete by hand" (findings doc: ESKOM Form A / declarations / NEC3,
@@ -731,9 +768,10 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
     loc = extract_locality(all_text) if all_text.strip() else {"rows": [], "mandatory_local_office": None}
     returnables = find_returnables(docs)
     roles = find_roles(docs)
+    person_registrations = find_person_registrations(docs)
     # EXPERIMENTAL OCR: anything read out of OCR'd text says so, so the UI
     # can show it isn't from a real text layer.
-    for item in returnables + roles + buyer_forms:
+    for item in returnables + roles + buyer_forms + person_registrations:
         if item.get("document") in ocr_docs:
             item["from_ocr"] = True
     conditions = {
@@ -757,6 +795,9 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         "buyer_forms": buyer_forms,
         "returnables": returnables,
         "roles": roles,
+        # 0040: only present when the tender asks (People page shows the
+        # SACNASP / SAGC fields because of it)
+        **({"person_registrations": person_registrations} if person_registrations else {}),
         "cidb": {"grading": cidb_m.group(1).replace(" ", "").upper(), "quote": _quote(all_text, cidb_m.start(), cidb_m.end())} if cidb_m else None,
         "briefing": {"compulsory": conditions["briefing"], "quote": _quote(all_text, brief_m.start(), brief_m.end())} if brief_m else None,
         "scoring": {

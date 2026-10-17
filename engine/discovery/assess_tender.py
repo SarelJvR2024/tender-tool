@@ -49,6 +49,7 @@ import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from score_outlook import estimate_score_outlook, PROVINCES  # noqa: E402
+import taxonomy as _taxonomy  # noqa: E402
 
 STRUCTURAL_MARKERS = [
     "tender data", "returnable schedule", "conditions of tender",
@@ -56,17 +57,17 @@ STRUCTURAL_MARKERS = [
     "standard conditions of tender",
 ]
 
-DISCIPLINE_KEYWORDS = {
-    "roads_civil": ["road", "bridge", "pavement", "route", "highway", "civil engineering",
-                    "rehabilitation", "stormwater", "earthworks"],
-    "water": ["water treatment", "sanitation", "sewer", "pump station", "borehole", "reticulation"],
-    "buildings": ["building", "renovation", "refurbishment", "construction of", "roofing"],
-    "electrical_mechanical": ["electrical", "mechanical", "hvac", "generator"],
-    "it_telecoms": ["ict", "software", "network", "telecommunications", "server"],
-    "professional_services": ["professional service provider", "consulting engineer",
-                               "design specialist", "psp"],
-    "security_facilities": ["security services", "cleaning", "facilities management"],
-}
+# Discipline categories are no longer a fixed dict here. They are Tender
+# Tool's own maintained list (taxonomy.py): the discipline_categories table
+# (0038), seeded from config/discipline_taxonomy.json - 19 groups / 93
+# disciplines built from 2 211 live eTenders tenders, cross-checked against
+# eTenders' and Leads 2 Business's own category lists
+# (docs/specs/Discipline-Taxonomy-Findings.md). The 7 keyword buckets that
+# used to live here (roads_civil, water, buildings, electrical_mechanical,
+# it_telecoms, professional_services, security_facilities) are kept as the
+# top-level GROUP slugs of that list, so tags and stored categories written
+# before it still match. Before: 66% of live tenders came out
+# "uncategorized"; after: 3%.
 
 CIDB_RE = re.compile(r"CIDB\s*(?:CONTRACTOR\s*)?GRADING?\s*(?:OF\s*)?(?:AT\s*LEAST\s*)?([0-9]+\s*[A-Z]{1,3})", re.IGNORECASE)
 # Known-weak, kept only for output-shape compatibility: on SANRAL's Book 1 it
@@ -152,16 +153,21 @@ def extract_signals(text, depth):
     return signals, confidence
 
 
-def categorize(title, description, procurement_category=None):
-    """Keyword-bucket discipline matching, with the OCDS structured
-    mainProcurementCategory (goods/services/works) folded in as a fallback
-    signal rather than discarded: when no keyword bucket matches, a plain
-    "uncategorized" told a reviewer nothing about what the tender even was.
-    Tagging it with the buyer's own declared category at least distinguishes
-    "unrecognised works tender" from "unrecognised goods tender", and stays
-    honest - it is NOT a discipline match, just better-labelled uncertainty."""
-    text = f"{title or ''} {description or ''}".lower()
-    matches = [cat for cat, kws in DISCIPLINE_KEYWORDS.items() if any(kw in text for kw in kws)]
+def categorize(title, description, procurement_category=None, taxonomy=None):
+    """Sorts a tender into Tender Tool's discipline categories (taxonomy.py:
+    the live discipline_categories list when the run loaded it, else the
+    seed file), from its title + description. A specific discipline wins
+    over its group; several can apply (a WWTW upgrade is water treatment AND
+    electrical AND mechanical). The OCDS structured mainProcurementCategory
+    (goods/services/works) is folded in as a fallback signal rather than
+    discarded: when nothing matches, a plain "uncategorized" told a reviewer
+    nothing about what the tender even was. Tagging it with the buyer's own
+    declared category at least distinguishes "unrecognised works tender"
+    from "unrecognised goods tender", and stays honest - it is NOT a
+    discipline match, just better-labelled uncertainty (and a candidate for
+    a new category: taxonomy.py coverage lists them)."""
+    tax = taxonomy or _taxonomy.active()
+    matches = tax.match(f"{title or ''} {description or ''}")
     if matches:
         return matches
     if procurement_category:
@@ -175,10 +181,19 @@ def assess_fit(categories, signals, depth, profile):
     verdict = "possible"
 
     known_disciplines = profile.get("disciplines") or []
-    discipline_match = any(c in known_disciplines for c in categories)
+    tax = _taxonomy.active()
+    # exact: same category, or the company's tag is the group it sits in;
+    # broad: the tender is only known at group level and the company works in
+    # one of that group's disciplines - same field, scope still to check.
+    exact, broad = tax.overlap(categories, known_disciplines)
+    discipline_match = bool(exact)
     uncategorized = all(c.startswith("uncategorized") for c in categories)
+    labels = lambda cs: ", ".join(f"{tax.label(c)} ({c})" if c in tax.by_slug else c for c in cs)  # noqa: E731
     if discipline_match:
-        reasons.append(f"Discipline match: {', '.join(categories)} is within scope.")
+        reasons.append(f"Discipline match: {labels(exact)} is within scope.")
+    elif broad:
+        reasons.append(f"Same discipline group: the tender reads only as {labels(broad)}, and the company works in "
+                       "that group - check the tender's scope against what the company actually does.")
     elif uncategorized:
         if categories != ["uncategorized"]:
             reasons.append(f"Could not match a discipline from title/description alone "
@@ -198,11 +213,11 @@ def assess_fit(categories, signals, depth, profile):
         # at its own call site; this is the same fix at the root, so every
         # caller (including the live OCDS discovery feed, which had no
         # workaround) gets it.
-        reasons.append(f"Discipline ({', '.join(categories)}) matched, but the company has no disciplines "
+        reasons.append(f"Discipline ({labels(categories)}) matched, but the company has no disciplines "
                         "recorded yet to compare against - needs a human look, not an automatic rejection.")
         verdict = "needs_review"
     else:
-        reasons.append(f"Discipline ({', '.join(categories)}) doesn't match the company's known disciplines "
+        reasons.append(f"Discipline ({labels(categories)}) doesn't match the company's known disciplines "
                         f"({', '.join(known_disciplines)}).")
         verdict = "not_a_fit"
 

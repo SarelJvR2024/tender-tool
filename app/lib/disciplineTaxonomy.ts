@@ -1,0 +1,80 @@
+// Tender Tool's own discipline / category list (migration 0040,
+// discipline_categories). Sarel, 2026-10-17: "There is no standard list ...
+// build our own list ... a list that we're gonna have to maintain and build."
+// It is a table, not a code constant: a category added to the table
+// (engine/discovery/taxonomy.py add) shows up here - Experience Library
+// suggestions, the pricing sector list - with no deploy and no migration.
+//
+// Two levels: a group (parent_slug null) and its disciplines. The 7 keys
+// Tender Tool started with are group slugs, so old tags still resolve.
+// Evidence for the seed: docs/specs/Discipline-Taxonomy-Findings.md.
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import { DISCIPLINES, disciplineLabel } from "@/lib/experience";
+
+export type DisciplineCategory = {
+  slug: string;
+  label: string;
+  parent_slug: string | null;
+  sort_order: number;
+};
+
+export type DisciplineTaxonomy = {
+  categories: DisciplineCategory[];
+  /** "table" = the live list; "fallback" = the table couldn't be read (shown to the user). */
+  source: "table" | "fallback";
+  error: string | null;
+};
+
+export type DisciplineGroup = { group: DisciplineCategory; children: DisciplineCategory[] };
+
+/** Used only when the table can't be read (e.g. 0040 not applied yet): the 7 original groups. */
+export const FALLBACK_TAXONOMY: DisciplineTaxonomy = {
+  categories: DISCIPLINES.map((d, i) => ({ slug: d.value, label: d.label, parent_slug: null, sort_order: (i + 1) * 10 })),
+  source: "fallback",
+  error: null,
+};
+
+export async function loadDisciplineTaxonomy(supabase: SupabaseClient): Promise<DisciplineTaxonomy> {
+  const { data, error } = await supabase
+    .from("discipline_categories")
+    .select("slug, label, parent_slug, sort_order")
+    .eq("active", true)
+    .order("sort_order");
+  if (error || !data || data.length === 0) {
+    return { ...FALLBACK_TAXONOMY, error: error?.message ?? "discipline_categories is empty" };
+  }
+  return { categories: data as DisciplineCategory[], source: "table", error: null };
+}
+
+/** Groups in list order, each with its disciplines. */
+export function taxonomyGroups(t: DisciplineTaxonomy): DisciplineGroup[] {
+  const groups = t.categories.filter((c) => !c.parent_slug);
+  return groups.map((g) => ({ group: g, children: t.categories.filter((c) => c.parent_slug === g.slug) }));
+}
+
+/** The list's label for a slug; a company's own tag (not on the list) in words. */
+export function taxonomyLabel(t: DisciplineTaxonomy, slug: string): string {
+  return t.categories.find((c) => c.slug === slug)?.label ?? disciplineLabel(slug);
+}
+
+export function isTaxonomySlug(t: DisciplineTaxonomy, slug: string): boolean {
+  return t.categories.some((c) => c.slug === slug);
+}
+
+export function parentOf(t: DisciplineTaxonomy, slug: string): string | null {
+  return t.categories.find((c) => c.slug === slug)?.parent_slug ?? null;
+}
+
+/**
+ * A group stands for every discipline in it: experience tagged
+ * "road_maintenance" is roads_civil experience. Returns the slugs plus the
+ * children of any group among them, for the experience_matches() overlap
+ * query. A discipline does NOT widen to its group (a geotechnical tender is
+ * not matched by an item tagged only "professional_services").
+ */
+export function expandDisciplines(t: DisciplineTaxonomy, slugs: string[]): string[] {
+  const out = new Set(slugs);
+  for (const s of slugs) for (const c of t.categories) if (c.parent_slug === s) out.add(c.slug);
+  return Array.from(out);
+}

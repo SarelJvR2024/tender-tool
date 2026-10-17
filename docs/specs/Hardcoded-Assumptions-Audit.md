@@ -91,6 +91,7 @@ The per-position rule follows Sarel's earlier answer: *don't refuse the whole pa
 | `company_offices.office_kind` / `proof_type` (0015) | … / … + **other** | Fine | `proof_type` has `other`. `office_kind` is the app's own classification of an office (registered/head/branch/site). |
 | `tender_roles.family` (0016) | sanral_consultant, construction_contractor, professional_services, health_safety, trades, services | Fine (reference data) | A grouping label on a shared, admin-maintained catalog, not a limit on tenders. A new role is a row. `tender_roles.discipline` is unconstrained. |
 | `tender_documents.doc_type` (0001, 0025 RPC) | technical_xlsm, financial_xlsm, c111_form_of_offer, c123_contract_data, a_forms | Fine, with a stated limit | These are the **input slots the SANRAL pack builder consumes**, not a claim about every document a SANRAL tender contains. Other documents (e.g. R.396's own `Appendix D3-OHS Audit Questionnaire.xlsm`) are listed by the intake but not filled. See open question Q6. |
+| `tender_packs.price_sector` (0034, added after this audit) | the same 7 bucket keys | **Fixed (0040)** | Same list as `experience_items.disciplines`. Now an FK to `discipline_categories(slug)`, so any listed category (and any added later) is a valid sector. See §10.1. |
 | `tenders.family` (comment only), `source`, statuses, job kinds, pipeline stages, `cv` formats, `company_members.role/tender_role`, provenance status | – | Fine | Internal state machines, not real-world taxonomies. |
 
 Migration replay: all 32 files `0001`→`0036` (including upstream's `0030`-`0035`) replayed on a scratch Postgres 16, plus `seed_tenders.sql`. It used the same auth/storage stub as earlier passes, plus `auth.users.email`, which upstream `0033` reads. On that DB:
@@ -174,7 +175,7 @@ Migration replay: all 32 files `0001`→`0036` (including upstream's `0030`-`003
 - `/experience` lists filter chips for the suggested set plus any custom tags the company uses.
 - `saveExperienceTags` accepts any slug.
 
-**Stated limit:** discovered tenders are only ever categorised into the 7 keyword buckets, so a custom tag doesn't make Discovery match new tenders. It is matched wherever a caller asks for it, e.g. the Experience page filter or a future tender-specific discipline. See Q3.
+~~**Stated limit:** discovered tenders are only ever categorised into the 7 keyword buckets, so a custom tag doesn't make Discovery match new tenders. It is matched wherever a caller asks for it, e.g. the Experience page filter or a future tender-specific discipline. See Q3.~~ **Closed (§10.1):** discovered tenders are now sorted into Tender Tool's own maintained list (`discipline_categories`, 0040: 19 groups / 93 disciplines), and the 7 buckets are 7 of its groups.
 
 ---
 
@@ -234,9 +235,9 @@ Baselines were made by running each harness on a clean checkout of `origin/main`
 
 - **Q1 - `MO/MA` vs RRM's `MO/MA (Excl. RRM)`. ANSWERED 2026-10-17 (same code, renamed) and built - §8.1.** The Conventional PL/CE/RE matrix offers `MO/MA` ("Maintenance Operations and Adhoc Maintenance"). The RRM CE block offers `MO/MA (Excl. RRM)` ("… (Excl. RRM Projects)") next to a separate `RRM` code. On an RRM tender, should a project the company coded `MO/MA` be treated as `MO/MA (Excl. RRM)`? That is only true if it wasn't an RRM project. Today it is left off the RRM form with a note asking for the right code. Not mapped automatically, because only the company knows whether it was RRM work.
 - **Q2 - Engineering Geologist DS has no workbook codes.** Book 1 T-23 prints a DS Engineering Geologist matrix, but the workbook's `Proj Relevance Codes` sheet (identical in all 7 workbooks) has no Engineering Geologist section; its last section is "DS - GENERIC TEMPLATE", with no codes. We have no SANRAL tender that actually tenders a DS Engineering Geologist, so how its Form B1 dropdown is populated is unknown. If you have one, it would settle it.
-- **Q3 - discipline taxonomy.** Companies can now add their own discipline tags, but Discovery still sorts tenders into the 7 keyword buckets. Should Tender Tool adopt a published classification instead? CIDB's classes of construction works (CE, GB, EB, EP, ME, the SA–SW specialist classes) is the obvious official one for works. Services (security, IT, cleaning, consulting) have no single official list we've found.
+- **Q3 - discipline taxonomy. ANSWERED 2026-10-17 (build our own, maintained list - not CIDB) and built - §10.1.** Companies can now add their own discipline tags, but Discovery still sorts tenders into the 7 keyword buckets. Should Tender Tool adopt a published classification instead? CIDB's classes of construction works (CE, GB, EB, EP, ME, the SA–SW specialist classes) is the obvious official one for works. Services (security, IT, cleaning, consulting) have no single official list we've found.
 - **Q4 - Discovery is scored against one profile. ANSWERED 2026-10-17 (score every company) and built - §8.2.** The national feed (`watch_new_tenders.py` → `seed_supabase_opportunities.py`) defaults to `config/klipcorp_profile.json` and attaches results to "Klipcorp (Pty) Ltd". The manual and intake path already scores each company from its own rows. Should Discovery fan out per company, scoring each from its own Experience Library and vault? It's a design change, not a list fix, so it wasn't done here.
-- **Q5 - other C3.1.11 tables.** Only R.396's Book 2/3 is on hand. The minimums are now labelled as R.396's, but checking every tender properly means reading each tender's own C3.1.11. Should that be extracted per tender, like the evidence rules (`tenders.evaluation_rules`)? Also: should SACNASP (Pr Sci.Nat) and SAGC registrations get People-page fields, which R.396 asks for (Engineering Geologist, Surveyor)?
+- **Q5 - other C3.1.11 tables. SACNASP/SAGC half ANSWERED 2026-10-17 (in the structure, asked for only when a tender requires it) and built - §10.2; per-tender C3.1.11 extraction still open.** Only R.396's Book 2/3 is on hand. The minimums are now labelled as R.396's, but checking every tender properly means reading each tender's own C3.1.11. Should that be extracted per tender, like the evidence rules (`tenders.evaluation_rules`)? Also: should SACNASP (Pr Sci.Nat) and SAGC registrations get People-page fields, which R.396 asks for (Engineering Geologist, Surveyor)?
 - **Q6 - other SANRAL document sets.** All six Conventional tenders ship the same 5 fillable documents (Technical/Financial `.xlsm`, C.1.1.1, C.1.2.3, A-Forms). The docx fillers find their fields by the labels in those editions. R.396 also ships `Appendix D3-OHS Audit Questionnaire - Conventional projects.xlsm`, which is listed by the intake but not filled. SANRAL **contractor** (construction) tenders, and any newer consultant template family, would differ. Today they route to the general engine with a reason. Do you have a SANRAL contractor tender, or a newer consultant set, to check against?
 - **Q7 - Authority letter format. ANSWERED 2026-10-17 (every company uploads its own or gives a guideline, for all letters) and built for the authority letter - §8.3.** `fill_authority_letter.py` reproduces Klipcorp's own historical "Letter of Authority to Sign". Another company would normally use its own board-resolution wording. Keep the generated draft as a starting point for everyone, or offer it only when the company has no letter of its own?
 - **Q8 - specific-goal kinds.** Beyond B-BBEE, ownership (women/youth/disability/HDI/black) and locality, the samples show no other kinds. Other buyers' tables may score e.g. military veterans or rural/township enterprises. These are now named as "check the table", not estimated. Add them when a real tender shows the wording?
@@ -332,3 +333,63 @@ Before: `--mode live` printed "live mode's national-feed fetch needs a company p
 - **The other local seen stores.** `watch_deadlines.py` (`state/seen_deadlines.json`) and the digest's readiness store (`state/seen_digest_readiness.json`) are still per-host JSON files, with the same multi-host problem (d) solved for Discovery. Move them too?
 - **Seen before seeded.** The watch records a release as seen when it scores it; `seed_supabase_opportunities.py` writes the `discovered_opportunities` rows afterwards from the `--out` file. If seeding fails, those opportunities are never re-offered (true of the JSON store too). One script doing both, or seeding inside the watch's run, would close that.
 - **`ERROR` verdicts are remembered.** As before, a release whose scoring raised is recorded and not retried. With the store now shared across runs and hosts, should `ERROR` rows be retried on the next run instead?
+
+---
+
+## 10. Sarel's answers to Q3 and Q5 (2026-10-17) - built and verified
+
+Full evidence, research and verification: `Discipline-Taxonomy-Findings.md`.
+
+### 10.1 Q3: Tender Tool's own discipline list, maintained and growing
+
+Sarel: *"There is no standard list ... CIDB is only a small portion of the tenders ... Let's rather build our own list ... it's a list that we're gonna have to maintain and build."*
+
+**Research.**
+
+- **eTenders.gov.za:** the public site's Category filter has 91 entries (15 legacy "Services:/Supplies:" entries plus 76 SIC-style industry divisions). Across all 2 211 tenders advertised on 2026-10-17, 29% are filed under one of three generic buckets ("Services: Professional", "Services: General", "Supplies: General"), each spanning a dozen unrelated trades. That is too coarse to be the taxonomy, but it is kept as a cross-reference.
+- **OCDS API:** carries only goods / services / works / consultingServices (22% empty).
+- **L2B:** trades as L2B (`l2b.co.za`). Its wiki publishes 17 tender categories plus 15 "industry" sectors; it is construction/facilities-centred, but its splits and keywords were used.
+- **CIDB:** construction works only, about 18% of live tenders. Kept as a cross-reference on works categories, not as the list.
+
+**Built.**
+
+- **Migration `0040`:** a `discipline_categories` lookup table. Two levels (group → discipline, enforced by a trigger), with keywords and excludes, cross-references (eTenders / L2B / CIDB), `active` and provenance.
+  - It is read by signed-in users and written by the service role.
+  - Adding a category is an INSERT (`taxonomy.py add`), never a migration.
+  - It is seeded with 19 groups / 93 disciplines grown against the real feed.
+  - The original 7 buckets are 7 of the group slugs, so all stored values stay valid.
+  - `tender_packs.price_sector` CHECK → FK.
+- **`engine/discovery/taxonomy.py`:**
+  - the matcher (whole words, `*` endings, `a & b`, excludes, `!` vetoes);
+  - group/discipline overlap;
+  - loads the live table whenever the service-role env is present, with a fallback to `config/discipline_taxonomy.json` (also in the worker image);
+  - maintenance commands `check` / `coverage` (the review loop) / `sync` / `add` / `sql`.
+- **`assess_tender.categorize()`** now sorts into this list, and `assess_fit()` matches through it (exact / group / broad "check scope"). Verdict rules are otherwise unchanged.
+- **App (`app/lib/disciplineTaxonomy.ts`):**
+  - Experience Library grouped checkboxes and group filters (a group covers its disciplines);
+  - SANRAL compliance experience count (`expandDisciplines`);
+  - Discovery labels;
+  - the pricing sector select and the group-by-sector roll-up.
+
+**Effect on live tenders.** Uncategorised fell from **66.1% → 2.9%** of the 2 211 live tenders, and from 70.8% → 2.8% of 400 OCDS releases. The old matcher's substring false positives are gone: "Road Accident Fund" plumbing → `roads_civil`, and "district" → `it_telecoms` via "ict".
+
+### 10.2 Q5: SACNASP and SAGC - in the structure, asked for only when a tender requires it
+
+Sarel: *"We can accommodate that into the structure, but don't specifically ask for it unless the tender requires it."*
+
+- **`0040` adds 6 optional columns to `people`:** `sacnasp_category/number/expiry` and `sagc_category/number/expiry`. Same shape as ECSA/SACPCMP; nullable with no default.
+- **Reminders:** `watch_deadlines.TRACKED_PERSON_EXPIRY_FIELDS` includes both expiries, through the same `find_due_person_credentials()` path.
+- **People page:**
+  - A body's fields are shown only when the person holds it, or when an **open tender's own requirements** ask for it:
+    - a SANRAL SETUP position description naming an Engineering Geologist / Surveyor;
+    - or a general tender's `document_requirements.person_registrations` from the new `requirements.py find_person_registrations()`.
+  - The tender is named. Otherwise the fields sit in a closed "add another registration" disclosure.
+- **Compliance:** checked only for a Geologist position (Pr Sci.Nat, number, valid at closing) or a Surveyor position (SAGC). The general workspace lists who holds a required body.
+- **Verified on real PostgREST + RLS with `next dev`:**
+  - hidden for a person and company with no asking tender;
+  - shown with "Asked for by ..." once one exists;
+  - a geologist whose registration lapses before closing fails the minimum;
+  - the expiry reminder fires for a SACNASP registration due in 15 days and a lapsed SAGC one, on real replayed rows.
+
+**Still open from Q5:** per-tender C3.1.11 extraction. New questions O1-O5 are in `Discipline-Taxonomy-Findings.md` §7.
+

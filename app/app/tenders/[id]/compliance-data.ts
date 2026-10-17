@@ -11,6 +11,7 @@ import {
   type PersonFacts,
 } from "@/lib/tenderCompliance";
 import { estimateSanralConventional, pastPerformanceFromExperience, type SanralProject } from "@/lib/sanralScoring";
+import { expandDisciplines, loadDisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
 import { findMatchingExperience, isScoreableEvidence, type ExperienceItem } from "@/lib/experience";
 import { chooseEvidenceRule, evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
 import { TENDER_ROLE_COLUMNS, roleCodeForPosition, roleFitCheck, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
@@ -107,7 +108,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   let generatedCvs: GeneratedCvRow[] = [];
   if (personIds.length > 0) {
     const [{ data: ppl }, { data: prj }, { data: cvs }, { data: gen }] = await Promise.all([
-      supabase.from("people").select("id, name, ecsa_level, ecsa_number, initial_graduated").in("id", personIds),
+      supabase.from("people").select("id, name, ecsa_level, ecsa_number, initial_graduated, sacnasp_category, sacnasp_number, sacnasp_expiry, sagc_category, sagc_number, sagc_expiry").in("id", personIds),
       supabase.from("projects").select("person_id, client_type, project_type, position_code, start_date, end_date").in("person_id", personIds),
       supabase.from("cv_uploads").select("person_id, mode, original_filename, created_at").in("person_id", personIds).order("created_at", { ascending: false }),
       supabase.from("generated_cvs").select("position_code, status").eq("tender_id", tenderId),
@@ -143,11 +144,14 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   );
   if (experienceDisciplines.length === 0) experienceDisciplines.push("roads_civil");
   const chosenRule = chooseEvidenceRule(evaluationRules);
+  const taxonomy = await loadDisciplineTaxonomy(supabase);
   const companyId = (company?.id as string | undefined) ?? null;
   const asOf = closingDate ? closingDate.slice(0, 10) : undefined;
   const experience = companyId
     ? await findMatchingExperience(supabase, companyId, {
-        disciplines: experienceDisciplines,
+        // a group stands for every discipline in it (0040): experience
+        // tagged road_maintenance counts as roads_civil experience
+        disciplines: expandDisciplines(taxonomy, experienceDisciplines),
         ...(chosenRule.rule.window_years ? { completedWithinYears: chosenRule.rule.window_years } : {}),
         asOf,
       })

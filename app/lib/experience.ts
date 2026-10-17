@@ -5,7 +5,8 @@
 // For whoever builds a tender compliance check (e.g. the readiness report on
 // app/app/tenders/[id]/page.tsx): call findMatchingExperience() with the
 // tender's discipline categories (engine/discovery/assess_tender.py
-// categorize() output - DISCIPLINES below uses exactly those keys) and, for
+// categorize() output - discipline_categories slugs, 0040; widen a group to
+// its disciplines with disciplineTaxonomy.ts expandDisciplines()) and, for
 // SANRAL-style "3 completed projects of similar scope in the last 10 years"
 // (Form B6), completedWithinYears: 10 and asOf: the tender's closing date.
 // Only rows a human has tagged are ever returned.
@@ -27,13 +28,12 @@ export const DOCUMENT_TYPES = [
 ] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number]["value"];
 
-// The SUGGESTED disciplines: exactly engine/discovery/assess_tender.py
-// DISCIPLINE_KEYWORDS keys, so a discovered tender's categories match this
-// column directly. Not a closed list (migration 0036): those 7 are Tender
-// Tool's own keyword buckets for the eTenders feed, not a published
-// classification of all the work companies do, so a company can add its own
-// tags (disciplineSlug). A custom tag is matched wherever a caller asks for
-// it; discovered tenders are only ever categorised into the 7 below.
+// The 7 ORIGINAL discipline groups. Since 0040 the suggested list is the
+// discipline_categories table (app/lib/disciplineTaxonomy.ts: 19 groups, 93
+// disciplines, growing - Sarel's own maintained list, audit Q3); these 7 are
+// its first seven group slugs, kept here only as the fallback when that
+// table can't be read. Not a closed list either way (0036): a company can
+// still add its own tags (disciplineSlug).
 export const DISCIPLINES = [
   { value: "roads_civil", label: "Roads & civil" },
   { value: "water", label: "Water & sanitation" },

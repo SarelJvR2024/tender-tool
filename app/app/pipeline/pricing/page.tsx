@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { DISCIPLINES } from "@/lib/experience";
+import { loadDisciplineTaxonomy, taxonomyGroups } from "@/lib/disciplineTaxonomy";
 import { STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import {
   clientLabel,
@@ -10,6 +10,7 @@ import {
   ECONOMICS_COLUMNS,
   formatRand,
   median,
+  sectorGroup,
   sectorLabel,
   tenderTypeLabel,
   toNumber,
@@ -80,6 +81,7 @@ export default async function PricingHistoryPage({
     supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, categories"),
   ]);
   const people = (peopleRows ?? []) as CreditPerson[];
+  const taxonomy = await loadDisciplineTaxonomy(supabase);
   const nameById = new Map(people.map((p) => [p.id, p.name]));
 
   const categoriesByKey = new Map<string, string[]>();
@@ -126,11 +128,15 @@ export default async function PricingHistoryPage({
   const rows = priced
     .filter((r) => !sp.type || r.type === sp.type)
     .filter((r) => !sp.client || r.client === sp.client)
-    .filter((r) => !sp.sector || (sp.sector === "none" ? !r.sector : r.sector === sp.sector))
+    // a group filter takes every discipline in it (0040)
+    .filter((r) => !sp.sector || (sp.sector === "none" ? !r.sector : r.sector === sp.sector || sectorGroup(r.sector, taxonomy) === sp.sector))
     .filter((r) => outcome === "all" || r.stage === outcome)
     .sort((a, b) => (b.submittedAt ?? "").localeCompare(a.submittedAt ?? ""));
 
-  const groupOf = (r: Row) => (group === "type" ? r.type : group === "client" ? r.client : sectorLabel(r.sector));
+  // "By sector" rolls a discipline up to its group (road maintenance and
+  // bridges are both Roads, bridges & civil works) so a history doesn't
+  // splinter into one-row groups; the row itself shows the exact sector.
+  const groupOf = (r: Row) => (group === "type" ? r.type : group === "client" ? r.client : sectorLabel(sectorGroup(r.sector, taxonomy), taxonomy));
   const groups = new Map<string, Row[]>();
   for (const r of rows) groups.set(groupOf(r), [...(groups.get(groupOf(r)) ?? []), r]);
   const summary = [...groups.entries()]
@@ -204,7 +210,12 @@ export default async function PricingHistoryPage({
           <Filter label="Sector">
             <select name="sector" defaultValue={sp.sector ?? ""} style={select}>
               <option value="">All sectors</option>
-              {DISCIPLINES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+              {taxonomyGroups(taxonomy).map(({ group, children }) => (
+                <optgroup key={group.slug} label={group.label}>
+                  <option value={group.slug}>{group.label} (all)</option>
+                  {children.map((c) => <option key={c.slug} value={c.slug}>{c.label}</option>)}
+                </optgroup>
+              ))}
               <option value="none">Unclassified</option>
             </select>
           </Filter>
@@ -306,7 +317,7 @@ export default async function PricingHistoryPage({
                         <td style={td}>{r.client}</td>
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{r.type}</td>
                         <td style={td}>
-                          {sectorLabel(r.sector)}
+                          {sectorLabel(r.sector, taxonomy)}
                           {r.sectorDerived && <div style={{ fontSize: 10, color: "#9A9684" }}>suggested</div>}
                         </td>
                         <td style={td}>
@@ -325,7 +336,7 @@ export default async function PricingHistoryPage({
                           {r.pack.commission_note && <div style={{ fontSize: 11, color: "#6B6758" }}>{r.pack.commission_note}</div>}
                         </td>
                         <td style={{ ...td, minWidth: 220 }}>
-                          <EconomicsForm tenderId={r.tenderId} economics={r.pack} people={people} defaultSector={r.defaultSector} returnTo="pricing" toggleLabel="Edit" />
+                          <EconomicsForm tenderId={r.tenderId} economics={r.pack} people={people} defaultSector={r.defaultSector} taxonomy={taxonomy} returnTo="pricing" toggleLabel="Edit" />
                         </td>
                       </tr>
                     );

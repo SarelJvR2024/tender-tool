@@ -25,6 +25,7 @@
 // status has always come from the number + expiry on file.
 
 import { closingDayOf, daysUntil } from "./dates";
+import { SAGC_POSITION_RE } from "./personCredentials";
 
 export type ComplianceStatus = "have" | "missing" | "check";
 
@@ -508,12 +509,20 @@ export function sanralConventionalDocumentChecks(input: {
 // R.396 table also lists Surveyor (SAGC, 5 yrs), Engineering Geologist (Pr
 // Sci.Nat + SAIEG, 5 yrs), OHS Specialist (SACPCMP), Road Safety Audit Team
 // Leader and Programmer - only the Engineering Geologist is a DS specialism
-// here (sanralMatrices DS_SPECIALISMS); a DS whose description names it is
-// checked against Pr Sci.Nat, not ECSA.
+// here (sanralMatrices DS_SPECIALISMS); a position whose own description
+// names it is checked against the person's SACNASP fields, not ECSA, and a
+// Surveyor position against SAGC.
+//
+// SACNASP / SAGC (0040, audit Q5): the person's own registration fields are
+// read ONLY for a position whose requirement names that body - Engineering
+// Geologist -> SACNASP Pr Sci.Nat, Surveyor -> SAGC - never for every key
+// person ("don't specifically ask for it unless the tender requires it").
 const MIN_REQ_SOURCE = "R.396-010-2025/1F C3.1.11 table - check this tender's own C3.1.11";
-type MinReq = { registration: "pr_eng_or_tech" | "candidate" | "pr_sci_nat"; years: number | null; label: string };
+type MinReq = { registration: "pr_eng_or_tech" | "candidate" | "pr_sci_nat" | "sagc"; years: number | null; label: string };
 const ENGINEERING_GEOLOGIST_REQ: MinReq = { registration: "pr_sci_nat", years: 5, label: "Pr Sci.Nat (SACNASP), member of SAIEG, 5 years' relevant experience" };
+const SURVEYOR_REQ: MinReq = { registration: "sagc", years: 5, label: "Registered with SAGC (SA Geomatics Council), 5 years' relevant experience" };
 const PR_SCI_NAT_RE = /pr\.?\s*sci\.?\s*nat|professional\s+natural\s+scientist/i;
+const CAND_SCI_NAT_RE = /cand\.?\s*sci\.?\s*nat|cert\.?\s*sci\.?\s*nat|candidate|certificated/i;
 export const SANRAL_MIN_REQUIREMENTS: Record<string, MinReq> = {
   PL: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience" },
   APL: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years" },
@@ -533,7 +542,29 @@ export type PersonFacts = {
   ecsa_level: string | null;
   ecsa_number: string | null;
   initial_graduated: string | null;
+  // 0040 - read only when the position's requirement names the body
+  sacnasp_category?: string | null;
+  sacnasp_number?: string | null;
+  sacnasp_expiry?: string | null;
+  sagc_category?: string | null;
+  sagc_number?: string | null;
+  sagc_expiry?: string | null;
 };
+
+/** Which requirement applies to a position: by its own SETUP description first (geologist, surveyor), else the code. */
+export function minimumRequirementFor(positionCode: string, description: string | null): MinReq | undefined {
+  const code = positionCode.replace(/\d+$/, "");
+  if (description && /geolog/i.test(description)) return ENGINEERING_GEOLOGIST_REQ;
+  if (description && SAGC_POSITION_RE.test(description)) return SURVEYOR_REQ;
+  return SANRAL_MIN_REQUIREMENTS[code];
+}
+
+/** A registration with an expiry: valid on the closing date? (null = no expiry recorded) */
+function registrationValidity(expiry: string | null | undefined, closingDate: string | null): { ok: boolean; text: string } | null {
+  if (!expiry) return null;
+  const v = validityAtClosing(expiry, closingDate);
+  return { ok: v.status === "have", text: v.text };
+}
 
 export function checkMinimumRequirement(
   positionCode: string,
@@ -541,8 +572,7 @@ export function checkMinimumRequirement(
   closingDate: string | null,
   description: string | null = null,
 ): { status: ComplianceStatus; detail: string; requirement: string | null } {
-  const code = positionCode.replace(/\d+$/, "");
-  const found = code === "DS" && description && /geolog/i.test(description) ? ENGINEERING_GEOLOGIST_REQ : SANRAL_MIN_REQUIREMENTS[code];
+  const found = minimumRequirementFor(positionCode, description);
   const req = found ? { ...found, label: `${found.label} (${MIN_REQ_SOURCE})` } : undefined;
   if (!person) return { status: "missing", detail: "No key person confirmed for this position.", requirement: req?.label ?? null };
   if (!req) return { status: "check", detail: "No minimum requirement on file for this position code - check the tender's C3.1.11 table.", requirement: null };
@@ -550,10 +580,35 @@ export function checkMinimumRequirement(
   const problems: string[] = [];
   const unknowns: string[] = [];
   const level = person.ecsa_level ?? "";
+  let regText = "";
   if (req.registration === "pr_sci_nat") {
-    // SACNASP registration isn't a field in the schema yet (only ECSA/SACPCMP)
-    // - read from the registration text on file, else confirm by hand.
-    if (!PR_SCI_NAT_RE.test(level)) unknowns.push("Pr Sci.Nat (SACNASP) registration isn't recorded - the People page only holds ECSA/SACPCMP fields");
+    // SACNASP fields (0040). Older records may only carry it in the ECSA
+    // level text, so that still counts as stated.
+    const cat = person.sacnasp_category ?? "";
+    const stated = PR_SCI_NAT_RE.test(cat) || PR_SCI_NAT_RE.test(level);
+    if (!person.sacnasp_number && !cat && !PR_SCI_NAT_RE.test(level)) {
+      unknowns.push("no SACNASP registration on file - add it on the People page (it appears there because this tender asks for it)");
+    } else if (cat && !stated && CAND_SCI_NAT_RE.test(cat)) {
+      problems.push(`SACNASP "${cat}" isn't Pr Sci.Nat (professional) registration`);
+    } else {
+      if (!stated) unknowns.push("SACNASP category not recorded - confirm it is Pr Sci.Nat");
+      if (!person.sacnasp_number) unknowns.push("SACNASP number not on file");
+      const v = registrationValidity(person.sacnasp_expiry, closingDate);
+      if (v && !v.ok) problems.push(`SACNASP registration ${v.text}`);
+      else if (!v && person.sacnasp_number) unknowns.push("SACNASP renewal date not on file");
+      regText = `SACNASP ${cat || "registration"}${person.sacnasp_number ? ` ${person.sacnasp_number}` : ""}${v ? `, ${v.text}` : ""}`;
+    }
+  } else if (req.registration === "sagc") {
+    const cat = person.sagc_category ?? "";
+    if (!person.sagc_number && !cat) {
+      unknowns.push("no SAGC registration on file - add it on the People page (it appears there because this tender asks for it)");
+    } else {
+      if (!person.sagc_number) unknowns.push("SAGC number not on file");
+      const v = registrationValidity(person.sagc_expiry, closingDate);
+      if (v && !v.ok) problems.push(`SAGC registration ${v.text}`);
+      else if (!v) unknowns.push("SAGC renewal date not on file");
+      regText = `SAGC ${cat || "registration"}${person.sagc_number ? ` ${person.sagc_number}` : ""}${v ? `, ${v.text}` : ""}`;
+    }
   } else {
     const regOk = req.registration === "pr_eng_or_tech" ? PR_ENG_OR_TECH_RE.test(level) : CANDIDATE_RE.test(level);
     if (!level) unknowns.push("no ECSA registration on file");
@@ -578,5 +633,6 @@ export function checkMinimumRequirement(
     return { status: "missing", detail: `Doesn't meet the minimum: ${problems.join("; ")}.${yearsProblem ? " (Years since first degree is a proxy - SANRAL counts relevant experience.)" : yearsNote}`, requirement: req.label };
   }
   if (unknowns.length) return { status: "check", detail: `Can't confirm: ${unknowns.join("; ")}.${yearsNote}`, requirement: req.label };
-  return { status: "have", detail: `${level}${person.ecsa_number ? ` (ECSA ${person.ecsa_number})` : ""}.${yearsNote}`, requirement: req.label };
+  const held = regText || `${level}${person.ecsa_number ? ` (ECSA ${person.ecsa_number})` : ""}`;
+  return { status: "have", detail: `${held}.${yearsNote}`, requirement: req.label };
 }

@@ -29,6 +29,7 @@ on:
       - "templates/forms/**"
       - "templates/general_samples/**"
       - "fingerprints/**"
+      - "config/discipline_taxonomy.json"
       - ".dockerignore"
       - ".github/workflows/bridge-worker-ci.yml"
   workflow_dispatch:
@@ -74,6 +75,14 @@ jobs:
 
       - name: Per-person registration expiry reminders + digest routing (in-memory rows)
         run: python3 engine/compliance/test_watch_person_credentials.py
+
+      - name: SACNASP / SAGC registration expiry reminders (in-memory rows)
+        run: python3 engine/compliance/test_watch_conditional_registrations.py
+
+      - name: Discipline taxonomy - seed validates, real tenders sorted, fit scoring, growth without a migration
+        run: |
+          python3 engine/discovery/taxonomy.py check
+          python3 engine/discovery/test_taxonomy.py
 
       - name: Award outcomes - parsing of eTenders/SANRAL award records (offline fixtures)
         run: python3 engine/discovery/test_award_outcomes.py

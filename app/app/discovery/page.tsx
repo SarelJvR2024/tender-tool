@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../_components/SiteNav";
+import { loadDisciplineTaxonomy, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { pursueOpportunity } from "./actions";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
@@ -74,6 +75,7 @@ export default async function DiscoveryPage({
     : "all";
 
   const supabase = await createClient();
+  const taxonomy = await loadDisciplineTaxonomy(supabase); // category labels (0040)
 
   // Scoped to the signed-in user's company via RLS (is_company_member) -
   // this query shape works the same regardless of which company is asking.
@@ -249,7 +251,7 @@ export default async function DiscoveryPage({
                             color: "#475569",
                           }}
                         >
-                          {c.replace(/_/g, " ")}
+                          {c.startsWith("uncategorized") ? c.replace(/_/g, " ") : taxonomyLabel(taxonomy, c)}
                         </span>
                       ))}
                     </div>

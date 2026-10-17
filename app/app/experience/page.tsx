@@ -2,13 +2,12 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../_components/SiteNav";
 import { captureExperience } from "./actions";
+import { expandDisciplines, loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import {
   DOCUMENT_TYPES,
-  DISCIPLINES,
   findMatchingExperience,
   isScoreableEvidence,
   labelFor,
-  disciplineLabel,
   type ExperienceItem,
 } from "@/lib/experience";
 
@@ -60,13 +59,18 @@ export default async function ExperiencePage({
   // A discipline filter goes through the same experience_matches() query a
   // tender compliance check would use, so what this page shows is exactly
   // what a check would count (tagged items only).
-  // Suggested disciplines plus any custom tags this company uses (0036).
-  const disciplineOptions = Array.from(new Set([...DISCIPLINES.map((d) => d.value as string), ...all.flatMap((i) => i.disciplines)]));
+  // The discipline list's groups (0040, the live discipline_categories
+  // table) plus every tag this company actually uses - listed disciplines
+  // and its own custom tags (0036). A group filter matches every discipline
+  // in it, exactly as a tender check does (expandDisciplines).
+  const taxonomy = await loadDisciplineTaxonomy(supabase);
+  const disciplineOptions = Array.from(new Set([...taxonomyGroups(taxonomy).map((g) => g.group.slug), ...all.flatMap((i) => i.disciplines)]));
+  const labelOf = (slug: string) => taxonomyLabel(taxonomy, slug);
   const activeDiscipline = discipline && disciplineOptions.includes(discipline) ? discipline : null;
   let filtered: ExperienceItem[] | null = null;
   let filterError: string | null = null;
   if (activeDiscipline && companyId) {
-    const res = await findMatchingExperience(supabase, companyId, { disciplines: [activeDiscipline] });
+    const res = await findMatchingExperience(supabase, companyId, { disciplines: expandDisciplines(taxonomy, [activeDiscipline]) });
     filtered = res.items;
     filterError = res.error;
   } else if (activeDiscipline) {
@@ -172,12 +176,12 @@ export default async function ExperiencePage({
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
           <FilterLink href="/experience" active={!activeDiscipline} text="All" />
           {disciplineOptions.map((v) => (
-            <FilterLink key={v} href={`/experience?discipline=${encodeURIComponent(v)}`} active={activeDiscipline === v} text={disciplineLabel(v)} />
+            <FilterLink key={v} href={`/experience?discipline=${encodeURIComponent(v)}`} active={activeDiscipline === v} text={labelOf(v)} />
           ))}
         </div>
         {activeDiscipline && (
           <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
-            Tagged items matching {disciplineLabel(activeDiscipline)} - the same query a tender check uses. Untagged uploads never count.
+            Tagged items matching {labelOf(activeDiscipline)}{taxonomyGroups(taxonomy).some((g) => g.group.slug === activeDiscipline) ? " (any discipline in this group)" : ""} - the same query a tender check uses. Untagged uploads never count.
           </div>
         )}
 
@@ -190,7 +194,7 @@ export default async function ExperiencePage({
         )}
 
         {(filtered ?? [...untagged, ...tagged]).map((e) => (
-          <ExperienceRow key={e.id} item={e} url={e.storage_path ? signedUrls[e.storage_path] : undefined} />
+          <ExperienceRow key={e.id} item={e} url={e.storage_path ? signedUrls[e.storage_path] : undefined} labelOf={labelOf} />
         ))}
       </div>
     </div>
@@ -213,7 +217,7 @@ function FilterLink({ href, active, text }: { href: string; active: boolean; tex
   );
 }
 
-function ExperienceRow({ item: e, url }: { item: ExperienceItem; url?: string }) {
+function ExperienceRow({ item: e, url, labelOf }: { item: ExperienceItem; url?: string; labelOf: (slug: string) => string }) {
   const meta = [
     e.client_name,
     e.client_type,
@@ -236,7 +240,7 @@ function ExperienceRow({ item: e, url }: { item: ExperienceItem; url?: string })
           {e.tagged_at && e.disciplines.length > 0 && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
               {e.disciplines.map((d) => (
-                <Chip key={d} text={disciplineLabel(d)} tone={GREY} />
+                <Chip key={d} text={labelOf(d)} tone={GREY} />
               ))}
             </div>
           )}

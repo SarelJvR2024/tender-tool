@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { COMPANY_VAULT_COLUMNS, type ComplianceStatus } from "@/lib/tenderCompliance";
+import { COMPANY_VAULT_COLUMNS, validityAtClosing, type ComplianceStatus } from "@/lib/tenderCompliance";
+import { REGISTRATION_BODY_INFO, type PersonCredentialFields } from "@/lib/personCredentials";
 import {
   FORM_STATUS_STYLE,
   GENERAL_COMPANY_COLUMNS,
@@ -53,7 +54,7 @@ const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", min
 const primaryBtn: React.CSSProperties = { minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" };
 const secondaryBtn: React.CSSProperties = { minHeight: 34, padding: "0 12px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E5E1D5", color: "#16233B", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
 
-type Person = { id: string; name: string; signatory_capacity: string | null; role: string | null };
+type Person = PersonCredentialFields & { id: string; name: string; signatory_capacity: string | null; role: string | null };
 
 export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tenderId: string; saved?: string | null }) {
   const supabase = await createClient();
@@ -85,7 +86,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
       supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
       supabase.from(JOBS_TABLE).select(JOB_COLUMNS).eq("engine", GENERAL_ENGINE).eq("tender_id", tenderId).order("requested_at", { ascending: false }).limit(10),
-      supabase.from("people").select("id, name, signatory_capacity, role").order("name"),
+      supabase.from("people").select("id, name, signatory_capacity, role, sacnasp_category, sacnasp_number, sacnasp_expiry, sagc_category, sagc_number, sagc_expiry").order("name"),
       supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS),
       supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
       supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS),
@@ -156,6 +157,9 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const autoForms = manifest.forms.filter((f) => f.status === "auto");
   const byHandForms = manifest.forms.filter((f) => f.status === "by_hand");
   const typedForms = manifest.forms.filter((f) => f.status === "overlay");
+
+  // ----- per-person registrations the tender requires (0040) -----
+  const personRegs = manifest.person_registrations ?? [];
 
   // ----- key people -----
   const roleRowsForTender = manifest.roles.map((mr) => {
@@ -400,9 +404,37 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       </div>
 
       {/* 4. Key people, experience, locality */}
-      {(roleRowsForTender.length > 0 || chosen || locRows.length > 0 || mandatory) && (
+      {(roleRowsForTender.length > 0 || personRegs.length > 0 || chosen || locRows.length > 0 || mandatory) && (
         <div id="general-people" style={card}>
           <SectionTitle title="People, experience and locality" />
+          {personRegs.length > 0 && (
+            <>
+              <SubTitle text="Professional registrations this tender asks for" />
+              {personRegs.map((pr) => {
+                const key = pr.body === "SACNASP" ? "sacnasp" : "sagc";
+                const holders = people.filter((p) => p[`${key}_number`] || p[`${key}_category`]);
+                const valid = holders.filter((p) => {
+                  const exp = p[`${key}_expiry`];
+                  return !exp || validityAtClosing(exp, closingDate).status === "have";
+                });
+                const st = valid.length > 0 ? STATUS_STYLE.have : holders.length > 0 ? STATUS_STYLE.check : STATUS_STYLE.missing;
+                return (
+                  <div key={pr.body} title={pr.quote} style={{ borderTop: "1px solid #F0EEE6", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                    <div style={{ minWidth: 0, flex: "1 1 280px" }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{pr.body} registration ({REGISTRATION_BODY_INFO[pr.body].name})</div>
+                      <div style={{ fontSize: 12, color: "#4B5563" }}>
+                        {holders.length > 0
+                          ? `On file: ${holders.map((p) => `${p.name}${p[`${key}_category`] ? ` (${p[`${key}_category`]})` : ""}${p[`${key}_expiry`] ? `, valid to ${p[`${key}_expiry`]}` : ", renewal date not on file"}`).join("; ")}`
+                          : `Nobody has a ${pr.body} registration on file - add it on the person's page (the field shows there now that this tender asks for it).`}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#9A9684", fontStyle: "italic", wordBreak: "break-word" }}>{pr.from_ocr ? OCR_TAG : ""}&ldquo;{pr.quote.slice(0, 150)}…&rdquo;</div>
+                    </div>
+                    <Chip {...st} label={valid.length > 0 ? "On file" : holders.length > 0 ? "Lapses before closing" : "Not on file"} />
+                  </div>
+                );
+              })}
+            </>
+          )}
           {roleRowsForTender.length > 0 && (
             <>
               <SubTitle text="Roles this tender names" />

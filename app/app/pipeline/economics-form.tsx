@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { DISCIPLINES } from "@/lib/experience";
+import { taxonomyGroups, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
 import { commissionText, formatRand, sectorLabel, toNumber, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
 import { saveTenderEconomics } from "./actions";
 
@@ -31,6 +31,7 @@ export function EconomicsForm({
   economics,
   people,
   defaultSector,
+  taxonomy,
   returnTo = "pipeline",
   prompt = false,
   toggleLabel,
@@ -39,6 +40,8 @@ export function EconomicsForm({
   economics: PackEconomics | null;
   people: CreditPerson[];
   defaultSector: PriceSector | null;
+  // The live discipline list (0040) - the sector options, grouped.
+  taxonomy: DisciplineTaxonomy;
   returnTo?: "pipeline" | "pricing";
   // Open with an amber "Record the submitted price" call to action (a
   // submitted/won/lost card that has no price yet).
@@ -132,14 +135,19 @@ export function EconomicsForm({
         <label style={label} htmlFor={`sector-${tenderId}`}>Sector</label>
         <select id={`sector-${tenderId}`} name="sector" defaultValue={sector ?? ""} style={input}>
           <option value="">Unclassified</option>
-          {DISCIPLINES.map((d) => (
-            <option key={d.value} value={d.value}>
-              {d.label}
-            </option>
+          {taxonomyGroups(taxonomy).map(({ group, children }) => (
+            <optgroup key={group.slug} label={group.label}>
+              <option value={group.slug}>{group.label} (general)</option>
+              {children.map((c) => (
+                <option key={c.slug} value={c.slug}>
+                  {c.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
         {!economics?.price_sector && defaultSector && (
-          <div style={{ fontSize: 10, color: "#9A9684", marginTop: 2 }}>Suggested: {sectorLabel(defaultSector)} (from Discovery / tender family)</div>
+          <div style={{ fontSize: 10, color: "#9A9684", marginTop: 2 }}>Suggested: {sectorLabel(defaultSector, taxonomy)} (from Discovery / tender family)</div>
         )}
 
         <label style={label} htmlFor={`note-${tenderId}`}>Pricing note</label>

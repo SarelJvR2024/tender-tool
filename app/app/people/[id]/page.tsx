@@ -4,7 +4,15 @@ import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRol
 import { SiteNav } from "../../_components/SiteNav";
 import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
-import { credentialExpiries } from "@/lib/personCredentials";
+import {
+  CONDITIONAL_BODIES,
+  REGISTRATION_BODY_INFO,
+  credentialExpiries,
+  holdsRegistration,
+  registrationsAskedFor,
+  type AskedFor,
+  type ConditionalBody,
+} from "@/lib/personCredentials";
 import { ROLE_FAMILY_LABEL, ROLE_FAMILY_ORDER, TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { CLIENT_TYPES, SANRAL_PROJECT_TYPES } from "@/lib/experience";
 import { SANRAL_POSITION_CODES } from "@/lib/sanralMatrices";
@@ -30,6 +38,13 @@ type Person = {
   sacpcmp_date: string | null;
   ecsa_expiry: string | null; // 0035
   sacpcmp_expiry: string | null; // 0035
+  // 0040 - optional, shown only when held or a tender asks (audit Q5)
+  sacnasp_category?: string | null;
+  sacnasp_number?: string | null;
+  sacnasp_expiry?: string | null;
+  sagc_category?: string | null;
+  sagc_number?: string | null;
+  sagc_expiry?: string | null;
   highest_level: string | null;
   highest_description: string | null;
   highest_institution: string | null;
@@ -119,6 +134,48 @@ function Field({ children }: { children: React.ReactNode }) {
   return <div style={{ marginBottom: 12 }}>{children}</div>;
 }
 
+// SACNASP / SAGC (0040): the same number / category / renewal-date shape as
+// ECSA, rendered only when held or asked for by a tender (see the caller).
+function ConditionalRegistration({
+  body,
+  person,
+  askedBy,
+  status,
+}: {
+  body: ConditionalBody;
+  person: Person | null;
+  askedBy: string[];
+  status?: { label: string; bg: string; color: string };
+}) {
+  const info = REGISTRATION_BODY_INFO[body];
+  const key = body.toLowerCase() as "sacnasp" | "sagc";
+  const listId = `${key}-categories`;
+  return (
+    <div style={{ border: "1px solid #F0EEE6", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
+        {body} <span style={{ fontWeight: 400, color: "#6B6758" }}>- {info.name}</span>
+      </div>
+      <div style={{ fontSize: 11, color: askedBy.length ? "#B45309" : "#9A9684", margin: "2px 0 8px" }}>
+        {askedBy.length
+          ? `Asked for by ${askedBy.slice(0, 4).join(", ")}${askedBy.length > 4 ? ` and ${askedBy.length - 4} more` : ""}.`
+          : `Only some tenders ask for this, ${info.example}.`}
+      </div>
+      <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <Field>
+          <label style={label}>{body} category</label>
+          <input style={field} name={`${key}_category`} list={listId} defaultValue={person?.[`${key}_category`] ?? ""} />
+          <datalist id={listId}>{info.categories.map((c) => <option key={c} value={c} />)}</datalist>
+        </Field>
+        <Field><label style={label}>{body} number</label><input style={field} name={`${key}_number`} defaultValue={person?.[`${key}_number`] ?? ""} /></Field>
+        <Field>
+          <label style={label}>{body} valid until / renewal due <ExpiryBadge status={status} /></label>
+          <input style={field} type="date" name={`${key}_expiry`} defaultValue={person?.[`${key}_expiry`] ?? ""} />
+        </Field>
+      </div>
+    </div>
+  );
+}
+
 // Computed on demand, as of today - never stored. Mirrors
 // engine/pack_generator/suggest_pack.py's years_experience_at(), which computes it
 // relative to a specific tender's closing date instead; this is just "as of today"
@@ -151,6 +208,9 @@ export default async function PersonDetailPage({
   let taggedRoles = new Set<string>();
   let rolesError: string | null = null;
   let pendingExtractions: CvExtractionResult[] = [];
+  // Which conditional registrations (SACNASP, SAGC) a tender on the system
+  // asks for - the fields are shown only then, or when already held.
+  const askedFor: AskedFor = await registrationsAskedFor(supabase);
 
   if (!isNew) {
     const { data } = await supabase.from("people").select("*").eq("id", id).maybeSingle();
@@ -319,6 +379,29 @@ export default async function PersonDetailPage({
               <input style={field} type="date" name="sacpcmp_expiry" defaultValue={person?.sacpcmp_expiry ?? ""} />
             </Field>
           </div>
+          {(() => {
+            const shown = CONDITIONAL_BODIES.filter((b) => (person && holdsRegistration(person, b)) || askedFor[b].length > 0);
+            const hidden = CONDITIONAL_BODIES.filter((b) => !shown.includes(b));
+            return (
+              <>
+                {shown.map((b) => (
+                  <ConditionalRegistration key={b} body={b} person={person} askedBy={askedFor[b]} status={expiryByBody[b]} />
+                ))}
+                {hidden.length > 0 && (
+                  // Not asked for by any tender and not held: kept out of the
+                  // way, one click to add (the fields still submit, empty).
+                  <details style={{ marginBottom: 10 }}>
+                    <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#D97706", padding: "6px 0", minHeight: 32 }}>
+                      + Add another registration ({hidden.join(", ")}) - only some tenders ask for these
+                    </summary>
+                    {hidden.map((b) => (
+                      <ConditionalRegistration key={b} body={b} person={person} askedBy={[]} status={expiryByBody[b]} />
+                    ))}
+                  </details>
+                )}
+              </>
+            );
+          })()}
           <div style={{ fontSize: 12, color: "#9A9684", marginBottom: 10 }}>
             Enter the date from the registration certificate or renewal notice. It drives the expiry
             badge here and the renewal reminder (60 days ahead, and again if it lapses).

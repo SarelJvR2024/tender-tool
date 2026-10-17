@@ -71,6 +71,15 @@ export async function savePerson(formData: FormData) {
     sacpcmp_date: str(formData, "sacpcmp_date"),
     ecsa_expiry: str(formData, "ecsa_expiry"), // 0035
     sacpcmp_expiry: str(formData, "sacpcmp_expiry"), // 0035
+    // 0040 - SACNASP / SAGC. The page always submits these inputs (visible
+    // when held or asked for by a tender, else inside the closed "add another
+    // registration" disclosure), so an empty value really is "not recorded".
+    sacnasp_category: str(formData, "sacnasp_category"),
+    sacnasp_number: str(formData, "sacnasp_number"),
+    sacnasp_expiry: str(formData, "sacnasp_expiry"),
+    sagc_category: str(formData, "sagc_category"),
+    sagc_number: str(formData, "sagc_number"),
+    sagc_expiry: str(formData, "sagc_expiry"),
     highest_level: str(formData, "highest_level"),
     highest_description: str(formData, "highest_description"),
     highest_institution: str(formData, "highest_institution"),

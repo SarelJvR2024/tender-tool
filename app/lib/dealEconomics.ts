@@ -3,17 +3,27 @@
 // that person - all on the tender_packs row. Shared by the Pipeline board's
 // "Price & credit" form and the pricing history page (/pipeline/pricing).
 
-import { DISCIPLINES } from "@/lib/experience";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
+import { parentOf, taxonomyLabel, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
 
-export type PriceSector = (typeof DISCIPLINES)[number]["value"];
+// A sector is any discipline_categories slug (0040: price_sector references
+// that table, so a category added to the list is a valid sector at once).
+export type PriceSector = string;
 
+/** Shape check only - the database FK decides whether it is on the list. */
 export function isPriceSector(v: unknown): v is PriceSector {
-  return typeof v === "string" && DISCIPLINES.some((d) => d.value === v);
+  return typeof v === "string" && /^[a-z][a-z0-9_]{0,62}$/.test(v);
 }
 
-export function sectorLabel(v: string | null | undefined): string {
-  return DISCIPLINES.find((d) => d.value === v)?.label ?? "Unclassified";
+export function sectorLabel(v: string | null | undefined, taxonomy?: DisciplineTaxonomy): string {
+  if (!v) return "Unclassified";
+  return taxonomy ? taxonomyLabel(taxonomy, v) : v.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+}
+
+/** The group a sector sits in (itself when it is a group) - pricing history rolls up to this. */
+export function sectorGroup(v: string | null | undefined, taxonomy: DisciplineTaxonomy): string | null {
+  if (!v) return null;
+  return parentOf(taxonomy, v) ?? v;
 }
 
 /** The columns 0034 adds, as selected from tender_packs. */
@@ -86,12 +96,13 @@ export function clientLabel(buyer: string | null, family: string | null): string
 
 /**
  * Best guess at a tender's sector when none is stored: Discovery's own
- * categories (assess_tender.py categorize(), first real one), else roads &
- * civil for a SANRAL family tender (SANRAL only issues road work). Used to
+ * categories (assess_tender.py categorize(), first real one - the most
+ * specific discipline it found), else roads & civil for a SANRAL family
+ * tender (SANRAL only issues road work). Used to
  * prefill the form and, flagged as derived, in the history.
  */
 export function derivedSector(family: string | null, categories: string[] | null | undefined): PriceSector | null {
-  const fromDiscovery = (categories ?? []).find(isPriceSector);
+  const fromDiscovery = (categories ?? []).find((c) => isPriceSector(c) && !c.startsWith("uncategorized"));
   if (fromDiscovery) return fromDiscovery;
   if (family && family !== GENERAL_FAMILY && family !== "UNKNOWN") return "roads_civil";
   return null;
