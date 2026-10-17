@@ -1,10 +1,10 @@
-// Manual tender load (migration 0023): shared constants/types for the
+// Manual tender load (migration 0024): shared constants/types for the
 // /tenders/new form, its server actions, and the Tender Workspace intake card.
 //
 // Files go straight from the browser into the 'tender-documents' bucket under
 // manual/<company_id>/<tender_id>/ - NOT through a Server Action, whose body
 // is capped at 4.5 MB on Vercel (next.config.ts). A SANRAL set alone is two
-// ~2 MB workbooks plus Book 1/2 PDFs. 0023's storage policy lets a member write
+// ~2 MB workbooks plus Book 1/2 PDFs. 0024's storage policy lets a member write
 // only under their own company's manual/ prefix.
 
 export const TENDER_DOCS_BUCKET = "tender-documents";

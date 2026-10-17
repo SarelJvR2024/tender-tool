@@ -6,8 +6,8 @@ import { revalidatePath } from "next/cache";
 import { TENDER_DOCS_BUCKET, manualPrefix, type UploadedTenderDocument } from "@/lib/manualTender";
 
 /**
- * Manual tender load (migration 0023). The browser has already put the files
- * in Storage (tender-documents/manual/<company>/<tender>/ - 0023's policy
+ * Manual tender load (migration 0024). The browser has already put the files
+ * in Storage (tender-documents/manual/<company>/<tender>/ - 0024's policy
  * only lets a member write under their own company's prefix); this action
  * only creates the tender via load_manual_tender(), which re-checks every
  * path, creates the private tenders row + this company's tender_pack, and

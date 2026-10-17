@@ -9,7 +9,7 @@ import { ManualTenderForm } from "./manual-tender-form";
 export const instant = false;
 
 /**
- * Load a tender by hand (migration 0023): for a tender found some other way -
+ * Load a tender by hand (migration 0024): for a tender found some other way -
  * SANRAL's own portal, one a client forwarded, a buyer not on eTenders. The
  * documents go through the same intake every discovered tender gets
  * (engine/general/process_general_jobs.py): SANRAL-template detection

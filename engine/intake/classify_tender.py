@@ -1,7 +1,7 @@
 """
 Intake: the first thing that happens to a tender's own documents, however the
 tender entered the system (a Discovery "Prepare this tender", or a manual load
-from /tenders/new - migration 0023). Run by the extract_requirements job in
+from /tenders/new - migration 0024). Run by the extract_requirements job in
 engine/general/process_general_jobs.py, after engine/general/requirements.py
 has read the documents.
 

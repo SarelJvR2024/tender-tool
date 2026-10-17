@@ -420,7 +420,7 @@ export default async function TenderWorkspacePage({
               </>
             )}
 
-            {/* Intake (0023): how the documents were read and routed - SANRAL
+            {/* Intake (0024): how the documents were read and routed - SANRAL
                 pack flow vs. general - and the fit for this company. */}
             <IntakeCard tenderId={id} />
 

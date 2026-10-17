@@ -23,7 +23,7 @@ type OpportunityRow = {
   // engine/discovery/score_outlook.py's result (migration 0013) - null for
   // rows assessed before it existed.
   score_outlook: { estimable?: string; summary?: string[] } | null;
-  // 0023: the tender this opportunity became (pursued, or loaded manually).
+  // 0024: the tender this opportunity became (pursued, or loaded manually).
   tender_id: string | null;
   source: string | null;
 };
@@ -107,7 +107,7 @@ export default async function DiscoveryPage({
             </p>
           </div>
           {/* A tender that isn't in this feed (SANRAL's own portal, a forwarded
-              RFQ, a buyer not on eTenders) - migration 0023. */}
+              RFQ, a buyer not on eTenders) - migration 0024. */}
           <Link
             href="/tenders/new"
             style={{ display: "inline-flex", alignItems: "center", minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #16233B", color: "#16233B", fontSize: 13, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}

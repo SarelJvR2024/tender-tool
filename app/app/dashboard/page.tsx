@@ -50,7 +50,7 @@ export default async function DashboardPage() {
       <div style={{ flex: 1, padding: "24px 32px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "0 0 16px" }}>
           {/* Not only SANRAL any more: Discovery's "Prepare this tender" (0018)
-              and manual loads (0023) land here too. */}
+              and manual loads (0024) land here too. */}
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>Tenders</h1>
           <Link
             href="/tenders/new"

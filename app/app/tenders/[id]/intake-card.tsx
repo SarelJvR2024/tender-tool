@@ -7,7 +7,7 @@ import { AddTenderDocumentsForm } from "../new/manual-tender-form";
 /**
  * "How this tender was read" - the intake step every tender's documents go
  * through (engine/general/process_general_jobs.py run_extraction, migration
- * 0023): where it came from, the SANRAL-vs-general routing decision and the
+ * 0024): where it came from, the SANRAL-vs-general routing decision and the
  * signal behind it, the SANRAL templates it registered, the fingerprint
  * check, documents that couldn't be read, and the fit for this company
  * (discovered_opportunities - the same row Discovery shows).

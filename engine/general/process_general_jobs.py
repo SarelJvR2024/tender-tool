@@ -69,7 +69,7 @@ import classify_tender as intake  # noqa: E402
 DEFAULT_WORK_DIR = os.path.join(ENGINE_DIR, "..", "out", "general_jobs")
 PACK_BUCKET = "submission-packs"
 VAULT_BUCKET = "company-documents"
-TENDER_DOCS_BUCKET = "tender-documents"  # 0017; manual uploads under manual/<company>/<tender>/ (0023)
+TENDER_DOCS_BUCKET = "tender-documents"  # 0017; manual uploads under manual/<company>/<tender>/ (0024)
 CV_BUCKET = "cv-documents"
 EXPERIENCE_BUCKET = "experience-documents"
 
@@ -160,7 +160,7 @@ class Supabase:
 def download_tender_documents(tender, dest_dir, fetch=None, client=None, sources=None):
     """Downloads each tenders.document_urls entry once (cached per tender):
     a public link (eTenders OCDS release, 0018) over HTTP, or a document a
-    person uploaded themselves (manual load, 0023: {title, storage_path,
+    person uploaded themselves (manual load, 0024: {title, storage_path,
     bucket}) from Storage. Returns (paths, notes). A document that fails is
     noted, not fatal - one bad link must not hide the rest (same rule as
     assess_tender.fetch_pdf_text). `sources`, when given, is filled with
@@ -298,7 +298,7 @@ def record_fit(client, job, tender, all_text):
 
 def run_extraction(client, job, work_root, fetch=None):
     """The intake + requirements step every tender's documents go through,
-    however the tender arrived (Discovery, or a manual load - 0023)."""
+    however the tender arrived (Discovery, or a manual load - 0024)."""
     tender = client.select("tenders", {"id": job["tender_id"]})[0]
     work = os.path.join(work_root, "tenders", tender["id"])
     docs_dir = os.path.join(work, "docs")

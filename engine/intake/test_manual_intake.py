@@ -1,12 +1,12 @@
 """
-End-to-end check of the manual tender load (migration 0023 + the intake step
+End-to-end check of the manual tender load (migration 0024 + the intake step
 in engine/general/process_general_jobs.py) against a scratch Postgres with
 every migration replayed - no live Supabase exists (System-Status gap #9).
 
 What it drives, in the order the real system does it:
   1. "the browser" writes each uploaded file into Storage under
      tender-documents/manual/<company>/<tender>/ - as an INSERT on
-     storage.objects under `set role authenticated`, so 0023's storage policy
+     storage.objects under `set role authenticated`, so 0024's storage policy
      is what allows or refuses it (Storage itself is a local directory);
   2. the server action calls load_manual_tender() as that signed-in user
      (same arguments as app/app/tenders/new/actions.ts);

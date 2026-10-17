@@ -30,7 +30,7 @@ function checkFiles(files: File[]): string | null {
 }
 
 /**
- * Straight to Storage from the browser (0023's policy: own company's
+ * Straight to Storage from the browser (0024's policy: own company's
  * manual/ prefix only), one file at a time so progress is visible. If one
  * fails, the ones already uploaded are removed and nothing is registered.
  */
