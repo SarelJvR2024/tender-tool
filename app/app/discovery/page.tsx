@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../_components/SiteNav";
 import { pursueOpportunity } from "./actions";
@@ -22,6 +23,9 @@ type OpportunityRow = {
   // engine/discovery/score_outlook.py's result (migration 0013) - null for
   // rows assessed before it existed.
   score_outlook: { estimable?: string; summary?: string[] } | null;
+  // 0023: the tender this opportunity became (pursued, or loaded manually).
+  tender_id: string | null;
+  source: string | null;
 };
 
 type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit";
@@ -75,7 +79,7 @@ export default async function DiscoveryPage({
   // this query shape works the same regardless of which company is asking.
   const { data: opportunities, error } = await supabase
     .from("discovered_opportunities")
-    .select("id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook")
+    .select("id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source")
     .order("first_seen", { ascending: false });
 
   const rows = (opportunities ?? []) as unknown as OpportunityRow[];
@@ -94,11 +98,23 @@ export default async function DiscoveryPage({
       <SiteNav active="discovery" />
 
       <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovery</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
-          Newly-found tender opportunities from the national OCDS feed, scored against your company profile.
-          Click through to download the real document from the buyer&apos;s own site.
-        </p>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", margin: "0 0 16px" }}>
+          <div style={{ flex: "1 1 320px" }}>
+            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovery</h1>
+            <p style={{ fontSize: 13, color: "#6B6758", margin: 0 }}>
+              Newly-found tender opportunities from the national OCDS feed, scored against your company profile.
+              Click through to download the real document from the buyer&apos;s own site.
+            </p>
+          </div>
+          {/* A tender that isn't in this feed (SANRAL's own portal, a forwarded
+              RFQ, a buyer not on eTenders) - migration 0023. */}
+          <Link
+            href="/tenders/new"
+            style={{ display: "inline-flex", alignItems: "center", minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #16233B", color: "#16233B", fontSize: 13, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            Found one elsewhere? Load it manually
+          </Link>
+        </div>
 
         {error && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
@@ -196,6 +212,9 @@ export default async function DiscoveryPage({
                     <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#16233B" }}>
                       {o.contract_number || "(no reference number)"}
                     </span>
+                    {o.source === "manual" && (
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>Loaded manually</span>
+                    )}
                     <span
                       style={{
                         display: "inline-flex",
@@ -276,12 +295,12 @@ export default async function DiscoveryPage({
                         type="submit"
                         style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
                       >
-                        Prepare this tender
+                        {o.tender_id ? "Open in workspace" : "Prepare this tender"}
                       </button>
                     </form>
                   )}
                   {docs.length === 0 && (
-                    <div style={{ fontSize: 11, color: "#9A9684" }}>No document URL on file</div>
+                    <div style={{ fontSize: 11, color: "#9A9684" }}>{o.source === "manual" ? "Documents uploaded by you" : "No document URL on file"}</div>
                   )}
                   {docs.map((d, i) => (
                     <a

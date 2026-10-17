@@ -34,6 +34,12 @@ COPY engine/worker/requirements.txt engine/worker/requirements.txt
 RUN pip install --no-cache-dir -r engine/worker/requirements.txt
 
 COPY engine engine
+# The stored SANRAL template baselines. Without them every pack run in this
+# image skipped the template-changed check with only a warning
+# (assemble_pack.check_template_fingerprint: "No stored fingerprint baseline")
+# and the intake reported "no baseline" - Sarel's "always check the template
+# first" rule silently off in production. Found by the 2026-10-17 scenario pass.
+COPY fingerprints fingerprints
 COPY templates templates
 COPY config/test_companies config/test_companies
 

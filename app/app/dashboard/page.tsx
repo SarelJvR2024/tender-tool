@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { SiteNav } from "../_components/SiteNav";
@@ -14,6 +15,8 @@ type TenderRow = {
   nra_reference: string | null;
   description: string | null;
   closing_date: string | null;
+  source: string | null;
+  family: string | null;
   tender_packs: { status: string }[];
 };
 
@@ -33,7 +36,7 @@ export default async function DashboardPage() {
   // this query shape works the same regardless of which company is asking.
   const { data: tenders, error } = await supabase
     .from("tenders")
-    .select("id, contract_no, nra_reference, description, closing_date, tender_packs(status)")
+    .select("id, contract_no, nra_reference, description, closing_date, source, family, tender_packs(status)")
     .order("closing_date", { ascending: true });
 
   const rows = (tenders ?? []) as unknown as TenderRow[];
@@ -45,7 +48,17 @@ export default async function DashboardPage() {
       <SiteNav active="dashboard" />
 
       <div style={{ flex: 1, padding: "24px 32px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 16px" }}>SANRAL Tenders</h1>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", margin: "0 0 16px" }}>
+          {/* Not only SANRAL any more: Discovery's "Prepare this tender" (0018)
+              and manual loads (0023) land here too. */}
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>Tenders</h1>
+          <Link
+            href="/tenders/new"
+            style={{ display: "inline-flex", alignItems: "center", minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#D97706", color: "#FFFFFF", fontSize: 13, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" }}
+          >
+            Load a tender manually
+          </Link>
+        </div>
 
         {error && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
@@ -74,10 +87,17 @@ export default async function DashboardPage() {
             return (
               <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.3fr 2.4fr 1fr 1.3fr", gap: 12, alignItems: "center", padding: "11px 18px", borderTop: "1px solid #F0EEE6" }}>
                 <div>
-                  <div style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#16233B" }}>{t.contract_no}</div>
+                  <a href={`/tenders/${t.id}`} style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#16233B", textDecoration: "none" }}>{t.contract_no ?? "(no reference)"}</a>
                   <div style={{ fontSize: 11, color: "#9A9684" }}>{t.nra_reference}</div>
                 </div>
-                <div style={{ fontSize: 12, color: "#4B5563" }}>{t.description}</div>
+                <div style={{ fontSize: 12, color: "#4B5563" }}>
+                  <a href={`/tenders/${t.id}`} style={{ color: "#4B5563", textDecoration: "none" }}>{t.description}</a>
+                  {t.source === "manual" && (
+                    <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>
+                      {t.family ? "Loaded manually" : "Loaded manually - analysing"}
+                    </span>
+                  )}
+                </div>
                 <div style={{ fontSize: 12, color: "#16233B" }}>
                   {t.closing_date ? new Date(t.closing_date).toLocaleDateString() : "-"}
                   {left !== null && <div style={{ fontSize: 10, color: left <= 7 ? "#B45309" : "#9A9684" }}>{left} days left</div>}

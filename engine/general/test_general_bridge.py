@@ -95,12 +95,14 @@ class Fake:
                         fake.storage[urllib.parse.unquote(path[len("/storage/v1/object/"):])] = data
                     return self._send(200, {"Key": path})
                 table = path.split("/rest/v1/", 1)[1]
-                keys = q.get("on_conflict", [""])[0].split(",")
+                keys = [k for k in q.get("on_conflict", [""])[0].split(",") if k]
                 rows = json.loads(data)
+                if isinstance(rows, dict):  # a plain insert of one row (PostgREST accepts either)
+                    rows = [rows]
                 with fake.lock:
                     t = fake.tables.setdefault(table, [])
                     for row in rows:
-                        hit = next((r for r in t if all(r.get(k) == row.get(k) for k in keys)), None)
+                        hit = next((r for r in t if all(r.get(k) == row.get(k) for k in keys)), None) if keys else None
                         if hit:
                             hit.update(row)
                         else:

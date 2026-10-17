@@ -10,6 +10,7 @@ import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
 import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 import { SubmissionPack } from "./submission-pack";
+import { IntakeCard } from "./intake-card";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -22,6 +23,7 @@ type TenderFacts = {
   description: string | null;
   closing_date: string | null;
   family: string | null;
+  source: string | null;
 };
 
 type TenderPack = {
@@ -126,7 +128,7 @@ export default async function TenderWorkspacePage({
 
   const { data: tender, error: tenderError } = await supabase
     .from("tenders")
-    .select("id, contract_no, nra_reference, description, closing_date, family")
+    .select("id, contract_no, nra_reference, description, closing_date, family, source")
     .eq("id", id)
     .maybeSingle();
 
@@ -327,6 +329,7 @@ export default async function TenderWorkspacePage({
               >
                 {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
                 {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" variant="primary" />}
+                {tenderFacts.source !== "sanral" && <JumpLink href="#intake" label="Intake" />}
                 {tenderPack && provenance.length > 0 && <JumpLink href="#readiness-report" label="Readiness" />}
                 {isSanralFamily && <JumpLink href="#compliance-check" label="Documents" />}
                 {isSanralFamily && <JumpLink href="#key-people" label="Key people" />}
@@ -417,8 +420,19 @@ export default async function TenderWorkspacePage({
               </>
             )}
 
-            {/* Document/CV compliance + functionality score estimate for pursuing this tender. */}
-            {isGeneralFamily ? <GeneralTenderWorkspace tenderId={id} saved={saved ?? null} /> : <ComplianceReport tenderId={id} />}
+            {/* Intake (0023): how the documents were read and routed - SANRAL
+                pack flow vs. general - and the fit for this company. */}
+            <IntakeCard tenderId={id} />
+
+            {/* Document/CV compliance + functionality score estimate for pursuing this tender.
+                A tender whose documents haven't been analysed yet (family
+                still null - a manual load waiting on its intake) has no
+                family to report against; the intake card says so. */}
+            {isGeneralFamily ? (
+              <GeneralTenderWorkspace tenderId={id} saved={saved ?? null} />
+            ) : tenderFacts.family ? (
+              <ComplianceReport tenderId={id} />
+            ) : null}
 
             <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
 

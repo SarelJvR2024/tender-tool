@@ -90,11 +90,26 @@ def convert_with_soffice(path, target_ext, out_dir):
 
 
 def pdf_text(path):
+    return pdf_text_or_error(path)[0]
+
+
+def pdf_text_or_error(path):
+    """(text, error). A file pdftotext can't open at all (truncated download,
+    an HTML error page saved as .pdf, a password-protected PDF) is a different
+    problem from a scanned PDF with no text layer, and the user fixes it
+    differently (re-download vs. ask for a text copy / OCR) - so the two are
+    never reported with the same words. Before 2026-10-17 both came out as
+    "no text layer (scanned image)"."""
     try:
         out = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True, text=True, timeout=120)
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return ""
-    return out.stdout if out.returncode == 0 else ""
+    except subprocess.TimeoutExpired:
+        return "", "pdftotext timed out reading it (very large or damaged PDF)"
+    except FileNotFoundError:
+        return "", "pdftotext (poppler-utils) is not installed on this worker"
+    if out.returncode != 0:
+        first = next((ln.strip() for ln in (out.stderr or "").splitlines() if ln.strip()), "")
+        return "", "not a readable PDF - corrupt, truncated or not really a PDF" + (f" ({first[:120]})" if first else "") + " - re-download it"
+    return out.stdout, None
 
 
 def collect_documents(paths, work_dir):
@@ -143,7 +158,9 @@ def read_document(doc, work_dir):
     fmt = doc["format"]
     text = ""
     if fmt == "pdf":
-        text = pdf_text(doc["path"])
+        text, err = pdf_text_or_error(doc["path"])
+        if err:
+            doc["unreadable"] = err
     elif fmt == "docx":
         try:
             text = docx_text(doc["path"])
@@ -518,7 +535,7 @@ COMPANY_FIELDS = [
 # Manifest
 # ---------------------------------------------------------------------------
 
-def extract_requirements(paths, work_dir=None, source_label=None):
+def extract_requirements(paths, work_dir=None, source_label=None, keep_text=False):
     """paths: files and/or directories (zips are unpacked). Returns the manifest
     dict (JSON-safe). Document dicts keep local paths under `_local` so the pack
     generator can reuse the downloaded copies; strip_local() removes them before
@@ -651,6 +668,10 @@ def extract_requirements(paths, work_dir=None, source_label=None):
     }
     if own_tmp:
         manifest["_work_dir"] = work_dir
+    if keep_text:
+        # for the intake step (engine/intake/classify_tender.py): fit scoring
+        # reads the same text instead of extracting every document twice.
+        manifest["_all_text"] = all_text
     return manifest
 
 
@@ -658,7 +679,17 @@ def _gaps(doc_entries, forms, suite, buyer_forms):
     """Plain statements of what this engine can't do for this tender - shown
     in the UI and the pack index instead of being hidden."""
     gaps = []
-    if suite is None:
+    readable = [e for e in doc_entries if e["chars"] > 0 and not e["unreadable"]]
+    if not readable:
+        # Nothing was read, so nothing can be concluded about the forms - the
+        # old wording ("uses no SBD/MBD standard forms") was a confident
+        # statement made from zero evidence.
+        gaps.append("None of this tender's documents could be read, so what it requires is unknown - nothing below "
+                    "was checked against its documents. Upload a text PDF or Word copy.")
+    elif suite is None and any(e["unreadable"] for e in doc_entries):
+        gaps.append("No SBD/MBD standard forms were found in the documents that could be read - but some couldn't be "
+                    "read (listed below), and the forms may be in those.")
+    elif suite is None:
         gaps.append("This tender uses no SBD/MBD standard forms - its returnable forms are the buyer's own, which "
                     "Tender Tool has no templates for. The pack orders your supporting documents; the buyer's forms are "
                     "completed by hand.")
@@ -674,6 +705,7 @@ def _gaps(doc_entries, forms, suite, buyer_forms):
 def strip_local(manifest):
     m = json.loads(json.dumps(manifest))
     m.pop("_work_dir", None)
+    m.pop("_all_text", None)
     for d in m.get("documents", []):
         d.pop("_local", None)
     return m

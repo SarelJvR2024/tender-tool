@@ -63,10 +63,13 @@ for p in (HERE, ENGINE_DIR, os.path.join(ENGINE_DIR, "worker")):
 
 import requirements as req  # noqa: E402
 import build_general_pack as bgp  # noqa: E402
+sys.path.insert(0, os.path.join(ENGINE_DIR, "intake"))
+import classify_tender as intake  # noqa: E402
 
 DEFAULT_WORK_DIR = os.path.join(ENGINE_DIR, "..", "out", "general_jobs")
 PACK_BUCKET = "submission-packs"
 VAULT_BUCKET = "company-documents"
+TENDER_DOCS_BUCKET = "tender-documents"  # 0017; manual uploads under manual/<company>/<tender>/ (0023)
 CV_BUCKET = "cv-documents"
 EXPERIENCE_BUCKET = "experience-documents"
 
@@ -124,6 +127,14 @@ class Supabase:
         out = self._req("PATCH", f"/rest/v1/{table}{self._q(filters)}", body, {"Prefer": "return=representation"})
         return json.loads(out) if out else []
 
+    def insert(self, table, row):
+        out = self._req("POST", f"/rest/v1/{table}", row, {"Prefer": "return=representation"})
+        rows = json.loads(out) if out else []
+        return rows[0] if rows else None
+
+    def delete(self, table, filters):
+        self._req("DELETE", f"/rest/v1/{table}{self._q(filters)}")
+
     def upsert(self, table, rows, on_conflict):
         out = self._req("POST", f"/rest/v1/{table}?on_conflict={on_conflict}", rows,
                         {"Prefer": "return=representation,resolution=merge-duplicates"})
@@ -146,30 +157,46 @@ class Supabase:
 # Tender documents
 # ---------------------------------------------------------------------------
 
-def download_tender_documents(tender, dest_dir, fetch=None):
-    """Downloads each tenders.document_urls entry once (cached per tender).
-    Returns (paths, notes). A link that fails is noted, not fatal - one bad
-    link must not hide the rest (same rule as assess_tender.fetch_pdf_text)."""
+def download_tender_documents(tender, dest_dir, fetch=None, client=None, sources=None):
+    """Downloads each tenders.document_urls entry once (cached per tender):
+    a public link (eTenders OCDS release, 0018) over HTTP, or a document a
+    person uploaded themselves (manual load, 0023: {title, storage_path,
+    bucket}) from Storage. Returns (paths, notes). A document that fails is
+    noted, not fatal - one bad link must not hide the rest (same rule as
+    assess_tender.fetch_pdf_text). `sources`, when given, is filled with
+    local path -> the entry it came from."""
     os.makedirs(dest_dir, exist_ok=True)
     fetch = fetch or _http_get
-    paths, notes = [], []
+    paths, notes, used = [], [], set()
     for i, d in enumerate(tender.get("document_urls") or []):
-        url = d.get("url")
-        if not url:
+        url, storage_path = d.get("url"), d.get("storage_path")
+        if not url and not storage_path:
             continue
-        title = d.get("title") or f"document_{i}"
+        title = d.get("title") or (os.path.basename(storage_path) if storage_path else f"document_{i}")
         name = re.sub(r"[^A-Za-z0-9._ ()-]+", "_", title)[:120] or f"document_{i}"
         if "." not in name[-6:]:
             name += ".pdf"
+        base, ext = os.path.splitext(name)
+        n = 2
+        while name.lower() in used:  # two uploads with the same file name
+            name, n = f"{base} ({n}){ext}", n + 1
+        used.add(name.lower())
         dest = os.path.join(dest_dir, name)
         if not os.path.exists(dest):
             try:
-                data = fetch(url)
-                with open(dest, "wb") as f:
-                    f.write(data)
+                if storage_path:
+                    if client is None:
+                        raise RuntimeError("no Storage client to fetch an uploaded document")
+                    client.download(d.get("bucket") or TENDER_DOCS_BUCKET, storage_path, dest)
+                else:
+                    data = fetch(url)
+                    with open(dest, "wb") as f:
+                        f.write(data)
             except Exception as e:
                 notes.append(f"{title}: download failed ({e})")
                 continue
+        if sources is not None:
+            sources[os.path.realpath(dest)] = d
         paths.append(dest)
     return paths, notes
 
@@ -180,20 +207,153 @@ def _http_get(url):
         return resp.read()
 
 
+def profile_from_company(client, company_id):
+    """assess_tender's profile shape, from the company's own rows instead of a
+    local JSON file (the Discovery cron uses config/<company>_profile.json;
+    the bridge has the real rows). Disciplines = the union of the company's
+    tagged Experience Library items (0012 uses exactly assess_tender's
+    DISCIPLINE_KEYWORDS keys); CIDB from companies.cidb_grading (0018);
+    offices from company_offices (0015), else derived from the registered
+    address the same way assess_tender.offices_from_company() does."""
+    company = (client.select("companies", {"id": company_id}) or [{}])[0]
+    items = client.select("experience_items", {"company_id": company_id})
+    disciplines = sorted({d for i in items if i.get("tagged_at") for d in (i.get("disciplines") or [])})
+    offices = [{k: o.get(k) for k in ("province", "district_municipality", "local_municipality", "town", "office_kind")}
+               for o in client.select("company_offices", {"company_id": company_id})]
+    if not offices:
+        offices = intake.assess_tender.offices_from_company({"registered_address": company.get("registered_address")})
+    return {"disciplines": disciplines, "bee_level": company.get("bee_level"),
+            "black_ownership_pct": company.get("black_ownership_pct"),
+            "has_cidb_grading": bool(company.get("cidb_grading")), "offices": offices}
+
+
+def _template_storage_path(tender, doc_type, local, sources):
+    """Reuse the uploaded object when the template was uploaded as its own
+    file; a template that came out of a zip is uploaded on its own."""
+    src = sources.get(os.path.realpath(local))
+    if src and src.get("storage_path") and (src.get("bucket") or TENDER_DOCS_BUCKET) == TENDER_DOCS_BUCKET:
+        return src["storage_path"], False
+    ext = os.path.splitext(local)[1].lower()
+    if tender.get("source") == "manual" and tender.get("owner_company_id"):
+        return f"manual/{tender['owner_company_id']}/{tender['id']}/intake/{doc_type}{ext}", True
+    return f"{tender.get('slug') or tender['id']}/{doc_type}{ext}", True
+
+
+def register_sanral_tender(client, tender, decision, sources):
+    """SANRAL route: the blank templates -> tender_documents (what
+    engine/pack/process_pack_jobs.py reads), the template's SETUP positions ->
+    tender_requirements (what the compliance report reads), and the
+    fingerprint check, reported but never stored as a baseline."""
+    files = decision["sanral_files"]
+    tech = files["technical_xlsm"]
+    setup = intake.read_setup(tech)
+    fp = intake.check_fingerprint(tech, decision["family"])
+    for doc_type, local in files.items():
+        path, needs_upload = _template_storage_path(tender, doc_type, local, sources)
+        if needs_upload:
+            ct = "application/vnd.ms-excel.sheet.macroEnabled.12" if local.lower().endswith(".xlsm") else \
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            client.upload(TENDER_DOCS_BUCKET, path, local, ct)
+        client.upsert("tender_documents", [{"tender_id": tender["id"], "doc_type": doc_type, "storage_path": path,
+                                            "downloaded_at": _now()}], "tender_id,doc_type")
+    client.delete("tender_requirements", {"tender_id": tender["id"]})
+    rows = []
+    for p in setup["positions"]:
+        base = {"tender_id": tender["id"], "position_code": p["code"], "position_description": p["description"],
+                "managerial": p["managerial"]}
+        rows.append({**base, "is_alternate": False})
+        if p["has_alternate"]:
+            rows.append({**base, "is_alternate": True})
+    if rows:
+        client.upsert("tender_requirements", rows, "tender_id,position_code,is_alternate")
+    return setup, fp
+
+
+def record_fit(client, job, tender, all_text):
+    """assess_tender + score_outlook on the tender's own text, for THIS
+    company, into discovered_opportunities - the same row a discovered tender
+    has, so /discovery and the workspace read fit the same way. A discovered
+    tender's own Discovery verdict is left alone (only linked); a manual
+    tender's row is written (and rewritten when documents are added)."""
+    existing = client.select("discovered_opportunities", {"company_id": job["company_id"], "tender_id": tender["id"]})
+    if not existing and tender.get("ocid"):
+        existing = client.select("discovered_opportunities", {"company_id": job["company_id"], "ocid": tender["ocid"]})
+    if existing and tender.get("source") != "manual":
+        if not existing[0].get("tender_id"):
+            client.update("discovered_opportunities", {"id": existing[0]["id"]}, {"tender_id": tender["id"]})
+        return existing[0].get("verdict")
+    profile = profile_from_company(client, job["company_id"])
+    fit = intake.assess_fit_from_text(tender.get("title"), tender.get("description"), all_text, profile)
+    row = {"company_id": job["company_id"], "contract_number": tender.get("contract_no"), "buyer": tender.get("buyer"),
+           "title": tender.get("title"), "closing_date": tender.get("closing_date"), "categories": fit["categories"],
+           "document_depth": fit["document_depth"], "verdict": fit["verdict"], "reasons": fit["reasons"],
+           "description": tender.get("description"), "score_outlook": fit["score_outlook"],
+           "source": "manual" if tender.get("source") == "manual" else "etenders_ocds", "tender_id": tender["id"]}
+    if existing:
+        client.update("discovered_opportunities", {"id": existing[0]["id"]}, row)
+    else:
+        client.insert("discovered_opportunities", {**row, "ocid": tender.get("ocid"), "document_urls": []})
+    return fit["verdict"]
+
+
 def run_extraction(client, job, work_root, fetch=None):
+    """The intake + requirements step every tender's documents go through,
+    however the tender arrived (Discovery, or a manual load - 0023)."""
     tender = client.select("tenders", {"id": job["tender_id"]})[0]
     work = os.path.join(work_root, "tenders", tender["id"])
     docs_dir = os.path.join(work, "docs")
-    paths, notes = download_tender_documents(tender, docs_dir, fetch)
+    sources = {}
+    paths, notes = download_tender_documents(tender, docs_dir, fetch, client=client, sources=sources)
     if not paths:
         raise RuntimeError("No tender documents could be downloaded" + (": " + "; ".join(notes) if notes else " - no document links on file."))
     scratch = os.path.join(work, "extract")
     shutil.rmtree(scratch, ignore_errors=True)
-    manifest = req.extract_requirements([docs_dir], work_dir=scratch, source_label=tender.get("ocid") or tender.get("slug"))
+    manifest = req.extract_requirements([docs_dir], work_dir=scratch, source_label=tender.get("ocid") or tender.get("slug"),
+                                        keep_text=True)
+    all_text = manifest.get("_all_text") or ""
+    decision = intake.classify_documents(manifest["documents"], tender.get("buyer"), all_text)
+    readable = [d for d in manifest["documents"] if d["chars"] > 0 and not d["unreadable"]]
+    if decision["route"] != "sanral" and not readable:
+        # Fail loudly: a manifest built from zero readable text would claim
+        # "this tender uses no standard forms" and ask no questions - a
+        # silent wrong answer, not an empty one.
+        why = "; ".join(f"{d['name']}: {d['unreadable'] or 'no text found'}" for d in manifest["documents"])[:700]
+        raise RuntimeError("None of this tender's documents could be read, so nothing about what it requires could be "
+                           f"checked ({why}). Upload a text PDF or Word copy - scanned tenders are not OCR'd yet.")
     clean = req.strip_local(manifest)
     if notes:
         clean["gaps"] = clean.get("gaps", []) + [f"Couldn't download: {n}" for n in notes]
+
+    intake_rec = {k: decision[k] for k in ("route", "family", "signal", "sanral_hint", "workbooks", "sanral_documents")}
+    intake_rec["notes"] = list(decision["notes"]) + [f"Couldn't download: {n}" for n in notes]
+    intake_rec["readable_documents"] = len(readable)
+    intake_rec["unreadable_documents"] = [{"document": d["name"], "reason": d["unreadable"]} for d in manifest["documents"] if d["unreadable"]]
+    intake_rec["analysed_at"] = _now()
     patch = {"document_requirements": clean}
+    if decision["route"] == "sanral":
+        setup, fp = register_sanral_tender(client, tender, decision, sources)
+        intake_rec["setup"] = setup
+        intake_rec["fingerprint"] = fp
+        intake_rec["notes"] += intake.discrepancies({"contract_no": tender.get("contract_no"), "closing_date": tender.get("closing_date")}, setup)
+        patch["family"] = decision["family"]
+        if not tender.get("nra_reference"):
+            nra = intake.find_nra_reference(all_text)
+            if nra:
+                patch["nra_reference"] = nra
+                intake_rec["notes"].append(f"NRA reference {nra} read from the tender documents.")
+            else:
+                intake_rec["notes"].append("No NRA reference found (it's on SANRAL's Book 1 cover, e.g. 'NRA: 2026/0071') - "
+                                           "upload Book 1, otherwise the envelope covers and the authority letter are left out of the pack.")
+        if not tender.get("contract_no") and setup.get("contract_no"):
+            patch["contract_no"] = setup["contract_no"]
+        if not tender.get("closing_date") and setup.get("closing_date"):
+            patch["closing_date"] = setup["closing_date"] + "T11:00:00+02:00"  # SANRAL closes 11:00 SAST
+            intake_rec["notes"].append(f"Closing date taken from the workbook's SETUP sheet ({setup['closing_date']}); "
+                                       "the time (11:00) is SANRAL's usual closing time - check the notice.")
+    elif tender.get("family") in (None, "", "UNKNOWN") or tender.get("family") in intake.SANRAL_FAMILIES:
+        patch["family"] = intake.GENERAL_FAMILY
+    patch["intake"] = intake_rec
+
     existing = tender.get("evaluation_rules") or {}
     if not existing or str(existing.get("source_document", "")).startswith("discovery outlook"):
         patch["evaluation_rules"] = {
@@ -203,7 +363,9 @@ def run_extraction(client, job, work_root, fetch=None):
             "extracted_at": clean["extracted_at"],
         }
     client.update("tenders", {"id": tender["id"]}, patch)
-    return {"forms": len(clean["forms"]), "returnables": len(clean["returnables"]), "questions": len(clean["questions"])}
+    verdict = record_fit(client, job, {**tender, **patch}, all_text)
+    return {"route": decision["route"], "family": patch.get("family", tender.get("family")), "verdict": verdict,
+            "forms": len(clean["forms"]), "returnables": len(clean["returnables"]), "questions": len(clean["questions"])}
 
 
 # ---------------------------------------------------------------------------
@@ -280,13 +442,16 @@ def gather_pack_inputs(client, job, tender, manifest, work):
 
 def run_pack(client, job, work_root, fetch=None):
     tender = client.select("tenders", {"id": job["tender_id"]})[0]
+    if tender.get("family") in intake.SANRAL_FAMILIES:
+        raise RuntimeError("This is a SANRAL tender (its Technical Submission workbook was recognised) - generate it with the "
+                           "SANRAL 'Submission pack' card, not the general pack.")
     manifest = tender.get("document_requirements")
     if not manifest:
         raise RuntimeError("This tender's documents haven't been read yet - run 'Read this tender's documents' first.")
     work = os.path.join(work_root, "packs", job["id"])
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work, exist_ok=True)
-    paths, _ = download_tender_documents(tender, os.path.join(work_root, "tenders", tender["id"], "docs"), fetch)
+    paths, _ = download_tender_documents(tender, os.path.join(work_root, "tenders", tender["id"], "docs"), fetch, client=client)
     docs_dir = os.path.join(work_root, "tenders", tender["id"], "docs")
     local = bgp.local_docs_for(manifest, [docs_dir] if paths else [], os.path.join(work, "src"))
     company, answers, files, signatory, evidence, cvs = gather_pack_inputs(client, job, tender, manifest, work)
