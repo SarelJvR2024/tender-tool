@@ -72,42 +72,61 @@ export default async function DashboardPage() {
           <StatCard label="Needs your input" value={needsInputCount} color="#B45309" />
         </div>
 
+        {/* A plain 4-column grid here had no mobile fallback at all - on a
+            phone (this is the first screen after login, checked constantly)
+            contract/description/closing/status were squeezed into slivers.
+            Each tender is its own flex-wrap card instead, same idea as
+            discovery/page.tsx's opportunity cards: it reflows by itself
+            instead of needing a breakpoint override. */}
         <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1.3fr 2.4fr 1fr 1.3fr", gap: 12, padding: "9px 18px", fontSize: 11, fontWeight: 600, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: "1px solid #F0EEE6" }}>
-            <div>Contract</div><div>Description</div><div>Closes</div><div>Status</div>
-          </div>
           {rows.length === 0 && !error && (
             <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
               No tenders yet - run <code>supabase/seed_tenders.sql</code> to load the known SANRAL tenders.
             </div>
           )}
-          {rows.map((t) => {
+          {rows.map((t, i) => {
             const st = statusFor(t);
             const left = daysUntil(t.closing_date);
             return (
-              <div key={t.id} style={{ display: "grid", gridTemplateColumns: "1.3fr 2.4fr 1fr 1.3fr", gap: 12, alignItems: "center", padding: "11px 18px", borderTop: "1px solid #F0EEE6" }}>
-                <div>
-                  <a href={`/tenders/${t.id}`} style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#16233B", textDecoration: "none" }}>{t.contract_no ?? "(no reference)"}</a>
-                  <div style={{ fontSize: 11, color: "#9A9684" }}>{t.nra_reference}</div>
-                </div>
-                <div style={{ fontSize: 12, color: "#4B5563" }}>
-                  <a href={`/tenders/${t.id}`} style={{ color: "#4B5563", textDecoration: "none" }}>{t.description}</a>
-                  {t.source === "manual" && (
-                    <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>
-                      {t.family ? "Loaded manually" : "Loaded manually - analysing"}
+              <a
+                key={t.id}
+                href={`/tenders/${t.id}`}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  flexWrap: "wrap",
+                  padding: "12px 18px",
+                  borderTop: i > 0 ? "1px solid #F0EEE6" : undefined,
+                  textDecoration: "none",
+                  color: "inherit",
+                }}
+              >
+                <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                    <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#16233B" }}>
+                      {t.contract_no ?? "(no reference)"}
                     </span>
-                  )}
+                    {t.source === "manual" && (
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>
+                        {t.family ? "Loaded manually" : "Loaded manually - analysing"}
+                      </span>
+                    )}
+                  </div>
+                  {t.nra_reference && <div style={{ fontSize: 11, color: "#9A9684", marginTop: 1 }}>{t.nra_reference}</div>}
+                  <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3 }}>{t.description}</div>
                 </div>
-                <div style={{ fontSize: 12, color: "#16233B" }}>
-                  {t.closing_date ? new Date(t.closing_date).toLocaleDateString() : "-"}
-                  {left !== null && <div style={{ fontSize: 10, color: left <= 7 ? "#B45309" : "#9A9684" }}>{left} days left</div>}
-                </div>
-                <div>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
+                <div style={{ flexShrink: 0, textAlign: "right" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color, whiteSpace: "nowrap" }}>
                     {st.label}
                   </span>
+                  <div style={{ fontSize: 12, color: "#16233B", marginTop: 6 }}>
+                    {t.closing_date ? new Date(t.closing_date).toLocaleDateString() : "-"}
+                  </div>
+                  {left !== null && <div style={{ fontSize: 10, color: left <= 7 ? "#B45309" : "#9A9684" }}>{left} days left</div>}
                 </div>
-              </div>
+              </a>
             );
           })}
         </div>
