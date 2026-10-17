@@ -522,7 +522,11 @@ def main():
         readiness_seen, readiness_loaded = load_readiness_seen_db(client)
         owners = {}
         document_expiry = (watch_deadlines.find_due_documents(url, key, seen, today, args.doc_lead_days)
-                           + watch_deadlines.find_due_person_credentials(url, key, seen, today, args.doc_lead_days))
+                           + watch_deadlines.find_due_person_credentials(url, key, seen, today, args.doc_lead_days)
+                           # 0050: catalog registrations (company -> "document", person/director ->
+                           # "person_credential") and property documents, same routing
+                           + watch_deadlines.registration_reminders.find_due_registrations(url, key, seen, today, args.doc_lead_days)
+                           + watch_deadlines.registration_reminders.find_due_property_documents(url, key, seen, today, args.doc_lead_days))
         tender_tasks = watch_deadlines.find_due_tasks(url, key, seen, today, args.task_lead_days)
         readiness_changes = find_readiness_changes(url, key, readiness_seen, today, owners)
         # Updates the tender-update watch already alerted on, not yet in a

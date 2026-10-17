@@ -64,8 +64,16 @@ mechanism as document-expiry reminders, not a second one):
    tender asks for them). Same lead-time window, same seen-store, same status
    escalation as the company documents: all go through _expiry_window(),
    one mechanism, not a second one. Other professional bodies (SACAP,
-   SACPLAN, ...) have no registration column on people yet, so they are not
-   tracked.
+   SACPLAN, ...) have no registration column on people yet; since 0050 they
+   are held through the shared registrations catalog instead (1c).
+
+1c. Registrations / licences / accreditations from the shared catalog
+   (0050 registration_types + held_registrations: PSIRA, SETA accreditation,
+   waste permits, SACAP, HPCSA ...) held by the company, a person or a
+   director/shareholder, and per-building property documents with a
+   valid-until date (0050 property_documents). One row = one tracked expiry,
+   whatever the body - registration_reminders.py, through the same
+   _expiry_window() and seen store.
 
 2. Tender task due dates (tender_tasks, migration 0009_tender_tasks.sql -
    app/app/tenders/[id]/page.tsx's task/deadline timeline). Reports any
@@ -120,6 +128,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
 import company_profiles  # noqa: E402  (RestClient: the paged service-role select/upsert)
 import system_alerts  # noqa: E402
+import registration_reminders  # noqa: E402  (0050: catalog registrations + property documents)
 
 SEEN_TABLE = "deadline_reminders_seen"  # 0041
 CONSUMER = "watch_deadlines"
@@ -421,6 +430,8 @@ def main():
         seen, loaded = load_seen_db(client)
         documents_due = find_due_documents(url, key, seen, today, args.doc_lead_days)
         credentials_due = find_due_person_credentials(url, key, seen, today, args.doc_lead_days)
+        registrations_due = (registration_reminders.find_due_registrations(url, key, seen, today, args.doc_lead_days)
+                             + registration_reminders.find_due_property_documents(url, key, seen, today, args.doc_lead_days))
         tasks_due = find_due_tasks(url, key, seen, today, args.task_lead_days)
         before_closing = find_documents_lapsing_before_closing(url, key, seen, today)
         written = save_seen_db(client, seen, loaded)
@@ -443,6 +454,13 @@ def main():
         print(f"  {c['company_name']!r:<30} {c['person_name']!r:<24} {c['label']:<34} expires {c['expiry_date']}  "
               f"({c['days_left']} days{' overdue' if c['days_left'] < 0 else ' left'})")
 
+    print(f"\n{len(registrations_due)} catalog registration(s) / property document(s) newly due "
+          f"(within {args.doc_lead_days} days or already lapsed):")
+    for r in registrations_due:
+        holder = r.get("person_name") or "(company)"
+        print(f"  {r['company_name']!r:<30} {holder!r:<24} {r['label']:<40} expires {r['expiry_date']}  "
+              f"({r['days_left']} days{' overdue' if r['days_left'] < 0 else ' left'})")
+
     print(f"\n{len(before_closing)} document(s) that will have lapsed by the closing date of a tender being prepared:")
     for d in before_closing:
         print(f"  {d['company_name']!r:<30} {d['label']:<32} expires {d['expiry_date']} - {d['tender_label']} closes {d['closing_date']}")
@@ -453,7 +471,7 @@ def main():
         print(f"  {t['tender_label']:<20} {t['description']:<50} due {t['due_date']}  "
               f"({t['days_left']} days{' overdue' if t['days_left'] < 0 else ' left'})")
 
-    report = {"documents": documents_due, "person_credentials": credentials_due, "documents_before_closing": before_closing, "tasks": tasks_due}
+    report = {"documents": documents_due, "person_credentials": credentials_due, "registrations": registrations_due, "documents_before_closing": before_closing, "tasks": tasks_due}
     if args.out:
         with open(args.out, "w") as f:
             json.dump(report, f, indent=2)

@@ -9,8 +9,9 @@ import { COMPANY_DOCUMENT_TYPES, GUIDELINE_MAX_CHARS, isCompanyDocumentType, isD
 
 /**
  * Fields the edit form is allowed to write. Deliberately excludes any bank
- * account number field - this schema never stores one (see 0001's comment
- * on the companies table) and this action must not add one back in.
+ * account number field - account numbers live only in the restricted
+ * bank_accounts table (0050, owners/admins only; 0001's own instruction),
+ * never on companies, and this action must not add one here.
  * bank_confirmation_letter_valid_until is a generated column (0014) and must
  * never be written either.
  */

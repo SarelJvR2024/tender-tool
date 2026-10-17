@@ -142,6 +142,13 @@ export async function deletePerson(formData: FormData) {
     if (rmErr) redirect(`/people/${id}?error=${encodeURIComponent(`Could not remove this person's CV files: ${rmErr.message}`)}`);
   }
 
+  // Registration certificates this person held (0050 held_registrations,
+  // company-documents bucket): the rows cascade with the person, the files
+  // don't - remove them first, same rule as the CVs above.
+  const { data: regs } = await supabase.from("held_registrations").select("storage_path").eq("person_id", id).eq("company_id", companyId);
+  const regPaths = (regs ?? []).map((r) => r.storage_path as string | null).filter((p): p is string => !!p && p.startsWith(`${companyId}/`));
+  if (regPaths.length > 0) await supabase.storage.from("company-documents").remove(regPaths);
+
   const { error } = await supabase.from("people").delete().eq("id", id).eq("company_id", companyId);
   if (error) redirect(`/people/${id}?error=${encodeURIComponent(`Could not delete this person: ${error.message}`)}`);
   revalidatePath("/people");

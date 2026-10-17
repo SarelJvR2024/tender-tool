@@ -123,6 +123,21 @@ export default async function CompanyPage({
     });
   }
 
+  // Directors register, registrations, buildings, bank accounts (0050) - each
+  // on its own page; only counts here. RLS scopes every count to this company
+  // (bank accounts: owners/admins only, so members see 0 here).
+  const registerCounts = { principals: 0, registrations: 0, properties: 0 };
+  if (row && !editing) {
+    const [a, b, c] = await Promise.all([
+      supabase.from("company_principals").select("id", { count: "exact", head: true }),
+      supabase.from("held_registrations").select("id", { count: "exact", head: true }),
+      supabase.from("company_properties").select("id", { count: "exact", head: true }),
+    ]);
+    registerCounts.principals = a.count ?? 0;
+    registerCounts.registrations = b.count ?? 0;
+    registerCounts.properties = c.count ?? 0;
+  }
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
       <SiteNav active="company" />
@@ -171,6 +186,8 @@ export default async function CompanyPage({
         )}
 
         {row && (editing ? <EditForm company={row} /> : <ReadOnlyView company={row} docUrls={docUrls} />)}
+
+        {row && !editing && <RegisterLinks counts={registerCounts} />}
 
         {row && !editing && <LettersSection companyId={row.id} templates={templates} urls={templateUrls} />}
 
@@ -404,10 +421,55 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
           <Field label="Branch code" value={company.bank_branch_code} />
         </div>
         <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
-          Account numbers are never stored in Tender Tool - generated documents are marked &quot;WITHHELD&quot; and completed manually.
+          The account number itself is kept on the restricted{" "}
+          <a href="/company/bank-accounts" style={{ color: "#D97706", fontWeight: 600, textDecoration: "none" }}>
+            Bank accounts
+          </a>{" "}
+          page (owners and admins only). Generated documents still print &quot;WITHHELD&quot; - it is copied onto a form by hand.
         </div>
       </Section>
     </div>
+  );
+}
+
+function RegisterLinks({ counts }: { counts: { principals: number; registrations: number; properties: number } }) {
+  const items = [
+    {
+      href: "/company/principals",
+      title: "Directors & shareholders",
+      detail: counts.principals
+        ? `${counts.principals} on the register - IDs, ownership by group, certified ID copies`
+        : "Not started - tenders ask for every director's certified ID and the ownership split",
+    },
+    {
+      href: "/company/registrations",
+      title: "Registrations, licences & accreditations",
+      detail: counts.registrations
+        ? `${counts.registrations} held by the company or its people - PSIRA, SETA, permits, councils`
+        : "PSIRA, SETA accreditation, waste permits, HPCSA, SACAP ... - with expiry reminders",
+    },
+    { href: "/company/bank-accounts", title: "Bank accounts", detail: "Restricted - owners and admins only" },
+    {
+      href: "/company/properties",
+      title: "Buildings you lease to government",
+      detail: counts.properties ? `${counts.properties} building${counts.properties === 1 ? "" : "s"} on file` : "Only for lease / office-accommodation tenders",
+    },
+  ];
+  return (
+    <Section title="Directors, registrations &amp; property">
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+        {items.map((i) => (
+          <a
+            key={i.href}
+            href={i.href}
+            style={{ display: "block", border: "1px solid #E5E1D5", borderRadius: 9, padding: "10px 12px", textDecoration: "none", minHeight: 44, boxSizing: "border-box" }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B" }}>{i.title} →</div>
+            <div style={{ fontSize: 12, color: "#6B6758", marginTop: 3, lineHeight: 1.4 }}>{i.detail}</div>
+          </a>
+        ))}
+      </div>
+    </Section>
   );
 }
 
@@ -498,7 +560,7 @@ function EditForm({ company }: { company: CompanyRow }) {
           <TextInput name="bank_branch_code" label="Branch code" defaultValue={company.bank_branch_code} />
         </div>
         <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
-          Account numbers are not collected here - this schema never stores one.
+          Account numbers are not collected here - they go on the restricted Bank accounts page (owners and admins only).
         </div>
       </Section>
 
