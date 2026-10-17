@@ -140,8 +140,14 @@ def main(src_dir, profile_path, out_dir, provenance_out=None):
     comp = profile["company"]
     henning = profile["key_people"][0]
     # block_row -> (table row index) mapping, same convention as fill_conventional.py's
-    # key_persons list: 37 = PL = table row 1, 137 = DS1 = table row 3
-    key_persons = {1: henning, 3: henning}
+    # key_persons list: 37 = PL = table row 1, 137 = DS1 = table row 3.
+    # "henning" (key_people[0]) is the signatory, not necessarily the PL or
+    # DS1 - process_pack_jobs.py passes the real per-position people in
+    # profile["role_people"] (keyed "PL"/"DS") whenever it has them. Falls
+    # back to the signatory when absent (admin_harness.py's test-company
+    # fixtures, and any company where one person covers every role).
+    role_people = profile.get("role_people") or {}
+    key_persons = {1: role_people.get("PL", henning), 3: role_people.get("DS", henning)}
     log = ProvenanceLog(source="fill_docx_forms.py")
 
     fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log)

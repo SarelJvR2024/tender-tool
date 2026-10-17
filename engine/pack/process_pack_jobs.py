@@ -52,6 +52,7 @@ Env: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY (service role - this
 runs outside RLS, like every other engine/ writer).
 """
 import os
+import re
 import sys
 import json
 import shutil
@@ -324,7 +325,21 @@ def gather(client, job, work):
         prj = [p for p in projects if p["person_id"] == pid]
         index_of[pid] = len(key_people)
         key_people.append(adapt_person(people[pid], prj))
-    profile = {"company": adapt_company(company), "key_people": key_people}
+
+    # Which actual key_people entry holds the PL and which holds the DS -
+    # fill_docx_forms.py's C.1.2.3 key-person table rows need this; the
+    # signatory above is a separate person whenever the company's signatory
+    # isn't also tendered for a position (any company bigger than a
+    # one-person consultancy). Keyed by base position code ("DS1" -> "DS")
+    # so the one Design Specialist row matches whichever DS slot the
+    # template asks for; first match wins if a tender ever asks for more
+    # than one DS position (Conventional Book 1 templates seen so far ask
+    # for exactly one).
+    role_people = {}
+    for p in required:
+        base = re.sub(r"\d+$", "", p["code"].strip().upper())
+        role_people.setdefault(base, key_people[index_of[by_code[p["code"]]["confirmed_person_id"]]])
+    profile = {"company": adapt_company(company), "key_people": key_people, "role_people": role_people}
 
     # pack.yaml via confirm_pack.py's own confirm(), so its gates still apply.
     dp = os.path.join(work, "data_pack")

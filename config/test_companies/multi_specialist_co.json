@@ -1,0 +1,149 @@
+{
+  "_note": "SYNTHETIC TEST FIXTURE for the admin harness (spec item 30) - added 2026-10-17 by the standing QA/robustness review after finding a real bug (QA-Edge-Case-Findings.md) in engine/fill_docx_forms.py: the C.1.2.3 Contract Data form's 'Project Leader' and 'Design Specialist' key-person rows were always filled with the company's SIGNATORY (key_people[0]) regardless of who is actually confirmed for those positions. That bug was invisible on all 3 existing fixtures because each of them has exactly one key person who is simultaneously the signatory, the PL and the DS1 - a shape that happens to match Klipcorp's own real data, but not a company of any real size. This fixture is deliberately a DIFFERENT shape on two axes Sarel asked this review to cover: (1) three distinct key people, with the signatory being neither the PL nor the DS1 - the normal shape once a company has more than one qualified person; (2) a Design Specialist whose discipline is Structures, not Klipcorp's Pavement and Materials - the other 7 of 8 Book 1 DS specialisms (app/lib/sanralMatrices.ts) had no test-company coverage at all before this. Unlike the other 3 fixtures, this one also carries 'role_people' directly (normally synthesized at runtime by engine/pack/process_pack_jobs.py's gather() from tender_pack_assignments, never stored in a real company's own profile) so the admin harness's existing fill_docx_forms.py/fill_a_forms.py direct-call path - the one check that actually catches this bug class - exercises it on every run, not just the full web-to-Supabase pipeline (which cannot run in this environment - Gap #9).",
+  "_profile_name": "multi_specialist_co",
+  "company": {
+    "legal_name": "Test Multi-Specialist Consulting (Pty) Ltd",
+    "csd_trading_name": "Test Multi-Specialist",
+    "cipc_registration_number": "2012/000075/07",
+    "vat_number": "4000000075",
+    "income_tax_number": "9000000075",
+    "paye_number": "7000000075",
+    "csd_supplier_number": "MAAA0000075",
+    "coid_registration_number": "1000075",
+    "coid_letter_of_good_standing_number": "2026000075",
+    "coid_letter_of_good_standing_expiry": "2027-03-31",
+    "coid_status_flag": "CURRENT",
+    "cidb_grading": "7CE",
+    "bee_level": 1,
+    "black_ownership_pct": 80,
+    "bee_procurement_recognition_pct": 135,
+    "status": "QSE",
+    "registered_address": "75 Test Crescent, Umhlanga, KwaZulu-Natal, 4319",
+    "postal_address": "PO Box 75, Umhlanga",
+    "head_office_per_form_b3": "Umhlanga",
+    "other_offices": 2,
+    "ecsa_registered_staff_count": 9,
+    "sacpcmp_registered_staff_count": 1,
+    "total_employees": 35,
+    "typical_jv_share_pct": 100,
+    "bank": {
+      "bank_name": "Test Bank",
+      "branch_code": "000075",
+      "account_number": "WITHHELD - synthetic, never a real number"
+    },
+    "director": {
+      "name": "Devon Test-Director",
+      "id_number": "WITHHELD - synthetic",
+      "role": "signs BEE affidavit / CSD - NOT tendered for any position on this tender"
+    }
+  },
+  "key_people": [
+    {
+      "name": "Devon Test-Director",
+      "role": "Managing Director - signatory only, not a confirmed key person on any position",
+      "id_number": "0000000000075",
+      "qualifications": {
+        "ecsa_level": null,
+        "ecsa_number": null,
+        "ecsa_date": null,
+        "sacpcmp_number": null,
+        "highest_level": "Honours Degree and Postgraduate Diplomas",
+        "highest_description": "BCom (Hons)",
+        "highest_institution": "Test University",
+        "highest_graduated": "2005-01-01",
+        "initial_description": "BCom",
+        "initial_institution": "Test University",
+        "initial_graduated": "2002-01-01",
+        "years_experience": null
+      },
+      "projects": [],
+      "phone": "+27 00 000 0075",
+      "signatory_capacity": "Managing Director"
+    },
+    {
+      "name": "Pat Test-ProjectLeader",
+      "role": "Senior Engineer / fielded as Project Leader (PL) - distinct person from the signatory",
+      "id_number": "0000000000076",
+      "qualifications": {
+        "ecsa_level": "Professional Engineer",
+        "ecsa_number": "20000076",
+        "ecsa_date": "2010-01-01",
+        "sacpcmp_number": null,
+        "highest_level": "Masters Degree",
+        "highest_description": "MEng (Transportation Engineering)",
+        "highest_institution": "Test University",
+        "highest_graduated": "2009-01-01",
+        "initial_description": "BEng (Civil Engineering)",
+        "initial_institution": "Test University",
+        "initial_graduated": "2005-01-01",
+        "years_experience": null
+      },
+      "projects": [
+        {
+          "client_and_number": "Test Province DoT\nTEST/2018/075",
+          "value_rm": 150,
+          "position_held": "Project Leader",
+          "contact": "Sam Test-Referee\nProject Manager",
+          "contact_phone": "000 000 0075",
+          "contact_email": "sam.test@example.test",
+          "start": "2017-01-01",
+          "end": "2021-12-31",
+          "client_type": "Provincial Authority",
+          "project_type": "DN",
+          "position_code": "PL"
+        }
+      ],
+      "phone": "+27 00 000 0076",
+      "signatory_capacity": null
+    },
+    {
+      "name": "Riley Test-Structures",
+      "role": "Senior Structural Engineer / fielded as Design Specialist 1 - Structures - a different discipline from every other fixture's Pavement and Materials specialist",
+      "id_number": "0000000000077",
+      "qualifications": {
+        "ecsa_level": "Professional Engineer",
+        "ecsa_number": "20000077",
+        "ecsa_date": "2011-01-01",
+        "sacpcmp_number": null,
+        "highest_level": "Masters Degree",
+        "highest_description": "MEng (Structural Engineering)",
+        "highest_institution": "Test University",
+        "highest_graduated": "2010-01-01",
+        "initial_description": "BEng (Civil Engineering)",
+        "initial_institution": "Test University",
+        "initial_graduated": "2006-01-01",
+        "years_experience": null
+      },
+      "projects": [
+        {
+          "client_and_number": "Test Municipality\nTEST/2019/075",
+          "value_rm": 90,
+          "position_held": "Design Specialist - Structures",
+          "contact": "Sam Test-Referee\nProject Manager",
+          "contact_phone": "000 000 0076",
+          "contact_email": "sam.test@example.test",
+          "start": "2018-01-01",
+          "end": "2022-12-31",
+          "client_type": "Municipality",
+          "project_type": "DIB",
+          "position_code": "DS"
+        }
+      ],
+      "phone": "+27 00 000 0077",
+      "signatory_capacity": null
+    }
+  ],
+  "role_people": {
+    "PL": {
+      "name": "Pat Test-ProjectLeader",
+      "signatory_capacity": null,
+      "phone": "+27 00 000 0076"
+    },
+    "DS": {
+      "name": "Riley Test-Structures",
+      "signatory_capacity": null,
+      "phone": "+27 00 000 0077"
+    }
+  },
+  "gaps": []
+}

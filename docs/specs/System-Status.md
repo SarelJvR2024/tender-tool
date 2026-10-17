@@ -98,6 +98,36 @@ bridged by `engine/general/process_general_jobs.py`.
 
 13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; documents can't be attached to a shared discovered tender (load a private copy instead); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once.
 
+## This pass (2026-10-17, standing QA/robustness review - first run)
+
+New standing review, separate from the solution-architect pass above: adversarial testing of the
+engines against company/tender shapes different from Klipcorp's own, per Sarel's mandate.
+Evidence-first findings log now lives at `docs/specs/QA-Edge-Case-Findings.md` (new, append-only,
+read that for full detail - this is the pointer).
+
+**Found and fixed a real bug** in `engine/fill_docx_forms.py`: the C.1.2.3 Contract Data form's
+"Project Leader" and "Design Specialist" key-person rows were always filled with the company's
+*signatory* (`key_people[0]`), not the actually-confirmed PL/DS1 people - silently wrong (no
+error, no provenance flag) for any company where the signing director isn't also the sole
+technical specialist. Invisible on all 3 existing test-company fixtures and on Klipcorp's real
+data only because each has exactly one key person covering every role. Confirmed by running the
+real script against a synthetic 3-person profile shaped exactly as `process_pack_jobs.py`
+assembles one; fixed by having `process_pack_jobs.py` pass a `role_people` PL/DS mapping through
+the profile, with `fill_docx_forms.py` using it and falling back to the old behaviour when absent
+(verified byte-for-byte unchanged on the 3 existing fixtures). Added a 4th committed fixture,
+`config/test_companies/multi_specialist_co.json` (3 distinct people, DS **Structures** specialist
+rather than every other fixture's Pavement and Materials), so the harness keeps covering this
+shape. `admin_harness.py`: 24 clean / 0 flagged / 0 failures across all 4 fixtures × 6 templates.
+
+Also read `app/lib/sanralMatrices.ts`'s 8 Design-Specialist matrices in full: the no-match
+fallback (`matrixForPosition` -> `null` -> honest `[0,5]` range) is sound, not a silent-wrong-
+result gate. Flagged, not yet run: `sanralScoring.ts`'s `estimatePosition()` has never been
+exercised end-to-end on the other 7 DS specialisms (only Pavement and Materials, via Klipcorp's
+real data) - no live Supabase to drive it through, and no standalone harness for the TS scoring
+engine the way the Python fill scripts have. Next pass: either the general engine's equivalent
+signatory/role-conflation risk, or scripting a direct call into `estimatePosition()` for the
+other 7 specialisms.
+
 ## This pass (2026-10-17, 14:11 UTC)
 
 One new commit: the Dashboard's tender list (`/dashboard`, the first screen after login) made
