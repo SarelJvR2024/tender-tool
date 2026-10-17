@@ -2,6 +2,8 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility } from "../actions";
 import { SiteNav } from "../../_components/SiteNav";
+import { CvExtractionReview } from "./cv-review";
+import type { CvExtractionResult } from "@/lib/cvExtraction";
 import { ROLE_FAMILY_LABEL, ROLE_FAMILY_ORDER, TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 
 // Per-request: loads one real person's record (or a blank "new" form) under
@@ -38,6 +40,7 @@ type CvUpload = {
   mode: "as_is" | "ai_extract";
   status: string;
   created_at: string;
+  extraction_error: string | null;
 };
 
 type GeneratedCv = {
@@ -54,9 +57,9 @@ type GeneratedCv = {
 
 const CV_UPLOAD_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
   uploaded: { label: "Uploaded - used as-is", bg: "#DCFCE7", color: "#15803D" },
-  extraction_requested: { label: "AI extraction requested", bg: "#FEF3C7", color: "#B45309" },
-  extracting: { label: "Extracting…", bg: "#FEF3C7", color: "#B45309" },
-  extracted: { label: "Extracted - review fields above", bg: "#DCFCE7", color: "#15803D" },
+  extraction_requested: { label: "Waiting for AI extraction", bg: "#FEF3C7", color: "#B45309" },
+  extracting: { label: "Reading the CV…", bg: "#FEF3C7", color: "#B45309" },
+  extracted: { label: "Fields read - see above", bg: "#DCFCE7", color: "#15803D" },
   extraction_failed: { label: "Extraction failed", bg: "#FEE2E2", color: "#B91C1C" },
 };
 
@@ -116,10 +119,10 @@ export default async function PersonDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; roles_saved?: string }>;
+  searchParams: Promise<{ error?: string; roles_saved?: string; cv_applied?: string }>;
 }) {
   const { id } = await params;
-  const { error: errorParam, roles_saved: rolesSaved } = await searchParams;
+  const { error: errorParam, roles_saved: rolesSaved, cv_applied: cvApplied } = await searchParams;
   const isNew = id === "new";
   const supabase = await createClient();
 
@@ -131,6 +134,7 @@ export default async function PersonDetailPage({
   let roleCatalog: TenderRole[] = [];
   let taggedRoles = new Set<string>();
   let rolesError: string | null = null;
+  let pendingExtractions: CvExtractionResult[] = [];
 
   if (!isNew) {
     const { data } = await supabase.from("people").select("*").eq("id", id).maybeSingle();
@@ -154,10 +158,19 @@ export default async function PersonDetailPage({
 
     const { data: uploadRows } = await supabase
       .from("cv_uploads")
-      .select("id, storage_path, original_filename, mode, status, created_at")
+      .select("id, storage_path, original_filename, mode, status, created_at, extraction_error")
       .eq("person_id", id)
       .order("created_at", { ascending: false });
     cvUploads = (uploadRows ?? []) as CvUpload[];
+
+    // AI-extracted fields waiting for a person to confirm/correct (0023).
+    const { data: extractionRows } = await supabase
+      .from("cv_extraction_results")
+      .select("id, cv_upload_id, proposed, warnings, text_method, source_pages, model, created_at")
+      .eq("person_id", id)
+      .eq("review_status", "pending_review")
+      .order("created_at", { ascending: false });
+    pendingExtractions = (extractionRows ?? []) as CvExtractionResult[];
 
     // Standard (non-tender-specific) CVs only here - tender_id is null.
     // Tender-customized CVs are requested and shown on that tender's own
@@ -202,6 +215,9 @@ export default async function PersonDetailPage({
       <style>{`
         @media (max-width: 600px) {
           .person-grid-2 { grid-template-columns: 1fr !important; }
+          .cvx-row { grid-template-columns: 28px 1fr !important; }
+          .cvx-row > div:nth-child(n+3) { grid-column: 2; }
+          .cvx-proj { grid-template-columns: 1fr !important; }
         }
       `}</style>
 
@@ -220,6 +236,26 @@ export default async function PersonDetailPage({
             {decodeURIComponent(errorParam)}
           </div>
         )}
+
+        {cvApplied && (
+          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+            {(() => {
+              const [f, p] = cvApplied.split("-").map((n) => Number(n) || 0);
+              return `Saved from the CV: ${f} field${f === 1 ? "" : "s"}${p ? ` and ${p} project${p === 1 ? "" : "s"}` : ""}. The standard CV formats are queued.`;
+            })()}
+          </div>
+        )}
+
+        {!isNew && pendingExtractions.map((r) => (
+          <CvExtractionReview
+            key={r.id}
+            result={r}
+            filename={cvUploads.find((u) => u.id === r.cv_upload_id)?.original_filename ?? "uploaded CV"}
+            personId={person!.id}
+            current={person as unknown as Record<string, string | null>}
+            existingProjects={projects.map((p) => p.client_and_number)}
+          />
+        ))}
 
         <form action={savePerson} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "18px 16px", marginBottom: 20 }}>
           <input type="hidden" name="id" value={isNew ? "new" : person!.id} />
@@ -363,8 +399,9 @@ export default async function PersonDetailPage({
             <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
               Upload {person!.name}&apos;s CV once. Choose <strong>use as-is</strong> to attach
               the exact file to submissions with no AI involvement, or{" "}
-              <strong>AI-extract</strong> to also queue the standard CV template formats so
-              they&apos;re ready to view here any time - see docs/specs/Tender-Tool-Competitor-Feature-Deep-Dive.md.
+              <strong>AI-extract</strong> to have the qualifications, registrations and projects read off the CV for
+              you to check here - nothing is saved until you confirm it. Works on Word and PDF CVs that contain
+              text; a scanned/photographed CV can only be used as-is.
             </div>
 
             <form
@@ -381,8 +418,8 @@ export default async function PersonDetailPage({
                 <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 13, color: "#16233B", maxWidth: 320 }}>
                   <input type="radio" name="mode" value="ai_extract" defaultChecked style={{ marginTop: 3 }} />
                   <span>
-                    <strong>AI-extract</strong> the fields and pre-generate the standard CV
-                    formats right away.
+                    <strong>AI-extract</strong> the fields for you to check, then build the
+                    standard CV formats from them.
                   </span>
                 </label>
                 <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 13, color: "#16233B", maxWidth: 320 }}>
@@ -413,6 +450,9 @@ export default async function PersonDetailPage({
                         <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>
                           {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {new Date(u.created_at).toLocaleDateString()}
                         </div>
+                        {u.status === "extraction_failed" && u.extraction_error && (
+                          <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 4, maxWidth: 480 }}>{u.extraction_error}</div>
+                        )}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>

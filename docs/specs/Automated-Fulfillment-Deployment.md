@@ -145,6 +145,10 @@ This can't be done from this sandbox. It needs your own accounts and keys.
    - `NEXT_PUBLIC_SUPABASE_URL` = the Project URL from step 1
    - `SUPABASE_SERVICE_ROLE_KEY` = the service-role key from step 1
    - optional: `BRIDGE_POLL_INTERVAL` = `30` (seconds; the default)
+   - `ANTHROPIC_API_KEY` = an Anthropic API key, needed for CV AI-extraction (the
+     `cv_extract` bridge). Without it, AI-extract uploads wait in the queue and each pass logs
+     why; nothing else is affected. Optional `CV_EXTRACTION_MODEL` (default `claude-opus-5-5`).
+     Setup and cost: `CV-Extraction-Findings.md` §7.
 5. **Don't add a domain or port.** This is a background worker. It only calls out to Supabase.
 6. **Deploy, then open the service's logs.** You should see
    `run_bridges: polling every 30s`. Until the pack bridge is committed, you'll also see

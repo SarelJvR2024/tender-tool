@@ -1,0 +1,763 @@
+"""
+CV AI-extraction bridge: reads an uploaded CV (cv_uploads.mode = 'ai_extract')
+and PROPOSES people/projects field values for a human to confirm or correct on
+the People page. It never writes to `people` or `projects` itself.
+
+Spec: "CVs: upload once, never recapture" in
+docs/specs/Tender-Tool-Competitor-Feature-Deep-Dive.md. Evidence and design
+reasoning: docs/specs/CV-Extraction-Findings.md.
+
+Pipeline for one upload (same async request/fulfil shape as
+process_cv_jobs.py; the web app on Vercel can't run Python/LibreOffice):
+
+  1. claim:   cv_uploads.status extraction_requested -> extracting (atomic,
+              only if still extraction_requested), extraction_claimed_at set.
+  2. read:    download the original from the private cv-documents bucket and
+              pull its text layer - pdftotext for PDF, python-docx for .docx,
+              LibreOffice -> .docx for legacy .doc. These are the helpers
+              engine/general/requirements.py already uses for tender
+              documents (imported, not re-written).
+  3. gate:    refuse, with a plain reason, anything we can't read honestly:
+              an image upload, a scanned PDF with no text layer, garbled text
+              (bad font encoding), a file far too long to be one person's CV.
+              Nothing is guessed from a file we can't read.
+  4. redact:  South African ID numbers (13 digits, valid checksum) are found
+              locally and replaced with a placeholder BEFORE any text leaves
+              this machine. The ID is proposed from the local match.
+  5. parse:   one Claude Messages API call with a JSON-schema structured
+              output: every proposed value comes with the verbatim line of
+              the CV it was read from. Needs ANTHROPIC_API_KEY (see
+              CV-Extraction-Findings.md "What Sarel needs to set up").
+  6. check:   every quote is looked up in the CV text again. A value whose
+              quote isn't really in the CV, a registration number whose
+              digits don't appear in the CV, a date the CV only gives as a
+              year, a value outside SANRAL's own dropdown list - each is
+              flagged, so the review screen leaves it unticked by default.
+              The model saying the document isn't a CV, or finding nothing,
+              fails the job with that reason.
+  7. store:   cv_extraction_results row (migration 0023), review_status
+              'pending_review'; cv_uploads.status -> extracted. A failure sets
+              cv_uploads.status = extraction_failed with extraction_error.
+
+The People page then shows proposed-vs-current per field; only the user's
+"Save selected fields" action (app/app/people/actions.ts applyCvExtraction)
+writes to people/projects.
+
+Usage:
+    python3 extract_cv_fields.py [--once]                  # process the queue once (default)
+    python3 extract_cv_fields.py --loop [--interval 30]    # always-on mode
+    python3 extract_cv_fields.py --file CV.pdf --text-only # local: show what text we read
+    python3 extract_cv_fields.py --file CV.docx            # local: full extraction (needs ANTHROPIC_API_KEY)
+
+Environment:
+    NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY   queue mode only
+    ANTHROPIC_API_KEY                                    needed only when there is a CV to parse
+    CV_EXTRACTION_MODEL                                  optional, default claude-opus-5-5
+
+Missing ANTHROPIC_API_KEY with CVs waiting: the pass exits 1 with a clear
+message and the uploads stay 'extraction_requested' (not failed), so they are
+picked up as soon as the key is set - the user never has to re-upload.
+"""
+import argparse
+import datetime
+import json
+import os
+import re
+import shutil
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ENGINE = os.path.dirname(HERE)
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(ENGINE, "worker"))
+sys.path.insert(0, os.path.join(ENGINE, "general"))
+
+from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
+from process_cv_jobs import supabase_request  # noqa: E402  (same REST helper, same env vars)
+from requirements import docx_text, pdf_text, convert_with_soffice  # noqa: E402
+
+DEFAULT_MODEL = "claude-opus-5-5"
+STALE_AFTER_MINUTES = 30  # one API call + a text pull; 30 minutes means the worker died
+
+# ---------------------------------------------------------------------------
+# SANRAL's own closed lists. Read out of the real R.396-010-2025/1F
+# Conventional workbook's Form B2.1 dropdowns (templates/samples/
+# R.396-010-2025.1F_ran.xlsm, sheet 'TEND 1X', D76 and H76) with
+# engine/sanral_fill.Workbook.options(). engine/fill_conventional.py /
+# fill_tender.py call set_dropdown() with people.ecsa_level /
+# qualifications.highest_level and raise on any label not in these lists, so
+# a proposal outside them would break pack generation later - it is flagged.
+# ---------------------------------------------------------------------------
+ECSA_LEVELS = [
+    "Professional Engineer", "Professional Engineering Technologist", "Professional Certificated Engineer",
+    "Professional Engineering Technician", "Candidate Engineer", "Candidate Engineering Technologist",
+    "Candidate Certificated Engineer", "Candidate Engineering Technician", "Unregistered",
+]
+QUALIFICATION_LEVELS = [
+    "Higher Certificates and Advanced National (vocational) Cert.", "Diploma and Advanced certificates",
+    "Bachelors Degree and Advanced Diplomas", "Honours, Post Grad diploma and Professional Qualifications",
+    "Masters Degree", "Doctoral Degree",
+    "National Senior Certificate and National (vocational) Cert. level 4",
+]
+
+# people columns this step proposes (0001_init_schema.sql). Deliberately not:
+# description / signatory_capacity (company decisions, not CV facts) and any
+# years_experience (never stored - computed per tender from initial_graduated).
+PERSON_TEXT_FIELDS = [
+    "name", "role", "phone", "email",
+    "ecsa_number", "sacpcmp_number",
+    "highest_description", "highest_institution",
+    "initial_description", "initial_institution",
+]
+PERSON_DATE_FIELDS = ["ecsa_date", "sacpcmp_date", "highest_graduated", "initial_graduated"]
+PERSON_ENUM_FIELDS = {"ecsa_level": ECSA_LEVELS, "highest_level": QUALIFICATION_LEVELS}
+LLM_PERSON_FIELDS = PERSON_TEXT_FIELDS + PERSON_DATE_FIELDS + list(PERSON_ENUM_FIELDS)
+PERSON_FIELDS = LLM_PERSON_FIELDS + ["id_number"]  # id_number is matched locally, never by the model
+
+PROJECT_FIELDS = ["client_and_number", "position_held", "value_rm", "start_date", "end_date",
+                  "contact_name", "contact_phone", "contact_email"]
+
+# Text-quality gates (see CV-Extraction-Findings.md for how they were set).
+MIN_TEXT_CHARS = 200          # a real one-page CV has well over 1,000
+MIN_CHARS_PER_PAGE = 80       # below this a page is treated as having no text layer
+MIN_LETTER_RATIO = 0.35       # letters / non-space chars; garbled font encodings fall far below
+MAX_TEXT_CHARS = 150_000      # ~40+ pages of dense text - not one person's CV
+
+IMAGE_EXTS = {"png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif", "heic", "webp"}
+
+
+class ExtractionFailed(Exception):
+    """A reason the user should see, in plain words. The job is marked failed."""
+
+
+class SetupError(Exception):
+    """Server not set up (no API key, bad key). Job is put back in the queue."""
+
+
+class TransientError(Exception):
+    """Rate limit / overload / network. Job is put back in the queue."""
+
+
+# ============================================================================
+# 2-3. Text extraction and quality gates
+# ============================================================================
+
+def read_cv_text(path, work_dir):
+    """Returns {"text", "method", "pages", "empty_pages"}; raises
+    ExtractionFailed with a user-facing reason when the file has no usable
+    text. Re-uses engine/general/requirements.py's readers."""
+    ext = os.path.splitext(path)[1].lower().lstrip(".")
+    pages, empty_pages, verify_extra = None, [], ""
+
+    if ext in IMAGE_EXTS:
+        raise ExtractionFailed(
+            "This is a photo or scanned image, not a document with text in it. AI extraction reads a CV's "
+            "text and does not OCR scans yet, so nothing was guessed. Upload the Word or PDF version of the "
+            "CV, or choose 'use as-is' to attach this file unchanged.")
+    if ext == "pdf":
+        raw = pdf_text(path)
+        page_texts = raw.split("\f")
+        if page_texts and not page_texts[-1].strip():
+            page_texts = page_texts[:-1]
+        pages = len(page_texts)
+        empty_pages = [i + 1 for i, t in enumerate(page_texts) if len(re.sub(r"\s", "", t)) < MIN_CHARS_PER_PAGE]
+        text, method = raw.replace("\f", "\n"), "pdftotext -layout"
+        # Reading-order text too, used only to check the model's quotes: -layout
+        # interleaves a table's columns line by line, so a cell that wraps
+        # ("Test Metro" / "Roads Agency") is split up; reading order keeps each
+        # cell's lines together. The model gets the -layout text, which keeps
+        # SANRAL-form labels next to their values.
+        verify_extra = _pdf_reading_order_text(path)
+        if pages and len(empty_pages) == pages:
+            raise ExtractionFailed(
+                f"This PDF has no text layer on any of its {pages} page(s) - it is a scan (a photo of paper). "
+                "AI extraction reads a CV's text and does not OCR scans yet, so nothing was guessed. Upload the "
+                "original Word/PDF export of the CV, or choose 'use as-is' to attach the scan unchanged.")
+    elif ext == "docx":
+        try:
+            text = docx_text(path)
+        except Exception as e:
+            raise ExtractionFailed(f"This .docx file could not be opened ({e}). It may be damaged or not really a Word file.")
+        method = "python-docx"
+    elif ext == "doc":
+        conv = convert_with_soffice(path, "docx", work_dir)
+        if not conv:
+            raise ExtractionFailed("This old-style Word .doc file could not be converted to read its text. "
+                                   "Save it as .docx or PDF and upload that instead.")
+        text, method = docx_text(conv), "LibreOffice .doc->.docx, python-docx"
+    elif ext == "txt":
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text, method = f.read(), "plain text"
+    else:
+        raise ExtractionFailed(f"'.{ext}' files can't be read for AI extraction. Upload the CV as PDF or Word (.docx/.doc).")
+
+    assess_text_quality(text, pages)
+    return {"text": text, "method": method, "pages": pages, "empty_pages": empty_pages,
+            "verify_text": text + "\n" + verify_extra}
+
+
+def _pdf_reading_order_text(path):
+    import subprocess
+    try:
+        out = subprocess.run(["pdftotext", path, "-"], capture_output=True, text=True, timeout=120)
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return ""
+    return out.stdout if out.returncode == 0 else ""
+
+
+def assess_text_quality(text, pages=None):
+    compact = re.sub(r"\s", "", text or "")
+    if len(compact) < MIN_TEXT_CHARS:
+        raise ExtractionFailed(
+            f"Only {len(compact)} characters of text could be read from this file"
+            + (f" ({pages} page(s))" if pages else "")
+            + ". It is most likely a scan or an image saved inside a PDF/Word file. AI extraction reads text and "
+              "does not OCR scans yet, so nothing was guessed. Upload the original Word/PDF export of the CV, or "
+              "choose 'use as-is'.")
+    letters = sum(ch.isalpha() for ch in compact)
+    if letters / len(compact) < MIN_LETTER_RATIO:
+        raise ExtractionFailed(
+            "The text in this file reads as garbled symbols (usually a PDF made with an unusual font encoding), "
+            "so its fields can't be read reliably and nothing was guessed. Re-export the CV to PDF from Word, or "
+            "upload the .docx.")
+    if len(compact) > MAX_TEXT_CHARS:
+        raise ExtractionFailed(
+            f"This file has about {len(compact):,} characters of text"
+            + (f" over {pages} pages" if pages else "")
+            + " - far more than one person's CV. Upload just this person's CV, not a whole tender submission.")
+
+
+# ============================================================================
+# 4. South African ID numbers: matched and redacted locally
+# ============================================================================
+
+SA_ID_RE = re.compile(r"(?<!\d)(\d{6})[ -]?(\d{4})[ -]?(\d{3})(?!\d)")
+
+
+def _luhn_ok(digits):
+    total = 0
+    for i, ch in enumerate(reversed(digits)):
+        d = int(ch)
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return total % 10 == 0
+
+
+def _plausible_sa_id(digits):
+    if len(digits) != 13 or not _luhn_ok(digits):
+        return False
+    mm, dd = int(digits[2:4]), int(digits[4:6])
+    return 1 <= mm <= 12 and 1 <= dd <= 31 and digits[10] in "01"
+
+
+def find_and_redact_sa_ids(text):
+    """Returns (redacted_text, [unique ID numbers found]). Only 13-digit
+    numbers with a valid SA ID checksum, birth month/day and citizenship digit
+    count - registration numbers, phone numbers and contract numbers don't."""
+    found = []
+
+    def sub(m):
+        digits = "".join(m.groups())
+        if not _plausible_sa_id(digits):
+            return m.group(0)
+        if digits not in found:
+            found.append(digits)
+        return "[SA ID NUMBER REMOVED]"
+
+    return SA_ID_RE.sub(sub, text), found
+
+
+# ============================================================================
+# 5. The LLM call
+# ============================================================================
+
+def _nullable(schema):
+    return {"anyOf": [schema, {"type": "null"}]}
+
+
+def _field(value_schema):
+    return {
+        "type": "object",
+        "properties": {"value": _nullable(value_schema), "evidence": _nullable({"type": "string"})},
+        "required": ["value", "evidence"],
+        "additionalProperties": False,
+    }
+
+
+def output_schema():
+    person_props = {f: _field({"type": "string"}) for f in PERSON_TEXT_FIELDS + PERSON_DATE_FIELDS}
+    for f, options in PERSON_ENUM_FIELDS.items():
+        person_props[f] = _field({"type": "string", "enum": options})
+    project_props = {f: _nullable({"type": "number"} if f == "value_rm" else {"type": "string"}) for f in PROJECT_FIELDS}
+    project_props["evidence"] = {"type": "string"}
+    return {
+        "type": "object",
+        "properties": {
+            "document_kind": {"type": "string", "enum": ["cv", "sanral_key_person_forms", "not_a_cv"]},
+            "document_kind_reason": {"type": "string"},
+            "person": {"type": "object", "properties": person_props, "required": list(person_props),
+                       "additionalProperties": False},
+            "projects": {"type": "array", "items": {
+                "type": "object", "properties": project_props, "required": list(project_props),
+                "additionalProperties": False}},
+            "other_registrations": {"type": "array", "items": {
+                "type": "object",
+                "properties": {"body": {"type": "string"}, "level": _nullable({"type": "string"}),
+                               "number": _nullable({"type": "string"}), "evidence": {"type": "string"}},
+                "required": ["body", "level", "number", "evidence"], "additionalProperties": False}},
+            "parse_problems": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["document_kind", "document_kind_reason", "person", "projects", "other_registrations",
+                     "parse_problems"],
+        "additionalProperties": False,
+    }
+
+
+SYSTEM_PROMPT = """You read the text of one person's CV for a South African engineering consultancy that prepares public-sector tenders (SANRAL and other buyers). Your output pre-fills a form that a person at the company then checks field by field before anything is saved, so a missing value costs them a few seconds and a wrong value can end up on a sworn tender form. When the CV does not clearly state something, leave it null rather than inferring it.
+
+How to fill the output:
+
+- Every value needs `evidence`: a short verbatim quote copied character-for-character from the CV text that shows the value (the line or table cell it came from). The quote is searched for in the CV afterwards; a value whose quote cannot be found is shown to the reviewer as unverified. If you cannot quote it, set both value and evidence to null.
+- Dates: write `YYYY-MM-DD` only when the CV gives the full date. If it gives only a month and year write `YYYY-MM`; only a year, `YYYY`. Never invent a day or month. Read `2015/3/5`, `05 Mar 2015` and `5 March 2015` all as 2015-03-05; if day/month order is genuinely ambiguous, use the lower precision you are sure of and say so in parse_problems.
+- `role`: the person's current job title.
+- Registrations: `ecsa_level`/`ecsa_number`/`ecsa_date` are the person's Engineering Council of South Africa registration (category, registration number, date registered). `sacpcmp_number`/`sacpcmp_date` are the SA Council for the Project and Construction Management Professions. `ecsa_level` must be one of the listed options and only when the CV states the category (for example "Pr Eng" or "Professional Engineer" is "Professional Engineer"; "Pr Tech Eng" is "Professional Engineering Technologist"; "Pr Techni Eng" is "Professional Engineering Technician"; a candidate category is the matching "Candidate ..." option). Any other professional body (SACAP, SACPLAN, SACNASP, SAICE membership, PLATO, SACQSP, ECSA-recognised voluntary associations, ...) goes in `other_registrations`, not in the ECSA/SACPCMP fields.
+- Qualifications: `initial_*` is the first tertiary qualification relevant to the person's profession (for an engineer usually the first degree or diploma); `highest_*` is the highest one. If the CV lists only one tertiary qualification, it is both initial and highest. `*_description` is the qualification as written (e.g. "BEng (Civil Engineering)"), `*_institution` the university/college, `*_graduated` the date awarded. `highest_level` must be one of the listed options (the South African NQF band of the highest qualification: a BEng/BSc is "Bachelors Degree and Advanced Diplomas", an MEng/MSc is "Masters Degree", a BSc Hons or a postgraduate diploma is "Honours, Post Grad diploma and Professional Qualifications", a National Diploma is "Diploma and Advanced certificates"); null when no tertiary qualification is listed.
+- Projects: one entry per project or contract the person worked on that the CV lists (a project-experience table, or project descriptions under employment history). `client_and_number` is the client and the contract/project number as written (put both on one line, client first, e.g. "SANRAL - N.001-012-2026/1F" or "City of Tshwane: Rehabilitation of Lynnwood Road"); `position_held` the person's role on that project; `value_rm` the project/contract value converted to millions of rand as a plain number (R150 million -> 150, R2.5 bn -> 2500, R800 000 -> 0.8), only when the CV states a rand value; start/end dates with the same date rules (end null if ongoing or not given); `contact_*` the client referee for that project if named. `evidence` is a verbatim quote of that project's client/title line. Employment history at a company without any named project is not a project entry. Do not merge two projects into one or split one into two.
+- `document_kind`: "cv" for a normal CV; "sanral_key_person_forms" when the text is SANRAL's Form B1.1/B2.1 (Candidate's technical/managerial record, qualification and registration record) - read those the same way; "not_a_cv" when it is not about one person's career at all (a tender document, a certificate on its own, a letter, a form for several people). Explain in `document_kind_reason` in one sentence.
+- Identity numbers have been removed from the text before you see it; ignore the placeholder.
+- `parse_problems`: anything the reviewer should know - a layout that made a section hard to read, columns that may have run together, an ambiguous date, two different values for the same field, a section in another language. Empty when there were none."""
+
+
+def compact_for_model(text):
+    """pdftotext -layout pads columns with long runs of spaces (the real SANRAL
+    Form B1-B2 PDF: 11.9k characters, most of them padding). Runs of 4+ spaces
+    become 3 - still a visible column gap, at a fraction of the tokens. Quotes
+    are checked against the original text with whitespace collapsed, so this
+    doesn't affect verification."""
+    text = re.sub(r"[ \t]{4,}", "   ", text)
+    return re.sub(r"\n{3,}", "\n\n", text)
+
+
+def build_user_message(text):
+    return ("Here is the text extracted from the uploaded CV file. Table cells may be separated by runs of spaces "
+            "or ' | ', and page layout may have moved columns apart.\n\n<cv_text>\n" + text + "\n</cv_text>")
+
+
+def default_llm_client():
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        raise SetupError(
+            "ANTHROPIC_API_KEY is not set on this worker, so CVs waiting for AI extraction can't be read yet. "
+            "They stay queued and will be processed once the key is set (see docs/specs/CV-Extraction-Findings.md, "
+            "'What Sarel needs to set up').")
+    try:
+        import anthropic
+    except ImportError:
+        raise SetupError("The 'anthropic' Python package isn't installed on this worker "
+                         "(pip install -r engine/worker/requirements.txt).")
+    return anthropic.Anthropic(api_key=key)
+
+
+def call_llm(text, client=None, model=None):
+    """One structured-output Messages API call. Returns (parsed_dict, meta).
+    `client` is anything with .beta.messages.create(...) - the real
+    anthropic.Anthropic() unless a test passes its own."""
+    import anthropic
+    client = client or default_llm_client()
+    model = model or os.environ.get("CV_EXTRACTION_MODEL") or DEFAULT_MODEL
+    try:
+        response = client.beta.messages.create(
+            model=model,
+            max_tokens=16000,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": build_user_message(text)}],
+            output_config={"effort": "medium", "format": {"type": "json_schema", "schema": output_schema()}},
+            # If a safety classifier declines (unlikely for a CV, but possible),
+            # Anthropic re-runs the request on its recommended fallback model
+            # inside the same call instead of returning a refusal.
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+        )
+    except anthropic.AuthenticationError:
+        raise SetupError("ANTHROPIC_API_KEY was rejected by the Anthropic API (invalid or revoked key). "
+                         "CVs stay queued until a working key is set.")
+    except anthropic.PermissionDeniedError as e:
+        raise SetupError(f"The Anthropic API key lacks permission for this request: {e.message}")
+    except anthropic.NotFoundError:
+        raise SetupError(f"Model '{model}' was not found - check CV_EXTRACTION_MODEL.")
+    except anthropic.RateLimitError:
+        raise TransientError("Anthropic API rate limit reached; will retry on the next pass.")
+    except anthropic.BadRequestError as e:
+        raise ExtractionFailed(f"The AI service rejected this CV's request: {e.message}")
+    except anthropic.APIStatusError as e:
+        if e.status_code >= 500:
+            raise TransientError(f"Anthropic API server error {e.status_code}; will retry on the next pass.")
+        raise ExtractionFailed(f"The AI service returned an error ({e.status_code}): {e.message}")
+    except anthropic.APIConnectionError:
+        raise TransientError("Could not reach the Anthropic API; will retry on the next pass.")
+
+    meta = {"model": getattr(response, "model", model),
+            "request_id": getattr(response, "_request_id", None),
+            "stop_reason": response.stop_reason}
+    usage = getattr(response, "usage", None)
+    if usage is not None:
+        meta["usage"] = {"input_tokens": getattr(usage, "input_tokens", None),
+                         "output_tokens": getattr(usage, "output_tokens", None)}
+
+    if response.stop_reason == "refusal":
+        raise ExtractionFailed("The AI service declined to read this file, so no fields were proposed. "
+                               "Enter the fields by hand or try a different copy of the CV.")
+    if response.stop_reason == "max_tokens":
+        raise ExtractionFailed("This CV has more content than one extraction pass can return. "
+                               "Upload a shorter CV (e.g. without project appendices) and add the rest by hand.")
+    texts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+    if not texts:
+        raise ExtractionFailed("The AI service returned no answer for this CV.")
+    try:
+        return json.loads(texts[-1]), meta
+    except json.JSONDecodeError:
+        raise ExtractionFailed("The AI service's answer wasn't valid structured data, so nothing was proposed.")
+
+
+# ============================================================================
+# 6. Checking the model's answer against the CV text
+# ============================================================================
+
+def _norm(s):
+    s = (s or "").lower().replace("–", "-").replace("—", "-").replace("’", "'")
+    return re.sub(r"[\s|]+", " ", s).strip()
+
+
+def _digits(s):
+    return re.sub(r"\D", "", s or "")
+
+
+def evidence_in_text(evidence, norm_text):
+    if not evidence:
+        return False
+    e = _norm(evidence)
+    if e and e in norm_text:
+        return True
+    # a quote wrapped mid-token by a narrow table column ("TMRA/2019/04" + "4"),
+    # or whose line-end hyphen the PDF text layer dropped: compare letters and
+    # digits only
+    squeezed = re.sub(r"[^a-z0-9]", "", e)
+    if len(squeezed) >= 8 and squeezed in re.sub(r"[^a-z0-9]", "", norm_text):
+        return True
+    # pdftotext -layout can put a cell on two lines or split a long label from
+    # its value; accept the quote when every 4+ char chunk of it is present.
+    chunks = [c for c in re.split(r"[^a-z0-9@./()-]+", e) if len(c) >= 4]
+    return bool(chunks) and all(c in norm_text for c in chunks)
+
+
+def normalise_date(raw):
+    """Returns (iso_date or None, precision 'day'|'month'|'year'|None, warning)."""
+    if raw is None:
+        return None, None, None
+    raw = raw.strip()
+    try:
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw):
+            return datetime.date.fromisoformat(raw).isoformat(), "day", None
+        if re.fullmatch(r"\d{4}-\d{2}", raw):
+            datetime.date(int(raw[:4]), int(raw[5:7]), 1)
+            return f"{raw}-01", "month", (f"The CV only gives the month ({raw}). The 1st of the month is filled in "
+                                          "as a placeholder - correct the day if you know it.")
+        if re.fullmatch(r"\d{4}", raw):
+            return f"{raw}-01-01", "year", (f"The CV only gives the year ({raw}). 1 January is filled in as a "
+                                            "placeholder - correct it if you know the real date.")
+    except ValueError:
+        pass
+    return None, None, f"'{raw}' isn't a date that could be read; enter it by hand."
+
+
+def validate_proposal(data, text, local_ids):
+    """Turns the model's answer into the stored proposal: per field {value,
+    evidence, verified, warnings}. Raises ExtractionFailed when the answer
+    says the file isn't a CV or found nothing usable."""
+    norm_text = _norm(text)
+    digits_text = _digits(text)
+    overall = [p for p in (data.get("parse_problems") or []) if p]
+
+    if data.get("document_kind") == "not_a_cv":
+        raise ExtractionFailed("This doesn't look like one person's CV"
+                               + (f": {data.get('document_kind_reason')}" if data.get("document_kind_reason") else ".")
+                               + " Nothing was proposed.")
+
+    person = {}
+    for f in LLM_PERSON_FIELDS:
+        item = (data.get("person") or {}).get(f) or {}
+        value, evidence = item.get("value"), item.get("evidence")
+        if isinstance(value, str):
+            value = value.strip() or None
+        if value is None:
+            continue
+        warnings = []
+        verified = evidence_in_text(evidence, norm_text)
+        if not verified:
+            warnings.append("The quote this was read from couldn't be found in the CV text - check it against the CV.")
+        if f in PERSON_DATE_FIELDS:
+            iso, precision, w = normalise_date(value)
+            if w:
+                warnings.append(w)
+            if iso is None:
+                verified = False
+            elif precision != "day":
+                verified = False  # placeholder day/month: needs a human to tick it
+            value = iso
+        if f in PERSON_ENUM_FIELDS and value not in PERSON_ENUM_FIELDS[f]:
+            warnings.append(f"'{value}' isn't one of SANRAL's options for this field; choose one.")
+            value, verified = None, False
+        if f in ("ecsa_number", "sacpcmp_number", "phone") and _digits(value) and _digits(value) not in digits_text:
+            warnings.append("These digits don't appear in the CV text - check them.")
+            verified = False
+        if f == "email" and value.lower() not in text.lower():
+            warnings.append("This address doesn't appear in the CV text - check it.")
+            verified = False
+        person[f] = {"value": value, "evidence": evidence, "verified": verified, "warnings": warnings}
+
+    if len(local_ids) == 1:
+        person["id_number"] = {"value": local_ids[0], "evidence": "Found in the CV text (never sent to the AI service).",
+                               "verified": True, "warnings": []}
+    elif len(local_ids) > 1:
+        overall.append(f"The CV contains {len(local_ids)} different SA ID numbers, so none was proposed - enter the "
+                       "right one by hand.")
+
+    projects = []
+    for p in data.get("projects") or []:
+        client = (p.get("client_and_number") or "").strip()
+        if not client:
+            continue
+        warnings = []
+        verified = evidence_in_text(p.get("evidence"), norm_text) or evidence_in_text(client, norm_text)
+        if not verified:
+            warnings.append("This project's client/title couldn't be found in the CV text - check it against the CV.")
+        row = {"client_and_number": client, "evidence": p.get("evidence")}
+        for f in ("position_held", "contact_name", "contact_phone", "contact_email"):
+            v = p.get(f)
+            row[f] = v.strip() if isinstance(v, str) and v.strip() else None
+        v = p.get("value_rm")
+        row["value_rm"] = v if isinstance(v, (int, float)) and v >= 0 else None
+        for f in ("start_date", "end_date"):
+            iso, precision, w = normalise_date(p.get(f))
+            row[f] = iso
+            if w:
+                warnings.append(("Start: " if f == "start_date" else "End: ") + w)
+        if row["contact_phone"] and _digits(row["contact_phone"]) not in digits_text:
+            warnings.append("The referee phone number's digits don't appear in the CV text - check them.")
+        row["verified"], row["warnings"] = verified, warnings
+        projects.append(row)
+
+    other = [r for r in (data.get("other_registrations") or []) if r.get("body")]
+    for r in other:
+        r["verified"] = evidence_in_text(r.get("evidence"), norm_text)
+
+    if not person and not projects:
+        raise ExtractionFailed(
+            "None of the CV fields (name, registrations, qualifications, projects) could be found in this file, so "
+            "nothing was proposed. The layout may be too unusual to read - enter the fields by hand."
+            + (f" Notes: {'; '.join(overall)}" if overall else ""))
+    unverified = sum(1 for v in person.values() if not v["verified"]) + sum(1 for p in projects if not p["verified"])
+    total = len(person) + len(projects)
+    if total >= 4 and unverified / total > 0.6:
+        raise ExtractionFailed(
+            f"{unverified} of the {total} values the AI proposed couldn't be traced back to the CV's own text, so the "
+            "result isn't trustworthy and nothing was proposed. The layout may be too unusual to read reliably - "
+            "enter the fields by hand.")
+
+    return {"document_kind": data.get("document_kind"), "person": person, "projects": projects,
+            "other_registrations": other}, overall
+
+
+def extract_from_file(path, work_dir, client=None):
+    """Steps 2-6 for one local file. Returns (proposal, warnings, info)."""
+    read = read_cv_text(path, work_dir)
+    redacted, ids = find_and_redact_sa_ids(read["text"])
+    data, meta = call_llm(compact_for_model(redacted), client=client)
+    proposal, warnings = validate_proposal(data, read["verify_text"], ids)
+    if read["empty_pages"]:
+        warnings.insert(0, f"Page(s) {', '.join(map(str, read['empty_pages']))} of {read['pages']} had no readable "
+                           "text (probably scanned) - anything on them was not read.")
+    info = {"text_method": read["method"], "source_pages": read["pages"],
+            "source_text_chars": len(read["text"]), **meta}
+    return proposal, warnings, info
+
+
+# ============================================================================
+# 1 + 7. Queue plumbing (Supabase REST, service role)
+# ============================================================================
+
+def _now_iso():
+    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+
+def storage_download(url, key, bucket, object_path, dest):
+    quoted = urllib.parse.quote(object_path, safe="/")
+    req = urllib.request.Request(f"{url}/storage/v1/object/{bucket}/{quoted}",
+                                 headers={"apikey": key, "Authorization": f"Bearer {key}"})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r, open(dest, "wb") as f:
+            shutil.copyfileobj(r, f)
+    except urllib.error.HTTPError as e:
+        raise ExtractionFailed(f"The uploaded file couldn't be fetched from storage ({e.code}). Upload it again.")
+
+
+def claim_upload(url, key, upload):
+    claimed = supabase_request(
+        url, key, "PATCH", f"cv_uploads?id=eq.{upload['id']}&status=eq.extraction_requested",
+        {"status": "extracting", "extraction_claimed_at": _now_iso(), "extraction_error": None})
+    return bool(claimed)
+
+
+def release_upload(url, key, upload):
+    """Put a claimed upload back in the queue (setup or transient problem)."""
+    supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{upload['id']}&status=eq.extracting",
+                     {"status": "extraction_requested", "extraction_claimed_at": None})
+
+
+def fail_upload(url, key, upload, reason):
+    supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{upload['id']}", {
+        "status": "extraction_failed", "extraction_error": reason, "extraction_completed_at": _now_iso()})
+
+
+def fail_stale_uploads(url, key, now=None):
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
+    for up in supabase_request(url, key, "GET", "cv_uploads?status=eq.extracting&select=id,extraction_claimed_at"):
+        claimed = up.get("extraction_claimed_at")
+        if claimed and datetime.datetime.fromisoformat(claimed.replace("Z", "+00:00")) < cutoff:
+            supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{up['id']}&status=eq.extracting", {
+                "status": "extraction_failed", "extraction_completed_at": _now_iso(),
+                "extraction_error": f"The extraction worker stopped mid-job (no result after {STALE_AFTER_MINUTES} "
+                                    "minutes). Nothing was proposed - upload the CV again."})
+            print(f"[failed] cv_upload {up['id']}: stale 'extracting' since {claimed}")
+
+
+def process_upload(url, key, upload, client_factory=default_llm_client):
+    """Returns True if handled (ready or failed), False if skipped. Raises
+    SetupError (after putting the upload back) so the pass exits non-zero."""
+    if not claim_upload(url, key, upload):
+        print(f"[skipped] cv_upload {upload['id']}: already claimed by another worker")
+        return False
+    work_dir = tempfile.mkdtemp(prefix="cv_extract_")
+    try:
+        client = client_factory()  # SetupError here leaves the job queued
+        local = os.path.join(work_dir, os.path.basename(upload["storage_path"]))
+        storage_download(url, key, "cv-documents", upload["storage_path"], local)
+        proposal, warnings, info = extract_from_file(local, work_dir, client=client)
+        supabase_request(url, key, "POST", "cv_extraction_results?on_conflict=cv_upload_id", {
+            "company_id": upload["company_id"], "person_id": upload["person_id"], "cv_upload_id": upload["id"],
+            "proposed": proposal, "warnings": warnings, "review_status": "pending_review",
+            "text_method": info["text_method"], "source_pages": info["source_pages"],
+            "source_text_chars": info["source_text_chars"], "model": info.get("model"),
+            "usage": info.get("usage"),
+        })
+        supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{upload['id']}", {
+            "status": "extracted", "extraction_completed_at": _now_iso(), "extraction_error": None})
+        print(f"[extracted] cv_upload {upload['id']}: {len(proposal['person'])} field(s), "
+              f"{len(proposal['projects'])} project(s), {len(warnings)} warning(s)")
+        return True
+    except (SetupError, TransientError) as e:
+        release_upload(url, key, upload)
+        if isinstance(e, SetupError):
+            raise
+        print(f"[retry] cv_upload {upload['id']}: {e}")
+        return False
+    except ExtractionFailed as e:
+        fail_upload(url, key, upload, str(e))
+        print(f"[failed] cv_upload {upload['id']}: {e}")
+        return True
+    except Exception as e:  # a bug, not a user problem - still never leave it 'extracting'
+        fail_upload(url, key, upload, f"AI extraction hit an unexpected error ({type(e).__name__}). Nothing was "
+                                      "proposed - upload the CV again or enter the fields by hand.")
+        print(f"[failed] cv_upload {upload['id']}: unexpected {type(e).__name__}: {e}")
+        return True
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def poll_once(url, key, quiet_when_empty=False, client_factory=default_llm_client):
+    fail_stale_uploads(url, key)
+    uploads = supabase_request(
+        url, key, "GET",
+        "cv_uploads?status=eq.extraction_requested&mode=eq.ai_extract&select=*&order=created_at.asc")
+    if not uploads:
+        if not quiet_when_empty:
+            print("No pending CV extraction requests.")
+        return 0
+    handled = 0
+    for up in uploads:
+        if process_upload(url, key, up, client_factory=client_factory):
+            handled += 1
+    return handled
+
+
+def run(loop=False, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None):
+    url = os.environ.get("NEXT_PUBLIC_SUPABASE_URL")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not url or not key:
+        print("ERROR: set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY "
+              "(see app/.env.local.example) before running this.")
+        return 1
+    if not loop:
+        try:
+            poll_once(url, key)
+        except SetupError as e:
+            print(f"ERROR: {e}")
+            return 1
+        return 0
+    poll_forever(lambda: poll_once(url, key, quiet_when_empty=True), interval=interval,
+                 max_cycles=max_cycles, name="extract_cv_fields")
+    return 0
+
+
+def run_local_file(path, text_only):
+    work_dir = tempfile.mkdtemp(prefix="cv_extract_")
+    try:
+        if text_only:
+            read = read_cv_text(path, work_dir)
+            redacted, ids = find_and_redact_sa_ids(read["text"])
+            print(json.dumps({"method": read["method"], "pages": read["pages"], "empty_pages": read["empty_pages"],
+                              "chars": len(read["text"]), "sa_id_numbers_found": len(ids)}, indent=2))
+            sent = compact_for_model(redacted)
+            print(f"----- text that would be sent ({len(sent)} chars; ID numbers removed) -----")
+            print(sent)
+            return 0
+        proposal, warnings, info = extract_from_file(path, work_dir)
+        print(json.dumps({"info": info, "warnings": warnings, "proposal": proposal}, indent=2, default=str))
+        return 0
+    except ExtractionFailed as e:
+        print(f"EXTRACTION FAILED (shown to the user as-is): {e}")
+        return 2
+    except (SetupError, TransientError) as e:
+        print(f"ERROR: {e}")
+        return 1
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--once", action="store_true", help="process queued uploads once and exit (the default)")
+    mode.add_argument("--loop", "--daemon", dest="loop", action="store_true", help="keep polling until stopped")
+    mode.add_argument("--file", help="run on one local CV file instead of the Supabase queue")
+    ap.add_argument("--text-only", action="store_true", help="with --file: only show the text step (no API call)")
+    ap.add_argument("--interval", type=int, default=DEFAULT_INTERVAL_SECONDS)
+    ap.add_argument("--max-cycles", type=int, default=None)
+    args = ap.parse_args(argv)
+    if args.file:
+        return run_local_file(args.file, args.text_only)
+    if args.interval <= 0:
+        ap.error("--interval must be a positive number of seconds")
+    return run(loop=args.loop, interval=args.interval, max_cycles=args.max_cycles)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

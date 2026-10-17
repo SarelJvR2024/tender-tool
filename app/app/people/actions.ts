@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
+import { EXTRACTED_PERSON_FIELDS, ISO_DATE, type Proposal } from "@/lib/cvExtraction";
 
 /**
  * Every write here goes through the signed-in user's own Supabase client, so
@@ -159,16 +160,17 @@ export async function deleteProject(formData: FormData) {
  *                 involvement at all - recorded in cv_uploads and nothing else
  *                 happens. (See the spec's "Use as-is option" paragraph.)
  *   ai_extract  - queues field extraction (cv_uploads.status =
- *                 'extraction_requested' - the actual extraction step is not
- *                 built yet, see engine/cv/README.md "What's genuinely not done
- *                 yet") AND immediately queues the standard (non-tender-
- *                 specific) CV formats for pre-generation (generated_cvs rows,
- *                 status 'requested'), so they're sitting there ready to view
- *                 any time someone looks at this person, not generated lazily
- *                 on first view. Actual generation happens out-of-band - see
- *                 engine/cv/process_cv_jobs.py and its README section on why
- *                 (Vercel can't run Python/LibreOffice) - this action only
- *                 ever records the request, never blocks on a result.
+ *                 'extraction_requested'). engine/cv/extract_cv_fields.py reads
+ *                 the file and stores PROPOSED values (cv_extraction_results,
+ *                 0023); the People page shows them for confirm/correct and
+ *                 applyCvExtraction() below writes only what the person ticks.
+ *                 The standard (non-tender-specific) CV formats are queued for
+ *                 pre-generation (generated_cvs, 'requested') at that confirm
+ *                 step, not here: until the fields are confirmed the record
+ *                 they'd be built from is still empty or out of date.
+ *                 Generation itself happens out-of-band - see
+ *                 engine/cv/process_cv_jobs.py (Vercel can't run
+ *                 Python/LibreOffice) - this file only records requests.
  *
  * Storage path convention: "<company_id>/people/<person_id>/uploads/<uuid>-
  * <filename>" under the private 'cv-documents' bucket (0008_cv_uploads.sql),
@@ -218,23 +220,159 @@ export async function uploadCv(formData: FormData) {
     redirect(`/people/${personId}?error=${encodeURIComponent(insertError.message)}`);
   }
 
-  if (mode === "ai_extract") {
-    const standardJobs = STANDARD_CV_FORMATS.flatMap((format) =>
-      STANDARD_CV_DETAILS.map((detail) => ({
-        company_id: companyId,
-        person_id: personId,
-        format,
-        detail,
-        status: "requested" as const,
-        requested_by: user?.id ?? null,
-      }))
-    );
-    const { error: jobsError } = await supabase.from("generated_cvs").insert(standardJobs);
-    if (jobsError) {
-      redirect(`/people/${personId}?error=${encodeURIComponent(`CV uploaded, but could not queue standard formats: ${jobsError.message}`)}`);
-    }
+  revalidatePath(`/people/${personId}`);
+  redirect(`/people/${personId}`);
+}
+
+/**
+ * Queue the four standard CV formats for one person, unless a set is already
+ * waiting to be built (re-confirming twice shouldn't stack duplicate jobs).
+ * Returns an error message or null.
+ */
+async function queueStandardCvs(supabase: Awaited<ReturnType<typeof createClient>>, companyId: string, personId: string, userId: string | null) {
+  const { data: pending } = await supabase
+    .from("generated_cvs")
+    .select("id")
+    .eq("person_id", personId)
+    .is("tender_id", null)
+    .in("status", ["requested", "generating"])
+    .limit(1);
+  if ((pending ?? []).length > 0) return null;
+  const standardJobs = STANDARD_CV_FORMATS.flatMap((format) =>
+    STANDARD_CV_DETAILS.map((detail) => ({
+      company_id: companyId,
+      person_id: personId,
+      format,
+      detail,
+      status: "requested" as const,
+      requested_by: userId,
+    }))
+  );
+  const { error } = await supabase.from("generated_cvs").insert(standardJobs);
+  return error ? error.message : null;
+}
+
+/**
+ * The confirm-or-correct step for an AI-extracted CV (cv_extraction_results,
+ * 0023). The review card posts, per person field, `use_<field>` (ticked) and
+ * `f_<field>` (the value as the reviewer left it - proposed, or corrected),
+ * and per proposed project `p<i>_use` plus `p<i>_<column>`. Only ticked items
+ * are written; nothing else on the person is touched. Projects are added with
+ * contact_match_confidence 'unconfirmed' (a CV naming a referee is not a
+ * confirmed performance report - same rule the manual form defaults to) and a
+ * source_note saying where they came from.
+ */
+export async function applyCvExtraction(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const personId = str(formData, "person_id");
+  const extractionId = str(formData, "extraction_id");
+  if (!personId || !extractionId) redirect("/people");
+  const back = (msg: string): never => redirect(`/people/${personId}?error=${encodeURIComponent(msg)}`);
+
+  const { data: row, error: readError } = await supabase
+    .from("cv_extraction_results")
+    .select("id, person_id, review_status, proposed, cv_upload_id, cv_uploads(original_filename)")
+    .eq("id", extractionId)
+    .maybeSingle();
+  if (readError) back(readError.message);
+  if (!row || row.person_id !== personId) back("That extraction result wasn't found for this person.");
+  if (row!.review_status !== "pending_review") back("These extracted fields were already saved or discarded.");
+  const proposal = row!.proposed as Proposal;
+  const upload = row!.cv_uploads as unknown as { original_filename: string } | null;
+
+  const personUpdate: Record<string, string | null> = {};
+  const edited: string[] = [];
+  for (const f of EXTRACTED_PERSON_FIELDS) {
+    if (formData.get(`use_${f.key}`) !== "on") continue;
+    const v = str(formData, `f_${f.key}`);
+    if (f.key === "name" && !v) back("A ticked name can't be empty.");
+    if (v && f.kind === "date" && !ISO_DATE.test(v)) back(`${f.label}: "${v}" isn't a date (yyyy-mm-dd).`);
+    if (v && f.kind === "select" && !(f.options ?? []).includes(v)) back(`${f.label}: choose one of SANRAL's options.`);
+    personUpdate[f.key] = v;
+    if ((proposal.person?.[f.key]?.value ?? null) !== v) edited.push(f.key);
   }
 
+  const today = new Date().toISOString().slice(0, 10);
+  const sourceNote = `From CV "${upload?.original_filename ?? "upload"}" (AI-extracted, confirmed ${today})`;
+  const projectRows: Record<string, string | number | null>[] = [];
+  (proposal.projects ?? []).forEach((_, i) => {
+    if (formData.get(`p${i}_use`) !== "on") return;
+    const client = str(formData, `p${i}_client_and_number`);
+    if (!client) back(`Project ${i + 1}: client and contract number can't be empty.`);
+    const valueRaw = str(formData, `p${i}_value_rm`);
+    const value = valueRaw ? Number(valueRaw) : null;
+    if (value !== null && Number.isNaN(value)) back(`Project ${i + 1}: value must be a number (R million).`);
+    const dates: Record<string, string | null> = {};
+    for (const d of ["start_date", "end_date"]) {
+      const v = str(formData, `p${i}_${d}`);
+      if (v && !ISO_DATE.test(v)) back(`Project ${i + 1}: "${v}" isn't a date (yyyy-mm-dd).`);
+      dates[d] = v;
+    }
+    projectRows.push({
+      company_id: companyId,
+      person_id: personId,
+      client_and_number: client,
+      position_held: str(formData, `p${i}_position_held`),
+      value_rm: value,
+      start_date: dates.start_date,
+      end_date: dates.end_date,
+      contact_name: str(formData, `p${i}_contact_name`),
+      contact_phone: str(formData, `p${i}_contact_phone`),
+      contact_email: str(formData, `p${i}_contact_email`),
+      contact_match_confidence: "unconfirmed",
+      source_note: sourceNote,
+    });
+  });
+
+  if (Object.keys(personUpdate).length === 0 && projectRows.length === 0) {
+    back("Nothing was ticked. Tick the fields to save, or discard the extraction.");
+  }
+
+  if (Object.keys(personUpdate).length > 0) {
+    const { error } = await supabase.from("people").update({ ...personUpdate, updated_at: new Date().toISOString() }).eq("id", personId);
+    if (error) back(`Could not save the person's fields: ${error.message}`);
+  }
+  if (projectRows.length > 0) {
+    const { error } = await supabase.from("projects").insert(projectRows);
+    if (error) back(`Person fields saved, but the projects could not be added: ${error.message}`);
+  }
+
+  const { error: markError } = await supabase
+    .from("cv_extraction_results")
+    .update({
+      review_status: "applied",
+      reviewed_by: user?.id ?? null,
+      reviewed_at: new Date().toISOString(),
+      applied: { person_fields: Object.keys(personUpdate), edited_fields: edited, projects_added: projectRows.length },
+    })
+    .eq("id", extractionId);
+  if (markError) back(`Saved, but the extraction couldn't be marked as reviewed: ${markError.message}`);
+
+  const queueError = await queueStandardCvs(supabase, companyId, personId!, user?.id ?? null);
+  revalidatePath(`/people/${personId}`);
+  if (queueError) back(`Fields saved, but the standard CV formats could not be queued: ${queueError}`);
+  redirect(`/people/${personId}?cv_applied=${Object.keys(personUpdate).length}-${projectRows.length}`);
+}
+
+/** Reject an extraction outright: nothing is written to people/projects. */
+export async function discardCvExtraction(formData: FormData) {
+  await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const personId = str(formData, "person_id");
+  const extractionId = str(formData, "extraction_id");
+  if (!personId || !extractionId) redirect("/people");
+
+  const { error } = await supabase
+    .from("cv_extraction_results")
+    .update({ review_status: "discarded", reviewed_by: user?.id ?? null, reviewed_at: new Date().toISOString() })
+    .eq("id", extractionId)
+    .eq("person_id", personId)
+    .eq("review_status", "pending_review");
+  if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}`);
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}`);
 }

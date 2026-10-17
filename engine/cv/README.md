@@ -91,13 +91,15 @@ drift apart, and `generate_cv.py` is the one real one.
   The REST-call plumbing itself (`supabase_request`/`storage_upload`) follows the exact
   pattern already proven working in `write_admin_harness_results.py`/`seed_supabase_company.py`,
   but is untested end-to-end against a real project until Sarel connects one.
-- **AI extraction of structured fields from an uploaded CV (the `ai_extract` mode's actual
-  field-extraction step) is not built in this pass.** `cv_uploads.status` can reach
-  `extraction_requested`, but nothing yet reads the uploaded file's content and proposes
-  `people`/`projects` field values for confirm/correct. This is the single biggest remaining
-  piece of "upload once, never recapture" — flagged here rather than stubbed with a fake
-  extractor, per this project's honesty discipline. The standard-format **pre-generation**
-  half of `ai_extract` mode (queuing `generated_cvs` rows immediately on upload) IS wired.
+- **AI extraction (`ai_extract` mode) is built, but has never run against the real API.**
+  `extract_cv_fields.py` reads the upload's text, refuses scans and unreadable files with a
+  reason, removes SA ID numbers, asks Claude for the `people`/`projects` fields with a verbatim
+  quote per value, re-checks every quote against the CV, and stores a *proposal*
+  (`cv_extraction_results`, migration 0023). The People page review card writes only what a
+  person ticks; the standard formats are queued at that point (no longer at upload). No
+  `ANTHROPIC_API_KEY` exists in this sandbox, so extraction quality on real CVs is unmeasured.
+  Evidence, setup and cost: `docs/specs/CV-Extraction-Findings.md`. Tests:
+  `python3 test_extract_cv_fields.py`.
 - World Bank format fields the schema doesn't capture (nationality, languages, countries of
   work experience, other professional memberships) are shown as `MISSING` with a reason —
   never fabricated. Adding those columns to `people` is a product decision for when a real

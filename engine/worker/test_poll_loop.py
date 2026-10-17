@@ -131,7 +131,7 @@ def test_cv_bridge_loop_end_to_end():
         wait_for(lambda: status_of(fake, "j1") == "ready", 120, "j1 ready")
         t_j1 = time.time()
         gets_before_j2 = sum(1 for m, path in fake.request_log
-                             if m == "GET" and path.startswith("/rest/v1/generated_cvs?"))
+                             if m == "GET" and path.startswith("/rest/v1/generated_cvs?status=eq.requested"))
         fake.insert("generated_cvs", job("j2", fmt="world_bank", detail="detailed"))   # appears mid-sleep
 
         wait_for(lambda: status_of(fake, "j2") == "ready", 120, "j2 ready")
@@ -140,7 +140,7 @@ def test_cv_bridge_loop_end_to_end():
         reader.join(timeout=5)
 
         queue_polls = [path for m, path in fake.request_log
-                       if m == "GET" and path.startswith("/rest/v1/generated_cvs?")]
+                       if m == "GET" and path.startswith("/rest/v1/generated_cvs?status=eq.requested")]
         assert p.returncode == 0, (p.returncode, lines)
         assert gets_before_j2 == 1, f"j2 must not exist before the first poll finished ({gets_before_j2})"
         assert len(queue_polls) == 3, queue_polls                      # 3 cycles, 3 queue polls
@@ -185,12 +185,15 @@ def test_runner_drives_bridges_and_stops_on_sigterm():
 
         p = subprocess.Popen([sys.executable, RUNNER, "--loop", "--interval", "60", "--script", broken],
                              env=env_for(fake), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-        p_cv = subprocess.Popen([sys.executable, RUNNER, "--loop", "--interval", "2", "--max-cycles", "2"],
+        # The pack/general/cv_extract bridges have all landed since this test was written, so the
+        # "bridge not present yet" path is exercised with a deliberately missing --script instead.
+        p_cv = subprocess.Popen([sys.executable, RUNNER, "--loop", "--interval", "2", "--max-cycles", "2",
+                                 "--bridge", "cv", "--script", "engine/pack/not_landed_yet.py"],
                                 env=env_for(fake), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         out_cv, _ = p_cv.communicate(timeout=180)
         assert p_cv.returncode == 0, out_cv
         assert status_of(fake, "r1") == "ready", out_cv
-        assert "pack: engine/pack/process_pack_jobs.py not present yet, skipping" in out_cv, out_cv
+        assert "not_landed_yet.py: engine/pack/not_landed_yet.py not present yet, skipping" in out_cv, out_cv
         assert out_cv.count("not present yet") == 1, "missing bridge should be reported once, not every cycle"
         assert "cv: [ready] r1" in out_cv, out_cv
         assert "stopped (max_cycles) after 2 cycle(s)" in out_cv, out_cv

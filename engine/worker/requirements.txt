@@ -9,3 +9,7 @@ python-docx==1.2.0
 PyYAML==6.0.1
 pypdf==6.17.0
 Pillow==12.3.0
+# engine/cv/extract_cv_fields.py -> the Claude Messages API (AI field extraction
+#   from uploaded CVs). Text is read with the same pdftotext (poppler-utils, in
+#   the Dockerfile) / python-docx / soffice helpers as engine/general/.
+anthropic==1.15.0

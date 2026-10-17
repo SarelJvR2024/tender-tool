@@ -59,6 +59,12 @@ jobs:
       - name: CV bridge self-test (row adapters -> generate_cv.py)
         run: python3 engine/cv/process_cv_jobs.py --self-test --out-dir "$RUNNER_TEMP/cv-self-test"
 
+      - name: CV AI-extraction - text step, failure modes, checks, queue (no API key, no secrets)
+        run: |
+          sudo apt-get install -y --no-install-recommends poppler-utils
+          pip install jsonschema  # test only: checks the test-double answer against the output schema
+          python3 engine/cv/test_extract_cv_fields.py
+
       - name: Polling-loop smoke test (fake Supabase, no secrets)
         run: python3 engine/worker/test_poll_loop.py
 
