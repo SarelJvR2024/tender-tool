@@ -89,6 +89,9 @@ export type RequirementManifest = {
   questions: ManifestQuestion[];
   company_fields: ManifestCompanyField[];
   gaps: string[];
+  // assess_tender.document_depth() over everything read (added 2026-10-17;
+  // absent on manifests extracted before then).
+  document_depth?: "full_document" | "advert_or_partial" | "no_extractable_text";
 };
 
 export type GeneralCompany = CompanyVault & {

@@ -248,7 +248,10 @@ EDITION_MARKERS = {
     "6.1": ([r"Name\s+of\s+company/firm", r"Company\s+registration\s+number", r"POINTS\s+CLAIMED|points\s+claimed"], 2),
     # The CSD supplier leaflet also names both registers - SBD 8 needs its heading.
     "8": ([r"PAST\s+SUPPLY\s+CHAIN\s+MANAGEMENT\s+PRACTICES", r"Database\s+of\s+Restricted\s+Suppliers|Register\s+for\s+Tender\s+Defaulters"], 2),
-    "9": ([r"INDEPENDENT\s+BID\s+DETERMINATION"], 1),
+    # Heading + the Competition Act wording every SBD/MBD 9 carries: a contract
+    # form that merely LISTS "Certificate of Independent Bid Determination"
+    # among its annexures (Ratlou LM's MBD 7.2, live OCDS 2026-10-17) is not one.
+    "9": ([r"INDEPENDENT\s+BID\s+DETERMINATION", r"bid\s+rigging|collusive\s+bid|Competition\s+Act"], 2),
 }
 
 
@@ -440,6 +443,15 @@ def classify_document(doc, mentioned_forms):
         doc["edition_of"] = []
         return "reference"
     eds = edition_forms(text)
+    # A single-form file whose name AND own heading name the same form is an
+    # edition of that form, whatever else its body mentions (Ratlou's
+    # "MBD 7.2.pdf" was read as an MBD 9 edition and put into the pack as
+    # "MBD 9" while the real "MBD 9.pdf" sat next to it).
+    named = forms_in_text(os.path.basename(doc["name"]))
+    if len(named) == 1:
+        (_, code), = named.keys()
+        if any(c == code for (_, c) in forms_in_text(text[:1500])):
+            eds = [code]
     doc["edition_of"] = eds
     in_doc = forms_in_text(text) if text else {}
     name_forms = forms_in_text(name)
@@ -678,7 +690,8 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         "locality": {"rows": loc["rows"], "mandatory_local_office": loc["mandatory_local_office"]},
         "questions": questions,
         "company_fields": company_fields,
-        "gaps": _gaps(doc_entries, forms, suite, buyer_forms),
+        "gaps": _gaps(doc_entries, forms, suite, buyer_forms, _depth(all_text)),
+        "document_depth": _depth(all_text),
     }
     if own_tmp:
         manifest["_work_dir"] = work_dir
@@ -731,7 +744,14 @@ def _overlay_buyer_form(key, doc):
     return {"code": code, "document": doc["name"], "page": pages[0] + 1, "fills": fills, "by_hand": by_hand} if pages else None
 
 
-def _gaps(doc_entries, forms, suite, buyer_forms):
+def _depth(all_text):
+    """assess_tender.document_depth() - the same advert-vs-full-document test
+    Discovery uses - on everything that was read."""
+    from assess_tender import document_depth
+    return document_depth(all_text or "")
+
+
+def _gaps(doc_entries, forms, suite, buyer_forms, depth="full_document"):
     """Plain statements of what this engine can't do for this tender - shown
     in the UI and the pack index instead of being hidden."""
     gaps = []
@@ -745,6 +765,14 @@ def _gaps(doc_entries, forms, suite, buyer_forms):
     elif suite is None and any(e["unreadable"] for e in doc_entries):
         gaps.append("No SBD/MBD standard forms were found in the documents that could be read - but some couldn't be "
                     "read (listed below), and the forms may be in those.")
+    elif suite is None and depth != "full_document":
+        # 2026-10-17 scenario pass: Stellenbosch BSM 25/27 published only its
+        # newspaper advert on eTenders ("...Adverts only.pdf"); the manifest
+        # used to say "uses no SBD/MBD standard forms" and the pack built as
+        # if that were the whole tender.
+        gaps.append("Only an advert or short notice was found, not the full tender document - so whether it uses "
+                    "SBD/MBD forms (and everything else it requires) is unknown. Get the full bid document from the buyer "
+                    "and load it (Tenders > Load a tender manually, or Add documents).")
     elif suite is None:
         gaps.append("This tender uses no SBD/MBD standard forms - its returnable forms are the buyer's own, which "
                     "Tender Tool has no templates for. The pack orders your supporting documents; the buyer's forms are "

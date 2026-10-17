@@ -191,7 +191,7 @@ begin
   if nullif(btrim(p_ocid), '') is not null then
     select id into existing from tenders where ocid = btrim(p_ocid);
     if existing is not null then
-      raise exception 'A tender with OCDS id % is already loaded - open it from the Tenders list instead.', btrim(p_ocid)
+      raise exception 'A tender with OCDS id % is already loaded - open it from the Tenders list, or leave the OCDS id blank to load your own copy of its documents (e.g. the full bid document when eTenders only has the advert).', btrim(p_ocid)
         using errcode = '23505';
     end if;
   end if;

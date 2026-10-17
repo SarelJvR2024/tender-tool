@@ -181,7 +181,11 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             ? "This buyer uses the municipal MBD forms (same fields as National Treasury's SBD forms)."
             : manifest.form_suite === "SBD"
               ? "This buyer uses National Treasury's SBD forms."
-              : "This buyer uses no SBD/MBD standard forms - only its own."}
+              : manifest.document_depth && manifest.document_depth !== "full_document"
+                ? "No SBD/MBD standard forms were found - but only an advert or partial document was read, so that isn't known yet (see below)."
+                : manifest.documents.some((d) => d.unreadable)
+                  ? "No SBD/MBD standard forms were found in the documents that could be read (some couldn't - see below)."
+                  : "This buyer uses no SBD/MBD standard forms - only its own."}
         </div>
 
         {manifest.gaps.length > 0 && (

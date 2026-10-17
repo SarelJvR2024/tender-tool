@@ -209,3 +209,26 @@ class Workbook:
             for name in self.order:
                 z.writestr(self.zin.getinfo(name), self.files[name],
                            compress_type=zipfile.ZIP_DEFLATED)
+
+class FieldError(ValueError):
+    """A dropdown value from the company's own data that the template can't
+    take, phrased for the person who has to fix it (which person / project /
+    field, what the data says, what SANRAL accepts, where to fix it) instead
+    of a bare cell reference. Still a ValueError, so every existing caller
+    (assemble_pack, harness_pack, process_pack_jobs) keeps treating it as a
+    refusal with a reason."""
+
+
+def set_dropdown_for(wb, sheet, ref, label, who, what, fix_where="the People page"):
+    """wb.set_dropdown() with a human error (2026-10-17 scenario pass: the
+    refusal for a test company used to read "'None' is not an option for TEND
+    1X!D76" - true, but it named a cell, not the person or the field)."""
+    if label is None or str(label).strip() == "":
+        raise FieldError(f"{who}: {what} is not recorded - fill it in on {fix_where} before generating the pack "
+                         f"(SANRAL's form needs it; template cell {sheet}!{ref}).")
+    try:
+        return wb.set_dropdown(sheet, ref, label)
+    except ValueError as e:
+        opts = str(e).split("Options: ", 1)[-1] if "Options: " in str(e) else ""
+        raise FieldError(f"{who}: {what} '{label}' is not one of the options this SANRAL template accepts"
+                         + (f" ({opts})" if opts else "") + f" - correct it on {fix_where} (template cell {sheet}!{ref}).") from e

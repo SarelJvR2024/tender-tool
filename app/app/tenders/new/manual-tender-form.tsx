@@ -128,7 +128,7 @@ export function ManualTenderForm({ companyId }: { companyId: string }) {
         </div>
         <div>
           <label style={label} htmlFor="closing_time">Closing time (SAST)</label>
-          <input id="closing_time" name="closing_time" type="time" defaultValue="11:00" style={input} />
+          <input id="closing_time" name="closing_time" type="time" defaultValue="12:00" style={input} />
         </div>
       </div>
       <div>

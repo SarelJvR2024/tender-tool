@@ -6,7 +6,7 @@ in a reusable library section, so the next tender only needs a new
 'tender' block and a new 'key_persons' assignment list.
 """
 import sys, yaml, datetime
-from sanral_fill import Workbook, split, n2col, col2n
+from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for
 
 T = "TEND 1X"
 
@@ -51,26 +51,29 @@ def fill_person(wb, base, person, projects_lib):
     for i, pr in enumerate(projs):
         r = base + B["proj_first"] + i
         wb.set_value(T, f"B{r}", pr["client_and_number"])
-        wb.set_dropdown(T, f"C{r}", pr["client_type"])
-        wb.set_dropdown(T, f"F{r}", pr["project_type"])
+        proj = f"{person['name']}, project '{str(pr.get('client_and_number') or '').replace(chr(10), ' / ')}'"
+        set_dropdown_for(wb, T, f"C{r}", pr["client_type"], proj, "client type")
+        set_dropdown_for(wb, T, f"F{r}", pr["project_type"], proj, "project type")
         wb.set_value(T, f"I{r}", pr["value_rm"])
         wb.set_value(T, f"J{r}", pr["position_held"])
-        wb.set_dropdown(T, f"K{r}", pr["position_code"])
+        set_dropdown_for(wb, T, f"K{r}", pr["position_code"], proj, "position held (code)")
         wb.set_value(T, f"L{r}", pr["contact"])
         wb.set_value(T, f"M{r}", pr["contact_number"])
         wb.set_date(T, f"P{r}", pr["start"])
         wb.set_date(T, f"P{base + B['proj_end_first'] + i}", pr["end"])
     q = person["qualifications"]
-    wb.set_dropdown(T, at(B["employment"], base), person["employment"])
-    wb.set_dropdown(T, at(B["ecsa_level"], base), q["ecsa_level"])
+    who = person["name"]
+    set_dropdown_for(wb, T, at(B["employment"], base), person["employment"], who, "employment type")
+    set_dropdown_for(wb, T, at(B["ecsa_level"], base), q["ecsa_level"], who, "ECSA registration level")
     if q.get("ecsa_number"): wb.set_value(T, at(B["ecsa_number"], base), q["ecsa_number"])
     if q.get("ecsa_date"): wb.set_date(T, at(B["ecsa_date"], base), q["ecsa_date"])
     if q.get("sacpcmp_date"): wb.set_date(T, at(B["sacpcmp_date"], base), q["sacpcmp_date"])
-    wb.set_dropdown(T, at(B["highest_qual"], base), q["highest_level"])
+    set_dropdown_for(wb, T, at(B["highest_qual"], base), q["highest_level"], who, "highest qualification level")
     wb.set_value(T, at(B["highest_desc"], base), q["highest_description"])
     wb.set_value(T, at(B["highest_inst"], base), q["highest_institution"])
     wb.set_date(T, at(B["highest_date"], base), q["highest_graduated"])
-    wb.set_dropdown(T, at(B["years_exp"], base), str(q["years_experience"]))
+    set_dropdown_for(wb, T, at(B["years_exp"], base),
+                     None if q.get("years_experience") is None else str(q["years_experience"]), who, "years of experience")
     wb.set_value(T, at(B["initial_desc"], base), q["initial_description"])
     wb.set_value(T, at(B["initial_inst"], base), q["initial_institution"])
     wb.set_date(T, at(B["initial_date"], base), q["initial_graduated"])

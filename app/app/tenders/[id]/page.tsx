@@ -111,10 +111,19 @@ function humanizeFieldKey(fieldKey: string): string {
     .join(" ");
 }
 
-function daysLeft(closingDate: string | null): number | null {
+// Time-aware on purpose (unlike the date-only daysUntil): a tender closes at
+// a stated hour. The old Math.ceil(ms / day) turned "closed 2 hours ago" into
+// -0, which rendered as "0 days left" instead of "closed" (2026-10-17
+// scenario pass), and "closes at 12:00 today" as "1 days left".
+function closingCountdown(closingDate: string | null): { text: string; urgent: boolean } | null {
   if (!closingDate) return null;
   const ms = new Date(closingDate).getTime() - Date.now();
-  return Math.ceil(ms / (1000 * 60 * 60 * 24));
+  if (Number.isNaN(ms)) return null;
+  if (ms <= 0) return { text: "closed", urgent: true };
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  if (hours < 24) return { text: hours < 1 ? "closes within the hour" : `closes in ${hours} hour${hours === 1 ? "" : "s"}`, urgent: true };
+  const days = Math.floor(hours / 24);
+  return { text: `${days} day${days === 1 ? "" : "s"} left`, urgent: days <= 7 };
 }
 
 export default async function TenderWorkspacePage({
@@ -248,7 +257,7 @@ export default async function TenderWorkspacePage({
   ).sort();
   const peopleName = new Map(assignablePeople.map((p) => [p.id, p.name]));
 
-  const left = daysLeft(tenderFacts?.closing_date ?? null);
+  const countdown = closingCountdown(tenderFacts?.closing_date ?? null);
   const packStatus = tenderPack ? PACK_STATUS_LABEL[tenderPack.status] : null;
   // Drives the at-a-glance summary chips on the facts card, so "are we ready
   // to submit" is answerable without scrolling past Tasks & Key positions.
@@ -304,9 +313,9 @@ export default async function TenderWorkspacePage({
               <div style={{ fontSize: 13, color: "#6B6758" }}>
                 Closes{" "}
                 {tenderFacts.closing_date ? new Date(tenderFacts.closing_date).toLocaleDateString() : "- no closing date on file"}
-                {left !== null && (
-                  <span style={{ marginLeft: 8, fontWeight: 600, color: left <= 7 ? "#B45309" : "#9A9684" }}>
-                    ({left >= 0 ? `${left} days left` : "closed"})
+                {countdown && (
+                  <span style={{ marginLeft: 8, fontWeight: 600, color: countdown.urgent ? "#B45309" : "#9A9684" }}>
+                    ({countdown.text})
                   </span>
                 )}
               </div>

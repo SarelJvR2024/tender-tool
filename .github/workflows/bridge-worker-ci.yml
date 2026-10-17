@@ -28,6 +28,7 @@ on:
       - "engine/**"
       - "templates/forms/**"
       - "templates/general_samples/**"
+      - "fingerprints/**"
       - ".dockerignore"
       - ".github/workflows/bridge-worker-ci.yml"
   workflow_dispatch:
@@ -67,6 +68,9 @@ jobs:
 
       - name: Polling-loop smoke test (fake Supabase, no secrets)
         run: python3 engine/worker/test_poll_loop.py
+
+      - name: Deadline reminders - escalation and closing-date awareness (in-memory rows)
+        run: python3 engine/compliance/test_watch_deadlines_urgency.py
 
       - name: General engine - bridge end to end (fake Supabase, real tender documents)
         run: |

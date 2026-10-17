@@ -220,7 +220,12 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
             notes.append("No Financial Submission workbook was uploaded - the pack will be built without the Financial envelope's workbook.")
     else:
         family, route = GENERAL_FAMILY, "general"
-        if sanral_hint:
+        broken = [w for w in workbooks if w["kind"] == "unreadable"]
+        if broken:
+            signal = (f"{'; '.join(w['document'] for w in broken)} couldn't be opened as a workbook (corrupt, truncated or "
+                      "not really an Excel file), so it can't be checked for a SANRAL Technical Submission template - "
+                      "re-download it and add it again. Until then this tender is on the general (non-SANRAL) flow.")
+        elif sanral_hint:
             signal = ("These look like SANRAL tender documents (SANRAL is named), but no SANRAL Technical Submission "
                       "workbook (.xlsm) was among them - the SANRAL pack can only fill that workbook, so this tender is "
                       "on the general flow for now. Upload the Technical Submission .xlsm (and the C.1.1.1, C.1.2.3 and "
@@ -245,10 +250,21 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
 def assess_fit_from_text(title, description, all_text, profile):
     """assess_release()'s own steps, on text already read from the documents."""
     categories = assess_tender.categorize(title, description)
+    if all(c.startswith("uncategorized") for c in categories) and all_text:
+        # Discovery only has the OCDS title/description; here the tender's own
+        # opening pages are available too (real R.396: the typed title
+        # "Routine ad-hoc maintenance of R396 Section 1" matched no keyword,
+        # its Book 1 cover says "consulting engineering services").
+        from_text = assess_tender.categorize(title, f"{description or ''} {all_text[:6000]}")
+        if not all(c.startswith("uncategorized") for c in from_text):
+            categories = from_text
     depth = assess_tender.document_depth(all_text or "")
     signals, confidence = assess_tender.extract_signals(all_text or "", depth)
     verdict, reasons = assess_tender.assess_fit(categories, signals, depth, profile)
+    if categories != assess_tender.categorize(title, description):
+        reasons.append("Discipline read from the opening pages of the tender documents (the title alone didn't say).")
     if not profile.get("disciplines"):
+        reasons = [r for r in reasons if "doesn't match the company's known disciplines" not in r]
         reasons.append("Your company has no disciplines on file yet (they come from your Experience Library tags), so "
                        "fit can't be judged - needs a human look.")
         if verdict in ("not_a_fit", "strong_fit", "possible"):

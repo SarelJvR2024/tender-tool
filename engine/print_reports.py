@@ -15,7 +15,7 @@ How it works (LibreOffice, driven headless through its API):
      SANRAL's own button macro and exports it to PDF.
 The tender file is never saved or modified.
 """
-import os, sys, time, shutil, subprocess, tempfile, zipfile, re
+import os, sys, time, shutil, signal, subprocess, tempfile, zipfile, re
 import uno
 from com.sun.star.beans import PropertyValue
 from com.sun.star.awt import Point, Size
@@ -87,7 +87,8 @@ class Office:
         self.proc = subprocess.Popen(["soffice", f"-env:UserInstallation=file://{self.prof}", "--headless",
                                       "--invisible", "--nologo", "--norestore",
                                       f"--accept=socket,host=localhost,port={port};urp;"],
-                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                     start_new_session=True)  # own process group, so __exit__ kills only this soffice
         local = uno.getComponentContext()
         res = local.ServiceManager.createInstanceWithContext("com.sun.star.bridge.UnoUrlResolver", local)
         for _ in range(90):
@@ -102,7 +103,13 @@ class Office:
         except Exception: pass
         try: self.proc.wait(timeout=30)
         except Exception: pass
-        subprocess.run(["pkill", "-9", "-x", "soffice.bin"], capture_output=True)
+        # Kill only THIS instance's process group (soffice -> oosplash ->
+        # soffice.bin). This used to be `pkill -9 -x soffice.bin`, which also
+        # killed every other LibreOffice on the host mid-conversion - found by
+        # the 2026-10-17 scenario pass when a concurrent run died with
+        # "illegal object given!" / "cannot get value Control".
+        try: os.killpg(self.proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError): pass
         shutil.rmtree(self.prof, ignore_errors=True)
 
 

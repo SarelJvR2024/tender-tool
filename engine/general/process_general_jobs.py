@@ -332,7 +332,8 @@ def run_extraction(client, job, work_root, fetch=None):
     intake_rec = {k: decision[k] for k in ("route", "family", "signal", "sanral_hint", "workbooks", "sanral_documents")}
     intake_rec["notes"] = list(decision["notes"]) + [f"Couldn't download: {n}" for n in notes]
     intake_rec["readable_documents"] = len(readable)
-    intake_rec["unreadable_documents"] = [{"document": d["name"], "reason": d["unreadable"]} for d in manifest["documents"] if d["unreadable"]]
+    intake_rec["unreadable_documents"] = [{"document": d["name"], "reason": d["unreadable"]} for d in manifest["documents"] if d["unreadable"]] + \
+        [{"document": w["document"], "reason": w["error"]} for w in decision["workbooks"] if w["kind"] == "unreadable"]
     intake_rec["analysed_at"] = _now()
     patch = {"document_requirements": clean}
     if decision["route"] == "sanral":
@@ -352,9 +353,9 @@ def run_extraction(client, job, work_root, fetch=None):
         if not tender.get("contract_no") and setup.get("contract_no"):
             patch["contract_no"] = setup["contract_no"]
         if not tender.get("closing_date") and setup.get("closing_date"):
-            patch["closing_date"] = setup["closing_date"] + "T11:00:00+02:00"  # SANRAL closes 11:00 SAST
+            patch["closing_date"] = setup["closing_date"] + "T12:00:00+02:00"  # SANRAL closes 12:00 SAST (R.396 Book 1: "The closing time ... is 12:00")
             intake_rec["notes"].append(f"Closing date taken from the workbook's SETUP sheet ({setup['closing_date']}); "
-                                       "the time (11:00) is SANRAL's usual closing time - check the notice.")
+                                       "the time (12:00) is SANRAL's usual closing time - check the notice.")
     elif tender.get("family") in (None, "", "UNKNOWN") or tender.get("family") in intake.SANRAL_FAMILIES:
         patch["family"] = intake.GENERAL_FAMILY
     patch["intake"] = intake_rec

@@ -216,7 +216,16 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     # a machine with LibreOffice - same requirement process_cv_jobs.py has.
     import print_reports
     reports_dir = os.path.join(work_dir, "reports")
-    made, skipped, _ = print_reports.export(filled_xlsm, reports_dir)
+    try:
+        made, skipped, _ = print_reports.export(filled_xlsm, reports_dir)
+    except Exception as e:
+        # A LibreOffice/UNO failure ("illegal object given!", "cannot get value
+        # Control") is a worker problem, not the company's data - say so,
+        # instead of handing the Tender Workspace a raw UNO exception.
+        # RuntimeError (not ValueError) so the harness still counts it as a
+        # run failure rather than a data refusal.
+        raise RuntimeError("LibreOffice failed while printing Forms B1-B7 from the filled workbook - a worker "
+                           f"problem, not your data; request the pack again ({type(e).__name__}: {str(e)[:160]})") from e
     reports = {os.path.splitext(os.path.basename(m))[0]: m for m in made}
     setup_positions = positions_on_setup(filled_xlsm)
 

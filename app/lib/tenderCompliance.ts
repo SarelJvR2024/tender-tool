@@ -24,7 +24,7 @@
 // in the detail text but doesn't change the status - same as COID, whose
 // status has always come from the number + expiry on file.
 
-import { daysUntil } from "./dates";
+import { closingDayOf, daysUntil } from "./dates";
 
 export type ComplianceStatus = "have" | "missing" | "check";
 
@@ -90,7 +90,7 @@ export function validityAtClosing(
   renewSoonDays = RENEW_SOON_DAYS,
 ): { status: "have" | "missing"; expiring: boolean; text: string } {
   const expLeft = daysUntil(expiry) as number;
-  const closingLeft = daysUntil(closingDate);
+  const closingLeft = daysUntil(closingDayOf(closingDate)); // calendar day: valid ON the closing day counts
   if (expLeft < 0) return { status: "missing", expiring: false, text: `expired ${fmt(expiry)}` };
   if (closingLeft !== null && expLeft < closingLeft) {
     return { status: "missing", expiring: false, text: `expires ${fmt(expiry)}, before this tender closes - renew it first` };
@@ -176,7 +176,7 @@ export function sanralConventionalDocumentChecks(input: {
 }): ComplianceItem[] {
   const c = input.company;
   const items: ComplianceItem[] = [];
-  const closingLeft = daysUntil(input.closingDate);
+  const closingLeft = daysUntil(closingDayOf(input.closingDate)); // calendar day, as in validityAtClosing()
 
   // A7 / Stage 2 #2 - registered on CSD.
   items.push({

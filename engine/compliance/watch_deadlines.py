@@ -81,6 +81,14 @@ expiry, a task's due date gets pushed - that is a new key, so it reports
 again, exactly like a genuinely new deadline. A task that leaves the
 "not done" set (marked done) simply stops being fetched, so it needs no
 explicit removal from the seen store.
+
+Escalation and closing dates (2026-10-17 scenario pass): the key also
+carries the item's status, so a document is reported once while "renew
+soon" and once more when it lapses, and a task once while due and once more
+when overdue - before, the lapse itself was never reported. A third check,
+find_documents_lapsing_before_closing(), reports a document that is outside
+the expiry window today but will have lapsed by the closing date of a tender
+the company is preparing (engine/compliance/test_watch_deadlines_urgency.py).
 """
 import os
 import sys
@@ -159,7 +167,12 @@ def find_due_documents(url, key, seen, today, lead_days):
             if left is None or left > (lead_override if lead_override is not None else lead_days):
                 continue  # not expired and outside the reminder window
 
-            seen_key = f"doc::{company['id']}::{col}::{expiry}"
+            status = "expired" if left < 0 else "renew_soon"
+            # The status is part of the key (2026-10-17): reported once while
+            # "renew soon" and once more when it actually lapses. Before, a
+            # document reported at 60 days was never reported again - the
+            # moment it expired was silent.
+            seen_key = f"doc::{company['id']}::{col}::{expiry}::{status}"
             if seen_key in seen:
                 continue
             seen[seen_key] = {"first_seen": today.isoformat(), "kind": "document"}
@@ -172,7 +185,63 @@ def find_due_documents(url, key, seen, today, lead_days):
                 "label": label,
                 "expiry_date": expiry,
                 "days_left": left,
-                "status": "expired" if left < 0 else "renew_soon",
+                "status": status,
+            })
+    return due
+
+
+def find_documents_lapsing_before_closing(url, key, seen, today):
+    """A document that is fine today - outside the 60-day window - but will
+    have lapsed by the closing date of a tender the company is preparing
+    (has a tender_pack for, still open). The plain expiry window can't see
+    this: a PIN expiring in 90 days is "current" until day 60, yet it is
+    already useless for a tender closing on day 100. Same comparison as the
+    compliance report (app/lib/tenderCompliance.ts validityAtClosing: valid
+    ON the closing day counts). One report per (company, document, expiry,
+    tender)."""
+    select_cols = "id,legal_name," + ",".join(col for col, _, _ in TRACKED_EXPIRY_FIELDS)
+    companies = {c["id"]: c for c in supabase_request(url, key, f"companies?select={select_cols}")}
+    packs = supabase_request(url, key, "tender_packs?select=company_id,tender_id")
+    tender_ids = sorted({p["tender_id"] for p in packs})
+    tenders = {}
+    if tender_ids:
+        rows = supabase_request(url, key, f"tenders?select=id,contract_no,title,closing_date,status&id=in.({','.join(tender_ids)})")
+        tenders = {t["id"]: t for t in rows}
+    due = []
+    for p in packs:
+        company, tender = companies.get(p["company_id"]), tenders.get(p["tender_id"])
+        if not company or not tender or tender.get("status") != "open" or not tender.get("closing_date"):
+            continue
+        # calendar day in SAST (UTC+2), like app/lib/dates.ts closingDayOf()
+        closing_ts = datetime.datetime.fromisoformat(tender["closing_date"].replace("Z", "+00:00"))
+        closing_day = (closing_ts + datetime.timedelta(hours=2)).date() if closing_ts.tzinfo else closing_ts.date()
+        to_closing = (closing_day - today).days
+        if to_closing < 0:
+            continue
+        for col, label, _ in TRACKED_EXPIRY_FIELDS:
+            expiry = company.get(col)
+            if not expiry:
+                continue
+            exp_day = datetime.date.fromisoformat(expiry[:10])
+            if exp_day >= closing_day or exp_day < today:
+                continue  # covers the closing date / already expired (reported by find_due_documents)
+            seen_key = f"doc_before_closing::{company['id']}::{col}::{expiry}::{tender['id']}"
+            if seen_key in seen:
+                continue
+            seen[seen_key] = {"first_seen": today.isoformat(), "kind": "document_before_closing"}
+            due.append({
+                "type": "document_before_closing",
+                "company_id": company["id"],
+                "company_name": company.get("legal_name"),
+                "field": col,
+                "label": label,
+                "expiry_date": expiry,
+                "days_left": (exp_day - today).days,
+                "tender_id": tender["id"],
+                "tender_label": tender.get("contract_no") or tender.get("title") or tender["id"],
+                "closing_date": closing_day.isoformat(),
+                "days_to_closing": to_closing,
+                "status": "lapses_before_closing",
             })
     return due
 
@@ -199,7 +268,8 @@ def find_due_tasks(url, key, seen, today, lead_days):
         if left is None or left > lead_days:
             continue
 
-        seen_key = f"task::{task['id']}::{task['due_date']}"
+        status = "overdue" if left < 0 else "due_soon"
+        seen_key = f"task::{task['id']}::{task['due_date']}::{status}"  # overdue escalates, see find_due_documents
         if seen_key in seen:
             continue
         seen[seen_key] = {"first_seen": today.isoformat(), "kind": "task"}
@@ -214,7 +284,7 @@ def find_due_tasks(url, key, seen, today, lead_days):
             "description": task["description"],
             "due_date": task["due_date"],
             "days_left": left,
-            "status": "overdue" if left < 0 else "due_soon",
+            "status": status,
             "kind": task.get("kind"),
         })
     return due
@@ -242,6 +312,7 @@ def main():
 
     documents_due = find_due_documents(url, key, seen, today, args.doc_lead_days)
     tasks_due = find_due_tasks(url, key, seen, today, args.task_lead_days)
+    before_closing = find_documents_lapsing_before_closing(url, key, seen, today)
 
     save_seen(args.seen_store, seen)
 
@@ -251,13 +322,17 @@ def main():
         print(f"  {d['company_name']!r:<30} {d['label']:<32} expires {d['expiry_date']}  "
               f"({d['days_left']} days{' overdue' if d['days_left'] < 0 else ' left'})")
 
+    print(f"\n{len(before_closing)} document(s) that will have lapsed by the closing date of a tender being prepared:")
+    for d in before_closing:
+        print(f"  {d['company_name']!r:<30} {d['label']:<32} expires {d['expiry_date']} - {d['tender_label']} closes {d['closing_date']}")
+
     print(f"\n{len(tasks_due)} tender task(s) newly due for a reminder "
           f"(within {args.task_lead_days} days or already overdue):")
     for t in tasks_due:
         print(f"  {t['tender_label']:<20} {t['description']:<50} due {t['due_date']}  "
               f"({t['days_left']} days{' overdue' if t['days_left'] < 0 else ' left'})")
 
-    report = {"documents": documents_due, "tasks": tasks_due}
+    report = {"documents": documents_due, "documents_before_closing": before_closing, "tasks": tasks_due}
     if args.out:
         with open(args.out, "w") as f:
             json.dump(report, f, indent=2)

@@ -66,7 +66,7 @@ export async function registerManualTender(input: {
   let closing: string | null = null;
   if (input.closingDate) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.closingDate)) return { error: "Closing date isn't a valid date." };
-    const time = /^\d{2}:\d{2}$/.test(input.closingTime) ? input.closingTime : "11:00";
+    const time = /^\d{2}:\d{2}$/.test(input.closingTime) ? input.closingTime : "12:00";
     closing = `${input.closingDate}T${time}:00+02:00`;
   }
 

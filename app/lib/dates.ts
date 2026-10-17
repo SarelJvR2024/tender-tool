@@ -12,6 +12,19 @@ export function daysUntil(dateStr: string | null): number | null {
   return Math.ceil((target.getTime() - today.getTime()) / msPerDay);
 }
 
+// The calendar day (South African time, UTC+2, no DST) a tender closes on,
+// as "YYYY-MM-DD" - for comparing against a document's expiry DATE. Without
+// this, a closing timestamp (e.g. 12:00 SAST = 10:00 UTC) counts as a later
+// day than a date-only expiry on that same day (daysUntil ceil()s the
+// fraction), so a document valid until the closing day was reported as
+// "expires before this tender closes" (2026-10-17 scenario pass).
+export function closingDayOf(closingDate: string | null): string | null {
+  if (!closingDate) return null;
+  const t = new Date(closingDate);
+  if (Number.isNaN(t.getTime())) return null;
+  return new Date(t.getTime() + 2 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
 export type StatusChip = { label: string; bg: string; color: string };
 
 const GREEN = { bg: "#DCFCE7", color: "#15803D" };
