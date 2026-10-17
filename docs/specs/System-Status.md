@@ -181,6 +181,41 @@ place that name was ever written down, and the "decision" it was meant to record
 Item (b) (`how_we_work` on the Tender Workspace) is untouched by this pass, per instruction, and
 stays open below.
 
+## This pass (2026-10-17, standing QA/robustness review - second run)
+
+Rotated to the discovery engine (`engine/discovery/`) per the standing mandate. Pulled latest
+`main` first (fast-forward merge - several concurrent passes had landed: OCR for scanned
+documents, deal economics, position suggestions, person registration expiry, pricing; none
+touched discovery, confirmed by grep before starting).
+
+**Found and fixed a real, production-reaching bug**: `assess_tender.assess_fit()` treated an
+empty/unset `disciplines` list on a company's profile the same as "checked, out of scope" -
+`not_a_fit` - instead of "no data to judge yet". Checked where `disciplines` is actually
+supposed to come from: it's **never written anywhere** in the flat-file path the live national
+OCDS discovery feed uses (`load_company_profile()` - no committed test-company fixture has the
+field, no Company-page UI field or migration column exists for it), so in production this was
+always `[]` for every real company, including Klipcorp. Confirmed directly: `assess_fit()` on a
+profile shaped like every committed fixture, against a textbook SANRAL roads tender title
+(exactly Klipcorp's own real discipline), came back `not_a_fit` - the verdict
+`app/app/discovery/page.tsx` renders directly. A prior pass had already hit this and patched
+around it, but only at one call site (`classify_tender.assess_fit_from_text()`, the manual-
+intake/general-engine path) - the discovery feed's own direct call was left with the original
+bug, a partial fix that looked complete because only one path had been tested.
+
+Fixed at the root in `assess_fit()` (empty disciplines -> `needs_review`, a genuine mismatch on
+a populated list still -> `not_a_fit`), so every caller gets it; simplified the now-redundant
+band-aid in `classify_tender.py` to avoid stacking two near-duplicate reasons. Verified directly:
+all 4 cases (empty+match, populated+mismatch, populated+match, uncategorized+empty) behave
+correctly; `engine/general/test_general_bridge.py` ALL PASSED; `general_harness.py --no-pack`
+44/0/0. Full evidence in `docs/specs/QA-Edge-Case-Findings.md` (Finding 3).
+
+Flagged, not fixed: no standalone test file exists for `assess_tender.py`/`score_outlook.py` at
+all - every check on this module to date, across every pass, has been informal script-at-the-
+prompt verification. Also flagged: the discovery feed and the general engine derive
+"disciplines" two different ways (flat-file vs. `experience_items`-backed) that happen to only
+agree today because both are empty - worth unifying once a live Supabase project exists to
+verify against (Gap #9).
+
 ## This pass (2026-10-17, standing QA/robustness review - first run)
 
 New standing review, separate from the solution-architect pass above: adversarial testing of the

@@ -134,3 +134,106 @@ just Pavement and Materials.
   seen in any fixture - e.g. `RM`/`ARM` (Resident Manager / Alternate), or `PE(E)` - to see
   whether the gates there are as sound as the PL/DS ones were found to be, or have the same class
   of silent-wrong-result risk under a different variable name.
+
+---
+
+## 2026-10-17 (second run): Discovery - the national OCDS feed's fit scoring
+
+**Why this area:** rotating through the engines per the standing mandate - discovery
+(`engine/discovery/`) hadn't had this review's attention yet. Pulled latest `main` first
+(`git merge --ff-only`) - several concurrent passes had landed (OCR, deal economics, position
+suggestions, person registration expiry, pricing) since the first run; none touched the files
+below, confirmed by `grep` before starting.
+
+### Finding 3 (CONFIRMED, FIXED): discipline-fit scoring treats "no disciplines recorded" the
+same as "checked, out of scope" - silently marks matching tenders "not_a_fit" for every company
+
+**Where:** `engine/discovery/assess_tender.py`, `assess_fit()`.
+
+**What was tested:** `profile.get("disciplines", [])` is the list `assess_fit()` compares a
+tender's keyword-matched category against. Checked where that list is actually supposed to come
+from for a real company, not just read the code in isolation:
+- Every one of the 4 committed `config/test_companies/*.json` fixtures (the day-one 3 plus
+  `multi_specialist_co.json` added in the first run of this review) has **no top-level
+  `company.disciplines` field at all.**
+- `grep`ed the whole `app/` tree: no Company-page field, no Server Action, and no migration ever
+  writes a `disciplines` column on `companies`. The only `disciplines` concept the web app
+  actually has is `experience_items.disciplines` (migration `0012`, the Experience Library's
+  per-evidence tags) - a different table entirely.
+- `engine/discovery/load_company_profile()` (used by `watch_new_tenders.py`/`run_discovery.py`,
+  i.e. the live national OCDS feed path) reads `company.disciplines` straight off a flat JSON
+  file - it has no code path to Supabase's `experience_items` at all.
+- `engine/general/process_general_jobs.py`'s `profile_from_company()` (the general-engine/manual-
+  intake production path) **does** correctly derive `disciplines` from tagged `experience_items`
+  rows - but that function is never called by the discovery feed path.
+
+So in production, for every real company (including Klipcorp, whose own real profile JSON
+follows the identical flat-file shape as the fixtures), `assess_fit()`'s `known_disciplines` is
+always `[]` when reached via the discovery feed. Confirmed by running `assess_fit()` directly
+(not theorised) with a profile shaped exactly like the committed fixtures against a textbook
+SANRAL roads tender title ("Appointment of a consultant for the upgrade of Route R.396 Section
+10" / "Rehabilitation of pavement and stormwater") - precisely Klipcorp's own real discipline.
+
+**What broke:** verdict came back `not_a_fit`, with the reason "Discipline (roads_civil) doesn't
+match the company's known disciplines" - confidently wrong, not an honest "unknown". This is the
+verdict `app/app/discovery/page.tsx` renders directly (System-Status's Built table: "genuinely
+wired end-to-end"), so the live Discovery page would show a company's own bread-and-butter work
+as a flat rejection, system-wide, for every tenant, with nothing in the UI suggesting the
+rejection is actually "we have no data to judge this."
+
+**Doubly confirmed this is a real, already-known-about risk, not a one-off):**
+`engine/intake/classify_tender.py`'s `assess_fit_from_text()` (the manual-tender-intake /
+general-engine call site) already has a band-aid for exactly this -
+`if not profile.get("disciplines"): ... verdict = "needs_review"` - added by an earlier pass that
+evidently hit this same wrong-rejection behaviour and patched around it **at its own call site**
+instead of in `assess_fit()` itself. That left the discovery feed's own direct call to
+`assess_fit()` (via `assess_release()`) with the original, unpatched bug - a partial fix that
+looked complete because the one path someone happened to test (intake) was covered.
+
+**Fix (contained, applied this pass):**
+- `assess_tender.assess_fit()` now treats an empty/missing `disciplines` list as "no data to
+  judge" -> `needs_review` (same honest-uncertainty treatment the `uncategorized` branch already
+  gets), separately from a populated list that genuinely doesn't include the matched category,
+  which still correctly returns `not_a_fit`. This is the root fix, so every caller gets it -
+  not just the one that was patched before.
+- `classify_tender.assess_fit_from_text()`'s existing band-aid is now redundant for the case it
+  was written for, so simplified it to swap in its more specific, actionable message ("...they
+  come from your Experience Library tags...") in place of `assess_fit()`'s generic one, instead
+  of stacking both - checked directly that only one reason line results, not two near-duplicates.
+
+**Verification (real execution, not just read-through):**
+- Empty disciplines + matching category -> `needs_review` (was `not_a_fit`).
+- Populated disciplines that genuinely don't include the category -> still `not_a_fit` (the real
+  mismatch case keeps working).
+- Populated disciplines that do include the category -> still `strong_fit` (unchanged).
+- Uncategorized tender + empty disciplines -> unchanged `needs_review` with its original,
+  unrelated reason (categorization failure, not a disciplines problem - confirmed the fix didn't
+  touch this branch).
+- `classify_tender.assess_fit_from_text()` with empty disciplines -> exactly one reason in the
+  list mentioning the Experience Library, not two.
+- `engine/general/test_general_bridge.py` (fake-Supabase, no live project needed): **ALL PASSED**
+  after the fix - this is the suite that exercises `classify_tender.py` against real documents,
+  so it's the one regression check that could have caught a breakage here.
+- `engine/general/general_harness.py --no-pack`: 44 clean / 0 flagged / 0 failed across all 4
+  test companies.
+- `python3 -m py_compile` clean on both changed files.
+- No standalone test file exists for `assess_tender.py` itself (`engine/discovery/` has none) -
+  flagging that as a real gap (see below), not claiming coverage that doesn't exist.
+
+### Not yet tested this pass (deferred)
+
+- No unit test file for `engine/discovery/assess_tender.py` or `score_outlook.py` exists at all -
+  every check on this module across every pass to date (including this one) has been informal
+  script-at-the-prompt verification, never a committed, re-runnable test. Worth a dedicated pass:
+  a small `test_assess_tender.py` with the four cases verified by hand above, so this exact bug
+  class can't silently regress.
+- Whether `load_company_profile()` should itself be extended to read `experience_items` the way
+  `process_general_jobs.profile_from_company()` does, so the discovery feed and the general
+  engine derive "disciplines" the same way instead of two different mechanisms (one Supabase-
+  backed, one flat-file) that happen to agree only by also both being empty today. Not done this
+  pass - `load_company_profile()` takes a file path, not a `client`/`company_id`, so unifying it
+  is a real refactor, not a one-line change, and needs a live Supabase project to verify against
+  (Gap #9).
+- Malformed/boundary OCDS releases (missing title, non-ASCII buyer names, a closing date with no
+  timezone) through `assess_release()` end-to-end - not reached this pass, which focused on the
+  fit-scoring gate itself once it was found to be wrong for literally every company.

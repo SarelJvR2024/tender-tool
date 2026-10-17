@@ -174,7 +174,8 @@ def assess_fit(categories, signals, depth, profile):
     reasons = []
     verdict = "possible"
 
-    discipline_match = any(c in profile.get("disciplines", []) for c in categories)
+    known_disciplines = profile.get("disciplines") or []
+    discipline_match = any(c in known_disciplines for c in categories)
     uncategorized = all(c.startswith("uncategorized") for c in categories)
     if discipline_match:
         reasons.append(f"Discipline match: {', '.join(categories)} is within scope.")
@@ -186,8 +187,23 @@ def assess_fit(categories, signals, depth, profile):
         else:
             reasons.append("Could not determine discipline from title/description alone - needs a human look.")
         verdict = "needs_review"
+    elif not known_disciplines:
+        # An empty disciplines list is "we don't know yet" (the field has
+        # never been populated for this company), not "we checked and this
+        # is out of scope" - confirmed by running this on a profile shaped
+        # like every committed test-company fixture against a plain roads
+        # tender title: it silently came back "not_a_fit" on exactly the
+        # kind of work Klipcorp's own real SANRAL history is built around.
+        # classify_tender.assess_fit_from_text() already worked around this
+        # at its own call site; this is the same fix at the root, so every
+        # caller (including the live OCDS discovery feed, which had no
+        # workaround) gets it.
+        reasons.append(f"Discipline ({', '.join(categories)}) matched, but the company has no disciplines "
+                        "recorded yet to compare against - needs a human look, not an automatic rejection.")
+        verdict = "needs_review"
     else:
-        reasons.append(f"Discipline ({', '.join(categories)}) doesn't match the company's known disciplines.")
+        reasons.append(f"Discipline ({', '.join(categories)}) doesn't match the company's known disciplines "
+                        f"({', '.join(known_disciplines)}).")
         verdict = "not_a_fit"
 
     if signals.get("cidb_grading"):

@@ -264,9 +264,17 @@ def assess_fit_from_text(title, description, all_text, profile):
     if categories != assess_tender.categorize(title, description):
         reasons.append("Discipline read from the opening pages of the tender documents (the title alone didn't say).")
     if not profile.get("disciplines"):
-        reasons = [r for r in reasons if "doesn't match the company's known disciplines" not in r]
-        reasons.append("Your company has no disciplines on file yet (they come from your Experience Library tags), so "
-                       "fit can't be judged - needs a human look.")
+        # assess_fit() itself now treats an empty disciplines list as
+        # "unknown" rather than "checked, out of scope" (same root fix, so
+        # the live OCDS discovery feed gets it too, not just this intake
+        # path) - swap its generic reason for this call site's more useful
+        # one, which actually tells the user where disciplines come from.
+        nicer = ("Your company has no disciplines on file yet (they come from your Experience Library tags), so "
+                "fit can't be judged - needs a human look.")
+        if any("has no disciplines recorded yet" in r for r in reasons):
+            reasons = [nicer if "has no disciplines recorded yet" in r else r for r in reasons]
+        else:
+            reasons.append(nicer)
         if verdict in ("not_a_fit", "strong_fit", "possible"):
             verdict = "needs_review"
     outlook = estimate_score_outlook(all_text or "", depth, profile, signals.get("cidb_grading"))
