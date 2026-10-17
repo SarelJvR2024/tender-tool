@@ -92,6 +92,15 @@ def part1():
         check(r["kind"] == "addendum" and b.get("previous_date") == prev and b.get("date") == new,
               f"{name}: compulsory briefing moved {prev} -> {new} ({b.get('previous_date')} -> {b.get('date')})")
         check("closing_date" not in r["changes"], f"{name}: 'closing on the 04 November 2026' is not read as a closing-date change")
+        check(b.get("on_file_agrees") is True and b.get("previous_on_file") is None and b.get("applied") is False,
+              f"{name}: nothing on file -> the briefing date may be applied (on_file_agrees)")
+        check(any("briefing date was read by OCR" in c for c in r["changes"].get("caveats", [])), f"{name}: OCR caveat on the briefing date")
+        r_same = tu.classify_document(name + ".pdf", fixture(name), "ocr", "2026-11-04T09:00:00Z", "2026-11-04T09:00:00Z", prev)
+        check(r_same["changes"]["briefing"]["on_file_agrees"] is True, f"{name}: on file = the document's original ({prev}) -> agrees")
+        r_dis = tu.classify_document(name + ".pdf", fixture(name), "ocr", "2026-11-04T09:00:00Z", "2026-11-04T09:00:00Z", "2026-10-25")
+        check(r_dis["changes"]["briefing"]["on_file_agrees"] is False and r_dis["changes"]["briefing"]["previous_on_file"] == "2026-10-25"
+              and any("briefing date on file is" in c for c in r_dis["changes"]["caveats"]),
+              f"{name}: on file 25 Oct but the document's original is {prev} -> not applied, flagged")
 
     r = tu.classify_document("AMENDED RFQ-MICT-75-2026- WATER DISPENSER_.pdf", fixture("mict_rfq75_amended_reissue"), "text",
                              "2026-10-23T09:00:00Z", "2026-10-23T09:00:00Z")
@@ -156,6 +165,11 @@ class MemClient:
                 out.append(copy.deepcopy(r))
         return out
 
+    def rpc(self, fn, args=None):
+        """company_member_labels() as the service role sees it (0048)."""
+        assert fn == "company_member_labels", fn
+        return [{"user_id": u, "label": e or "a team member"} for u, e in self.rows("_auth_users")]
+
     def upsert(self, table, rows, on_conflict):
         keys = on_conflict.split(",")
         out = []
@@ -181,6 +195,7 @@ def addendum_docx(text):
 
 OCID = "ocds-9t57fa-990001"
 OCID_LATE = "ocds-9t57fa-990002"
+OCID_DIS = "ocds-9t57fa-990004"  # addendum moves the closing date, the listing doesn't
 DAY = datetime.date(2026, 10, 16)
 TODAY = datetime.date(2026, 10, 17)
 
@@ -229,8 +244,12 @@ def scenario(c, label, seed):
     sanral_pages = [{"url": "https://www.nra.co.za/open-tenders/nra-2026-0756-c", "closing_date": "2026/11/16 12:00",
                      "attached_files": ["NORTH-WEST BATCH 3 CONTRACTORS (3).zip"], "file_count": "1"}]
     feed = Feed()
+    dis1 = ocds_doc("dddddddd-0000-0000-0000-000000000001", "Bid document.pdf", "2026-10-16T08:00:00Z")
+    dis2 = ocds_doc("dddddddd-0000-0000-0000-000000000002", "ADDENDUM NO. 1.docx", "2026-10-17T11:00:00Z", "docx")
+    files[dis2["url"]] = addendum_docx(fixture("ec_transport_scmu10_addendum1"))
     feed.releases[DAY] = [release(OCID, [doc1], "2026-10-26T09:00:00Z"),
-                          release(OCID_LATE, [late1, late2], "2026-11-04T09:00:00Z")]
+                          release(OCID_LATE, [late1, late2], "2026-11-04T09:00:00Z"),
+                          release(OCID_DIS, [dis1], "2026-10-26T09:00:00Z")]
     logs = []
 
     def go(today=TODAY):
@@ -256,9 +275,22 @@ def scenario(c, label, seed):
     check(len(sanral) == 1 and sanral[0]["baseline"], "run 1: SANRAL page's attached file recorded as baseline")
     state = c.select("tender_watch_state", {"tender_id": ids["t1"]})[0]
     check(state["release_date"] == DAY.isoformat(), "run 1: the release date is remembered for the next check")
+    # Briefing moved 22 -> 27 Oct (0048): written to the tender and to each
+    # active pursuer's own "Briefing session" milestone.
+    tl = c.select("tenders", {"id": ids["t_late"]})[0]
+    late_doc = [d for d in c.select("tender_watched_documents", {"tender_id": ids["t_late"]}) if not d["baseline"]][0]
+    check(str(tl.get("briefing_date"))[:10] == "2026-10-27" and tl.get("briefing_source_document_id") == late_doc["id"],
+          f"run 1: tenders.briefing_date = 27 Oct, from that addendum ({tl.get('briefing_date')})")
+    check(late_doc["changes"]["briefing"].get("applied") is True, "run 1: the update records the briefing date as applied")
+    btasks = c.select("tender_tasks", {"tender_id": ids["t_late"], "kind": "briefing"})
+    check(sorted(t["company_id"] for t in btasks) == sorted([ids["a"], ids["b"]])
+          and all(str(t["due_date"])[:10] == "2026-10-27" and t["description"].startswith("Briefing session") and t["is_standard"]
+                  for t in btasks),
+          f"run 1: a 'Briefing session' milestone (kind briefing) due 27 Oct for each active pursuer ({len(btasks)})")
 
     # Run 2: the buyer adds the addendum and moves the closing date on the listing.
-    feed.releases[DAY] = [release(OCID, [doc1, doc2], "2026-11-06T11:00:00Z"), release(OCID_LATE, [late1, late2], "2026-11-04T09:00:00Z")]
+    feed.releases[DAY] = [release(OCID, [doc1, doc2], "2026-11-06T11:00:00Z"), release(OCID_LATE, [late1, late2], "2026-11-04T09:00:00Z"),
+                          release(OCID_DIS, [dis1, dis2], "2026-10-26T09:00:00Z")]
     sanral_pages.append({**sanral_pages[0], "attached_files": sanral_pages[0]["attached_files"] + ["Addendum 1 - NW Batch 3 RRM Contractors Signed.pdf"], "file_count": "2"})
     feed.calls.clear()
     rep = go()
@@ -284,6 +316,21 @@ def scenario(c, label, seed):
     check(ids["b"] in by_co and not any(t["tender_id"] == ids["t_sanral"] for t in by_co[ids["b"]]["tenders"]),
           "run 2: the SANRAL addendum goes only to the company pursuing the SANRAL tender")
     check(by_co[ids["a"]]["members"] and by_co[ids["a"]]["legal_name"] == "Pursuer Bidding (Pty) Ltd", "run 2: report names the company and its members")
+    labels = sorted(m["label"] for m in by_co[ids["a"]]["members"])
+    check(labels == ["estimator@pursuer-bidding.example", "owner@pursuer-bidding.example"]
+          and all(m["email"] == m["label"] for m in by_co[ids["a"]]["members"]),
+          f"run 2: the two members of the bidding company are named by e-mail, not user id ({labels})")
+    check([m["label"] for m in by_co[ids["b"]]["members"]] == ["a team member (no e-mail found)"]
+          and by_co[ids["b"]]["members"][0]["email"] is None,
+          "run 2: a member with no e-mail is 'a team member (no e-mail found)', never the raw id")
+    # The listing does NOT agree: recorded, not applied (0039's rule, kept).
+    dis = c.select("tenders", {"id": ids["t_dis"]})[0]
+    dis_upd = [u for t in by_co[ids["a"]]["tenders"] if t["tender_id"] == ids["t_dis"] for u in t["updates"]]
+    dcd = dis_upd[0]["changes"]["closing_date"] if dis_upd else {}
+    check(dcd.get("date") == "2026-11-06" and dcd.get("listing_date") == "2026-10-26" and dcd.get("listing_agrees") is False
+          and dcd.get("applied") is False and str(dis["closing_date"]).startswith("2026-10-26"),
+          f"run 2: addendum says 6 Nov, listing still 26 Oct -> recorded, NOT applied ({dcd.get('applied')}, {dis['closing_date']})")
+    ids["dis_doc"] = dis_upd[0]["id"] if dis_upd else None
 
     # Run 3: nothing new.
     n_before = len(c.select("tender_update_notifications"))
@@ -318,14 +365,35 @@ def scenario(c, label, seed):
     check(len(u4) == 2 and all(u["kind"] == "supporting_document" and u["urgency"] == "info" for u in u4),
           "run 4: a late plain document -> one 'info' update per pursuing company")
     check(go(TODAY + datetime.timedelta(days=1)) == [], "run 5: and not again")
+
+    # Run 6: a company starts pursuing the briefing-moved tender after the
+    # addendum: exactly one alert (Sarel: confirmed correct) and its own
+    # briefing milestone from tenders.briefing_date.
+    c.insert("tender_packs", {"company_id": ids["c"], "tender_id": ids["t_late"], "pipeline_stage": "found"})
+    rep = go(TODAY + datetime.timedelta(days=2))
+    late_join = [(e["company_id"], u["kind"]) for e in rep for t in e["tenders"] for u in t["updates"]]
+    check(late_join == [(ids["c"], "addendum")], f"run 6: the late joiner gets exactly one alert, the addendum ({late_join})")
+    cb = c.select("tender_tasks", {"tender_id": ids["t_late"], "kind": "briefing", "company_id": ids["c"]})
+    check(len(cb) == 1 and str(cb[0]["due_date"])[:10] == "2026-10-27", "run 6: and its own briefing milestone, 27 Oct")
+    check(go(TODAY + datetime.timedelta(days=2)) == [] and
+          len(c.select("tender_tasks", {"tender_id": ids["t_late"], "kind": "briefing"})) == 3, "run 7: nothing new, no duplicate milestone")
     return ids
+
+
+# Company a has two members (both with e-mail), b one with no e-mail on its
+# auth.users row - the reports must name each, never by user id.
+MEMBER_EMAILS = {"a": ["owner@pursuer-bidding.example", "estimator@pursuer-bidding.example"], "b": [None],
+                 "c": ["owner@feed-only.example"], "d": ["owner@lost-it.example"]}
 
 
 def seed_mem(c):
     ids = {k: str(uuid.uuid4()) for k in ("a", "b", "c", "d")}
     for k, name in (("a", "Pursuer Bidding (Pty) Ltd"), ("b", "Pursuer Found CC"), ("c", "Feed Only Ltd"), ("d", "Lost It Ltd")):
         c.rows("companies").append({"id": ids[k], "legal_name": name})
-        c.rows("company_members").append({"company_id": ids[k], "user_id": str(uuid.uuid4()), "tender_role": "full_cycle"})
+        for email in MEMBER_EMAILS[k]:
+            uid = str(uuid.uuid4())
+            c.rows("_auth_users").append((uid, email))
+            c.rows("company_members").append({"company_id": ids[k], "user_id": uid, "tender_role": "full_cycle"})
     t = lambda **kw: {"id": str(uuid.uuid4()), "status": "open", "created_at": "2026-10-16T12:00:00Z", **kw}  # noqa: E731
     t1 = t(slug="etenders-990001", contract_no="SCMU10-26/27-0017", ocid=OCID, source="etenders_ocds",
            closing_date="2026-10-26T09:00:00Z", description="Scholar transport",
@@ -334,9 +402,12 @@ def seed_mem(c):
            document_urls=[{"url": ocds_doc("bbbbbbbb-0000-0000-0000-000000000001", "", "")["url"], "title": "Specification"}])
     tu_ = t(slug="etenders-990003", contract_no="NOBODY", ocid="ocds-9t57fa-990003", source="etenders_ocds", closing_date="2026-11-04T09:00:00Z")
     ts = t(slug="nra-2026-0756-c", contract_no="NRA 2026/0756 (C)", source="sanral", closing_date="2026-11-16T10:00:00Z")
-    c.rows("tenders").extend([t1, tl, tu_, ts])
-    ids.update({"t1": t1["id"], "t_late": tl["id"], "t_unpursued": tu_["id"], "t_sanral": ts["id"]})
-    for co, tender, stage in (("a", t1, "bidding"), ("b", t1, "found"), ("d", t1, "lost"), ("a", tl, "bidding"), ("b", tl, "found"), ("a", ts, "bidding")):
+    td = t(slug="etenders-990004", contract_no="DIS-0001", ocid=OCID_DIS, source="etenders_ocds", closing_date="2026-10-26T09:00:00Z",
+           document_urls=[{"url": ocds_doc("dddddddd-0000-0000-0000-000000000001", "", "")["url"], "title": "Bid document.pdf"}])
+    c.rows("tenders").extend([t1, tl, tu_, ts, td])
+    ids.update({"t1": t1["id"], "t_late": tl["id"], "t_unpursued": tu_["id"], "t_sanral": ts["id"], "t_dis": td["id"]})
+    for co, tender, stage in (("a", t1, "bidding"), ("b", t1, "found"), ("d", t1, "lost"), ("a", tl, "bidding"), ("b", tl, "found"),
+                              ("a", ts, "bidding"), ("a", td, "bidding"), ("d", td, "lost")):
         c.rows("tender_packs").append({"id": str(uuid.uuid4()), "company_id": ids[co], "tender_id": tender["id"], "pipeline_stage": stage})
     for co in ("a", "b", "d"):
         c.rows("tender_tasks").append({"id": str(uuid.uuid4()), "company_id": ids[co], "tender_id": t1["id"], "kind": "closing", "due_date": "2026-10-26"})
@@ -345,6 +416,10 @@ def seed_mem(c):
                                                    "closing_date": "2026-10-26T09:00:00Z", "first_seen": "2026-10-16T12:00:00Z"})
     c.rows("discovered_opportunities").append({"id": str(uuid.uuid4()), "company_id": ids["c"], "ocid": "ocds-9t57fa-990003",
                                                "closing_date": "2026-11-04T09:00:00Z", "first_seen": "2026-10-16T12:00:00Z"})
+    for co in ("a", "d"):
+        c.rows("tender_tasks").append({"id": str(uuid.uuid4()), "company_id": ids[co], "tender_id": td["id"], "kind": "closing", "due_date": "2026-10-26"})
+        c.rows("discovered_opportunities").append({"id": str(uuid.uuid4()), "company_id": ids[co], "ocid": OCID_DIS,
+                                                   "closing_date": "2026-10-26T09:00:00Z", "first_seen": "2026-10-16T12:00:00Z"})
     return ids
 
 
@@ -356,14 +431,15 @@ def seed_db(c):
     from test_manual_intake import lit  # noqa: F401
     c.sql("delete from tender_update_notifications; delete from tender_watched_documents; delete from tender_watch_state; "
           "delete from discovered_opportunities where ocid like 'ocds-9t57fa-99000%'; "
-          "delete from tenders where slug in ('etenders-990001','etenders-990002','etenders-990003','nra-2026-0756-c'); "
+          "delete from tenders where slug in ('etenders-990001','etenders-990002','etenders-990003','etenders-990004','nra-2026-0756-c'); "
           "delete from companies where legal_name in ('Pursuer Bidding (Pty) Ltd','Pursuer Found CC','Feed Only Ltd','Lost It Ltd')")
     ids = {}
     for k, name in (("a", "Pursuer Bidding (Pty) Ltd"), ("b", "Pursuer Found CC"), ("c", "Feed Only Ltd"), ("d", "Lost It Ltd")):
         ids[k] = c.insert("companies", {"legal_name": name})["id"]
-        uid = c.sql("insert into auth.users default values returning id").splitlines()[0]
-        ids["u" + k] = uid
-        c.insert("company_members", {"company_id": ids[k], "user_id": uid, "role": "owner"})
+        for i, email in enumerate(MEMBER_EMAILS[k]):
+            uid = c.sql(f"insert into auth.users (email) values ({'null' if email is None else repr(email)}) returning id").splitlines()[0]
+            ids["u" + k + ("" if i == 0 else str(i + 1))] = uid
+            c.insert("company_members", {"company_id": ids[k], "user_id": uid, "role": "owner" if i == 0 else "member"})
 
     def tender(**kw):
         return c.insert("tenders", {"status": "open", **kw})
@@ -374,8 +450,11 @@ def seed_db(c):
                 document_urls=[{"url": ocds_doc("bbbbbbbb-0000-0000-0000-000000000001", "", "")["url"], "title": "Specification"}])
     tu_ = tender(slug="etenders-990003", contract_no="NOBODY", ocid="ocds-9t57fa-990003", source="etenders_ocds", closing_date="2026-11-04T09:00:00Z")
     ts = tender(slug="nra-2026-0756-c", contract_no="NRA 2026/0756 (C)", source="sanral", closing_date="2026-11-16T10:00:00Z")
-    ids.update({"t1": t1["id"], "t_late": tl["id"], "t_unpursued": tu_["id"], "t_sanral": ts["id"]})
-    for co, t, stage in (("a", t1, "bidding"), ("b", t1, "found"), ("d", t1, "lost"), ("a", tl, "bidding"), ("b", tl, "found"), ("a", ts, "bidding")):
+    td = tender(slug="etenders-990004", contract_no="DIS-0001", ocid=OCID_DIS, source="etenders_ocds", closing_date="2026-10-26T09:00:00Z",
+                document_urls=[{"url": ocds_doc("dddddddd-0000-0000-0000-000000000001", "", "")["url"], "title": "Bid document.pdf"}])
+    ids.update({"t1": t1["id"], "t_late": tl["id"], "t_unpursued": tu_["id"], "t_sanral": ts["id"], "t_dis": td["id"]})
+    for co, t, stage in (("a", t1, "bidding"), ("b", t1, "found"), ("d", t1, "lost"), ("a", tl, "bidding"), ("b", tl, "found"),
+                         ("a", ts, "bidding"), ("a", td, "bidding"), ("d", td, "lost")):
         c.insert("tender_packs", {"company_id": ids[co], "tender_id": t["id"], "pipeline_stage": stage})
     for co in ("a", "b", "d"):
         c.insert("tender_tasks", {"company_id": ids[co], "tender_id": t1["id"], "kind": "closing", "is_standard": True,
@@ -385,6 +464,11 @@ def seed_db(c):
                                               "closing_date": "2026-10-26T09:00:00Z", "first_seen": "2026-10-16T12:00:00Z"})
     c.insert("discovered_opportunities", {"company_id": ids["c"], "ocid": "ocds-9t57fa-990003", "verdict": "possible",
                                           "closing_date": "2026-11-04T09:00:00Z", "first_seen": "2026-10-16T12:00:00Z"})
+    for co in ("a", "d"):
+        c.insert("tender_tasks", {"company_id": ids[co], "tender_id": td["id"], "kind": "closing", "is_standard": True,
+                                  "description": "Tender closes", "due_date": "2026-10-26"})
+        c.insert("discovered_opportunities", {"company_id": ids[co], "ocid": OCID_DIS, "verdict": "possible",
+                                              "closing_date": "2026-10-26T09:00:00Z", "first_seen": "2026-10-16T12:00:00Z"})
     return ids
 
 
@@ -392,7 +476,14 @@ def part3(psql):
     sys.path.insert(0, os.path.join(ROOT, "engine", "intake"))
     sys.path.insert(0, os.path.join(ROOT, "engine", "pack"))
     from test_manual_intake import Client
-    c = Client(psql, "/nonexistent")
+
+    class DbClient(Client):
+        def rpc(self, fn, args=None):
+            """PostgREST /rpc/<fn> with the service-role key: the JWT role claim set."""
+            out = self.sql("select set_config('request.jwt.claims', '{\"role\":\"service_role\"}', false); "
+                           f"select coalesce(json_agg(r), '[]') from {fn}() r")
+            return json.loads(out.split("\n", 1)[1])
+    c = DbClient(psql, "/nonexistent")
     c.sql("grant usage on schema public to authenticated; grant all on all tables in schema public to authenticated; "
           "grant execute on all functions in schema public to authenticated")
     ids = scenario(c, "3 - the watch on a scratch Postgres (every migration replayed)", seed_db)
@@ -400,7 +491,8 @@ def part3(psql):
     own = c.sql(f"select count(*) from tender_update_notifications where company_id = '{ids['a']}'")
     check(ok and n == own and int(n) > 0, f"RLS: a pursuer's member sees its own {own} notification(s) only ({n})")
     ok, n = c.as_user(ids["uc"], "select count(*) from tender_update_notifications")
-    check(ok and n == "0", "RLS: the Discovery-feed-only company's member sees no notifications")
+    own_c = c.sql(f"select count(*) from tender_update_notifications where company_id = '{ids['c']}'")
+    check(ok and n == own_c == "1", f"RLS: the feed-only company (a late joiner on one tender since run 6) sees only its own 1 notification ({n})")
     ok, n = c.as_user(ids["uc"], f"select count(*) from tender_watched_documents where tender_id = '{ids['t1']}' and not baseline")
     check(ok and int(n) >= 1, "RLS: a shared tender's updates are readable by any member (like its documents)")
     ok, n = c.as_user(ids["ua"], "select count(*) from tender_watch_state")
@@ -417,6 +509,82 @@ def part3(psql):
     ok2, n2 = c.as_user(ids["ub"], f"select count(*) from tender_watched_documents where tender_id = '{priv['id']}'")
     check(ok and n == "1" and ok2 and n2 == "0", "RLS: a private manual tender's updates: owner 1, other company 0")
     c.sql(f"delete from tenders where id = '{priv['id']}'")
+
+    # company_member_labels() (0033/0048): a signed-in member still sees only
+    # their own company's members; the service role (the engine) sees all.
+    ok, n = c.as_user(ids["ub"], "select count(*) from company_member_labels()")
+    check(ok and n == "1", f"labels: a member of the 1-member company sees 1 label, not everyone's ({n})")
+    ok, out = c.as_user(ids["ua"], "select string_agg(label, ',' order by label) from company_member_labels()")
+    check(ok and out == "estimator@pursuer-bidding.example,owner@pursuer-bidding.example",
+          f"labels: a member of the bidding company sees its two members' e-mails ({out})")
+    ok, n = c.as_user(ids["ua"], "select set_config('request.jwt.claims', '{\"role\":\"authenticated\"}', false); "
+                                 "select count(*) from company_member_labels()")
+    check(ok and n == "2", "labels: an authenticated JWT claim doesn't widen it")
+    svc = c.rpc("company_member_labels")
+    check(len(svc) >= 5 and {"owner@feed-only.example", "owner@lost-it.example"} <= {r["label"] for r in svc},
+          f"labels: the service role sees every company's members ({len(svc)})")
+
+    # 1. A person accepts the addendum's closing date the listing doesn't show.
+    doc = ids["dis_doc"]
+    accept = f"select accept_tender_update_date('{doc}', 'closing_date')"
+    for who, why in (("uc", "a Discovery-feed-only company"), ("ud", "a company that lost the tender")):
+        ok, err = c.as_user(ids[who], accept)
+        check(not ok and "Only a company working on this tender" in err, f"accept: refused for {why}")
+    check(c.sql(f"select closing_date from tenders where id = '{ids['t_dis']}'").startswith("2026-10-26"), "accept: nothing changed by the refusals")
+    ok, out = c.as_user(ids["ua2"], accept)
+    check(ok, f"accept: the bidding company's second member accepts it ({out[:200]})")
+    tdis = c.select("tenders", {"id": ids["t_dis"]})[0]
+    check(tdis["closing_date"].startswith("2026-11-06T09:00:00"), f"accept: tenders.closing_date = 6 Nov 11:00 SAST, the document's own time ({tdis['closing_date']})")
+    dtasks = c.select("tender_tasks", {"tender_id": ids["t_dis"], "kind": "closing"})
+    check(len(dtasks) == 2 and all(t["due_date"] == "2026-11-06" for t in dtasks),
+          "accept: every company's 'Tender closes' milestone moved to 6 Nov (same rows the automatic path moves)")
+    dopps = c.select("discovered_opportunities", {"ocid": OCID_DIS})
+    check(len(dopps) == 2 and all(o["closing_date"] == tdis["closing_date"] for o in dopps), "accept: the Discovery rows for the release moved")
+    ch = c.select("tender_watched_documents", {"id": doc})[0]["changes"]["closing_date"]
+    check(ch["applied"] is True and ch["applied_by"] == "person" and ch["accepted_by"] == ids["ua2"]
+          and ch["accepted_by_company"] == ids["a"] and ch.get("accepted_at") and ch["on_file_before_accept"].startswith("2026-10-26"),
+          "accept: logged on the update - who (user + company), when, and the date it replaced")
+    ok, err = c.as_user(ids["ua"], accept)
+    check(not ok and "already been applied" in err, "accept: a second accept is refused")
+    # Parity with the automatic path (t1, applied by apply_closing_date): the
+    # same three places hold the same value.
+    for tid, ocid in ((ids["t1"], OCID), (ids["t_dis"], OCID_DIS)):
+        tc = c.select("tenders", {"id": tid})[0]["closing_date"]
+        day = tu.to_date(tc).isoformat()
+        tasks_ok = all(t["due_date"] == day for t in c.select("tender_tasks", {"tender_id": tid, "kind": "closing"}))
+        opps_ok = all(o["closing_date"] == tc for o in c.select("discovered_opportunities", {"ocid": ocid}))
+        check(tasks_ok and opps_ok, f"parity: {'automatic' if tid == ids['t1'] else 'accepted'} path - tender, every closing task and Discovery row agree ({tc})")
+
+    # 2. Briefing: a contradicted date is accepted by a person the same way.
+    c.sql(f"update tenders set briefing_date = '2026-10-25' where id = '{ids['t_late']}'")
+    bdoc = c.insert("tender_watched_documents", {"tender_id": ids["t_late"], "doc_key": "x@briefing", "source": "etenders_ocds",
+                                                  "title": "Addendum 2.pdf", "kind": "addendum", "urgency": "high",
+                                                  "changes": {"briefing": {"date": "2026-10-29", "time": "10:00", "previous_date": "2026-10-22",
+                                                                           "previous_on_file": "2026-10-25", "on_file_agrees": False,
+                                                                           "applied": False, "quote": "Revised Site Briefing Date: 29 October 2026"}}})
+    ok, out = c.as_user(ids["ub"], f"select accept_tender_update_date('{bdoc['id']}', 'briefing')")
+    check(ok, f"accept briefing: the found company's member accepts it ({out[:160]})")
+    tl = c.select("tenders", {"id": ids["t_late"]})[0]
+    bt = c.select("tender_tasks", {"tender_id": ids["t_late"], "kind": "briefing"})
+    check(tl["briefing_date"] == "2026-10-29" and tl["briefing_time"] == "10:00" and tl["briefing_source_document_id"] == bdoc["id"],
+          "accept briefing: tenders.briefing_date/time = 29 Oct 10:00, from that document")
+    check(len(bt) == 3 and all(t["due_date"] == "2026-10-29" and t["description"] == "Briefing session at 10:00" for t in bt),
+          f"accept briefing: all 3 pursuers' briefing milestones moved, none duplicated ({len(bt)})")
+
+    # 0048's index fix: the Workspace's own auto-seed statement (PostgREST
+    # ?on_conflict=company_id,tender_id,kind + ignore-duplicates) now runs.
+    ok, err = c.as_user(ids["ua"], f"insert into tender_tasks (company_id, tender_id, description, due_date, kind, is_standard) "
+                                   f"values ('{ids['a']}', '{ids['t_late']}', 'Briefing session', '2026-10-29', 'briefing', true) "
+                                   f"on conflict (company_id, tender_id, kind) do nothing")
+    check(ok, f"auto-seed: on conflict (company_id, tender_id, kind) is accepted ({err[:120]})")
+    ok, err = c.as_user(ids["ua"], f"insert into tender_tasks (company_id, tender_id, description, due_date, kind, is_standard) "
+                                   f"values ('{ids['a']}', '{ids['t_late']}', 'Tender closes', '2026-11-04', 'closing', true) "
+                                   f"on conflict (company_id, tender_id, kind) do nothing")
+    n = c.sql(f"select count(*) from tender_tasks where tender_id = '{ids['t_late']}' and company_id = '{ids['a']}' and kind = 'closing'")
+    check(ok and n == "1", "auto-seed: the closing milestone is created once")
+    ok, _ = c.as_user(ids["ua"], f"insert into tender_tasks (company_id, tender_id, description) values ('{ids['a']}', '{ids['t_late']}', 'a'), "
+                                 f"('{ids['a']}', '{ids['t_late']}', 'b')")
+    check(ok, "auto-seed: manual tasks (kind null) are still unconstrained")
 
 
 if __name__ == "__main__":

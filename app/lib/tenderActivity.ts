@@ -20,6 +20,8 @@
 
 import { STAGE_META, isPipelineStage } from "./pipeline";
 import { TENDER_TEMPLATES, isTenderTemplateType } from "./tenderTemplates";
+import { formatDay, type TenderUpdateChanges } from "./tenderUpdates";
+import { closingDayOf } from "./dates";
 
 export type ActivityActor =
   | { kind: "user"; userId: string | null } // null = a removed user
@@ -99,7 +101,9 @@ export type ActivityInput = {
   answers: { field_key: string; original_filename: string | null; answered_by: string | null; updated_at: string }[];
   // Documents the buyer added after discovery (0039, tender_watched_documents,
   // non-baseline). Optional so callers built before 0039 still type-check.
-  updates?: { id: string; title: string | null; source: string; first_seen_at: string; summary: string | null }[];
+  // `changes` (optional) carries a person's acceptance of a document's date
+  // (accept_tender_update_date, 0048: accepted_by / accepted_by_company / accepted_at).
+  updates?: { id: string; title: string | null; source: string; first_seen_at: string; summary: string | null; changes?: TenderUpdateChanges | null }[];
 };
 
 // A row whose updated_at/stage_changed_at is within this of its created_at
@@ -295,6 +299,23 @@ export function buildTenderActivity(input: ActivityInput): ActivityEntry[] {
       text: `Found a new document on ${u.source === "sanral_page" ? "SANRAL's tender page" : "eTenders"}: “${u.title ?? "untitled"}”`,
       detail: clip(u.summary),
     });
+    const accepted: [string, { date: string | null; time: string | null; accepted_by?: string; accepted_by_company?: string; accepted_at?: string; on_file_before_accept?: string | null } | undefined][] = [
+      ["closing", u.changes?.closing_date],
+      ["briefing", u.changes?.briefing],
+    ];
+    for (const [what, c] of accepted) {
+      if (!c?.accepted_at) continue;
+      out.push({
+        key: `update:${u.id}:accepted:${what}`,
+        at: c.accepted_at,
+        actor: c.accepted_by_company && c.accepted_by_company !== input.companyId ? { kind: "other_company" } : user(c.accepted_by ?? null),
+        category: "update",
+        text: `Accepted ${formatDay(c.date)}${c.time ? ` ${c.time}` : ""} as the ${what} date, from “${u.title ?? "untitled"}”`,
+        detail: c.on_file_before_accept
+          ? `Was ${formatDay(what === "closing" ? closingDayOf(c.on_file_before_accept) : c.on_file_before_accept.slice(0, 10))} on file`
+          : "Nothing was on file before",
+      });
+    }
   }
 
   return out

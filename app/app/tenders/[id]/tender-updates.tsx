@@ -3,13 +3,18 @@ import {
   UPDATE_KIND_LABEL,
   URGENCY_STYLE,
   appliedLine,
+  briefingNeedsDecision,
   closingDateLine,
+  closingNeedsDecision,
   formatDay,
   mostUrgent,
   sortUpdates,
+  type Acceptance,
   type TenderUpdate,
 } from "@/lib/tenderUpdates";
 import { formatActivityTime } from "@/lib/tenderActivity";
+import { closingDayOf } from "@/lib/dates";
+import { acceptTenderUpdateDate } from "./update-actions";
 
 /**
  * "This tender has been updated" - documents the buyer added after the tender
@@ -35,14 +40,34 @@ const BASIS_LABEL: Record<string, string> = {
   title_only: "Judged from the file name only",
 };
 
+// Same stages the watch alerts and accept_tender_update_date() (0048) allows.
+const ACTIVE_STAGES = ["found", "bidding", "submitted"];
+
 export async function TenderUpdates({ tenderId }: { tenderId: string }) {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("tender_watched_documents")
-    .select("id, title, url, source, first_seen_at, kind, read_basis, urgency, summary, changes, read_error")
-    .eq("tender_id", tenderId)
-    .eq("baseline", false)
-    .order("first_seen_at", { ascending: false });
+  const { data: { user } } = await supabase.auth.getUser();
+  const [{ data, error }, { data: tender }, { data: pack }, { data: labelRows }] = await Promise.all([
+    supabase
+      .from("tender_watched_documents")
+      .select("id, title, url, source, first_seen_at, kind, read_basis, urgency, summary, changes, read_error")
+      .eq("tender_id", tenderId)
+      .eq("baseline", false)
+      .order("first_seen_at", { ascending: false }),
+    supabase.from("tenders").select("closing_date, briefing_date, briefing_time").eq("id", tenderId).maybeSingle(),
+    // RLS: only the signed-in user's own company's pack.
+    supabase.from("tender_packs").select("company_id, pipeline_stage").eq("tender_id", tenderId).maybeSingle(),
+    supabase.rpc("company_member_labels"),
+  ]);
+  const canAccept = !!pack && ACTIVE_STAGES.includes(pack.pipeline_stage as string);
+  const labels = new Map<string, string>();
+  for (const r of (labelRows ?? []) as { user_id: string; label: string }[]) labels.set(r.user_id, r.label);
+  const acceptedBy = (a: Acceptance): string => {
+    if (pack && a.accepted_by_company && a.accepted_by_company !== pack.company_id) return "another company working on this tender";
+    if (a.accepted_by && a.accepted_by === user?.id) return "you";
+    return (a.accepted_by && labels.get(a.accepted_by)) || "a former member";
+  };
+  const closingOnFile = (tender?.closing_date as string | null) ?? null;
+  const briefingOnFile = (tender?.briefing_date as string | null) ?? null;
 
   if (error) {
     return (
@@ -98,28 +123,70 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                 )}
               </div>
 
-              {closing && (
-                <div
-                  style={{
-                    marginTop: 6,
-                    padding: "8px 11px",
-                    borderRadius: 8,
-                    fontSize: 13,
-                    fontWeight: 600,
-                    background: closing.tone === "good" ? "#DCFCE7" : closing.tone === "bad" ? "#FEE2E2" : "#F6F5F1",
-                    color: closing.tone === "good" ? "#15803D" : closing.tone === "bad" ? "#B91C1C" : "#16233B",
-                  }}
-                >
-                  {closing.text}
-                  {applied && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 3 }}>{applied}</div>}
-                </div>
+              {closing && changes.closing_date && closingNeedsDecision(changes.closing_date) ? (
+                <DateDisagreement
+                  heading="The closing date in this document isn't the one on file"
+                  rows={[
+                    { label: "This document says", value: `${formatDay(changes.closing_date.date)}${changes.closing_date.time ? ` ${changes.closing_date.time}` : ""}`, strong: true },
+                    {
+                      label: u.source === "sanral_page" ? "SANRAL's tender page shows" : "The buyer's eTenders listing shows",
+                      value: changes.closing_date.listing_date ? formatDay(changes.closing_date.listing_date) : "no closing date",
+                    },
+                    { label: "On file here", value: closingOnFile ? formatDay(closingDayOf(closingOnFile)) : "no closing date" },
+                  ]}
+                  note={`${closing.text} Not applied automatically, because the buyer's own listing doesn't show this date. Check the document (and with the buyer if in doubt) before accepting it - accepting moves the closing date, its countdown, every company's “Tender closes” task and the Discovery entry.`}
+                  form={canAccept ? { tenderId, documentId: u.id, change: "closing_date", label: `Accept ${formatDay(changes.closing_date.date)} as the closing date` } : null}
+                />
+              ) : (
+                closing && (
+                  <div
+                    style={{
+                      marginTop: 6,
+                      padding: "8px 11px",
+                      borderRadius: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      background: closing.tone === "good" ? "#DCFCE7" : closing.tone === "bad" ? "#FEE2E2" : "#F6F5F1",
+                      color: closing.tone === "good" ? "#15803D" : closing.tone === "bad" ? "#B91C1C" : "#16233B",
+                    }}
+                  >
+                    {closing.text}
+                    {applied && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 3 }}>{applied}</div>}
+                    {changes.closing_date?.accepted_at && (
+                      <div style={{ fontSize: 12, fontWeight: 400, marginTop: 3 }}>
+                        Accepted by {acceptedBy(changes.closing_date)} on {formatActivityTime(changes.closing_date.accepted_at)}
+                        {changes.closing_date.listing_date ? ` - the listing showed ${formatDay(changes.closing_date.listing_date)}` : ""}.
+                      </div>
+                    )}
+                  </div>
+                )
               )}
-              {briefing && (
-                <div style={{ marginTop: 6, fontSize: 13, color: "#16233B" }}>
-                  {briefing.cancelled
-                    ? "Briefing session cancelled or no longer compulsory."
-                    : `Briefing moved${briefing.previous_date ? ` from ${formatDay(briefing.previous_date)}` : ""} to ${formatDay(briefing.date)}${briefing.time ? ` ${briefing.time}` : ""}.`}
-                </div>
+              {briefing && briefingNeedsDecision(briefing) ? (
+                <DateDisagreement
+                  heading="The briefing date in this document doesn't match the one on file"
+                  rows={[
+                    { label: "This document says", value: `${formatDay(briefing.date)}${briefing.time ? ` ${briefing.time}` : ""}`, strong: true },
+                    { label: "It says the original was", value: briefing.previous_date ? formatDay(briefing.previous_date) : "not stated" },
+                    { label: "On file here", value: briefingOnFile ? formatDay(briefingOnFile) : "no briefing date" },
+                  ]}
+                  note="Not applied automatically, because the document's original briefing date isn't the one on file. Accepting it moves the briefing date and every company's “Briefing session” task."
+                  form={canAccept ? { tenderId, documentId: u.id, change: "briefing", label: `Accept ${formatDay(briefing.date)} as the briefing date` } : null}
+                />
+              ) : (
+                briefing && (
+                  <div style={{ marginTop: 6, fontSize: 13, color: "#16233B" }}>
+                    {briefing.cancelled
+                      ? "Briefing session cancelled or no longer compulsory."
+                      : `Briefing moved${briefing.previous_date ? ` from ${formatDay(briefing.previous_date)}` : ""} to ${formatDay(briefing.date)}${briefing.time ? ` ${briefing.time}` : ""}.`}
+                    {briefing.applied && (
+                      <div style={{ fontSize: 12, color: "#6B6758", marginTop: 2 }}>
+                        {briefing.accepted_at
+                          ? `Accepted by ${acceptedBy(briefing)} on ${formatActivityTime(briefing.accepted_at)} - the briefing date and the “Briefing session” task now show it.`
+                          : "The briefing date on file and the “Briefing session” task have been updated."}
+                      </div>
+                    )}
+                  </div>
+                )
               )}
               {!closing && !briefing && u.summary && (
                 <div style={{ marginTop: 4, fontSize: 13, color: "#16233B" }}>
@@ -139,7 +206,12 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                 {u.read_basis ? BASIS_LABEL[u.read_basis] : null}
                 {u.read_error ? ` · ${u.read_error}` : null}
               </div>
-              {(changes.caveats ?? []).map((c) => (
+              {(changes.caveats ?? [])
+                // Once a person accepted the document's date, "confirm with the
+                // buyer" is history - the accepted line above says what was done.
+                .filter((c) => !(changes.closing_date?.accepted_at && c.startsWith("The listing still shows")))
+                .filter((c) => !(changes.briefing?.accepted_at && c.startsWith("The briefing date on file is")))
+                .map((c) => (
                 <div key={c} style={{ fontSize: 11, color: "#B45309", marginTop: 2 }}>
                   {c}
                 </div>
@@ -148,6 +220,55 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
           );
         })}
       </ol>
+    </div>
+  );
+}
+
+/**
+ * Two dates that disagree, side by side, flagged - and, for a company working
+ * on this tender, the button that accepts the document's date.
+ */
+function DateDisagreement({
+  heading,
+  rows,
+  note,
+  form,
+}: {
+  heading: string;
+  rows: { label: string; value: string; strong?: boolean }[];
+  note: string;
+  form: { tenderId: string; documentId: string; change: "closing_date" | "briefing"; label: string } | null;
+}) {
+  return (
+    <div style={{ marginTop: 6, padding: "10px 12px", borderRadius: 8, background: "#FEF3C7", border: "1px solid #FCD34D" }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: "#B45309", marginBottom: 8 }}>&#9888; {heading}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {rows.map((r) => (
+          <div
+            key={r.label}
+            style={{ flex: "1 1 150px", minWidth: 0, background: "#FFFFFF", border: `1px solid ${r.strong ? "#D97706" : "#E5E1D5"}`, borderRadius: 8, padding: "7px 10px" }}
+          >
+            <div style={{ fontSize: 11, color: "#6B6758" }}>{r.label}</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#16233B" }}>{r.value}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 12, color: "#6B6758", marginTop: 8 }}>{note}</div>
+      {form ? (
+        <form action={acceptTenderUpdateDate} style={{ marginTop: 8 }}>
+          <input type="hidden" name="tender_id" value={form.tenderId} />
+          <input type="hidden" name="watched_document_id" value={form.documentId} />
+          <input type="hidden" name="change" value={form.change} />
+          <button
+            type="submit"
+            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#D97706", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" }}
+          >
+            {form.label}
+          </button>
+        </form>
+      ) : (
+        <div style={{ fontSize: 12, color: "#9A9684", marginTop: 6 }}>Only a company working on this tender can accept this date.</div>
+      )}
     </div>
   );
 }

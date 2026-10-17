@@ -232,7 +232,7 @@ def _fmt(d):
     return d.strftime("%a %d %b %Y") if d else "?"
 
 
-def classify_document(title, text, read_basis, closing_on_file=None, listing_closing=None):
+def classify_document(title, text, read_basis, closing_on_file=None, listing_closing=None, briefing_on_file=None):
     """What a newly-added tender document is, and what it changes.
 
     title           the file name / OCDS title
@@ -241,6 +241,7 @@ def classify_document(title, text, read_basis, closing_on_file=None, listing_clo
     closing_on_file tenders.closing_date before this check
     listing_closing the source listing's closing date now (OCDS
                     tenderPeriod.endDate / SANRAL page), or None
+    briefing_on_file tenders.briefing_date before this check (0048), or None
 
     Returns {kind, urgency, summary, changes}. kind is one of addendum,
     clarification, cancellation, revised_document, supporting_document."""
@@ -275,6 +276,24 @@ def classify_document(title, text, read_basis, closing_on_file=None, listing_clo
         if listing and listing != new:
             caveats.append(f"The listing still shows {_fmt(listing)}, not the {_fmt(new)} in the document - confirm with the buyer.")
     if briefing:
+        # Whether the briefing date may be written to tenders.briefing_date and
+        # the briefing milestones (watch_tender_updates.apply_briefing_date).
+        # There is no listing field to corroborate a briefing date against
+        # (eTenders' OCDS release has none), so the check is the document
+        # against itself: its "original" date must be the one on file, or
+        # nothing may be on file. A contradiction is recorded, not applied -
+        # a person can accept it from the Tender Workspace.
+        b_on_file = to_date(briefing_on_file)
+        if not briefing.get("cancelled"):
+            prev = briefing.get("previous_date")
+            agrees = b_on_file is None or b_on_file.isoformat() in (prev, briefing["date"])
+            briefing.update({"previous_on_file": b_on_file.isoformat() if b_on_file else None,
+                             "on_file_agrees": bool(agrees), "applied": False})
+            if read_basis == "ocr":
+                caveats.append("The new briefing date was read by OCR from a scanned addendum - check it against the scan.")
+            if not agrees:
+                caveats.append(f"The briefing date on file is {_fmt(b_on_file)}, but this document says the original was "
+                               f"{_fmt(datetime.date.fromisoformat(prev)) if prev else 'not stated'} - check which is right.")
         changes["briefing"] = briefing
     skip = [c["quote"] for c in changes.values() if isinstance(c, dict) and c.get("quote")]
     others = find_other_changes(text, skip) if text else []

@@ -55,7 +55,16 @@ scans) and classified by tender_updates.classify_document().
 
 Closing date: written to tenders.closing_date (plus every company's "Tender
 closes" milestone, and discovered_opportunities rows with the same ocid) ONLY
-when the listing agrees with the document. See 0039's header.
+when the listing agrees with the document. See 0039's header. When it doesn't,
+a person can accept the document's date from the Tender Workspace
+(accept_tender_update_date(), 0048 - the same writes as apply_closing_date()).
+
+Briefing date (0048): a moved briefing is written to tenders.briefing_date /
+briefing_time and to every company's "Briefing session" milestone
+(tender_tasks kind 'briefing'), created for each company actively pursuing the
+tender - unless the document's "original" briefing date contradicts the one
+on file (tender_updates.classify_document's on_file_agrees), in which case it
+is recorded and can be accepted by a person, like a closing date.
 
 Notifications (tender_update_notifications, 0039 - the seen store, in the
 database): one row per (company, document) the first time the watch reports
@@ -89,6 +98,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "general"))
+import company_profiles  # noqa: E402
 import etenders_national  # noqa: E402
 sys.path.insert(0, os.path.join(HERE, "..", "alerts"))
 import system_alerts  # noqa: E402
@@ -256,9 +266,43 @@ def apply_closing_date(client, tender, new_closing_iso):
             client.update("discovered_opportunities", {"id": r["id"]}, {"closing_date": new_closing_iso})
 
 
-def check_tender(client, tender, today, ocds, fetch_sanral=None, fetch_doc=None, work_dir=None, log=print):
+def apply_briefing_date(client, tender, briefing, document_id, company_ids=()):
+    """The briefing date on file, everywhere it is copied: tenders (0048), every
+    company's existing "Briefing session" milestone (tender_tasks kind
+    'briefing'), and a new one for each of company_ids (the companies actively
+    pursuing the tender) that has none. accept_tender_update_date() (0048)
+    makes the same writes when a person accepts a date."""
+    day, time = briefing["date"], briefing.get("time")
+    client.update("tenders", {"id": tender["id"]},
+                  {"briefing_date": day, "briefing_time": time, "briefing_source_document_id": document_id})
+    tender.update({"briefing_date": day, "briefing_time": time})
+    ensure_briefing_tasks(client, tender, company_ids)
+
+
+def ensure_briefing_tasks(client, tender, company_ids=()):
+    """Every existing briefing milestone of the tender at tenders.briefing_date,
+    and one for each of company_ids that has none (a company that started
+    pursuing the tender after the addendum gets it on the next run - or on its
+    first Workspace view, ensureBriefingMilestone())."""
+    day = tender.get("briefing_date")
+    if not day:
+        return
+    desc = "Briefing session" + (f" at {tender['briefing_time']}" if tender.get("briefing_time") else "")
+    have = set()
+    for t in client.select("tender_tasks", {"tender_id": tender["id"], "kind": "briefing"}):
+        have.add(t["company_id"])
+        if str(t.get("due_date"))[:10] != str(day)[:10] or t.get("description") != desc:
+            client.update("tender_tasks", {"id": t["id"]}, {"due_date": str(day)[:10], "description": desc})
+    for company_id in dict.fromkeys(company_ids):
+        if company_id not in have:
+            client.insert("tender_tasks", {"company_id": company_id, "tender_id": tender["id"], "description": desc,
+                                           "due_date": str(day)[:10], "kind": "briefing", "is_standard": True})
+
+
+def check_tender(client, tender, today, ocds, fetch_sanral=None, fetch_doc=None, work_dir=None, log=print, company_ids=()):
     """Re-reads one tender's source, records and classifies every document not
-    known before. Returns the new tender_watched_documents rows."""
+    known before. Returns the new tender_watched_documents rows. company_ids:
+    the companies actively pursuing it (for a new briefing milestone)."""
     state = _one(client.select("tender_watch_state", {"tender_id": tender["id"]})) or {}
     known = {r["doc_key"]: r for r in client.select("tender_watched_documents", {"tender_id": tender["id"]})}
     first_look = not known and not state.get("last_found_at")
@@ -310,7 +354,8 @@ def check_tender(client, tender, today, ocds, fetch_sanral=None, fetch_doc=None,
                "baseline": is_baseline}
         if not is_baseline:
             text, basis, err = read_new_document(doc, work_dir, fetch_doc)
-            verdict = tender_updates.classify_document(doc["title"], text, basis, closing_on_file, listing_closing)
+            verdict = tender_updates.classify_document(doc["title"], text, basis, closing_on_file, listing_closing,
+                                                       tender.get("briefing_date"))
             if replaced:
                 verdict["summary"] = "Replaced: " + verdict["summary"]
                 verdict["changes"].setdefault("caveats", []).append("The buyer replaced an earlier file with this one (same document, newer upload).")
@@ -320,11 +365,19 @@ def check_tender(client, tender, today, ocds, fetch_sanral=None, fetch_doc=None,
                 cd["applied"] = True
                 closing_on_file = listing_closing
                 tender["closing_date"] = listing_closing
+            b = verdict["changes"].get("briefing")
+            apply_b = bool(b and b.get("date") and not b.get("cancelled") and b.get("on_file_agrees"))
             row.update({"kind": verdict["kind"], "read_basis": basis, "urgency": verdict["urgency"],
                         "summary": verdict["summary"], "changes": verdict["changes"], "read_error": err})
             log(f"  {tender.get('contract_no') or tender['id']}: NEW {verdict['kind']} [{verdict['urgency']}] "
                 f"{doc['title']!r} ({basis}) - {verdict['summary']}")
-        added.append(client.upsert("tender_watched_documents", [row], "tender_id,doc_key")[0])
+        saved = client.upsert("tender_watched_documents", [row], "tender_id,doc_key")[0]
+        if not is_baseline and apply_b:
+            # After the row exists: tenders.briefing_source_document_id points at it.
+            apply_briefing_date(client, tender, b, saved["id"], company_ids)
+            b["applied"] = True
+            saved = client.update("tender_watched_documents", {"id": saved["id"]}, {"changes": verdict["changes"]})[0]
+        added.append(saved)
     client.upsert("tender_watch_state", [{**state, **new_state}], "tender_id")
     return added
 
@@ -383,7 +436,9 @@ def run(client, today=None, fetch_ocds_day=None, fetch_sanral=None, fetch_doc=No
         pursued = active_pursuits(client, today)
         log(f"{len(pursued)} tender(s) actively pursued by at least one company (stages {', '.join(ACTIVE_STAGES)})")
         for tid, (tender, packs) in pursued.items():
-            check_tender(client, tender, today, ocds, fetch_sanral, fetch_doc, work_dir, log)
+            active_ids = [p["company_id"] for p in packs]
+            check_tender(client, tender, today, ocds, fetch_sanral, fetch_doc, work_dir, log, active_ids)
+            ensure_briefing_tasks(client, tender, active_ids)
             docs = [d for d in client.select("tender_watched_documents", {"tender_id": tid}) if not d.get("baseline")]
             for company_id, fresh in notify(client, tender, packs, docs).items():
                 entry = report.setdefault(company_id, {"company_id": company_id, "tenders": []})
@@ -398,10 +453,11 @@ def run(client, today=None, fetch_ocds_day=None, fetch_sanral=None, fetch_doc=No
     finally:
         if own_work:
             shutil.rmtree(work_dir, ignore_errors=True)
+    labels = company_profiles.member_labels(client, log) if report else {}
     for company_id, entry in report.items():
         company = _one(client.select("companies", {"id": company_id})) or {}
         entry["legal_name"] = company.get("legal_name")
-        entry["members"] = [{"user_id": m["user_id"], "tender_role": m.get("tender_role")}
+        entry["members"] = [company_profiles.member_entry(m, labels)
                             for m in client.select("company_members", {"company_id": company_id})]
         entry["tenders"].sort(key=lambda t: min(URGENCY_ORDER.get(u["urgency"], 3) for u in t["updates"]))
         entry["most_urgent"] = min((u["urgency"] for t in entry["tenders"] for u in t["updates"]),
@@ -453,7 +509,7 @@ def main():
     n = sum(len(t["updates"]) for e in report for t in e["tenders"])
     print(f"\n{n} update(s) newly reported to {len(report)} compan{'y' if len(report) == 1 else 'ies'}:")
     for e in report:
-        print(f"  [{e['most_urgent']}] {e.get('legal_name')}")
+        print(f"  [{e['most_urgent']}] {e.get('legal_name')} - to {', '.join(m['label'] for m in e['members']) or 'no members'}")
         for t in e["tenders"]:
             for u in t["updates"]:
                 print(f"      {t.get('contract_no')}: [{u['urgency']}] {u['summary']}")

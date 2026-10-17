@@ -270,6 +270,9 @@ export async function advanceTaskStatus(taskId: string, tenderId: string, curren
  * - no select-then-insert race.
  */
 export async function ensureClosingMilestone(tenderId: string, closingDate: string | null) {
+  // (0048 made tender_tasks_standard_kind_idx a full unique index: as a
+  // partial one, Postgres refused this on_conflict target and the upsert
+  // silently created nothing.)
   if (!closingDate) return;
   const companyId = await requireCompanyId();
   const supabase = await createClient();
@@ -281,6 +284,32 @@ export async function ensureClosingMilestone(tenderId: string, closingDate: stri
       description: "Tender closes",
       due_date: closingDate.slice(0, 10),
       kind: "closing",
+      is_standard: true,
+    },
+    { onConflict: "company_id,tender_id,kind", ignoreDuplicates: true }
+  );
+}
+
+/**
+ * Same auto-seed for the briefing milestone, from tenders.briefing_date
+ * (0048 - written by the tender-update watch when an addendum moves the
+ * briefing, or by a person accepting a document's briefing date). A company
+ * that starts working on the tender after the addendum gets its own
+ * "Briefing session" task on its first view. Existing rows are left alone
+ * (the watch / accept_tender_update_date() move every company's).
+ */
+export async function ensureBriefingMilestone(tenderId: string, briefingDate: string | null, briefingTime: string | null) {
+  if (!briefingDate) return;
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+
+  await supabase.from("tender_tasks").upsert(
+    {
+      company_id: companyId,
+      tender_id: tenderId,
+      description: `Briefing session${briefingTime ? ` at ${briefingTime}` : ""}`,
+      due_date: briefingDate.slice(0, 10),
+      kind: "briefing",
       is_standard: true,
     },
     { onConflict: "company_id,tender_id,kind", ignoreDuplicates: true }

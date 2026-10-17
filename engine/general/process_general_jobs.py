@@ -157,6 +157,10 @@ class Supabase:
                         {"Prefer": "return=representation,resolution=merge-duplicates"})
         return json.loads(out) if out else []
 
+    def rpc(self, fn, args=None):
+        out = self._req("POST", f"/rest/v1/rpc/{fn}", args or {})
+        return json.loads(out) if out else []
+
     def download(self, bucket, path, dest):
         data = self._req("GET", f"/storage/v1/object/{bucket}/{urllib.parse.quote(path)}")
         os.makedirs(os.path.dirname(dest), exist_ok=True)

@@ -17,11 +17,36 @@ export type ClosingDateChange = {
   listing_date: string | null;
   listing_agrees: boolean;
   applied: boolean;
+} & Acceptance;
+
+/** Set by accept_tender_update_date() (0048) when a person applied the date. */
+export type Acceptance = {
+  applied_by?: "person";
+  accepted_by?: string;
+  accepted_by_company?: string;
+  accepted_at?: string;
+  on_file_before_accept?: string | null;
+  applied_value?: string;
+  time_assumed?: boolean;
 };
+
+export type BriefingChange = {
+  date: string | null;
+  time: string | null;
+  previous_date: string | null;
+  quote: string;
+  cancelled?: boolean;
+  // 0048: the briefing date on file when the watch read it, whether the
+  // document's "original" date matches it, and whether it was written to
+  // tenders.briefing_date + the "Briefing session" milestones.
+  previous_on_file?: string | null;
+  on_file_agrees?: boolean;
+  applied?: boolean;
+} & Acceptance;
 
 export type TenderUpdateChanges = {
   closing_date?: ClosingDateChange;
-  briefing?: { date: string | null; time: string | null; previous_date: string | null; quote: string; cancelled?: boolean };
+  briefing?: BriefingChange;
   other_changes?: { kind: string; quote: string }[];
   caveats?: string[];
 };
@@ -93,8 +118,24 @@ export function closingDateLine(c: ClosingDateChange | undefined): { text: strin
 /** Whether the closing date on file was changed from this update, said plainly. */
 export function appliedLine(c: ClosingDateChange | undefined): string | null {
   if (!c || c.direction === "same") return null;
+  if (c.applied && c.applied_by === "person")
+    return `Applied by hand: the closing date on file, its countdown, the “Tender closes” task and Discovery now show ${formatDay(c.date)}${c.time_assumed ? " (the document gives no time - the time of day on file was kept)" : ""}.`;
   if (c.applied) return "The closing date on file, its countdown and the “Tender closes” task have been updated - the listing shows the same date.";
   if (c.listing_date && !c.listing_agrees)
     return `Not applied: the listing still shows ${formatDay(c.listing_date)}. The closing date on file is unchanged until the buyer's listing agrees - confirm with the buyer.`;
   return "Not applied automatically - the closing date on file is unchanged. Check the document and confirm with the buyer.";
+}
+
+/**
+ * A date the document states that wasn't applied automatically and that a
+ * person can accept (accept_tender_update_date, 0048): the closing date when
+ * the buyer's listing doesn't show it (or shows nothing), the briefing date
+ * when the document's "original" briefing date isn't the one on file.
+ */
+export function closingNeedsDecision(c: ClosingDateChange | undefined): boolean {
+  return !!c && !c.applied && c.direction !== "same";
+}
+
+export function briefingNeedsDecision(b: BriefingChange | undefined): boolean {
+  return !!b && !!b.date && !b.cancelled && !b.applied && b.on_file_agrees === false;
 }

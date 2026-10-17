@@ -327,19 +327,24 @@ def find_readiness_changes(url, key, seen, today, owners=None):
 # which mode produced the list.
 # ---------------------------------------------------------------------------
 
-def load_roster_live(url, key, company_id=None):
+def load_roster_live(url, key, company_id=None, client=None):
+    """company_members, each person named by e-mail: company_member_labels()
+    (0033, the Tender Workspace activity log's own lookup; answers the service
+    role since 0048). company_members has no name column, so the e-mail is the
+    name shown; a member whose e-mail can't be read is "a team member (no
+    e-mail found)", never a raw user id."""
     path = "company_members?select=user_id,company_id,tender_role,companies(legal_name)"
     if company_id:
         path += f"&company_id=eq.{company_id}"
     rows = watch_deadlines.supabase_request(url, key, path)
+    labels = company_profiles.member_labels(client or company_profiles.RestClient(url, key))
     roster = []
     for r in rows:
+        who = company_profiles.member_entry(r, labels)
         roster.append({
             "person_id": r["user_id"],
-            "name": r.get("user_id"),  # live mode has no display name column on company_members itself;
-            # the real digest-sender (email wrapper) is expected to resolve this against
-            # auth.users/a profile table once one exists - flagged, not solved, here.
-            "email": None,
+            "name": who["label"],
+            "email": who["email"],
             "company_id": r["company_id"],
             "company_name": (r.get("companies") or {}).get("legal_name"),
             "tender_role": r.get("tender_role") or DEFAULT_ROLE,

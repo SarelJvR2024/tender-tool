@@ -87,6 +87,17 @@ ROWS = {
          "companies": {"legal_name": "Digest Architects Inc"}},
         {"user_id": "u-arch-viewer", "company_id": "co-arch", "tender_role": "viewer",
          "companies": {"legal_name": "Digest Architects Inc"}},
+        # A member whose auth.users row has no e-mail (0048: named, never by id).
+        {"user_id": "u-guard-noemail", "company_id": "co-guard", "tender_role": "validator",
+         "companies": {"legal_name": "Digest Guarding CC"}},
+    ],
+    # auth.users, as company_member_labels() (0033/0048) reads it for the
+    # service role: user_id -> e-mail (coalesced to 'a team member').
+    "_member_labels": [
+        {"user_id": "u-guard", "label": "thandi@guarding.example"},
+        {"user_id": "u-arch", "label": "pieter@architects.example"},
+        {"user_id": "u-arch-viewer", "label": "lerato@architects.example"},
+        {"user_id": "u-guard-noemail", "label": "a team member"},
     ],
     "people": [],
     "tender_tasks": [
@@ -123,6 +134,10 @@ class MemClient:
             else:
                 store.append(dict(row))
         return rows
+
+    def rpc(self, fn, args=None):
+        assert fn == "company_member_labels", fn
+        return [dict(r) for r in ROWS["_member_labels"]]
 
 
 def main():
@@ -161,7 +176,15 @@ def main():
           f"each company's profile built from its own rows, test company included ({calls['profile_from_company_rows']})")
 
     tn051, scmu5 = (fanout.SAMPLES[k]["reference"] for k in ("dawid_kruiper_tn051", "ecdpwi_scmu5_0007"))
-    g, a, v = digests["u-guard"], digests["u-arch"], digests["u-arch-viewer"]
+    check(sorted(digests) == sorted(["thandi@guarding.example", "pieter@architects.example", "lerato@architects.example",
+                                      "a team member (no e-mail found)"]),
+          f"every person named by e-mail (company_member_labels), none by user id ({sorted(digests)})")
+    check(all(d["person"]["email"] == d["person"]["name"] for k, d in digests.items() if "@" in k)
+          and digests["a team member (no e-mail found)"]["person"]["email"] is None,
+          "person.email set from the label; a member with no e-mail has email null, not a user id")
+    check(not any(u in json.dumps([d["person"] for d in digests.values()]) for u in ("u-guard", "u-arch")),
+          "no raw user id anywhere in the digests' person blocks")
+    g, a, v = digests["thandi@guarding.example"], digests["pieter@architects.example"], digests["lerato@architects.example"]
     g_new = {r["contract_number"]: r["verdict"] for r in g["new_tenders"]}
     a_new = {r["contract_number"]: r["verdict"] for r in a["new_tenders"]}
     print(f"    guarding digest new_tenders:   {g_new}")
@@ -208,11 +231,11 @@ def main():
     check(sorted(calls["profile_from_company_rows"]) == ["co-arch", "co-guard"],
           "--exclude-test-companies: the test company isn't scored")
     check(all(d["document_expiry"] == [] and d["tender_tasks"] == [] and d["readiness_changes"] == []
-              for d in (digests2["u-guard"], digests2["u-arch"])),
+              for d in (digests2["thandi@guarding.example"], digests2["pieter@architects.example"])),
           "second run: nothing reported again (COIDs, tasks, readiness change all seen)")
     ROWS["field_provenance"][0]["status"] = "confirmed"
     digests3 = run()
-    check([(c["previous_status"], c["status"]) for c in digests3["u-arch"]["readiness_changes"]] == [("missing", "confirmed")]
+    check([(c["previous_status"], c["status"]) for c in digests3["pieter@architects.example"]["readiness_changes"]] == [("missing", "confirmed")]
           and [r["status"] for r in ROWS["digest_readiness_seen"]] == ["confirmed"],
           "a status change is reported once (missing -> confirmed) and the stored status updated")
 

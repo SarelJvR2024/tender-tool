@@ -7,12 +7,13 @@ import { ComplianceReport } from "./compliance-report";
 import { GeneralTenderWorkspace } from "./general-workspace";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
-import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
+import { requestTenderCv, addTenderTask, ensureBriefingMilestone, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 import { SubmissionPack } from "./submission-pack";
 import { IntakeCard } from "./intake-card";
 import { ActivityLog } from "./activity-log";
 import { TenderUpdates } from "./tender-updates";
+import { formatDay } from "@/lib/tenderUpdates";
 import { ReusePastSubmission } from "./reuse-past-submission";
 import { TenderTemplates } from "./tender-templates";
 import { PositionPersonSelect } from "./position-person-select";
@@ -30,6 +31,8 @@ type TenderFacts = {
   nra_reference: string | null;
   description: string | null;
   closing_date: string | null;
+  briefing_date: string | null;
+  briefing_time: string | null;
   family: string | null;
   source: string | null;
 };
@@ -147,7 +150,7 @@ export default async function TenderWorkspacePage({
 
   const { data: tender, error: tenderError } = await supabase
     .from("tenders")
-    .select("id, contract_no, nra_reference, description, closing_date, family, source")
+    .select("id, contract_no, nra_reference, description, closing_date, briefing_date, briefing_time, family, source")
     .eq("id", id)
     .maybeSingle();
 
@@ -167,6 +170,7 @@ export default async function TenderWorkspacePage({
   let tasksError: { message: string } | null = null;
   if (tenderFacts) {
     await ensureClosingMilestone(id, tenderFacts.closing_date);
+    await ensureBriefingMilestone(id, tenderFacts.briefing_date, tenderFacts.briefing_time);
     const { data: taskRows, error } = await supabase
       .from("tender_tasks")
       .select("id, description, due_date, status, kind, is_standard, assigned_to, people:assigned_to(name)")
@@ -325,6 +329,13 @@ export default async function TenderWorkspacePage({
                   </span>
                 )}
               </div>
+              {tenderFacts.briefing_date && (
+                <div style={{ fontSize: 13, color: "#6B6758", marginTop: 2 }}>
+                  Briefing {formatDay(tenderFacts.briefing_date)}
+                  {tenderFacts.briefing_time ? ` at ${tenderFacts.briefing_time}` : ""}
+                  <span style={{ color: "#9A9684" }}> - from the buyer&apos;s addendum (see below)</span>
+                </div>
+              )}
 
               {tenderPack && provenance.length > 0 && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEE6" }}>
@@ -682,8 +693,9 @@ function TaskTimeline({
     <div id="tasks-milestones" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Tasks &amp; milestones</div>
       <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
-        Closing date is seeded automatically. Briefing, clarification and submission dates aren&apos;t
-        extracted automatically yet - add them here when known. Add anything else specific to this
+        Closing date is seeded automatically, and so is the briefing date once a buyer&apos;s addendum states
+        it. The original tender&apos;s briefing, clarification and submission dates aren&apos;t extracted
+        automatically yet - add them here when known. Add anything else specific to this
         tender (lining up a subcontractor, sourcing a product, a reference letter from a client) as a
         plain task - there&apos;s no fixed list to pick from.
       </div>

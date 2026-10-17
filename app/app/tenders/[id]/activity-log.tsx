@@ -62,7 +62,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
       .eq("tender_id", tenderId),
     supabase.from("tender_answers").select("field_key, original_filename, answered_by, updated_at").eq("tender_id", tenderId),
     supabase.rpc("company_member_labels"),
-    supabase.from("tender_watched_documents").select("id, title, source, first_seen_at, summary").eq("tender_id", tenderId).eq("baseline", false),
+    supabase.from("tender_watched_documents").select("id, title, source, first_seen_at, summary, changes").eq("tender_id", tenderId).eq("baseline", false),
   ]);
 
   // A source that fails to load is named, not silently left out of the history.

@@ -160,3 +160,36 @@ class RestClient:
         import urllib.parse
         q = "&".join(f"{k}=eq.{urllib.parse.quote(str(v), safe='')}" for k, v in (filters or {}).items())
         return self._req("PATCH", f"{table}?{q}", body, "return=representation")
+
+    def rpc(self, fn, args=None):
+        """POST /rest/v1/rpc/<fn> (company_member_labels, 0033/0048)."""
+        return self._req("POST", f"rpc/{fn}", args or {})
+
+
+# ---------------------------------------------------------------------------
+# Who a company member is, for the engine's reports (tender-update alerts,
+# daily digest). company_members has only user_id; company_member_labels()
+# (0033 - the Tender Workspace activity log's own lookup - answering the
+# service role since 0048) gives each member's e-mail.
+# ---------------------------------------------------------------------------
+
+def member_labels(client, log=print):
+    """{user_id: e-mail} from company_member_labels(). {} (and a warning) when
+    the client has no RPC or the call fails - a report must still go out."""
+    try:
+        rows = client.rpc("company_member_labels", {}) or []
+    except Exception as e:  # noqa: BLE001 - reported, not fatal
+        log(f"WARNING: member e-mails could not be read (company_member_labels: {e}) - members shown without them.")
+        return {}
+    return {str(r["user_id"]): r.get("label") for r in rows if r.get("user_id")}
+
+
+def member_entry(member, labels):
+    """One company_members row as the reports show it: e-mail when known."""
+    label = labels.get(str(member.get("user_id")))
+    email = label if label and "@" in label else None
+    return {"user_id": member.get("user_id"), "email": email,
+            # company_member_labels() says 'a team member' when auth.users has
+            # no e-mail; either way, never the raw user id.
+            "label": email or "a team member (no e-mail found)",
+            "tender_role": member.get("tender_role")}
