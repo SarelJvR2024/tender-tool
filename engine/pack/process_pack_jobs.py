@@ -284,6 +284,20 @@ def _ts():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def own_path(path, company_id, what):
+    """A storage path read off a row the client can write, checked before the
+    service role downloads it: it must sit under this company's own folder
+    ("<company_id>/..."). The service-role key bypasses Storage RLS, so
+    without this a row pointing at another company's file would copy that
+    file into this company's pack (POPIA-Security-Audit.md; migration 0043
+    adds the same rule as a CHECK on every such column)."""
+    p = path or ""
+    if not p.startswith(f"{company_id}/") or ".." in p or "//" in p:
+        raise ValueError(f"{what}: the stored file path is not under this company's own folder - refusing to read it. "
+                         "Upload the document again on its page.")
+    return p
+
+
 def load_document_templates(client, company_id, dest_dir):
     """{document_type: template} from the company's company_document_templates
     rows (0037), in the shape engine/company_documents.produce() takes. An
@@ -295,6 +309,7 @@ def load_document_templates(client, company_id, dest_dir):
         t = {"mode": row["mode"], "guideline": row.get("guideline"),
              "original_filename": row.get("original_filename")}
         if row["mode"] == "uploaded":
+            own_path(row["storage_path"], company_id, f"Company document '{row['document_type']}'")
             try:
                 t["path"] = client.download("company-documents", row["storage_path"],
                                             os.path.join(dest_dir, row["document_type"],
@@ -315,8 +330,10 @@ def gather(client, job, work):
     if not company:
         raise ValueError("company not found")
     pack_rows = client.select("tender_packs", {"id": job["tender_pack_id"]})
-    if not pack_rows or pack_rows[0]["company_id"] != job["company_id"]:
+    if not pack_rows or pack_rows[0]["company_id"] != job["company_id"] or pack_rows[0]["tender_id"] != tender["id"]:
         raise ValueError("tender pack not found for this company")
+    if tender.get("owner_company_id") not in (None, job["company_id"]):
+        raise ValueError("tender not found")  # another company's private tender (0024)
     tender_pack = pack_rows[0]
 
     # Blank SANRAL templates for this tender.
@@ -353,8 +370,15 @@ def gather(client, job, work):
                          "Form of Offer, A-Forms and authority letter need a named signatory.")
     person_ids = [signatories[0]["id"]] + [by_code[p["code"]]["confirmed_person_id"] for p in required]
     person_ids = list(dict.fromkeys(person_ids))
-    people = {r["id"]: r for r in client.select("people", {"id": person_ids})}
-    projects = client.select("projects", {"person_id": person_ids}, order="end_date.desc.nullslast")
+    # This company's people only: confirmed_person_id is written by the client
+    # and the service role sees every company's people (POPIA-Security-Audit).
+    people = {r["id"]: r for r in client.select("people", {"id": person_ids, "company_id": company["id"]})}
+    foreign = [p["code"] for p in required if by_code[p["code"]]["confirmed_person_id"] not in people]
+    if foreign:
+        raise ValueError(f"The person confirmed for position(s) {', '.join(foreign)} is not one of this company's people "
+                         "- confirm someone from your own People list for each before generating the pack.")
+    projects = client.select("projects", {"person_id": person_ids, "company_id": company["id"]},
+                             order="end_date.desc.nullslast")
     key_people, index_of = [], {}
     for pid in person_ids:
         prj = [p for p in projects if p["person_id"] == pid]
@@ -414,6 +438,7 @@ def gather(client, job, work):
         for key, (path_col, exp_col) in VAULT_COLUMNS.items():
             sp = company.get(path_col)
             if sp:
+                own_path(sp, company["id"], f"Vault document '{key}'")
                 local = client.download("company-documents", sp, os.path.join(work, "vault", key + "_" + os.path.basename(sp)))
                 vault[key] = {"path": local, "expiry": company.get(exp_col)}
 
@@ -422,7 +447,8 @@ def gather(client, job, work):
     if job.get("include_cvs", True):
         gen = client.select("generated_cvs", {"tender_id": tender["id"], "company_id": company["id"],
                                               "status": "ready"}, order="completed_at.desc.nullslast")
-        uploads = client.select("cv_uploads", {"person_id": person_ids, "mode": "as_is"}, order="created_at.desc")
+        uploads = client.select("cv_uploads", {"person_id": person_ids, "company_id": company["id"], "mode": "as_is"},
+                                order="created_at.desc")
         for p in required:
             pid = by_code[p["code"]]["confirmed_person_id"]
             name = people[pid]["name"]
@@ -430,11 +456,13 @@ def gather(client, job, work):
                       and g.get("storage_path_pdf")), None)
             u = next((u for u in uploads if u["person_id"] == pid), None)
             if g:
+                own_path(g["storage_path_pdf"], company["id"], f"Generated CV for {p['code']}")
                 local = client.download("cv-documents", g["storage_path_pdf"],
                                         os.path.join(work, "cvs", p["code"], os.path.basename(g["storage_path_pdf"])))
                 cvs[p["code"]] = {"path": local, "person": name,
                                   "source": f"generated {g['format']}/{g['detail']}, tender-specific"}
             elif u:
+                own_path(u["storage_path"], company["id"], f"Uploaded CV for {p['code']}")
                 local = client.download("cv-documents", u["storage_path"],
                                         os.path.join(work, "cvs", p["code"], os.path.basename(u["original_filename"])))
                 cvs[p["code"]] = {"path": local, "person": name, "source": "uploaded CV, used as-is"}
@@ -449,6 +477,7 @@ def gather(client, job, work):
 
     logo = None
     if company.get("logo_storage_path"):
+        own_path(company["logo_storage_path"], company["id"], "Company logo")
         try:
             logo = client.download("company-documents", company["logo_storage_path"],
                                    os.path.join(work, "logo", os.path.basename(company["logo_storage_path"])))
@@ -638,7 +667,8 @@ def sync_position_suggestions(client, today=None):
             continue  # closed: leave its last suggestions as they were
         try:
             people_rows = client.select("people", {"company_id": pack["company_id"]}, order="created_at.asc")
-            projects = client.select("projects", {"person_id": [p["id"] for p in people_rows]}) if people_rows else []
+            projects = client.select("projects", {"person_id": [p["id"] for p in people_rows],
+                                                  "company_id": pack["company_id"]}) if people_rows else []
             existing = {a["position_code"]: a for a in client.select("tender_pack_assignments",
                                                                        {"tender_pack_id": pack["id"]})}
             for req in by_tender[pack["tender_id"]]:

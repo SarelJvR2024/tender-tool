@@ -65,11 +65,14 @@ export type ActivityInput = {
     stage_changed_at: string | null;
     submitted_at: string | null;
   } | null;
+  // tender_document_uploads() (0043): uploaded_by / original_filename are
+  // only filled for this company's own uploads.
   templates: {
     doc_type: string;
     original_filename: string | null;
     uploaded_by: string | null;
-    uploaded_by_company: string | null;
+    uploaded_by_us: boolean;
+    uploaded_by_another_company: boolean;
     downloaded_at: string;
   }[];
   jobs: {
@@ -199,18 +202,19 @@ export function buildTenderActivity(input: ActivityInput): ActivityEntry[] {
 
   for (const d of input.templates) {
     const label = isTenderTemplateType(d.doc_type) ? TENDER_TEMPLATES[d.doc_type].label : d.doc_type;
-    const actor: ActivityActor | null = !d.uploaded_by
-      ? null
-      : d.uploaded_by_company && d.uploaded_by_company !== input.companyId
-        ? { kind: "other_company" }
-        : user(d.uploaded_by);
+    const uploaded = d.uploaded_by_us || d.uploaded_by_another_company;
+    const actor: ActivityActor | null = d.uploaded_by_another_company
+      ? { kind: "other_company" }
+      : d.uploaded_by
+        ? user(d.uploaded_by)
+        : null;
     out.push({
       key: `template:${d.doc_type}`,
       at: d.downloaded_at,
       actor,
       category: "template",
-      text: d.uploaded_by ? `Uploaded the ${label}` : `${label} downloaded from the buyer`,
-      detail: d.original_filename ? `${d.original_filename}${d.uploaded_by ? " (newest upload only)" : ""}` : null,
+      text: uploaded ? `Uploaded the ${label}` : `${label} downloaded from the buyer`,
+      detail: d.original_filename ? `${d.original_filename}${uploaded ? " (newest upload only)" : ""}` : null,
     });
   }
 

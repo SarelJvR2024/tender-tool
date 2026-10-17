@@ -103,13 +103,47 @@ export async function savePerson(formData: FormData) {
   redirect(`/people/${personId}`);
 }
 
+/**
+ * Deletes a person and everything held about them (POPIA s 14 / s 24 -
+ * docs/specs/POPIA-Security-Audit.md). The rows go by cascade (projects, CV
+ * uploads, generated CVs, extraction results, role tags; migration 0044 also
+ * strips them from key-position rankings and signatory answers). Their CV
+ * FILES are not rows - Storage only deletes a file through the Storage API -
+ * so the uploaded and generated CVs are removed here first, from the paths
+ * the rows record plus anything left in the person's own folder.
+ */
 export async function deletePerson(formData: FormData) {
-  await requireCompanyId();
+  const companyId = await requireCompanyId();
   const supabase = await createClient();
   const id = str(formData, "id");
   if (!id) redirect("/people");
 
-  await supabase.from("people").delete().eq("id", id);
+  const { data: person } = await supabase.from("people").select("id").eq("id", id).eq("company_id", companyId).maybeSingle();
+  if (!person) redirect("/people");
+
+  const [{ data: uploads }, { data: generated }] = await Promise.all([
+    supabase.from("cv_uploads").select("storage_path").eq("person_id", id).eq("company_id", companyId),
+    supabase.from("generated_cvs").select("storage_path_docx, storage_path_pdf").eq("person_id", id).eq("company_id", companyId),
+  ]);
+  const paths = new Set<string>();
+  for (const u of uploads ?? []) if (u.storage_path) paths.add(u.storage_path as string);
+  for (const g of generated ?? []) {
+    if (g.storage_path_docx) paths.add(g.storage_path_docx as string);
+    if (g.storage_path_pdf) paths.add(g.storage_path_pdf as string);
+  }
+  const folder = `${companyId}/people/${id}`;
+  for (const sub of ["uploads", "generated"]) {
+    const { data: files } = await supabase.storage.from("cv-documents").list(`${folder}/${sub}`, { limit: 1000 });
+    for (const f of files ?? []) if (f.name) paths.add(`${folder}/${sub}/${f.name}`);
+  }
+  const own = [...paths].filter((p) => p.startsWith(`${companyId}/`));
+  if (own.length > 0) {
+    const { error: rmErr } = await supabase.storage.from("cv-documents").remove(own);
+    if (rmErr) redirect(`/people/${id}?error=${encodeURIComponent(`Could not remove this person's CV files: ${rmErr.message}`)}`);
+  }
+
+  const { error } = await supabase.from("people").delete().eq("id", id).eq("company_id", companyId);
+  if (error) redirect(`/people/${id}?error=${encodeURIComponent(`Could not delete this person: ${error.message}`)}`);
   revalidatePath("/people");
   redirect("/people");
 }

@@ -24,21 +24,18 @@ export async function SiteNav({ active }: { active: NavKey }) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  let isOwner = false;
+  let isPlatformAdmin = false;
   if (user) {
-    const { data: membership } = await supabase
-      .from("company_members")
-      .select("role")
-      .eq("user_id", user.id)
-      .maybeSingle();
-    isOwner = membership?.role === "owner";
+    const { data } = await supabase.rpc("is_platform_admin");
+    isPlatformAdmin = data === true;
   }
 
-  // Admin is a diagnostic tool for the company owner (see
-  // supabase/migrations/0005_admin_harness_results.sql) - RLS already hides
-  // its data from everyone else, but surfacing the tab only for owners avoids
-  // sending other members to a page that will just look confusingly empty.
-  const items: { key: NavKey; href: string; label: string }[] = isOwner
+  // Admin is Tender Tool's own internal diagnostic (test-company harness
+  // results), not a customer feature. Until migration 0043 it was shown to
+  // "an owner of any company" - i.e. to every customer, since everyone who
+  // onboards owns their own company. Now only platform_admins (0043) see it;
+  // RLS enforces the same rule on the data itself.
+  const items: { key: NavKey; href: string; label: string }[] = isPlatformAdmin
     ? [...NAV_ITEMS, { key: "admin", href: "/admin", label: "Admin" }]
     : NAV_ITEMS;
 

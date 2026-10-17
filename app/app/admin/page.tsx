@@ -3,7 +3,7 @@ import HarnessRunRow, { type HarnessDocument } from "./HarnessRunRow";
 import { SiteNav } from "../_components/SiteNav";
 
 // Reads per-request session/DB data (admin_harness_runs, gated by RLS on the
-// signed-in user being a company owner) - same escape hatch as
+// signed-in user being a platform admin - migration 0043) - same escape hatch as
 // app/app/dashboard/page.tsx.
 export const instant = false;
 

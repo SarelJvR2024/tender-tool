@@ -208,12 +208,19 @@ def build_tender_ctx_from_assignment(tender_row, requirement_row, assignment_row
 # ============================================================================
 
 def fetch_job_context(url, key, job):
-    person_rows = supabase_request(url, key, "GET", f"people?id=eq.{job['person_id']}&select=*")
+    # Every read is scoped to the job's own company: this runs with the
+    # service role (no RLS), and generated_cvs.person_id / tender_pack_id are
+    # written by the client - without the company filter a request naming
+    # another company's person built that person's CV into this company's
+    # folder (POPIA-Security-Audit.md; migration 0043 refuses such a row too).
+    person_rows = supabase_request(url, key, "GET",
+                                   f"people?id=eq.{job['person_id']}&company_id=eq.{job['company_id']}&select=*")
     if not person_rows:
-        raise RuntimeError(f"person {job['person_id']} not found")
+        raise RuntimeError(f"person {job['person_id']} not found in this company")
     person_row = person_rows[0]
 
-    project_rows = supabase_request(url, key, "GET", f"projects?person_id=eq.{job['person_id']}&select=*")
+    project_rows = supabase_request(url, key, "GET",
+                                    f"projects?person_id=eq.{job['person_id']}&company_id=eq.{job['company_id']}&select=*")
 
     company_rows = supabase_request(url, key, "GET", f"companies?id=eq.{job['company_id']}&select=legal_name")
     company_row = company_rows[0] if company_rows else {}
@@ -222,6 +229,8 @@ def fetch_job_context(url, key, job):
     if job.get("tender_id"):
         tender_rows = supabase_request(url, key, "GET", f"tenders?id=eq.{job['tender_id']}&select=*")
         tender_row = tender_rows[0] if tender_rows else {}
+        if tender_row.get("owner_company_id") not in (None, job["company_id"]):
+            raise RuntimeError("tender not found")  # another company's private tender (0024)
 
         req_rows = supabase_request(
             url, key, "GET",
@@ -229,10 +238,12 @@ def fetch_job_context(url, key, job):
         )
         requirement_row = req_rows[0] if req_rows else None
 
+        own_pack = supabase_request(url, key, "GET", f"tender_packs?id=eq.{job['tender_pack_id']}"
+                                    f"&company_id=eq.{job['company_id']}&select=id") if job.get("tender_pack_id") else []
         assignment_rows = supabase_request(
             url, key, "GET",
             f"tender_pack_assignments?tender_pack_id=eq.{job['tender_pack_id']}&position_code=eq.{job['position_code']}&select=*",
-        )
+        ) if own_pack else []
         assignment_row = assignment_rows[0] if assignment_rows else {
             "position_code": job["position_code"], "suggested_score": None,
             "suggested_rationale": None, "specialism_warning": False,

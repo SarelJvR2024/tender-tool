@@ -321,12 +321,21 @@ def private_work_dir(work_root, company_id, tender_id):
     return os.path.join(work_root, "companies", company_id, "tenders", tender_id)
 
 
+def job_tender(client, job):
+    """The job's tender - refused when it is another company's private
+    (manual) tender: the service role would otherwise read its documents."""
+    rows = client.select("tenders", {"id": job["tender_id"]})
+    if not rows or rows[0].get("owner_company_id") not in (None, job["company_id"]):
+        raise RuntimeError("tender not found")
+    return rows[0]
+
+
 def own_pack(client, job):
-    if job.get("tender_pack_id"):
-        rows = client.select("tender_packs", {"id": job["tender_pack_id"]})
-    else:
-        rows = client.select("tender_packs", {"company_id": job["company_id"], "tender_id": job["tender_id"]})
-    rows = [r for r in rows if r.get("company_id") == job["company_id"]]
+    """The job company's own tender_packs row for the job's tender, looked up
+    by (company_id, tender_id) - unique since 0001. job.tender_pack_id is
+    written by the client, so it is never used to find the pack."""
+    rows = client.select("tender_packs", {"company_id": job["company_id"], "tender_id": job["tender_id"]})
+    rows = [r for r in rows if r.get("company_id") == job["company_id"] and r.get("tender_id") == job["tender_id"]]
     return rows[0] if rows else None
 
 
@@ -340,7 +349,7 @@ def run_extraction(client, job, work_root, fetch=None):
     row only. Nothing read from a private document is written to the shared
     tenders row, tender_documents or tender_requirements, which every company
     pursuing the tender can see."""
-    tender = client.select("tenders", {"id": job["tender_id"]})[0]
+    tender = job_tender(client, job)
     work = os.path.join(work_root, "tenders", tender["id"])
     docs_dir = os.path.join(work, "docs")
     sources = {}
@@ -452,6 +461,26 @@ def _within(item, rule, closing):
     return True
 
 
+def own_path(path, company_id, what):
+    """A client-written storage path, checked before the service role
+    downloads it (no Storage RLS for the service key): it must sit under the
+    job company's own folder, else another company's file would end up in
+    this pack (POPIA-Security-Audit.md; migration 0043 has the same CHECK)."""
+    p = path or ""
+    if not p.startswith(f"{company_id}/") or ".." in p or "//" in p:
+        raise RuntimeError(f"{what}: the stored file path is not under this company's own folder - refusing to read it. "
+                           "Upload the document again on its page.")
+    return p
+
+
+def provenance_pack_id(client, job):
+    """The tender_packs row field provenance is written to: always the job
+    company's OWN pack for this tender. job.tender_pack_id is client-written,
+    so it is never trusted on its own."""
+    pack = own_pack(client, job)
+    return pack["id"] if pack and pack.get("tender_id") == job.get("tender_id") else None
+
+
 def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rules=False):
     company = client.select("companies", {"id": job["company_id"]})[0]
     answer_rows = client.select("tender_answers", {"company_id": job["company_id"], "tender_id": tender["id"]})
@@ -460,9 +489,11 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
     files = {}
     for col in VAULT_COLUMNS:
         if company.get(col):
+            own_path(company[col], job["company_id"], "Vault document")
             files["vault:" + col] = client.download(VAULT_BUCKET, company[col], os.path.join(files_dir, "vault", os.path.basename(company[col])))
     for a in answer_rows:
         if a.get("storage_path") and a["field_key"].startswith("upload:"):
+            own_path(a["storage_path"], job["company_id"], "Tender upload")
             files[a["field_key"]] = client.download(VAULT_BUCKET, a["storage_path"], os.path.join(files_dir, "uploads", os.path.basename(a["storage_path"])))
 
     signatory = None
@@ -488,6 +519,7 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
         for i in items[:max(int(rule.get("projects_required") or 5), 1) + 2]:
             title = f"{i['project_name']} ({i['document_type'].replace('_', ' ')})"
             if i.get("storage_path"):
+                own_path(i["storage_path"], job["company_id"], "Experience document")
                 evidence.append({"title": title, "path": client.download(EXPERIENCE_BUCKET, i["storage_path"],
                                                                         os.path.join(files_dir, "experience", os.path.basename(i["storage_path"])))})
             else:
@@ -497,15 +529,22 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
     cvs = []
     for role in manifest.get("roles", []):
         for tag in client.select("person_role_eligibility", {"company_id": job["company_id"], "role_code": role["role_code"]}):
-            person = (client.select("people", {"id": tag["person_id"]}) or [{}])[0]
-            gen = [g for g in client.select("generated_cvs", {"person_id": tag["person_id"], "status": "ready"}, order="requested_at.desc")
+            # Scoped to this company: a person's CVs are only the ones this
+            # company attached (another company could name the same people.id).
+            person = (client.select("people", {"id": tag["person_id"], "company_id": job["company_id"]}) or [None])[0]
+            if person is None:
+                continue
+            gen = [g for g in client.select("generated_cvs", {"person_id": tag["person_id"], "company_id": job["company_id"],
+                                                              "status": "ready"}, order="requested_at.desc")
                    if g.get("storage_path_pdf")]
-            up = client.select("cv_uploads", {"person_id": tag["person_id"]}, order="created_at.desc")
+            up = client.select("cv_uploads", {"person_id": tag["person_id"], "company_id": job["company_id"]},
+                               order="created_at.desc")
             title = f"CV - {person.get('name', 'unknown')} ({role['role_code'].split('.', 1)[-1].replace('_', ' ')})"
             if any(c["title"] == title for c in cvs):
                 continue
             src = (CV_BUCKET, gen[0]["storage_path_pdf"]) if gen else ((CV_BUCKET, up[0]["storage_path"]) if up else None)
             if src:
+                own_path(src[1], job["company_id"], f"CV for {person.get('name')}")
                 cvs.append({"title": title, "path": client.download(src[0], src[1], os.path.join(files_dir, "cvs", os.path.basename(src[1])))})
             else:
                 cvs.append({"title": title, "path": None, "missing_reason": "no CV uploaded or generated for this person"})
@@ -513,7 +552,7 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
 
 
 def run_pack(client, job, work_root, fetch=None):
-    tender = client.select("tenders", {"id": job["tender_id"]})[0]
+    tender = job_tender(client, job)
     if tender.get("family") in intake.SANRAL_FAMILIES:
         raise RuntimeError("This is a SANRAL tender (its Technical Submission workbook was recognised) - generate it with the "
                            "SANRAL 'Submission pack' card, not the general pack.")
@@ -558,11 +597,12 @@ def run_pack(client, job, work_root, fetch=None):
         client.upload(PACK_BUCKET, f"{prefix}/{name}", local_path, ct)
         output_files[name] = f"{prefix}/{name}"
 
-    if job.get("tender_pack_id") and res["provenance"]:
+    prov_pack = provenance_pack_id(client, job)
+    if prov_pack and res["provenance"]:
         seen = {}
         for e in res["provenance"]:
             seen[e["field_key"]] = e  # last write wins (a field filled in two documents)
-        client.upsert("field_provenance", [{"tender_pack_id": job["tender_pack_id"], **{k: e[k] for k in ("field_key", "status", "value", "reason", "source")}}
+        client.upsert("field_provenance", [{"tender_pack_id": prov_pack, **{k: e[k] for k in ("field_key", "status", "value", "reason", "source")}}
                                           for e in seen.values()], "tender_pack_id,field_key")
     return {"storage_path_pdf": pdf_path, "output_files": output_files, "page_count": pm["page_count"],
             "manifest": {k: pm[k] for k in ("sections", "omitted", "by_hand", "form_results", "provenance_summary", "contents_pages",

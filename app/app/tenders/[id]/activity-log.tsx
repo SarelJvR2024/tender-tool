@@ -49,7 +49,9 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
       .select("created_at, confirmed_by, confirmed_at, pipeline_stage, stage_changed_at, submitted_at")
       .eq("tender_id", tenderId)
       .maybeSingle(),
-    supabase.from("tender_documents").select("doc_type, original_filename, uploaded_by, uploaded_by_company, downloaded_at").eq("tender_id", tenderId),
+    // Who uploaded a shared template is only ours to see for our own uploads
+    // (migration 0043: the uploader columns aren't readable directly).
+    supabase.rpc("tender_document_uploads", { p_tender_id: tenderId }),
     supabase
       .from("pack_generation_jobs")
       .select("id, engine, kind, status, requested_by, requested_at, completed_at, page_count, error_message")

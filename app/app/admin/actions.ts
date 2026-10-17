@@ -8,7 +8,7 @@ import { redirect } from "next/navigation";
  * Spec item 31's "mark reviewed": Sarel's record that a test-company run's
  * generated documents were looked at and are correct. Writes only the three
  * review columns - migration 0022 grants authenticated users UPDATE on just
- * those, and its RLS policy limits that to company owners (0005's admin proxy)
+ * those, and its RLS policy (0043) limits that to platform admins
  * with reviewed_by pinned to the signed-in user. Checked here too, since a
  * Server Action is reachable by direct POST.
  */
@@ -33,7 +33,7 @@ async function writeReview(formData: FormData, reviewed: boolean) {
   if (error) redirect(`/admin?error=${encodeURIComponent(error.message)}`);
   // RLS filters a non-owner's update down to zero rows rather than erroring.
   if (!data || data.length === 0) {
-    redirect(`/admin?error=${encodeURIComponent("Only a company owner can review harness runs.")}`);
+    redirect(`/admin?error=${encodeURIComponent("Only a Tender Tool platform admin can review harness runs.")}`);
   }
   revalidatePath("/admin");
 }

@@ -166,8 +166,11 @@ export async function uploadTenderTemplate(formData: FormData) {
   // copy can't be filled, so it's refused here rather than failing in the pack.
   if (ext !== template.extension) fail(`${template.label} must be the .${template.extension} file SANRAL issued (got .${ext || "?"}).`);
 
-  const safeName = file!.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const storagePath = `${tenderId}/${docType}/${randomUUID()}-${safeName}`;
+  // The object name carries no part of the uploader's file name: this folder
+  // is readable by every company preparing the tender, and a name like
+  // "Acme_R396_Technical.xlsm" would tell them who else is bidding (0043).
+  // The original name is kept on the row, shown only to this company.
+  const storagePath = `${tenderId}/${docType}/${randomUUID()}.${template.extension}`;
   const { error: upErr } = await supabase.storage
     .from(TENDER_TEMPLATE_BUCKET)
     .upload(storagePath, file!, { contentType: file!.type || "application/octet-stream" });

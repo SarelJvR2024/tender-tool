@@ -730,6 +730,14 @@ def process_upload(url, key, upload, client_factory=default_llm_client):
         return False
     work_dir = tempfile.mkdtemp(prefix="cv_extract_")
     try:
+        # The path is written by the client and this download uses the
+        # service role (no Storage RLS): it must be this company's own file,
+        # or another company's CV would be read, sent to the AI and shown
+        # here (POPIA-Security-Audit.md; migration 0043 adds the same CHECK).
+        sp = upload.get("storage_path") or ""
+        if not sp.startswith(f"{upload['company_id']}/") or ".." in sp or "//" in sp:
+            raise ExtractionFailed("This upload's file isn't in your company's own storage folder, so it wasn't read. "
+                                   "Upload the CV again from the person's page.")
         client = client_factory()  # SetupError here leaves the job queued
         local = os.path.join(work_dir, os.path.basename(upload["storage_path"]))
         storage_download(url, key, "cv-documents", upload["storage_path"], local)

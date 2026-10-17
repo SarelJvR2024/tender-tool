@@ -10,16 +10,16 @@ import { uploadTenderTemplate } from "./pack-inputs-actions";
  * Shared across companies, like the tender itself (0001/0025).
  */
 
-type DocRow = { doc_type: string; original_filename: string | null; downloaded_at: string };
+// tender_document_uploads() (0043): the file name is only returned for this
+// company's own uploads (or the buyer's own file) - another company's upload is
+// only flagged, so a competitor on the same tender stays anonymous.
+type DocRow = { doc_type: string; original_filename: string | null; downloaded_at: string; uploaded_by_another_company: boolean };
 
 const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
 export async function TenderTemplates({ tenderId, saved }: { tenderId: string; saved: boolean }) {
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("tender_documents")
-    .select("doc_type, original_filename, downloaded_at")
-    .eq("tender_id", tenderId);
+  const { data, error } = await supabase.rpc("tender_document_uploads", { p_tender_id: tenderId });
   const rows = new Map(((data ?? []) as DocRow[]).map((r) => [r.doc_type, r]));
   const missingRequired = TENDER_TEMPLATE_ORDER.filter((t) => TENDER_TEMPLATES[t].required && !rows.has(t));
 
@@ -66,7 +66,7 @@ export async function TenderTemplates({ tenderId, saved }: { tenderId: string; s
               </div>
               <div style={{ fontSize: 11, color: "#6B6758", marginTop: 2, wordBreak: "break-word" }}>
                 {row
-                  ? `${row.original_filename ?? "uploaded"} · ${new Date(row.downloaded_at).toLocaleDateString()}`
+                  ? `${row.original_filename ?? (row.uploaded_by_another_company ? "uploaded by another company preparing this tender" : "uploaded")} · ${new Date(row.downloaded_at).toLocaleDateString()}`
                   : t.hint}
               </div>
             </div>

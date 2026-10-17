@@ -108,6 +108,9 @@ jobs:
       - name: Company letters - uploaded as-is / own guideline / not set up (docx read-back)
         run: python3 engine/test_company_documents.py "$RUNNER_TEMP/company-documents"
 
+      - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
+        run: python3 engine/security/test_tenant_isolation.py
+
   container-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
