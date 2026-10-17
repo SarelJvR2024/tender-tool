@@ -29,7 +29,20 @@ export type ManifestForm = {
   reason: string;
   mentions: number;
   quote: string | null;
+  from_ocr?: boolean; // the quote came from OCR'd text (engine/ocr/scan_ocr.py, experimental)
   editions: { document: string; format: string; editable: boolean }[];
+};
+
+// EXPERIMENTAL OCR: set on a manifest document when some/all of its text was
+// read by OCR from a scan (engine/general/requirements.py ocr_scanned_pages).
+export type ManifestOcr = {
+  engine: string | null;
+  pages_ocr: number[];
+  pages_failed: { page: number; reason: string }[];
+  pages_skipped: number[];
+  mean_confidence: number | null;
+  total_pages: number | null;
+  notice: string;
 };
 
 export type ManifestReturnable = {
@@ -41,6 +54,7 @@ export type ManifestReturnable = {
   mentions: number;
   document: string;
   quote: string;
+  from_ocr?: boolean;
 };
 
 export type ManifestQuestion = {
@@ -67,7 +81,7 @@ export type RequirementManifest = {
   version: number;
   extracted_at: string;
   form_suite: "SBD" | "MBD" | null;
-  documents: { name: string; format: string; kind: string; forms: string[]; editable: boolean; converted_from_doc: boolean; unreadable: string | null }[];
+  documents: { name: string; format: string; kind: string; forms: string[]; editable: boolean; converted_from_doc: boolean; unreadable: string | null; ocr?: ManifestOcr | null }[];
   forms: ManifestForm[];
   buyer_forms: {
     key: string; label: string; document: string; format: string; reason: string; quote?: string;
@@ -76,7 +90,7 @@ export type RequirementManifest = {
     overlay?: { code: string; document: string; page: number; fills: string; by_hand: string };
   }[];
   returnables: ManifestReturnable[];
-  roles: { role_code: string; mentions: number; document: string; quote: string }[];
+  roles: { role_code: string; mentions: number; document: string; quote: string; from_ocr?: boolean }[];
   cidb: { grading: string; quote: string } | null;
   briefing: { compulsory: boolean; quote: string } | null;
   scoring: {
@@ -125,6 +139,7 @@ export type ReturnableCheck = {
   status: ComplianceStatus;
   detail: string;
   quote: string;
+  from_ocr?: boolean;
   strength: "required" | "mentioned";
   uploadable: boolean; // offer an "upload for this tender" slot
   vaultLink: boolean; // fix it on the Company page instead
@@ -148,7 +163,7 @@ export function checkReturnable(
   biddingAsJv: boolean | null,
 ): ReturnableCheck {
   const upload = answers.find((a) => a.field_key === UPLOAD_PREFIX + r.key && a.storage_path) ?? null;
-  const base = { key: r.key, label: r.label, quote: r.quote, strength: r.strength, upload };
+  const base = { key: r.key, label: r.label, quote: r.quote, from_ocr: r.from_ocr, strength: r.strength, upload };
   const uploaded = upload ? ` Uploaded for this tender: ${upload.original_filename}.` : "";
 
   if (r.conditional === "jv" && biddingAsJv === false) {

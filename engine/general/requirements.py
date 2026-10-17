@@ -50,6 +50,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "discovery"))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)  # fill_flat_pdf (overlay check)
+sys.path.insert(0, os.path.join(HERE, "..", "ocr"))
+import scan_ocr  # noqa: E402  (EXPERIMENTAL - docs/specs/OCR-Evaluation.md)
 from score_outlook import estimate_score_outlook, extract_experience_evidence, extract_locality  # noqa: E402
 from assess_tender import CIDB_RE, BRIEFING_RE  # noqa: E402
 
@@ -163,6 +165,12 @@ def read_document(doc, work_dir):
         text, err = pdf_text_or_error(doc["path"])
         if err:
             doc["unreadable"] = err
+        else:
+            try:
+                text = ocr_scanned_pages(doc, text, work_dir)
+            except Exception as e:  # experimental step: never worse than no OCR
+                doc.pop("ocr", None)
+                doc["_ocr_failure"] = f"OCR failed on it ({type(e).__name__})"
     elif fmt == "docx":
         try:
             text = docx_text(doc["path"])
@@ -179,8 +187,64 @@ def read_document(doc, work_dir):
         text = open(doc["path"], encoding="utf-8", errors="replace").read()
     doc["text"] = text or ""
     if not doc.get("unreadable") and fmt in ("pdf", "docx", "doc") and len(doc["text"].strip()) < 50:
-        doc["unreadable"] = "no text layer (scanned image) - read it by eye"
+        tried = doc.pop("_ocr_failure", None)
+        if doc.pop("ocr", None):
+            tried = "OCR read only a few words from it"
+        doc["unreadable"] = ("no text layer (scanned image)"
+                             + (f", and {tried}" if tried else "") + " - read it by eye")
+    doc.pop("_ocr_failure", None)
     return doc
+
+
+# A page with fewer non-space characters than this in its text layer is
+# offered to OCR. Not 0: a scan with a few typed-in fields on top has a tiny
+# text layer (Tourism NB143's SBD 1 page: just "NB143/2026 20 OCT 2026 10H00"
+# over a scanned form). The OCR text replaces the page's own only when it is
+# clearly more (OCR_REPLACE_FACTOR x the text layer + 50 characters), so a
+# short real page - a divider, "this page intentionally left blank" - keeps
+# its text layer and isn't flagged as OCR.
+OCR_PAGE_MIN_CHARS = 200
+OCR_REPLACE_FACTOR = 2
+
+
+def ocr_scanned_pages(doc, text, work_dir):
+    """EXPERIMENTAL (engine/ocr/scan_ocr.py, docs/specs/OCR-Evaluation.md).
+    Pages of a PDF with no text layer are OCR'd; each page whose OCR passes
+    the quality gate gets the OCR text in its place (pages stay separated by
+    form feeds, so page numbers still line up), and doc['ocr'] records which
+    pages came from OCR so the manifest and the UI can say so. When OCR is
+    unavailable or reads nothing usable the text is returned unchanged and
+    read_document() refuses the document exactly as before OCR existed."""
+    pages = text.split("\f")
+    if pages and not pages[-1].strip():
+        pages = pages[:-1]
+    empty = [i + 1 for i, t in enumerate(pages) if len(re.sub(r"\s", "", t)) < OCR_PAGE_MIN_CHARS]
+    if empty:
+        with_images = scan_ocr.pages_with_images(doc["path"])
+        if with_images is not None:
+            empty = [n for n in empty if n in with_images]
+    if not empty:
+        return text
+    fully_scanned = len(re.sub(r"\s", "", text)) < 50
+    res = scan_ocr.ocr_pdf_pages(doc["path"], empty, work_dir=work_dir)
+    used = []
+    for n in res["read"]:
+        native = len(re.sub(r"\s", "", pages[n - 1]))
+        if len(re.sub(r"\s", "", res["pages"][n]["text"])) >= OCR_REPLACE_FACTOR * native + 50:
+            pages[n - 1] = res["pages"][n]["text"]
+            used.append(n)
+    short = bool(res["read"]) and not used
+    res["read"] = used
+    if not used:
+        if fully_scanned:
+            doc["_ocr_failure"] = "OCR read only a few words from it" if short else scan_ocr.failure_sentence(res)
+        return text
+    summary = scan_ocr.summary(res, total_pages=len(pages))
+    if not fully_scanned:
+        # A blank page in a text PDF isn't news; only an unclear scan is.
+        summary["pages_failed"] = [f for f in summary["pages_failed"] if "unclear" in f["reason"]]
+    doc["ocr"] = summary
+    return "\f".join(pages) + "\f"
 
 
 # ---------------------------------------------------------------------------
@@ -566,6 +630,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         for k, n in forms_in_text(os.path.basename(d["name"])).items():
             mentioned[k] = mentioned.get(k, 0) + n
 
+    ocr_docs = {d["name"] for d in docs if d.get("ocr")}
     doc_entries = []
     for d in docs:
         kind = classify_document(d, mentioned)
@@ -576,6 +641,9 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
             "converted_from_doc": bool(d.get("converted_docx")),
             "unreadable": d.get("unreadable"),
             "chars": len(d.get("text") or ""),
+            # EXPERIMENTAL: set when some/all of the text came from OCR of a
+            # scanned page (engine/ocr/scan_ocr.py) - pages, confidence, notice.
+            "ocr": d.get("ocr"),
             "_local": d.get("converted_docx") or d["path"],
         })
 
@@ -596,11 +664,11 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         fillable = [e for e in editions if e["editable"]]
         prefix = suite or "SBD"
         n_mentions = mentioned.get((prefix, code), 0) + mentioned.get(("SBD" if prefix == "MBD" else "MBD", code), 0)
-        quote = None
+        quote, quote_doc = None, None
         for d in docs:
             m = re.search(rf"\b{prefix[0]}\s?B\s?D\s*{re.escape(code).replace(r'\.', r'\s*[.(]\s*')}", d.get("text") or "", re.IGNORECASE)
             if m:
-                quote = _quote(d["text"], m.start(), m.end(), 80)
+                quote, quote_doc = _quote(d["text"], m.start(), m.end(), 80), d["name"]
                 break
         overlay = _overlay_edition(code, editions, docs) if capability == "fill" and not fillable else None
         if capability == "fill" and fillable:
@@ -610,6 +678,9 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
             status, reason = "overlay", (
                 f"Flat PDF ({overlay['document']}, p.{overlay['page']}) - Tender Tool types your details onto the printed form "
                 "next to each label it can find; anything it can't place safely stays on the completion guide to write by hand.")
+        elif capability == "fill" and editions and editions[0]["name"] in ocr_docs:
+            status, reason = "by_hand", (f"Only a scanned PDF edition was published ({editions[0]['name']}, read by OCR) - "
+                                         "nothing can be typed onto a scan, so it's completed by hand from the completion guide.")
         elif capability == "fill" and editions:
             status, reason = "by_hand", (f"Only a {editions[0]['format'].upper()} edition was published ({editions[0]['name']}) - "
                                          "flat PDFs have no fillable fields, so it's completed by hand from the completion guide.")
@@ -628,6 +699,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         forms.append({"code": code, "label": f"{prefix} {code}", "title": title, "status": status, "reason": reason,
                       **({"overlay": overlay} if overlay else {}),
                       "mentions": n_mentions, "quote": quote,
+                      **({"from_ocr": True} if quote_doc in ocr_docs else {}),
                       "editions": [{"document": e["name"], "format": e["format"], "editable": e["editable"]} for e in editions]})
 
     buyer_forms = []
@@ -658,6 +730,12 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
                                      {"disciplines": [], "bee_level": None, "offices": []})
     loc = extract_locality(all_text) if all_text.strip() else {"rows": [], "mandatory_local_office": None}
     returnables = find_returnables(docs)
+    roles = find_roles(docs)
+    # EXPERIMENTAL OCR: anything read out of OCR'd text says so, so the UI
+    # can show it isn't from a real text layer.
+    for item in returnables + roles + buyer_forms:
+        if item.get("document") in ocr_docs:
+            item["from_ocr"] = True
     conditions = {
         "cidb": bool(cidb_m) or any(r["key"] == "cidb" and r["strength"] == "required" for r in returnables),
         "briefing": bool(brief_m) and not non_compulsory,
@@ -678,7 +756,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         "forms": forms,
         "buyer_forms": buyer_forms,
         "returnables": returnables,
-        "roles": find_roles(docs),
+        "roles": roles,
         "cidb": {"grading": cidb_m.group(1).replace(" ", "").upper(), "quote": _quote(all_text, cidb_m.start(), cidb_m.end())} if cidb_m else None,
         "briefing": {"compulsory": conditions["briefing"], "quote": _quote(all_text, brief_m.start(), brief_m.end())} if brief_m else None,
         "scoring": {
@@ -721,7 +799,11 @@ def _overlay_pages(doc, code):
         import fill_flat_pdf
     except ImportError:  # pdfplumber/pypdf missing on this host - by hand, as before
         return []
-    return fill_flat_pdf.find_form_pages((doc.get("text") or "").split("\f"), code)
+    pages = fill_flat_pdf.find_form_pages((doc.get("text") or "").split("\f"), code)
+    # The overlay places values next to labels in the PDF's own text layer; a
+    # page read by OCR has none, so its form stays by hand.
+    ocr_pages = {n - 1 for n in ((doc.get("ocr") or {}).get("pages_ocr") or [])}
+    return [p for p in pages if p not in ocr_pages]
 
 
 def _overlay_edition(code, editions, docs):
@@ -786,7 +868,30 @@ def _gaps(doc_entries, forms, suite, buyer_forms, depth="full_document"):
     unread = [e["name"] for e in doc_entries if e["kind"] == "unreadable"]
     if unread:
         gaps.append("Couldn't read: " + "; ".join(unread[:5]) + " - check these documents by eye.")
+    gaps.extend(_ocr_gaps(doc_entries))
     return gaps
+
+
+def _ocr_gaps(doc_entries):
+    """EXPERIMENTAL OCR: one plain line per document whose text (some of it or
+    all) came from OCR, so nobody mistakes it for a clean read."""
+    out = []
+    for e in doc_entries:
+        o = e.get("ocr")
+        if not o:
+            continue
+        pages = o["pages_ocr"]
+        where = (f"all {len(pages)} page(s)" if o.get("total_pages") and len(pages) == o["total_pages"]
+                 else "page(s) " + ", ".join(map(str, pages)))
+        line = (f"{e['name']}: {where} read by OCR from a scan (no text layer), average OCR confidence "
+                f"{o['mean_confidence']:.0f}/100. OCR can misread characters and numbers and can drop a line - check "
+                "anything listed from this document against the scan. Flat-PDF typing is not offered on OCR'd pages.")
+        if o.get("pages_failed"):
+            line += " Not read: " + "; ".join(f"p.{f['page']} ({f['reason']})" for f in o["pages_failed"][:4]) + "."
+        if o.get("pages_skipped"):
+            line += f" Pages {o['pages_skipped'][0]}-{o['pages_skipped'][-1]} were not OCR'd (page limit) - read them by eye."
+        out.append(line)
+    return out
 
 
 def strip_local(manifest):

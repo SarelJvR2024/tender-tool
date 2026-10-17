@@ -85,6 +85,15 @@ export function CvExtractionReview({
         <span style={chip("#FEF3C7", "#B45309")}>Waiting for your check</span>
       </div>
 
+      {/* EXPERIMENTAL OCR (engine/ocr/scan_ocr.py): the CV was a scan, read by character recognition. */}
+      {result.text_method?.includes("OCR") && (
+        <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 9, padding: "9px 12px", margin: "12px 0 0", fontSize: 12, color: "#1E3A8A" }}>
+          <strong>Read by OCR from a scan.</strong> This CV (or part of it) had no real text layer, so its text was read by character
+          recognition. OCR can misread letters and digits and skip a line, so values read from the scan start unticked - check each
+          one against the scan before saving.
+        </div>
+      )}
+
       {(result.warnings ?? []).length > 0 && (
         <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 12px", margin: "12px 0 0", fontSize: 12, color: "#92400E" }}>
           {(result.warnings ?? []).map((w, i) => <div key={i}>{w}</div>)}

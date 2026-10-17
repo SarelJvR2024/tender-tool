@@ -17,6 +17,8 @@ Claude reads a CV. What it does test, for real:
      handles refusal / max_tokens / bad JSON - against a stub client.
   6. The queue plumbing (claim, success, put-back on missing key, failure
      reason, stale reclaim) against an in-memory stand-in for supabase_request.
+  7. EXPERIMENTAL OCR (needs tesseract): a scan made from the synthetic CV is
+     read by OCR, flagged, every value left unticked; an illegible one refused.
 
 Real-sample text extraction (the Klipcorp SANRAL Form B1/B2 PDF and the
 scanned certificates) is in CV-Extraction-Findings.md; those files are
@@ -92,7 +94,8 @@ def expect_fail(fn, needle, msg):
     try:
         fn()
     except x.ExtractionFailed as e:
-        check(needle.lower() in str(e).lower(), f"{msg} -> refused: {str(e)[:90]}...")
+        needles = needle if isinstance(needle, tuple) else (needle,)
+        check(any(n.lower() in str(e).lower() for n in needles), f"{msg} -> refused: {str(e)[:90]}...")
         return
     check(False, f"{msg} -> expected ExtractionFailed")
 
@@ -130,8 +133,11 @@ def test_failure_modes(tmp):
     img.save(png)
     scan_pdf = os.path.join(tmp, "scanned_cv.pdf")
     img.save(scan_pdf, "PDF", resolution=150)
-    expect_fail(lambda: x.read_cv_text(png, tmp), "photo or scanned image", "PNG upload")
-    expect_fail(lambda: x.read_cv_text(scan_pdf, tmp), "no text layer", "image-only PDF (a scan)")
+    # With OCR installed this one line IS read (38 characters) and then refused
+    # as far too little text for a CV; without OCR, refused as a scan.
+    expect_fail(lambda: x.read_cv_text(png, tmp), ("photo or scanned image", "characters of text could be read"), "PNG upload")
+    expect_fail(lambda: x.read_cv_text(scan_pdf, tmp), ("no text layer", "characters of text could be read"),
+                "image-only PDF (a scan)")
     expect_fail(lambda: x.assess_text_quality("Name: X\n"), "only", "almost no text")
     expect_fail(lambda: x.assess_text_quality("□■#$%&*+=" * 60 + "ab"), "garbled", "garbled font encoding")
     expect_fail(lambda: x.assess_text_quality("word " * 40000), "far more than one person", "a whole tender, not a CV")
@@ -348,6 +354,46 @@ def test_queue(docx_path, tmp):
     check(u4["status"] == "extraction_failed" and "stopped mid-job" in u4["extraction_error"], "stale 'extracting' reclaimed as failed")
 
 
+def test_ocr(docx_path, tmp):
+    """EXPERIMENTAL OCR path (engine/ocr/scan_ocr.py). Needs tesseract; skipped
+    (stated, not silently) where it isn't installed."""
+    print("6. OCR of a scanned CV (experimental)")
+    import scan_ocr
+    ok, why = scan_ocr.available()
+    redacted, ids = x.find_and_redact_sa_ids("ID 9002150123081 and 1234567890123", redact_all_13_digit=True)
+    check("1234567890123" not in redacted and "9002150123081" not in redacted,
+          "OCR'd text: every 13-digit run is removed before sending, even one whose checksum fails (a misread ID)")
+    if not ok or shutil.which("soffice") is None:
+        print(f"  (skipped: {why if not ok else 'soffice not installed'})")
+        return
+    from PIL import Image, ImageFilter
+    pdf = soffice_convert(docx_path, "pdf", tmp)
+    subprocess.run(["pdftoppm", "-r", "200", "-gray", "-png", pdf, os.path.join(tmp, "scanpage")], check=True)
+    pages = sorted(f for f in os.listdir(tmp) if f.startswith("scanpage"))
+    imgs = [Image.open(os.path.join(tmp, f)).convert("L") for f in pages]
+    scan_pdf = os.path.join(tmp, "scanned_cv_ocr.pdf")
+    imgs[0].save(scan_pdf, "PDF", resolution=200, save_all=True, append_images=imgs[1:])
+    r = x.read_cv_text(scan_pdf, tmp)
+    check(r["method"].startswith("OCR (") and r["ocr"] and r["ocr"]["pages_ocr"], f"scanned PDF read by OCR: {r['method']}")
+    check("20169999" in r["text"] and "University of Cape Town" in r["text"], "OCR text has the ECSA number and institution")
+    stub = StubClient(StubResponse(json.dumps(GOOD_ANSWER)))
+    proposal, warnings, info = x.extract_from_file(scan_pdf, tmp, client=stub)
+    check(warnings and warnings[0].startswith("OCR:"), "review step is told the text came from OCR")
+    check(all(not v["verified"] and x.OCR_FIELD_WARNING in v["warnings"] for v in proposal["person"].values())
+          and all(not p["verified"] for p in proposal["projects"]),
+          "every value read from the scan starts unticked, with the OCR warning")
+    check(SYNTH_ID not in stub.calls[0]["messages"][0]["content"], "OCR'd ID number never reached the API request")
+    # an illegible scan: the same page blurred until OCR can't read it -> refused, never guessed
+    blurred = os.path.join(tmp, "blurred_cv.pdf")
+    imgs[0].resize((imgs[0].width // 4, imgs[0].height // 4)).filter(ImageFilter.GaussianBlur(2)).save(blurred, "PDF", resolution=50)
+    expect_fail(lambda: x.read_cv_text(blurred, tmp), "OCR couldn't read it clearly", "illegible scan")
+    # a photo upload of the same page is OCR'd too
+    png = os.path.join(tmp, "cv_photo.png")
+    imgs[0].save(png)
+    r = x.read_cv_text(png, tmp)
+    check(r["method"] == f"OCR ({r['ocr']['engine']}) - image upload" and "20169999" in r["text"], "image upload read by OCR")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="cv_extract_test_")
     try:
@@ -356,6 +402,7 @@ def main():
         test_validation(docx_path, tmp)
         test_llm_call()
         test_queue(docx_path, tmp)
+        test_ocr(docx_path, tmp)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{'ALL PASSED' if not FAILS else f'{len(FAILS)} FAILED'}")

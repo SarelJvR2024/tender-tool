@@ -378,7 +378,8 @@ def run_extraction(client, job, work_root, fetch=None):
         # silent wrong answer, not an empty one.
         why = "; ".join(f"{d['name']}: {d['unreadable'] or 'no text found'}" for d in manifest["documents"])[:700]
         raise RuntimeError("None of this tender's documents could be read, so nothing about what it requires could be "
-                           f"checked ({why}). Upload a text PDF or Word copy - scanned tenders are not OCR'd yet.")
+                           f"checked ({why}). Upload a text PDF or Word copy - scanned pages are only read when OCR can read "
+                           "them clearly (each reason above says why it couldn't).")
     clean = req.strip_local(manifest)
     if notes:
         clean["gaps"] = clean.get("gaps", []) + [f"Couldn't download: {n}" for n in notes]

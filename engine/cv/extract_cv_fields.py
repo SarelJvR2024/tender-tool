@@ -79,6 +79,8 @@ sys.path.insert(0, os.path.join(ENGINE, "general"))
 from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
 from process_cv_jobs import supabase_request  # noqa: E402  (same REST helper, same env vars)
 from requirements import docx_text, pdf_text, convert_with_soffice  # noqa: E402
+sys.path.insert(0, os.path.join(ENGINE, "ocr"))
+import scan_ocr  # noqa: E402  (EXPERIMENTAL - docs/specs/OCR-Evaluation.md)
 
 DEFAULT_MODEL = "claude-opus-5-5"
 STALE_AFTER_MINUTES = 30  # one API call + a text pull; 30 minutes means the worker died
@@ -129,6 +131,11 @@ MAX_TEXT_CHARS = 150_000      # ~40+ pages of dense text - not one person's CV
 
 IMAGE_EXTS = {"png", "jpg", "jpeg", "tif", "tiff", "bmp", "gif", "heic", "webp"}
 
+# EXPERIMENTAL OCR (engine/ocr/scan_ocr.py): what the reviewer is told when
+# any of the CV's text came from OCR of a scan instead of a real text layer.
+OCR_FIELD_WARNING = ("Read by OCR from a scan, not from a text layer - OCR can misread letters and digits, so "
+                     "check this against the scan before saving.")
+
 
 class ExtractionFailed(Exception):
     """A reason the user should see, in plain words. The job is marked failed."""
@@ -153,11 +160,26 @@ def read_cv_text(path, work_dir):
     ext = os.path.splitext(path)[1].lower().lstrip(".")
     pages, empty_pages, verify_extra = None, [], ""
 
+    ocr = None
     if ext in IMAGE_EXTS:
-        raise ExtractionFailed(
-            "This is a photo or scanned image, not a document with text in it. AI extraction reads a CV's "
-            "text and does not OCR scans yet, so nothing was guessed. Upload the Word or PDF version of the "
-            "CV, or choose 'use as-is' to attach this file unchanged.")
+        try:
+            res = scan_ocr.ocr_image_file(path, work_dir) if ext in scan_ocr.IMAGE_EXTS else None
+        except Exception as e:  # experimental step: never worse than no OCR
+            res = {"pages": {}, "read": [], "failed": [], "skipped": [], "engine": None,
+                   "error": f"OCR failed on it ({type(e).__name__})"}
+        if not res or not res["read"]:
+            raise ExtractionFailed(
+                "This is a photo or scanned image, not a document with text in it, and "
+                f"{scan_ocr.failure_sentence(res)}. Nothing was guessed. Upload the Word or PDF version of the "
+                "CV, or choose 'use as-is' to attach this file unchanged.")
+        n = max(res["pages"]) if res["pages"] else 1
+        text = "\n".join(res["pages"][i]["text"] for i in sorted(res["read"]))
+        ocr = scan_ocr.summary(res, total_pages=n)
+        pages, method = n, f"OCR ({ocr['engine']}) - image upload"
+        empty_pages = [f["page"] for f in ocr["pages_failed"]]
+        assess_text_quality(text, pages)
+        return {"text": text, "method": method, "pages": pages, "empty_pages": empty_pages,
+                "verify_text": text, "native_text": "", "ocr": ocr}
     if ext == "pdf":
         raw = pdf_text(path)
         page_texts = raw.split("\f")
@@ -165,7 +187,30 @@ def read_cv_text(path, work_dir):
             page_texts = page_texts[:-1]
         pages = len(page_texts)
         empty_pages = [i + 1 for i, t in enumerate(page_texts) if len(re.sub(r"\s", "", t)) < MIN_CHARS_PER_PAGE]
-        text, method = raw.replace("\f", "\n"), "pdftotext -layout"
+        native_text = raw.replace("\f", "\n")
+        ocr_failure = None
+        if empty_pages:
+            # EXPERIMENTAL: OCR the pages with no text layer; a page OCR can't
+            # read clearly stays empty and is reported, exactly as before.
+            try:
+                res = scan_ocr.ocr_pdf_pages(path, empty_pages, work_dir=work_dir)
+            except Exception as e:  # experimental step: never worse than no OCR
+                res = {"pages": {}, "read": [], "failed": [], "skipped": [], "engine": None,
+                       "error": f"OCR failed on it ({type(e).__name__})"}
+            used = [n for n in res["read"]
+                    if len(re.sub(r"\s", "", res["pages"][n]["text"])) > len(re.sub(r"\s", "", page_texts[n - 1]))]
+            res["read"] = used
+            if used:
+                for n in used:
+                    page_texts[n - 1] = res["pages"][n]["text"]
+                ocr = scan_ocr.summary(res, total_pages=pages)
+                empty_pages = [n for n in empty_pages if n not in used]
+            else:
+                ocr_failure = scan_ocr.failure_sentence(res)
+        text = "\n".join(page_texts)
+        method = "pdftotext -layout" if not ocr else (
+            f"OCR ({ocr['engine']}) - scanned PDF, no text layer" if not empty_pages and len(ocr["pages_ocr"]) == pages
+            else f"pdftotext -layout + OCR ({ocr['engine']}) of scanned page(s) {', '.join(map(str, ocr['pages_ocr']))}")
         # Reading-order text too, used only to check the model's quotes: -layout
         # interleaves a table's columns line by line, so a cell that wraps
         # ("Test Metro" / "Roads Agency") is split up; reading order keeps each
@@ -174,9 +219,9 @@ def read_cv_text(path, work_dir):
         verify_extra = _pdf_reading_order_text(path)
         if pages and len(empty_pages) == pages:
             raise ExtractionFailed(
-                f"This PDF has no text layer on any of its {pages} page(s) - it is a scan (a photo of paper). "
-                "AI extraction reads a CV's text and does not OCR scans yet, so nothing was guessed. Upload the "
-                "original Word/PDF export of the CV, or choose 'use as-is' to attach the scan unchanged.")
+                f"This PDF has no text layer on any of its {pages} page(s) - it is a scan (a photo of paper) - "
+                f"and {ocr_failure or 'OCR found no readable text'}. Nothing was guessed. "
+                "Upload the original Word/PDF export of the CV, or choose 'use as-is' to attach the scan unchanged.")
     elif ext == "docx":
         try:
             text = docx_text(path)
@@ -196,8 +241,13 @@ def read_cv_text(path, work_dir):
         raise ExtractionFailed(f"'.{ext}' files can't be read for AI extraction. Upload the CV as PDF or Word (.docx/.doc).")
 
     assess_text_quality(text, pages)
+    if ext != "pdf":
+        native_text = text
     return {"text": text, "method": method, "pages": pages, "empty_pages": empty_pages,
-            "verify_text": text + "\n" + verify_extra}
+            "verify_text": text + "\n" + verify_extra,
+            # the text-layer part only, so a value quoted from it isn't marked as OCR'd
+            "native_text": native_text + "\n" + verify_extra if ocr else text + "\n" + verify_extra,
+            "ocr": ocr}
 
 
 def _pdf_reading_order_text(path):
@@ -215,9 +265,9 @@ def assess_text_quality(text, pages=None):
         raise ExtractionFailed(
             f"Only {len(compact)} characters of text could be read from this file"
             + (f" ({pages} page(s))" if pages else "")
-            + ". It is most likely a scan or an image saved inside a PDF/Word file. AI extraction reads text and "
-              "does not OCR scans yet, so nothing was guessed. Upload the original Word/PDF export of the CV, or "
-              "choose 'use as-is'.")
+            + ". It is most likely a scan or an image saved inside a PDF/Word file, and too little could be read "
+              "from it (by OCR too, where it was tried), so nothing was guessed. Upload the original Word/PDF export "
+              "of the CV, or choose 'use as-is'.")
     letters = sum(ch.isalpha() for ch in compact)
     if letters / len(compact) < MIN_LETTER_RATIO:
         raise ExtractionFailed(
@@ -257,16 +307,20 @@ def _plausible_sa_id(digits):
     return 1 <= mm <= 12 and 1 <= dd <= 31 and digits[10] in "01"
 
 
-def find_and_redact_sa_ids(text):
+def find_and_redact_sa_ids(text, redact_all_13_digit=False):
     """Returns (redacted_text, [unique ID numbers found]). Only 13-digit
     numbers with a valid SA ID checksum, birth month/day and citizenship digit
-    count - registration numbers, phone numbers and contract numbers don't."""
+    count - registration numbers, phone numbers and contract numbers don't.
+    redact_all_13_digit (OCR'd text): an ID number OCR misread by one digit
+    fails the checksum but is still someone's ID - every 13-digit run is
+    removed before the text leaves this machine; only checksum-valid ones are
+    proposed."""
     found = []
 
     def sub(m):
         digits = "".join(m.groups())
         if not _plausible_sa_id(digits):
-            return m.group(0)
+            return "[13-DIGIT NUMBER REMOVED]" if redact_all_13_digit else m.group(0)
         if digits not in found:
             found.append(digits)
         return "[SA ID NUMBER REMOVED]"
@@ -578,15 +632,44 @@ def validate_proposal(data, text, local_ids):
 def extract_from_file(path, work_dir, client=None):
     """Steps 2-6 for one local file. Returns (proposal, warnings, info)."""
     read = read_cv_text(path, work_dir)
-    redacted, ids = find_and_redact_sa_ids(read["text"])
+    redacted, ids = find_and_redact_sa_ids(read["text"], redact_all_13_digit=bool(read.get("ocr")))
     data, meta = call_llm(compact_for_model(redacted), client=client)
     proposal, warnings = validate_proposal(data, read["verify_text"], ids)
     if read["empty_pages"]:
         warnings.insert(0, f"Page(s) {', '.join(map(str, read['empty_pages']))} of {read['pages']} had no readable "
-                           "text (probably scanned) - anything on them was not read.")
+                           "text (probably scanned"
+                           + (", and OCR couldn't read them clearly" if read.get("ocr") or scan_ocr.available()[0] else "")
+                           + ") - anything on them was not read.")
+    if read.get("ocr"):
+        mark_ocr_values(proposal, read["native_text"], read.get("ocr"))
+        o = read["ocr"]
+        warnings.insert(0, (f"OCR: page(s) {', '.join(map(str, o['pages_ocr']))} of this CV are a scan and were read by "
+                            f"OCR (average confidence {o['mean_confidence']:.0f}/100), not from a text layer. Every value "
+                            "read from them is left unticked - OCR can misread letters and digits (0/O, 1/l, 5/S) and "
+                            "can skip a line, so check each one against the scan."))
     info = {"text_method": read["method"], "source_pages": read["pages"],
             "source_text_chars": len(read["text"]), **meta}
     return proposal, warnings, info
+
+
+def mark_ocr_values(proposal, native_text, ocr):
+    """EXPERIMENTAL OCR: a value whose quote isn't in the CV's real text layer
+    came from OCR'd text, so it is never pre-ticked: verified -> False with a
+    plain warning. The quote check against the OCR text only proves the AI
+    copied the OCR output; it can't prove OCR read the paper right (a blurred
+    copy of the real ECSA certificate read 20150155 as 2015015 at high
+    confidence - OCR-Evaluation.md)."""
+    norm_native, digits_native = _norm(native_text), _digits(native_text)
+    for key, item in list(proposal["person"].items()) + [(None, p) for p in proposal["projects"]]:
+        if native_text.strip() and (evidence_in_text(item.get("evidence"), norm_native)
+                                    or (key == "id_number" and item["value"] in digits_native)):
+            continue
+        item["verified"] = False
+        if OCR_FIELD_WARNING not in item["warnings"]:
+            item["warnings"].insert(0, OCR_FIELD_WARNING)
+    for r in proposal.get("other_registrations") or []:
+        if not (native_text.strip() and evidence_in_text(r.get("evidence"), norm_native)):
+            r["verified"] = False
 
 
 # ============================================================================

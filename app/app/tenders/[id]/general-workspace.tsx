@@ -22,6 +22,7 @@ import { DOCUMENT_TYPES, findMatchingExperience, labelFor } from "@/lib/experien
 import { COMPANY_OFFICE_COLUMNS, matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
 import { TENDER_ROLE_COLUMNS, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
 import { requestGeneralPack, requestRequirementsExtraction, saveGeneralAnswers, uploadTenderDocument } from "./general-actions";
+import { OcrNotice, OCR_TAG } from "./ocr-notice";
 import { PackChecklist, checklistOf } from "./pack-checklist";
 import { PrivateDocuments, type PrivateDoc } from "./private-documents";
 
@@ -227,6 +228,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             </ul>
           </div>
         )}
+        <OcrNotice documents={manifest.documents} />
 
         {manifest.forms.length > 0 && (
           <>
@@ -294,7 +296,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                     {r.strength === "mentioned" && <span style={{ fontWeight: 500, color: "#9A9684" }}> - mentioned, may not be required</span>}
                   </div>
                   <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>{r.detail}</div>
-                  <div style={{ fontSize: 11, color: "#9A9684", fontStyle: "italic", marginTop: 2, wordBreak: "break-word" }}>&ldquo;{r.quote.slice(0, 160)}{r.quote.length > 160 ? "…" : ""}&rdquo;</div>
+                  <div style={{ fontSize: 11, color: "#9A9684", fontStyle: "italic", marginTop: 2, wordBreak: "break-word" }}>{r.from_ocr ? OCR_TAG : ""}&ldquo;{r.quote.slice(0, 160)}{r.quote.length > 160 ? "…" : ""}&rdquo;</div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   {r.expiring && <Chip label="Renew soon" bg="#FEF3C7" color="#B45309" />}
@@ -411,7 +413,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                     <div style={{ fontSize: 12, color: "#4B5563" }}>
                       {tagged.length > 0 ? `Tagged for this role: ${tagged.map((p) => p.name).join(", ")}` : "Nobody tagged for this role yet - tag CVs on the People page."}
                     </div>
-                    <div style={{ fontSize: 11, color: "#9A9684", fontStyle: "italic", wordBreak: "break-word" }}>&ldquo;{mr.quote.slice(0, 150)}…&rdquo;</div>
+                    <div style={{ fontSize: 11, color: "#9A9684", fontStyle: "italic", wordBreak: "break-word" }}>{mr.from_ocr ? OCR_TAG : ""}&ldquo;{mr.quote.slice(0, 150)}…&rdquo;</div>
                   </div>
                   <Chip {...(tagged.length > 0 ? STATUS_STYLE.have : STATUS_STYLE.missing)} label={tagged.length > 0 ? "Someone tagged" : "Nobody tagged"} />
                 </div>

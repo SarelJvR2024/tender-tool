@@ -20,9 +20,17 @@ FROM python:3.13-slim
 # to recalculate the filled SANRAL workbook and print the Form B reports.
 # The general bridge (engine/general/process_general_jobs.py) reads tender PDFs
 # with pdftotext (poppler-utils), same as engine/discovery/assess_tender.py.
+# EXPERIMENTAL: Tesseract OCR (+ English and orientation data) reads scanned
+# pages with no text layer - engine/ocr/scan_ocr.py, called by the general
+# bridge and the CV-extraction bridge. Local and free (no API, nothing leaves
+# the container). Evaluation and keep/drop recommendation:
+# docs/specs/OCR-Evaluation.md. To drop it, delete these three packages; the
+# bridges then refuse scans exactly as before (scan_ocr.available() is False).
+# OCR_DISABLED=1 switches it off without a rebuild.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       libreoffice-writer-nogui libreoffice-calc-nogui python3-uno poppler-utils \
+      tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd \
       fonts-liberation fonts-crosextra-carlito fonts-dejavu-core \
  && rm -rf /var/lib/apt/lists/*
 # python3-uno installs for Debian's own python3; expose it to this image's
