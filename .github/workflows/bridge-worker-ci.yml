@@ -102,6 +102,9 @@ jobs:
       - name: Daily digest live mode - per-company scoring and per-company sections (in-memory rows, real sample PDFs)
         run: python3 engine/notify/test_digest_live.py
 
+      - name: Tender updates - addenda classified from real documents, watch end to end, pursuers only (in-memory rows)
+        run: python3 engine/discovery/test_tender_updates.py
+
       - name: Company letters - uploaded as-is / own guideline / not set up (docx read-back)
         run: python3 engine/test_company_documents.py "$RUNNER_TEMP/company-documents"
 

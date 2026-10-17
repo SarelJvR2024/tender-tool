@@ -1,0 +1,42 @@
+# Real eTenders document text, read with pdftotext -layout on 2026-10-17 from OCDS release ocds-9t57fa-174337.
+# Contact names, e-mail addresses and phone numbers removed. Used by engine/discovery/test_tender_updates.py.
+                                                                        Johannesburg Tourism Company NPC
+                                                                 A City of Johannesburg Metropolitan Municipality Entity
+                                                                                                Reg. No. 2003/009873/08
+
+                                              Sandton Library Offices     P.O Box 7776               Tel [phone removed]
+                                              Nelson Mandela Square       Johannesburg             www.joburgtourism.com
+                                              West Street, Sandton        South Africa
+                                              Johannesburg                2000
+                                              South Africa
+                                              2196
+
+
+
+
+                          REQUEST FOR QUOTATION (RFQ)
+RFQ Number                 JTC0014/2026-27 (Addendum)
+DESCRIPTION: REQUEST FOR QUOTATION FROM SUITABLE, QUALIFIED SERVICE PROVIDER FOR
+TRAVEL, ACCOMMODATION, BREAKFAST, TRANSFERS, TRAVEL INSURANCE, UK VISA FOR THE
+JOBURG TOURISM COMPANY OFFICIALS’ ATTENDANCE AT WORLD TRAVEL MARKET (WTM)
+INCLUDING SECURING OF SPACE, BUILD AND BREAKDOWN OF EXHIBITION SPACE, TAKING PLACE
+AT EXCEL CENTRE IN LONDON- UK FROM 01- 06 NOVEMBER 2026
+
+                               THIS REQUEST FOR PROPOSAL IS FOR
+                              THE JOHANNESBURG TOURISM COMPANY
+
+
+
+Date of advertisement:                               13 October 2026
+Closing date:                                        20 October 2026
+Closing time:                                        10H30
+Compulsory briefing meeting                          N/A
+Quotations MUST be physically deposited in the       Quotations will be received on the closing dates and
+TENDER box at:                                       times shown and must be enclosed in sealed
+                                                     envelopes, bearing the applicable quotation description
+4th Floor Joburg Tourism Company Offices
+                                                     and reference number as well as the closing time and
+Sandton Library Offices                              due date, and must be addressed to:
+Nelson Mandela Square                                THE ACCOUNTING OFFICER
+West Street, Sandton                                 JOHANNESBURG TOURISM COMPANY
+                                                     Quotati

@@ -25,6 +25,7 @@ const CATEGORY_DOT: Record<ActivityCategory, string> = {
   cv: "#6B6758",
   answers: "#6B6758",
   tender: "#6B6758",
+  update: "#B45309",
 };
 
 export async function ActivityLog({ tenderId, showAll }: { tenderId: string; showAll: boolean }) {
@@ -36,7 +37,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
   if (!user || !membership) return null;
   const companyId = membership.company_id as string;
 
-  const [tenderRes, commentsRes, tasksRes, packRes, templatesRes, jobsRes, cvsRes, answersRes, labelsRes] = await Promise.all([
+  const [tenderRes, commentsRes, tasksRes, packRes, templatesRes, jobsRes, cvsRes, answersRes, labelsRes, updatesRes] = await Promise.all([
     supabase.from("tenders").select("created_at, owner_company_id").eq("id", tenderId).maybeSingle(),
     supabase.from("tender_comments").select("id, author_id, body, created_at").eq("tender_id", tenderId),
     supabase
@@ -59,6 +60,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
       .eq("tender_id", tenderId),
     supabase.from("tender_answers").select("field_key, original_filename, answered_by, updated_at").eq("tender_id", tenderId),
     supabase.rpc("company_member_labels"),
+    supabase.from("tender_watched_documents").select("id, title, source, first_seen_at, summary").eq("tender_id", tenderId).eq("baseline", false),
   ]);
 
   // A source that fails to load is named, not silently left out of the history.
@@ -70,6 +72,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
     ["pack requests", jobsRes.error],
     ["CV requests", cvsRes.error],
     ["answers", answersRes.error],
+    ["tender updates", updatesRes.error],
   ]
     .filter(([, e]) => !!e)
     .map(([name]) => name as string);
@@ -91,6 +94,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
       person_name: c.people?.name ?? null,
     })),
     answers: (answersRes.data ?? []) as ActivityInput["answers"],
+    updates: (updatesRes.data ?? []) as NonNullable<ActivityInput["updates"]>,
   };
 
   const entries = buildTenderActivity(input);

@@ -1,0 +1,29 @@
+# Real eTenders document text, read by OCR (tesseract) from a scan on 2026-10-17 from OCDS release ocds-9t57fa-174359.
+# Contact names, e-mail addresses and phone numbers removed. Used by engine/discovery/test_tender_updates.py.
+SATS 1286.2011
+Annex C
+
+Local Content Declaration - Summary Schedule
+
+Tender No. Note: VAT to be excluded from all
+Tender description:
+Designated product(s)
+Tender Authority:
+Tendering Entity name:
+Tender Exchange Rate:
+Specified local content %
+Calculation of local content Tender summary
+Tender value
+Tender price -| Exempted net of Local
+List of items each imported exempted content % Tender Total tender value Total exempted Total Imported
+. . imported content content
+(excl VAT) imported (per item)
+content
+
+Tender item
+
+Signature of tenderer from Annex B
+(C22) Total Tender value net of exempt Imported content
+(C23) Total Imported content
+(C24) Total local content
+(C25) Average local content % of tender

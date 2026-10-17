@@ -1,0 +1,65 @@
+# Real eTenders document text, read with pdftotext -layout on 2026-10-17 from OCDS release ocds-9t57fa-174419.
+# Contact names, e-mail addresses and phone numbers removed. Used by engine/discovery/test_tender_updates.py.
+DEPARTMENT/        BID NUMBER & PROJECT DESCRIPTION                                         CONTACT PERSON
+INSITUTION
+DEPT OF                                      ADDENDUM No.1                                  TECHNICAL / PROJECT ENQUIRIES
+TRANSPORT
+                   SCMU10–26/27–0017 (A-F)                                                  [name removed]
+                                                                                            Telephone number:
+                   APPOINTMENT OF PANEL OF SERVICE PROVIDERS FOR THE                        Cell No:[phone removed]
+                   PROVISION OF TRANSPORT SERVICES FOR QUALIFYING AND                       Email:
+                   APPROVED LEARNERS TO AND FROM SCHOOLS IN THE                             [email removed]
+                   PROVINCE OF THE EASTERN CAPE FOR THE PERIOD OF THIRTHY
+                   SIX (36) MONTHS
+                                                                                            SCM RELATED QUERIES
+                   REASONS FOR ADDENDUM                                                     Mr. [name removed]
+                                                                                            Cell no:[phone removed]
+                   This addendum serves to extend the closing date and to correct errors    Email address:
+                   identified on the tender document where applicable.                      [email removed]
+                                                                                            v.za
+                   CLOSING DATE IS EXTENDED TO FRIDAY 06 NOVEMBER 2026 AT
+                   11:00 AM
+
+NO             QUERY DESCRIPTION                                               RESPONSE / AMENDMENT
+ 1   TENDER SUBMISSION –
+
+     The completed bid documents must be submitted on        The completed bid documents must be submitted on e-Tender
+     e-Tender Publication Portal (e-Submission) not later    Publication Portal (e-Submission) not later than 11H00 on the 06
+     than 11H00 on 26 October 2026                           November 2026
+
+2    Page. 5 of 69, under A. Requirements in terms of
+     Public Transport requirements and other relevant
+     policies,
+     iii) under bullet 5 reads as follows:
+                                                             NB: All Vehicles must be in the name the bidder
+         •    NB: All Vehicles must be in the name of the    (Company/individual) / Or registered under the name of any of the
+              bidder (Company). If the bidder is a natural   company’s directors. Authenticity to be verified with Natis
+              person, the vehicles must be under the name
+              of the Vehicle Owner. Authenticity to be
+              verified with Natis
+     BID FORM - page. 45 of 69
+3     Bid No: SCMU10–26/27–0017-D – JOE GQABI                 Bid No: SCMU10–26/27–0017-B - ALFRED NZO
+
+
+4                                                            Fuel price and Annual Price adjustment
+     Rate card - page. 45 of 69
+     Fuel price and annual price adjustment clause               1.   The fuel price will be adjusted quarterly, based on the
+     omission.                                                        average of the previous 3 months.
+                                                                 2.   The rate will be adjusted annually with the average CPI
+                                                                      for the 12 months preceding the effective month of the
+                                                                      adjustment.
+
+5    16. ALLOCATION CRITERIA - page 42 of 69                 16. ALLOCATION CRITERIA - Page 42 of 69
+
+     Learners will be allocated according to the criteria    Learners will be allocated according to the criteria set
+     set hereunder                                           hereunder
+
+     16.4 The Proximity of the operator to the pick-up       16.4 Preference will be given to operators who provide
+     points for the allocated school(s).                         transportation that can cater for bigger capacity depending on
+                                                                 the number of learners to be transported.
+     16.5 Preference will be given to Operators who          16.5 Previous experience in providing scholar transport operations
+     provide transportation that can cater for bigger            will be considered.
+     capacity depending on the number of learners to be      16.6 The Proximity of the operator to the pick-up points for the
+     transported in order to ensure full capacity of the         allocated school(s).
+     vehicle.
+

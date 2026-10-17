@@ -46,6 +46,12 @@ TENDER_BLOCK_RE = re.compile(
     re.S,
 )
 DOWNLOAD_FORM_RE = re.compile(r'class="sanral-tender-download"')
+# "Attached Files" list under the description (confirmed 2026-10-17 on
+# NRA 2026/0756 (C): "NORTH-WEST BATCH 3 CONTRACTORS (3).zip" + "Addendum 1 -
+# NW Batch 3 RRM Contractors Signed.pdf"). Names only - the files themselves
+# are behind the reCAPTCHA form. watch_tender_updates.py diffs this list.
+ATTACHED_BLOCK_RE = re.compile(r"<h4>\s*Attached Files\s*</h4>\s*<ul[^>]*>(.*?)</ul>", re.S | re.I)
+ATTACHED_ITEM_RE = re.compile(r"<li[^>]*>(.*?)</li>", re.S | re.I)
 RECAPTCHA_RE = re.compile(r"g-recaptcha-response")
 
 
@@ -58,6 +64,8 @@ def fetch_detail(slug):
     stats = {html.unescape(k).strip(): html.unescape(v).strip()
              for k, v in STAT_ROW_RE.findall(body)}
     block_m = TENDER_BLOCK_RE.search(body)
+    att_m = ATTACHED_BLOCK_RE.search(body)
+    attached = [html.unescape(re.sub(r"<[^>]+>", "", li)).strip() for li in ATTACHED_ITEM_RE.findall(att_m.group(1))] if att_m else []
 
     return {
         "slug": slug,
@@ -72,6 +80,7 @@ def fetch_detail(slug):
         "last_updated": stats.get("Last Updated"),
         "download_form_present": bool(DOWNLOAD_FORM_RE.search(body)),
         "download_form_gated_by_recaptcha": bool(RECAPTCHA_RE.search(body)),
+        "attached_files": [a for a in attached if a],
     }
 
 

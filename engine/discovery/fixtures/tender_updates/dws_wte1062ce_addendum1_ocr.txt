@@ -1,0 +1,84 @@
+# Real eTenders document text, read by OCR (tesseract) from a scan on 2026-10-17 from OCDS release ocds-9t57fa-174359.
+# Contact names, e-mail addresses and phone numbers removed. Used by engine/discovery/test_tender_updates.py.
+“az2 water & sanitation
+
+yoy Department:
+3 Water and Sanitation
+SS" REPUBLIC OF SOUTH AFRICA
+
+Private Bag x24, Howick, Construction East, Midmar dam, 3290
+Enquiries: Mr. L [name removed], Tel:[phone removed], Email: [email removed]
+
+ADDENDUM NO 01 — Ref: WTE1062CE
+Dear Tenderer
+
+RE: WTE1062CE ~- SUPPLY AND DELIVERY OF LOCAL CONTENT ROOF TIMBER TRUSSES AND 0.5MM
+IBR ROOF COVERING SHEETS FOR THE KLIPFONTEIN DAM PROJECT IN VRYHEID, CLOSEST TOWN,
+KZNPROVINCE.
+
+In terms of the Tender, issued by Department of Water and Sanitation and closing on the 04 November 2026,
+herewith please find enclosed the addendum for the subject project.
+
+THE FOLLOWING AMENDMENT IS MADE TO THE TENDER DOCUMENT
+
+Item
+
+Item 1 [Please take note that an amendment has been made to the compulsory site briefing date reflected |
+in the specification/bid document.
+
+Original Site Briefing Date: [22 October 2026]
+Revised Site Briefing Date: [27 October 2026]
+Time: 10:00am
+Venue: Klipfontein dam near Vryheid town in the KZN Province
+
+Bidders are requested to take note of the revised compulsory site briefing date and ensure attendance
+accordingly.
+
+All other terms, conditions and requirements of the specification/bid document remain unchanged.RE: WTE1062CE —SUPPLY AND DELIVERY OF LOCAL CONTENT ROOF TIMBER
+TRUSSES AND 0.5 MM IBR ROOF COVERING SHEETS FOR THE KLIPFONTEIN DAM
+PROJECT IN VRYHEID, CLOSEST TOWN, KZN PROVINCE.
+
+Attention: Mr. [name removed] [name removed][phone removed])
+Yours sin Mig
+Sign: ....¢B 1...) & .
+
+Project Manager
+Date: 17/10/2026
+
+Ms. A [name removed][phone removed])
+
+Supply Chain
+
+Date: |77 { ( o| 2AORGDEPARTMENT OF WATER AND SANITATION
+REPUBLIC OF SOUTH AFRICA
+
+DUE AT 11:00 ON
+04 NOVEMBER 2026
+WTE1062CE
+
+SUPPLY AND DELIVERY OF LOCAL CONTENT ROOF TIMBER TRUSSES AND 0.5 mm IBR
+ROOF COVERING SHEETS FOR THE KLIPFONTEIN DAM PROJECT IN VRYHEID, CLOSEST
+TOWN, KZN PROVINCE
+
+SUBMIT COMPLETED AND SIGNED BID DOCUMENTS TO:
+
+TO BE DEPOSITED IN:
+
+Department Water and Sanitation
+The bid box at the entrance of
+Construction East Site Office
+R103 Prospect Road,
+Midmar Dam Close to Howick
+HOWICK
+3290
+
+Compulsory Briefing Session
+Date: 27 October 2026
+Time: 10:00am
+Venue: Klipfontein dam near Vryheid town in the
+KZN Province.
+Coordinates: (27°50'29” S: 30°49°02"E)
+
+BIDDER: (Company address and stamp)
+
+COMPILED BY: CONSTRUCTION EAST

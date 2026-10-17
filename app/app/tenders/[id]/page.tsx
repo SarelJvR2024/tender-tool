@@ -12,6 +12,7 @@ import { SiteNav } from "../../_components/SiteNav";
 import { SubmissionPack } from "./submission-pack";
 import { IntakeCard } from "./intake-card";
 import { ActivityLog } from "./activity-log";
+import { TenderUpdates } from "./tender-updates";
 import { ReusePastSubmission } from "./reuse-past-submission";
 import { TenderTemplates } from "./tender-templates";
 import { PositionPersonSelect } from "./position-person-select";
@@ -342,6 +343,11 @@ export default async function TenderWorkspacePage({
                 </div>
               )}
             </div>
+
+            {/* Addenda, changed dates and other documents the buyer added after
+                discovery (0039) - straight under the facts, since a moved
+                closing date changes everything below it. Nothing when none. */}
+            <TenderUpdates tenderId={id} />
 
             {/* Jump nav - this page stacks up to 9 report/management cards once
                 a pack exists, so a sticky row of anchors beats blind-scrolling

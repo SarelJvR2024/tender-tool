@@ -26,7 +26,7 @@ export type ActivityActor =
   | { kind: "system" } // the Tender Tool itself (bridge worker, auto-seed)
   | { kind: "other_company" }; // a shared tender's template, uploaded by another company
 
-export type ActivityCategory = "note" | "task" | "stage" | "positions" | "template" | "pack" | "cv" | "answers" | "tender";
+export type ActivityCategory = "note" | "task" | "stage" | "positions" | "template" | "pack" | "cv" | "answers" | "tender" | "update";
 
 export type ActivityEntry = {
   key: string;
@@ -94,6 +94,9 @@ export type ActivityInput = {
     error_message: string | null;
   }[];
   answers: { field_key: string; original_filename: string | null; answered_by: string | null; updated_at: string }[];
+  // Documents the buyer added after discovery (0039, tender_watched_documents,
+  // non-baseline). Optional so callers built before 0039 still type-check.
+  updates?: { id: string; title: string | null; source: string; first_seen_at: string; summary: string | null }[];
 };
 
 // A row whose updated_at/stage_changed_at is within this of its created_at
@@ -276,6 +279,17 @@ export function buildTenderActivity(input: ActivityInput): ActivityEntry[] {
       category: "answers",
       text: `Saved ${g.count} answer${g.count === 1 ? "" : "s"} to this tender's questions`,
       detail: "Latest save only",
+    });
+  }
+
+  for (const u of input.updates ?? []) {
+    out.push({
+      key: `update:${u.id}`,
+      at: u.first_seen_at,
+      actor: SYSTEM,
+      category: "update",
+      text: `Found a new document on ${u.source === "sanral_page" ? "SANRAL's tender page" : "eTenders"}: “${u.title ?? "untitled"}”`,
+      detail: clip(u.summary),
     });
   }
 

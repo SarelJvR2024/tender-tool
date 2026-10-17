@@ -105,6 +105,7 @@ import assess_tender
 import company_profiles
 import watch_new_tenders
 import watch_deadlines
+import watch_tender_updates
 
 LOCAL_COMPANY_KEY = "local"  # --mode local: the one --profile company
 
@@ -128,6 +129,13 @@ SECTION_VISIBILITY = {
     "finance": {"document_expiry", "tender_tasks", "readiness_changes", "submission_due"},
     "viewer": {"new_tenders", "document_expiry", "submission_due"},
 }
+# Tender updates (0039, engine/discovery/watch_tender_updates.py): an addendum,
+# a moved closing/briefing date or a cancellation on a tender the company is
+# actively pursuing. Not in the spec's matrix (it predates the watch); every
+# role gets it - a moved closing date matters to whoever is working on the bid,
+# whatever their part - and the viewer gets the count, like its other sections.
+for _sections in SECTION_VISIBILITY.values():
+    _sections.add("tender_updates")
 
 # Heuristic keyword classifiers for sections that have no real "who cares
 # about this" tag in the schema yet (tender_tasks.kind is a closed enum of
@@ -192,7 +200,7 @@ def score_per_company(releases, companies, fetch_documents=True, fetch_text=None
 
 
 def company_signals(company_key, scored_by_company, document_expiry, tender_tasks, readiness_changes,
-                    submission_lead_days, company_id=None):
+                    submission_lead_days, company_id=None, tender_updates=None):
     """One company's signals. With company_id set (live mode), the
     company-tagged sections (every item watch_deadlines/find_readiness_changes
     returns carries company_id) are narrowed to that company - a person never
@@ -206,6 +214,10 @@ def company_signals(company_key, scored_by_company, document_expiry, tender_task
         "tender_tasks": own(tender_tasks),
         "readiness_changes": own(readiness_changes),
         "submission_due": submission_due_signals(scored, lead_days=submission_lead_days),
+        # Already narrowed to the companies pursuing each tender by the watch
+        # (tender_update_notifications rows are per company); own() keeps a
+        # person to their own company's rows like every other section.
+        "tender_updates": own(tender_updates or []),
     }
 
 
@@ -418,6 +430,14 @@ def build_digest_for_person(person, signals):
         else:
             digest["submission_due"] = items
 
+    if "tender_updates" in visible:
+        items = signals.get("tender_updates") or []
+        if role == "viewer":
+            digest["tender_updates"] = {"count": len(items),
+                                        "most_urgent": items[0].get("urgency") if items else None}
+        else:
+            digest["tender_updates"] = items
+
     return digest
 
 
@@ -464,6 +484,7 @@ def main():
                            + local_person_credential_expiry(profile, today, args.doc_lead_days))
         tender_tasks = []  # Supabase-only, no local fixture (see module docstring)
         readiness_changes = []  # Supabase-only
+        tender_updates, updates_client = [], None  # Supabase-only (0039)
     else:
         if not url or not key:
             print("ERROR: --mode live needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
@@ -475,6 +496,15 @@ def main():
                            + watch_deadlines.find_due_person_credentials(url, key, seen, today, args.doc_lead_days))
         tender_tasks = watch_deadlines.find_due_tasks(url, key, seen, today, args.task_lead_days)
         readiness_changes = find_readiness_changes(url, key, seen, today)
+        # Updates the tender-update watch already alerted on, not yet in a
+        # digest (tender_update_notifications.digested_at, 0039). A failure
+        # here must not cost anyone the rest of their digest.
+        updates_client = company_profiles.RestClient(url, key)
+        try:
+            tender_updates = watch_tender_updates.pending_digest_updates(updates_client)
+        except Exception as e:
+            print(f"WARNING: tender updates could not be read ({e}) - digest goes out without them.")
+            tender_updates, updates_client = [], None
 
     print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
           f"{'y' if len(companies) == 1 else 'ies'}, each from its own profile...")
@@ -487,7 +517,8 @@ def main():
     for p in roster:
         ckey = LOCAL_COMPANY_KEY if mode == "local" else p["company_id"]
         signals = company_signals(ckey, scored_by_company, document_expiry, tender_tasks, readiness_changes,
-                                  args.submission_lead_days, company_id=None if mode == "local" else p["company_id"])
+                                  args.submission_lead_days, company_id=None if mode == "local" else p["company_id"],
+                                  tender_updates=tender_updates)
         for k, v in signals.items():
             totals.setdefault(k, {})[ckey] = len(v)
         digests.append(build_digest_for_person(p, signals))
@@ -500,7 +531,19 @@ def main():
           f"{total('document_expiry')} document(s) due for expiry reminder, "
           f"{total('tender_tasks')} tender task(s) due, "
           f"{total('readiness_changes')} readiness change(s), "
-          f"{total('submission_due')} tender(s) closing soon.")
+          f"{total('submission_due')} tender(s) closing soon, "
+          f"{total('tender_updates')} tender update(s) (addenda, new documents).")
+
+    # Each update is carried by one digest only: mark the ones that went to a
+    # roster company as digested (the watch already alerted on them).
+    if updates_client is not None:
+        roster_companies = {p["company_id"] for p in roster}
+        delivered = [u for u in tender_updates if u["company_id"] in roster_companies]
+        try:
+            watch_tender_updates.mark_digested(updates_client, delivered)
+        except Exception as e:
+            print(f"WARNING: could not mark {len(delivered)} tender update(s) as digested ({e}) - "
+                  "they will be carried again tomorrow.")
 
     print(f"\n{len(digests)} per-person digest(s) built ({mode} mode):")
     for d in digests:

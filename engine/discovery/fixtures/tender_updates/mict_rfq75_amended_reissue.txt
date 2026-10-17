@@ -1,0 +1,58 @@
+# Real eTenders document text, read with pdftotext -layout on 2026-10-17 from OCDS release ocds-9t57fa-174249.
+# Contact names, e-mail addresses and phone numbers removed. Used by engine/discovery/test_tender_updates.py.
+RFQ NUMBER                    RFQ/MICT/75/2026
+                              APPOINTMENT OF A SERVICE PROVIDER FOR THE PROVISION OF
+                              RENTAL OF WATER DISPENSER AND THE SUPPLY & DELIVERY OF
+RFQ DESCRIPTION
+                              PURIFIED WATER FOR THE EAST LONDON REGIONAL OFFICE FOR A
+                              PERIOD OF THIRTY-SIX (36) MONTHS
+RFQ ISSUE DATE                15 OCTOBER 2026
+BRIEFING SESSION              N/A
+                              23 OCTOBER 2026 @ 11:00 AM South African Time, RFQ submitted
+CLOSING DATE & TIME
+                              after the stipulated closing date and time will not be considered.
+LOCATION FOR
+                              [email removed]
+SUBMISSIONS
+NO: OF DOCUMENTS              1 SOFT COPY
+
+For queries, please contact [email removed] before the closing date of this RFQ.
+
+The MICT SETA requests your quotation on the services listed above. Please furnish us with all
+the information as requested and return your quotation on the date and time stipulated
+above. Late and incomplete submissions will invalidate the quote submitted.
+
+     SUPPLIER NAME:               _________________________________________________________
+
+     NATIONAL TREASURY (CSD) SUPPLIER NUMBER: _________________________________
+
+     POSTAL ADDRESS:              _________________________________________________________
+
+     TELEPHONE NO:                _________________________________________________________
+
+     E MAIL ADDRESS:              _________________________________________________________
+
+     CONTACT PERSON:              _________________________________________________________
+
+     CELL NO:                     _________________________________________________________
+
+     SIGNATURE OF BIDDER:         _________________________________________________________
+
+
+
+SUPPLIER REGISTRATION ON CSD
+Prospective suppliers must register on the National Treasury Central Supplier database in terms
+of National Treasury circular no 4A of 2016/17. The bidder shall register prior submitting a
+proposal/bid.
+
+
+
+
+RFQ/MICT/75/2026                                                          1 of 16 | P a g e
+                              MICT SETA: CHECKLIST INFORMATION
+
+   RETURNABLE DOCUMENTS CHECKLIST
+
+   Request For Quotation invitation document must be completed, signed and submitted as a
+   whole by the authorised Company representative. All forms must be properly completed;
+   list below serve as a checklis

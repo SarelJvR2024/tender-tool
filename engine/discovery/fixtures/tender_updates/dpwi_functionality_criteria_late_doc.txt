@@ -1,0 +1,29 @@
+# Real eTenders document text, read with pdftotext -layout on 2026-10-17 from OCDS release ocds-9t57fa-174194.
+# Contact names, e-mail addresses and phone numbers removed. Used by engine/discovery/test_tender_updates.py.
+COMPANY’S EXPERIENCE-
+
+Track Record of the Contractor on similar type of work (Cleaning, hygiene & horticulture or cleaning & hygiene
+services or Cleaning & Horticultural/Gardening services).
+NB: Bidders submitting a track record of Cleaning only or hygiene only or horticultural services only will be
+regarded as an incomplete submission
+                                                      5 Points: The Appointment letters/Purchase Orders/contracts accompanied by reference
+Score will be based on successfully executed and      letters/completion certificates for combined contract value between a range of R 11 000
+completed cleaning service or Cleaning &              001 and above.
+Horticultural / Gardening service or Cleaning &
+Hygiene rendered over the last 5 years (2021-         4 Points:      The Appointment letters/Purchase Orders/contracts accompanied by
+2026). Only Contracts with a minimum value of         reference letters/completion certificates for combined contract value between a range of
+R 3 000 000 will be considered.                       R 8 000 001 – R11 000 000.
+
+                                                      3 Points:         The Appointment letters/Purchase Orders/contracts accompanied by
+Evidence required:                                    reference letters/completion certificates for combined contract value between a range of
+                                                      R 5 000 001 – R8 000 000.
+The bidders     are   to   submit   the   following
+documents:                                            2 Points:         The Appointment letters/Purchase Orders/contracts accompanied by
+                                                      reference letters/completion certificates for combined contract value between a range of
+•    Provide    appointment       letter/Purchase     R 3 000 001 – R 5 000 000.
+     Order/contract for each project.
+                                                      1 Point: The Appointment letters/Purchase Orders/contracts accompanied by reference
+                                                      letters/completion certificates for combined contract value between a range of R 1 000
+•    Provide a reference letter or Completion         000 – R3 000 000.
+     certificate relating to the appointment                                                                                                      30%
+     letter/Purchase Order/contract provided.         0 Point: No submission or irrelev

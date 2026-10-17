@@ -139,3 +139,9 @@ class RestClient:
     def insert(self, table, row):
         out = self._req("POST", table, row, "return=representation")
         return out[0] if out else None
+
+    def update(self, table, filters, body):
+        """PATCH rows matching eq filters (watch_tender_updates.mark_digested)."""
+        import urllib.parse
+        q = "&".join(f"{k}=eq.{urllib.parse.quote(str(v), safe='')}" for k, v in (filters or {}).items())
+        return self._req("PATCH", f"{table}?{q}", body, "return=representation")
