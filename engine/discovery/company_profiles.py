@@ -69,8 +69,10 @@ def all_company_profiles(client, include_test_companies=True):
 
 def profile_fingerprint(profile):
     """sha256 of a profile's canonical JSON - recorded with each seen-store
-    verdict (discovery_seen_releases.profile_fingerprint, 0038) so a later
-    rule can tell whether the company's profile changed since it was scored."""
+    verdict (discovery_seen_releases.profile_fingerprint, 0038).
+    watch_new_tenders.fan_out() re-scores a release for a company whose
+    current fingerprint differs from the stored one (its profile changed
+    since it was scored - Sarel, 2026-10-17)."""
     return hashlib.sha256(json.dumps(profile, sort_keys=True, default=str).encode()).hexdigest()
 
 
@@ -115,10 +117,17 @@ class RestClient:
         except urllib.error.HTTPError as e:
             raise RuntimeError(f"{method} {path.split('?')[0]} failed: {e.code} {e.read().decode(errors='replace')[:300]}")
 
+    PAGE = 1000  # Supabase's PostgREST returns at most 1000 rows per request (max_rows)
+
     def select(self, table, filters=None, order=None):
         """filters: {column: value} -> eq; {column: [values]} -> in.(...)
         (each value double-quoted, so a contract number with a comma or a
-        slash is one value - PostgREST's own quoting rule)."""
+        slash is one value - PostgREST's own quoting rule).
+
+        Every page is read (limit/offset, PAGE rows at a time): Supabase caps
+        one response at 1000 rows, and a seen store read that silently
+        stopped at row 1000 would re-score and re-report everything after it.
+        Pass `order` for a stable order across pages."""
         import urllib.parse
 
         def cond(k, v):
@@ -130,7 +139,13 @@ class RestClient:
         parts.append("select=*")
         if order:
             parts.append(f"order={order}")
-        return self._req("GET", f"{table}?{'&'.join(parts)}")
+        out, offset = [], 0
+        while True:
+            page = self._req("GET", f"{table}?{'&'.join(parts)}&limit={self.PAGE}&offset={offset}")
+            out += page
+            if len(page) < self.PAGE:
+                return out
+            offset += self.PAGE
 
     def upsert(self, table, rows, on_conflict):
         return self._req("POST", f"{table}?on_conflict={on_conflict}", rows,

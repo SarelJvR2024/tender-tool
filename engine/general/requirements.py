@@ -169,6 +169,8 @@ def read_document(doc, work_dir):
             try:
                 text = ocr_scanned_pages(doc, text, work_dir)
             except Exception as e:  # experimental step: never worse than no OCR
+                scan_ocr.system_alerts.record("ocr", f"OCR crashed on a tender document: {type(e).__name__}: {e}",
+                                              "error", exc=e, context={"file": os.path.basename(doc["path"])})
                 doc.pop("ocr", None)
                 doc["_ocr_failure"] = f"OCR failed on it ({type(e).__name__})"
     elif fmt == "docx":

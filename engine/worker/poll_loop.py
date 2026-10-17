@@ -32,9 +32,14 @@ Usage from a bridge script:
 `poll_once` must return the number of jobs it handled (0 when the queue was
 empty). That number is only used for logging and the returned stats.
 """
+import os
 import signal
+import sys
 import threading
 import time
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alerts"))
+import system_alerts  # noqa: E402
 
 DEFAULT_INTERVAL_SECONDS = 30
 
@@ -45,8 +50,14 @@ def _ts():
 
 def poll_forever(poll_once, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None,
                  max_runtime=None, sleep=None, log=print, stop_event=None,
-                 install_signal_handlers=True, name="bridge", unit="job(s)"):
+                 install_signal_handlers=True, name="bridge", unit="job(s)", alert_source=None):
     """Call poll_once() every `interval` seconds until stopped.
+
+    alert_source: when set, a failed poll is also recorded in system_alerts
+    (engine/alerts/system_alerts.py, migration 0042) under that source, so an
+    unattended worker's failures reach Sarel instead of only its log. One
+    open alert per distinct failure (repeats raise its occurrence count).
+    run_bridges.py leaves it unset: it records each bridge's own failure.
 
     Returns {"cycles": n, "jobs": total handled, "errors": failed polls,
     "stopped_by": "max_cycles" | "max_runtime" | "signal"}.
@@ -83,6 +94,9 @@ def poll_forever(poll_once, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None,
             stats["errors"] += 1
             log(f"[{_ts()}] {name}: cycle {stats['cycles']} failed, will retry next cycle: "
                 f"{type(e).__name__}: {e}")
+            if alert_source:
+                system_alerts.record(alert_source, f"{name}: a poll failed ({type(e).__name__}: {e})",
+                                     "critical", exc=e, context={"loop": name, "cycle": stats["cycles"]})
 
         if stop_event.is_set():
             stats["stopped_by"] = "signal"

@@ -111,6 +111,12 @@ jobs:
       - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
         run: python3 engine/security/test_tenant_isolation.py
 
+      - name: Reminder seen stores in the database, not state/*.json (in-memory REST client)
+        run: python3 engine/compliance/test_reminder_seen_db.py
+
+      - name: System alerts - real bridges fed malformed jobs, worker failure, check_system_alerts.py (fake Supabase)
+        run: python3 engine/alerts/test_system_alerts.py
+
   container-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

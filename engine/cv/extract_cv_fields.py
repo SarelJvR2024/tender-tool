@@ -76,7 +76,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ENGINE, "worker"))
 sys.path.insert(0, os.path.join(ENGINE, "general"))
 
-from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
+from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 from process_cv_jobs import supabase_request  # noqa: E402  (same REST helper, same env vars)
 from requirements import docx_text, pdf_text, convert_with_soffice  # noqa: E402
 sys.path.insert(0, os.path.join(ENGINE, "ocr"))
@@ -165,6 +165,8 @@ def read_cv_text(path, work_dir):
         try:
             res = scan_ocr.ocr_image_file(path, work_dir) if ext in scan_ocr.IMAGE_EXTS else None
         except Exception as e:  # experimental step: never worse than no OCR
+            system_alerts.record("ocr", f"OCR crashed on an uploaded CV image: {type(e).__name__}: {e}", "error",
+                                 exc=e, context={"file": os.path.basename(path)})
             res = {"pages": {}, "read": [], "failed": [], "skipped": [], "engine": None,
                    "error": f"OCR failed on it ({type(e).__name__})"}
         if not res or not res["read"]:
@@ -195,6 +197,8 @@ def read_cv_text(path, work_dir):
             try:
                 res = scan_ocr.ocr_pdf_pages(path, empty_pages, work_dir=work_dir)
             except Exception as e:  # experimental step: never worse than no OCR
+                system_alerts.record("ocr", f"OCR crashed on a scanned CV PDF: {type(e).__name__}: {e}", "error",
+                                     exc=e, context={"file": os.path.basename(path)})
                 res = {"pages": {}, "read": [], "failed": [], "skipped": [], "engine": None,
                        "error": f"OCR failed on it ({type(e).__name__})"}
             used = [n for n in res["read"]
@@ -720,6 +724,9 @@ def fail_stale_uploads(url, key, now=None):
                 "extraction_error": f"The extraction worker stopped mid-job (no result after {STALE_AFTER_MINUTES} "
                                     "minutes). Nothing was proposed - upload the CV again."})
             print(f"[failed] cv_upload {up['id']}: stale 'extracting' since {claimed}")
+            system_alerts.record("cv_extract", f"A CV extraction was stuck in 'extracting' for over "
+                                               f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and was "
+                                               "marked failed", "error", context={"cv_upload_id": up["id"]})
 
 
 def process_upload(url, key, upload, client_factory=default_llm_client):
@@ -757,14 +764,21 @@ def process_upload(url, key, upload, client_factory=default_llm_client):
     except (SetupError, TransientError) as e:
         release_upload(url, key, upload)
         if isinstance(e, SetupError):
-            raise
+            raise  # recorded by whoever runs the pass (run_bridges.py's non-zero exit / poll_forever)
+        # Retried next pass; recorded so a lasting outage (rate limit, API down) is seen.
+        system_alerts.record("cv_extract", f"CV extraction hit a temporary problem and will retry: {e}", "warning",
+                             context={"cv_upload_id": upload["id"], "company_id": upload.get("company_id")})
         print(f"[retry] cv_upload {upload['id']}: {e}")
         return False
     except ExtractionFailed as e:
         fail_upload(url, key, upload, str(e))
+        system_alerts.record("cv_extract", f"CV extraction refused an upload: {e}", "warning",
+                             context={"cv_upload_id": upload["id"], "company_id": upload.get("company_id")})
         print(f"[failed] cv_upload {upload['id']}: {e}")
         return True
     except Exception as e:  # a bug, not a user problem - still never leave it 'extracting'
+        system_alerts.record("cv_extract", f"CV extraction crashed: {type(e).__name__}: {e}", "error", exc=e,
+                             context={"cv_upload_id": upload["id"], "company_id": upload.get("company_id")})
         fail_upload(url, key, upload, f"AI extraction hit an unexpected error ({type(e).__name__}). Nothing was "
                                       "proposed - upload the CV again or enter the fields by hand.")
         print(f"[failed] cv_upload {upload['id']}: unexpected {type(e).__name__}: {e}")
@@ -804,7 +818,7 @@ def run(loop=False, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None):
             return 1
         return 0
     poll_forever(lambda: poll_once(url, key, quiet_when_empty=True), interval=interval,
-                 max_cycles=max_cycles, name="extract_cv_fields")
+                 max_cycles=max_cycles, name="extract_cv_fields", alert_source="cv_extract")
     return 0
 
 

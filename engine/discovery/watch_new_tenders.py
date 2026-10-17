@@ -28,11 +28,25 @@ documents itself.
 
 The "seen" store tracks, per company, every release this script has scored
 for that company, keyed by ocid (falling back to contract_number for the rare
-release with no ocid). A company added later is scored on the releases still
-in the window; a company already scored on a release is never re-notified
-about it, even if its score would change on a later run (a verdict can drift
-as more of the document becomes readable, but re-notifying about something
-already seen defeats the point of a "what's new" alert).
+release with no ocid), with a fingerprint of the profile it was scored
+against. A company added later is scored on the releases still in the window.
+A company already scored on a release is not scored or notified again -
+unless one of these holds (Sarel, 2026-10-17):
+  - its OWN profile changed since (the stored profile_fingerprint differs
+    from company_profiles.profile_fingerprint() of its profile now - e.g. it
+    tagged new Experience Library items, added an office, got a CIDB
+    grading): the release is re-scored for that company, its seen row is
+    updated, and a report-worthy verdict is reported again as new, marked
+    rescored="profile_changed" with the previous_verdict. The tender didn't
+    change; the company's situation did.
+  - its last scoring raised (verdict ERROR): retried on every run instead of
+    being remembered as seen (rescored="retry_after_error"), and every
+    failure is recorded in system_alerts (engine/alerts/system_alerts.py) so
+    it reaches Sarel instead of sitting in the seen store.
+A verdict that merely drifts on the same profile (more of a document became
+readable) is still not re-reported - that would defeat the point of a
+"what's new" alert. A seen entry with no stored fingerprint (written before
+fingerprints existed) gets the current one, so only a LATER change counts.
 
 Where it lives (audit follow-up (d), Sarel 2026-10-17):
   - Supabase mode (every company from the database): the
@@ -79,6 +93,8 @@ sys.path.insert(0, os.path.dirname(__file__))
 import etenders_national
 import assess_tender
 import company_profiles
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
+import system_alerts  # noqa: E402
 
 DEFAULT_SEEN_STORE = os.path.join(os.path.dirname(__file__), "..", "..", "state", "seen_tenders.json")
 
@@ -130,44 +146,52 @@ def _chunks(items, n=SEEN_CHUNK):
 def load_seen_db(client, releases):
     """The database seen store (0038) for these releases, in fan_out()'s
     dict shape: {release_key: {first_seen, ocid, contract_number, title,
-    companies: {company_id: verdict}}}. Only the releases in this run's
-    window are read - the table grows with every run, the window doesn't.
-    Returns (seen, loaded) where `loaded` is the set of (release_key,
-    company_id) pairs already stored, so save_seen_db() writes only new ones."""
+    companies: {company_id: verdict}, fingerprints: {company_id: sha256}}}.
+    Only the releases in this run's window are read - the table grows with
+    every run, the window doesn't. Returns (seen, loaded) where `loaded` maps
+    each stored (release_key, company_id) pair to its stored (verdict,
+    profile_fingerprint), so save_seen_db() writes only new or changed rows."""
     keys = sorted({k for k in (release_key(r) for r in releases) if k})
-    seen, loaded = {}, set()
+    seen, loaded = {}, {}
     for chunk in _chunks(keys):
-        for row in client.select(SEEN_TABLE, {"release_key": chunk}):
+        for row in client.select(SEEN_TABLE, {"release_key": chunk}, order="company_id.asc,release_key.asc"):
             k = row["release_key"]
             e = seen.setdefault(k, {"first_seen": row.get("first_seen"), "ocid": row.get("ocid"),
                                     "contract_number": row.get("contract_number"), "title": row.get("title"),
-                                    "companies": {}})
+                                    "companies": {}, "fingerprints": {}})
             if row.get("first_seen") and (not e["first_seen"] or row["first_seen"] < e["first_seen"]):
                 e["first_seen"] = row["first_seen"]
             e["companies"][row["company_id"]] = row["verdict"]
-            loaded.add((k, row["company_id"]))
+            if row.get("profile_fingerprint"):
+                e["fingerprints"][row["company_id"]] = row["profile_fingerprint"]
+            loaded[(k, row["company_id"])] = (row["verdict"], row.get("profile_fingerprint"))
     return seen, loaded
 
 
 def save_seen_db(client, seen, loaded, companies):
     """Writes every (release, company) pair fan_out() scored this run that
-    wasn't in the table yet. Only database companies (with a company_id) -
-    a --profile file company has no row to key on. Returns rows written."""
+    is new, or whose verdict / profile fingerprint changed (a re-score after a
+    profile change or an ERROR retry - updated in place, first_seen kept).
+    Only database companies (with a company_id) - a --profile file company
+    has no row to key on. Returns rows written."""
     by_key = {c["key"]: c for c in companies if c.get("company_id")}
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
     rows = []
     for k, e in seen.items():
         for ckey, verdict in (e.get("companies") or {}).items():
             c = by_key.get(ckey)
-            if not c or (k, c["company_id"]) in loaded:
+            if not c:
+                continue
+            fp = (e.get("fingerprints") or {}).get(ckey) or company_profiles.profile_fingerprint(c["profile"])
+            if loaded.get((k, c["company_id"])) == (verdict or "ERROR", fp):
                 continue
             rows.append({"company_id": c["company_id"], "release_key": k, "ocid": e.get("ocid"),
                          "contract_number": e.get("contract_number"), "title": e.get("title"),
-                         "verdict": verdict or "ERROR",
-                         "profile_fingerprint": company_profiles.profile_fingerprint(c["profile"]),
-                         "first_seen": e.get("first_seen")})
+                         "verdict": verdict or "ERROR", "profile_fingerprint": fp,
+                         "first_seen": e.get("first_seen"), "scored_at": now})
     for chunk in _chunks(rows):
         client.upsert(SEEN_TABLE, chunk, "company_id,release_key")
-    loaded.update((r["release_key"], r["company_id"]) for r in rows)
+    loaded.update({(r["release_key"], r["company_id"]): (r["verdict"], r["profile_fingerprint"]) for r in rows})
     return len(rows)
 
 
@@ -175,15 +199,41 @@ RELEASE_FIELDS = ("contract_number", "buyer", "title", "description", "closing_d
                   "document_depth", "signals", "confidence_note")
 
 
+def _pending(entry, companies, fps):
+    """{company key: why} for the companies to (re-)score on this release:
+    None = never scored, "retry_after_error" = last scoring raised,
+    "profile_changed" = the company's profile fingerprint differs from the
+    one its verdict was scored against. A missing stored fingerprint is
+    backfilled with the current one (only a later change counts)."""
+    out = {}
+    stored = entry.setdefault("fingerprints", {})
+    for c in companies:
+        k = c["key"]
+        if k not in entry["companies"]:
+            out[k] = None
+        elif entry["companies"][k] in (None, "ERROR"):
+            out[k] = "retry_after_error"
+        elif not stored.get(k):
+            stored[k] = fps[k]
+        elif stored[k] != fps[k]:
+            out[k] = "profile_changed"
+    return out
+
+
 def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document=True, fetch_text=None):
-    """Scores each release once per company not yet scored on it. Returns the
-    new, report-worthy releases: release-level facts (the same for every
-    company) plus `company_results`, one entry per company whose OWN verdict is
+    """Scores each release once per company not yet scored on it - and again
+    for a company whose own profile changed since, or whose last scoring
+    raised (see the module docstring). Returns the new, report-worthy
+    releases: release-level facts (the same for every company) plus
+    `company_results`, one entry per company whose OWN verdict is
     report-worthy - {company_id, legal_name, company_key, verdict, reasons,
-    score_outlook}. Mutates `seen`. A seen-store entry written before the
-    fan-out (no "companies" key) was scored against one shared profile file,
-    not any company's own rows, so it is scored again for every company."""
+    score_outlook, rescored, previous_verdict}; `rescored` is None for a
+    first scoring, else "profile_changed" / "retry_after_error". Mutates
+    `seen`. A seen-store entry written before the fan-out (no "companies"
+    key) was scored against one shared profile file, not any company's own
+    rows, so it is scored again for every company."""
     today = (today or datetime.date.today()).isoformat()
+    fps = {c["key"]: company_profiles.profile_fingerprint(c["profile"]) for c in companies}
     out = []
     for r in releases:
         key = release_key(r)
@@ -192,15 +242,20 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
         entry = seen.get(key)
         if not entry or not isinstance(entry.get("companies"), dict):
             entry = {"first_seen": (entry or {}).get("first_seen") or today, "ocid": r.get("ocid"),
-                     "contract_number": r.get("contract_number"), "title": r.get("title"), "companies": {}}
+                     "contract_number": r.get("contract_number"), "title": r.get("title"), "companies": {},
+                     "fingerprints": {}}
             seen[key] = entry
-        pending = [c for c in companies if c["key"] not in entry["companies"]]
+        why = _pending(entry, companies, fps)
+        pending = [c for c in companies if c["key"] in why]
         if not pending:
             continue
+        ctx = {"ocid": r.get("ocid"), "contract_number": r.get("contract_number"), "buyer": r.get("buyer")}
         try:
             reading = assess_tender.read_release(r, fetch_document=fetch_document, fetch_text=fetch_text)
         except Exception as e:
             reading, read_error = None, str(e)
+            system_alerts.record("discovery", f"Could not read a discovered tender for scoring: {type(e).__name__}: {e}",
+                                 "error", exc=e, context=ctx)
         results, base = [], None
         for c in pending:
             try:
@@ -209,12 +264,19 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
                 res = assess_tender.score_release(r, reading, c["profile"])
             except Exception as e:
                 res = {"contract_number": r.get("contract_number"), "verdict": "ERROR", "error": str(e)}
+                if reading is not None:  # a read failure was recorded once above, not once per company
+                    system_alerts.record("discovery", f"Scoring a tender for a company failed: {type(e).__name__}: {e}",
+                                         "error", exc=e, context={**ctx, "company_id": c.get("company_id"),
+                                                                  "company": c.get("legal_name")})
+            previous = entry["companies"].get(c["key"])
             entry["companies"][c["key"]] = res.get("verdict")
+            entry["fingerprints"][c["key"]] = fps[c["key"]]
             base = base or (res if res.get("verdict") != "ERROR" else None)
             if res.get("verdict") in report_worthy:
                 results.append({"company_id": c["company_id"], "legal_name": c["legal_name"], "company_key": c["key"],
                                 "verdict": res["verdict"], "reasons": res.get("reasons") or [],
-                                "score_outlook": res.get("score_outlook")})
+                                "score_outlook": res.get("score_outlook"), "rescored": why[c["key"]],
+                                "previous_verdict": previous if why[c["key"]] else None})
         if results:
             out.append({**{k: base.get(k) for k in RELEASE_FIELDS}, "ocid": r.get("ocid"),
                         "documents": r.get("documents"), "company_results": results})
@@ -244,7 +306,8 @@ def run(releases, companies, report_worthy, client=None, seen_store=DEFAULT_SEEN
         seen, loaded = load_seen_db(client, releases)
         log(f"  Seen store: {SEEN_TABLE} (database) - {len(loaded)} company x release row(s) for this window")
         out = fan_out(releases, companies, seen, report_worthy, today, fetch_document, fetch_text)
-        log(f"  Seen store: {save_seen_db(client, seen, loaded, companies)} new row(s) written to {SEEN_TABLE}")
+        log(f"  Seen store: {save_seen_db(client, seen, loaded, companies)} row(s) written to {SEEN_TABLE} "
+            "(new, re-scored after a profile change, or an ERROR retried)")
     else:
         seen = load_seen(seen_store)
         log(f"  Seen store: {seen_store} (local JSON - no Supabase companies in this run)")
@@ -304,7 +367,9 @@ def main():
         docs = ", ".join(d["url"] for d in (r.get("documents") or []) if d.get("url")) or "(no document URL on file)"
         print(f"  {r.get('contract_number'):>14}  {r.get('buyer')}  -  {r.get('title')}")
         for c in r["company_results"]:
-            print(f"      {c['verdict']:<14} {c['legal_name']}")
+            again = {"profile_changed": f"  (re-scored: its profile changed since; was {c.get('previous_verdict')})",
+                     "retry_after_error": "  (re-scored: the last scoring failed)"}.get(c.get("rescored"), "")
+            print(f"      {c['verdict']:<14} {c['legal_name']}{again}")
         print(f"      closes {r.get('closing_date')}  |  {docs}")
 
     if args.out:
@@ -316,4 +381,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:  # the run itself broke (feed down, database unreachable): Sarel must hear of it
+        system_alerts.record("discovery", f"The new-tender watch run failed: {type(e).__name__}: {e}", "critical", exc=e)
+        raise

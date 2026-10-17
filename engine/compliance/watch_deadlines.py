@@ -3,7 +3,7 @@ Deadline watch: document-expiry reminders + tender task/deadline reminders.
 
 Same family and same deliberate boundary as
 engine/discovery/watch_new_tenders.py: find what's newly due for a reminder,
-diff against a local "seen" store so a run only ever reports something once
+diff against a "seen" store in the database so a run only ever reports something once
 per lead-time window (not every single day it stays in that window), print a
 summary, and - with --out - write the full list as JSON. Nothing here sends
 an email, Slack message, or any other notification itself. Sarel's one real
@@ -22,7 +22,7 @@ actual mail-sender here would be a second, parallel notification mechanism -
 explicitly out of scope (see the Tender-Tool-Competitor-Feature-Deep-Dive.md
 section this script implements).
 
-Two independent things get watched, in one run, sharing one seen-store file
+Two independent things get watched, in one run, sharing one seen store
 (keeping two parallel scripts/seen-stores was considered and rejected - the
 spec is explicit that tender-task reminders should reuse the *same*
 mechanism as document-expiry reminders, not a second one):
@@ -76,7 +76,7 @@ mechanism as document-expiry reminders, not a second one):
 
 Usage:
     python3 watch_deadlines.py [--doc-lead-days 60] [--task-lead-days 14]
-        [--seen-store PATH] [--out report.json]
+        [--out report.json]
 
 Requires the same environment variables as engine/seed_supabase_company.py:
     NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -84,11 +84,17 @@ Requires the same environment variables as engine/seed_supabase_company.py:
 anon key's RLS would never allow; same justification as every other
 engine/*.py script that talks to Supabase directly.)
 
-The "seen" store (state/seen_deadlines.json, gitignored - per-deployment
-state, not code, same as watch_new_tenders.py's state/seen_tenders.json)
-tracks every (item, due-or-expiry-date) pair already reported, so a
-document or task stays in the window without re-triggering a report every
-run. If the underlying date changes - a document gets renewed to a new
+The "seen" store is the deadline_reminders_seen table (migration 0041, one
+row per company x consumer x item key; this script is consumer
+'watch_deadlines', the daily digest keeps its own 'daily_digest' rows).
+Until 2026-10-17 it was state/seen_deadlines.json - a file on whichever
+machine ran the watch, which a redeploy or a second host forgets (Sarel:
+"why would anything be saved in local instead of database"). Same pattern
+as Discovery's discovery_seen_releases (0038). It tracks every (item,
+due-or-expiry-date, status) already reported, so a document or task stays
+in the window without re-triggering a report every run. A database read or
+write error fails the run loudly (and is recorded in system_alerts) - it
+never falls back to "nothing seen" and re-reports everything. If the underlying date changes - a document gets renewed to a new
 expiry, a task's due date gets pushed - that is a new key, so it reports
 again, exactly like a genuinely new deadline. A task that leaves the
 "not done" set (marked done) simply stops being fetched, so it needs no
@@ -110,7 +116,13 @@ import datetime
 import urllib.request
 import urllib.error
 
-DEFAULT_SEEN_STORE = os.path.join(os.path.dirname(__file__), "..", "..", "state", "seen_deadlines.json")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "discovery"))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
+import company_profiles  # noqa: E402  (RestClient: the paged service-role select/upsert)
+import system_alerts  # noqa: E402
+
+SEEN_TABLE = "deadline_reminders_seen"  # 0041
+CONSUMER = "watch_deadlines"
 
 # See module docstring part 1 - only columns that really exist on `companies`
 # (0001 + 0014) go here. (field_column, human_label, lead_days_override);
@@ -157,17 +169,35 @@ def supabase_request(url, service_key, path):
         raise RuntimeError(f"GET {path} failed: {e.code} {e.read().decode()}")
 
 
-def load_seen(path):
-    try:
-        return json.load(open(path))
-    except (OSError, json.JSONDecodeError):
-        return {}
+def load_seen_db(client, consumer=CONSUMER):
+    """The reminder seen store (0041) for one consumer, in the find_*
+    functions' dict shape: {seen_key: {first_seen, kind, company_id}}.
+    Returns (seen, loaded) - `loaded` is the set of keys already stored, so
+    save_seen_db() writes only the new ones."""
+    seen = {}
+    for row in client.select(SEEN_TABLE, {"consumer": consumer}, order="company_id.asc,seen_key.asc"):
+        seen[row["seen_key"]] = {"first_seen": row.get("first_seen"), "kind": row.get("kind"),
+                                 "company_id": row["company_id"]}
+    return seen, set(seen)
 
 
-def save_seen(path, seen):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(seen, f, indent=2)
+def save_seen_db(client, seen, loaded, consumer=CONSUMER):
+    """Writes every key the find_* functions recorded this run. Every entry
+    carries its company_id (the row is per tenant); one without is skipped
+    with a message rather than guessed. Returns rows written."""
+    rows = []
+    for k, e in seen.items():
+        if k in loaded or not isinstance(e, dict):
+            continue
+        if not e.get("company_id"):
+            print(f"  (seen key {k!r} has no company - not stored)")
+            continue
+        rows.append({"company_id": e["company_id"], "consumer": consumer, "seen_key": k,
+                     "kind": e.get("kind") or "unknown", "first_seen": e.get("first_seen")})
+    for i in range(0, len(rows), 200):
+        client.upsert(SEEN_TABLE, rows[i:i + 200], "company_id,consumer,seen_key")
+    loaded.update(r["seen_key"] for r in rows)
+    return len(rows)
 
 
 def days_until(date_str, today):
@@ -178,7 +208,7 @@ def days_until(date_str, today):
     return (d - today).days
 
 
-def _expiry_window(seen, key_prefix, kind, expiry, today, lead_days):
+def _expiry_window(seen, key_prefix, kind, expiry, today, lead_days, company_id=None):
     """The one reminder rule shared by company documents and per-person
     registrations: None if there is no date or it is outside the lead-time
     window, or this (item, expiry, status) was already reported; otherwise
@@ -195,7 +225,7 @@ def _expiry_window(seen, key_prefix, kind, expiry, today, lead_days):
     seen_key = f"{key_prefix}::{expiry}::{status}"
     if seen_key in seen:
         return None
-    seen[seen_key] = {"first_seen": today.isoformat(), "kind": kind}
+    seen[seen_key] = {"first_seen": today.isoformat(), "kind": kind, "company_id": company_id}
     return left, status
 
 
@@ -210,7 +240,8 @@ def find_due_documents(url, key, seen, today, lead_days):
             if not expiry:
                 continue
             hit = _expiry_window(seen, f"doc::{company['id']}::{col}", "document",
-                                 expiry, today, lead_override if lead_override is not None else lead_days)
+                                 expiry, today, lead_override if lead_override is not None else lead_days,
+                                 company_id=company["id"])
             if not hit:
                 continue
             left, status = hit
@@ -246,7 +277,8 @@ def find_due_person_credentials(url, key, seen, today, lead_days):
         for col, label, lead_override, num_col in TRACKED_PERSON_EXPIRY_FIELDS:
             expiry = person.get(col)
             hit = _expiry_window(seen, f"person::{person['id']}::{col}", "person_credential",
-                                 expiry, today, lead_override if lead_override is not None else lead_days)
+                                 expiry, today, lead_override if lead_override is not None else lead_days,
+                                 company_id=person.get("company_id"))
             if not hit:
                 continue
             left, status = hit
@@ -304,7 +336,8 @@ def find_documents_lapsing_before_closing(url, key, seen, today):
             seen_key = f"doc_before_closing::{company['id']}::{col}::{expiry}::{tender['id']}"
             if seen_key in seen:
                 continue
-            seen[seen_key] = {"first_seen": today.isoformat(), "kind": "document_before_closing"}
+            seen[seen_key] = {"first_seen": today.isoformat(), "kind": "document_before_closing",
+                              "company_id": company["id"]}
             due.append({
                 "type": "document_before_closing",
                 "company_id": company["id"],
@@ -348,7 +381,7 @@ def find_due_tasks(url, key, seen, today, lead_days):
         seen_key = f"task::{task['id']}::{task['due_date']}::{status}"  # overdue escalates, see find_due_documents
         if seen_key in seen:
             continue
-        seen[seen_key] = {"first_seen": today.isoformat(), "kind": "task"}
+        seen[seen_key] = {"first_seen": today.isoformat(), "kind": "task", "company_id": task.get("company_id")}
 
         tender = tenders_by_id.get(task["tender_id"], {})
         due.append({
@@ -372,7 +405,6 @@ def main():
                      help=f"report a document this many days before it expires (default {DEFAULT_DOC_LEAD_DAYS}, matching app/lib/dates.ts)")
     ap.add_argument("--task-lead-days", type=int, default=DEFAULT_TASK_LEAD_DAYS,
                      help=f"report a tender task this many days before its due date (default {DEFAULT_TASK_LEAD_DAYS})")
-    ap.add_argument("--seen-store", default=DEFAULT_SEEN_STORE)
     ap.add_argument("--out", default=None, help="write the full combined report to this JSON file")
     args = ap.parse_args()
 
@@ -384,14 +416,20 @@ def main():
         sys.exit(1)
 
     today = datetime.date.today()
-    seen = load_seen(args.seen_store)
-
-    documents_due = find_due_documents(url, key, seen, today, args.doc_lead_days)
-    credentials_due = find_due_person_credentials(url, key, seen, today, args.doc_lead_days)
-    tasks_due = find_due_tasks(url, key, seen, today, args.task_lead_days)
-    before_closing = find_documents_lapsing_before_closing(url, key, seen, today)
-
-    save_seen(args.seen_store, seen)
+    client = company_profiles.RestClient(url, key)
+    try:
+        seen, loaded = load_seen_db(client)
+        documents_due = find_due_documents(url, key, seen, today, args.doc_lead_days)
+        credentials_due = find_due_person_credentials(url, key, seen, today, args.doc_lead_days)
+        tasks_due = find_due_tasks(url, key, seen, today, args.task_lead_days)
+        before_closing = find_documents_lapsing_before_closing(url, key, seen, today)
+        written = save_seen_db(client, seen, loaded)
+    except Exception as e:
+        system_alerts.record("deadlines", f"The deadline-reminder watch failed: {type(e).__name__}: {e}",
+                             "critical", exc=e)
+        print(f"ERROR: deadline watch failed: {type(e).__name__}: {e}")
+        sys.exit(1)
+    print(f"Seen store: {SEEN_TABLE} (database) - {len(loaded) - written} reported before, {written} new\n")
 
     print(f"{len(documents_due)} document(s) newly due for an expiry reminder "
           f"(within {args.doc_lead_days} days or already expired):")

@@ -50,6 +50,14 @@ What this script reuses rather than reimplements, concretely:
     table, not a new scoring concept. A true "status changing" signal (not
     just "is currently flagged") needs its own seen-store, same pattern as
     the other two scripts; see find_readiness_changes() below.
+  - Seen stores (live mode), in the database since 2026-10-17 (migration
+    0041; before, both lived in state/seen_digest_readiness.json on whichever
+    host ran the digest): deadline items in deadline_reminders_seen under
+    consumer 'daily_digest' (its own rows - the watch_deadlines.py report
+    keeps separate ones, so one reporting an item never hides it from the
+    other), readiness statuses in digest_readiness_seen. Local mode has no
+    seen store at all (it never needed one: its expiry items are recomputed
+    from the profile file every run).
   - Submission due soon: the same national-feed fetch used for new-tender
     fit, filtered to closing_date inside the lead window - no separate
     fetch, no separate scoring.
@@ -106,10 +114,12 @@ import company_profiles
 import watch_new_tenders
 import watch_deadlines
 import watch_tender_updates
+import system_alerts  # noqa: E402  (engine/alerts, on the path via watch_deadlines)
 
 LOCAL_COMPANY_KEY = "local"  # --mode local: the one --profile company
 
-DEFAULT_SEEN_STORE = os.path.join(os.path.dirname(__file__), "..", "..", "state", "seen_digest_readiness.json")
+DIGEST_CONSUMER = "daily_digest"  # deadline_reminders_seen.consumer (0041)
+READINESS_TABLE = "digest_readiness_seen"  # 0041
 DEFAULT_ROSTER_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "team_roster.json")
 
 VALID_ROLES = ("full_cycle", "validator", "cv_admin", "finance", "viewer")
@@ -155,17 +165,26 @@ def classify_text(text, keywords):
     return any(k in t for k in keywords)
 
 
-def load_seen(path):
-    try:
-        return json.load(open(path))
-    except (OSError, json.JSONDecodeError):
-        return {}
+def load_readiness_seen_db(client):
+    """digest_readiness_seen (0041) in find_readiness_changes()'s shape:
+    {"prov::<field_provenance id>": status}. Returns (seen, loaded) -
+    `loaded` the same mapping as stored, so only changes are written."""
+    seen = {f"prov::{r['field_provenance_id']}": r["status"]
+            for r in client.select(READINESS_TABLE, order="company_id.asc,field_provenance_id.asc")}
+    return seen, dict(seen)
 
 
-def save_seen(path, seen):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        json.dump(seen, f, indent=2)
+def save_readiness_seen_db(client, seen, loaded, owners):
+    """Upserts every prov:: status that is new or changed. `owners` maps a
+    prov:: key to its company (find_readiness_changes fills it from the
+    row's tender pack). Returns rows written."""
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    rows = [{"company_id": owners[k], "field_provenance_id": k.split("::", 1)[1], "status": v, "updated_at": now}
+            for k, v in seen.items() if k.startswith("prov::") and loaded.get(k) != v and owners.get(k)]
+    for i in range(0, len(rows), 200):
+        client.upsert(READINESS_TABLE, rows[i:i + 200], "company_id,field_provenance_id")
+    loaded.update({f"prov::{r['field_provenance_id']}": r["status"] for r in rows})
+    return len(rows)
 
 
 # ---------------------------------------------------------------------------
@@ -262,7 +281,7 @@ def submission_due_signals(scored, lead_days=14):
 # row on every run.
 # ---------------------------------------------------------------------------
 
-def find_readiness_changes(url, key, seen, today):
+def find_readiness_changes(url, key, seen, today, owners=None):
     rows = watch_deadlines.supabase_request(
         url, key, "field_provenance?select=id,tender_pack_id,field_key,status,reason,updated_at"
     )
@@ -278,6 +297,8 @@ def find_readiness_changes(url, key, seen, today):
     changes = []
     for r in rows:
         seen_key = f"prov::{r['id']}"
+        if owners is not None:
+            owners[seen_key] = (packs_by_id.get(r.get("tender_pack_id")) or {}).get("company_id")
         prev_status = seen.get(seen_key)
         cur_status = r["status"]
         if prev_status == cur_status:
@@ -462,7 +483,6 @@ def main():
     ap.add_argument("--exclude-test-companies", action="store_true",
                      help="live mode: leave companies flagged is_test_company out of the tender scoring "
                           "(default: scored like every other company, same as the Discovery feed)")
-    ap.add_argument("--seen-store", default=DEFAULT_SEEN_STORE)
     ap.add_argument("--out", default=None, help="write the full list of per-person digests to this JSON file")
     args = ap.parse_args()
 
@@ -471,7 +491,6 @@ def main():
     mode = args.mode or ("live" if url and key else "local")
 
     today = datetime.date.today()
-    seen = load_seen(args.seen_store)
 
     if mode == "local":
         if not args.profile:
@@ -489,21 +508,28 @@ def main():
         if not url or not key:
             print("ERROR: --mode live needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
             sys.exit(1)
+        client = company_profiles.RestClient(url, key)
         roster = load_roster_live(url, key)
-        companies = company_profiles.all_company_profiles(company_profiles.RestClient(url, key),
-                                                          not args.exclude_test_companies)
+        companies = company_profiles.all_company_profiles(client, not args.exclude_test_companies)
+        # A database error here fails the run loudly (recorded in system_alerts
+        # by the __main__ guard) - never "nothing seen", which would re-report everything.
+        seen, seen_loaded = watch_deadlines.load_seen_db(client, DIGEST_CONSUMER)
+        readiness_seen, readiness_loaded = load_readiness_seen_db(client)
+        owners = {}
         document_expiry = (watch_deadlines.find_due_documents(url, key, seen, today, args.doc_lead_days)
                            + watch_deadlines.find_due_person_credentials(url, key, seen, today, args.doc_lead_days))
         tender_tasks = watch_deadlines.find_due_tasks(url, key, seen, today, args.task_lead_days)
-        readiness_changes = find_readiness_changes(url, key, seen, today)
+        readiness_changes = find_readiness_changes(url, key, readiness_seen, today, owners)
         # Updates the tender-update watch already alerted on, not yet in a
         # digest (tender_update_notifications.digested_at, 0039). A failure
         # here must not cost anyone the rest of their digest.
-        updates_client = company_profiles.RestClient(url, key)
+        updates_client = client
         try:
             tender_updates = watch_tender_updates.pending_digest_updates(updates_client)
         except Exception as e:
             print(f"WARNING: tender updates could not be read ({e}) - digest goes out without them.")
+            system_alerts.record("digest", f"The daily digest could not read tender updates: {type(e).__name__}: {e}",
+                                 "error", exc=e)
             tender_updates, updates_client = [], None
 
     print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
@@ -511,7 +537,10 @@ def main():
     scored_by_company = score_per_company(fetch_releases(args.days), companies,
                                           fetch_documents=not args.no_fetch_documents)
 
-    save_seen(args.seen_store, seen)
+    if mode == "live":
+        n = (watch_deadlines.save_seen_db(client, seen, seen_loaded, DIGEST_CONSUMER)
+             + save_readiness_seen_db(client, readiness_seen, readiness_loaded, owners))
+        print(f"  Seen stores: deadline_reminders_seen ({DIGEST_CONSUMER}) + {READINESS_TABLE} - {n} row(s) written")
 
     digests, totals = [], {}
     for p in roster:
@@ -628,4 +657,8 @@ def local_person_credential_expiry(profile, today, lead_days):
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:  # the run itself broke (feed down, database unreachable): Sarel must hear of it
+        system_alerts.record("digest", f"The daily digest run failed: {type(e).__name__}: {e}", "critical", exc=e)
+        raise

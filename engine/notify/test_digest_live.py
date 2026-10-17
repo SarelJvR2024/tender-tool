@@ -103,12 +103,25 @@ ROWS = {
 
 
 class MemClient:
-    """company_profiles' client interface (.select(table, filters)) over ROWS."""
+    """company_profiles' client interface (.select(table, filters), .upsert)
+    over ROWS - including the 0041 seen-store tables the digest now keeps in
+    the database instead of state/seen_digest_readiness.json."""
 
     def select(self, table, filters=None, order=None):
         rows = [dict(r) for r in ROWS.get(table, [])]
         for k, v in (filters or {}).items():
             rows = [r for r in rows if r.get(k) == v]
+        return rows
+
+    def upsert(self, table, rows, on_conflict):
+        keys = on_conflict.split(",")
+        store = ROWS.setdefault(table, [])
+        for row in rows:
+            hit = next((r for r in store if all(r.get(k) == row.get(k) for k in keys)), None)
+            if hit:
+                hit.update(row)
+            else:
+                store.append(dict(row))
         return rows
 
 
@@ -136,8 +149,7 @@ def main():
     out_path = os.path.join(tmp, "digest.json")
 
     def run(*extra):
-        sys.argv = ["daily_digest.py", "--mode", "live", "--seen-store", os.path.join(tmp, "seen.json"),
-                    "--out", out_path, *extra]
+        sys.argv = ["daily_digest.py", "--mode", "live", "--out", out_path, *extra]
         os.environ["NEXT_PUBLIC_SUPABASE_URL"], os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "http://fake", "fake-key"
         daily_digest.main()
         return {d["person"]["name"]: d for d in json.load(open(out_path))}
@@ -179,11 +191,30 @@ def main():
     check(g["readiness_changes"] == [] and [c["field_key"] for c in a["readiness_changes"]] == ["company.bee_level"],
           "readiness changes: the architects' pack change goes to the architects only")
 
-    print("Live mode with --exclude-test-companies")
+    print("Seen stores in the database (0041), not a local file")
+    dl = ROWS.get("deadline_reminders_seen", [])
+    rd = ROWS.get("digest_readiness_seen", [])
+    check(sorted((r["company_id"], r["kind"]) for r in dl) ==
+          [("co-arch", "document"), ("co-arch", "task"), ("co-guard", "document"), ("co-guard", "task")]
+          and all(r["consumer"] == "daily_digest" for r in dl),
+          f"deadline items reported -> deadline_reminders_seen rows, per company, consumer daily_digest ({len(dl)})")
+    check([(r["company_id"], r["field_provenance_id"], r["status"]) for r in rd] == [("co-arch", "fp1", "missing")],
+          f"readiness status -> digest_readiness_seen, under the pack's company ({rd})")
+    check(not os.listdir(tmp) or os.listdir(tmp) == ["digest.json"], "no local seen file written")
+
+    print("Live mode with --exclude-test-companies (second run: seen stores read back from the database)")
     calls["profile_from_company_rows"].clear()
-    run("--exclude-test-companies")
+    digests2 = run("--exclude-test-companies")
     check(sorted(calls["profile_from_company_rows"]) == ["co-arch", "co-guard"],
           "--exclude-test-companies: the test company isn't scored")
+    check(all(d["document_expiry"] == [] and d["tender_tasks"] == [] and d["readiness_changes"] == []
+              for d in (digests2["u-guard"], digests2["u-arch"])),
+          "second run: nothing reported again (COIDs, tasks, readiness change all seen)")
+    ROWS["field_provenance"][0]["status"] = "confirmed"
+    digests3 = run()
+    check([(c["previous_status"], c["status"]) for c in digests3["u-arch"]["readiness_changes"]] == [("missing", "confirmed")]
+          and [r["status"] for r in ROWS["digest_readiness_seen"]] == ["confirmed"],
+          "a status change is reported once (missing -> confirmed) and the stored status updated")
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

@@ -44,6 +44,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "alerts"))
+import system_alerts  # noqa: E402
+
 # Quality gate - see the module docstring and OCR-Evaluation.md.
 MIN_WORDS = 5
 MIN_MEAN_CONF = 75.0
@@ -228,6 +231,24 @@ def pages_with_images(pdf_path):
     return pages
 
 
+def _alert_failures(res, path):
+    """System alerts for OCR that BROKE (System-Status: central alerts), as
+    opposed to a page that simply failed the quality gate (a bad scan - the
+    expected, user-facing refusal, never alerted). Broke = Tesseract missing
+    or unstartable on a worker that is meant to have it, Tesseract erroring
+    or timing out on a page, or a page that couldn't be rendered. One alert
+    per document, never raises."""
+    name = os.path.basename(path or "")
+    if res.get("error") and "OCR_DISABLED" not in res["error"]:
+        system_alerts.record("ocr", f"OCR could not run: {res['error']}", "error", context={"file": name})
+        return
+    broken = [f for f in res.get("failed") or []
+              if (res["pages"].get(f["page"]) or {}).get("status") == "error" or "could not be rendered" in f["reason"]]
+    if broken:
+        system_alerts.record("ocr", f"OCR failed on {len(broken)} page(s) of a document: {broken[0]['reason']}",
+                             "error", context={"file": name, "pages": [f["page"] for f in broken][:50]})
+
+
 def _scratch(work_dir):
     if work_dir:
         os.makedirs(work_dir, exist_ok=True)
@@ -247,6 +268,7 @@ def ocr_pdf_pages(pdf_path, pages, work_dir=None):
     res = {"pages": {}, "read": [], "failed": [], "skipped": [], "engine": engine if ok else None,
            "error": None if ok else engine}
     if not ok:
+        _alert_failures(res, pdf_path)
         return res
     tmp = _scratch(work_dir)
     try:
@@ -273,6 +295,7 @@ def ocr_pdf_pages(pdf_path, pages, work_dir=None):
                 res["failed"].append({"page": n, "reason": page["reason"]})
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    _alert_failures(res, pdf_path)
     return res
 
 
@@ -283,6 +306,7 @@ def ocr_image_file(path, work_dir=None):
     res = {"pages": {}, "read": [], "failed": [], "skipped": [], "engine": engine if ok else None,
            "error": None if ok else engine}
     if not ok:
+        _alert_failures(res, path)
         return res
     from PIL import Image, ImageSequence
     tmp = _scratch(work_dir)
@@ -318,6 +342,7 @@ def ocr_image_file(path, work_dir=None):
                 res["failed"].append({"page": n, "reason": page["reason"]})
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+    _alert_failures(res, path)
     return res
 
 

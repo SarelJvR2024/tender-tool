@@ -85,7 +85,7 @@ from suggest_pack import read_required_positions, score_candidate  # noqa: E402
 from sanral_fill import Workbook  # noqa: E402
 from assemble_pack import build_submission_pack  # noqa: E402
 from pdf_merge import verify_pack  # noqa: E402
-from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
+from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 
 DEFAULT_WORK_DIR = os.path.join(ENGINE_DIR, "..", "out", "pack_jobs")
 # pack_generation_jobs is the one job queue for every engine (unified-queue
@@ -544,8 +544,18 @@ def process_job(client, job, work_root, keep=False):
         return manifest
     except Exception as e:
         msg = f"{type(e).__name__}: {e}" if not isinstance(e, ValueError) else str(e)
-        client.update("pack_generation_jobs", {"id": job["id"]},
-                      {"status": "failed", "error_message": msg[:2000], "completed_at": _ts()})
+        # A ValueError is the confirm gate / a filler refusing on purpose (the
+        # user can act on the message) - recorded as a warning, since a refusal
+        # can hide a real bug (the MO/MA refusal did). Anything else is a crash.
+        system_alerts.record("pack", f"SANRAL pack job failed: {msg}", "warning" if isinstance(e, ValueError) else "error",
+                             exc=e, context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                             "tender_id": job.get("tender_id")})
+        try:
+            client.update("pack_generation_jobs", {"id": job["id"]},
+                          {"status": "failed", "error_message": msg[:2000], "completed_at": _ts()})
+        except Exception as e2:  # the job row couldn't even be marked: it stays 'generating' until fail_stale_jobs
+            system_alerts.record("pack", f"Could not mark a failed pack job as failed: {type(e2).__name__}: {e2}",
+                                 "error", exc=e2, context={"job_id": job["id"]})
         print(f"[failed] {job['id']}: {msg}")
         return None
     finally:
@@ -573,6 +583,10 @@ def fail_stale_jobs(client, now=None):
                 "error_message": f"The pack builder stopped mid-job (no result after {STALE_AFTER_MINUTES} "
                                  "minutes). Nothing was produced - request the pack again."})
             print(f"[failed] {job['id']}: stale 'generating' since {started}")
+            system_alerts.record("pack", f"A SANRAL pack job was stuck in 'generating' for over {STALE_AFTER_MINUTES} "
+                                         "minutes (the worker died mid-job) and was marked failed", "error",
+                                 context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                          "tender_id": job.get("tender_id"), "started_at": started})
 
 
 def _managerial(v):
@@ -611,6 +625,9 @@ def sync_tender_requirements(client, work_root):
         except Exception as e:
             print(f"[requirements] tender {d['tender_id']}: could not read the uploaded Technical workbook's "
                   f"SETUP sheet ({type(e).__name__}: {e})")
+            system_alerts.record("pack", f"Could not read an uploaded Technical workbook's SETUP sheet "
+                                         f"({type(e).__name__}: {e})", "error", exc=e,
+                                 context={"tender_id": d["tender_id"], "storage_path": d.get("storage_path")})
         finally:
             shutil.rmtree(os.path.dirname(local), ignore_errors=True)
     return written
@@ -687,6 +704,8 @@ def sync_position_suggestions(client, today=None):
                 written += 1
         except Exception as e:
             print(f"[suggestions] tender pack {pack['id']}: could not score candidates ({type(e).__name__}: {e})")
+            system_alerts.record("pack", f"Could not score key-position candidates ({type(e).__name__}: {e})", "error",
+                                 exc=e, context={"tender_pack_id": pack["id"], "company_id": pack.get("company_id")})
     if written:
         print(f"[suggestions] {written} position ranking(s) updated")
     return written
@@ -732,7 +751,7 @@ def main():
         process_pending(client, args.work_dir, args.keep)
         return
     poll_forever(lambda: process_pending(client, args.work_dir, args.keep, quiet_when_empty=True),
-                 interval=args.interval, max_cycles=args.max_cycles, name="process_pack_jobs")
+                 interval=args.interval, max_cycles=args.max_cycles, name="process_pack_jobs", alert_source="pack")
 
 
 if __name__ == "__main__":

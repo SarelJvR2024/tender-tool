@@ -329,10 +329,10 @@ Before: `--mode live` printed "live mode's national-feed fetch needs a company p
 
 ### 9.4 New open questions from this pass
 
-- **Re-surfacing on a profile change.** A company is still never re-notified about a release it was scored on, even if its profile changed since (e.g. it tagged new Experience Library items). `discovery_seen_releases.profile_fingerprint` records the profile behind each verdict, so a rule like "re-score when the fingerprint changed, report only if the verdict became report-worthy" is a code change, not a migration. Wanted?
-- **The other local seen stores.** `watch_deadlines.py` (`state/seen_deadlines.json`) and the digest's readiness store (`state/seen_digest_readiness.json`) are still per-host JSON files, with the same multi-host problem (d) solved for Discovery. Move them too?
+- **Re-surfacing on a profile change.** *(Answered 2026-10-17: yes - built, §11.1.)* A company is still never re-notified about a release it was scored on, even if its profile changed since (e.g. it tagged new Experience Library items). `discovery_seen_releases.profile_fingerprint` records the profile behind each verdict, so a rule like "re-score when the fingerprint changed, report only if the verdict became report-worthy" is a code change, not a migration. Wanted?
+- **The other local seen stores.** *(Answered 2026-10-17: yes, and every other local state - built, §11.2.)* `watch_deadlines.py` (`state/seen_deadlines.json`) and the digest's readiness store (`state/seen_digest_readiness.json`) are still per-host JSON files, with the same multi-host problem (d) solved for Discovery. Move them too?
 - **Seen before seeded.** The watch records a release as seen when it scores it; `seed_supabase_opportunities.py` writes the `discovered_opportunities` rows afterwards from the `--out` file. If seeding fails, those opportunities are never re-offered (true of the JSON store too). One script doing both, or seeding inside the watch's run, would close that.
-- **`ERROR` verdicts are remembered.** As before, a release whose scoring raised is recorded and not retried. With the store now shared across runs and hosts, should `ERROR` rows be retried on the next run instead?
+- **`ERROR` verdicts are remembered.** *(Answered 2026-10-17: retry them and flag every failure to Sarel - built, §11.1 and §11.3.)* As before, a release whose scoring raised is recorded and not retried. With the store now shared across runs and hosts, should `ERROR` rows be retried on the next run instead?
 
 ---
 
@@ -392,4 +392,33 @@ Sarel: *"We can accommodate that into the structure, but don't specifically ask 
   - the expiry reminder fires for a SACNASP registration due in 15 days and a lapsed SAGC one, on real replayed rows.
 
 **Still open from Q5:** per-tender C3.1.11 extraction. New questions O1-O5 are in `Discipline-Taxonomy-Findings.md` §7.
+
+## 11. Sarel's answers to the §9.4 questions (2026-10-17) - built and verified
+
+Sarel: re-score a company when its profile changed; *"why would anything be saved in local instead of database"*; *"A fail must be emailed to me and flagged for me to review so that we can fix it. Any issues and breaks must be sent and flagged to me to keep reviewing and improving the app."* The seen-before-seeded question stays open.
+
+### 11.1 Re-score on a profile change; ERROR verdicts retried - CLOSED
+
+- `watch_new_tenders.fan_out()`: per release, `_pending()` picks the companies to (re-)score - never scored, last verdict `ERROR` (`retry_after_error`), or stored `profile_fingerprint` != `company_profiles.profile_fingerprint(profile now)` (`profile_changed`). A seen entry with no stored fingerprint gets the current one (only a later change counts). Only those companies are scored; the tender's documents are read once for them. Each `company_results` entry carries `rescored` and `previous_verdict`; the CLI prints "(re-scored: its profile changed since; was not_a_fit)". A report-worthy re-score is reported as new and seeded like any other result.
+- Database mode: `load_seen_db()` returns the stored (verdict, fingerprint) per pair; `save_seen_db()` upserts every pair that is new or whose verdict/fingerprint changed, with `scored_at` = now and the original `first_seen`. `0041` corrects 0038's column comments ("not acted on today").
+- Every read error (once per release) and scoring error (per company) is recorded in `system_alerts` (source `discovery`).
+- `RestClient.select()` reads every page (`limit`/`offset`, 1000 per request - Supabase's cap); before, a seen-store read over >1000 rows would have silently stopped and re-reported the rest.
+- **Verified** (`test_discovery_fanout.py`, fresh `0001`→`0042` replay): Part 1 - the architects' profile gains security work: only they are re-scored, TN051 `not_a_fit` -> `strong_fit` reported with `previous_verdict`, fingerprint updated, the next run silent; a forced scorer failure -> `ERROR` + 2 alerts with one fingerprint, the next run retries and reports `strong_fit` (`retry_after_error`). Part 2 (real rows) - the roads company tags security work and opens a Northern Cape office: only it is re-scored, TN051 `not_a_fit` -> `strong_fit`, its `discovery_seen_releases` row updated in place (new fingerprint, `first_seen` kept, `scored_at` later), its own Discovery row written, the next run silent; RLS unchanged.
+- **Open:** a re-score that DOWNGRADES a verdict leaves the old `discovered_opportunities` row in place (the seeder writes report-worthy results only).
+
+### 11.2 No local state - CLOSED
+
+- Migration `0041_reminder_seen_stores.sql`: `deadline_reminders_seen` (PK company x consumer x seen key; `consumer` in `watch_deadlines`/`daily_digest`, kept apart exactly as their two files were; the scripts' own keys unchanged) and `digest_readiness_seen` (company x `field_provenance` row -> last status). Same shape and RLS as 0038: members read their own company's rows; service role writes.
+- `watch_deadlines.py`: `load_seen_db()`/`save_seen_db()` through `company_profiles.RestClient`; every seen entry now carries its `company_id`; `--seen-store` removed; a database error records a critical alert and exits 1. `daily_digest.py --mode live`: both stores from the database; local mode never needed a store. Neither writes anything under `state/` any more.
+- Whole-codebase sweep: the remaining local files and why each stays (profile-file Discovery runs, the SANRAL portal scraper's download snapshot, per-environment QA baselines, caches, committed reference data, local-mode inputs) are listed in System-Status, 19:00 pass, "Local files that stay local". `app/` keeps no local state.
+- The existing `state/seen_digest_readiness.json` is not imported (it was a local test run's file); a first database run reports each currently-due item once, as a fresh deployment would.
+- **Verified:** `test_reminder_seen_db.py` (CI part + DB part on the replay): CLI run 1 reports 4 items and writes 4 rows (each under its own company), run 2 nothing, a renewed document once; no file under `state/`; the digest consumer is independent; readiness stored under the pack's company, not re-reported; RLS read-own/no-write. Over HTTP (PostgREST stand-in on the replay): `watch_deadlines.py` 4 -> 0 -> 1 (renewed COID); `daily_digest.py --mode live` 5 rows written, then nothing reported. `test_digest_live.py` extended (seen rows in the database, second run silent, a readiness change reported once).
+
+### 11.3 System alerts - CLOSED (with a named backlog)
+
+- Migration `0042_system_alerts.sql`: `system_alerts` (source, severity, message, detail, context, fingerprint, occurrences, first/last seen, reported_at/reported_occurrences, resolved_at/by/note), unique open fingerprint, `record_system_alert()` (service role only - revoked from public/anon/authenticated). Owner-only RLS and resolution-columns-only update, the `admin_harness_runs` pattern.
+- `engine/alerts/system_alerts.py` (`record()`, never raises; prints a `[system-alert]` line), `engine/alerts/check_system_alerts.py` (new + still-happening since the last check, `--out` JSON, `--min-severity`, `--dry-run`; the seen store is the table's `reported_*` columns; sends no e-mail - the scheduled check-in with Gmail access does, exactly like `watch_new_tenders.py`).
+- Wired: pack, general, CV, CV-extraction bridges (job failures, stale jobs, SETUP/scoring failures, CV PDF conversion), OCR breakage, Discovery errors, every bridge's `--loop` poll failure, `run_bridges.py` (non-zero pass, timeout, crash), and run-level failures of `watch_deadlines.py`, `watch_new_tenders.py`, `daily_digest.py`, `watch_tender_updates.py` (plus its OCDS-day and SANRAL-page read failures). Backlog: System-Status, 19:00 pass, "System alerts backlog" (the web app itself first).
+- /admin "System alerts": open alerts first (severity, source, message, open-new / open-e-mailed / resolved, occurrences), expandable traceback and context, "Mark resolved" with a note, "Reopen", recently resolved behind a disclosure.
+- **Verified:** `test_system_alerts.py` (CI part: real CV and general bridges fed malformed jobs, run_bridges over a failing bridge, the checker CLI through new / nothing new / still occurring / resolved / recurrence; DB part: the real function and RLS). Over HTTP on the replay with real bridges and the real RPC. /admin rendered and the resolve action POSTed under real RLS. Details in System-Status's Built-table row.
 

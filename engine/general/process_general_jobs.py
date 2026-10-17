@@ -71,6 +71,15 @@ import requirements as req  # noqa: E402
 import build_general_pack as bgp  # noqa: E402
 sys.path.insert(0, os.path.join(ENGINE_DIR, "intake"))
 import classify_tender as intake  # noqa: E402
+sys.path.insert(0, os.path.join(ENGINE_DIR, "alerts"))
+import system_alerts  # noqa: E402
+
+
+class JobRefusal(RuntimeError):
+    """The bridge refusing a job on purpose, with a message the user can act
+    on (no readable documents, wrong engine, not read yet...). Recorded in
+    system_alerts as a warning, not an error: the product working as meant,
+    but worth a look because a refusal can hide a real bug."""
 
 DEFAULT_WORK_DIR = os.path.join(ENGINE_DIR, "..", "out", "general_jobs")
 JOBS_TABLE = "pack_generation_jobs"  # one queue for every engine; ours are engine = 'general'
@@ -365,7 +374,7 @@ def run_extraction(client, job, work_root, fetch=None):
         paths, notes, dirs = paths + ppaths, notes + [f"(private) {n}" for n in pnotes], dirs + [pdir]
         scratch = os.path.join(pwork, "extract")
     if not paths:
-        raise RuntimeError("No tender documents could be downloaded" + (": " + "; ".join(notes) if notes else " - no document links on file."))
+        raise JobRefusal("No tender documents could be downloaded" + (": " + "; ".join(notes) if notes else " - no document links on file."))
     shutil.rmtree(scratch, ignore_errors=True)
     manifest = req.extract_requirements(dirs, work_dir=scratch, source_label=tender.get("ocid") or tender.get("slug"),
                                         keep_text=True)
@@ -377,7 +386,7 @@ def run_extraction(client, job, work_root, fetch=None):
         # "this tender uses no standard forms" and ask no questions - a
         # silent wrong answer, not an empty one.
         why = "; ".join(f"{d['name']}: {d['unreadable'] or 'no text found'}" for d in manifest["documents"])[:700]
-        raise RuntimeError("None of this tender's documents could be read, so nothing about what it requires could be "
+        raise JobRefusal("None of this tender's documents could be read, so nothing about what it requires could be "
                            f"checked ({why}). Upload a text PDF or Word copy - scanned pages are only read when OCR can read "
                            "them clearly (each reason above says why it couldn't).")
     clean = req.strip_local(manifest)
@@ -393,7 +402,7 @@ def run_extraction(client, job, work_root, fetch=None):
     if private:
         pack = own_pack(client, job)
         if not pack:
-            raise RuntimeError("This company has no tender pack for this tender - start working on it first.")
+            raise JobRefusal("This company has no tender pack for this tender - start working on it first.")
         intake_rec["private_documents"] = [d["id"] for d in private]
         intake_rec["notes"].append(f"Read together with {len(private)} of your private document(s) - this reading is kept "
                                    "with your company's copy of the tender, not shown to other companies.")
@@ -554,14 +563,14 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
 def run_pack(client, job, work_root, fetch=None):
     tender = job_tender(client, job)
     if tender.get("family") in intake.SANRAL_FAMILIES:
-        raise RuntimeError("This is a SANRAL tender (its Technical Submission workbook was recognised) - generate it with the "
+        raise JobRefusal("This is a SANRAL tender (its Technical Submission workbook was recognised) - generate it with the "
                            "SANRAL 'Submission pack' card, not the general pack.")
     # This company's own reading (with its private documents, 0032) wins.
     pack = own_pack(client, job)
     private_manifest = (pack or {}).get("document_requirements")
     manifest = private_manifest or tender.get("document_requirements")
     if not manifest:
-        raise RuntimeError("This tender's documents haven't been read yet - run 'Read this tender's documents' first.")
+        raise JobRefusal("This tender's documents haven't been read yet - run 'Read this tender's documents' first.")
     work = os.path.join(work_root, "packs", job["id"])
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work, exist_ok=True)
@@ -630,7 +639,16 @@ def process_job(client, job, work_root, fetch=None):
         else:
             raise RuntimeError(f"unknown job kind {job['kind']}")
     except Exception as e:
-        client.update(JOBS_TABLE, {"id": job["id"]}, {"status": "failed", "error_message": str(e)[:1000], "completed_at": _now()})
+        system_alerts.record("general", f"General engine {job.get('kind')} job failed: "
+                                        f"{e if isinstance(e, JobRefusal) else f'{type(e).__name__}: {e}'}",
+                             "warning" if isinstance(e, JobRefusal) else "error", exc=e,
+                             context={"job_id": job["id"], "kind": job.get("kind"), "company_id": job.get("company_id"),
+                                      "tender_id": job.get("tender_id")})
+        try:
+            client.update(JOBS_TABLE, {"id": job["id"]}, {"status": "failed", "error_message": str(e)[:1000], "completed_at": _now()})
+        except Exception as e2:
+            system_alerts.record("general", f"Could not mark a failed general job as failed: {type(e2).__name__}: {e2}",
+                                 "error", exc=e2, context={"job_id": job["id"]})
         print(f"[failed] {job['kind']} {job['id']}: {e}")
     return True
 
@@ -665,7 +683,7 @@ def main(argv=None):
         poll_once(client, work)
         return 0
     from poll_loop import poll_forever
-    poll_forever(lambda: poll_once(client, work), interval=args.interval, max_cycles=args.max_cycles, name="general")
+    poll_forever(lambda: poll_once(client, work), interval=args.interval, max_cycles=args.max_cycles, name="general", alert_source="general")
     return 0
 
 

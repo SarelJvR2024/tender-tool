@@ -46,6 +46,10 @@ import assess_tender  # noqa: E402
 import company_profiles  # noqa: E402
 import watch_new_tenders as watch  # noqa: E402
 import seed_supabase_opportunities as seeder  # noqa: E402
+import system_alerts  # noqa: E402  (on the path via watch_new_tenders)
+
+ALERTS = []
+system_alerts.set_sink(lambda payload: ALERTS.append(payload) or "test-alert")
 
 FAILS = []
 
@@ -127,6 +131,55 @@ def part1():
           "seen store records every company per release")
     again = watch.fan_out(RELEASES, companies, seen, ALL, fetch_text=counting_fetch)
     check(again == [] and len(reads) == len(RELEASES), "second run: nothing new, no document re-read")
+    check(all(set(e["fingerprints"]) == {c["key"] for c in companies} for e in seen.values()),
+          "seen store records the profile fingerprint per company per release")
+
+    # Re-score on a profile change (Sarel, 2026-10-17): the architects tag
+    # security work; only they are re-scored, and TN051 is reported to them
+    # again as new, marked as a re-score with the previous verdict.
+    arch = next(c for c in companies if c["legal_name"] == "Synthetic Architects Inc")
+    arch["profile"] = {**arch["profile"], "disciplines": arch["profile"]["disciplines"] + ["security_facilities"],
+                       "offices": [{**arch["profile"]["offices"][0], "province": "Northern Cape"}]}
+    changed = watch.fan_out(RELEASES, companies, seen, ALL, fetch_text=counting_fetch)
+    per = {(r["contract_number"], c["legal_name"]): c for r in changed for c in r["company_results"]}
+    print("    after the architects' profile change:", {k: (v["verdict"], v["rescored"], v["previous_verdict"])
+                                                         for k, v in per.items()})
+    check({n for _, n in per} == {"Synthetic Architects Inc"}, "profile change: only the changed company is re-scored")
+    tn = per.get((SAMPLES["dawid_kruiper_tn051"]["reference"], "Synthetic Architects Inc"))
+    check(tn is not None and tn["verdict"] in ("strong_fit", "possible") and tn["rescored"] == "profile_changed"
+          and tn["previous_verdict"] == "not_a_fit",
+          "profile change: TN051 not_a_fit -> report-worthy, reported again as new (rescored=profile_changed)")
+    check(seen[RELEASES[0]["ocid"]]["fingerprints"][arch["key"]] == company_profiles.profile_fingerprint(arch["profile"]),
+          "profile change: the stored fingerprint is updated to the new profile")
+    check(watch.fan_out(RELEASES, companies, seen, ALL, fetch_text=counting_fetch) == [],
+          "after the re-score: an unchanged profile reports nothing")
+
+    # A scoring error is retried on the next run (not remembered as seen) and
+    # recorded in system_alerts.
+    real_score = assess_tender.score_release
+    guard = next(c for c in companies if c["legal_name"] == "Synthetic Guarding Services CC")
+    guard["profile"] = {**guard["profile"], "bee_level": 2}  # a change, so it is re-scored...
+
+    def boom(r, reading, profile):
+        if profile is guard["profile"]:
+            raise RuntimeError("synthetic scorer failure for release 174000")
+        return real_score(r, reading, profile)
+    assess_tender.score_release = boom
+    ALERTS.clear()
+    try:
+        watch.fan_out(RELEASES, companies, seen, ALL, fetch_text=counting_fetch)
+    finally:
+        assess_tender.score_release = real_score
+    check(seen[RELEASES[0]["ocid"]]["companies"][guard["key"]] == "ERROR", "...and its scoring raised: ERROR recorded")
+    check(len(ALERTS) == 2 and all(a["p_source"] == "discovery" and a["p_severity"] == "error" and
+                                   "synthetic scorer failure" in a["p_message"] for a in ALERTS)
+          and len({a["p_fingerprint"] for a in ALERTS}) == 1,
+          f"each scoring error recorded in system_alerts, one fingerprint for the same failure ({len(ALERTS)} records)")
+    retried = watch.fan_out(RELEASES, companies, seen, ALL, fetch_text=counting_fetch)
+    rr = {c["legal_name"]: c for r in retried for c in r["company_results"]}
+    check(set(rr) == {guard["legal_name"]} and rr[guard["legal_name"]]["rescored"] == "retry_after_error",
+          "next run: the ERROR is retried (not skipped as seen) and reported, rescored=retry_after_error")
+    check(seen[RELEASES[0]["ocid"]]["companies"][guard["key"]] == "strong_fit", "the retry's verdict replaces ERROR")
     # No Supabase companies (profile files): watch.run() keeps the local JSON store.
     import tempfile
     store = os.path.join(tempfile.mkdtemp(), "seen.json")
@@ -137,6 +190,8 @@ def part1():
           "profile-file run: seen store is the local JSON file (both releases, every company)")
     check(watch.run(RELEASES, companies, ALL, client=None, seen_store=store, log=lambda m: None) == [],
           "profile-file run: second run against the same JSON file reports nothing")
+    check(all(set(e["fingerprints"]) == {c["key"] for c in companies} for e in json.load(open(store)).values()),
+          "profile-file run: the JSON store keeps the fingerprints too")
     legacy = {RELEASES[0]["ocid"]: {"first_seen": "2026-10-01", "verdict": "possible"}}
     out3 = watch.fan_out(RELEASES[:1], companies[:1], legacy, ALL)
     check(len(out3) == 1 and "companies" in legacy[RELEASES[0]["ocid"]] and
@@ -259,6 +314,39 @@ def part2(psql):
     n = c.sql(f"select count(*) from discovery_seen_releases where company_id = '{late}'")
     check(n == str(len(RELEASES)), f"the late company's seen rows written ({n})")
     check(not os.path.exists(json_store), "the local JSON file still never written in Supabase mode")
+
+    # Profile change on real rows: the roads company tags security work and
+    # opens a Northern Cape office -> its profile fingerprint changes -> only
+    # it is re-scored, TN051 is reported to it as new, and its seen row is
+    # updated in place (verdict, fingerprint, scored_at; first_seen kept).
+    roads = ids["Fanout Roads (Pty) Ltd"]
+    before = json.loads(c.sql(f"select row_to_json(s) from discovery_seen_releases s where company_id = '{roads}' "
+                              f"and release_key = '{RELEASES[0]['ocid']}'"))
+    c.insert("experience_items", {"company_id": roads, "project_name": "Depot guarding", "document_type": "completion_certificate",
+                                  "disciplines": ["security_facilities"], "tagged_at": "2026-10-17T00:00:00+00:00"})
+    c.insert("company_offices", {"company_id": roads, "province": "Northern Cape", "office_kind": "branch"})
+    all_rows = fanout_rows()
+    out = watch.run(RELEASES, all_rows, watch.REPORT_WORTHY_VERDICTS_WIDE, client=c, seen_store=json_store,
+                    log=lambda m: print("   ", m))
+    got = {(r["contract_number"], x["legal_name"]): x for r in out for x in r["company_results"]}
+    print("    after the roads company's profile change:", {k: (v["verdict"], v["rescored"], v["previous_verdict"])
+                                                              for k, v in got.items()})
+    tnr = got.get((tn, "Fanout Roads (Pty) Ltd"))
+    check({n for _, n in got} == {"Fanout Roads (Pty) Ltd"} and tnr is not None and tnr["rescored"] == "profile_changed"
+          and tnr["previous_verdict"] == before["verdict"],
+          "DB profile change: only the changed company re-scored; TN051 reported again as new with its previous verdict")
+    after = json.loads(c.sql(f"select row_to_json(s) from discovery_seen_releases s where company_id = '{roads}' "
+                             f"and release_key = '{RELEASES[0]['ocid']}'"))
+    new_fp = company_profiles.profile_fingerprint(next(x["profile"] for x in all_rows if x["company_id"] == roads))
+    check(after["profile_fingerprint"] == new_fp != before["profile_fingerprint"] and after["verdict"] == tnr["verdict"]
+          and after["first_seen"] == before["first_seen"] and after["scored_at"] > before["scored_at"],
+          f"DB profile change: seen row updated in place ({before['verdict']} -> {after['verdict']}, new fingerprint, "
+          "first_seen kept, scored_at moved)")
+    seeder.seed(c, out)
+    n = c.sql(f"select verdict from discovered_opportunities where company_id = '{roads}' and contract_number = '{tn}'")
+    check(n == tnr["verdict"], f"DB profile change: the roads company now has its own TN051 Discovery row ({n})")
+    check(watch.run(RELEASES, all_rows, watch.REPORT_WORTHY_VERDICTS_WIDE, client=c, seen_store=json_store,
+                    log=lambda m: None) == [], "DB: a run after the re-score, profile unchanged, reports nothing")
     # RLS: each company sees only its own row (0004 tenant isolation).
     uid = c.sql("insert into auth.users default values returning id").splitlines()[0]
     c.insert("company_members", {"company_id": ids["Fanout Guarding CC"], "user_id": uid, "role": "owner"})

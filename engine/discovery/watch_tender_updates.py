@@ -90,6 +90,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "general"))
 import etenders_national  # noqa: E402
+sys.path.insert(0, os.path.join(HERE, "..", "alerts"))
+import system_alerts  # noqa: E402
 import tender_updates  # noqa: E402
 
 ACTIVE_STAGES = ("found", "bidding", "submitted")
@@ -121,6 +123,8 @@ class OcdsDays:
                 self.cache[day] = self.fetch_day(day)
             except Exception as e:  # one bad day must not end the run
                 print(f"  OCDS {day}: fetch failed ({e})")
+                system_alerts.record("tender_updates", f"The OCDS feed could not be read for one day: {type(e).__name__}: {e}",
+                                     "error", exc=e, context={"day": str(day)})
                 self.cache[day] = []
         return self.cache[day]
 
@@ -280,6 +284,8 @@ def check_tender(client, tender, today, ocds, fetch_sanral=None, fetch_doc=None,
             page = fetch_sanral(tender["slug"])
         except Exception as e:
             new_state["last_error"] = f"SANRAL page could not be read ({e})"
+            system_alerts.record("tender_updates", f"A pursued SANRAL tender's page could not be read: {type(e).__name__}: {e}",
+                                 "error", exc=e, context={"tender_id": tender.get("id"), "slug": tender.get("slug")})
             client.upsert("tender_watch_state", [{**state, **new_state}], "tender_id")
             log(f"  {tender.get('contract_no')}: {new_state['last_error']}")
             return []
@@ -459,4 +465,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:  # the run itself broke: Sarel must hear of it (system_alerts, 0042)
+        system_alerts.record("tender_updates", f"The tender-update watch run failed: {type(e).__name__}: {e}",
+                             "critical", exc=e)
+        raise

@@ -7,7 +7,9 @@ without a live Supabase project - none exists in this environment.
 
 It understands only the exact URL shapes process_cv_jobs.py sends
 (`table?col=eq.value&col2=eq.value&select=...` for GET/PATCH, and
-`/storage/v1/object/<bucket>/<path>` for uploads). It is not a general
+`/storage/v1/object/<bucket>/<path>` for uploads), plus the
+`rpc/record_system_alert` call every bridge makes on a failure (0042), kept
+in `tables["system_alerts"]`. It is not a general
 PostgREST emulator and is never used outside tests.
 
 Every request is recorded in `server.request_log` as (method, path) so a test
@@ -27,11 +29,16 @@ def _parse_filters(query):
         v = vs[0]
         if v.startswith("eq."):
             filters[k] = v[3:]
+        elif v == "is.null":
+            filters[k] = IS_NULL
     return filters
 
 
+IS_NULL = object()
+
+
 def _match(row, filters):
-    return all(str(row.get(k)) == v for k, v in filters.items())
+    return all(row.get(k) is None if v is IS_NULL else str(row.get(k)) == v for k, v in filters.items())
 
 
 class FakeSupabase:
@@ -111,6 +118,26 @@ class FakeSupabase:
                     with fake.lock:
                         fake.storage[key] = data
                     self._send(200, {"Key": key})
+                elif self.path.startswith("/rest/v1/rpc/record_system_alert"):
+                    # engine/alerts/system_alerts.py's write (0042): one row per
+                    # open fingerprint, repeats counted - the SQL function's rule.
+                    p = json.loads(data or b"{}")
+                    with fake.lock:
+                        rows = fake.tables.setdefault("system_alerts", [])
+                        hit = next((r for r in rows if r["fingerprint"] == p["p_fingerprint"]
+                                    and not r.get("resolved_at")), None)
+                        if hit:
+                            hit["occurrences"] += 1
+                            hit["detail"] = p.get("p_detail") or hit.get("detail")
+                            hit["context"] = p.get("p_context") or {}
+                        else:
+                            hit = {"id": f"alert-{len(rows) + 1}", "source": p["p_source"], "severity": p["p_severity"],
+                                   "message": p["p_message"], "detail": p.get("p_detail"),
+                                   "context": p.get("p_context") or {}, "fingerprint": p["p_fingerprint"],
+                                   "occurrences": 1, "reported_at": None, "reported_occurrences": 0,
+                                   "resolved_at": None}
+                            rows.append(hit)
+                    self._send(200, hit["id"])
                 else:
                     self._send(404, {"message": "not handled by FakeSupabase"})
 

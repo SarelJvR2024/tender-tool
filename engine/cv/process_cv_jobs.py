@@ -74,7 +74,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "worker"))
 from generate_cv import generate_as_is  # noqa: E402
 import generate_cv  # noqa: E402
-from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
+from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_OUT_DIR = os.path.join(HERE, "..", "..", "out", "generated_cvs")
@@ -297,6 +297,10 @@ def fail_stale_jobs(url, key, now=None):
                                  "minutes). Nothing was produced - request the CV again.",
             })
             print(f"[failed] {job['id']}: stale 'generating' since {claimed}")
+            system_alerts.record("cv", f"A CV job was stuck in 'generating' for over {STALE_AFTER_MINUTES} minutes "
+                                       "(the worker died mid-job) and was marked failed", "error",
+                                 context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                          "person_id": job.get("person_id"), "claimed_at": claimed})
 
 
 def process_job(url, key, job, out_dir):
@@ -325,6 +329,13 @@ def process_job(url, key, job, out_dir):
                         "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
         storage_path_pdf = None
+        if not pdf_local:
+            # The Word CV is still delivered, so the job is 'ready' - but a
+            # missing PDF means LibreOffice failed on the worker, silently.
+            system_alerts.record("cv", "A CV was generated but its PDF conversion failed (LibreOffice) - "
+                                       "only the .docx was delivered", "warning",
+                                 context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                          "person_id": job.get("person_id"), "format": job.get("format")})
         if pdf_local:
             storage_path_pdf = f"{job['company_id']}/people/{job['person_id']}/generated/{base_name}.pdf"
             storage_upload(url, key, "cv-documents", storage_path_pdf, pdf_local, "application/pdf")
@@ -337,9 +348,16 @@ def process_job(url, key, job, out_dir):
         })
         print(f"[ready] {job['id']} ({job['format']}/{job['detail']}) -> {storage_path_docx}")
     except Exception as e:
-        supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}", {
-            "status": "failed", "error_message": str(e),
-        })
+        system_alerts.record("cv", f"CV generation job failed: {type(e).__name__}: {e}", "error", exc=e,
+                             context={"job_id": job["id"], "company_id": job.get("company_id"),
+                                      "person_id": job.get("person_id"), "format": job.get("format")})
+        try:
+            supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}", {
+                "status": "failed", "error_message": str(e),
+            })
+        except Exception as e2:
+            system_alerts.record("cv", f"Could not mark a failed CV job as failed: {type(e2).__name__}: {e2}",
+                                 "error", exc=e2, context={"job_id": job["id"]})
         print(f"[failed] {job['id']}: {e}")
     return True
 
@@ -377,7 +395,7 @@ def run(out_dir, loop=False, interval=DEFAULT_INTERVAL_SECONDS, max_cycles=None)
     # In loop mode an empty queue is the normal state; printing "No pending
     # jobs" every 30s would bury the lines that matter in the host's logs.
     poll_forever(lambda: poll_once(url, key, out_dir, quiet_when_empty=True),
-                 interval=interval, max_cycles=max_cycles, name="process_cv_jobs")
+                 interval=interval, max_cycles=max_cycles, name="process_cv_jobs", alert_source="cv")
 
 
 # ============================================================================

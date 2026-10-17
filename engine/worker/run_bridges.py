@@ -36,6 +36,15 @@ cycle, which is well under a second.
 Each bridge also has its own --loop flag for running it alone; this runner is
 for the normal case of one worker serving both queues.
 
+Failures reach Sarel, not just this log (system alerts, migration 0042,
+engine/alerts/system_alerts.py): a bridge pass that exits non-zero or times
+out, and a crash of this runner itself, are recorded as `critical` alerts
+under source "worker" (the bridge's output tail as the detail). Each bridge
+records its own job-level failures (a crashed job, a refused job as a
+warning, a job stuck in 'generating') under its own source. One open alert
+per distinct failure - a pass failing every 30 s counts occurrences on one
+row. engine/alerts/check_system_alerts.py reports them for the e-mail.
+
 Usage:
     python3 run_bridges.py                        # one pass over every bridge, then exit
     python3 run_bridges.py --loop                 # always-on worker (what the container runs)
@@ -55,7 +64,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
-from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
+from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 
 BRIDGES = {
     "cv": "engine/cv/process_cv_jobs.py",
@@ -100,8 +109,13 @@ class BridgeRunner:
             try:
                 p = subprocess.run([sys.executable, path, "--once"] + self.extra_args,
                                    cwd=REPO_ROOT, capture_output=True, text=True, timeout=self.timeout)
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as e:
                 broken.append(f"{label} timed out after {self.timeout}s")
+                out = (e.stdout or b"") + (e.stderr or b"")
+                out = out.decode(errors="replace") if isinstance(out, bytes) else out
+                system_alerts.record("worker", f"The {label} bridge pass timed out after {self.timeout}s and was killed",
+                                     "critical", detail=out[-8000:] or None,
+                                     context={"bridge": label, "script": os.path.relpath(path, REPO_ROOT)})
                 continue
             lines = [ln for ln in (p.stdout + p.stderr).splitlines() if ln.strip()]
             meaningful = [ln for ln in lines if not ln.startswith(QUIET_PREFIXES)]
@@ -111,6 +125,14 @@ class BridgeRunner:
                     self.log(f"{label}: {ln}")
             if p.returncode != 0:
                 broken.append(f"{label} exited {p.returncode}")
+                # The pass itself broke (crash, missing env, Supabase down) -
+                # nobody watches this log, so it goes to system_alerts.
+                tail = "\n".join(lines[-80:])
+                last = next((ln for ln in reversed(lines) if not ln.startswith("[system-alert]")), "")
+                system_alerts.record("worker", f"The {label} bridge pass failed (exit {p.returncode}): {last[:300]}",
+                                     "critical", detail=tail or None,
+                                     context={"bridge": label, "script": os.path.relpath(path, REPO_ROOT),
+                                              "exit_code": p.returncode})
         if broken:
             raise RuntimeError("; ".join(broken))
         return did_something
@@ -160,4 +182,8 @@ def main(argv=None):
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Exception as e:  # the worker itself crashed: the one failure nobody would otherwise see
+        system_alerts.record("worker", f"run_bridges.py crashed: {type(e).__name__}: {e}", "critical", exc=e)
+        raise

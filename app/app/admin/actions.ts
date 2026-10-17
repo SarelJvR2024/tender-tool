@@ -45,3 +45,53 @@ export async function markHarnessRunReviewed(formData: FormData) {
 export async function clearHarnessRunReview(formData: FormData) {
   await writeReview(formData, false);
 }
+
+/**
+ * System alerts (migration 0042): Sarel marks an engine/bridge failure
+ * resolved once it is fixed (or reopens it). Same shape as the harness
+ * review above: migration 0042 grants authenticated users UPDATE on only the
+ * three resolution columns, and its RLS policy limits that to company owners
+ * with resolved_by pinned to the signed-in user. Checked here too, since a
+ * Server Action is reachable by direct POST. A resolved alert is never
+ * reported again by engine/alerts/check_system_alerts.py; the same failure
+ * happening later is recorded as a new alert.
+ */
+async function writeAlertResolution(formData: FormData, resolved: boolean) {
+  const alertId = String(formData.get("alert_id") ?? "");
+  const note = String(formData.get("note") ?? "").trim().slice(0, 4000);
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  if (!alertId) redirect(`/admin?error=${encodeURIComponent("Missing system alert.")}#system-alerts`);
+
+  const { data, error } = await supabase
+    .from("system_alerts")
+    .update(
+      resolved
+        ? { resolved_at: new Date().toISOString(), resolved_by: user.id, resolution_note: note || null }
+        : { resolved_at: null, resolved_by: null, resolution_note: null },
+    )
+    .eq("id", alertId)
+    .select("id");
+  if (error) {
+    // Reopening while the same failure already has a newer open alert hits
+    // the one-open-alert-per-fingerprint index - say so plainly.
+    const message = error.code === "23505"
+      ? "This failure has happened again since and already has a newer open alert - review that one instead."
+      : error.message;
+    redirect(`/admin?error=${encodeURIComponent(message)}#system-alerts`);
+  }
+  if (!data || data.length === 0) {
+    redirect(`/admin?error=${encodeURIComponent("Only a company owner can resolve system alerts.")}#system-alerts`);
+  }
+  revalidatePath("/admin");
+}
+
+export async function markSystemAlertResolved(formData: FormData) {
+  await writeAlertResolution(formData, true);
+}
+
+export async function reopenSystemAlert(formData: FormData) {
+  await writeAlertResolution(formData, false);
+}

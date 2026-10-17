@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import HarnessRunRow, { type HarnessDocument } from "./HarnessRunRow";
+import SystemAlertRow, { type SystemAlert } from "./SystemAlertRow";
 import { SiteNav } from "../_components/SiteNav";
 
 // Reads per-request session/DB data (admin_harness_runs, gated by RLS on the
@@ -11,6 +12,9 @@ const ARTIFACT_BUCKET = "admin-harness-artifacts";
 // Long enough that a preview opened from a page left sitting for a while still
 // loads - this is one person's internal QA page, not a shared link.
 const SIGNED_URL_SECONDS = 3600;
+const RESOLVED_SHOWN = 20;
+const ALERT_COLUMNS =
+  "id, source, severity, message, detail, context, occurrences, first_seen_at, last_seen_at, reported_at, resolved_at, resolution_note";
 
 type RunRow = {
   id: string;
@@ -41,6 +45,18 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     .order("kind", { ascending: true })
     .order("test_company", { ascending: true });
 
+  // System alerts (migration 0042): every open alert, plus the most recently
+  // resolved ones for reference. Owner-only by RLS, same as the harness runs.
+  const [{ data: openAlerts, error: alertsError }, { data: resolvedAlerts }] = await Promise.all([
+    supabase.from("system_alerts").select(ALERT_COLUMNS).is("resolved_at", null)
+      .order("last_seen_at", { ascending: false }),
+    supabase.from("system_alerts").select(ALERT_COLUMNS).not("resolved_at", "is", null)
+      .order("resolved_at", { ascending: false }).limit(RESOLVED_SHOWN),
+  ]);
+  const open = (openAlerts ?? []) as SystemAlert[];
+  const resolved = (resolvedAlerts ?? []) as SystemAlert[];
+  const newCount = open.filter((a) => !a.reported_at).length;
+
   const rows = (runs ?? []) as RunRow[];
   const flaggedCount = rows.filter((r) => r.status === "flagged").length;
   const unreviewedCount = rows.filter((r) => !r.reviewed_at).length;
@@ -58,6 +74,38 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       <SiteNav active="admin" />
 
       <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+        <section id="system-alerts" style={{ marginBottom: 36 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>System alerts</h1>
+          <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+            Every failure the engines and the bridge worker hit (a job that crashed, a scoring error, OCR that
+            couldn&apos;t run, a worker pass that broke) - one row per problem, counted each time it happens again.
+            New alerts are e-mailed by the scheduled check-in (engine/alerts/check_system_alerts.py); mark one resolved
+            once it is fixed.{" "}
+            {open.length === 0 ? "Nothing open." : `${open.length} open${newCount > 0 ? `, ${newCount} not yet e-mailed` : ""}.`}
+          </p>
+          {alertsError && (
+            <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+              Could not load system alerts: {alertsError.message}
+            </div>
+          )}
+          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
+            {open.length === 0 && !alertsError && (
+              <div style={{ padding: "18px", fontSize: 13, color: "#15803D" }}>No open system alerts.</div>
+            )}
+            {open.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
+          </div>
+          {resolved.length > 0 && (
+            <details style={{ marginTop: 12 }}>
+              <summary style={{ fontSize: 13, color: "#6B6758", cursor: "pointer", padding: "6px 0" }}>
+                Recently resolved ({resolved.length})
+              </summary>
+              <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden", marginTop: 8 }}>
+                {resolved.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
+              </div>
+            </details>
+          )}
+        </section>
+
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Admin harness results</h1>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
           Results of running every test company through the real tender-filling pipeline (engine/admin_harness.py),
