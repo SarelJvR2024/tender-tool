@@ -239,8 +239,13 @@ function StageButton({ tenderId, stage, primary = false }: { tenderId: string; s
   const label = primary ? ACTION_LABEL[stage] : "← Back";
   const style: CSSProperties = primary
     ? {
-        minHeight: 32,
-        padding: "0 12px",
+        // This is the single action that actually moves a tender forward on
+        // this board - on a phone it's tapped once per card, repeatedly down
+        // a scrolling column, so it gets the same 44px minimum as every other
+        // primary button in the app (company page, task-add), not the 32px
+        // used for lighter secondary controls like the "<- Back" link below.
+        minHeight: 44,
+        padding: "0 14px",
         borderRadius: 8,
         fontSize: 12,
         fontWeight: 600,
