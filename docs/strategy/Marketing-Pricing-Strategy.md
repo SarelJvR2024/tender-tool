@@ -588,3 +588,110 @@ Anonymise Klipcorp's data (or use the `complete_co` test company) per the Deep-D
 - Current SAICE and CESA membership counts: latest found is 2022 for CESA, undated for SAICE.
 - Whether SANRAL's terms permit automated collection.
 - Whether POPIA s 69 applies to every channel listed. Check with an attorney.
+
+---
+
+## 9. Deep dive: Leads 2 Business (L2B)
+
+Added 17 Oct 2026 at Sarel's request: "do some research on leads to business to see if they still exist, what's their coverage on tenders, and how would our product compare with them." **"L2B" in sections 1.1 and 1.2 is the same company.** This section goes past the single price point those sections gave.
+
+### 9.1 Verdict
+
+**L2B is alive, long-established and much bigger than Tender Tool at discovery. It does none of what Tender Tool's paid tiers sell.** It is a research-led lead service for the construction supply chain: tenders, private projects, awards, contacts and a quotation (RFQ/BoQ) marketplace. It doesn't fill forms, check compliance, match CVs or build submission packs.
+
+So L2B is **not a direct competitor** for SANRAL Pro or Tender Pro. It overlaps only with the free Tender Watch tier, where it is clearly better on coverage. Treat it as an upstream source a customer might already pay for, and possibly a channel partner, rather than as a rival to fight feature by feature.
+
+### 9.2 Does it still exist? Yes (Observed)
+
+- **Live site:** [l2b.co.za](https://www.l2b.co.za/), footer "© Cedrus Internet Solutions (Pty) Ltd 2026". A rebuilt platform is running at `next.l2b.co.za`, with public teaser pages for tenders published late July and early August 2026 (for example DTA 1151573, fencing, published 30 Jul 2026; DTA 1152040, pothole patching in KwaDukuza, 31 Jul 2026).
+- **Age:** "Established 1999" ([about us](https://www.l2b.co.za/about-us)). It grew out of the DailyTenders notification service, and the research team is based in Hilton, KZN ([FAQ](https://www.l2b.co.za/faq)).
+- **Scale, self-reported** in its June 2024 25-year post ([blog](https://www.l2b.co.za/blog/celebrating-25-years-of-leads-2-business)): 1,020,940 tenders published, 31,513 private projects, 21.8 million RFQs sent, 26,742 BoQs uploaded, 384,843 directory entries, and "nearly 4,000 active users" (3,944). These are L2B's own numbers, not independently checked.
+- **Selling today:** a current pricing page, a 14-day free trial (no credit card; applications approved within about two working days), and month-to-month terms with 14 days' written notice to cancel.
+
+### 9.3 Coverage: what L2B covers, and how it compares with Tender Tool's discovery
+
+| | L2B | Tender Tool today |
+| --- | --- | --- |
+| How listings are found | Human research team. Sources named in the FAQ: government gazettes, newspapers, industry publications, online sources, direct industry contacts, the Deeds Office | Machine feed: National Treasury's eTenders OCDS API (`engine/discovery/etenders_national.py`), plus SANRAL's own site (`run_discovery.py`) |
+| SA public tenders | Yes: national, provincial, municipal and other public buyers, across industries (public listings include construction, PPE, vehicles, kitchen hygiene, ICT) | Yes, but only buyers that publish through the eTenders portal, plus SANRAL's own site |
+| Private-sector and invited tenders | "Primarily public tenders"; private or invited tenders when the inviting organisation shares them officially | **No** |
+| Private construction projects (pre-tender leads) | Yes: development phases, the organisations and professionals involved, contacts (Projects service) | **No** |
+| Rest of Africa | Yes: separate Africa plan, five regions (public example: a Lesotho Bureau of Statistics tender, DTA 1110712) | **No** |
+| Award information | Yes: an awards section, "Request Award Information" from the research team, and award alerts on monitored tenders | **Effectively no.** The module's own testing found `awards` and `contracts` empty on every release sampled (400 releases, Jul to Oct 2026, plus 100 from 2024 H1) |
+| Bidders lists, BoQs, site-attendance registers | On request from the research team, where obtainable | **No** |
+| Tender documents | Documents and addenda behind the paywall; document collection in Gauteng (Infomessenger) | OCDS `documents` only link back to the buyer's own download pages; SANRAL's reCAPTCHA-gated documents still need a person to fetch them |
+| Change tracking | Daily Advisory email flags cancellations, re-advertisements and amendments; "monitor" a tender for emailed updates | No amendment tracking. Note also that OCDS `tender.status` is blank on every release sampled, so "open" is inferred from the closing date |
+| Feed reliability | Curated; quality depends on the research team | The OCDS API returns HTTP 500 at about page 5 or 6 (500 to 600 records) on any date window, so long windows get truncated; it repeats some releases across pages (deduplicated in code) |
+| Fit to *your* company | Profile-based filtering: location, industry, project stage, CIDB grading | **Stronger here:** a fit verdict and score outlook against the company's own profile, CVs and evidence |
+
+**What this means:** on breadth (private tenders, private projects, Africa, awards, bidders lists, amendments) L2B is plainly better, and its 27-year research operation can't be matched by a free government API. Tender Tool's discovery only wins on the *next* question: "does this tender fit us, and what would we score?" That supports section 4's call: discovery is the free lead magnet, not something to charge for.
+
+One limit on this comparison: I couldn't see inside L2B's paywall. How many SANRAL consultant (professional services) tenders it carries, and how quickly, is unverified. A web search for SANRAL consulting-engineering tenders turned up nra.co.za and TenderFlow listings but no L2B pages. That fits L2B's construction and contractor focus, but it doesn't prove L2B leaves them out.
+
+### 9.4 Usability and user friendliness
+
+- **The product works like this (Observed, from L2B's own guidance):** a **Daily Advisory email** driven by an "Advisory Settings Profile". You open each lead online, "monitor" the ones you want, set reminders for site inspections and closing dates, keep notes, and email the named researcher with questions. L2B's own tips tell users to "go through the daily Advisory email thoroughly each day" ([blog](https://blog.l2b.co.za/how-to-make-the-most-of-our-tenders/)). It is a mature, human-backed, email-first workflow.
+- **Help material:** a "How To" video series on L2B's blog (for example about three minutes on managing notifications) and a wiki with screenshots. The tender pages on the new `next.l2b.co.za` platform returned HTTP 503 several times during this research. That may only be a migration under way, but it is worth noting.
+- **Reviews:** **no independent reviews found.** There is nothing on Capterra or G2 (the Capterra "Leads2b" listing is an unrelated prospecting tool), and searches found nothing on HelloPeter or Trustpilot. L2B's own testimonials page praises support, training and the value of L2B and L2Q, and shows no negatives because L2B chose them. **I found no real user complaints or independent praise, so I make no usability claim either way.**
+- **Compared with Tender Tool:** L2B is built around reading a daily list of leads. Tender Tool is built around preparing a bid for one chosen tender. They are different jobs. A consulting firm could quite reasonably use L2B to find a tender and Tender Tool to build the submission.
+
+### 9.5 Functionality: does L2B do Tender Tool's niche?
+
+| Tender Tool capability (built and verified, per section 2.1 and System-Status) | L2B |
+| --- | --- |
+| SANRAL Conventional and RRM workbook fill with a template fingerprint check | No |
+| Two-envelope SANRAL submission pack (contents page, page ranges, bookmarks, "Not included" table) | No |
+| Tender-customised CVs (SANRAL key-person and World Bank formats); CV-to-position matching | No. L2B offers no CV or people functions |
+| SBD/MBD form fill and flat-PDF overlay; merged general pack | No |
+| Compliance report: required documents against the vault on the closing date; key-person minimums; experience against the tender's own evidence rule; SANRAL functionality score estimate | No |
+| Experience Library (reference letters, completion certificates) | No |
+| Document vault with expiry tracking | No |
+| Pipeline board, task timeline, role-based digest | Partly: monitor lists, notes and reminders on a lead, but no bid workflow |
+| **L2B features Tender Tool doesn't have** | Private projects and contacts; Africa; awards; bidders lists; BoQ and site-register requests; **Leads 2 Quotes** (BoQ pricing tool, RFQ distribution to suppliers); **Open Quotes** supplier marketplace; directory; advertising; **L2B Unplugged** data integration (price on application) |
+
+**Plainly: there is zero functional overlap with Tender Tool's paid niche.** L2B's "beyond discovery" products face *downstream suppliers* (contractors pricing BoQs and getting supplier quotes). They don't touch a *consultant's* compliance and submission pack.
+
+### 9.6 Pricing, re-verified 17 Oct 2026 (all excl. VAT, per month)
+
+The R1,426 figure in section 1.2 is **stale**. It matches the *FAQ's* older list. The live [pricing page](https://www.l2b.co.za/pricing) now shows higher prices. The old `/Tenders/Tender-Pricing` link in section 8 returns 404.
+
+| Plan | Live pricing page (17 Oct 2026) | FAQ (older list, still published) |
+| --- | --- | --- |
+| Tenders South Africa | **R1,495.65** | R1,426.09 (extra user R521.74) |
+| Tenders Africa | R1,808.70 | R1,721.74 (extra user R695.65) |
+| Tenders SA + Africa | R2,582.61 | R2,460.87 (extra user R704.35) |
+| Private Projects (SA + Africa) | R3,200.00 | R3,043.48 (extra user R1,339.13) |
+| L2Q (buyer RFQs / BoQ) | R2,634.78 | R2,513.04 (extra user R1,756.52) |
+| Open Quotes (suppliers) | R321.74 | R304.35 |
+| Price per bill (RFQ service) | R713.04 per bill | — |
+| Advertising | R11,426.09 | — |
+| L2B Unplugged (data integration) | Price on application | — |
+
+Quarterly, six-monthly and annual billing are offered, but those prices aren't shown. The live page doesn't state per-user prices. The live prices are about 5% above the FAQ's, which looks like a price increase the FAQ hasn't caught up with (my inference).
+
+**What the price says:** SA firms already pay about **R1,500 a month just to be told about tenders**, by L2B, which has around 4,000 users. That is a useful anchor. It makes section 4's R1,490 Tender Pro (discovery *plus* form filling and packs) look cheap. It also means SANRAL Pro at R3,950 is about 2.6 times an L2B SA tenders subscription, for a product that does a different and much heavier job.
+
+### 9.7 Head-to-head summary (honest)
+
+| Dimension | L2B | Tender Tool | Who's better |
+| --- | --- | --- | --- |
+| Exists and trading | Since 1999, about 4,000 users (self-reported), live 2026 pricing | Not sellable yet (no live Supabase, worker not deployed: section 7.1) | **L2B, by a long way** |
+| Coverage breadth | SA public tenders, private and invited tenders, private projects, Africa, awards | eTenders OCDS buyers plus SANRAL's site; no awards in practice | **L2B** |
+| Discovery alerts | Mature daily email, amendment and award tracking, a human researcher to email | Daily digest logic built, but `--mode live` unverified and email not sent yet | **L2B** |
+| Trust and track record | 27 years, research team, phone line (0860 836 337) | One firm (Klipcorp) using it on its own tenders | **L2B** |
+| Fit and score to *your* firm | Profile filters (region, industry, stage, CIDB grade) | Fit verdict plus SANRAL functionality score estimate from your own CVs and evidence | **Tender Tool** |
+| Compliance checking | None | Vault against the closing date, key-person minimums, B6 evidence check | **Tender Tool (L2B has none)** |
+| CV and people matching | None | Tender CVs per position, World Bank format | **Tender Tool (L2B has none)** |
+| Pack generation | None | SANRAL two-envelope packs, SBD/MBD fill and overlay | **Tender Tool (L2B has none)** |
+| Supplier quoting (BoQ/RFQ) | L2Q, Open Quotes | None | **L2B (Tender Tool has none, and doesn't need it)** |
+| Price | R1,495.65/mo for SA tenders | R0 (Watch) / R1,490 / R3,950 proposed | Not comparable: different jobs |
+| Independent reviews | None found | None (not launched) | Neither |
+
+### 9.8 What to do with this
+
+1. **Don't position against L2B.** A director who pays L2B is a *good* prospect: they already pay to find tenders, so the next pain is preparing them. The message: *"Keep L2B for finding work. Tender Tool builds the submission."*
+2. **Ask about L2B in the customer interviews** (section 5.4): "Do you pay for L2B or another lead service? Does it carry the SANRAL consultant tenders you bid, and how quickly?" That answers the coverage question 9.3 couldn't, and tells Sarel whether Tender Watch adds anything for that firm.
+3. **Possible partnership, later and low priority:** L2B already sells data integration ("L2B Unplugged", price on application). A future "import this L2B tender into Tender Tool" link, or a referral arrangement, would add their coverage to Tender Tool's workflow without competing. Only worth exploring after the first 10 paying firms; nobody has asked L2B anything yet.
+4. **Correct section 1.2's L2B row** to R1,495.65/mo (live page, 17 Oct 2026) at the next edit, and point the source link at [l2b.co.za/pricing](https://www.l2b.co.za/pricing).
+
+**Sources for this section:** [l2b.co.za](https://www.l2b.co.za/), [pricing](https://www.l2b.co.za/pricing), [FAQ](https://www.l2b.co.za/faq), [about us](https://www.l2b.co.za/about-us), [free trial](https://www.l2b.co.za/free-trial), [testimonials](https://www.l2b.co.za/testimonials), [25-years post (June 2024)](https://www.l2b.co.za/blog/celebrating-25-years-of-leads-2-business), [how to use tenders (blog)](https://blog.l2b.co.za/how-to-make-the-most-of-our-tenders/), [public tender page, DTA 1110712](https://www.l2b.co.za/Tender/Construction-of-Slab-Supply-and-Mounting-of-Prefa/1110712), [next.l2b.co.za tender listing, DTA 1151573](https://next.l2b.co.za/tenders/supply-delivery-and-installation-of-clearview-fencing/1151573) (returned 503 when fetched; seen in search results), [Mining Weekly on the 2013 mobile app](https://www.miningweekly.com/article/company-annoucementsleads-2-go-mobility-revives-construction-opportunities-2013-10-03). Repo: `engine/discovery/etenders_national.py` (OCDS limits), `docs/specs/System-Status.md`.
