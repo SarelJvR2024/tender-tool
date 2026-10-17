@@ -11,6 +11,7 @@ import { requestTenderCv, addTenderTask, ensureClosingMilestone, type TenderTask
 import { SiteNav } from "../../_components/SiteNav";
 import { SubmissionPack } from "./submission-pack";
 import { IntakeCard } from "./intake-card";
+import { ActivityLog } from "./activity-log";
 import { TenderTemplates } from "./tender-templates";
 import { PositionPersonSelect } from "./position-person-select";
 import { startTenderPack } from "./pack-inputs-actions";
@@ -131,12 +132,12 @@ export default async function TenderWorkspacePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; saved?: string }>;
+  searchParams: Promise<{ error?: string; saved?: string; activity?: string }>;
 }) {
   const { id } = await params;
   // Every action on this page (requestTenderCv, addTenderTask,
   // requestSubmissionPack) reports a refusal as ?error=... - shown at the top.
-  const { error: actionError, saved } = await searchParams;
+  const { error: actionError, saved, activity } = await searchParams;
   const supabase = await createClient();
 
   const { data: tender, error: tenderError } = await supabase
@@ -372,6 +373,7 @@ export default async function TenderWorkspacePage({
                 {isGeneralFamily && <JumpLink href="#general-documents" label="Documents" />}
                 {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
                 <JumpLink href="#tasks-milestones" label="Tasks" />
+                <JumpLink href="#activity" label="Notes & activity" />
                 {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
                 {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
               </div>
@@ -480,6 +482,9 @@ export default async function TenderWorkspacePage({
             ) : null}
 
             <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
+
+            {/* Notes + one chronological history of this tender (item 15; tender_comments, 0033). */}
+            <ActivityLog tenderId={id} showAll={activity === "all"} />
 
             {tenderPack && (positions.length > 0 || isSanralPackFamily) && (
               <div id="key-positions" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
