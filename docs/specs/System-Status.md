@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, 14:11 UTC check-in (feature pass for Sarel's decisions 1-4 at ~15:00 UTC, below); hardcoded-assumptions audit at ~16:00 UTC, below.
+Last full pass: 2026-10-17, ~16:20 UTC independent verification of the 10 commits since the last check-in (below); hardcoded-assumptions audit at ~16:00 UTC, below that.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -106,6 +106,59 @@ bridged by `engine/general/process_general_jobs.py`.
     - **`print_reports.Office.__exit__` runs `pkill -9 -x soffice.bin`**, which kills every LibreOffice on the host, including another job's. Seen this pass: one run lost its Financial print to a concurrent process (caught, reported in the pack as "Not included", rest of the pack built). Harmless with one worker; worth scoping to its own PID before running bridges in parallel.
 
 13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; ~~documents can't be attached to a shared discovered tender~~ (**closed** by `0032`: "Your private documents"); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once (expired_certs_co now builds - see the hardcoded-assumptions pass).
+
+## This pass (2026-10-17, ~16:20 UTC): independent verification of 10 commits (discipline-fit fix, award outcomes, OCR, deal economics, registration expiry, past-submission reuse, Sarel's decisions 1-4, activity log, hardcoded-assumptions audit)
+
+Ten commits landed since the 14:11 UTC check-in. Rather than trust each one's own "ALL PASSED"
+claim, replayed and ran what could actually be re-run independently:
+
+- **Full migration replay, `0001`→`0036` (fresh scratch Postgres 16, same `auth`/`storage` stubs
+  as every prior pass), clean.** `0027`-`0029` were never used — checked `git log --all` for
+  those filenames (no hits) to rule out a renumbered collision like the real one caught earlier
+  (`0023`); this is the same benign kind of gap as `0020`, not a bug.
+- **`test_manual_intake.py` run end-to-end against that replayed schema with real Postgres RLS**
+  (`Known gaps` item 13 names this test as not in CI because it needs Postgres — nobody had
+  re-run it since migration `0032` landed). First run surfaced 4 failures; traced every one to
+  **my own scratch-DB stub being incomplete**, not a product bug: `storage.objects`/`buckets`
+  never had RLS enabled (my stub skipped it; real Supabase enables it platform-side, no migration
+  does), no shared SANRAL tender was seeded, and the harness's own `auth.uid()` convention
+  (`set_config('test.uid', ...)`) didn't match my generic JWT-claim stub. Fixed the stub
+  (enabled RLS on both storage tables, redefined `auth.uid()` to read `test.uid`, seeded one
+  `source='sanral'` tender), reran: **0 failures.** This is real, independent confirmation —
+  under actual enforced RLS, not a mock — that migration `0032`'s three security fixes hold:
+  member B's INSERT into company A's storage prefix is refused, member B can't read company A's
+  uploaded tender documents or write the shared (non-manual) part of the bucket, and
+  `load_manual_tender()` correctly refuses a path outside the tender's own prefix, a duplicate
+  OCID, and loading into another company. The full SANRAL pipeline (intake → fit scoring with
+  the discipline-fit fix below → pack build → 60-page pack) also ran clean end to end in the
+  same pass.
+- **Test suites**: `test_award_outcomes.py`, `test_general_bridge.py` (includes the private-vs-
+  shared document isolation checks for `0032`), `test_watch_person_credentials.py` — all ALL
+  PASSED / 0 failures, run directly, output read. `test_extract_cv_fields.py`'s LLM-call test
+  fails for a pre-existing environment reason (`anthropic` package not installed here — Known
+  gap 3, not new).
+- **Discipline-fit fix (`b41d0c8`) read directly**: `assess_fit()` now treats an empty
+  `disciplines` list as "unknown, needs review" rather than "checked and out of scope" — the
+  actual bug (every real company today has no `disciplines` row written anywhere) and the fix
+  are both as described; `classify_tender.py`'s now-redundant band-aid was correctly simplified
+  rather than left stacked.
+- **Duplication/overlap check**: the new `personCredentials.ts` imports and calls the shared
+  `expiryStatus()` from `app/lib/dates.ts` rather than reimplementing it (grep-verified) — the
+  pattern holds. The two commits `28d8f5d`/`7ca6937` ("Sarel's decisions 1-4") aren't duplicated
+  work — `7ca6937`'s own message explains a shared-working-directory stash/pop mid-commit split
+  the files across two pushes; already self-documented, nothing to reconcile.
+- `npm run typecheck` / `npm run lint`: clean.
+
+**Not re-verified this pass** (already correctly flagged by the agents who built them, left as
+their own open items rather than re-derived here): `QA-Edge-Case-Findings.md` Finding 2 —
+`sanralScoring.ts`'s `estimatePosition()` has only ever been exercised against Pavement and
+Materials; the other 7 SANRAL DS specialisms' matrix lookups are untested (a pure function, no
+Supabase needed — named as a future pass by that agent, not mine to claim credit for deferring
+again). `Hardcoded-Assumptions-Audit.md`'s 8 open questions (Q1-Q8) are judgment calls for
+Sarel, already consistent with the existing "Open items" section below — not duplicating them
+here.
+
+Nothing found needing a fix this pass. No new gaps opened.
 
 ## This pass (2026-10-17, ~16:00 UTC): hardcoded-assumptions audit (Sarel: "don't base limitations only on Klipcorp's submissions / these 6 tenders")
 
