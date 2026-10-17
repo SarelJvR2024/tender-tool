@@ -15,7 +15,10 @@ script claims it (requested -> generating, conditional on it still being
 
   extract_requirements
     1. downloads the tender's published documents (tenders.document_urls -
-       the buyer's own eTenders links, public and unauthenticated);
+       the buyer's own eTenders links, public and unauthenticated), plus, on a
+       shared tender, the requesting company's own private documents
+       (tender_private_documents, 0032 - read into a per-company folder, and
+       the result stored on that company's tender_packs row only);
     2. runs requirements.extract_requirements() over them;
     3. stores the manifest on tenders.document_requirements, and the
        experience-evidence / locality rules on tenders.evaluation_rules (only
@@ -301,19 +304,70 @@ def record_fit(client, job, tender, all_text):
     return fit["verdict"]
 
 
+def private_documents_for(client, company_id, tender):
+    """This company's own documents for a SHARED tender (tender_private_documents,
+    migration 0032) as document_urls-shaped entries - [] for a manual tender
+    (already private; its documents are in tenders.document_urls). Every path
+    is re-checked against the company's own prefix before anything is
+    downloaded with the service role (the table has the same CHECK)."""
+    if tender.get("owner_company_id"):
+        return []
+    prefix = f"private/{company_id}/{tender['id']}/"
+    out = []
+    for r in client.select("tender_private_documents", {"company_id": company_id, "tender_id": tender["id"]},
+                           order="created_at.asc"):
+        sp = r.get("storage_path") or ""
+        if not sp.startswith(prefix) or ".." in sp:
+            raise RuntimeError(f"private document {r.get('id')} is not under this company's own folder - refusing to read it")
+        out.append({"id": r["id"], "title": r.get("title") or os.path.basename(sp), "storage_path": sp,
+                    "bucket": TENDER_DOCS_BUCKET})
+    return out
+
+
+def private_work_dir(work_root, company_id, tender_id):
+    """Per-COMPANY working folder: the tenders/<id>/docs cache is shared by every
+    company's jobs on this worker, so private documents never go there."""
+    return os.path.join(work_root, "companies", company_id, "tenders", tender_id)
+
+
+def own_pack(client, job):
+    if job.get("tender_pack_id"):
+        rows = client.select("tender_packs", {"id": job["tender_pack_id"]})
+    else:
+        rows = client.select("tender_packs", {"company_id": job["company_id"], "tender_id": job["tender_id"]})
+    rows = [r for r in rows if r.get("company_id") == job["company_id"]]
+    return rows[0] if rows else None
+
+
 def run_extraction(client, job, work_root, fetch=None):
     """The intake + requirements step every tender's documents go through,
-    however the tender arrived (Discovery, or a manual load - 0024)."""
+    however the tender arrived (Discovery, or a manual load - 0024).
+
+    With private documents (0032: this company's own files on a SHARED
+    tender) the published documents and those are read together, and the
+    result - manifest and intake record - goes to THIS company's tender_packs
+    row only. Nothing read from a private document is written to the shared
+    tenders row, tender_documents or tender_requirements, which every company
+    pursuing the tender can see."""
     tender = client.select("tenders", {"id": job["tender_id"]})[0]
     work = os.path.join(work_root, "tenders", tender["id"])
     docs_dir = os.path.join(work, "docs")
     sources = {}
     paths, notes = download_tender_documents(tender, docs_dir, fetch, client=client, sources=sources)
+    private = private_documents_for(client, job["company_id"], tender)
+    dirs = [docs_dir]
+    scratch = os.path.join(work, "extract")
+    if private:
+        pwork = private_work_dir(work_root, job["company_id"], tender["id"])
+        pdir = os.path.join(pwork, "private_docs")
+        shutil.rmtree(pdir, ignore_errors=True)  # a removed private document must not linger
+        ppaths, pnotes = download_tender_documents({"document_urls": private}, pdir, fetch, client=client, sources=sources)
+        paths, notes, dirs = paths + ppaths, notes + [f"(private) {n}" for n in pnotes], dirs + [pdir]
+        scratch = os.path.join(pwork, "extract")
     if not paths:
         raise RuntimeError("No tender documents could be downloaded" + (": " + "; ".join(notes) if notes else " - no document links on file."))
-    scratch = os.path.join(work, "extract")
     shutil.rmtree(scratch, ignore_errors=True)
-    manifest = req.extract_requirements([docs_dir], work_dir=scratch, source_label=tender.get("ocid") or tender.get("slug"),
+    manifest = req.extract_requirements(dirs, work_dir=scratch, source_label=tender.get("ocid") or tender.get("slug"),
                                         keep_text=True)
     all_text = manifest.get("_all_text") or ""
     decision = intake.classify_documents(manifest["documents"], tender.get("buyer"), all_text)
@@ -335,6 +389,21 @@ def run_extraction(client, job, work_root, fetch=None):
     intake_rec["unreadable_documents"] = [{"document": d["name"], "reason": d["unreadable"]} for d in manifest["documents"] if d["unreadable"]] + \
         [{"document": w["document"], "reason": w["error"]} for w in decision["workbooks"] if w["kind"] == "unreadable"]
     intake_rec["analysed_at"] = _now()
+    if private:
+        pack = own_pack(client, job)
+        if not pack:
+            raise RuntimeError("This company has no tender pack for this tender - start working on it first.")
+        intake_rec["private_documents"] = [d["id"] for d in private]
+        intake_rec["notes"].append(f"Read together with {len(private)} of your private document(s) - this reading is kept "
+                                   "with your company's copy of the tender, not shown to other companies.")
+        if decision["route"] == "sanral":
+            intake_rec["notes"].append("A SANRAL Technical Submission workbook was found among the documents. The SANRAL "
+                                       "submission pack uses the tender's blank templates - upload them under Blank tender "
+                                       "templates on this page.")
+        client.update("tender_packs", {"id": pack["id"]}, {"document_requirements": clean, "intake": intake_rec})
+        verdict = record_fit(client, job, tender, all_text)
+        return {"route": decision["route"], "family": tender.get("family"), "verdict": verdict, "private_documents": len(private),
+                "forms": len(clean["forms"]), "returnables": len(clean["returnables"]), "questions": len(clean["questions"])}
     patch = {"document_requirements": clean}
     if decision["route"] == "sanral":
         setup, fp = register_sanral_tender(client, tender, decision, sources)
@@ -391,7 +460,7 @@ def _within(item, rule, closing):
     return True
 
 
-def gather_pack_inputs(client, job, tender, manifest, work):
+def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rules=False):
     company = client.select("companies", {"id": job["company_id"]})[0]
     answer_rows = client.select("tender_answers", {"company_id": job["company_id"], "tender_id": tender["id"]})
     answers = {a["field_key"]: a["value"] for a in answer_rows if a.get("value") is not None}
@@ -415,7 +484,10 @@ def gather_pack_inputs(client, job, tender, manifest, work):
 
     # experience the tender's own rule accepts (never SANRAL's B6 by default)
     evidence = []
-    rules = (tender.get("evaluation_rules") or {}).get("experience_evidence", {}).get("rules") or manifest["experience_evidence"].get("rules") or []
+    shared_rules = (tender.get("evaluation_rules") or {}).get("experience_evidence", {}).get("rules")
+    own_rules = manifest["experience_evidence"].get("rules")
+    # A company's own reading (private documents) is the fuller one - its rule first.
+    rules = ((own_rules or shared_rules) if prefer_manifest_rules else (shared_rules or own_rules)) or []
     if rules:
         rule = rules[0]
         accepted = {t for e in rule.get("accepted_evidence", []) for t in DOC_TYPES_FOR.get(e, [])}
@@ -453,7 +525,10 @@ def run_pack(client, job, work_root, fetch=None):
     if tender.get("family") in intake.SANRAL_FAMILIES:
         raise RuntimeError("This is a SANRAL tender (its Technical Submission workbook was recognised) - generate it with the "
                            "SANRAL 'Submission pack' card, not the general pack.")
-    manifest = tender.get("document_requirements")
+    # This company's own reading (with its private documents, 0032) wins.
+    pack = own_pack(client, job)
+    private_manifest = (pack or {}).get("document_requirements")
+    manifest = private_manifest or tender.get("document_requirements")
     if not manifest:
         raise RuntimeError("This tender's documents haven't been read yet - run 'Read this tender's documents' first.")
     work = os.path.join(work_root, "packs", job["id"])
@@ -461,8 +536,17 @@ def run_pack(client, job, work_root, fetch=None):
     os.makedirs(work, exist_ok=True)
     paths, _ = download_tender_documents(tender, os.path.join(work_root, "tenders", tender["id"], "docs"), fetch, client=client)
     docs_dir = os.path.join(work_root, "tenders", tender["id"], "docs")
-    local = bgp.local_docs_for(manifest, [docs_dir] if paths else [], os.path.join(work, "src"))
-    company, answers, files, signatory, evidence, cvs = gather_pack_inputs(client, job, tender, manifest, work)
+    dirs = [docs_dir] if paths else []
+    if private_manifest:
+        private = private_documents_for(client, job["company_id"], tender)
+        if private:
+            pdir = os.path.join(private_work_dir(work_root, job["company_id"], tender["id"]), "private_docs")
+            ppaths, _ = download_tender_documents({"document_urls": private}, pdir, fetch, client=client)
+            if ppaths:
+                dirs.append(pdir)
+    local = bgp.local_docs_for(manifest, dirs, os.path.join(work, "src"))
+    company, answers, files, signatory, evidence, cvs = gather_pack_inputs(client, job, tender, manifest, work,
+                                                                           prefer_manifest_rules=bool(private_manifest))
     out_pdf = os.path.join(work, "submission_pack.pdf")
     res = bgp.build_general_pack(
         manifest=manifest, local_docs=local, company=company, signatory=signatory, answers=answers,
@@ -489,7 +573,8 @@ def run_pack(client, job, work_root, fetch=None):
         client.upsert("field_provenance", [{"tender_pack_id": job["tender_pack_id"], **{k: e[k] for k in ("field_key", "status", "value", "reason", "source")}}
                                           for e in seen.values()], "tender_pack_id,field_key")
     return {"storage_path_pdf": pdf_path, "output_files": output_files, "page_count": pm["page_count"],
-            "manifest": {k: pm[k] for k in ("sections", "omitted", "by_hand", "form_results", "provenance_summary", "contents_pages")}}
+            "manifest": {k: pm[k] for k in ("sections", "omitted", "by_hand", "form_results", "provenance_summary", "contents_pages",
+                                            "checklist", "checklist_summary")}}
 
 
 # ---------------------------------------------------------------------------

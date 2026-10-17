@@ -117,6 +117,12 @@ def score_candidate(person_id, person, position, closing_date):
         "years_experience": years,
         "rationale": "; ".join(reasons) if reasons else "no matching or conflicting evidence found",
         "specialism_warning": bool(specific_miss) and not specific_overlap,
+        # The same evidence as the rationale, structured, so the Tender
+        # Workspace can say briefly why a person is suggested
+        # (engine/pack/process_pack_jobs.py sync_position_suggestions).
+        "matched": sorted(specific_overlap),
+        "missing": sorted(specific_miss),
+        "ecsa_level": ecsa or None,
     }
 
 

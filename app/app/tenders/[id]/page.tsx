@@ -16,6 +16,7 @@ import { TenderTemplates } from "./tender-templates";
 import { PositionPersonSelect } from "./position-person-select";
 import { startTenderPack } from "./pack-inputs-actions";
 import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
+import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -48,6 +49,8 @@ type Assignment = {
   position_code: string;
   confirmed_person_id: string | null;
   suggested_person_id: string | null;
+  // score_candidate() ranking from the pack builder (0031) - see app/lib/positionSuggestions.ts.
+  candidate_scores: CandidateScore[] | null;
   // PostgREST embedding via the confirmed_person_id FK - see
   // 0001_init_schema.sql's tender_pack_assignments.confirmed_person_id
   // references people(id).
@@ -231,7 +234,7 @@ export default async function TenderWorkspacePage({
 
     const { data: assignmentRows } = await supabase
       .from("tender_pack_assignments")
-      .select("id, position_code, confirmed_person_id, suggested_person_id, people:confirmed_person_id(name)")
+      .select("id, position_code, confirmed_person_id, suggested_person_id, candidate_scores, people:confirmed_person_id(name)")
       .eq("tender_pack_id", tenderPack.id)
       .order("position_code", { ascending: true });
     assignments = (assignmentRows ?? []) as unknown as Assignment[];
@@ -501,8 +504,10 @@ export default async function TenderWorkspacePage({
                 </div>
                 <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
                   Choose who fills each position on this tender - the submission pack is built with exactly these
-                  people and won&apos;t generate until every position has one. People tagged on their People page as
-                  fitting the role are listed first. Once confirmed, you can request the tender-customized CV
+                  people and won&apos;t generate until every position has one. Tender Tool suggests the best match among
+                  the people tagged on their People page as fitting the role (scored on their qualifications, projects
+                  and years against the position), with up to two alternatives - confirm it, or pick anyone else from the
+                  list. Once confirmed, you can request the tender-customized CV
                   (requirement-matching cover page); that is fulfilled out-of-band by engine/cv/process_cv_jobs.py, so it
                   records a request, not an instant result.
                 </div>
@@ -526,7 +531,13 @@ export default async function TenderWorkspacePage({
                   const tagged = assignablePeople.filter((p) => taggedIds.has(p.id));
                   const others = assignablePeople.filter((p) => !taggedIds.has(p.id));
                   const confirmedId = a?.confirmed_person_id ?? null;
-                  const suggestedName = !confirmedId && a?.suggested_person_id ? peopleName.get(a.suggested_person_id) ?? null : null;
+                  const sugg = suggestForPosition({
+                    positionCode: code,
+                    description: req?.position_description ?? null,
+                    candidateScores: a?.candidate_scores ?? null,
+                    tags: roleTags,
+                    peopleIds: new Set(assignablePeople.map((p) => p.id)),
+                  });
                   const positionJobs = generatedCvs.filter((g) => g.position_code === code);
                   return (
                     <div key={code} style={{ borderTop: "1px solid #F0EEE6", padding: "12px 0" }}>
@@ -539,9 +550,7 @@ export default async function TenderWorkspacePage({
                           <div style={{ fontSize: 12, color: confirmedId ? "#15803D" : "#B45309", marginTop: 2, fontWeight: 600 }}>
                             {confirmedId
                               ? `Confirmed: ${a?.people?.name ?? peopleName.get(confirmedId) ?? "person on file"}`
-                              : suggestedName
-                                ? `Not confirmed - suggested: ${suggestedName}`
-                                : "Not confirmed yet"}
+                              : "Not confirmed yet"}
                           </div>
                           {roleCode && tagged.length === 0 && (
                             <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>
@@ -557,6 +566,7 @@ export default async function TenderWorkspacePage({
                           tagged={tagged}
                           others={others}
                           roleTitle={roleCode ? roleTitles.get(roleCode) ?? null : null}
+                          suggestions={sugg}
                         />
                       </div>
                       {confirmedId && (

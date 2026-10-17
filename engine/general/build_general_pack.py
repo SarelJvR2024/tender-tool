@@ -53,7 +53,7 @@ import fill_sbd_docx  # noqa: E402
 import fill_flat_pdf  # noqa: E402
 import requirements as req  # noqa: E402
 from provenance import ProvenanceLog  # noqa: E402
-from pdf_merge import merge_with_contents, verify_pack  # noqa: E402
+from pdf_merge import merge_with_contents, verify_pack, expiry_warning  # noqa: E402
 
 FORMS_ENV = "Returnable forms"
 BUYER_ENV = "Buyer's own forms (complete by hand)"
@@ -115,17 +115,6 @@ def to_pdf(path, work_dir):
         pdf = req.convert_with_soffice(local, "pdf", work_dir)
         return (pdf, None) if pdf else (None, "Word file could not be converted to PDF")
     return None, f"unsupported file type '{ext}'"
-
-
-def _valid_on(expiry, closing):
-    if not expiry:
-        return None
-    try:
-        exp = datetime.date.fromisoformat(str(expiry)[:10])
-    except ValueError:
-        return None
-    ref = datetime.date.fromisoformat(str(closing)[:10]) if closing else datetime.date.today()
-    return exp >= ref
 
 
 # ---------------------------------------------------------------------------
@@ -466,11 +455,14 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
             continue
         pdf, why = to_pdf(path, conv_dir)
         exp_col = VAULT_EXPIRY_FOR.get(r["key"])
-        valid = _valid_on(company.get(exp_col), closing) if exp_col and not files.get("upload:" + r["key"]) else None
-        if valid is False:
-            by_hand.append({"title": title, "reason": "the copy on file expires before the closing date - renew it"})
-        sections.append({"title": title + (" (EXPIRES BEFORE CLOSING)" if valid is False else ""), "envelope": DOCS_ENV,
-                         "pdf": pdf, "omitted_reason": None if pdf else f"could not convert ({why})"})
+        # An expired vault copy is still included, with a checklist WARNING
+        # (pdf_merge.expiry_warning, same rule as the SANRAL pack) - a
+        # per-tender upload replaces the vault copy, so its date isn't known.
+        warning = expiry_warning(company.get(exp_col), closing) if exp_col and not files.get("upload:" + r["key"]) else None
+        if warning:
+            by_hand.append({"title": title, "reason": f"the vault copy {warning[0].lower() + warning[1:]}"})
+        sections.append({"title": title, "envelope": DOCS_ENV, "pdf": pdf, "warning": warning if pdf else None,
+                         "omitted_reason": None if pdf else f"could not convert ({why})"})
 
     # --- 5. experience evidence -----------------------------------------
     for item in evidence_items:

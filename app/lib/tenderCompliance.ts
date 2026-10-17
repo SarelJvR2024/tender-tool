@@ -38,6 +38,12 @@ export type ComplianceItem = {
   // Valid on the closing date, but renewal falls within RENEW_SOON_DAYS of
   // today - shown as an amber "Renew soon" chip next to an "On file" row.
   expiring?: boolean;
+  // Not valid at closing (expired / lapses first) BUT a copy is uploaded to
+  // the vault: the submission pack still INCLUDES that copy, flagged with a
+  // warning on its checklist (engine/pack/pdf_merge.py expiry_warning) -
+  // Sarel, 2026-10-17: "Dont include. Add as a warning." Shown as a chip so
+  // the report and the pack say the same thing.
+  expiredCopy?: boolean;
 };
 
 export type CompanyVault = {
@@ -104,6 +110,9 @@ export function validityAtClosing(
 }
 
 const copyNote = (path: string | null) => (path ? " Copy uploaded to the vault." : " No copy uploaded to the vault yet.");
+const EXPIRED_COPY_NOTE = " The expired copy on file still goes into the submission pack, marked with a warning - replace it before you submit.";
+/** An expired/lapsing document with an uploaded copy: the pack includes it with a warning. */
+const expiredCopy = (status: ComplianceStatus, path: string | null | undefined) => status === "missing" && !!path;
 
 export const BEE_PROOF_LABEL: Record<string, string> = {
   certificate: "B-BBEE verification certificate",
@@ -212,7 +221,8 @@ export function sanralConventionalDocumentChecks(input: {
       detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${new Date(exp).toLocaleDateString()} - covers the closing date.` + copyNote(c?.coid_letter_document_path ?? null);
     }
     const fill = formFillNote(input.provenance, ["a_forms.A20"], input.hasPack);
-    items.push({ key: "coid", form: "A20", label: "COID Letter of Good Standing", mandatory: true, status: status === "have" && fill.status ? fill.status : status, detail: detail + fill.note });
+    const exp_ = !!exp && expiredCopy(status, c?.coid_letter_document_path);
+    items.push({ key: "coid", form: "A20", label: "COID Letter of Good Standing", mandatory: true, status: status === "have" && fill.status ? fill.status : status, expiredCopy: exp_, detail: detail + (exp_ ? EXPIRED_COPY_NOTE : "") + fill.note });
   }
 
   // C1.1.1 / Stage 2 #1 - Form of Offer completed in full and signed.
@@ -269,7 +279,12 @@ export function sanralConventionalDocumentChecks(input: {
       mandatory: false,
       status: status === "have" && fill.status ? fill.status : status,
       expiring,
-      detail: detail + (c?.sars_tcs_pin ? copyNote(c.sars_tcs_pin_document_path) : "") + fill.note,
+      expiredCopy: !!c?.sars_tcs_pin_expiry && expiredCopy(status, c?.sars_tcs_pin_document_path),
+      detail:
+        detail +
+        (c?.sars_tcs_pin ? copyNote(c.sars_tcs_pin_document_path) : "") +
+        (c?.sars_tcs_pin_expiry && expiredCopy(status, c?.sars_tcs_pin_document_path) ? EXPIRED_COPY_NOTE : "") +
+        fill.note,
     });
   }
 
@@ -301,9 +316,11 @@ export function sanralConventionalDocumentChecks(input: {
       detail =
         `${levelText}, ${BEE_PROOF_LABEL[c.bee_proof_type]} ${v.text}.${accepted}` +
         (v.status === "missing" ? " Without valid proof you score 0 of the 10/20 preference points (not disqualified)." : "") +
-        copyNote(c.bee_proof_document_path);
+        copyNote(c.bee_proof_document_path) +
+        (expiredCopy(status, c.bee_proof_document_path) ? EXPIRED_COPY_NOTE : "");
     }
-    items.push({ key: "bbbee", form: "A12", label: "B-BBEE proof for preference points (SBD 6.1)", mandatory: false, status, expiring, detail });
+    const bbbeeExpired = !!c?.bee_proof_expiry && expiredCopy(status, c?.bee_proof_document_path);
+    items.push({ key: "bbbee", form: "A12", label: "B-BBEE proof for preference points (SBD 6.1)", mandatory: false, status, expiring, expiredCopy: bbbeeExpired, detail });
   }
 
   // A2 - authority for signatory.
@@ -336,7 +353,7 @@ export function sanralConventionalDocumentChecks(input: {
       const v = validityAtClosing(c.pi_insurance_expiry, input.closingDate);
       status = v.status;
       expiring = v.expiring;
-      detail = `${policy || "Policy"} ${v.text}.` + copyNote(c.pi_insurance_document_path);
+      detail = `${policy || "Policy"} ${v.text}.` + copyNote(c.pi_insurance_document_path) + (expiredCopy(status, c.pi_insurance_document_path) ? EXPIRED_COPY_NOTE : "");
     }
     items.push({
       key: "insurance",
@@ -345,6 +362,7 @@ export function sanralConventionalDocumentChecks(input: {
       mandatory: false,
       status: status === "have" && fill.status ? fill.status : status,
       expiring,
+      expiredCopy: !!c?.pi_insurance_expiry && expiredCopy(status, c?.pi_insurance_document_path),
       detail: detail + fill.note,
     });
   }
@@ -369,9 +387,11 @@ export function sanralConventionalDocumentChecks(input: {
         (v.status === "have"
           ? `, within 3 months of closing (${v.text}).`
           : ` - older than 3 months by the closing date; get a fresh one.`) +
-        copyNote(c.bank_confirmation_letter_path);
+        copyNote(c.bank_confirmation_letter_path) +
+        (expiredCopy(status, c.bank_confirmation_letter_path) ? EXPIRED_COPY_NOTE : "");
     }
-    items.push({ key: "bank", form: "A18", label: "Bank confirmation letter", mandatory: false, status, expiring, detail });
+    const bankExpired = !!c?.bank_confirmation_letter_valid_until && expiredCopy(status, c?.bank_confirmation_letter_path);
+    items.push({ key: "bank", form: "A18", label: "Bank confirmation letter", mandatory: false, status, expiring, expiredCopy: bankExpired, detail });
   }
 
   // A4-A23 declarations - filled from data by fill_a_forms.py, signed by hand.
@@ -406,7 +426,8 @@ export function sanralConventionalDocumentChecks(input: {
         detail =
           `${cert}, ${v.text}.` +
           (v.status === "have" ? " Submit the certificate with Form B4 for the full 10 points." : ` Without it, an in-house QMS scores 5. ${points}`) +
-          copyNote(c.iso_9001_document_path);
+          copyNote(c.iso_9001_document_path) +
+          (expiredCopy(status, c.iso_9001_document_path) ? EXPIRED_COPY_NOTE : "");
       }
     } else if (c?.iso_9001_certified === false) {
       status = "missing";
@@ -415,7 +436,8 @@ export function sanralConventionalDocumentChecks(input: {
       status = "check";
       detail = `ISO 9001 certification not stated in the vault yet. ${points}`;
     }
-    items.push({ key: "quality_system", form: "B4", label: "Certificate of quality systems (ISO 9001 or in-house)", mandatory: false, status, expiring, detail });
+    const isoExpired = c?.iso_9001_certified === true && !!c.iso_9001_expiry && expiredCopy(status, c.iso_9001_document_path);
+    items.push({ key: "quality_system", form: "B4", label: "Certificate of quality systems (ISO 9001 or in-house)", mandatory: false, status, expiring, expiredCopy: isoExpired, detail });
   }
 
   // B6 - past performance (15 functionality points) - company experience.

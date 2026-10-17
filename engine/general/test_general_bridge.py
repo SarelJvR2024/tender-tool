@@ -15,7 +15,14 @@ It proves, by reading the results back rather than trusting exit codes:
   3. a job already claimed by another worker is not re-processed;
   4. a pack requested before the documents were read fails with a reason;
   5. a buyer with no SBD/MBD forms (ESKOM) still gets a pack (ordered
-     documents + its own forms listed by hand), not a crash or a fake fill.
+     documents + its own forms listed by hand), not a crash or a fake fill;
+  6. an EXPIRED vault document is still put in the pack, with a warning on
+     its checklist row and on the contents page (Sarel, 2026-10-17);
+  7. private documents on a SHARED tender (migration 0032): one company's
+     own files are read with the published ones, the result goes to THAT
+     company's tender_packs row only, the shared tender row and another
+     company's reading are untouched, and a row pointing outside the
+     company's own folder is refused before anything is downloaded.
 
 Usage: python3 engine/general/test_general_bridge.py
 """
@@ -247,6 +254,86 @@ def main():
     check(j6["status"] == "ready", f"pack still built ({j6['status']} {j6.get('error_message')})")
     check(any("NEC3" in b["title"] or "Form of Offer" in b["title"] for b in (j6.get("manifest") or {}).get("by_hand", [])),
           "ESKOM's own forms listed as by-hand")
+
+    print("6. an expired vault document goes in WITH a warning (co2, TCS PIN lapsed 2026-01-31)")
+    fake.add("companies", id="co2", legal_name="Second Synthetic Bidder (Pty) Ltd", registered_address="1 Other Road, Testville, Gauteng",
+             csd_supplier_number="MAAA0888888", sars_tcs_pin="TESTPIN22", sars_tcs_pin_expiry="2026-01-31",
+             sars_tcs_pin_document_path="co2/vault/sars/pin.pdf", bee_level=2, bee_proof_type="certificate", bee_proof_expiry="2027-03-01")
+    fake.storage["company-documents/co2/vault/sars/pin.pdf"] = tiny_pdf("SECOND BIDDER EXPIRED TCS PIN LETTER")
+    fake.add("people", id="p2", company_id="co2", name="Sam Second", signatory_capacity="Director", role="Director")
+    fake.add("tender_packs", id="pack-co2-t-dsti", company_id="co2", tender_id="t-dsti", status="suggested")
+    fake.add("pack_generation_jobs", id="j7", engine="general", kind="generate_pack", status="requested", company_id="co2",
+             tender_id="t-dsti", tender_pack_id="pack-co2-t-dsti", requested_at="2026-10-16T10:10:00Z")
+    bridge.poll_once(client, work, fetch)
+    j7 = fake.one("pack_generation_jobs", id="j7")
+    check(j7["status"] == "ready", f"pack ready ({j7['status']} {j7.get('error_message')})")
+    cl = (j7.get("manifest") or {}).get("checklist") or []
+    tax = [c for c in cl if "SECOND" not in c["title"] and c["status"] == "included_warning"]
+    check(len(tax) == 1 and "EXPIRED 2026-01-31" in (tax[0]["note"] or ""), f"checklist: the expired PIN letter is included_warning ({[(c['title'], c['note']) for c in tax]})")
+    check(all(c["status"] in ("included", "included_warning", "not_included") for c in cl) and len(cl) >= 5, f"checklist lists every document ({len(cl)} rows)")
+    key7 = f"submission-packs/{j7.get('storage_path_pdf')}"
+    if key7 in fake.storage:
+        rd = PdfReader(io.BytesIO(fake.storage[key7]))
+        flat = " ".join(" ".join((p.extract_text() or "").split()) for p in rd.pages)
+        check("SECOND BIDDER EXPIRED TCS PIN LETTER" in flat, "the expired PIN letter itself IS in the PDF (not excluded)")
+        check("INCLUDED - WARNING: EXPIRED 2026-01-31" in flat, "contents page shows the warning on that row")
+        check("Pack checklist:" in flat, "contents page carries the checklist summary")
+
+    print("7. private documents on a SHARED tender (0032)")
+    # Shared tender: Discovery found it, the listing only has an advert.
+    fake.storage["advert.pdf"] = tiny_pdf("ADVERT ONLY - collect the bid document from the buyer")
+    advert = os.path.join(work, "advert.pdf")
+    open(advert, "wb").write(fake.storage["advert.pdf"])
+    fake.add("tenders", id="t-shared", slug="ocds-shared-1", contract_no="RFQ-SHARED", buyer="Shared buyer", description="Shared tender",
+             closing_date="2026-11-06T11:00:00Z", owner_company_id=None, document_urls=[{"url": f"sample://{advert}", "title": "advert.pdf"}],
+             document_requirements=None, evaluation_rules=None, intake=None, family="General (non-SANRAL)")
+    fake.add("tender_packs", id="pack-co1-shared", company_id="co1", tender_id="t-shared", status="suggested", document_requirements=None, intake=None)
+    fake.add("tender_packs", id="pack-co2-shared", company_id="co2", tender_id="t-shared", status="suggested", document_requirements=None, intake=None)
+    # co1's own copy of the bid document (the real DSTI SBD bundle), uploaded privately.
+    dsti = os.path.join(SAMPLES, "dsti_rfq15")
+    for i, f in enumerate(sorted(os.listdir(dsti))):
+        sp = f"private/co1/t-shared/{i}-{f}"
+        fake.storage[f"tender-documents/{sp}"] = open(os.path.join(dsti, f), "rb").read()
+        fake.add("tender_private_documents", id=f"pd{i}", company_id="co1", tender_id="t-shared", title=f, storage_path=sp,
+                 created_at=f"2026-10-17T09:0{i}:00Z")
+    for jid, co, at in (("j8", "co1", "10:11"), ("j9", "co2", "10:12")):
+        fake.add("pack_generation_jobs", id=jid, engine="general", kind="extract_requirements", status="requested", company_id=co,
+                 tender_id="t-shared", tender_pack_id=f"pack-{co}-shared", requested_at=f"2026-10-16T{at}:00Z")
+    bridge.poll_once(client, work, fetch)
+    j8, j9 = fake.one("pack_generation_jobs", id="j8"), fake.one("pack_generation_jobs", id="j9")
+    check(j8["status"] == "ready" and j9["status"] == "ready", f"both reads ready ({j8['status']} {j8.get('error_message')} / {j9['status']} {j9.get('error_message')})")
+    p1, p2, ts = fake.one("tender_packs", id="pack-co1-shared"), fake.one("tender_packs", id="pack-co2-shared"), fake.one("tenders", id="t-shared")
+    m1 = p1.get("document_requirements") or {}
+    check([f["code"] for f in m1.get("forms", []) if f["status"] == "auto"] == ["1", "4", "6.1"],
+          "co1's own reading (with its private bid document) found SBD 1/4/6.1")
+    check(sorted((p1.get("intake") or {}).get("private_documents") or []) == sorted(f"pd{i}" for i in range(len(os.listdir(dsti)))),
+          "co1's intake records which private documents it read")
+    shared_m = ts.get("document_requirements") or {}
+    check(not shared_m.get("forms"), "the SHARED tender's reading (co2's job, published advert only) has no SBD forms - nothing from co1's files")
+    shared_names = " ".join(d["name"] for d in shared_m.get("documents", []))
+    check(not any(f in shared_names for f in os.listdir(dsti)) and "SBD" not in json.dumps(ts.get("evaluation_rules") or {}),
+          "no private file name or rule reached the shared tenders row")
+    check(p2.get("document_requirements") is None, "co2's pack has no private reading")
+    check(not any(r.get("tender_id") == "t-shared" for r in fake.tables.get("tender_documents", [])), "nothing registered in shared tender_documents")
+    # co1's pack is built from its private reading: SBD 1 filled with co1's data.
+    fake.add("tender_answers", company_id="co1", tender_id="t-shared", field_key="signatory_person_id", value="p1", storage_path=None)
+    fake.add("pack_generation_jobs", id="j10", engine="general", kind="generate_pack", status="requested", company_id="co1",
+             tender_id="t-shared", tender_pack_id="pack-co1-shared", requested_at="2026-10-16T10:13:00Z")
+    bridge.poll_once(client, work, fetch)
+    j10 = fake.one("pack_generation_jobs", id="j10")
+    check(j10["status"] == "ready", f"co1's pack ready ({j10['status']} {j10.get('error_message')})")
+    fr = (j10.get("manifest") or {}).get("form_results") or {}
+    check(fr.get("1", {}).get("status") == "filled", f"co1's pack fills SBD 1 from the private bid document ({fr.get('1')})")
+    # A row pointing at another company's folder is refused before any download.
+    fake.add("tender_private_documents", id="bad", company_id="co2", tender_id="t-shared", title="x",
+             storage_path="private/co1/t-shared/0-stolen.pdf", created_at="2026-10-17T10:00:00Z")
+    fake.add("pack_generation_jobs", id="j11", engine="general", kind="extract_requirements", status="requested", company_id="co2",
+             tender_id="t-shared", tender_pack_id="pack-co2-shared", requested_at="2026-10-16T10:14:00Z")
+    bridge.poll_once(client, work, fetch)
+    j11 = fake.one("pack_generation_jobs", id="j11")
+    check(j11["status"] == "failed" and "not under this company's own folder" in (j11.get("error_message") or ""),
+          f"a private-document row outside the company's own folder is refused ({j11.get('error_message')})")
+    check(fake.one("tender_packs", id="pack-co2-shared").get("document_requirements") is None, "co2 got nothing from co1's folder")
 
     shutil.rmtree(work, ignore_errors=True)
     fake.httpd.shutdown()

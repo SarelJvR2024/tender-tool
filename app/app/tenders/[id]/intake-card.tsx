@@ -40,7 +40,10 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
     .eq("id", tenderId)
     .maybeSingle();
   if (!tender) return null;
-  const intake = (tender.intake as TenderIntake | null) ?? null;
+  // With private documents on a shared tender (0032), this company's own
+  // intake record (on its tender_packs row) describes what was read.
+  const { data: ownPack } = await supabase.from("tender_packs").select("intake").eq("tender_id", tenderId).maybeSingle();
+  const intake = ((ownPack?.intake ?? tender.intake) as TenderIntake | null) ?? null;
   const source = tender.source as string;
 
   const [{ data: jobRows }, { data: oppRows }] = await Promise.all([

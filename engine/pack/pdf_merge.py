@@ -19,18 +19,35 @@ Libraries: only what the repo already relies on.
     (engine/cv/generate_cv.py's _convert_to_pdf, reused, not copied).
 
 A section is a dict:
-  {"title": str, "envelope": str, "pdf": path-or-None, "omitted_reason": str-or-None}
+  {"title": str, "envelope": str, "pdf": path-or-None, "omitted_reason": str-or-None,
+   "warning": str-or-None}
 A section with no pdf is never silently dropped: it is listed on the
-contents page under "Not included" with its reason.
+contents page as NOT INCLUDED with its reason.
+
+The contents page is also the pack's CHECKLIST (Sarel, 2026-10-17: "With each
+tender pack you need to create a check of whats included and the status"):
+one numbered row per document the pack is meant to hold, in submission order,
+each with its status -
+  included          in the PDF, nothing to flag
+  included_warning  in the PDF, but must be fixed before submission (e.g. the
+                    vault copy has EXPIRED - it is still included, because it is
+                    the copy on file and leaving it out would hide the problem,
+                    but the row says so in red; see expiry_warning())
+  not_included      not in the PDF, with the reason
+The same rows are returned as manifest["checklist"], which the Tender
+Workspace renders next to the download (app/app/tenders/[id]/pack-checklist.tsx).
 """
 import os
 import sys
 import datetime
 
 import docx
-from docx.shared import Pt, Inches
+from docx.shared import Pt, Inches, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from pypdf import PdfReader, PdfWriter, PageObject
+
+RED = RGBColor(0xB9, 0x1C, 0x1C)    # Civic Navy danger
+AMBER = RGBColor(0xB4, 0x53, 0x09)  # Civic Navy warning
 from pypdf.generic import (
     DecodedStreamObject, DictionaryObject, NameObject, ArrayObject,
 )
@@ -84,6 +101,43 @@ def _stamp(page, text, size=8):
 
 
 # ---------------------------------------------------------------------------
+# Expired-document warning (shared by the SANRAL and general pack builders)
+# ---------------------------------------------------------------------------
+
+def expiry_warning(expiry, closing, today=None):
+    """Warning text for a dated document that is NOT valid on the closing date
+    (or, with no closing date, already lapsed) - None when it is valid or the
+    date is unknown. Same rule as app/lib/tenderCompliance.ts
+    validityAtClosing(): valid ON the closing day counts."""
+    if not expiry:
+        return None
+    try:
+        exp = datetime.date.fromisoformat(str(expiry)[:10])
+    except ValueError:
+        return None
+    today = today or datetime.date.today()
+    try:
+        close = datetime.date.fromisoformat(str(closing)[:10]) if closing else None
+    except ValueError:
+        close = None
+    if exp < today:
+        return f"EXPIRED {exp.isoformat()} - replace it with a current copy before submitting"
+    if close and exp < close:
+        return (f"EXPIRES {exp.isoformat()}, before the closing date ({close.isoformat()}) - "
+                "replace it with a current copy before submitting")
+    return None
+
+
+def checklist_status(section):
+    if not section.get("pdf"):
+        return "not_included"
+    return "included_warning" if section.get("warning") else "included"
+
+
+STATUS_TEXT = {"included": "Included", "included_warning": "INCLUDED - WARNING", "not_included": "NOT INCLUDED"}
+
+
+# ---------------------------------------------------------------------------
 # Contents page (python-docx -> soffice, same route as every other document)
 # ---------------------------------------------------------------------------
 
@@ -99,7 +153,8 @@ def _set_widths(table, inches):
             cell.width = Inches(w)
 
 
-def _contents_docx(path, heading_lines, rows, omitted, notes, title="SUBMISSION PACK - CONTENTS"):
+def _contents_docx(path, heading_lines, rows, notes, title="SUBMISSION PACK - CONTENTS AND CHECKLIST"):
+    """rows: every checklist row in submission order (included and not)."""
     d = docx.Document()
     s = d.sections[0]
     s.top_margin = s.bottom_margin = Inches(0.7)
@@ -114,53 +169,52 @@ def _contents_docx(path, heading_lines, rows, omitted, notes, title="SUBMISSION 
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p.paragraph_format.space_after = Pt(0)
 
-    d.add_paragraph()
-    t = d.add_table(rows=1, cols=3)
+    counts = {k: sum(1 for r in rows if r["status"] == k) for k in STATUS_TEXT}
+    p = d.add_paragraph(
+        f"Pack checklist: {len(rows)} documents - {counts['included']} included, "
+        f"{counts['included_warning']} included with a WARNING, {counts['not_included']} NOT included. "
+        "Every warning and every document not included must be dealt with before submission.")
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.runs[0].bold = True
+    p.runs[0].font.size = Pt(9)
+
+    t = d.add_table(rows=1, cols=4)
     t.style = "Table Grid"
     hdr = t.rows[0].cells
-    for c, label in zip(hdr, ("No.", "Document", "Pages")):
+    for c, label in zip(hdr, ("No.", "Document", "Pages", "Status")):
         c.text = label
         c.paragraphs[0].runs[0].bold = True
     current_env = None
-    n = 0
-    for r in rows:
+    flagged = []  # (row cells) to colour after the font pass
+    for n, r in enumerate(rows, start=1):
         if r["envelope"] != current_env:
             current_env = r["envelope"]
             row = t.add_row().cells
-            merged = row[0].merge(row[2])
+            merged = row[0].merge(row[3])
             merged.text = current_env
             merged.paragraphs[0].runs[0].bold = True
-        n += 1
         row = t.add_row().cells
         row[0].text = str(n)
         row[1].text = r["title"]
-        row[2].text = (f"{r['start']}" if r["start"] == r["end"] else f"{r['start']}-{r['end']}")
-    _set_widths(t, (0.5, 5.4, 0.9))
+        if r["status"] == "not_included":
+            row[2].text = "-"
+            row[3].text = f"NOT INCLUDED: {r['note']}"
+        else:
+            row[2].text = (f"{r['start']}" if r["start"] == r["end"] else f"{r['start']}-{r['end']}")
+            row[3].text = f"INCLUDED - WARNING: {r['note']}" if r["status"] == "included_warning" else "Included"
+        if r["status"] != "included":
+            flagged.append((row[3], r["status"]))
+    _set_widths(t, (0.4, 3.9, 0.7, 1.9))
     for row in t.rows:
         for c in row.cells:
             for para in c.paragraphs:
                 for run in para.runs:
-                    run.font.size = Pt(9)
-
-    if omitted:
-        d.add_paragraph()
-        p = d.add_paragraph("NOT INCLUDED IN THIS PACK - must be added before submission")
-        p.runs[0].bold = True
-        t2 = d.add_table(rows=1, cols=2)
-        t2.style = "Table Grid"
-        for c, label in zip(t2.rows[0].cells, ("Document", "Why it is missing")):
-            c.text = label
-            c.paragraphs[0].runs[0].bold = True
-        for o in omitted:
-            row = t2.add_row().cells
-            row[0].text = f"{o['envelope']}: {o['title']}"
-            row[1].text = o["omitted_reason"]
-        _set_widths(t2, (2.8, 4.0))
-        for row in t2.rows:
-            for c in row.cells:
-                for para in c.paragraphs:
-                    for run in para.runs:
-                        run.font.size = Pt(8.5)
+                    run.font.size = Pt(8.5)
+    for cell, status in flagged:
+        for para in cell.paragraphs:
+            for run in para.runs:
+                run.bold = True
+                run.font.color.rgb = RED if status == "included_warning" else AMBER
 
     if notes:
         d.add_paragraph()
@@ -176,7 +230,7 @@ def _page_count(path):
 
 
 def merge_with_contents(sections, out_pdf, work_dir, heading_lines, notes=(),
-                        front_count=1, stamp_label="", title="SUBMISSION PACK - CONTENTS",
+                        front_count=1, stamp_label="", title="SUBMISSION PACK - CONTENTS AND CHECKLIST",
                         pdf_title=None):
     """sections: ordered list (see module docstring). The first `front_count`
     included sections (the outer envelope cover) go before the contents page;
@@ -191,19 +245,35 @@ def merge_with_contents(sections, out_pdf, work_dir, heading_lines, notes=(),
 
     front, body = included[:front_count], included[front_count:]
     front_pages = sum(s["page_count"] for s in front)
+    front_ids = {id(s) for s in front}
+    # Checklist order = submission order: every section except the front
+    # cover(s) printed before the contents page, omitted ones in place.
+    listed = [s for s in sections if id(s) not in front_ids]
 
     # The contents page lists page numbers that depend on its own length -
     # render, count, re-render until stable (normally 1 or 2 passes).
     contents_pages = 1
     contents_pdf = None
+    # The front cover(s) sit before the contents page but are still part of
+    # the pack, so they are on the checklist too (pages 1..front_pages).
+    front_rows, fpage = [], 1
+    for s in front:
+        front_rows.append({"envelope": s["envelope"], "title": s["title"], "status": checklist_status(s),
+                           "note": s.get("warning"), "start": fpage, "end": fpage + s["page_count"] - 1})
+        fpage += s["page_count"]
     for _ in range(4):
-        rows, page = [], front_pages + contents_pages + 1
-        for s in body:
-            rows.append({"envelope": s["envelope"], "title": s["title"],
-                         "start": page, "end": page + s["page_count"] - 1})
-            page += s["page_count"]
+        rows, page = list(front_rows), front_pages + contents_pages + 1
+        for s in listed:
+            status = checklist_status(s)
+            row = {"envelope": s["envelope"], "title": s["title"], "status": status,
+                   "note": s.get("omitted_reason") if status == "not_included" else s.get("warning"),
+                   "start": None, "end": None}
+            if s.get("pdf"):
+                row["start"], row["end"] = page, page + s["page_count"] - 1
+                page += s["page_count"]
+            rows.append(row)
         docx_path = os.path.join(work_dir, "00a_Contents.docx")
-        _contents_docx(docx_path, heading_lines, rows, omitted, notes, title)
+        _contents_docx(docx_path, heading_lines, rows, notes, title)
         contents_pdf = _convert_to_pdf(docx_path, work_dir)
         if not contents_pdf:
             raise RuntimeError("could not render the contents page to PDF (soffice failed)")
@@ -232,7 +302,8 @@ def merge_with_contents(sections, out_pdf, work_dir, heading_lines, notes=(),
         writer.add_outline_item(s["title"], start - 1, parent=parent)
         manifest_sections.append({"title": s["title"], "envelope": s["envelope"],
                                   "start_page": start, "end_page": end,
-                                  "source": os.path.basename(s["pdf"])})
+                                  "source": os.path.basename(s["pdf"]),
+                                  "warning": s.get("warning")})
 
     total = len(writer.pages)
     prefix = f"{stamp_label} - " if stamp_label else ""
@@ -247,12 +318,21 @@ def merge_with_contents(sections, out_pdf, work_dir, heading_lines, notes=(),
 
     # The contents rows as printed - kept in the manifest so a reader (and the
     # harness) can check the contents page against the real section offsets.
+    checklist = [{"no": i, "title": r["title"], "envelope": r["envelope"], "status": r["status"],
+                  "pages": (None if r["start"] is None else
+                            (f"{r['start']}" if r["start"] == r["end"] else f"{r['start']}-{r['end']}")),
+                  "note": r["note"]}
+                 for i, r in enumerate(rows, start=1)]
     return {
         "page_count": total,
         "contents_pages": contents_pages,
         "sections": manifest_sections,
         "omitted": [{"title": s["title"], "envelope": s["envelope"], "reason": s["omitted_reason"]}
                     for s in omitted],
+        # Every document the pack is meant to hold, in order, with its status -
+        # numbered exactly as the printed checklist on the contents page.
+        "checklist": checklist,
+        "checklist_summary": {k: sum(1 for c in checklist if c["status"] == k) for k in STATUS_TEXT},
     }
 
 
@@ -292,6 +372,18 @@ def verify_pack(pdf_path, manifest):
         for o in manifest["omitted"]:
             if " ".join(o["title"].split()[:3]) not in flat:
                 problems.append(f"omitted item '{o['title']}' not listed on the contents page")
+        checklist = manifest.get("checklist")
+        if checklist is not None:
+            if "Pack checklist:" not in flat:
+                problems.append("checklist summary line not found on the contents page")
+            n_warn = sum(1 for c in checklist if c["status"] == "included_warning")
+            n_out = sum(1 for c in checklist if c["status"] == "not_included")
+            if flat.count("INCLUDED - WARNING:") != n_warn:
+                problems.append(f"contents page shows {flat.count('INCLUDED - WARNING:')} warning rows, "
+                                f"checklist has {n_warn}")
+            if flat.count("NOT INCLUDED:") != n_out:
+                problems.append(f"contents page shows {flat.count('NOT INCLUDED:')} not-included rows, "
+                                f"checklist has {n_out}")
     outline_titles = [o.title for o in _flatten(reader.outline)]
     for s in manifest["sections"]:
         if s["title"] not in outline_titles:

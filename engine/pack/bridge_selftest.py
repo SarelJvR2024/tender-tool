@@ -236,6 +236,10 @@ def main():
         print(f"  NOT INCLUDED [{o['envelope']}] {o['title']}: {o['reason']}")
     for w in row["manifest"]["warnings"]:
         print(f"  WARNING {w}")
+    print(f"checklist: {row['manifest']['checklist_summary']}")
+    for c in row["manifest"]["checklist"]:
+        print(f"  #{c['no']:<2} {c['status']:<17} p{c['pages'] or '-':<6} {c['title']}"
+              + (f"  -- {c['note']}" if c["note"] else ""))
 
     # Envelope 2 is its own PDF (assemble_pack.py module docstring).
     fin = row["manifest"]["financial"]

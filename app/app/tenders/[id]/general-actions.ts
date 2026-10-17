@@ -39,8 +39,12 @@ export async function saveGeneralAnswers(formData: FormData) {
   const tenderId = formData.get("tender_id") as string | null;
   if (!tenderId) redirect("/dashboard");
 
-  const { data: tender } = await supabase.from("tenders").select("document_requirements").eq("id", tenderId).maybeSingle();
-  const manifest = (tender?.document_requirements as RequirementManifest | null) ?? null;
+  // This company's own reading (0032: private documents on a shared tender) wins over the shared one.
+  const [{ data: tender }, { data: ownPack }] = await Promise.all([
+    supabase.from("tenders").select("document_requirements").eq("id", tenderId).maybeSingle(),
+    supabase.from("tender_packs").select("document_requirements").eq("tender_id", tenderId).eq("company_id", companyId).maybeSingle(),
+  ]);
+  const manifest = ((ownPack?.document_requirements ?? tender?.document_requirements) as RequirementManifest | null) ?? null;
   if (!manifest) redirect(back(tenderId, `?error=${encodeURIComponent("This tender's documents haven't been read yet.")}`));
 
   const rows: { company_id: string; tender_id: string; field_key: string; value: string; answered_by: string }[] = [];
@@ -153,4 +157,46 @@ export async function requestRequirementsExtraction(formData: FormData) {
 
 export async function requestGeneralPack(formData: FormData) {
   return requestJob(formData, "generate_pack");
+}
+
+/**
+ * Remove one of this company's private documents from a shared tender (0032):
+ * the row and its file. With others left, the tender is re-read without it;
+ * with none left, this company goes back to the shared reading (its private
+ * copy of the requirements is cleared, since it may quote the removed file).
+ */
+export async function removePrivateTenderDocument(formData: FormData) {
+  const { supabase, userId, companyId } = await requireMember();
+  const tenderId = formData.get("tender_id") as string | null;
+  const docId = formData.get("document_id") as string | null;
+  if (!tenderId || !docId) redirect("/dashboard");
+  const { data: doc } = await supabase
+    .from("tender_private_documents")
+    .select("id, storage_path")
+    .eq("id", docId)
+    .eq("company_id", companyId)
+    .eq("tender_id", tenderId)
+    .maybeSingle();
+  if (!doc) redirect(`/tenders/${tenderId}#private-documents`);
+  const { error } = await supabase.from("tender_private_documents").delete().eq("id", doc.id as string);
+  if (error) redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}#private-documents`);
+  await supabase.storage.from("tender-documents").remove([doc.storage_path as string]);
+
+  const { count } = await supabase
+    .from("tender_private_documents")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", companyId)
+    .eq("tender_id", tenderId);
+  const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).eq("company_id", companyId).maybeSingle();
+  if (pack && (count ?? 0) === 0) {
+    await supabase.from("tender_packs").update({ document_requirements: null, intake: null }).eq("id", pack.id as string);
+  } else if (pack) {
+    const { error: jobErr } = await supabase.from(JOBS_TABLE).insert({
+      engine: GENERAL_ENGINE, company_id: companyId, tender_id: tenderId, tender_pack_id: pack.id as string,
+      kind: "extract_requirements", requested_by: userId,
+    });
+    if (jobErr && jobErr.code !== "23505") redirect(`/tenders/${tenderId}?error=${encodeURIComponent(jobErr.message)}#private-documents`);
+  }
+  revalidatePath(`/tenders/${tenderId}`);
+  redirect(`/tenders/${tenderId}#private-documents`);
 }

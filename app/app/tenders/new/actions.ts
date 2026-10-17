@@ -3,7 +3,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { TENDER_DOCS_BUCKET, manualPrefix, type UploadedTenderDocument } from "@/lib/manualTender";
+import { TENDER_DOCS_BUCKET, manualPrefix, privatePrefix, type UploadedTenderDocument } from "@/lib/manualTender";
+import { GENERAL_ENGINE, JOBS_TABLE } from "@/lib/generalTender";
 
 /**
  * Manual tender load (migration 0024). The browser has already put the files
@@ -24,7 +25,7 @@ async function requireMember() {
   if (!user) redirect("/login");
   const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
   if (!membership) redirect("/onboarding");
-  return { supabase, companyId: membership.company_id as string };
+  return { supabase, companyId: membership.company_id as string, userId: user.id };
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -102,4 +103,47 @@ export async function addManualTenderDocuments(input: { tenderId: string; docume
   }
   revalidatePath(`/tenders/${input.tenderId}`);
   redirect(`/tenders/${input.tenderId}?saved=intake#intake`);
+}
+
+/**
+ * Private documents on a SHARED tender (migration 0032). The browser already
+ * put the files under tender-documents/private/<company>/<tender>/; this
+ * records them in tender_private_documents (RLS: own company, a shared
+ * tender it has a pack for, path under its own prefix - also a CHECK
+ * constraint) and queues a fresh read of the tender. The bridge reads the
+ * published documents plus these, and writes the result to this company's
+ * tender_packs row only - never to the shared tender.
+ */
+export async function addPrivateTenderDocuments(input: { tenderId: string; documents: UploadedTenderDocument[] }): Promise<Result> {
+  const { supabase, companyId, userId } = await requireMember();
+  if (!UUID_RE.test(input.tenderId)) return { error: "Unknown tender." };
+  const prefix = privatePrefix(companyId, input.tenderId);
+  const docs = cleanDocuments(input.documents, prefix);
+  if (!docs) return { error: "Choose at least one document." };
+  const cleanup = () => supabase.storage.from(TENDER_DOCS_BUCKET).remove(docs.map((d) => d.storage_path));
+
+  const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", input.tenderId).eq("company_id", companyId).maybeSingle();
+  if (!pack) {
+    await cleanup();
+    return { error: "Start working on this tender first (Prepare this tender), then add your documents." };
+  }
+  const { error } = await supabase.from("tender_private_documents").insert(
+    docs.map((d) => ({ company_id: companyId, tender_id: input.tenderId, title: d.title || "document", storage_path: d.storage_path, original_filename: d.title, uploaded_by: userId })),
+  );
+  if (error) {
+    await cleanup();
+    return { error: error.message };
+  }
+  const { error: jobErr } = await supabase.from(JOBS_TABLE).insert({
+    engine: GENERAL_ENGINE,
+    company_id: companyId,
+    tender_id: input.tenderId,
+    tender_pack_id: pack.id as string,
+    kind: "extract_requirements",
+    requested_by: userId,
+  });
+  // 23505: a read is already queued - it will pick these documents up.
+  if (jobErr && jobErr.code !== "23505") return { error: jobErr.message };
+  revalidatePath(`/tenders/${input.tenderId}`);
+  redirect(`/tenders/${input.tenderId}?saved=extract#private-documents`);
 }

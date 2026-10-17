@@ -238,7 +238,8 @@ export function packReadiness(data: TenderComplianceData | null): PackReadiness 
   if (!data || !data.mapped) {
     return { checked: false, mandatoryMissing: [], missing: [], toConfirm: [], unfilledPositions: [] };
   }
-  const label = (i: { form: string; label: string }) => `${i.form} ${i.label}`;
+  const label = (i: { form: string; label: string; expiredCopy?: boolean }) =>
+    `${i.form} ${i.label}${i.expiredCopy ? " - expired copy on file: it goes in the pack with a warning, replace it before submitting" : ""}`;
   return {
     checked: true,
     mandatoryMissing: data.docItems.filter((i) => i.mandatory && i.status === "missing").map(label),

@@ -6,6 +6,8 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { MAX_UPLOAD_BYTES } from "@/lib/vaultDocuments";
 import { TENDER_TEMPLATE_BUCKET, TENDER_TEMPLATES, isTenderTemplateType } from "@/lib/tenderTemplates";
+import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
+import type { RoleTag } from "@/lib/tenderRoles";
 
 /**
  * The two inputs the SANRAL submission pack needs from a person before
@@ -85,10 +87,31 @@ export async function confirmPositionPerson(
     if (!person) return;
   }
 
+  // Record what the page was suggesting at this moment next to the choice,
+  // so pack_selections.yaml (process_pack_jobs.py) says "suggested X,
+  // confirmed Y" honestly. Recomputed here from the stored ranking - the same
+  // suggestForPosition() the card uses - never taken from the browser.
+  const [{ data: current }, { data: req }, { data: tags }, { data: ppl }] = await Promise.all([
+    supabase.from("tender_pack_assignments").select("candidate_scores").eq("tender_pack_id", tenderPackId).eq("position_code", positionCode).maybeSingle(),
+    supabase.from("tender_requirements").select("position_description").eq("tender_id", tenderId).eq("position_code", positionCode).eq("is_alternate", false).maybeSingle(),
+    supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
+    supabase.from("people").select("id").eq("company_id", companyId),
+  ]);
+  const sugg = suggestForPosition({
+    positionCode,
+    description: (req?.position_description as string | null | undefined) ?? null,
+    candidateScores: (current?.candidate_scores as CandidateScore[] | null | undefined) ?? null,
+    tags: (tags ?? []) as RoleTag[],
+    peopleIds: new Set((ppl ?? []).map((p) => p.id as string)),
+  });
+  const suggestedFields = sugg.suggestion
+    ? { suggested_person_id: sugg.suggestion.id, suggested_score: sugg.suggestion.score, suggested_rationale: sugg.suggestion.why }
+    : {};
+
   await supabase
     .from("tender_pack_assignments")
     .upsert(
-      { tender_pack_id: tenderPackId, position_code: positionCode, confirmed_person_id: personId || null },
+      { tender_pack_id: tenderPackId, position_code: positionCode, confirmed_person_id: personId || null, ...suggestedFields },
       { onConflict: "tender_pack_id,position_code" },
     );
 

@@ -22,6 +22,8 @@ import { DOCUMENT_TYPES, findMatchingExperience, labelFor } from "@/lib/experien
 import { COMPANY_OFFICE_COLUMNS, matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
 import { TENDER_ROLE_COLUMNS, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
 import { requestGeneralPack, requestRequirementsExtraction, saveGeneralAnswers, uploadTenderDocument } from "./general-actions";
+import { PackChecklist, checklistOf } from "./pack-checklist";
+import { PrivateDocuments, type PrivateDoc } from "./private-documents";
 
 /**
  * Non-SANRAL tender preparation (Sarel, 2026-10-16: "keep working on
@@ -56,11 +58,24 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const supabase = await createClient();
   const { data: tender } = await supabase
     .from("tenders")
-    .select("id, contract_no, description, buyer, closing_date, document_urls, document_requirements, evaluation_rules")
+    .select("id, contract_no, description, buyer, closing_date, document_urls, document_requirements, evaluation_rules, owner_company_id")
     .eq("id", tenderId)
     .maybeSingle();
   if (!tender) return null;
-  const manifest = (tender.document_requirements as RequirementManifest | null) ?? null;
+  // A shared tender (found by Discovery) can carry this company's own private
+  // documents (0032); when it does, this company's reading of the tender is
+  // on its tender_packs row and wins over the shared one.
+  const isShared = !tender.owner_company_id;
+  const [{ data: ownPack }, { data: privateRows }] = await Promise.all([
+    supabase.from("tender_packs").select("id, company_id, document_requirements, intake").eq("tender_id", tenderId).maybeSingle(),
+    isShared
+      ? supabase.from("tender_private_documents").select("id, title, storage_path, created_at").eq("tender_id", tenderId).order("created_at")
+      : Promise.resolve({ data: [] as PrivateDoc[] }),
+  ]);
+  const privateDocs = (privateRows ?? []) as PrivateDoc[];
+  const privateRead = new Set(((ownPack?.intake as { private_documents?: string[] } | null)?.private_documents ?? []) as string[]);
+  const readingIsPrivate = !!ownPack?.document_requirements && privateDocs.length > 0 && privateDocs.every((d) => privateRead.has(d.id));
+  const manifest = ((ownPack?.document_requirements ?? tender.document_requirements) as RequirementManifest | null) ?? null;
   const closingDate = (tender.closing_date as string | null) ?? null;
   const docUrls = ((tender.document_urls as { url: string | null; title: string | null }[] | null) ?? []).filter((d) => d.url);
 
@@ -87,8 +102,15 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const savedNote =
     saved === "answers" ? "Answers saved." : saved === "doc" ? "Document uploaded." : saved === "pack" ? "Pack requested - it appears below when ready." : saved === "extract" ? "Requested - the tender's documents are being read." : null;
 
+  const privateCard =
+    isShared && ownPack ? (
+      <PrivateDocuments tenderId={tenderId} companyId={ownPack.company_id as string} docs={privateDocs} readingIsPrivate={readingIsPrivate} />
+    ) : null;
+
   if (!manifest) {
     return (
+      <>
+      {privateCard}
       <div id="general-preparation" style={card}>
         <SectionTitle title="Tender preparation" />
         {savedNote && <SavedBanner text={savedNote} />}
@@ -102,19 +124,24 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             <Chip {...JOB_STATUS_STYLE[extractJob.status]} />
             {extractJob.status === "failed"
               ? <span style={{ color: "#B91C1C" }}>Couldn&apos;t read the documents: {extractJob.error_message}</span>
-              : <span>Reading {docUrls.length} published document{docUrls.length === 1 ? "" : "s"} - requested {new Date(extractJob.requested_at).toLocaleString()}.</span>}
+              : <span>Reading {docUrls.length} published document{docUrls.length === 1 ? "" : "s"}{privateDocs.length > 0 ? ` and ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"}` : ""} - requested {new Date(extractJob.requested_at).toLocaleString()}.</span>}
           </div>
         ) : null}
         {(!extractJob || extractJob.status === "failed") && (
           <form action={requestRequirementsExtraction} style={{ marginTop: 10 }}>
             <input type="hidden" name="tender_id" value={tenderId} />
-            <button type="submit" style={primaryBtn} disabled={docUrls.length === 0}>
+            <button type="submit" style={primaryBtn} disabled={docUrls.length === 0 && privateDocs.length === 0}>
               {extractJob ? "Try reading the documents again" : "Read this tender's documents"}
             </button>
-            {docUrls.length === 0 && <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 6 }}>No document links are on file for this tender.</div>}
+            {docUrls.length === 0 && privateDocs.length === 0 && (
+              <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 6 }}>
+                No document links are on file for this tender{isShared ? " - add your own copy under Your private documents above" : ""}.
+              </div>
+            )}
           </form>
         )}
       </div>
+      </>
     );
   }
 
@@ -137,7 +164,9 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   });
 
   // ----- experience (the tender's own rule; never SANRAL's B6 here) -----
-  const rules = ((tender.evaluation_rules as EvaluationRules | null) ?? null);
+  // The shared tender's stored rules - unless this company's own reading
+  // (with its private documents) is in use: that one is the fuller read.
+  const rules = readingIsPrivate ? null : ((tender.evaluation_rules as EvaluationRules | null) ?? null);
   const evidenceRules = (rules?.experience_evidence?.rules?.length ? rules.experience_evidence.rules : manifest.experience_evidence.rules) ?? [];
   const chosen = evidenceRules.length > 0 ? { rule: evidenceRules[0], source: "tender_document" as const, otherRules: evidenceRules.length - 1 } : null;
   const experience = chosen && company?.id
@@ -164,6 +193,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
 
   return (
     <>
+      {privateCard}
       {/* 1. What this tender needs */}
       <div id="general-preparation" style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
@@ -175,7 +205,8 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         </div>
         {savedNote && <SavedBanner text={savedNote} />}
         <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
-          Read from {manifest.documents.length} published document{manifest.documents.length === 1 ? "" : "s"}
+          Read from {manifest.documents.length} {readingIsPrivate ? "" : "published "}document{manifest.documents.length === 1 ? "" : "s"}
+          {readingIsPrivate ? ` (including your ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"})` : ""}
           {tender.buyer ? ` by ${tender.buyer}` : ""} on {new Date(manifest.extracted_at).toLocaleDateString()}.{" "}
           {manifest.form_suite === "MBD"
             ? "This buyer uses the municipal MBD forms (same fields as National Treasury's SBD forms)."
@@ -478,14 +509,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                       </ul>
                     </>
                   )}
-                  {(j.manifest.omitted ?? []).length > 0 && (
-                    <>
-                      <div style={{ fontWeight: 700, color: "#B91C1C", marginBottom: 2 }}>Not in the pack ({j.manifest.omitted!.length})</div>
-                      <ul style={{ margin: 0, paddingLeft: 18 }}>
-                        {j.manifest.omitted!.slice(0, 12).map((o, i) => <li key={i}>{o.title} - {o.reason}</li>)}
-                      </ul>
-                    </>
-                  )}
+                  <PackChecklist rows={checklistOf(j.manifest)} />
                 </div>
               )}
             </div>

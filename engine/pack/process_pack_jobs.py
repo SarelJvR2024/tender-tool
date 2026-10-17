@@ -40,6 +40,14 @@ SETUP sheet (suggest_pack.read_required_positions - the same reader the pack
 build's confirm gate uses), never guessed. That is what lists the positions
 on the Tender Workspace's Key positions card for a person to confirm.
 
+And every poll scores each of the company's people against each of those
+positions with suggest_pack.score_candidate() - the existing scorer, the one
+generate_cv.py also uses - and stores the ranking on
+tender_pack_assignments.candidate_scores (0031). The Key positions card narrows
+it to the people tagged for the position's role and shows the best one as the
+suggestion, plus up to two alternatives (sync_position_suggestions). Nothing is
+confirmed by this: confirmed_person_id is only ever set by a person.
+
 Same CLI contract as process_cv_jobs.py: one-shot (process whatever is queued,
 then exit) is the default and `--once` says so explicitly - that is what
 engine/worker/run_bridges.py calls; `--loop` keeps polling via the shared
@@ -73,7 +81,7 @@ for p in (ENGINE_DIR, os.path.join(ENGINE_DIR, "pack_generator"), os.path.join(E
         sys.path.insert(0, p)
 
 import confirm_pack  # noqa: E402
-from suggest_pack import read_required_positions  # noqa: E402
+from suggest_pack import read_required_positions, score_candidate  # noqa: E402
 from sanral_fill import Workbook  # noqa: E402
 from assemble_pack import build_submission_pack  # noqa: E402
 from pdf_merge import verify_pack  # noqa: E402
@@ -548,10 +556,86 @@ def sync_tender_requirements(client, work_root):
     return written
 
 
+SANRAL_FAMILIES = ("Conventional Consultant Tender", "RRM Consultant Tender")
+CANDIDATE_KEYS = ("person_id", "name", "score", "years_experience", "ecsa_level", "matched", "missing",
+                  "specialism_warning", "rationale")
+
+
+def rank_candidates(people_rows, projects, position, closing_date):
+    """score_candidate() for every person against one position, highest score
+    first (ties: more years' experience, then name - stated, not hidden).
+    `position` = {"code", "description"} as tender_requirements holds it."""
+    ranked = []
+    for row in people_rows:
+        person = adapt_person(row, [p for p in projects if p["person_id"] == row["id"]])
+        c = score_candidate(row["id"], person, {"description": position.get("description") or ""}, closing_date)
+        ranked.append({k: c.get(k) for k in CANDIDATE_KEYS})
+    ranked.sort(key=lambda c: (-c["score"], -(c["years_experience"] or -1), c["name"] or ""))
+    return ranked
+
+
+def sync_position_suggestions(client, today=None):
+    """For every SANRAL tender pack whose tender has key positions on file
+    (tender_requirements, non-ALT) and hasn't closed: rank the company's
+    people per position (rank_candidates) and store the ranking on that
+    position's tender_pack_assignments row (created when missing, with
+    confirmed_person_id left null). Written only when the ranking changed, so
+    a quiet poll writes nothing. Returns the number of rows written. A failure
+    on one pack is reported and skipped - it never stops the pack jobs."""
+    today = today or datetime.date.today()
+    reqs = [r for r in client.select("tender_requirements") if not r.get("is_alternate")]
+    if not reqs:
+        return 0
+    by_tender = {}
+    for r in reqs:
+        by_tender.setdefault(r["tender_id"], []).append(r)
+    tenders = {t["id"]: t for t in client.select("tenders", {"id": list(by_tender)})
+               if t.get("family") in SANRAL_FAMILIES}
+    if not tenders:
+        return 0
+    written = 0
+    for pack in client.select("tender_packs", {"tender_id": list(tenders)}):
+        tender = tenders.get(pack["tender_id"])
+        if not tender:
+            continue
+        closing = (tender.get("closing_date") or "")[:10]
+        try:
+            closing_date = datetime.date.fromisoformat(closing) if closing else today
+        except ValueError:
+            closing_date = today
+        if closing and closing_date < today:
+            continue  # closed: leave its last suggestions as they were
+        try:
+            people_rows = client.select("people", {"company_id": pack["company_id"]}, order="created_at.asc")
+            projects = client.select("projects", {"person_id": [p["id"] for p in people_rows]}) if people_rows else []
+            existing = {a["position_code"]: a for a in client.select("tender_pack_assignments",
+                                                                       {"tender_pack_id": pack["id"]})}
+            for req in by_tender[pack["tender_id"]]:
+                ranked = rank_candidates(people_rows, projects,
+                                         {"code": req["position_code"], "description": req.get("position_description")},
+                                         closing_date)
+                row = existing.get(req["position_code"])
+                if row and row.get("candidate_scores") == ranked:
+                    continue
+                body = {"candidate_scores": ranked, "scored_at": _ts()}
+                if row:
+                    client.update("tender_pack_assignments", {"id": row["id"]}, body)
+                else:
+                    client.insert("tender_pack_assignments", {"tender_pack_id": pack["id"],
+                                                              "position_code": req["position_code"], **body})
+                written += 1
+        except Exception as e:
+            print(f"[suggestions] tender pack {pack['id']}: could not score candidates ({type(e).__name__}: {e})")
+    if written:
+        print(f"[suggestions] {written} position ranking(s) updated")
+    return written
+
+
 def process_pending(client, work_root, keep=False, quiet_when_empty=False):
     os.makedirs(work_root, exist_ok=True)
     fail_stale_jobs(client)
     sync_tender_requirements(client, work_root)
+    sync_position_suggestions(client)
     jobs = client.select("pack_generation_jobs", {"status": "requested", "engine": ENGINE}, order="requested_at.asc")
     if not jobs and not quiet_when_empty:
         print("No pending pack_generation_jobs.")

@@ -66,7 +66,7 @@ import fill_authority_letter  # noqa: E402
 import make_envelope_covers  # noqa: E402
 from sanral_fill import Workbook, n2col  # noqa: E402
 from generate_cv import _convert_to_pdf  # noqa: E402
-from pdf_merge import merge_with_contents  # noqa: E402
+from pdf_merge import merge_with_contents, expiry_warning  # noqa: E402
 
 TECHNICAL = "Envelope 1 - Technical Submission"
 FINANCIAL = "Envelope 2 - Financial Submission"
@@ -302,9 +302,10 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
             return None
         return _convert_to_pdf(path, os.path.dirname(path))
 
-    def sec(title, envelope, pdf, reason=None):
+    def sec(title, envelope, pdf, reason=None, warning=None):
         return {"title": title, "envelope": envelope, "pdf": pdf,
-                "omitted_reason": None if pdf else (reason or "could not be produced")}
+                "omitted_reason": None if pdf else (reason or "could not be produced"),
+                "warning": warning if pdf else None}
 
     # 7. Ordered sections. Order follows the two-envelope structure of the real
     # completed submission (templates/incoming/completed_sample): returnables and
@@ -322,18 +323,18 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
 
     def vault_section(key, form, label, envelope):
         entry = vault_docs.get(key)
-        # Either a bare path, or {"path": ..., "expiry": "YYYY-MM-DD"} so an
-        # expired document is still included (it IS the copy on file) but
-        # called out on the contents page instead of passing silently.
+        # Either a bare path, or {"path": ..., "expiry": "YYYY-MM-DD"}. An
+        # expired copy is still INCLUDED - it is the copy on file, and leaving
+        # it out would only hide the problem - but its checklist row carries a
+        # WARNING to replace it before submission (Sarel, 2026-10-17: "Dont
+        # include. Add as a warning." - i.e. don't move it to "Not included").
         path = entry.get("path") if isinstance(entry, dict) else entry
         expiry = entry.get("expiry") if isinstance(entry, dict) else None
         if not path:
             return sec(f"{form} - {label}", envelope, None, "no copy uploaded to the Document Vault")
-        if expiry and closing and str(expiry)[:10] < str(closing)[:10]:
-            warnings.append(f"{form} {label}: the copy on file expires {str(expiry)[:10]}, before closing "
-                            f"({closing}) - replace it before submitting.")
         pdf, reason = _to_pdf(path, conv_dir)
-        return sec(f"{form} - {label}", envelope, pdf, reason and f"vault copy unusable: {reason}")
+        return sec(f"{form} - {label}", envelope, pdf, reason and f"vault copy unusable: {reason}",
+                   warning=expiry_warning(expiry, closing))
 
     for key, form, label in VAULT_ORDER:
         sections.append(vault_section(key, form, label, TECHNICAL))

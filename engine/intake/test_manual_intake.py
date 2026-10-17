@@ -148,6 +148,18 @@ def job_for(c, tid):
     return c.select("tender_engine_jobs", {"tender_id": tid}, order="requested_at.desc")[0]
 
 
+def confirm_position(c, pack_id, code, person_id, **extra):
+    """confirmPositionPerson()'s upsert on (tender_pack_id, position_code): the
+    pack bridge's sync_position_suggestions (0031) may already have created
+    the row, with its candidate ranking, before a person confirms."""
+    body = {"suggested_person_id": person_id, "confirmed_person_id": person_id, **extra}
+    row = c.select("tender_pack_assignments", {"tender_pack_id": pack_id, "position_code": code})
+    if row:
+        c.update("tender_pack_assignments", {"id": row[0]["id"]}, body)
+    else:
+        c.insert("tender_pack_assignments", {"tender_pack_id": pack_id, "position_code": code, **body})
+
+
 def pack_case(c, company_id, tender_id, storage, work):
     """Same seeding as engine/pack/bridge_selftest.py seed() (complete_co's
     key person, vault scans, confirmed PL/DS1) but onto the tender the intake
@@ -189,16 +201,14 @@ def pack_case(c, company_id, tender_id, storage, work):
     c.update("companies", {"id": company_id}, vault)
     tp = c.select("tender_packs", {"company_id": company_id, "tender_id": tender_id})[0]
     # Only PL confirmed first: the pack bridge must refuse with the SETUP gate.
-    c.insert("tender_pack_assignments", {"tender_pack_id": tp["id"], "position_code": "PL",
-                                         "suggested_person_id": person["id"], "confirmed_person_id": person["id"]})
+    confirm_position(c, tp["id"], "PL", person["id"])
     job = c.insert("pack_generation_jobs", {"company_id": company_id, "tender_id": tender_id, "tender_pack_id": tp["id"],
                                             "status": "requested", "readiness_snapshot": {}, "acknowledged_gaps": True})
     process_pack_jobs.process_pending(c, os.path.join(work, "pack"))
     row = c.select("pack_generation_jobs", {"id": job["id"]})[0]
     check(row["status"] == "failed" and "DS1" in (row["error_message"] or ""),
           f"unconfirmed DS1 (read from the uploaded SETUP) refused loudly: {(row['error_message'] or '')[:150]}")
-    c.insert("tender_pack_assignments", {"tender_pack_id": tp["id"], "position_code": "DS1", "suggested_person_id": person["id"],
-                                         "confirmed_person_id": person["id"], "specialism_warning": True})
+    confirm_position(c, tp["id"], "DS1", person["id"], specialism_warning=True)
     job = c.insert("pack_generation_jobs", {"company_id": company_id, "tender_id": tender_id, "tender_pack_id": tp["id"],
                                             "status": "requested", "readiness_snapshot": {}, "acknowledged_gaps": True})
     process_pack_jobs.process_pending(c, os.path.join(work, "pack"))

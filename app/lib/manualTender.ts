@@ -22,6 +22,15 @@ export function manualPrefix(companyId: string, tenderId: string): string {
   return `manual/${companyId}/${tenderId}/`;
 }
 
+/**
+ * A company's own documents for a SHARED tender (one Discovery found) -
+ * migration 0032, tender_private_documents. Same bucket, a company-owned
+ * prefix: only that company's members can write, read or remove under it.
+ */
+export function privatePrefix(companyId: string, tenderId: string): string {
+  return `private/${companyId}/${tenderId}/`;
+}
+
 export function safeFileName(name: string): string {
   return name.replace(/[^a-zA-Z0-9._ ()-]/g, "_").slice(0, 120) || "document";
 }

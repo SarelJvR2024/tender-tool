@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 import { requestSubmissionPack } from "./actions";
 import { PackAutoRefresh } from "./pack-auto-refresh";
+import { PackChecklist, checklistOf, type ChecklistRow } from "./pack-checklist";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -23,8 +24,16 @@ type PackJob = {
   manifest: {
     omitted?: { title: string; envelope: string; reason: string }[];
     warnings?: string[];
+    // Every document + its status (engine/pack/pdf_merge.py) - pack-checklist.tsx.
+    checklist?: ChecklistRow[];
+    sections?: { title: string; envelope: string; start_page: number; end_page: number; warning?: string | null }[];
     // Envelope 2 (Financial) is its own PDF - engine/pack/assemble_pack.py.
-    financial?: { page_count?: number; omitted?: { title: string; envelope: string; reason: string }[] };
+    financial?: {
+      page_count?: number;
+      omitted?: { title: string; envelope: string; reason: string }[];
+      checklist?: ChecklistRow[];
+      sections?: { title: string; envelope: string; start_page: number; end_page: number; warning?: string | null }[];
+    };
   } | null;
   error_message: string | null;
   acknowledged_gaps: boolean;
@@ -102,8 +111,10 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
         submission pack: outer cover, then Envelope 1 (Technical) - authority letter, A-Forms, your vault documents,
         Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B7. Envelope 2 (Financial), separately: its
         cover, the Form of Offer and the printed Financial workbook - kept out of the technical pack because it is
-        opened only after technical evaluation. The filled .xlsm workbooks come with them. Anything missing is listed
-        on the contents pages. Signatures, pricing and the B4/B5 write-ups stay with you.
+        opened only after technical evaluation. The filled .xlsm workbooks come with them. Each contents page doubles as
+        the pack&apos;s checklist - every document with its status (included, included with a warning such as an
+        expired certificate that must be replaced, or not included and why) - and the same checklist is shown here
+        under each pack. Signatures, pricing and the B4/B5 write-ups stay with you.
       </div>
 
       {blockers.length > 0 && (
@@ -154,8 +165,9 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column" }}>
           {jobs.map((j) => {
             const st = STATUS[j.status] ?? { label: j.status, bg: "#F0EEE6", color: "#6B6758" };
-            const omitted = [...(j.manifest?.omitted ?? []), ...(j.manifest?.financial?.omitted ?? [])];
             const warnings = j.manifest?.warnings ?? [];
+            const techRows = checklistOf(j.manifest);
+            const finRows = checklistOf(j.manifest?.financial);
             return (
               <div key={j.id} style={{ borderTop: "1px solid #F0EEE6", padding: "10px 0", fontSize: 12, color: "#4B5563" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -186,11 +198,14 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                       ))}
                   </div>
                 )}
-                {j.status === "ready" && (omitted.length > 0 || warnings.length > 0) && (
+                {j.status === "ready" && (
+                  <>
+                    <PackChecklist rows={techRows} title="Submission pack (Envelope 1) checklist" />
+                    <PackChecklist rows={finRows} title="Envelope 2 (Financial) checklist" />
+                  </>
+                )}
+                {j.status === "ready" && warnings.length > 0 && (
                   <ul style={{ margin: "6px 0 0", paddingLeft: 18, color: "#92400E" }}>
-                    {omitted.map((o, i) => (
-                      <li key={`o${i}`}>Not included: {o.title} - {o.reason}</li>
-                    ))}
                     {warnings.map((w, i) => (
                       <li key={`w${i}`}>{w}</li>
                     ))}

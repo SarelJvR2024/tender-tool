@@ -249,6 +249,8 @@ export type EngineJob = {
     omitted?: { title: string; envelope: string; reason: string }[];
     by_hand?: { title: string; reason: string }[];
     provenance_summary?: Record<string, number>;
+    // Every document + its status (engine/pack/pdf_merge.py) - pack-checklist.tsx.
+    checklist?: { no: number; title: string; envelope: string; status: "included" | "included_warning" | "not_included"; pages: string | null; note: string | null }[];
   } | null;
   error_message: string | null;
   requested_at: string;

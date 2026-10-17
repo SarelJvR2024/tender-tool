@@ -85,7 +85,7 @@ How it works:
 **Limits, stated:**
 
 - A SANRAL tender loaded this way still stops at "No confirmed key person". There is still no UI that confirms `tender_pack_assignments` (System-Status gap #12).
-- Documents can't be added to a *discovered* (shared) tender, because they'd be visible to every tenant. Load a private copy instead: leave the OCDS id blank. The duplicate-id refusal now says so.
+- Documents can't be added to a *discovered* (shared) tender, because they'd be visible to every tenant. Load a private copy instead: leave the OCDS id blank. The duplicate-id refusal now says so. **Superseded 2026-10-17:** migration `0032` adds "Your private documents" on a shared tender (visible only to the company that added them); the duplicate-id refusal now points there. See System-Status.md.
 
 ## Scenario details
 

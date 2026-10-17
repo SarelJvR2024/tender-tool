@@ -446,6 +446,7 @@ function DocRow({ item }: { item: ComplianceItem }) {
         <span style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{item.label}</span>
         {item.mandatory && <span style={{ fontSize: 10, fontWeight: 700, color: "#B91C1C" }}>MANDATORY</span>}
         {item.expiring && <Chip label="Renew soon" bg="#FEF3C7" color="#B45309" />}
+        {item.expiredCopy && <Chip label="Expired copy in pack - replace" bg="#FEE2E2" color="#B91C1C" />}
       </div>
       <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3, wordBreak: "break-word" }}>{item.detail}</div>
     </div>

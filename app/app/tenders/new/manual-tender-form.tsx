@@ -8,10 +8,11 @@ import {
   TENDER_DOCS_BUCKET,
   hasAcceptedExtension,
   manualPrefix,
+  privatePrefix,
   safeFileName,
   type UploadedTenderDocument,
 } from "@/lib/manualTender";
-import { addManualTenderDocuments, registerManualTender } from "./actions";
+import { addManualTenderDocuments, addPrivateTenderDocuments, registerManualTender } from "./actions";
 
 const label: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4 };
 const help: React.CSSProperties = { fontSize: 11, color: "#6B6758", marginTop: 3 };
@@ -31,17 +32,16 @@ function checkFiles(files: File[]): string | null {
 
 /**
  * Straight to Storage from the browser (0024's policy: own company's
- * manual/ prefix only), one file at a time so progress is visible. If one
- * fails, the ones already uploaded are removed and nothing is registered.
+ * manual/ prefix only; 0032: its private/ prefix), one file at a time so
+ * progress is visible. If one fails, the ones already uploaded are removed
+ * and nothing is registered.
  */
 async function uploadAll(
-  companyId: string,
-  tenderId: string,
+  prefix: string,
   files: File[],
   onProgress: (msg: string) => void,
 ): Promise<{ docs: UploadedTenderDocument[] } | { error: string }> {
   const supabase = createClient();
-  const prefix = manualPrefix(companyId, tenderId);
   const done: UploadedTenderDocument[] = [];
   for (let i = 0; i < files.length; i++) {
     const f = files[i];
@@ -74,7 +74,7 @@ export function ManualTenderForm({ companyId }: { companyId: string }) {
     setError(null);
     startTransition(async () => {
       const tenderId = crypto.randomUUID();
-      const up = await uploadAll(companyId, tenderId, files, setProgress);
+      const up = await uploadAll(manualPrefix(companyId, tenderId), files, setProgress);
       if ("error" in up) {
         setProgress(null);
         setError(up.error);
@@ -190,7 +190,7 @@ export function AddTenderDocumentsForm({ companyId, tenderId }: { companyId: str
     if (bad) return setError(bad);
     setError(null);
     startTransition(async () => {
-      const up = await uploadAll(companyId, tenderId, files, setProgress);
+      const up = await uploadAll(manualPrefix(companyId, tenderId), files, setProgress);
       if ("error" in up) {
         setProgress(null);
         setError(up.error);
@@ -219,6 +219,61 @@ export function AddTenderDocumentsForm({ companyId, tenderId }: { companyId: str
         style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E5E1D5", color: "#16233B", fontSize: 12, fontWeight: 600, cursor: pending ? "default" : "pointer", opacity: pending ? 0.6 : 1 }}
       >
         {pending ? "Uploading…" : "Add documents and re-analyse"}
+      </button>
+      {progress && <span style={{ fontSize: 12, color: "#B45309" }}>{progress}</span>}
+      {error && <span role="alert" style={{ fontSize: 12, color: "#B91C1C", flexBasis: "100%" }}>{error}</span>}
+    </form>
+  );
+}
+
+/**
+ * "Your private documents" on a SHARED tender (one Discovery found, 0032):
+ * the company's own copies - e.g. the bid document the buyer e-mailed it -
+ * uploaded under tender-documents/private/<company>/<tender>/, recorded in
+ * tender_private_documents and read together with the published documents.
+ * No other company pursuing the tender can see them or what is read from them.
+ */
+export function AddPrivateDocumentsForm({ companyId, tenderId }: { companyId: string; tenderId: string }) {
+  const [files, setFiles] = useState<File[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const bad = checkFiles(files);
+    if (bad) return setError(bad);
+    setError(null);
+    startTransition(async () => {
+      const up = await uploadAll(privatePrefix(companyId, tenderId), files, setProgress);
+      if ("error" in up) {
+        setProgress(null);
+        setError(up.error);
+        return;
+      }
+      const res = await addPrivateTenderDocuments({ tenderId, documents: up.docs });
+      if (res?.error) {
+        setProgress(null);
+        setError(res.error);
+      }
+    });
+  }
+
+  return (
+    <form onSubmit={onSubmit} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <input
+        type="file"
+        multiple
+        accept={ACCEPTED_EXTENSIONS.join(",")}
+        onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+        style={{ fontSize: 12, maxWidth: "100%" }}
+      />
+      <button
+        type="submit"
+        disabled={pending}
+        style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#16233B", border: "none", color: "#FFFFFF", fontSize: 12, fontWeight: 600, cursor: pending ? "default" : "pointer", opacity: pending ? 0.6 : 1 }}
+      >
+        {pending ? "Uploading…" : "Add privately and re-read"}
       </button>
       {progress && <span style={{ fontSize: 12, color: "#B45309" }}>{progress}</span>}
       {error && <span role="alert" style={{ fontSize: 12, color: "#B91C1C", flexBasis: "100%" }}>{error}</span>}

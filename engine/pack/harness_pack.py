@@ -174,7 +174,10 @@ def signature(result):
         "sections": [f"{s['envelope']} | {s['title']} | {s['end_page'] - s['start_page'] + 1}p"
                      for s in m["sections"]],
         "omitted": sorted(f"{o['envelope']} | {o['title']}" for o in m["omitted"]),
-        "warning_count": len(m["warnings"]),
+        # Expired vault copies moved from m["warnings"] to their checklist
+        # row (2026-10-17) - counted together so the stored baselines hold.
+        "warning_count": len(m["warnings"]) + sum(1 for c in m.get("checklist", [])
+                                                  if c["status"] == "included_warning"),
         "financial": {
             "page_count": f["page_count"],
             "sections": [f"{s['envelope']} | {s['title']} | {s['end_page'] - s['start_page'] + 1}p"
