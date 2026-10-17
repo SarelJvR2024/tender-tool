@@ -696,3 +696,125 @@ Quarterly, six-monthly and annual billing are offered, but those prices aren't s
 4. Section 1.2's L2B row and section 8's link have been updated to the live R1,495.65 price and the working pricing URL.
 
 **Sources for this section:** [l2b.co.za](https://www.l2b.co.za/), [pricing](https://www.l2b.co.za/pricing), [FAQ](https://www.l2b.co.za/faq), [about us](https://www.l2b.co.za/about-us), [free trial](https://www.l2b.co.za/free-trial), [testimonials](https://www.l2b.co.za/testimonials), [25-years post (June 2024)](https://www.l2b.co.za/blog/celebrating-25-years-of-leads-2-business), [how to use tenders (blog)](https://blog.l2b.co.za/how-to-make-the-most-of-our-tenders/), [public tender page, DTA 1110712](https://www.l2b.co.za/Tender/Construction-of-Slab-Supply-and-Mounting-of-Prefa/1110712), [next.l2b.co.za tender listing, DTA 1151573](https://next.l2b.co.za/tenders/supply-delivery-and-installation-of-clearview-fencing/1151573) (returned 503 when fetched; seen in search results), [Mining Weekly on the 2013 mobile app](https://www.miningweekly.com/article/company-annoucementsleads-2-go-mobility-revives-construction-opportunities-2013-10-03). Repo: `engine/discovery/etenders_national.py` (OCDS limits), `docs/specs/System-Status.md`.
+
+---
+
+## 10. Can Tender Tool be "L2B for government tenders"? A coverage test
+
+Added 17 Oct 2026 at Sarel's request. He doesn't want private-sector coverage, and asked: "on government tenders, do you think we can provide the full Leads2Business [service] for government projects?" Put simply: can free, automated public sources match L2B's *government* tender coverage without L2B's research team? Everything below was measured on 17 Oct 2026 against live sources. Method notes are in 10.8.
+
+### 10.1 Verdict
+
+**Mostly yes for national, provincial and state-owned buyers. No for municipalities.** The honest positioning is "every government tender published on eTenders, plus SANRAL, Eskom, Transnet and the big metros, checked daily". It is not "full L2B".
+
+- **The free data is better than section 9.3 assumed, but Tender Tool reads it badly today.** The eTenders portal lists about 2,200 open tenders from about 400 buyers, and adds about 2,800 new ones a month. Discovery reads the OCDS API instead, and a live run of `etenders_national.py --days 14` returned **300 releases covering only the last 3 days of the 14** (15 to 17 Oct). The portal published 1,404 tenders in that window. **Today's Discovery therefore sees about a fifth of what is freely available.** The fix is cheap (10.5, item 1).
+- **SANRAL is well covered.** 72 of SANRAL's 73 real open tenders are on eTenders, including all 21 open consulting-engineering tenders. What eTenders misses are SANRAL's *changes*: date extensions and addenda (10.2).
+- **Municipalities are the real gap, and adding feeds won't close it.** Municipalities don't have to use eTenders. About a quarter of registered municipalities published nothing there in 3.5 months. Some metros barely use it, and municipal RFQs mostly never reach it: the City of Cape Town had **246 open RFQs on its own portal and 0 on eTenders**. Closing that gap means watching hundreds of separate, fragile municipal websites. That is the work L2B's people do.
+
+### 10.2 SANRAL: does it appear in the free feed? Yes (Observed)
+
+SANRAL's own open list (`list_tenders.py`) returned 138 rows. Of those, **54 aren't open tenders**: closing dates already passed, back to 2021, "001 test" entries, or a missing date. Of the 84 still open, 2 are staff vacancies (Social Facilitator) and 9 are subcontract or local-content packages that SANRAL's main contractors issue (suffixes such as `ENV`, `C-SL`, `1C-SF`, `RSA`). That leaves **73 tenders issued by SANRAL itself**.
+
+| SANRAL's own open tenders (73) | Count | On eTenders? |
+| --- | --- | --- |
+| Listed on the portal as advertised, matched by bid number or contract number | 65 | Yes |
+| On the portal, but in its **Closed** tab with the *original* closing date, while SANRAL's site shows a later one (for example NRA 2026/0754 (A): portal 15 Oct, SANRAL 6 Nov; NRA 2026/0021 (B): portal 2 Oct, SANRAL 2 Nov) | 7 | Listed, but the date is wrong |
+| Not found (C.003-081-2023/1; its detail page didn't load) | 1 | Unknown |
+| **Consulting-engineering tenders (Klipcorp's segment)** | **21 of 21** | **All on the portal**, 2 with an out-of-date closing date |
+
+- **In OCDS too:** 54 of the 55 SANRAL portal tenders published from 15 Sep to 17 Oct were in a day-by-day OCDS pull.
+- **The gap is amendments, not listings.** SANRAL extends a closing date or issues an addendum on its own site (one SANRAL page lists "Addendum No. 2" next to the pack), and the portal isn't updated. A firm watching only eTenders would see seven live tenders as closed. **SANRAL's own site is still needed, but for changes, not for discovery.**
+- **Subcontract packages are SANRAL-site only.** The 9 contractor-issued packages appear only on nra.co.za. They matter to small contractors, not to consultants.
+- **Documents: a correction to 9.3 and section 2.** All 67 SANRAL portal rows carry the tender pack as an attachment. The OCDS document link (for example `etenders.gov.za/home/Download?blobName=...zip`) answered a HEAD request with `200 OK` and a 9.1 MB zip: no reCAPTCHA, and no name or phone number asked for. So **SANRAL's packs are freely downloadable from eTenders**, while SANRAL's own copy sits behind reCAPTCHA. Two things to settle before relying on it: the eTenders copy may lag SANRAL's addenda (as with the dates above), and Sarel should decide whether this changes the "a person fetches SANRAL documents" policy in `download_documents.py`.
+
+### 10.3 The free feed: the portal against the OCDS API it comes from
+
+| Check | Result |
+| --- | --- |
+| Portal advertised tab (`/Home/TenderFilter/?status=1`) | **2,211 open tenders, 408 buyers.** Read in full in 23 requests with **no** failed records |
+| Portal publications from 1 Jul to 17 Oct (advertised plus closed tabs) | 9,764, about **2,800 a month**. This is a floor: tenders already moved to Awarded or Cancelled aren't counted |
+| OCDS, read one day at a time with a fallback to 10-record pages, 15 Sep to 17 Oct | 2,817 releases, holding **85%** of the portal's 3,198 tenders for that window. Most of the loss was on days where pages returned HTTP 500 (17 Sep: 54 of 125); the last week was 97 to 100% |
+| OCDS through today's module (`--days 14`, one window, pages of 100) | **300 releases**, all from the last 3 days; it stopped at page 4 with an HTTP 500. `watch_new_tenders.py` and `daily_digest.py` both call it the same way |
+| OCDS completeness by buyer type (same window) | Municipal 88%, provincial 88%, SOE 87%, national departments 83%, other entities 80%. **The loss doesn't favour any buyer type.** It comes from broken pages, not from missing buyers |
+| `mainProcurementCategory` in OCDS | services 1,315, goods 428, works 410, **blank 664 (24%)**. The portal's own category field (91 categories) is always filled |
+| Category spread on the portal (open) | Professional services 292, general services 215, construction 181, general supplies 145, then a long tail. Types: open bids 1,401, RFQs 451, RFPs 299 |
+
+**What this means:** inside eTenders, the free data isn't the bottleneck. The portal is complete, current, cross-industry and cheap to read. The OCDS API is a lossy copy of it. Tender Tool's present coverage problem is self-inflicted and fixable.
+
+### 10.4 Which government buyers the free feed covers well, and which it doesn't
+
+Buyers are classified by name from the portal's list of 895 registered organs of state, so the classes are approximate. "Published" means at least one tender advertised or closed from 1 Jul to 17 Oct.
+
+| Buyer type | Registered on eTenders | Published since 1 Jul | Tenders since 1 Jul |
+| --- | --- | --- | --- |
+| State-owned companies (Eskom, Transnet, ACSA, PRASA, water boards...) | 98 | 74 | 2,906 |
+| Municipalities and municipal entities | 264 | 196 | 2,638 |
+| Other public entities (agencies, TVETs, museums, boards) | 292 | 196 | 2,503 |
+| Provincial departments and entities | 198 | 126 | 1,118 |
+| National departments | 43 | 34 | 599 |
+
+**Spot checks of buyers' own sites against the portal (open tenders):**
+
+| Buyer | Own site | Found on eTenders | What's missing |
+| --- | --- | --- | --- |
+| SANRAL | 73 own tenders | 72 (99%) | Extensions and addenda; contractor subcontract packages |
+| Eskom (Tender Bulletin JSON) | 156 tenders published since 15 Aug, still open | 145 (93%) | A few tenders, plus Eskom's notices (bidders lists, regret letters, validity extensions) |
+| Transnet (own eTenders site) | 104 | 90 (87%) | Mostly short RFQs closing within days |
+| City of Cape Town | 246 open RFQs on its own portal; 44 formal tenders on eTenders | **0 of 246 RFQs** | **All RFQs** |
+
+**Municipalities, from the portal's own counts per municipality (all time, every status):**
+
+- **Ekurhuleni** (a metro) has 10 closed and 4 advertised tenders on eTenders *ever*.
+- **Buffalo City Metro** has 28 ever, the latest published in April 2026.
+- **Emfuleni** and **Mahikeng** are registered and have **zero**.
+- **Polokwane** (453), **City Council of Johannesburg** (889) and **Msunduzi** (488) use eTenders steadily.
+- Of 211 registered names that are clearly municipalities (South Africa has 257), **155 published anything since 1 Jul**. Many published only 1 to 3 tenders in 3.5 months, which is far below what a municipality buys.
+
+**Why municipalities are patchy (sourced, not inferred):**
+
+- **The rules don't require eTenders.** MFMA Circular 83 (2016) asks municipalities to advertise on the eTender portal, but the Minister of Finance told Parliament in 2023 that, being a circular, it isn't mandatory unless a council adopts it ([PMG NW1277](https://pmg.org.za/committee-question/22234/), [Circular 83](https://mfma.treasury.gov.za/Circulars/MFMA%20Circular%2083%20-%20eTender%20Portal%20-%2018%20July%202016.pdf)).
+- **Low-value RFQs don't need a public advert.** They go on the municipality's own website or notice board, which is why Cape Town's 246 RFQs never reach eTenders.
+- **The Public Procurement Act may change this.** It was signed in July 2024 and could centralise publication later, but its commencement for municipalities was **not verified** (10.8).
+
+**Municipal websites are hard to automate.** From this environment, the tender pages of Rustenburg, Sol Plaatje and Matjhabeng failed TLS verification, Durban, Johannesburg and Buffalo City reset the connection or wouldn't connect, and Polokwane's returned 404 or 503. Pages that do load are usually WordPress lists of PDF adverts with no structured data.
+
+### 10.5 What would close the gap, ranked by value for effort
+
+1. **Read the eTenders portal directly instead of the OCDS API.** *Small effort, biggest gain:* from about 20% of the window to about 100% of eTenders, plus real status, province, briefing details, the bid number and the document link. Snapshot the Closed and Cancelled tabs daily to catch cancellations. Keep OCDS as a fallback, and if it stays, read it one day at a time. (A concurrent `gov-coverage` branch is already building a portal reader; this section's numbers support that direction.)
+2. **SANRAL's own site, merged with the portal and diffed daily for changes.** *Already partly built* (`list_tenders.py`, `detail.py`). It adds the extensions, addenda and subcontract packages that eTenders doesn't carry. Small effort. This matters most for Klipcorp.
+3. **Direct readers for Eskom and Transnet.** Both have public JSON. *Small effort, small gain in listings* (7 to 13% more), but they carry the notices L2B sells on: bidders lists, cancellations and extensions.
+4. **Metros and secondary cities' own sites**, starting with the 8 metros and about 20 larger local municipalities, for RFQs and tenders that skip eTenders. *Medium effort and an ongoing maintenance cost:* each one is a custom scraper, often over PDF adverts, and breaks when a site changes. Cape Town's portal is the easy case (structured HTML).
+5. **The long tail: about 100 smaller municipalities** with little or no eTenders use. Notice-board and newspaper adverts, PDF-only sites, sites that are often down. **This is where automation stops paying.** It is exactly what L2B's research team, newspaper monitoring and phone calls do.
+6. **Award data:** already found (portal Awarded tab, and SANRAL's registers; see `docs/specs/Award-Outcomes-Findings.md`). On SANRAL consulting tenders this is **better than L2B's "request award information" service**, because it is automatic and includes every bidder's price. Not yet stored or shown.
+
+**Effort estimate (my judgement, not measured):**
+
+- Items 1 to 3 are a few days of engineering and run unattended. They cover about 90% of the volume of government tenders that are publicly advertised online.
+- Item 4 is a few weeks, then an ongoing hour or two a week fixing broken readers.
+- Item 5 is not a sensible software project for a part-time founder.
+
+### 10.6 Where L2B still wins, even on government-only
+
+- **Municipal long tail and RFQs.** These are the largest group by count and the hardest to automate (10.4).
+- **Things you get by asking, not by reading:** bidders lists and site-meeting registers for non-SANRAL buyers, BoQs, award details a buyer never published, and a researcher who phones the buyer.
+- **Curation:** L2B cleans and classifies by hand. Tender Tool would depend on buyers' own messy fields (24% blank category in OCDS, typed names, stale dates).
+- **Track record:** 27 years and about 4,000 paying users (self-reported, section 9.2). Tender Tool's coverage claims would be new and unproven.
+
+What Tender Tool would do that L2B doesn't: free automated award prices for every tender on the portal, SANRAL's full opening registers, and the fit verdict and score outlook (section 9.7).
+
+### 10.7 What this means for positioning
+
+1. **Don't claim "full L2B for government".** Discovery can't back it on municipalities, and an L2B user would notice quickly.
+2. **The claim it *can* back, once items 1 to 3 ship:** *"Every tender on National Treasury's eTenders portal (about 2,200 open, 400+ buyers, all industries), plus SANRAL, Eskom and Transnet direct, with their extensions and cancellations. Checked daily. Free."* For a SANRAL consulting firm that is effectively complete: 21 of 21 open consulting tenders found. It is also the only free source showing every competitor's price.
+3. **This strengthens Tender Watch as the free lead magnet (section 4).** It doesn't create a paid discovery product to sell against L2B's R1,495.65. Section 9.8 still stands: L2B users are prospects, not targets.
+4. **Fix item 1 before any marketing mentions discovery coverage.** Today's 14-day run sees about a fifth of the window. Any coverage claim made now would be false.
+
+### 10.8 Method and limits
+
+- **SANRAL matching:** SANRAL lists by contract number and the portal by NRA bid number. Matching used both identifiers, taken from the reference, the SCM reference on each SANRAL detail page (84 pages read, 1 s apart) and the portal's description. Plain reference-string matching finds only about 31 of 137 and badly undercounts. **Anyone repeating this must match on both identifiers.**
+- **Coverage counts:** portal counts exclude tenders that had already moved to Awarded or Cancelled, so OCDS-against-portal percentages are approximate. Buyer types come from a name-based classification of the portal's 895-entry buyer list.
+- **Municipal own sites:** only Cape Town was fully compared. The others couldn't be reached from this environment, so their own-site volumes are unknown, not zero.
+- **Not verified:** whether the Public Procurement Act 2024 has commenced for municipalities or created a mandatory single portal; provincial own portals (some provinces run their own); and how L2B's municipal coverage looks behind its paywall.
+- **Politeness:** the portal was read in pages of 50 to 100 with 0.4 to 0.5 s pauses, and OCDS one day at a time. No document was downloaded (the zip check was a HEAD request plus a 4-byte range read). The raw pulls were scratch files and weren't committed.
+
+**Sources for this section:** [eTenders portal](https://www.etenders.gov.za/Home/opportunities?id=1) (advertised, closed, awarded and cancelled tabs, read through `/Home/TenderFilter/`), [OCDS API](https://ocds-api.etenders.gov.za/api/OCDSReleases), [SANRAL open tenders](https://www.nra.co.za/sanral-tenders/list/open-tenders), [Eskom Tender Bulletin](https://tenderbulletin.eskom.co.za/), [Transnet eTenders](https://transnetetenders.azurewebsites.net/Home/AdvertisedTenders), [City of Cape Town procurement portal (RFQs)](https://web1.capetown.gov.za/web1/procurementportal/RFQ), [MFMA Circular 83](https://mfma.treasury.gov.za/Circulars/MFMA%20Circular%2083%20-%20eTender%20Portal%20-%2018%20July%202016.pdf), [PMG NW1277](https://pmg.org.za/committee-question/22234/), [PMG NW2297](https://pmg.org.za/committee-question/29895/), [National Treasury on the Public Procurement Act's commencement (Aug 2024)](https://www.treasury.gov.za/comm_media/press/2024/2024081301%20Media%20Statement%20-%20Commencement%20of%20Public%20Procurement%20Act.pdf). Repo: `engine/discovery/etenders_national.py`, `list_tenders.py`, `detail.py`, `award_outcomes.py`.
