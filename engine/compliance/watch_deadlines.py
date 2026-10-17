@@ -55,6 +55,17 @@ mechanism as document-expiry reminders, not a second one):
    app/lib/vaultDocuments.ts BANK_LETTER_RENEW_SOON_DAYS, so the vault badge
    and the reminder agree.
 
+1b. Per-person professional registrations (People page, app/app/people/;
+   Deep-Dive item 21). TRACKED_PERSON_EXPIRY_FIELDS lists the per-person
+   expiry columns that really exist on `people`: ECSA and SACPCMP
+   (0035_person_registration_expiry.sql - before it, people only had the
+   date each registration was GRANTED, ecsa_date/sacpcmp_date, which is not
+   an expiry). Same lead-time window, same seen-store, same status
+   escalation as the company documents: both go through _expiry_window(),
+   one mechanism, not a second one. Other professional bodies (SACAP,
+   SACPLAN, ...) have no registration column on people yet, so they are not
+   tracked.
+
 2. Tender task due dates (tender_tasks, migration 0009_tender_tasks.sql -
    app/app/tenders/[id]/page.tsx's task/deadline timeline). Reports any
    not-yet-done task whose due_date is inside --task-lead-days (default 14 -
@@ -112,6 +123,14 @@ TRACKED_EXPIRY_FIELDS = [
     ("bee_proof_expiry", "B-BBEE proof (certificate or sworn affidavit)", None),
 ]
 
+# Per-person registrations (0035). Same (column, label, lead_days_override)
+# shape as TRACKED_EXPIRY_FIELDS; the number column is carried into the
+# report so the reminder says which registration it is.
+TRACKED_PERSON_EXPIRY_FIELDS = [
+    ("ecsa_expiry", "ECSA professional registration", None, "ecsa_number"),
+    ("sacpcmp_expiry", "SACPCMP professional registration", None, "sacpcmp_number"),
+]
+
 DEFAULT_DOC_LEAD_DAYS = 60  # matches app/lib/dates.ts's renewSoonWithinDays default
 DEFAULT_TASK_LEAD_DAYS = 14
 
@@ -153,6 +172,27 @@ def days_until(date_str, today):
     return (d - today).days
 
 
+def _expiry_window(seen, key_prefix, kind, expiry, today, lead_days):
+    """The one reminder rule shared by company documents and per-person
+    registrations: None if there is no date or it is outside the lead-time
+    window, or this (item, expiry, status) was already reported; otherwise
+    records it in the seen-store and returns (days_left, status).
+
+    The status is part of the key (2026-10-17): an item is reported once
+    while "renew soon" and once more when it actually lapses. Before, a
+    document reported at 60 days was never reported again - the moment it
+    expired was silent. A changed expiry date (renewed) is a new key."""
+    left = days_until(expiry, today)
+    if left is None or left > lead_days:
+        return None  # not expired and outside the reminder window
+    status = "expired" if left < 0 else "renew_soon"
+    seen_key = f"{key_prefix}::{expiry}::{status}"
+    if seen_key in seen:
+        return None
+    seen[seen_key] = {"first_seen": today.isoformat(), "kind": kind}
+    return left, status
+
+
 def find_due_documents(url, key, seen, today, lead_days):
     select_cols = "id,legal_name," + ",".join(col for col, _, _ in TRACKED_EXPIRY_FIELDS)
     companies = supabase_request(url, key, f"companies?select={select_cols}")
@@ -163,19 +203,11 @@ def find_due_documents(url, key, seen, today, lead_days):
             expiry = company.get(col)
             if not expiry:
                 continue
-            left = days_until(expiry, today)
-            if left is None or left > (lead_override if lead_override is not None else lead_days):
-                continue  # not expired and outside the reminder window
-
-            status = "expired" if left < 0 else "renew_soon"
-            # The status is part of the key (2026-10-17): reported once while
-            # "renew soon" and once more when it actually lapses. Before, a
-            # document reported at 60 days was never reported again - the
-            # moment it expired was silent.
-            seen_key = f"doc::{company['id']}::{col}::{expiry}::{status}"
-            if seen_key in seen:
+            hit = _expiry_window(seen, f"doc::{company['id']}::{col}", "document",
+                                 expiry, today, lead_override if lead_override is not None else lead_days)
+            if not hit:
                 continue
-            seen[seen_key] = {"first_seen": today.isoformat(), "kind": "document"}
+            left, status = hit
 
             due.append({
                 "type": "document",
@@ -183,6 +215,44 @@ def find_due_documents(url, key, seen, today, lead_days):
                 "company_name": company.get("legal_name"),
                 "field": col,
                 "label": label,
+                "expiry_date": expiry,
+                "days_left": left,
+                "status": status,
+            })
+    return due
+
+
+def find_due_person_credentials(url, key, seen, today, lead_days):
+    """Per-person registrations (TRACKED_PERSON_EXPIRY_FIELDS, 0035) inside
+    the reminder window or already lapsed, across every person in every
+    company - same window/seen-store rule as find_due_documents()."""
+    select_cols = "id,company_id,name," + ",".join(
+        f"{col},{num}" for col, _, _, num in TRACKED_PERSON_EXPIRY_FIELDS)
+    people = supabase_request(url, key, f"people?select={select_cols}&order=name.asc")
+    company_ids = sorted({p["company_id"] for p in people if p.get("company_id")})
+    names = {}
+    if company_ids:
+        rows = supabase_request(url, key, f"companies?select=id,legal_name&id=in.({','.join(company_ids)})")
+        names = {c["id"]: c.get("legal_name") for c in rows}
+
+    due = []
+    for person in people:
+        for col, label, lead_override, num_col in TRACKED_PERSON_EXPIRY_FIELDS:
+            expiry = person.get(col)
+            hit = _expiry_window(seen, f"person::{person['id']}::{col}", "person_credential",
+                                 expiry, today, lead_override if lead_override is not None else lead_days)
+            if not hit:
+                continue
+            left, status = hit
+            due.append({
+                "type": "person_credential",
+                "company_id": person["company_id"],
+                "company_name": names.get(person["company_id"]),
+                "person_id": person["id"],
+                "person_name": person.get("name"),
+                "field": col,
+                "label": label,
+                "registration_number": person.get(num_col),
                 "expiry_date": expiry,
                 "days_left": left,
                 "status": status,
@@ -311,6 +381,7 @@ def main():
     seen = load_seen(args.seen_store)
 
     documents_due = find_due_documents(url, key, seen, today, args.doc_lead_days)
+    credentials_due = find_due_person_credentials(url, key, seen, today, args.doc_lead_days)
     tasks_due = find_due_tasks(url, key, seen, today, args.task_lead_days)
     before_closing = find_documents_lapsing_before_closing(url, key, seen, today)
 
@@ -322,6 +393,12 @@ def main():
         print(f"  {d['company_name']!r:<30} {d['label']:<32} expires {d['expiry_date']}  "
               f"({d['days_left']} days{' overdue' if d['days_left'] < 0 else ' left'})")
 
+    print(f"\n{len(credentials_due)} person registration(s) newly due for a renewal reminder "
+          f"(within {args.doc_lead_days} days or already lapsed):")
+    for c in credentials_due:
+        print(f"  {c['company_name']!r:<30} {c['person_name']!r:<24} {c['label']:<34} expires {c['expiry_date']}  "
+              f"({c['days_left']} days{' overdue' if c['days_left'] < 0 else ' left'})")
+
     print(f"\n{len(before_closing)} document(s) that will have lapsed by the closing date of a tender being prepared:")
     for d in before_closing:
         print(f"  {d['company_name']!r:<30} {d['label']:<32} expires {d['expiry_date']} - {d['tender_label']} closes {d['closing_date']}")
@@ -332,7 +409,7 @@ def main():
         print(f"  {t['tender_label']:<20} {t['description']:<50} due {t['due_date']}  "
               f"({t['days_left']} days{' overdue' if t['days_left'] < 0 else ' left'})")
 
-    report = {"documents": documents_due, "documents_before_closing": before_closing, "tasks": tasks_due}
+    report = {"documents": documents_due, "person_credentials": credentials_due, "documents_before_closing": before_closing, "tasks": tasks_due}
     if args.out:
         with open(args.out, "w") as f:
             json.dump(report, f, indent=2)

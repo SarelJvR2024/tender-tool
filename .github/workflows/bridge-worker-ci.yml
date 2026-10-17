@@ -72,6 +72,9 @@ jobs:
       - name: Deadline reminders - escalation and closing-date awareness (in-memory rows)
         run: python3 engine/compliance/test_watch_deadlines_urgency.py
 
+      - name: Per-person registration expiry reminders + digest routing (in-memory rows)
+        run: python3 engine/compliance/test_watch_person_credentials.py
+
       - name: General engine - bridge end to end (fake Supabase, real tender documents)
         run: |
           sudo apt-get install -y --no-install-recommends poppler-utils

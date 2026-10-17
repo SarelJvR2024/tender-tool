@@ -64,6 +64,8 @@ export async function savePerson(formData: FormData) {
     ecsa_date: str(formData, "ecsa_date"),
     sacpcmp_number: str(formData, "sacpcmp_number"),
     sacpcmp_date: str(formData, "sacpcmp_date"),
+    ecsa_expiry: str(formData, "ecsa_expiry"), // 0035
+    sacpcmp_expiry: str(formData, "sacpcmp_expiry"), // 0035
     highest_level: str(formData, "highest_level"),
     highest_description: str(formData, "highest_description"),
     highest_institution: str(formData, "highest_institution"),

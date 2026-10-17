@@ -26,7 +26,11 @@ What this script reuses rather than reimplements, concretely:
     REPORT_WORTHY_VERDICTS is imported from watch_new_tenders.py, not
     re-declared, so "report-worthy" means the same thing in both places.
   - Document expiry + tender tasks: engine/compliance/watch_deadlines.py's
-    find_due_documents()/find_due_tasks() are called directly, unchanged.
+    find_due_documents()/find_due_person_credentials()/find_due_tasks() are
+    called directly, unchanged. Per-person registrations (ECSA/SACPCMP,
+    0035) ride in the document_expiry section as type "person_credential":
+    full_cycle sees them, cv_admin sees only them, finance never sees them,
+    viewer gets them in the count.
     This script does NOT re-read companies/tender_tasks itself - whatever
     watch_deadlines.py's own TRACKED_EXPIRY_FIELDS list covers (today: just
     COID Letter of Good Standing - see that script's own docstring and
@@ -105,7 +109,9 @@ DEFAULT_ROLE = "full_cycle"
 SECTION_VISIBILITY = {
     "full_cycle": {"new_tenders", "document_expiry", "tender_tasks", "readiness_changes", "submission_due"},
     "validator": {"readiness_changes", "submission_due", "tender_tasks"},
-    "cv_admin": {"tender_tasks", "readiness_changes"},
+    # document_expiry added with 0035: the matrix gives cv_admin only expiries that
+    # block a specific person's registration, which now exist (person_credential).
+    "cv_admin": {"tender_tasks", "readiness_changes", "document_expiry"},
     "finance": {"document_expiry", "tender_tasks", "readiness_changes", "submission_due"},
     "viewer": {"new_tenders", "document_expiry", "submission_due"},
 }
@@ -317,14 +323,18 @@ def build_digest_for_person(person, signals):
 
     if "document_expiry" in visible:
         items = signals["document_expiry"]
+        # The section holds company documents (type "document") and, since
+        # 0035, per-person professional registrations (type
+        # "person_credential", watch_deadlines.find_due_person_credentials).
         if role == "finance":
-            pass  # full detail, same as full_cycle - no filtering needed, finance IS the document-expiry role
+            # Matrix: financial/tax/compliance documents - every company
+            # document, but not a person's ECSA/SACPCMP renewal (not theirs to act on).
+            items = [i for i in items if i.get("type") != "person_credential"]
         elif role == "cv_admin":
-            # Matrix: only if the expiring document would block a specific person's own
-            # registration/compliance - no such data exists yet (people has no expiry
-            # column, confirmed against 0001_init_schema.sql), so this is always empty
-            # today, not silently guessed at.
-            items = []
+            # Matrix: only if the expiring item would block a specific person's own
+            # registration being usable on a pack - exactly the person_credential
+            # items; company documents stay out.
+            items = [i for i in items if i.get("type") == "person_credential"]
         if role == "viewer":
             digest["document_expiry"] = {"count": len(items)}
         else:
@@ -406,7 +416,8 @@ def main():
         roster = load_roster_local(args.roster)
         print(f"Fetching OCDS releases ({args.days} days)...")
         scored = fetch_scored_releases(profile, days=args.days, fetch_documents=not args.no_fetch_documents)
-        document_expiry = local_document_expiry(profile, today, args.doc_lead_days)
+        document_expiry = (local_document_expiry(profile, today, args.doc_lead_days)
+                           + local_person_credential_expiry(profile, today, args.doc_lead_days))
         tender_tasks = []  # Supabase-only, no local fixture (see module docstring)
         readiness_changes = []  # Supabase-only
     else:
@@ -420,7 +431,8 @@ def main():
               "(assess_tender.load_company_profile doesn't yet read one from Supabase) - "
               "new_tenders/submission_due will be empty in live mode until that's wired up. "
               "See docs/specs/System-Status.md.")
-        document_expiry = watch_deadlines.find_due_documents(url, key, seen, today, args.doc_lead_days)
+        document_expiry = (watch_deadlines.find_due_documents(url, key, seen, today, args.doc_lead_days)
+                           + watch_deadlines.find_due_person_credentials(url, key, seen, today, args.doc_lead_days))
         tender_tasks = watch_deadlines.find_due_tasks(url, key, seen, today, args.task_lead_days)
         readiness_changes = find_readiness_changes(url, key, seen, today)
 
@@ -496,6 +508,29 @@ def local_document_expiry(profile, today, lead_days):
             due.append({
                 "type": "document", "field": "professional_indemnity_insurance.period_to",
                 "label": "Professional indemnity insurance", "expiry_date": pi_expiry,
+                "days_left": left, "status": "expired" if left < 0 else "renew_soon",
+            })
+    return due
+
+
+def local_person_credential_expiry(profile, today, lead_days):
+    """Local-mode stand-in for watch_deadlines.find_due_person_credentials():
+    reads key_people[*].qualifications.<column> from the profile JSON for the
+    same TRACKED_PERSON_EXPIRY_FIELDS columns (imported, not re-declared).
+    No seen-store, same as local_document_expiry()."""
+    due = []
+    for person in profile.get("key_people", []):
+        q = person.get("qualifications") or {}
+        for col, label, lead_override, num_col in watch_deadlines.TRACKED_PERSON_EXPIRY_FIELDS:
+            expiry = q.get(col)
+            if not expiry:
+                continue
+            left = watch_deadlines.days_until(expiry, today)
+            if left > (lead_override if lead_override is not None else lead_days):
+                continue
+            due.append({
+                "type": "person_credential", "person_name": person.get("name"), "field": col,
+                "label": label, "registration_number": q.get(num_col), "expiry_date": expiry,
                 "days_left": left, "status": "expired" if left < 0 else "renew_soon",
             })
     return due

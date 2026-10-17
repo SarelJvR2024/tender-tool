@@ -4,6 +4,7 @@ import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRol
 import { SiteNav } from "../../_components/SiteNav";
 import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
+import { credentialExpiries } from "@/lib/personCredentials";
 import { ROLE_FAMILY_LABEL, ROLE_FAMILY_ORDER, TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 
 // Per-request: loads one real person's record (or a blank "new" form) under
@@ -24,6 +25,8 @@ type Person = {
   ecsa_date: string | null;
   sacpcmp_number: string | null;
   sacpcmp_date: string | null;
+  ecsa_expiry: string | null; // 0035
+  sacpcmp_expiry: string | null; // 0035
   highest_level: string | null;
   highest_description: string | null;
   highest_institution: string | null;
@@ -98,6 +101,16 @@ const field: React.CSSProperties = {
   color: "#16233B", background: "#FFFFFF",
 };
 const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#6B6758", marginBottom: 4, display: "block" };
+
+// Same badge shape and colours as the Document Vault (app/app/company/page.tsx).
+function ExpiryBadge({ status }: { status?: { label: string; bg: string; color: string } }) {
+  if (!status) return null;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", marginLeft: 6, padding: "1px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: status.bg, color: status.color, textTransform: "none", letterSpacing: 0 }}>
+      {status.label}
+    </span>
+  );
+}
 
 function Field({ children }: { children: React.ReactNode }) {
   return <div style={{ marginBottom: 12 }}>{children}</div>;
@@ -209,6 +222,7 @@ export default async function PersonDetailPage({
   }
 
   const yearsFromInitial = yearsSince(person?.initial_graduated ?? null);
+  const expiryByBody = Object.fromEntries(credentialExpiries(person ?? {}).map((c) => [c.body, c.status]));
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
@@ -283,8 +297,20 @@ export default async function PersonDetailPage({
             <Field><label style={label}>ECSA level</label><input style={field} name="ecsa_level" defaultValue={person?.ecsa_level ?? ""} placeholder="e.g. Professional Engineer" /></Field>
             <Field><label style={label}>ECSA number</label><input style={field} name="ecsa_number" defaultValue={person?.ecsa_number ?? ""} /></Field>
             <Field><label style={label}>ECSA registration date</label><input style={field} type="date" name="ecsa_date" defaultValue={person?.ecsa_date ?? ""} /></Field>
+            <Field>
+              <label style={label}>ECSA valid until / renewal due <ExpiryBadge status={expiryByBody.ECSA} /></label>
+              <input style={field} type="date" name="ecsa_expiry" defaultValue={person?.ecsa_expiry ?? ""} />
+            </Field>
             <Field><label style={label}>SACPCMP number</label><input style={field} name="sacpcmp_number" defaultValue={person?.sacpcmp_number ?? ""} /></Field>
             <Field><label style={label}>SACPCMP registration date</label><input style={field} type="date" name="sacpcmp_date" defaultValue={person?.sacpcmp_date ?? ""} /></Field>
+            <Field>
+              <label style={label}>SACPCMP valid until / renewal due <ExpiryBadge status={expiryByBody.SACPCMP} /></label>
+              <input style={field} type="date" name="sacpcmp_expiry" defaultValue={person?.sacpcmp_expiry ?? ""} />
+            </Field>
+          </div>
+          <div style={{ fontSize: 12, color: "#9A9684", marginBottom: 10 }}>
+            Enter the date from the registration certificate or renewal notice. It drives the expiry
+            badge here and the renewal reminder (60 days ahead, and again if it lapses).
           </div>
 
           <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px" }}>

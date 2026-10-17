@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../_components/SiteNav";
+import { credentialChipLabel, credentialExpiries } from "@/lib/personCredentials";
 
 // Reads the signed-in user's own company's roster on every request (via RLS) -
 // can't be prerendered. Same Cache Components escape hatch as dashboard/page.tsx.
@@ -14,6 +15,8 @@ type PersonRow = {
   ecsa_level: string | null;
   ecsa_number: string | null;
   sacpcmp_number: string | null;
+  ecsa_expiry: string | null; // 0035
+  sacpcmp_expiry: string | null; // 0035
   highest_description: string | null;
 };
 
@@ -26,6 +29,11 @@ function registrationSummary(p: PersonRow): { label: string; bg: string; color: 
   }
   if (p.sacpcmp_number) {
     tags.push({ label: "SACPCMP registered", bg: "#DCFCE7", color: "#15803D" });
+  }
+  // Registration expiry badges (0035), same colours and 60-day threshold as
+  // the Document Vault's expiry badges (app/lib/dates.ts expiryStatus).
+  for (const c of credentialExpiries(p)) {
+    tags.push({ label: credentialChipLabel(c), bg: c.status.bg, color: c.status.color });
   }
   return tags;
 }
@@ -43,10 +51,16 @@ export default async function PeoplePage({
   // belongs in one of those, same rule companies.director_id_number states.
   const { data: people, error } = await supabase
     .from("people")
-    .select("id, name, role, description, ecsa_level, ecsa_number, sacpcmp_number, highest_description")
+    .select("id, name, role, description, ecsa_level, ecsa_number, sacpcmp_number, ecsa_expiry, sacpcmp_expiry, highest_description")
     .order("name", { ascending: true });
 
   const rows = (people ?? []) as PersonRow[];
+
+  // At-a-glance registration health, same idea as the Document Vault's chip row.
+  const allExpiries = rows.flatMap((p) => credentialExpiries(p));
+  const expiredCount = allExpiries.filter((c) => c.status.label === "Expired").length;
+  const renewSoonCount = allExpiries.filter((c) => c.status.label === "Renew soon").length;
+  const noDateCount = allExpiries.filter((c) => !c.expiry).length;
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
@@ -88,6 +102,15 @@ export default async function PeoplePage({
         {error && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
             Could not load people: {error.message}
+          </div>
+        )}
+
+        {allExpiries.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            {expiredCount > 0 && <SummaryChip text={`${expiredCount} registration${expiredCount === 1 ? "" : "s"} expired`} bg="#FEE2E2" color="#B91C1C" />}
+            {renewSoonCount > 0 && <SummaryChip text={`${renewSoonCount} renewing within 60 days`} bg="#FEF3C7" color="#B45309" />}
+            {noDateCount > 0 && <SummaryChip text={`${noDateCount} without a renewal date`} bg="#F0EEE6" color="#6B6758" />}
+            {expiredCount === 0 && renewSoonCount === 0 && noDateCount === 0 && <SummaryChip text="Registrations current" bg="#DCFCE7" color="#15803D" />}
           </div>
         )}
 
@@ -135,5 +158,13 @@ export default async function PeoplePage({
         </div>
       </div>
     </div>
+  );
+}
+
+function SummaryChip({ text, bg, color }: { text: string; bg: string; color: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color }}>
+      {text}
+    </span>
   );
 }
