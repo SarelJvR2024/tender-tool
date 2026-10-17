@@ -146,28 +146,27 @@ def add_cover_page(d, person, person_id, tender_ctx, log):
     log.confirmed("cv_cover.position_code", pos["code"])
 
     d.add_paragraph()
-    _sub_heading(d, "What this CV addresses, and what it doesn't")
+    _sub_heading(d, "Relevant experience for this position")
     d.add_paragraph(
-        "The matching below is the same scoring suggest_pack.py uses to rank candidates for "
-        "this position - a plain keyword match against the position's stated description "
-        "plus this person's qualifications and project history, never a silent AI guess."
+        f"This CV highlights {person['name']}'s qualifications and project experience "
+        f"relevant to the {pos['code']} - {pos['description']} position."
     )
 
     if cand is None:
-        p = d.add_paragraph(
-            "This person was not among the candidates scored for this position when the "
-            "pack suggestions were generated - there is no stored rationale to show. "
-            "Re-run suggest_pack.py for this tender before relying on this CV for this "
-            "specific position."
-        )
-        p.runs[0].bold = True
+        # Nothing buyer-appropriate to add without a stored match for this position -
+        # the generic sentence above already covers it. Full detail stays internal.
         log.missing("cv_cover.position_match",
                     reason=f"{person['name']} not present in {tender_ctx['candidate']!r} candidates "
                            f"list for position {pos['code']} at the time pack_suggestions.json was generated.")
+        d.add_paragraph()
+        d.add_page_break()
         return
 
     if cand["specialism_warning"]:
-        p = d.add_paragraph("⚠ SPECIALISM NOT EVIDENCED ON FILE for this position.")
+        p = d.add_paragraph(
+            "Note: this candidate's CV does not show direct evidence of this position's "
+            "specific specialism requirement."
+        )
         p.runs[0].bold = True
         log.assumed_default(
             "cv_cover.specialism_warning", True,
@@ -175,11 +174,16 @@ def add_cover_page(d, person, person_id, tender_ctx, log):
                    "this position's description and this person's recorded qualifications/"
                    "projects - flagged, not hidden.",
         )
-    d.add_paragraph(f"Match score: {cand['score']} (suggest_pack.py's own scoring scale, not a percentage).")
-    d.add_paragraph(f"Rationale: {cand['rationale']}")
+    # The underlying match score/rationale from suggest_pack.py's scoring is kept in the
+    # provenance log (and remains visible to internal reviewers via the Tender Workspace and
+    # pack_suggestions.json) but is never printed into this document - this file is the one
+    # that goes into the actual submitted pack, and there is no internal/submission
+    # distinction in the data model today to gate it behind, so it is left out entirely here.
     log.computed("cv_cover.match_rationale", cand["rationale"],
                  reason="Taken verbatim from suggest_pack.py's own stored pack_suggestions.json "
-                        "for this tender and position - not recomputed here.")
+                        "for this tender and position - not recomputed here. Kept in provenance "
+                        "only; not printed on the buyer-facing cover page.")
+    log.confirmed("cv_cover.match_score", cand["score"])
     d.add_paragraph()
     d.add_page_break()
 
@@ -194,9 +198,7 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
     _letterhead(d, logo_path)
     _heading(d, "KEY PERSONNEL - TECHNICAL/MANAGERIAL & QUALIFICATION RECORD")
     d.add_paragraph(
-        "Reproduces the shape of SANRAL's own Form B1.1 (Candidate's Technical/Managerial "
-        "Record) and Form B2.1 (Candidate's Qualification and Registration Record) as a "
-        "standalone document - see docs/specs/CV-Engine-Findings.md section 1."
+        "Candidate's Technical/Managerial Record and Qualification and Registration Record."
     ).alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     if tender_ctx:
@@ -314,11 +316,6 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
     d = docx.Document()
     _letterhead(d, logo_path)
     _heading(d, "CURRICULUM VITAE (WORLD BANK FORMAT)")
-    d.add_paragraph(
-        "Structure confirmed via WebSearch against donor-funded-project CV guidance and a "
-        "real World-Bank-style government procurement template - see "
-        "docs/specs/CV-Engine-Findings.md section 3 for sourcing and its caveat."
-    ).alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     if tender_ctx:
         add_cover_page(d, person, person_id, tender_ctx, log)
@@ -355,28 +352,21 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
         log.missing("cv.wb.professional_associations", reason="No ECSA/SACPCMP or other "
                     "professional-body registration on file for this person.")
     d.add_paragraph("\n".join(assoc_lines))
-    note = d.add_paragraph(
-        "Note: the people/projects schema only captures South African professional-body "
-        "registration (ECSA, SACPCMP) today - a separate 'other professional memberships' "
-        "field does not exist yet, so none is shown beyond these."
-    )
-    note.runs[0].italic = True
 
     d.add_paragraph()
     _sub_heading(d, "7. Other Training")
-    d.add_paragraph("MISSING - not captured in the people/projects schema yet.")
+    d.add_paragraph("Not currently on file for this candidate.")
     log.missing("cv.wb.other_training", reason="No 'other training' field exists on the "
                 "people record yet.")
 
     d.add_paragraph()
     _sub_heading(d, "8. Countries of Work Experience")
-    d.add_paragraph("MISSING - not captured in the people/projects schema yet "
-                     "(projects record client and value, not country).")
+    d.add_paragraph("Not currently on file for this candidate.")
     log.missing("cv.wb.countries_of_experience", reason="projects table has no country field.")
 
     d.add_paragraph()
     _sub_heading(d, "9. Languages")
-    d.add_paragraph("MISSING - not captured in the people/projects schema yet.")
+    d.add_paragraph("Not currently on file for this candidate.")
     log.missing("cv.wb.languages", reason="No language-proficiency field on the people record yet.")
 
     d.add_paragraph()

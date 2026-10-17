@@ -98,6 +98,48 @@ bridged by `engine/general/process_general_jobs.py`.
 
 13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; documents can't be attached to a shared discovered tender (load a private copy instead); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once.
 
+## This pass (2026-10-17, CV cover-page internal-text fix)
+
+**Found and fixed a real buyer-facing bug** in `engine/cv/generate_cv.py`: the tender-specific
+CV cover page (and the SANRAL/World Bank format intro paragraphs, printed regardless of
+tender-specific or standard mode) put tool-internal text straight into the document that gets
+merged into the real submitted pack - script names (`suggest_pack.py`, `generate_cv.py`),
+`docs/specs/CV-Engine-Findings.md` file-path references, "Match score: N (suggest_pack.py's own
+scoring scale, not a percentage)", and "people/projects schema" wording in the World Bank
+format's missing-field notes. Confirmed by generating a real CV (`complete_co` fixture, both
+formats, `--tender`/`--position` set) and reading the `.docx` and converted `.pdf` back with
+python-docx/pdfplumber - all of the above appeared verbatim in the output a buyer would receive.
+
+Fixed by rewriting every such string to plain, buyer-appropriate text (e.g. "This CV highlights
+[Name]'s qualifications and project experience relevant to the [code] - [description] position.")
+or dropping it where there was nothing genuinely buyer-appropriate to say (the raw match
+score/rationale, the "re-run suggest_pack.py" instruction for an unscored candidate, the
+"people/projects schema" missing-field explanations). The underlying match score and rationale
+are not deleted from the system - they stay in the written `.provenance.json` and remain visible
+to internal reviewers via the Tender Workspace/`pack_suggestions.json` - just no longer printed
+onto the document that is actually submitted. Checked: there is no internal-review-copy vs.
+submitted-copy distinction anywhere in the code or data model today (one file is generated, one
+file is merged into the pack), so per the safe default this strips the internal detail from the
+CV generator's output entirely rather than gating it behind a distinction that doesn't exist.
+
+Verified: regenerated real CVs for all three cover-page paths (matched candidate, matched
+candidate with `specialism_warning`, and a position with no scored candidate for this person) in
+both formats, read every `.docx` and `.pdf` back and grepped for `suggest_pack`, `generate_cv`,
+`.py`, `docs/specs`, `schema`, `script`, `Match score` - none found in any output. Standard
+(non-tender) CV generation in both formats re-run and still produces clean output. No test suite
+exists specifically for `generate_cv.py` (it's verified by the manual real-generation +
+read-back pattern documented in `CV-Engine-Findings.md`); `engine/cv/test_extract_cv_fields.py`
+was run for the wider CV engine and shows the same 4 pre-existing `fixture not found` errors with
+and without this change (unrelated - no local `conftest.py` defines `tmp`/`docx_path`, not
+touched here).
+
+This closes out item (a) of the "Company voice" open item below. **Correction to that item's own
+reference:** `docs/specs/Company-Voice-Audit.md` does not exist anywhere in this repo (checked by
+full-repo search) and nothing else references it - the open item below appears to be the only
+place that name was ever written down, and the "decision" it was meant to record was never made.
+Item (b) (`how_we_work` on the Tender Workspace) is untouched by this pass, per instruction, and
+stays open below.
+
 ## This pass (2026-10-17, standing QA/robustness review - first run)
 
 New standing review, separate from the solution-architect pass above: adversarial testing of the
@@ -339,7 +381,7 @@ note added to the Built table above; nothing new to flag.
 
 ## Open items for Sarel's own call (not decided here)
 
-- **Company voice (`Company-Voice-Audit.md`):** (a) the tender-specific CV cover page goes into the submitted pack and prints tool-internal text (script names, a docs/ file path, "Match score: N (suggest_pack.py's own scoring scale)"). This text is the same for every tenant. Is the cover page meant for the buyer (then reword it) or an internal aid (then merge a CV without it)? (b) OK to show `how_we_work` verbatim, read-only, beside the B4/B5 "complete by hand" item on the Tender Workspace as reference for whoever writes it? Not generated. **Standing discipline:** any new buyer-facing output must check whether it needs the company's own words. If it does, use them verbatim, never an LLM paraphrase. If they are blank, leave the spot visibly blank. Full rules in the deep-dive spec's "No AI-drafted narrative sections" section.
+- **Company voice:** (a) **Fixed this pass** (see "CV cover-page internal-text fix" above): the tender-specific CV cover page no longer prints tool-internal text (script names, a docs/ file path, the raw match score/rationale, "people/projects schema" wording) - every CV generated now reads as a plain, buyer-appropriate document, verified by regenerating and reading back real output. Still open for Sarel: whether the match score/rationale concept is worth keeping as a genuinely *internal* reviewer aid (e.g. a separate internal-review copy or a Tender-Workspace-only view) now that it's been stripped from the document that actually gets submitted - no internal-copy-vs-submitted-copy distinction exists in the code or data model today, so for now it only survives in `generated_cvs`' `.provenance.json` and the existing `pack_suggestions.json`/Tender Workspace surfaces, not on the CV itself. (b) OK to show `how_we_work` verbatim, read-only, beside the B4/B5 "complete by hand" item on the Tender Workspace as reference for whoever writes it? Not generated. **Standing discipline:** any new buyer-facing output must check whether it needs the company's own words. If it does, use them verbatim, never an LLM paraphrase. If they are blank, leave the spot visibly blank. Full rules in the deep-dive spec's "No AI-drafted narrative sections" section.
 
 - **CV AI-extraction** (`CV-Extraction-Findings.md` §7-8): create an Anthropic API key and set `ANTHROPIC_API_KEY` on the worker; share 3-5 real team CVs to measure against; decide whether scanned CVs should be read by Claude as images/PDFs or stay "use as-is" only; Opus 5.5 (default) vs Haiku 5.5; columns for other professional bodies.
 
