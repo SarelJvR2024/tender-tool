@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, 04:11 UTC check-in.
+Last full pass: 2026-10-17, 06:10 UTC check-in.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -59,7 +59,7 @@ bridged by `engine/general/process_general_jobs.py`.
 | General (non-SANRAL) tender preparation (`engine/general/requirements.py`, `fill_sbd_docx.fill_sbd_document()`, `build_general_pack.py`, `process_general_jobs.py`, migration `0018`, `general-workspace.tsx`, Discovery "Prepare this tender") | Reads THIS tender's own documents (pdf/docx/doc/zip) into a requirement manifest: which SBD or municipal MBD forms (filled vs by hand), the buyer's own forms, supporting documents with verbatim quotes, roles, CIDB/briefing, scoring, evidence and locality rules, and only the questions its forms need. Workspace shows a checklist vs the vault, inline per-tender uploads, one answers form (company SBD 1 facts saved to the company), and requests a pack: completion guide + filled forms + by-hand editions + buyer forms + vault docs + uploads + accepted experience + tagged people's CVs, merged with `engine/pack/pdf_merge.py` | 25 real non-SANRAL tenders read, 9 committed as `templates/general_samples/`. Fill read-back on 9 real editions (incl. bundles and a converted `.doc`); `test_general_bridge.py` (22 checks, fake Supabase, real documents); `general_harness.py` 9 samples x 3 test companies, expectations + read-back + baselines; `0001`→`0018` replayed with RLS tests. Never run against a live project (Gap #9). Evidence: `General-Tender-Preparation-Findings.md` |
 | Admin test-company harness (`engine/admin_harness.py`, item 30) | Runs test companies through the real SANRAL pipeline, flags shape changes vs. stored baseline | Self-verifying by design (3 real bugs caught per its own commit `d86c84e`) — but **SANRAL-only**, see Gaps. `--pack` (opt-in, needs LibreOffice, ~1 min per run) also runs the whole submission-pack chain per test company, including `generate_cv.py`. It reads the PDF back and baselines its shape (`state/admin_harness_pack_baselines/`). Today: `complete_co` builds (71 pages on this host, 69 in the worker image: different LibreOffice/fonts, so baselines are per-environment). `expired_certs_co` and `new_co` are refused by the real filler (`'MO/MA'` is not a Conventional project-type option; ECSA level null), which is recorded as their baseline outcome |
 | Admin results console (`app/app/admin/page.tsx`, item 31) | Plain list of harness runs (test company × tender, status, last run) | Real, reads `admin_harness_runs` (migration `0005`, column renamed by `0006`). **Simpler than the spec's description** — no inline rendering of generated documents, no "mark reviewed" workflow yet |
-| Company vault (`app/app/company/page.tsx`, migration `0014`) | Company profile plus six tracked compliance documents: COID, SARS TCS PIN, PI insurance, ISO 9001, bank confirmation letter (generated 3-month validity), and B-BBEE proof (certificate or QSE/EME affidavit). Each has an expiry badge and an upload/replace to the private `company-documents` bucket | Read-only + edit form both real; expiry coloring shared via `app/lib/dates.ts`. `0014` was replayed with functional SQL checks (generated column, check constraint, tenant-scoped update and storage prefix). The upload has never been run against a live project |
+| Company vault (`app/app/company/page.tsx`, migration `0014`) | Company profile plus six tracked compliance documents: COID, SARS TCS PIN, PI insurance, ISO 9001, bank confirmation letter (generated 3-month validity), and B-BBEE proof (certificate or QSE/EME affidavit). Each has an expiry badge and an upload/replace to the private `company-documents` bucket. A chip row at the top now summarizes all six at a glance ("N expired" / "N renewing soon" / "N not on file" / a single "documents current") | Read-only + edit form both real; expiry coloring shared via `app/lib/dates.ts`. `0014` was replayed with functional SQL checks (generated column, check constraint, tenant-scoped update and storage prefix). The upload has never been run against a live project. The summary chip is computed from the same `expiryStatus()` calls the six document rows use — checked, can't drift out of sync |
 | Onboarding (`app/app/onboarding/`) | One field (legal name) → company + owner row, atomically via `create_company_and_join` | Matches spec's "minimum to get started" principle exactly |
 | Route guard (`app/proxy.ts`) | Redirects signed-out users to `/login`, no-company users to `/onboarding` | Covers every real app route, including `/experience` (added this round) |
 | RLS policy set (`0001`–`0019`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such | Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 19 migrations against a fresh scratch Postgres this pass, all still apply cleanly |
@@ -92,6 +92,15 @@ bridged by `engine/general/process_general_jobs.py`.
     - **The Financial workbook isn't in the PDF.** No print path exists for it. The filled `.xlsm` ships alongside, and the contents page says so.
     - **The signatory comes from `people.signatory_capacity`** (first person with one set). `fill_docx_forms.py` still writes that one person into both C.1.2.3 key-person rows (pre-existing).
     - **Human-only items stay human**, and the contents page and `ACTIONS_TO_SIGN.md` list them: signatures, witness, pricing, and the B4/B5 narratives.
+
+## This pass (2026-10-17, 06:10 UTC)
+
+Two small commits since the last check-in: a vault-health summary chip row on the Company page
+(`400a5ab`) and a routine `state/seen_tenders.json` dedup-store update from the daily discovery
+watch (`affa5f0`, data only, no code). Verified the chip isn't a third expiry implementation —
+confirmed by grep it's computed from the same `expiryStatus()` calls (`@/lib/dates`) the six
+existing document rows already use, so it can't drift out of sync with them. `npm run
+typecheck`/`lint` clean. Nothing to fix, nothing new to flag.
 
 ## Quiet passes (2026-10-17, 02:11 and 04:11 UTC)
 
