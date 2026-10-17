@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, 02:11 UTC check-in.
+Last full pass: 2026-10-17, 04:11 UTC check-in.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -93,12 +93,16 @@ bridged by `engine/general/process_general_jobs.py`.
     - **The signatory comes from `people.signatory_capacity`** (first person with one set). `fill_docx_forms.py` still writes that one person into both C.1.2.3 key-person rows (pre-existing).
     - **Human-only items stay human**, and the contents page and `ACTIONS_TO_SIGN.md` list them: signatures, witness, pricing, and the B4/B5 narratives.
 
-## This pass (2026-10-17, 02:11 UTC)
+## Quiet passes (2026-10-17, 02:11 and 04:11 UTC)
 
-Quiet pass: one new commit (`6f926be`, promoting the submission-pack link to a primary CTA in
-the jump-nav) — visual-priority/ordering only, confirmed by reading the diff directly (a
-`variant` prop on the existing `JumpLink`, reordered pills, no report/scoring logic touched).
-`npm run typecheck`/`lint` clean. Nothing to fix, nothing new to flag.
+Merged into one entry rather than stacking a new header per quiet check-in (the thing this
+file's own convention note warns against). **02:11:** one new commit (`6f926be`, promoting the
+submission-pack link to a primary CTA in the jump-nav) — visual-priority/ordering only,
+confirmed by reading the diff directly (a `variant` prop on the existing `JumpLink`, reordered
+pills, no report/scoring logic touched). **04:11:** zero new commits since 02:11 —
+`origin/main` unchanged. Both passes re-ran `npm run typecheck`/`lint` (clean) and re-confirmed
+the general SBD engine is still wired (`general-workspace.tsx`/`general-actions.ts` still call
+into it). Nothing to fix, nothing new to flag in either.
 
 ## This pass (2026-10-17, 00:11 UTC)
 
