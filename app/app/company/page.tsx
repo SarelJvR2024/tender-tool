@@ -188,6 +188,14 @@ function Badge({ status }: { status: StatusChip }) {
   );
 }
 
+function SummaryChip({ count, label, bg, color }: { count: number; label: string; bg: string; color: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color }}>
+      {count} {label}
+    </span>
+  );
+}
+
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
 
 function NotStated({ label }: { label: string }): StatusChip {
@@ -204,8 +212,32 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
   const insuranceCover =
     company.pi_insurance_cover_zar !== null ? `R ${Number(company.pi_insurance_cover_zar).toLocaleString("en-ZA")}` : "—";
 
+  // At-a-glance vault health, same idea as the Tender Workspace's summary
+  // chips - this page tracks exactly the 6 documents a tender's compliance
+  // check reads, so "is anything about to bite me" should be answerable
+  // before reading all 6 rows below, not just color-coded within each one.
+  const docStatuses = [
+    expiryStatus(company.coid_letter_of_good_standing_expiry),
+    company.sars_tcs_pin || company.sars_tcs_pin_expiry ? expiryStatus(company.sars_tcs_pin_expiry) : NotStated({ label: "Not on file" }),
+    expiryStatus(company.pi_insurance_expiry),
+    isoStatus,
+    expiryStatus(company.bank_confirmation_letter_valid_until, BANK_LETTER_RENEW_SOON_DAYS),
+    expiryStatus(company.bee_proof_expiry),
+  ];
+  const expiredCount = docStatuses.filter((s) => s.color === "#B91C1C").length;
+  const renewSoonCount = docStatuses.filter((s) => s.color === "#B45309").length;
+  const notOnFileCount = docStatuses.filter((s) => s.color === "#6B6758").length;
+  const allGood = expiredCount === 0 && renewSoonCount === 0 && notOnFileCount === 0;
+
   return (
     <div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {expiredCount > 0 && <SummaryChip count={expiredCount} label={expiredCount === 1 ? "document expired" : "documents expired"} bg="#FEE2E2" color="#B91C1C" />}
+        {renewSoonCount > 0 && <SummaryChip count={renewSoonCount} label="renewing soon" bg="#FEF3C7" color="#B45309" />}
+        {notOnFileCount > 0 && <SummaryChip count={notOnFileCount} label="not on file" bg="#F0EEE6" color="#6B6758" />}
+        {allGood && <SummaryChip count={docStatuses.length} label="documents current" bg="#DCFCE7" color="#15803D" />}
+      </div>
+
       <Section title="Company identity">
         <div style={fieldGrid}>
           <Field label="Legal name" value={company.legal_name} />
