@@ -75,6 +75,9 @@ jobs:
       - name: Per-person registration expiry reminders + digest routing (in-memory rows)
         run: python3 engine/compliance/test_watch_person_credentials.py
 
+      - name: Award outcomes - parsing of eTenders/SANRAL award records (offline fixtures)
+        run: python3 engine/discovery/test_award_outcomes.py
+
       - name: General engine - bridge end to end (fake Supabase, real tender documents)
         run: |
           sudo apt-get install -y --no-install-recommends poppler-utils

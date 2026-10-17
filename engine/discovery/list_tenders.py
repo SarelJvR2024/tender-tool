@@ -68,7 +68,11 @@ def _parse_row(row):
     }
 
 
-def fetch_tenders(page_size=200, page_index=1, search="", region_id="1"):
+def fetch_tenders(page_size=200, page_index=1, search="", region_id="1", list_slug="open-tenders"):
+    """list_slug: SANRAL serves its other public lists from the same endpoint
+    shape - "awarded-tenders" and "closed-tenders" (confirmed 2026-10-17, same
+    6 columns, detail links under /awarded-tenders/<slug> and
+    /closed-tenders/<slug>). award_outcomes.py reads those two."""
     params = {
         "pageSize": page_size,
         "pageIndex": page_index,
@@ -76,7 +80,7 @@ def fetch_tenders(page_size=200, page_index=1, search="", region_id="1"):
         "search": search,
         "draw": 1,
     }
-    url = LIST_URL + "?" + urllib.parse.urlencode(params)
+    url = LIST_URL.rsplit("/", 1)[0] + "/" + list_slug + "?" + urllib.parse.urlencode(params)
     req = urllib.request.Request(
         url, headers={"User-Agent": USER_AGENT, "X-Requested-With": "XMLHttpRequest"}
     )

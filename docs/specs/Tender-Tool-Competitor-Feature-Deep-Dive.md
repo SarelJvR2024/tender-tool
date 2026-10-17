@@ -224,6 +224,8 @@ South Africa has at least five local tools at SME to mid-market prices, while th
 | AutoRFP.ai | International | Teams handling 40 to 200 tenders a year | $899 or $1,299 per month | [AutoRFP.ai](https://autorfp.ai/blog/tender-software.md) |
 | mytender.io | UK | Small to mid-sized bid teams | Not published | [Capterra](https://www.capterra.com/p/10031061/mytender-io/) |
 
+Award intelligence (BidsStack Pro, AITenders) is not a data moat: checked 2026-10-17, the same award records are public on the eTenders portal's Awarded tab (35,316 awards, all buyers), and SANRAL additionally publishes every bidder's tendered price in its opening registers - see `Award-Outcomes-Findings.md`. Our capture of both is built (report-only, `award_outcomes.py`); what competitors add on top is storage, name matching and search, not access.
+
 Caveats: Tender Aid's Capterra page shows zero reviews, and its "98% extraction accuracy" is the vendor's own claim. Loopio's limitations come from a competitor's blog. AutoRFP.ai's comparison page is written by AutoRFP.ai.
 
 ## Feature inventory across competitors
@@ -316,7 +318,7 @@ Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the ta
 | 14 | B-BBEE points and CIDB grade checks against a tender | Existing | 2 |
 | 15 | Team roles, comments, version history | Existing | 2 |
 | 16 | ~~AI-drafted narrative sections~~ - removed from scope 2026-10-17, see "No AI-drafted narrative sections" above: replaced by a per-company "how we work" profile every engine must read from, not a generic generator | Removed | - |
-| 17 | Awarded-tender and competitor intelligence | Existing | 3 |
+| 17 | Awarded-tender and competitor intelligence | Existing (competitors); capture built 2026-10-17 (report-only) - `engine/discovery/award_outcomes.py`: eTenders portal Awarded tab (all buyers, winner/amount, some bidder lists) and SANRAL tender opening registers (every bidder and price). No storage/UI yet - see `Award-Outcomes-Findings.md` | 3 |
 | 18 | Go/No-Go scoring | Existing (competitors); built 2026-10-16, hardened 2026-10-16 - `engine/discovery/assess_tender.py`, category + eligibility signals + fit verdict against a company profile loaded from the tenant's own profile JSON (not a hardcoded company), run against the widened national discovery feed (item 11). Hardening pass: closed-tender short-circuit (no wasted document fetch), duplicate-release removal upstream in `etenders_national.py`, multi-document handling per tender, graceful degrade on a failed/corrupt document download, and the OCDS `mainProcurementCategory` folded in as a fallback label when keyword categorisation finds nothing | 3 |
 | 19 | Case-study and past-project library with tailored write-ups | Existing (Flowcase, GovDash) | 3 |
 | 20 | Employee onboarding and self-service CV and credential capture | Roadmap (HR-lite) | 4 |
@@ -327,7 +329,7 @@ Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the ta
 | 25 | POPIA-compliant storage of ID copies and personal data (needed from Phase 1 because the vault holds them) | Existing | 1 |
 | 26 | Record who on the team submitted each tender, and any revenue-share or commission tied to that person | Gap | 3 |
 | 27 | Record the company's own submitted price per tender, building an internal pricing history by tender type, client and sector | Gap | 3 |
-| 28 | Capture public award outcomes (winner and price) from buyers that publish them, such as SANRAL, to show market-pricing trends | Gap | 3 |
+| 28 | Capture public award outcomes (winner and price) from buyers that publish them, such as SANRAL, to show market-pricing trends | Gap; capture built 2026-10-17 (`award_outcomes.py`, report-only), storage + trend view pending Sarel's call on SANRAL's "no charge to recipients" term - `Award-Outcomes-Findings.md` | 3 |
 | 29 | Field-level provenance tagging on every generated value: confirmed, computed, assumed-default, or missing - the data foundation items 30-32 below depend on | Built (CLI/engine layer; Supabase table only, not yet wired to the web app) | 1 |
 | 30 | Admin test-company harness: every open tender automatically runs full pack generation against several test companies loaded in for this purpose at different data-completeness levels | Built (CLI: `engine/admin_harness.py`; "automatically" on discovery, and the web console in item 31, are not yet built) | 2 |
 | 31 | Admin review console: visual queue of every test-company generation result, for Sarel to confirm correctness before a real customer relies on that tender template | Gap | 2 |
@@ -337,6 +339,8 @@ Phase 1 is the narrow niche you can use on your own tenders; Phase 2 adds the ta
 Access to external data is the main risk to Phase 2: portal scraping terms and eTenders access need checking before item 11 is promised, including whether each portal's terms of service permit downloading its documents, not only listing its tenders. Item 12 needs checking that the SBD form templates can be filled legally and reliably; I did not verify that any competitor does it.
 
 **Item 11 update (checked 2026-10-16):** eTenders.gov.za is not scraped at all - National Treasury runs a public OCDS (Open Contracting Data Standard) API at `ocds-api.etenders.gov.za`, confirmed live: no authentication, no robots.txt entry, no terms-of-use page found anywhere on the site, and every response is explicitly licensed under the Open Data Commons PDDL (public-domain-equivalent). This is a different situation in kind from SANRAL's own reCAPTCHA-protected site, not a workaround of it - it's a government API built for exactly this kind of reuse. Implemented in `engine/discovery/etenders_national.py`. Two real limits confirmed by direct testing, not assumed: `tender.status` is an empty string on every release sampled (use `tenderPeriod.endDate` vs today instead), and the API itself returns HTTP 500 after roughly 500-600 records regardless of date range - a real upstream limitation that narrower date windows work around, not a bug in this client. **Item 28 (award/price capture)** is the same API's `awards`/`contracts` fields in principle, but confirmed empty on every one of 500 sampled releases across two different date windows - this matches, rather than contradicts, the Open Cities Lab finding already cited above that award-stage fields are rarely completed. The module reports whatever award data a release actually carries, but it will come up empty for the large majority right now; this is a real data gap in what buyers publish, not something more scraping would fix.
+
+**Item 28 update (checked 2026-10-17):** re-confirmed on 800 fresh OCDS releases across five windows (Nov 2025 - Oct 2026): still 0 awards, 0 contracts, 0 tenderers, 0 values. But the 2026-10-16 conclusion above was too narrow: the gap is in National Treasury's OCDS *export*, not in what buyers publish. The eTenders portal's own public "Awarded" tab holds 35,316 awards (winner, amount, date; some with the full bidders list), each joinable to its OCDS release (`ocds-9t57fa-<portal id>`), and SANRAL's own awarded and closed tender pages publish the tender opening register - every tenderer and price - including Klipcorp's own consulting tenders (NRA 2026/0084(B) lists Klipcorp beside 10 competitors). Neither source needs a login or touches a CAPTCHA; SANRAL's Terms & Conditions permit reproduction with acknowledgement and "no charge ... upon any recipient". Captured by `engine/discovery/award_outcomes.py` (report-only). Evidence, data quality and open decisions: `docs/specs/Award-Outcomes-Findings.md`.
 
 ## Build discipline: finish and test before moving on
 
@@ -409,7 +413,7 @@ This is a new item, distinct from the later-phase "project financials" roadmap e
 - **Public award data:** where a buyer publishes it (SANRAL, for example, posts award outcomes on its website), capture who won each tender and at what price. Over time this builds a market-pricing trend across tender types, not just Sarel's own submissions.
 - **A use case beyond the bidder:** this award data has value to people who are not bidding themselves, such as suppliers or competitors wanting to know who won a tender so they can approach the winning contractor. This could be a distinct feature or a separate audience from the core product, worth treating as its own idea rather than assuming it is the same buyer as the rest of this document.
 
-This depends on stream 5 (discovery) already capturing and storing tender listings, and extends it to capture outcomes too, not only opportunities. Not yet researched: which buyers publish award outcomes and in what format, and whether scraping award pages raises the same terms-of-service questions as scraping open-tender listings.
+This depends on stream 5 (discovery) already capturing and storing tender listings, and extends it to capture outcomes too, not only opportunities. Researched 2026-10-17 (`Award-Outcomes-Findings.md`): the eTenders portal's Awarded tab (all buyers) and SANRAL's own awarded/closed pages (winner, points, amount, and the opening register of every bidder's price) publish outcomes; the OCDS API does not. SANRAL's terms allow reproduction with acknowledgement but say no charge may be made upon recipients of the material - fine for internal bid intelligence, a decision for Sarel before selling it to others.
 
 ## SANRAL project document preparation
 
@@ -493,7 +497,7 @@ SANRAL publishes a public list of open tenders with structured fields, but each 
 - **Other lists:** the site also links closed, awarded, cancelled and archived tenders, second-tier procurement (a separate site) and SAP Ariba tenders. These could hold the tender you meant; I did not open them.
 - **Detail page:** description, dates, submission rules, contact email, and a zipped tender document (one example was 31 MB). Award and opening results fields exist and fill in later, which supports the award-data feature.
 - **Download:** no login was needed, but a form asks for name, company, phone, email and agreement to the privacy policy before the file downloads.
-- **Not checked:** the site's terms of use were not readable in my fetch, so whether automated collection is allowed is unknown. Settle this with SANRAL's terms and, if needed, SANRAL itself before building the scraper.
+- **Terms (read 2026-10-17, `/terms-conditions`):** reproduction and publication of the site's material is permitted provided SANRAL is acknowledged as copyright owner, the material is not modified or used prejudicially, and no charge is made upon any recipient of it; robots.txt allows all. This does not change the download form: its reCAPTCHA is still not automated around.
 
 ## South African tender compliance coverage
 
