@@ -113,14 +113,82 @@ Verified on 12 real document sets (Treasury, RAF, DSTI, SSA, SITA, Mthashana, To
 - **Migration replay** `0001`→`0018` on scratch Postgres 16 (same auth/storage stub as earlier passes): all apply. RLS/function tests: a member pursues their own opportunity (tender + pack + one job), not another company's (error); re-pursuing is idempotent; a second company pursuing the same ocid reuses the shared tender; clients can't write `tenders`; answers upsert; cross-company answer rejected; an upload path outside the company/tender prefix rejected; an empty answer rejected; a second open pack job rejected by the partial unique index; a pre-completed job rejected by the insert policy; client updates to jobs change 0 rows; the other company sees 0 answers/jobs.
 - `npm run typecheck` / `npm run lint` clean.
 
+## Round 4 (Oct 17, 2026): flat-PDF forms, buyer-form templates, one job queue
+
+Asked: (1) decide whether coordinate-overlay filling of flat municipal MBD PDFs is buildable and reliable, and build it if so; (2) build templates for the 1-2 buyer-specific forms that matter most to Klipcorp, backlog the rest; (3) an "upload my own tender documents" path; (4) merge `tender_engine_jobs` into `pack_generation_jobs`.
+
+### Corpus added (Observed)
+
+`etenders_national.py --days 30` on 2026-10-17: 100 releases. Buyer mix: 20 municipalities (Cape Winelands x4, Ingquza, Umzinyathi x2, Dawid Kruiper, Ratlou, uMlalazi, Stellenbosch, Overberg, Nama Khoi, Kareeberg, Joe Gqabi, MISA...), 7 ESKOM, 4 Transnet/TNPA, 3 PRASA, 2 Sentech, 10 departments, the rest entities/SETAs. Every document of the 52 municipal / SOE / roads / engineering releases was downloaded (132 files) and read.
+
+### Finding 10 - fixed x/y coordinates can't work; label-anchored placement can
+
+The same MBD 1 is laid out differently by every municipality (measured with pdfplumber on the real pages):
+
+| Buyer | MBD 1 layout |
+| --- | --- |
+| Dawid Kruiper | ruled table, label column ends ~95pt, value cells from 116pt; Part B on the next page |
+| Umzinyathi | ruled table under a letterhead (~40pt lower), value cells from 200pt |
+| Joe Gqabi | table without a left grid; B-BBEE tick boxes; "R" pre-printed in the bid-price cell |
+| Nama Khoi | labels wrap ("TELEPHONE / NUMBER", "VATREGISTRATION" glued); the E-MAIL row has no right-hand rule; Yes/No boxes BELOW the words |
+| Cape Winelands | "MAAA" pre-printed in the CSD cell; a contact-person row |
+| Ingquza / Overberg / TNPA | Part B's two questions share one row, split into sub-rows |
+| Ratlou | separate one-form PDFs |
+
+MBD 4 varies the same way: ruled two-column table (Overberg, Cape Winelands), dotted leaders on the same line (Ingquza, Kareeberg, Dawid Kruiper, Joburg Water), dotted leaders on the NEXT line (uMlalazi). MBD 9: underscored lines with the caption below (Ingquza, uMlalazi, Joe Gqabi, Kareeberg), or the bid and municipality already printed by the buyer (Dawid Kruiper, Overberg). So a per-form x/y template is wrong on the next municipality. What is consistent is the **wording of the labels** - they're all copies of the same Treasury/MFMA forms. The overlay therefore anchors every value to its label in the PDF's own text layer.
+
+### Built - `engine/general/fill_flat_pdf.py`
+
+- Finds each form's page (heading in the top lines + its own field labels - a contents page that lists "MBD 1" doesn't count), then places each value in one of four layouts: the first **empty table cell** right of the label (pdfplumber's table finder; CODE/NUMBER split for telephone; text after a pre-printed "MAAA"/"R"; the row's blank width when a cell has no right rule), **dotted leaders** on the same line (white patch under the text, extended into blank margin when the dots are short), dots on the **next line**, a **drawn underline** (TNPA), or the dotted line **above a caption** ("(Name of Bidder)", "Position"). Yes/No answers are an X in the box next to / below the chosen word, or a circle round it ("YES / NO").
+- Safety rules: only provably blank targets; text that doesn't fit at 6pt isn't written; two fields aimed at the same spot -> neither is written; the buyer's own pre-print is detected and left; the Form of Offer is searched only up to the ACCEPTANCE heading and only one signature block; every typed value is **read back from inside its own box** in the written PDF before it counts. Anything not placed is reported with the reason and stays on the completion guide.
+- Forms: MBD/SBD 1 (name, postal/street address, contact person, telephone, cellphone, e-mail, VAT, TCS PIN, CSD, total bid price if answered, capacity, accredited-representative / foreign-supplier / B-BBEE certificate-or-affidavit ticks), MBD/SBD 4 (registered name, representative name, ID number, position, company registration, tax reference, VAT, CSD, "I, the undersigned (name)", the "presently in the service of the state" Yes/No, footer name/capacity), MBD/SBD 9 (bid number and description, institution, "on behalf of", position). 6.1 and 8 stay by hand (6.1's points table is buyer-specific; 8's Yes/No are captured but MBD 8 layouts weren't sampled enough to commit to).
+- Wiring: `requirements.py` marks such a form `overlay` (new status, "Typed onto the PDF" chip on the workspace) once the form's page is found; `build_general_pack.py` types onto one copy per PDF, puts the typed copy in the pack in place of the blank, lists what's still to write per form, and logs every field in `field_provenance` (typed -> confirmed / assumed_default; not placed -> missing with the value to write).
+- Dependency: `pdfplumber==0.11.10` added to `engine/worker/requirements.txt` (positions of words, characters, table cells and drawn lines - neither pypdf nor pdftotext gives cells). Writing uses pypdf + raw PDF operators, same as `pdf_merge`'s page stamp.
+
+### Finding 11 - which buyer forms matter to Klipcorp (evidence, not guesses)
+
+Klipcorp's profile disciplines are `roads_civil` and `professional_services`. Counts over the 52 downloaded municipal/SOE/roads/engineering releases (text search of every document):
+
+| Buyer-specific form | Releases | Where |
+| --- | --- | --- |
+| **Form of Offer and Acceptance** (CIDB SANS 10845 / Standard Conditions of Tender) | **16** | every construction/PSP tender seen: EC Roads PSP, uMlalazi roads, MISA, TNPA x2, Overberg, Cape Winelands x4, Sentech x2, ESKOM |
+| **Compulsory Enterprise Questionnaire** (CIDB returnable) | **7** | EC Roads PSP, MISA, TNPA x2, Overberg, Ingquza x2 |
+| Certificate / resolution of authority for signatory | 7 | Gauteng Roads, EC Roads, MISA, uMlalazi, Ingquza x2, Sentech |
+| ESKOM Form A / declarations of shareholding | 8 / 3 | ESKOM only (goods: gearboxes, kitchen consumables, data concentrators) |
+| Record of Addenda | 6 | same CIDB tenders as the Form of Offer |
+| Consent forms | 5 | Joburg Water x3, Sentech x2 |
+| NEC3 contract | 4 | ESKOM, TNPA, MISA |
+| Municipal "Form of Quotation" | 1 | Dawid Kruiper |
+
+Built (same overlay engine, as field maps over the buyer's own published form - the bidder must return the buyer's page, so a re-typed "template" would be wrong): **Compulsory Enterprise Questionnaire** (company-constant fields: name, VAT, CSD, company registration, tax reference, contact person, e-mail, telephone, cellphone, physical/postal address, bank and branch; tender/human fields left: CIDB registration number (no column yet), partner/principal particulars, bank account number, signature) and the **Form of Offer offer signatory block** (signatory name, capacity, tenderer name, address, telephone; left: the offered price in words and figures, signature, witnesses, and the whole Acceptance part). Verified on Overberg (CEQ 12 fields, offer 4), EC Roads PSP (CEQ 4, offer 2), TNPA (CEQ 5 on drawn underlines), uMlalazi (offer 5), Cape Winelands (offer 3).
+
+**Backlog, in priority order:** (1) Certificate of authority for signatory - 7 releases, but it's a board resolution with directors' signatures, mostly by hand; worth only the company/signatory names. (2) Record of Addenda - 6, a table of addenda numbers only the bidder knows; low value. (3) ESKOM Form A + shareholding declarations - 8 ESKOM releases, none in Klipcorp's disciplines this month; several ESKOM annexures are scans. (4) Consent forms (Joburg Water / Sentech) - 5. (5) NEC3 contract data - 4, mostly tender-specific. (6) Municipal Form of Quotation - 1 sighting; not worth a template yet.
+
+### Item 3 - "upload my own tender documents"
+
+Landed concurrently by the manual-tender-load work (`8945b0b` / `487b964`: `/tenders/new`, migration `0024`, `engine/intake/`): documents go straight from the browser to `tender-documents/manual/<company>/<tender>/`, `process_general_jobs.py` downloads storage-backed documents, and the extraction job runs the same `requirements.py` -> manifest -> `build_general_pack.py` pipeline. Nothing was duplicated here; the overlay and the buyer-form maps apply to manually loaded tenders automatically because they live in that shared pipeline.
+
+### Item 4 - one job queue (migration `0026_unified_job_queue.sql`)
+
+`pack_generation_jobs` gains `engine` ('sanral' default | 'general') and `kind`; `tender_pack_id` is nullable for general rows only (check constraint); 0018's one-open-job unique index moves here with the same predicate; RLS = select + strict insert for all, update/delete kept for SANRAL rows as 0017 had them. Existing `tender_engine_jobs` rows are copied (same ids), the table dropped, and `tender_engine_jobs` recreated as a security-invoker view (`engine = 'general'`, inserts default to general, `with cascaded check option`) so 0024's `load_manual_tender()` / `add_manual_tender_documents()` / `pursue_discovered_opportunity()` and `intake-card.tsx` keep working unchanged. `process_pack_jobs.py` claims only `engine = 'sanral'` rows (poll + stale-job sweep), `process_general_jobs.py` only `engine = 'general'` rows of the same table; the app's general workspace reads/writes `pack_generation_jobs` directly.
+
+### Verification (Observed)
+
+- Overlay on 15 real flat PDFs from 14 buyers (Dawid Kruiper, Umzinyathi, Joe Gqabi, Nama Khoi, Cape Winelands, Overberg, Ingquza, Kareeberg, uMlalazi, EC Roads PSP, MISA, TNPA, Joburg Water, Ratlou, plus SALB's committed SBD 1/4/9): placed per form, e.g. MBD 1 = 13 / 12 / 15 / 12 / 15 / 15 / 13 fields (DK, UZ, JG, NK, CW, Overberg, Ingquza), MBD 4 = 9 on six of them, CEQ 12 (Overberg). Every placed value read back from its own box. Pages rendered at 60-110 dpi and checked by eye for 13 buyers; bugs found and fixed that way: telephone in the CODE cell, "R"/"MAAA" pre-print overwritten, a SANAS line read as the accredited-representative question, two Part B ticks in one box, a "Position occupied..." sentence taken as a footer caption, a prose line above an underline taken as the buyer's pre-print, the Form of Offer scope closed by "acceptance and returning" in the offer text. Known not-placed (stay on the guide, correctly): TNPA's TCS PIN / CSD split over three lines, EC Roads' wrapped TCS label, Nama Khoi's e-mail row, MISA's form of offer (price-only page).
+- Full pack on Overberg Q12: 69 pages, `verify_pack` clean, the typed bundle in the pack (MBD 1 on p.6 renders typed, with the page stamp), provenance 37 confirmed / 1 assumed (foreign supplier = No) / 21 missing.
+- `general_harness.py`: 2 samples added (`overberg_q12`, `ecdpwi_scmu5_0007`), expectations extended with `overlay` forms, typed buyer forms and `typed_keys` that must come back confirmed from the typed PDF for every test company.
+- Migration replay `0001`->`0026` on scratch Postgres 16; `0026` applied over seeded rows of both old tables (rows moved with ids, duplicate open SANRAL jobs failed-not-deleted); RLS/constraint tests (SANRAL row without pack / with extract kind rejected; second open job per engine/kind rejected; insert through the view lands as `general`, `engine='sanral'` through the view rejected by the check option; ON CONFLICT through the view is a no-op; client updates change 0 general rows and 1 SANRAL row; pre-completed insert rejected; other company sees 0 rows and can't insert); 0024's `load_manual_tender()`, `add_manual_tender_documents()` and `pursue_discovered_opportunity()` run against the view and queue exactly one open extraction each; `engine/pack/bridge_selftest.py` (SANRAL bridge, real SQL) still goes `requested`->`ready` (63-page pack) on the unified table.
+
 ## Gaps - named, not papered over
 
-1. **Flat-PDF SBD/MBD editions are still completed by hand** (SALB, QCTO, every municipal bundle). The completion guide gives every value; no coordinate overlay is attempted (round 1, Finding 2 still holds). This is the single biggest remaining manual step for municipalities.
-2. **Buyer-specific forms have no templates**: ESKOM Form A / declarations / Method Statement / NEC3, municipal Form of Quotation, Sentech consent form, QCTO CV template, Treasury's Category Selection form. Each would need its own importer from real samples.
-3. **MBD 4's extra questions** (ID number, tax reference, relatives in the service of the state) aren't captured; SBD 8/9 are filled only in `.docx` editions.
+1. ~~Flat-PDF SBD/MBD editions are completed by hand~~ - **narrowed (Round 4)**: MBD/SBD 1, 4 and 9 are typed onto the printed PDF next to their labels (`fill_flat_pdf.py`). Still by hand: MBD/SBD 6.1 and 8 in flat editions, any field the overlay couldn't place safely (listed per form in the pack), scanned editions with no text layer, and the human check of every typed page before signing.
+2. **Buyer-specific forms - narrowed (Round 4)**: the CIDB Compulsory Enterprise Questionnaire and the Form of Offer signatory block are typed onto the buyer's own PDF. Still no template: certificate of authority, Record of Addenda, ESKOM Form A / declarations / Method Statement / NEC3, consent forms, municipal Form of Quotation, QCTO CV template, Treasury's Category Selection form - prioritised backlog in Round 4, Finding 11.
+3. **MBD 4's extra questions**: ID number, tax reference and "presently in the service of the state" are now typed (Round 4); the relatives / twelve-months / directors questions (3.9-3.14) and the directors table aren't captured. SBD 8 is filled only in `.docx` editions.
 4. **SBD 6.1's specific-goal points table is not ticked** - each buyer's table differs; the claim is captured and written on the guide.
 5. **Pricing** (SBD 3.x / bills of quantities) is never filled - by design.
 6. **Experience scope** is judged by a human: all tagged disciplines are counted against the tender's evidence rule; "similar scope" is shown verbatim.
 7. **No live Supabase** (System-Status gap #9): the web flow is typechecked and its logic run against real manifests, the bridge runs against a fake and the schema against scratch Postgres - never against a real project.
-8. **Tenders not on eTenders** (or whose links fail) can't be pursued - there is no "upload the tender's own documents" path yet.
-9. **Scanned tender documents** are not OCR'd.
+8. ~~Tenders not on eTenders can't be pursued~~ - **closed** by the manual tender load (`/tenders/new`, migration `0024`), which feeds the same extraction and pack pipeline (Round 4, item 3).
+9. **Scanned tender documents** are not OCR'd - and the overlay needs a text layer, so a scanned form stays fully by hand.
+10. **Overlay placement is checked by machine (read-back) but signed by a person**: the read-back proves the text is in the target box, not that the box is the right one on a layout nobody has seen yet. The pack says "check, then sign" on every typed form, and the harness pins 4 real municipal/PSP layouts.
+11. **CIDB registration (CRS) number has no column** - the CEQ asks for it; `companies.cidb_grading` is the grading, not the number.

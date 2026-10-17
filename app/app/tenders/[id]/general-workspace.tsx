@@ -4,7 +4,9 @@ import { COMPANY_VAULT_COLUMNS, type ComplianceStatus } from "@/lib/tenderCompli
 import {
   FORM_STATUS_STYLE,
   GENERAL_COMPANY_COLUMNS,
+  GENERAL_ENGINE,
   JOB_COLUMNS,
+  JOBS_TABLE,
   JOB_STATUS_STYLE,
   PACK_BUCKET,
   checkReturnable,
@@ -66,7 +68,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
     await Promise.all([
       supabase.from("companies").select(`${COMPANY_VAULT_COLUMNS}, ${GENERAL_COMPANY_COLUMNS}`).maybeSingle(),
       supabase.from("tender_answers").select("field_key, value, storage_path, original_filename, updated_at").eq("tender_id", tenderId),
-      supabase.from("tender_engine_jobs").select(JOB_COLUMNS).eq("tender_id", tenderId).order("requested_at", { ascending: false }).limit(10),
+      supabase.from(JOBS_TABLE).select(JOB_COLUMNS).eq("engine", GENERAL_ENGINE).eq("tender_id", tenderId).order("requested_at", { ascending: false }).limit(10),
       supabase.from("people").select("id, name, signatory_capacity, role").order("name"),
       supabase.from("tender_roles").select(TENDER_ROLE_COLUMNS),
       supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
@@ -125,6 +127,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const docsMissing = returnables.filter((r) => r.status === "missing").length;
   const autoForms = manifest.forms.filter((f) => f.status === "auto");
   const byHandForms = manifest.forms.filter((f) => f.status === "by_hand");
+  const typedForms = manifest.forms.filter((f) => f.status === "overlay");
 
   // ----- key people -----
   const roleRowsForTender = manifest.roles.map((mr) => {
@@ -192,7 +195,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
 
         {manifest.forms.length > 0 && (
           <>
-            <SubTitle text={`Standard forms (${autoForms.length} filled for you, ${byHandForms.length} by hand)`} />
+            <SubTitle text={`Standard forms (${autoForms.length} filled for you, ${typedForms.length > 0 ? `${typedForms.length} typed onto the buyer's PDF, ` : ""}${byHandForms.length} by hand)`} />
             {manifest.forms.map((f) => {
               const st = FORM_STATUS_STYLE[f.status];
               return (
@@ -213,11 +216,14 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
 
         {manifest.buyer_forms.length > 0 && (
           <>
-            <SubTitle text="The buyer's own forms (no template - complete by hand)" />
+            <SubTitle text="The buyer's own forms" />
             {manifest.buyer_forms.map((b) => (
               <div key={b.key} style={{ borderTop: "1px solid #F0EEE6", padding: "7px 0", fontSize: 12, color: "#16233B", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ minWidth: 0, wordBreak: "break-word" }}>{b.label}{b.document && b.document !== b.label ? <span style={{ color: "#9A9684" }}> - in {b.document}</span> : null}</span>
-                <Chip label="Complete by hand" bg="#FEF3C7" color="#B45309" />
+                <span style={{ minWidth: 0, flex: "1 1 280px", wordBreak: "break-word" }}>
+                  {b.label}{b.document && b.document !== b.label ? <span style={{ color: "#9A9684" }}> - in {b.document}</span> : null}
+                  {b.overlay && <span style={{ display: "block", color: "#4B5563", marginTop: 2 }}>{b.reason}</span>}
+                </span>
+                {b.overlay ? <Chip label="Typed onto the PDF" bg="#DCFCE7" color="#15803D" /> : <Chip label="Complete by hand" bg="#FEF3C7" color="#B45309" />}
               </div>
             ))}
           </>

@@ -23,7 +23,9 @@ export type ManifestForm = {
   code: string; // "1", "4", "6.1", "8", "9", "3", "7"...
   label: string; // "SBD 4" / "MBD 4"
   title: string;
-  status: "auto" | "by_hand" | "attach";
+  // overlay = a flat PDF edition the engine types onto at the labels it finds
+  // (engine/general/fill_flat_pdf.py); what didn't place stays by hand
+  status: "auto" | "by_hand" | "attach" | "overlay";
   reason: string;
   mentions: number;
   quote: string | null;
@@ -67,7 +69,12 @@ export type RequirementManifest = {
   form_suite: "SBD" | "MBD" | null;
   documents: { name: string; format: string; kind: string; forms: string[]; editable: boolean; converted_from_doc: boolean; unreadable: string | null }[];
   forms: ManifestForm[];
-  buyer_forms: { key: string; label: string; document: string; format: string; reason: string; quote?: string }[];
+  buyer_forms: {
+    key: string; label: string; document: string; format: string; reason: string; quote?: string;
+    // set when the engine can type the company details onto this form (CIDB
+    // Compulsory Enterprise Questionnaire, Form of Offer signatory block)
+    overlay?: { code: string; document: string; page: number; fills: string; by_hand: string };
+  }[];
   returnables: ManifestReturnable[];
   roles: { role_code: string; mentions: number; document: string; quote: string }[];
   cidb: { grading: string; quote: string } | null;
@@ -224,6 +231,7 @@ export const FORM_STATUS_STYLE: Record<ManifestForm["status"], { label: string; 
   auto: { label: "Filled for you", bg: "#DCFCE7", color: "#15803D" },
   attach: { label: "From the vault", bg: "#DCFCE7", color: "#15803D" },
   by_hand: { label: "Complete by hand", bg: "#FEF3C7", color: "#B45309" },
+  overlay: { label: "Typed onto the PDF", bg: "#DCFCE7", color: "#15803D" },
 };
 
 export type EngineJob = {
@@ -254,3 +262,8 @@ export const JOB_STATUS_STYLE: Record<EngineJob["status"], { label: string; bg: 
 };
 
 export const PACK_BUCKET = "submission-packs"; // created by 0017, reused (0018)
+
+// One job queue for every engine (migration 0026): the general engine's jobs
+// are pack_generation_jobs rows with engine = 'general'.
+export const JOBS_TABLE = "pack_generation_jobs";
+export const GENERAL_ENGINE = "general";

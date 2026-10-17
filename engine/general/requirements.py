@@ -48,6 +48,8 @@ import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "discovery"))
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)  # fill_flat_pdf (overlay check)
 from score_outlook import estimate_score_outlook, extract_experience_evidence, extract_locality  # noqa: E402
 from assess_tender import CIDB_RE, BRIEFING_RE  # noqa: E402
 
@@ -588,9 +590,14 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
             if m:
                 quote = _quote(d["text"], m.start(), m.end(), 80)
                 break
+        overlay = _overlay_edition(code, editions, docs) if capability == "fill" and not fillable else None
         if capability == "fill" and fillable:
             status, reason = "auto", f"Filled from your data in {fillable[0]['name']}" + (
                 " (converted from .doc by LibreOffice - check the layout)" if fillable[0]["converted_from_doc"] else "")
+        elif overlay:
+            status, reason = "overlay", (
+                f"Flat PDF ({overlay['document']}, p.{overlay['page']}) - Tender Tool types your details onto the printed form "
+                "next to each label it can find; anything it can't place safely stays on the completion guide to write by hand.")
         elif capability == "fill" and editions:
             status, reason = "by_hand", (f"Only a {editions[0]['format'].upper()} edition was published ({editions[0]['name']}) - "
                                          "flat PDFs have no fillable fields, so it's completed by hand from the completion guide.")
@@ -607,6 +614,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
                 "7": "Contract form - signed by hand (some buyers want it with the bid, most only after award).",
             }.get(code, "Complete by hand.")
         forms.append({"code": code, "label": f"{prefix} {code}", "title": title, "status": status, "reason": reason,
+                      **({"overlay": overlay} if overlay else {}),
                       "mentions": n_mentions, "quote": quote,
                       "editions": [{"document": e["name"], "format": e["format"], "editable": e["editable"]} for e in editions]})
 
@@ -620,9 +628,15 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         for d in docs:
             m = re.search(pat, d.get("text") or "", re.IGNORECASE)
             if m:
-                buyer_forms.append({"key": key, "label": label, "document": d["name"], "format": d["format"],
-                                    "quote": _quote(d["text"], m.start(), m.end(), 80),
-                                    "reason": "Buyer-specific form inside the tender document - complete by hand."})
+                entry = {"key": key, "label": label, "document": d["name"], "format": d["format"],
+                         "quote": _quote(d["text"], m.start(), m.end(), 80),
+                         "reason": "Buyer-specific form inside the tender document - complete by hand."}
+                ov = _overlay_buyer_form(key, d)
+                if ov:
+                    entry["overlay"] = ov
+                    entry["reason"] = (f"Found on p.{ov['page']} of {d['name']} - Tender Tool types your company details "
+                                       f"({ov['fills']}) onto it; {ov['by_hand']} stay by hand.")
+                buyer_forms.append(entry)
                 break
 
     cidb_m = CIDB_RE.search(all_text)
@@ -675,6 +689,48 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
     return manifest
 
 
+# Flat PDF editions: engine/general/fill_flat_pdf.py types onto the printed
+# form, anchored to each label in the PDF's own text layer (findings doc,
+# "Round 4": fixed x/y positions differ per municipality, the label wording
+# doesn't). Here we only check that the form's page is really in the document,
+# so the manifest can promise it; what actually got placed is reported per
+# field when the pack is built.
+OVERLAY_BUYER_FORMS = {
+    "compulsory_enterprise_questionnaire": ("ceq", "name, VAT, CSD, company registration and tax numbers, contact details",
+                                            "the CIDB number, partner/principal particulars, banking account number and the signature"),
+    "form_of_offer": ("form_of_offer", "signatory name, capacity, company name, address and telephone",
+                      "the offered price, the signature and the witnesses"),
+}
+
+
+def _overlay_pages(doc, code):
+    try:
+        import fill_flat_pdf
+    except ImportError:  # pdfplumber/pypdf missing on this host - by hand, as before
+        return []
+    return fill_flat_pdf.find_form_pages((doc.get("text") or "").split("\f"), code)
+
+
+def _overlay_edition(code, editions, docs):
+    if code not in ("1", "4", "9"):
+        return None
+    for e in editions:
+        d = next((x for x in docs if x["name"] == e["name"]), None)
+        if d and d["format"] == "pdf" and not d.get("unreadable"):
+            pages = _overlay_pages(d, code)
+            if pages:
+                return {"document": d["name"], "page": pages[0] + 1}
+    return None
+
+
+def _overlay_buyer_form(key, doc):
+    if key not in OVERLAY_BUYER_FORMS or doc["format"] != "pdf" or doc.get("unreadable"):
+        return None
+    code, fills, by_hand = OVERLAY_BUYER_FORMS[key]
+    pages = _overlay_pages(doc, code)
+    return {"code": code, "document": doc["name"], "page": pages[0] + 1, "fills": fills, "by_hand": by_hand} if pages else None
+
+
 def _gaps(doc_entries, forms, suite, buyer_forms):
     """Plain statements of what this engine can't do for this tender - shown
     in the UI and the pack index instead of being hidden."""
@@ -696,6 +752,9 @@ def _gaps(doc_entries, forms, suite, buyer_forms):
     for f in forms:
         if f["status"] == "by_hand" and FORMS[f["code"]][1] == "fill":
             gaps.append(f"{f['label']} must be completed by hand: {f['reason']}")
+        elif f["status"] == "overlay":
+            gaps.append(f"{f['label']} is a flat PDF: your details are typed onto it, but check the placement before you sign "
+                        "(fields Tender Tool couldn't place are listed in the pack's completion guide).")
     unread = [e["name"] for e in doc_entries if e["kind"] == "unreadable"]
     if unread:
         gaps.append("Couldn't read: " + "; ".join(unread[:5]) + " - check these documents by eye.")
@@ -735,6 +794,9 @@ def main():
     print(f"  cidb: {clean['cidb'] and clean['cidb']['grading']}  briefing: {clean['briefing'] and clean['briefing']['compulsory']}")
     print(f"  pref: {clean['scoring']['preference_system']['system']}  functionality: {clean['scoring']['functionality'].get('threshold')}"
           f"  evidence rules: {len(clean['experience_evidence']['rules'])}  locality rows: {len(clean['locality']['rows'])}")
+    for b in clean["buyer_forms"]:
+        if b.get("overlay"):
+            print(f"  buyer form typed onto: {b['key']} p.{b['overlay']['page']}")
     print(f"  questions: {[q['key'] for q in clean['questions']]}")
     print(f"  company fields: {[c['key'] for c in clean['company_fields']]}")
     for g in clean["gaps"]:

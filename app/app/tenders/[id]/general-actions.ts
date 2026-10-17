@@ -9,7 +9,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
-import { UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
+import { GENERAL_ENGINE, JOBS_TABLE, UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
 import { advanceFoundToBidding } from "@/lib/pipeline";
 
 async function requireMember() {
@@ -120,13 +120,16 @@ export async function uploadTenderDocument(formData: FormData) {
   redirect(back(tenderId, "?saved=doc"));
 }
 
-/** Queue a job for engine/general/process_general_jobs.py (RLS: insert only, status 'requested'). */
+/** Queue a job for engine/general/process_general_jobs.py: a pack_generation_jobs
+ * row with engine 'general' - the one queue every engine shares (0026). RLS:
+ * insert only, status 'requested'. */
 async function requestJob(formData: FormData, kind: "extract_requirements" | "generate_pack") {
   const { supabase, userId, companyId } = await requireMember();
   const tenderId = formData.get("tender_id") as string | null;
   if (!tenderId) redirect("/dashboard");
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).maybeSingle();
-  const { error } = await supabase.from("tender_engine_jobs").insert({
+  const { error } = await supabase.from(JOBS_TABLE).insert({
+    engine: GENERAL_ENGINE,
     company_id: companyId,
     tender_id: tenderId,
     tender_pack_id: (pack?.id as string | undefined) ?? null,

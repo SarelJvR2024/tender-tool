@@ -51,9 +51,25 @@ EXPECTED = {
     "mthashana_tvet": {"suite": "SBD", "auto": ["1", "4", "6.1", "8", "9"], "by_hand_fill": [], "returnables": ["csd_report", "tax_compliance", "bbbee_proof"]},
     "tourism_nb143": {"suite": "SBD", "auto": ["4"], "by_hand_fill": [], "returnables": []},
     "ssa_change_mgmt": {"suite": "SBD", "auto": ["1", "4", "6.1"], "by_hand_fill": [], "returnables": ["financial_statements"]},
-    "salb_15-10-2026": {"suite": "SBD", "auto": [], "by_hand_fill": ["1", "4", "8", "9"], "returnables": ["tax_compliance"]},
-    "dawid_kruiper_tn051": {"suite": "MBD", "auto": [], "by_hand_fill": ["1", "4", "6.1", "8", "9"], "returnables": ["psira", "municipal_account"],
-                            "roles": ["services.security_officer"], "mandatory_local_office": True},
+    # Flat PDFs: MBD/SBD 1, 4 and 9 are typed onto the printed page ("overlay",
+    # fill_flat_pdf.py); 6.1 / 8 stay by hand. typed_keys = fields that must
+    # come back "confirmed" from the typed PDF for every test company (they
+    # only need the company name / registration numbers every fixture has).
+    "salb_15-10-2026": {"suite": "SBD", "auto": [], "overlay": ["1", "4", "9"], "by_hand_fill": ["8"], "returnables": ["tax_compliance"],
+                        "typed_keys": ["sbd1.name_of_bidder", "sbd1.street_address", "sbd9.name_of_bidder"]},
+    "dawid_kruiper_tn051": {"suite": "MBD", "auto": [], "overlay": ["1", "4", "9"], "by_hand_fill": ["6.1", "8"],
+                            "returnables": ["psira", "municipal_account"],
+                            "roles": ["services.security_officer"], "mandatory_local_office": True,
+                            "typed_keys": ["sbd1.name_of_bidder", "sbd1.street_address", "sbd4.company_registration_number",
+                                           "sbd4.name_of_bidder_footer", "sbd9.name_of_bidder"]},
+    "overberg_q12": {"suite": "MBD", "auto": [], "overlay": ["1", "4", "9"], "by_hand_fill": ["6.1"], "returnables": ["municipal_account"],
+                     "buyer_forms_overlay": ["compulsory_enterprise_questionnaire", "form_of_offer"],
+                     "typed_keys": ["sbd1.name_of_bidder", "sbd4.registered_name", "ceq.name_of_enterprise", "ceq.company_registration_number",
+                                    "form_of_offer.tenderer"]},
+    "ecdpwi_scmu5_0007": {"suite": "SBD", "auto": [], "overlay": ["1", "4"], "by_hand_fill": ["6.1"], "returnables": [],
+                          "buyer_forms_overlay": ["compulsory_enterprise_questionnaire", "form_of_offer"],
+                          "typed_keys": ["sbd1.name_of_bidder", "ceq.name_of_enterprise", "ceq.company_registration_number",
+                                         "form_of_offer.tenderer"]},
     "eskom_e3689": {"suite": None, "auto": [], "by_hand_fill": [], "returnables": [], "buyer_forms_any": ["nec3_contract", "form_of_offer"]},
 }
 
@@ -74,6 +90,13 @@ def check_expected(name, m):
     auto = sorted((f["code"] for f in m["forms"] if f["status"] == "auto"), key=float)
     if auto != exp["auto"]:
         problems.append(f"auto-filled forms {auto} != {exp['auto']}")
+    overlay = sorted((f["code"] for f in m["forms"] if f["status"] == "overlay"), key=float)
+    if overlay != exp.get("overlay", []):
+        problems.append(f"typed-onto-PDF forms {overlay} != {exp.get('overlay', [])}")
+    typed_buyer = {b["key"] for b in m["buyer_forms"] if b.get("overlay")}
+    for k in exp.get("buyer_forms_overlay", []):
+        if k not in typed_buyer:
+            problems.append(f"buyer form '{k}' should be typed onto its PDF")
     hand = {f["code"] for f in m["forms"] if f["status"] == "by_hand"}
     for c in exp["by_hand_fill"]:
         if c not in hand:
@@ -162,6 +185,12 @@ def main(argv=None):
                     continue
                 if pack["manifest"]["verify_problems"]:
                     failed.append(f"{run_key}: read-back: {pack['manifest']['verify_problems']}")
+                # every typed field was already read back from its own spot on
+                # the PDF by fill_flat_pdf.verify_placements before it counted
+                confirmed = {e["field_key"] for e in pack["provenance"] if e["status"] in ("confirmed", "assumed_default")}
+                lost = [k for k in EXPECTED.get(sample, {}).get("typed_keys", []) if k not in confirmed]
+                if lost:
+                    failed.append(f"{run_key}: not typed onto the PDF: {lost}")
             sig = signature(m, pack)
             base_path = os.path.join(args.store, run_key + (".manifest" if args.no_pack else "") + ".json")
             if not os.path.exists(base_path):

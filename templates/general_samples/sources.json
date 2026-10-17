@@ -63,6 +63,22 @@
    "reference": "E3689GXMPLET",
    "description": "Supply and delivery of Thermocouples for a period of five (5) years at Lethabo Power Station on an \u201cas and when required basis.",
    "closing_date": "2026-11-06T10:00:00Z"
+  },
+  "overberg_q12": {
+   "ocid": "ocds-9t57fa-174439",
+   "buyer": "Overberg District Municipality",
+   "reference": "Q12-2026",
+   "description": "Provision for Lifeguard services at Uilenkraalsmond and Die Dam resorts",
+   "closing_date": "2026-10-30T12:00:00Z",
+   "note": "added 2026-10-17: municipal MBD bundle (ruled tables) + Compulsory Enterprise Questionnaire + Form of Offer - flat-PDF overlay regression input"
+  },
+  "ecdpwi_scmu5_0007": {
+   "ocid": "ocds-9t57fa-174193",
+   "buyer": "Eastern Cape - Roads and Public Works",
+   "reference": "SCMU5-26/27-0007SB",
+   "description": "PROVISION OF PROFESSIONAL ARCHITECTURAL SERVICES (PSP) FOR REHABILITATION, RENOVATION AND REFURBISHMENT TO SOMERSET EAST SERVICE OFFICE IN SARAH BAARTMAN DISTRICT",
+   "closing_date": "2026-10-27T11:00:00Z",
+   "note": "added 2026-10-17: PSP tender (Klipcorp's sector) - SBD bundle in a flat PDF, CEQ with dotted leaders, CIDB Form of Offer and Acceptance"
   }
  }
 }

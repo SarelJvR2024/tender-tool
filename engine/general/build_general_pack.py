@@ -50,6 +50,7 @@ for p in (HERE, ENGINE_DIR, os.path.join(ENGINE_DIR, "pack"), os.path.join(ENGIN
         sys.path.insert(0, p)
 
 import fill_sbd_docx  # noqa: E402
+import fill_flat_pdf  # noqa: E402
 import requirements as req  # noqa: E402
 from provenance import ProvenanceLog  # noqa: E402
 from pdf_merge import merge_with_contents, verify_pack  # noqa: E402
@@ -199,6 +200,34 @@ def guide_rows(code, ctx):
     return []
 
 
+def _field_label(key):
+    return key.split(".", 1)[-1].replace("_", " ")
+
+
+def _log_overlay(log, reports):
+    """Provenance for every field fill_flat_pdf looked for: typed (and read
+    back) -> confirmed / assumed_default; anything else -> missing with the
+    reason and the value to write by hand. The buyer's own pre-print is not
+    logged (nothing for the company to do)."""
+    for code, rep in reports.items():
+        prefix = None
+        for key, f in rep.get("fields", {}).items():
+            prefix = key.split(".", 1)[0]
+            if f["status"] == "placed":
+                if f.get("reason"):
+                    log.assumed_default(key, f.get("value"), f["reason"])
+                else:
+                    log.confirmed(key, f.get("value"))
+            elif f["status"] in ("prefilled", "not_found"):
+                continue  # the buyer printed it / this edition has no such field
+            elif f.get("value"):
+                log.missing(key, f"Typed-onto-PDF: {f.get('reason') or 'not placed'} - write by hand: {f['value']}")
+            else:
+                log.missing(key, f"Not on file - write it by hand on the printed form ({f.get('reason') or 'no value'}).")
+        if prefix:
+            log.missing(f"{prefix}.signature_and_date", "Needs a real signature and date - never typed in.")
+
+
 def write_guide(path, manifest, ctx, form_results, by_hand):
     d = docx.Document()
     sec = d.sections[0]
@@ -221,6 +250,7 @@ def write_guide(path, manifest, ctx, form_results, by_hand):
         if f["code"] not in FILLABLE_CODES:
             continue
         status = form_results.get(f["code"], {}).get("status") or ("filled" if f["status"] == "auto" else "by hand")
+        placed = form_results.get(f["code"], {}).get("placed") or []
         hd = d.add_paragraph(f"{f['label']} - {f['title']} ({status})")
         hd.runs[0].bold = True
         tbl = d.add_table(rows=1, cols=3)
@@ -232,6 +262,12 @@ def write_guide(path, manifest, ctx, form_results, by_hand):
             row[0].text = field
             row[1].text = value or ("(by hand)" if note and ("by hand" in note or "sign" in note) else "- not on file -")
             row[2].text = note or ""
+        if placed:
+            p = d.add_paragraph("Typed onto the printed form (check each before signing): " +
+                                ", ".join(_field_label(k) for k in sorted(placed)) +
+                                ". Everything else in the table above is still to be written by hand.")
+            p.runs[0].font.size = Pt(8.5)
+            p.runs[0].italic = True
         for row in tbl.rows:
             for cell in row.cells:
                 for para in cell.paragraphs:
@@ -305,9 +341,56 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
             form_results[c] = {"status": "filled"}
             done_codes.add(c)
 
+    # --- 1b. flat PDF editions: type onto the printed form ----------------
+    # (requirements.py marked these "overlay": the form's page is in the PDF's
+    # text layer). One typed copy per PDF, every overlay form in it at once.
+    overlay_jobs = {}
+    for f in manifest["forms"]:
+        if f["status"] == "overlay" and f["code"] not in done_codes and f.get("overlay"):
+            overlay_jobs.setdefault(f["overlay"]["document"], []).append(f["code"])
+    for b in manifest.get("buyer_forms", []):
+        if b.get("overlay"):
+            overlay_jobs.setdefault(b["overlay"]["document"], []).append(b["overlay"]["code"])
+    overlaid, overlay_reports = {}, {}
+    for doc_name, codes in overlay_jobs.items():
+        src = _doc_path(doc_name, local_docs)
+        if not src or not src.lower().endswith(".pdf"):
+            continue
+        base = re.sub(r"[^A-Za-z0-9._-]+", "_", os.path.splitext(os.path.basename(doc_name))[0])[:60]
+        out = os.path.join(filled_dir, f"{base}_TYPED.pdf")
+        try:
+            rep = fill_flat_pdf.fill_flat_pdf(src, out, ctx, codes)
+        except Exception as e:  # a PDF pdfplumber can't parse - stays by hand
+            rep = {"forms": {c: {"pages": [], "fields": {}, "reason": f"could not read the PDF ({type(e).__name__})"} for c in codes},
+                   "placed": 0, "written": False}
+        for c in codes:
+            overlay_reports[c] = rep["forms"].get(c, {"pages": [], "fields": {}})
+        if rep["written"]:
+            overlaid[doc_name] = out
+            outputs[os.path.basename(out)] = out
+    _log_overlay(log, overlay_reports)
+
     for f in manifest["forms"]:
         if f["code"] in done_codes:
             continue
+        if f["status"] == "overlay" and f["code"] in overlay_reports:
+            orep = overlay_reports[f["code"]]
+            placed = [k for k, v in orep["fields"].items() if v["status"] == "placed"]
+            left = [(k, v) for k, v in orep["fields"].items() if v["status"] in ("not_placed", "missing") and v.get("value")]
+            doc_name = f["overlay"]["document"]
+            if placed and doc_name in overlaid:
+                form_results[f["code"]] = {"status": f"typed onto the PDF ({len(placed)} fields)", "placed": placed,
+                                           "left": [k for k, _ in left]}
+                standalone = next((d for d in manifest["documents"] if d["name"] == doc_name and d["kind"] == "standard_form"), None)
+                if standalone:
+                    pdf, why = to_pdf(overlaid[doc_name], conv_dir)
+                    sections.append({"title": f"{f['label']} {f['title']} - details typed on, check and sign", "envelope": FORMS_ENV,
+                                     "pdf": pdf, "omitted_reason": None if pdf else f"could not read the typed copy ({why})"})
+                by_hand.append({"title": f"{f['label']} {f['title']}",
+                                "reason": "check the typed details, then sign" + (
+                                    "; still to write: " + ", ".join(_field_label(k) for k, _ in left[:8]) if left else "")})
+                continue
+            # nothing could be placed - falls through to the by-hand path below
         if f["status"] == "attach":
             form_results[f["code"]] = {"status": "from the vault"}
             continue
@@ -330,7 +413,7 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
         # whole below ("complete the forms inside by hand") - not "missing".
         by_hand.append({"title": f"{f['label']} {f['title']}", "reason": reason})
         form_results[f["code"]] = {"status": "by hand"}
-        if f["code"] in FILLABLE_CODES:
+        if f["code"] in FILLABLE_CODES and not overlay_reports.get(f["code"], {}).get("fields"):
             for field, value, note in guide_rows(f["code"], ctx):
                 key = f"{f['label'].lower().replace(' ', '').replace('.', '_')}.{re.sub(r'[^a-z0-9]+', '_', field.lower()).strip('_')}"
                 log.missing(key, f"{f['label']} is completed by hand ({reason[:120]})" + (f" - write: {value}" if value else " - not on file"))
@@ -339,11 +422,13 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
     # (municipal single-PDF bundles - Dawid Kruiper TN051, Overberg Q12 - are
     # returned whole, with the MBD forms inside completed by hand)
     for d in manifest["documents"]:
-        if d["kind"] == "tender_document" and d.get("forms") and not d.get("editable"):
-            src = _doc_path(d["name"], local_docs)
+        if d["kind"] == "tender_document" and (d.get("forms") or d["name"] in overlaid) and not d.get("editable"):
+            src = overlaid.get(d["name"]) or _doc_path(d["name"], local_docs)
             if src:
                 pdf, why = to_pdf(src, conv_dir)
-                sections.append({"title": f"{d['name']} - complete the forms inside by hand", "envelope": BUYER_ENV, "pdf": pdf,
+                title = (f"{d['name']} - your details typed onto its forms; check, complete the rest and sign"
+                         if d["name"] in overlaid else f"{d['name']} - complete the forms inside by hand")
+                sections.append({"title": title, "envelope": BUYER_ENV, "pdf": pdf,
                                  "omitted_reason": None if pdf else f"could not convert ({why})"})
 
     # --- 3. buyer's own forms (as published, by hand) --------------------
@@ -353,7 +438,15 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
             pdf, why = to_pdf(src, conv_dir)
             sections.append({"title": f"{b['label']} - complete by hand", "envelope": BUYER_ENV, "pdf": pdf,
                              "omitted_reason": None if pdf else f"could not convert ({why}) - print the original"})
-        by_hand.append({"title": b["label"], "reason": b["reason"]})
+        ov = b.get("overlay")
+        orep = overlay_reports.get(ov["code"]) if ov else None
+        placed = [k for k, v in (orep or {}).get("fields", {}).items() if v["status"] == "placed"]
+        if placed and ov["document"] in overlaid:
+            form_results[ov["code"]] = {"status": f"typed onto the PDF ({len(placed)} fields)", "placed": placed}
+            by_hand.append({"title": b["label"], "reason": f"your company details are typed on (p.{ov['page']} of {ov['document']}) - "
+                                                           f"check them; {ov['by_hand']} stay by hand"})
+        else:
+            by_hand.append({"title": b["label"], "reason": b["reason"]})
 
     # --- 4. company documents -------------------------------------------
     closing = tender.get("closing_date")
@@ -405,6 +498,7 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
     notes = [
         "Generated by Tender Tool. Signatures, dates and prices are never typed in for you.",
         f"Standard forms: {sum(1 for v in form_results.values() if v['status'] == 'filled')} filled from your data, "
+        f"{sum(1 for v in form_results.values() if v['status'].startswith('typed'))} typed onto the buyer's printed PDF, "
         f"{sum(1 for v in form_results.values() if v['status'] == 'by hand')} to complete by hand (see the completion guide).",
     ] + [f"Gap: {g}" for g in manifest.get("gaps", [])[:4]]
     pack_manifest = merge_with_contents(sections, out_pdf, os.path.join(work_dir, "contents"), heading, notes=notes,

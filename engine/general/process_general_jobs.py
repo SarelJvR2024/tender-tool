@@ -1,6 +1,9 @@
 """
-Bridge between the web app's tender_engine_jobs table (migration
-0018_general_tender_preparation.sql) and the general (non-SANRAL) engine:
+Bridge between the web app's job queue - pack_generation_jobs rows with
+engine = 'general' (migration 0018 created a separate tender_engine_jobs
+table; the unified-queue migration folded it into pack_generation_jobs and
+left tender_engine_jobs as a compatibility view) - and the general
+(non-SANRAL) engine:
 engine/general/requirements.py (what does this tender need?) and
 engine/general/build_general_pack.py (fill the forms, merge the pack).
 
@@ -67,6 +70,8 @@ sys.path.insert(0, os.path.join(ENGINE_DIR, "intake"))
 import classify_tender as intake  # noqa: E402
 
 DEFAULT_WORK_DIR = os.path.join(ENGINE_DIR, "..", "out", "general_jobs")
+JOBS_TABLE = "pack_generation_jobs"  # one queue for every engine; ours are engine = 'general'
+ENGINE = "general"
 PACK_BUCKET = "submission-packs"
 VAULT_BUCKET = "company-documents"
 TENDER_DOCS_BUCKET = "tender-documents"  # 0017; manual uploads under manual/<company>/<tender>/ (0024)
@@ -403,7 +408,9 @@ def gather_pack_inputs(client, job, tender, manifest, work):
     if sid:
         ppl = client.select("people", {"id": sid, "company_id": job["company_id"]})
         if ppl:
-            signatory = {"name": ppl[0]["name"], "capacity": ppl[0].get("signatory_capacity") or ppl[0].get("role")}
+            signatory = {"name": ppl[0]["name"], "capacity": ppl[0].get("signatory_capacity") or ppl[0].get("role"),
+                         # MBD 4 3.2 "Identity Number" of the representative (typed onto flat PDFs)
+                         "id_number": ppl[0].get("id_number")}
 
     # experience the tender's own rule accepts (never SANRAL's B6 by default)
     evidence = []
@@ -489,29 +496,29 @@ def run_pack(client, job, work_root, fetch=None):
 # ---------------------------------------------------------------------------
 
 def process_job(client, job, work_root, fetch=None):
-    claimed = client.update("tender_engine_jobs", {"id": job["id"], "status": "requested"},
+    claimed = client.update(JOBS_TABLE, {"id": job["id"], "status": "requested", "engine": ENGINE},
                             {"status": "generating", "started_at": _now()})
     if not claimed:
         return False  # another worker took it
     try:
         if job["kind"] == "extract_requirements":
             summary = run_extraction(client, job, work_root, fetch)
-            client.update("tender_engine_jobs", {"id": job["id"]}, {"status": "ready", "completed_at": _now()})
+            client.update(JOBS_TABLE, {"id": job["id"]}, {"status": "ready", "completed_at": _now()})
             print(f"[ready] extract {job['id']}: {summary}")
         elif job["kind"] == "generate_pack":
             result = run_pack(client, job, work_root, fetch)
-            client.update("tender_engine_jobs", {"id": job["id"]}, {"status": "ready", "completed_at": _now(), **result})
+            client.update(JOBS_TABLE, {"id": job["id"]}, {"status": "ready", "completed_at": _now(), **result})
             print(f"[ready] pack {job['id']}: {result['page_count']} pages -> {result['storage_path_pdf']}")
         else:
             raise RuntimeError(f"unknown job kind {job['kind']}")
     except Exception as e:
-        client.update("tender_engine_jobs", {"id": job["id"]}, {"status": "failed", "error_message": str(e)[:1000], "completed_at": _now()})
+        client.update(JOBS_TABLE, {"id": job["id"]}, {"status": "failed", "error_message": str(e)[:1000], "completed_at": _now()})
         print(f"[failed] {job['kind']} {job['id']}: {e}")
     return True
 
 
 def poll_once(client, work_root, fetch=None):
-    jobs = client.select("tender_engine_jobs", {"engine": "general", "status": "requested"}, order="requested_at.asc")
+    jobs = client.select(JOBS_TABLE, {"engine": ENGINE, "status": "requested"}, order="requested_at.asc")
     if not jobs:
         print("No pending general engine jobs.")
         return 0

@@ -10,8 +10,11 @@ registered by name:
                                                      cv_extraction_results; needs
                                                      ANTHROPIC_API_KEY once a CV is queued)
     pack     engine/pack/process_pack_jobs.py       (pack_generation_jobs, SANRAL)
-    general  engine/general/process_general_jobs.py (tender_engine_jobs: non-SANRAL
-                                                     requirement extraction + packs)
+    general  engine/general/process_general_jobs.py (pack_generation_jobs, engine='general':
+                                                     non-SANRAL requirement extraction + packs)
+
+pack and general poll the SAME table (pack_generation_jobs - one queue), each
+claiming only its own `engine` value.
 
 and any other one can be added with --script PATH.
 
@@ -58,8 +61,8 @@ BRIDGES = {
     "cv": "engine/cv/process_cv_jobs.py",
     # AI field extraction from uploaded CVs (0023); proposes, never writes people/projects
     "cv_extract": "engine/cv/extract_cv_fields.py",
-    "pack": "engine/pack/process_pack_jobs.py",
-    # non-SANRAL requirement extraction + pack generation (tender_engine_jobs, 0018)
+    "pack": "engine/pack/process_pack_jobs.py",  # pack_generation_jobs, engine='sanral'
+    # non-SANRAL requirement extraction + pack generation (pack_generation_jobs, engine='general')
     "general": "engine/general/process_general_jobs.py",
 }
 

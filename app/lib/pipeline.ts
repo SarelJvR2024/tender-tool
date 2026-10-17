@@ -38,7 +38,7 @@ export const PREVIOUS_STAGE: Record<PipelineStage, PipelineStage | null> = {
 
 /**
  * The one automatic stage change: requesting a submission pack (SANRAL
- * pack_generation_jobs or general tender_engine_jobs 'generate_pack') means
+ * pack_generation_jobs, engine 'sanral' or 'general', kind 'generate_pack') means
  * the company is bidding, so a tender still at 'found' moves to 'bidding'.
  * Never moves a tender backwards and never past bidding - "pack ready" is not
  * "handed in to the buyer", so submitted/won/lost stay manual on /pipeline.

@@ -176,10 +176,10 @@ def main():
 
     print("1. extraction + pack on a real editable SBD bundle (DSTI RFQ15/10/2026)")
     seed(fake, "t-dsti", os.path.join(SAMPLES, "dsti_rfq15"))
-    fake.add("tender_engine_jobs", id="j1", engine="general", kind="extract_requirements", status="requested", company_id="co1",
+    fake.add("pack_generation_jobs", id="j1", engine="general", kind="extract_requirements", status="requested", company_id="co1",
              tender_id="t-dsti", tender_pack_id="pack-t-dsti", requested_at="2026-10-16T10:00:00Z")
     bridge.poll_once(client, work, fetch)
-    job = fake.one("tender_engine_jobs", id="j1")
+    job = fake.one("pack_generation_jobs", id="j1")
     t = fake.one("tenders", id="t-dsti")
     check(job["status"] == "ready", f"extract job ready (got {job['status']} {job.get('error_message')})")
     m = t.get("document_requirements") or {}
@@ -187,10 +187,10 @@ def main():
     check(any(q["key"] == "sbd4.relationship_with_employee" for q in m.get("questions", [])), "SBD 4 questions asked")
     check(t.get("evaluation_rules") is not None, "evaluation_rules written (empty before)")
 
-    fake.add("tender_engine_jobs", id="j2", engine="general", kind="generate_pack", status="requested", company_id="co1",
+    fake.add("pack_generation_jobs", id="j2", engine="general", kind="generate_pack", status="requested", company_id="co1",
              tender_id="t-dsti", tender_pack_id="pack-t-dsti", requested_at="2026-10-16T10:05:00Z")
     bridge.poll_once(client, work, fetch)
-    job = fake.one("tender_engine_jobs", id="j2")
+    job = fake.one("pack_generation_jobs", id="j2")
     check(job["status"] == "ready", f"pack job ready (got {job['status']} {job.get('error_message')})")
     key = f"submission-packs/{job.get('storage_path_pdf')}"
     check(job.get("storage_path_pdf", "").startswith("co1/tenders/t-dsti/j2/") and key in fake.storage, "pack PDF uploaded under <company>/tenders/<tender>/<job>/")
@@ -221,29 +221,29 @@ def main():
     check(any(k.endswith("_FILLED.docx") for k in job.get("output_files", {})), "filled .docx uploaded alongside")
 
     print("2. a job another worker already claimed is left alone")
-    fake.add("tender_engine_jobs", id="j3", engine="general", kind="generate_pack", status="generating", company_id="co1",
+    fake.add("pack_generation_jobs", id="j3", engine="general", kind="generate_pack", status="generating", company_id="co1",
              tender_id="t-dsti", tender_pack_id="pack-t-dsti", requested_at="2026-10-16T10:06:00Z")
     bridge.poll_once(client, work, fetch)
-    check(fake.one("tender_engine_jobs", id="j3")["status"] == "generating", "status untouched")
+    check(fake.one("pack_generation_jobs", id="j3")["status"] == "generating", "status untouched")
 
     print("3. pack before extraction fails with a reason")
     seed(fake, "t-early", os.path.join(SAMPLES, "tourism_nb143"), with_answers=False)
-    fake.add("tender_engine_jobs", id="j4", engine="general", kind="generate_pack", status="requested", company_id="co1",
+    fake.add("pack_generation_jobs", id="j4", engine="general", kind="generate_pack", status="requested", company_id="co1",
              tender_id="t-early", tender_pack_id="pack-t-early", requested_at="2026-10-16T10:07:00Z")
     bridge.poll_once(client, work, fetch)
-    j4 = fake.one("tender_engine_jobs", id="j4")
+    j4 = fake.one("pack_generation_jobs", id="j4")
     check(j4["status"] == "failed" and "haven't been read" in (j4.get("error_message") or ""), "failed: documents not read yet")
 
     print("4. a buyer with no SBD/MBD forms (ESKOM E3689, zip of its own documents)")
     seed(fake, "t-eskom", os.path.join(SAMPLES, "eskom_e3689"))
     for jid, kind, at in (("j5", "extract_requirements", "10:08"), ("j6", "generate_pack", "10:09")):
-        fake.add("tender_engine_jobs", id=jid, engine="general", kind=kind, status="requested", company_id="co1",
+        fake.add("pack_generation_jobs", id=jid, engine="general", kind=kind, status="requested", company_id="co1",
                  tender_id="t-eskom", tender_pack_id="pack-t-eskom", requested_at=f"2026-10-16T{at}:00Z")
     bridge.poll_once(client, work, fetch)
     m = fake.one("tenders", id="t-eskom")["document_requirements"] or {}
     check(m.get("form_suite") is None and not m.get("forms"), "no standard forms claimed")
     check(any("no SBD/MBD standard forms" in g for g in m.get("gaps", [])), "the gap is stated, not hidden")
-    j6 = fake.one("tender_engine_jobs", id="j6")
+    j6 = fake.one("pack_generation_jobs", id="j6")
     check(j6["status"] == "ready", f"pack still built ({j6['status']} {j6.get('error_message')})")
     check(any("NEC3" in b["title"] or "Form of Offer" in b["title"] for b in (j6.get("manifest") or {}).get("by_hand", [])),
           "ESKOM's own forms listed as by-hand")

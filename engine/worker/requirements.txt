@@ -13,3 +13,6 @@ Pillow==12.3.0
 #   from uploaded CVs). Text is read with the same pdftotext (poppler-utils, in
 #   the Dockerfile) / python-docx / soffice helpers as engine/general/.
 anthropic==1.15.0
+# engine/general/fill_flat_pdf.py: word / character / table-cell positions on flat
+# PDF forms (municipal MBD bundles) so values can be typed next to their labels.
+pdfplumber==0.11.10

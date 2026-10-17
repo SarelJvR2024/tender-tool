@@ -79,6 +79,10 @@ from pdf_merge import verify_pack  # noqa: E402
 from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
 
 DEFAULT_WORK_DIR = os.path.join(ENGINE_DIR, "..", "out", "pack_jobs")
+# pack_generation_jobs is the one job queue for every engine (unified-queue
+# migration): this bridge takes only the SANRAL rows; engine = 'general' rows
+# belong to engine/general/process_general_jobs.py.
+ENGINE = "sanral"
 
 # tender_documents.doc_type -> file name the engines expect (fill_docx_forms.py /
 # run_forms_pipeline.py read these exact names from one directory).
@@ -478,7 +482,7 @@ def fail_stale_jobs(client, now=None):
     crashed the worker once would crash it again in a loop."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
-    for job in client.select("pack_generation_jobs", {"status": "generating"}):
+    for job in client.select("pack_generation_jobs", {"status": "generating", "engine": ENGINE}):
         started = job.get("started_at")
         if started and datetime.datetime.fromisoformat(started.replace("Z", "+00:00")) < cutoff:
             client.update("pack_generation_jobs", {"id": job["id"], "status": "generating"}, {
@@ -533,7 +537,7 @@ def process_pending(client, work_root, keep=False, quiet_when_empty=False):
     os.makedirs(work_root, exist_ok=True)
     fail_stale_jobs(client)
     sync_tender_requirements(client, work_root)
-    jobs = client.select("pack_generation_jobs", {"status": "requested"}, order="requested_at.asc")
+    jobs = client.select("pack_generation_jobs", {"status": "requested", "engine": ENGINE}, order="requested_at.asc")
     if not jobs and not quiet_when_empty:
         print("No pending pack_generation_jobs.")
     for job in jobs:
