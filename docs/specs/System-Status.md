@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, 10:11 UTC check-in.
+Last full pass: 2026-10-17, 12:11 UTC check-in.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -97,6 +97,11 @@ bridged by `engine/general/process_general_jobs.py`.
     - **`print_reports.Office.__exit__` runs `pkill -9 -x soffice.bin`**, which kills every LibreOffice on the host, including another job's. Seen this pass: one run lost its Financial print to a concurrent process (caught, reported in the pack as "Not included", rest of the pack built). Harmless with one worker; worth scoping to its own PID before running bridges in parallel.
 
 13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; documents can't be attached to a shared discovered tender (load a private copy instead); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once.
+
+## Quiet pass (2026-10-17, 12:11 UTC)
+
+No new commits since the last check-in — `origin/main` unchanged. Re-ran `npm run typecheck`/
+`lint`, both clean. Nothing to fix, nothing new to flag.
 
 ## This pass (2026-10-17, 10:11 UTC): independent spot-check of the scenario pass + UI review
 
