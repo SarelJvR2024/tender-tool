@@ -212,7 +212,12 @@ def _specific_goals(text, profile, pref_system, locality=None):
             parts.append(f"locality ({areas}) - {loc_match['reason']}")
         else:
             parts.append("locality (rows not readable from the text - check by hand)")
-    reason = "Specific goals based on " + "; ".join(parts) + "."
+    # The bases recognised above are the ones met in real tables so far; PPR
+    # 2022 lets each buyer choose its own specific goals, so a table can hold
+    # a row of a kind not listed here (e.g. military veterans, rural or
+    # township enterprises) - say so rather than imply the list is complete.
+    reason = ("Specific goals based on " + "; ".join(parts) + ". Only these kinds of row were recognised - "
+              "check the tender's table for any other goal it scores.")
 
     floors, floor_parts = 0.0, []
     m = BLACK_100_ROW_RE.search(text)

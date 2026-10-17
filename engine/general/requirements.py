@@ -768,7 +768,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         "locality": {"rows": loc["rows"], "mandatory_local_office": loc["mandatory_local_office"]},
         "questions": questions,
         "company_fields": company_fields,
-        "gaps": _gaps(doc_entries, forms, suite, buyer_forms, _depth(all_text)),
+        "gaps": _gaps(doc_entries, forms, suite, buyer_forms, _depth(all_text)) + _key_personnel_gap(docs),
         "document_depth": _depth(all_text),
     }
     if own_tmp:
@@ -892,6 +892,25 @@ def _ocr_gaps(doc_entries):
             line += f" Pages {o['pages_skipped'][0]}-{o['pages_skipped'][-1]} were not OCR'd (page limit) - read them by eye."
         out.append(line)
     return out
+
+
+# A tender that asks for key personnel by any role. find_roles() only
+# recognises the catalogued roles (ROLE_PATTERNS - the ones met in the sample
+# tenders), so a role outside that list (an environmental control officer, a
+# land surveyor, an electrician...) would otherwise just not appear, and the
+# Roles card would read as if it were the whole requirement.
+KEY_PERSONNEL_RE = re.compile(r"key\s+(?:personnel|staff|persons?)\b|curriculum\s+vitae|\bCVs?\s+(?:of|for)\b", re.IGNORECASE)
+
+
+def _key_personnel_gap(docs):
+    for d in docs:
+        t = d.get("text") or ""
+        m = KEY_PERSONNEL_RE.search(t)
+        if m:
+            return [f"This tender asks for key personnel (\"{_quote(t, m.start(), m.end())[:160]}\", {d['name']}). "
+                    f"Tender Tool recognises {len(ROLE_PATTERNS)} common roles (listed under Roles when found); "
+                    "check the tender's own list for any role it doesn't show."]
+    return []
 
 
 def strip_local(manifest):

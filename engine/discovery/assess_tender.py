@@ -257,7 +257,14 @@ def load_company_profile(path=None):
     company = profile.get("company", {})
     gaps = " ".join(profile.get("gaps", [])).lower()
     has_cidb = company.get("has_cidb_grading")
+    if has_cidb is None and "cidb_grading" in company:
+        # The structured field (companies.cidb_grading, 0018; the profile
+        # JSON's company.cidb_grading) wins over reading free-text gaps.
+        has_cidb = bool(company.get("cidb_grading"))
     if has_cidb is None:
+        # Last resort: Klipcorp's profile states this only as a gaps line
+        # ("No CIDB grading document found anywhere"). Any other company's
+        # profile records it in cidb_grading above.
         has_cidb = "no cidb grading" not in gaps if gaps else False
     return {
         "disciplines": company.get("disciplines", []),

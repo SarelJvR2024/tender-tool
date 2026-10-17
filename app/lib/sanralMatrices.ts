@@ -239,6 +239,38 @@ export const TECH_POSITION_ROWS: Record<string, number[]> = {
   "PE(E)": [2.5, 5, 2.5, 5, 5, 2.5, 2.5, 5, 5, 5, 0, 2.5, 2.5, 0, 0, 2.5, 2.5, 2.5, 0, 0, 0, 5, 0],
 };
 
+// Book 1's complete key-person code list (R.396-010-2025/1F p. T-24
+// "ABBREVIATION / DEFINITION"), the same 22 codes + "Undefined" the
+// workbook's position-held dropdown offers (WORKINGS MATRIX C80:C102, there
+// spelled "PL(Toll)" etc. for the toll codes). Suggestions for Form B1's
+// "POSITION HELD (coded)" on the People page.
+export const SANRAL_POSITION_CODES: { code: string; label: string }[] = [
+  { code: "PL", label: "Project Leader" },
+  { code: "APL", label: "Assistant Project Leader" },
+  { code: "DS", label: "Design Specialist" },
+  { code: "DA", label: "Design Assistant" },
+  { code: "CE", label: "Contracts Engineer" },
+  { code: "ACE", label: "Assistant Contracts Engineer" },
+  { code: "RE", label: "Resident Engineer" },
+  { code: "ARE", label: "Assistant Resident Engineer" },
+  { code: "RM", label: "RRM Route Manager" },
+  { code: "ARM", label: "Assistant Route Manager" },
+  { code: "SMT", label: "Senior Materials Technician" },
+  { code: "CM", label: "Contracts Manager" },
+  { code: "SA", label: "Site Agent" },
+  { code: "MT", label: "Materials Technician" },
+  { code: "ETS", label: "Electronics Systems Engineer" },
+  { code: "PL(T)", label: "Project Leader (Toll)" },
+  { code: "DS(T)", label: "Design Specialist (Toll)" },
+  { code: "CE(T)", label: "Contracts Engineer (Toll)" },
+  { code: "CM(T)", label: "Contracts Manager (Toll)" },
+  { code: "ETS(T)", label: "Electronics Systems Engineer (Toll)" },
+  { code: "ES", label: "Electrical Systems Engineer" },
+  { code: "MS", label: "Mechanical Systems Engineer" },
+  { code: "PE(E)", label: "Project Engineer (Client)" },
+  { code: "Undefined", label: "None of the above (scores 0 on position held)" },
+];
+
 // Managerial "Position Held" matrix (T-26) - only for managerial positions.
 export const MAN_POSITION_COLUMNS = ["PL", "CE", "RE", "RM", "PL(T)", "CE(T)", "CM(T)"];
 export const MAN_POSITION_ROWS: Record<string, number[]> = {
@@ -281,4 +313,34 @@ export const CLIENT_POINTS: Record<string, number> = {
 /** Normalise a project-type code for a matrix lookup ("Ds" -> "DS", collapse spaces). */
 export function normType(t: string | null | undefined): string {
   return (t ?? "").trim().toUpperCase().replace(/\s+/g, " ");
+}
+
+/**
+ * The matrix row a person's project type scores on, or null when this
+ * position's matrix has no such row - i.e. SANRAL's form for this position
+ * doesn't offer that project type at all (each Form B1 block's project-type
+ * dropdown is that position's own matrix list; engine/sanral_fill.py
+ * projects_for_block() leaves such a project off that block). Same matching
+ * as the filler: exact code, else one part of a combined row ("DI" on
+ * "DI/DN"). A blank type is "NONE".
+ */
+export function matrixRowKey(matrixKey: string, experienceType: string | null | undefined): string | null {
+  const m = PROJECT_TYPE_MATRICES[matrixKey];
+  if (!m) return null;
+  const t = normType(experienceType) || "NONE";
+  if (m.rows[t]) return t;
+  if (!t.includes("/")) {
+    const combined = Object.keys(m.rows).find((k) => k.includes("/") && k.split("/").map((x) => x.trim()).includes(t));
+    if (combined) return combined;
+  }
+  return null;
+}
+
+/**
+ * SANRAL spells toll position codes two ways: Book 1 (T-24/T-26) "PL(T)",
+ * the workbook's position-held dropdown (WORKINGS MATRIX C80:C102)
+ * "PL(Toll)". The matrices here use Book 1's spelling.
+ */
+export function normPositionCode(code: string | null | undefined): string {
+  return (code ?? "").trim().toUpperCase().replace(/\s+/g, "").replace(/\(TOLL\)$/, "(T)");
 }

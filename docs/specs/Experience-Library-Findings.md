@@ -39,7 +39,7 @@ Source: `templates/incoming/R.396-010-2025.1F/.../R396-010-2025-1F -Conventional
 
 Same Book 1, pages T-16 to T-25.
 
-- **Project type, coded**: MO/MA, MP/MS, DS, DI, DN, CD, RRM, MSC, MSB, DIB, DNB, MSS, DIS, DNS, Street Lighting, Traffic Lights, … (about 40 codes, copied verbatim into `app/lib/experience.ts` `SANRAL_PROJECT_TYPES`). Scored through a project-type relevance matrix.
+- **Project type, coded**: MO/MA, MP/MS, DS, DI, DN, CD, RRM, MSC, MSB, DIB, DNB, MSS, DIS, DNS, Street Lighting, Traffic Lights, … (the complete list is the workbook's `Proj Relevance Codes` sheet, 46 codes, identical in all 7 workbooks on hand; `app/lib/experience.ts` `SANRAL_PROJECT_TYPES` holds all of them since 2026-10-17 - it held 27 before, see `Hardcoded-Assumptions-Audit.md`). Scored through a project-type relevance matrix.
 - **Client, coded and scored**: National Roads Authority 5, Concessionaire 5, Provincial Authority 5, Relevant SOE 4.5, Metro Council 4.5, Municipality 4, Private 3.75, Other 3.75.
 - **Period relevance**: within 10 years scores 5, 10 to 15 years scores 2.5, over 15 years scores 0.
 - **Value** is in "millions of Rand".

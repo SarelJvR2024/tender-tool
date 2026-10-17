@@ -13,6 +13,12 @@ import json
 import yaml
 import datetime
 
+# people.employment_status (0036) -> the label Form B1's dropdown uses.
+EMPLOYMENT_LABEL = {
+    "full_time_employee": "Key Person is a full time employee of the tenderer",
+    "not_full_time_employee": "Key Person is NOT a full time employee of the tenderer",
+}
+
 
 def confirm(suggestions_path, selections_path, profile_path, out_path):
     suggestions = json.load(open(suggestions_path))
@@ -54,8 +60,15 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
             raise ValueError(f"{person['name']}: no initial_graduated date on file - "
                               f"years_experience cannot be computed, refusing to guess one.")
 
+        # Every project goes into the pack, not just the first 3: Form B1 has 3
+        # rows per position, but which 3 fit depends on the POSITION (each
+        # block's project-type list comes from that position's Book 1 matrix),
+        # so the filler picks per block (sanral_fill.projects_for_block). The
+        # first 3 must be complete, as before; a later one with a field
+        # missing is left out here (it was never cited before either) rather
+        # than refusing the whole pack over a project that may not be needed.
         projects = []
-        for proj in person.get("projects", [])[:3]:
+        for n, proj in enumerate(person.get("projects", [])):
             proj = dict(proj)
             # fill_conventional.py/fill_tender.py expect "contact_number" (a single cell on
             # the Form B1.1 project row); the profile stores the richer "contact_phone"
@@ -63,7 +76,10 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
             # profile's own field, since the profile's name is the more accurate one.
             if "contact_number" not in proj and "contact_phone" in proj:
                 proj["contact_number"] = proj["contact_phone"]
-            for required in ("client_type", "project_type", "position_code", "contact_number"):
+            missing = [r for r in ("client_type", "project_type", "position_code", "contact_number") if r not in proj]
+            if missing and n >= 3:
+                continue
+            for required in missing:
                 if required not in proj:
                     raise ValueError(f"{person['name']}: project '{proj.get('client_and_number')}' "
                                       f"is missing '{required}' - add it to the profile before "
@@ -74,7 +90,17 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
             "name": person["name"],
             "id_number": person["id_number"],
             "description": person.get("description", ""),
-            "employment": "Key Person is a full time employee of the tenderer",
+            # Form B1's "employment" dropdown has exactly three options (the
+            # workbook's own list): "No Key Person offered", "Key Person is NOT
+            # a full time employee of the tenderer", "Key Person is a full
+            # time employee of the tenderer". Until 2026-10-17 every person was
+            # declared a full-time employee - true for Klipcorp's signatory, not
+            # a fact about every company's key persons (subconsultants, JV
+            # partners, targeted-enterprise staff). Now it comes from the
+            # person's record; when that isn't recorded the old answer is kept
+            # but the filler notes it as an assumption on the pack.
+            "employment": EMPLOYMENT_LABEL.get(person.get("employment_status"), EMPLOYMENT_LABEL["full_time_employee"]),
+            "employment_status": person.get("employment_status"),
             "projects": projects,
             "qualifications": qual,
         }

@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, 14:11 UTC check-in (feature pass for Sarel's decisions 1-4 at ~15:00 UTC, below).
+Last full pass: 2026-10-17, 14:11 UTC check-in (feature pass for Sarel's decisions 1-4 at ~15:00 UTC, below); hardcoded-assumptions audit at ~16:00 UTC, below.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -105,7 +105,49 @@ bridged by `engine/general/process_general_jobs.py`.
     - **No automated "pricing guard" scan** (Handover §5) - Envelope 1 is kept price-free by construction (no pricing document is placed in it), not by scanning the output.
     - **`print_reports.Office.__exit__` runs `pkill -9 -x soffice.bin`**, which kills every LibreOffice on the host, including another job's. Seen this pass: one run lost its Financial print to a concurrent process (caught, reported in the pack as "Not included", rest of the pack built). Harmless with one worker; worth scoping to its own PID before running bridges in parallel.
 
-13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; ~~documents can't be attached to a shared discovered tender~~ (**closed** by `0032`: "Your private documents"); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once.
+13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; ~~documents can't be attached to a shared discovered tender~~ (**closed** by `0032`: "Your private documents"); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once (expired_certs_co now builds - see the hardcoded-assumptions pass).
+
+## This pass (2026-10-17, ~16:00 UTC): hardcoded-assumptions audit (Sarel: "don't base limitations only on Klipcorp's submissions / these 6 tenders")
+
+Full write-up, with before/after and source-document evidence for every item: `Hardcoded-Assumptions-Audit.md`.
+
+**Fixed:**
+- The `MO/MA` refusal. Root cause: project-type options are **per position**, each position's own Book 1 matrix (WB dropdowns: the PL block offers MO/MA, the DS-Pavement block doesn't). It is not per family. `sanral_fill.projects_for_block()` now leaves a project off only the block that doesn't offer its type, picks the next fitting one, and puts a note on the contents page. `confirm_pack` passes all projects, not the first 3. "DI"/"DN" fit the DS-Pavement "DI/DN" option. `sanralScoring` mirrors this. `expired_certs_co` (MO/MA) and `multi_specialist_co` (DIB on the DS-Pavement block, the same bug) now build.
+- C.1.2.3's key-person table was always the signatory in rows 1 and 3 (Klipcorp's Henning = PL + DS1). It is now filled from the confirmed pack, with rows found by label.
+- Form B1 declared every key person a full-time employee. New `people.employment_status` (0036) plus a People-page select; when it's not recorded, the old answer is kept and noted as an assumption.
+- Company/representative phone and e-mail are now filled from 0018/people columns. The "Klipcorp's"/"Henning's" messages are gone.
+- Toll codes: `PL(T)` (Book 1) and `PL(Toll)` (workbook) are accepted both ways.
+- Experience disciplines are no longer locked to the 7 Discovery buckets (0036 drops that CHECK, keeps a slug format check). Companies can add their own tags.
+- "Similar scope" is derived from this tender's own positions, no longer fixed at roads_civil.
+- C3.1.11 minimums are labelled as R.396's table. A DS Engineering Geologist is checked against Pr Sci.Nat.
+- `SANRAL_PROJECT_TYPES` now holds the complete workbook list (27 → 46 + 6 Book-1-only). It is also offered on the People page project form, with client codes and position codes.
+- CIDB is read from `cidb_grading`, not Klipcorp's gaps wording.
+- The specific-goals reason no longer implies its list is complete.
+- The general manifest flags key-personnel roles outside the 17-role catalogue.
+
+**Fine as is (evidence in the doc):** the client codes, CIDB Annex 1 stages, provinces, ratings and Book 1 matrices are the standards' own complete sets. `tender_documents.doc_type` is the pack builder's input slots, not "all SANRAL documents".
+
+**Verified:**
+- Baselines were made from unmodified `origin/main`. Then:
+  - `general_harness` (with packs): 44/44 clean.
+  - `admin_harness` forms: only the intended `c123.key_person_row_1/3` changes.
+  - `--pack`: complete_co and new_co unchanged; expired_certs_co and multi_specialist_co refused → built.
+- The bridge/unit suites pass.
+- `test_manual_intake.py` and `bridge_selftest.py` pass on a `0001`→`0036` replay (incl. upstream 0030-0035), where the 0036 constraints were tested by hand.
+- `sanralScoring` on Klipcorp's real projects is identical to unmodified code.
+- `tsc` and `eslint` are clean.
+
+**Local harness baselines (ignored `state/`) need `admin_harness.py --reset` and `--pack --reset` once.**
+
+**Open for Sarel:** see `Hardcoded-Assumptions-Audit.md` §7 (Q1-Q8):
+- MO/MA vs RRM's "MO/MA (Excl. RRM)";
+- the Engineering Geologist DS has no workbook codes;
+- a published discipline taxonomy (CIDB classes?);
+- Discovery scored against one profile;
+- per-tender C3.1.11 extraction and SACNASP/SAGC fields;
+- SANRAL contractor and other document sets;
+- the authority-letter format;
+- other specific-goal kinds.
 
 ## This pass (2026-10-17): public award outcomes (items 17, 28)
 
@@ -476,11 +518,12 @@ note added to the Built table above; nothing new to flag.
 - **Submission pack (Gap #12):** position confirmation now lives on the Key positions card, template upload on the Tender Workspace, and Envelope 2 is a separate PDF (documented convention). Still for Sarel: (a) is the Conventional Financial print right as "every visible sheet" (25 pages: input data, all 8 hours sheets incl. "not used" disciplines, All Hours, C2.4 FIN, Pricing Schedule, Summary Tendered Fee)? It follows Klipcorp's real RRM print, but no real completed *Conventional* financial print exists in the repo to compare; (b) should the Form of Offer also be in Envelope 1? (placed in Envelope 2 as in the real sample); (c) the signatory question above; (d) should one company's template upload be replaceable by another company working on the same tender (today: yes, recorded per row)?
 - **Deploying the bridge worker** (Railway Hobby, $5/mo, recommended; steps in `Automated-Fulfillment-Deployment.md`). It needs a Railway account plus the Supabase URL and service-role key, so it can only happen once a live Supabase project exists. A scheduled GitHub Action was considered and rejected, with evidence, in that doc (GitHub's Actions terms, 5-min floor, auto-disable after 60 idle days).
 - **Pipeline board (item 10):** (a) should a tender auto-advance to "submitted" when its pack is ready? Not done: "pack ready" means a PDF exists, not that it was handed in (submission happens on the buyer's portal or by hand), so the only automatic move is found → bidding on a pack request. (b) Should "Prepare this tender" on Discovery count as bidding? Today it lands at found, since it's also used just to read a tender's requirements. (c) The Tenders tab (dashboard) still lists every shared tender with pack status; fold it into the board, or keep both?
-- **Scenario pass (`Engine-Scenario-Test-Results.md` "Open decisions"):** (1) ~~expired vault documents in a SANRAL pack~~ - **answered** (included, with a warning, plus a per-pack checklist - built); (2) a project whose type exists only in the other SANRAL family (`MO/MA` on a Conventional tender) - refuse the pack (today, now with a clear message) or drop that project from Form B1? (3) ALT positions on SETUP get the same person as the primary slot - correct? (4) ~~manual tenders private~~ - **answered** (yes; confirmed and three leaks closed, `0032`); (5) ~~private documents on a shared tender~~ - **answered and built** (`0032`); (6) ~~OCR for scanned tenders~~ - **built as an experiment** (`OCR-Evaluation.md`, recommendation: keep with caveats) - keep or drop is Sarel's call.
+- **Scenario pass (`Engine-Scenario-Test-Results.md` "Open decisions"):** (1) ~~expired vault documents in a SANRAL pack~~ - **answered** (included, with a warning, plus a per-pack checklist - built); (2) ~~a project whose type exists only in the other SANRAL family~~ - **answered and built**: a project whose type a position's form doesn't offer is left off that position's Form B1 with a note (it was per position, not per family; `Hardcoded-Assumptions-Audit.md` §1); (3) ALT positions on SETUP get the same person as the primary slot - correct? (4) ~~manual tenders private~~ - **answered** (yes; confirmed and three leaks closed, `0032`); (5) ~~private documents on a shared tender~~ - **answered and built** (`0032`); (6) ~~OCR for scanned tenders~~ - **built as an experiment** (`OCR-Evaluation.md`, recommendation: keep with caveats) - keep or drop is Sarel's call.
 - **Tender notes + activity log (item 15):** (a) the activity log shows only the **latest** task status/assignee change and the **latest** pipeline move (`tender_tasks`/`tender_packs` overwrite in place, so a tender moved bidding → submitted → won shows "Submitted" and "Won", but not "Bidding"), and neither records **who** made that change. A full trail would need a small trigger-written events table on those two tables. That is the one place a "history" table would add real information. Worth it, or is latest-only enough? (b) People are named by their sign-in e-mail, because no display name exists for a user. Add a `company_members.display_name`? (c) Should notes be visible to the whole company (today), or only to people with a `tender_role` that can see that tender's work? (d) Pre-existing, found while testing: the `requested_by`/`created_by`/`uploaded_by` FKs to `auth.users` have no `on delete` action, so removing a user who ever requested anything fails at the database. The new `tender_comments.author_id` uses `set null`.
 - **Reuse of past submissions (item 9):** (a) per-tender uploads the vault has no field for (CIPC documents, director IDs, municipal account, public liability...) are re-uploaded on every general tender - add vault fields for the stable ones, or copy the file on reuse? (b) copied declarations aren't marked as copied once applied (only the preview and banner say so) - worth a "carried over from X" note per answer (needs a column)? (c) should "Mark submitted" on the Pipeline board offer the reuse card for the next tender, or is the Workspace enough?
 - **Deal economics (items 26, 27, `0034`):** (a) one credited person per tender - the spec also says "who worked on" it; is a single "credit" enough, or should several people (with a split) be recorded? (b) commission is a record only (percent or flat amount + note) - is any calculation/payout tracking wanted later? (c) the submitted price is typed by hand; should it be read back from the filled Financial workbook (Envelope 2) once pricing is in? (d) sector uses the 7 Discovery discipline buckets - fine-grained enough for pricing (e.g. split roads design vs. RRM)? (e) item 27's sibling "public award data": capture now built report-only (`award_outcomes.py`, see Built table) - storing it and showing it next to `/pipeline/pricing` waits on the item below.
 - **Public award data (items 17, 28, `Award-Outcomes-Findings.md` §6):** (a) SANRAL's Terms & Conditions allow reproduction with acknowledgement but "no charge ... upon any recipient of the material" - OK to store and show inside Klipcorp's own bidding; showing it to paying customers / selling it to non-bidders needs your call (possibly ask SANRAL). (b) If yes: a shared `public_awards` table + a market-price view beside `/pipeline/pricing`, and a POPIA lawful-basis note (company names are juristic-person personal information, though published by law). (c) CIDB's Register of Contractors is public (grade/class/province filters) but covers contractors only, not consulting engineers - not built.
+- **Hardcoded-assumptions audit (`Hardcoded-Assumptions-Audit.md` §7):** Q1 `MO/MA` vs RRM's `MO/MA (Excl. RRM)`; Q2 the DS Engineering Geologist has a Book 1 matrix but no workbook codes; Q3 adopt a published discipline taxonomy (e.g. CIDB classes of works)?; Q4 Discovery fan-out per company instead of one profile JSON; Q5 per-tender C3.1.11 extraction, SACNASP/SAGC fields; Q6 SANRAL contractor tenders / other document sets; Q7 authority-letter format for other companies; Q8 further specific-goal kinds.
 - Whether/how to wire real notification sending (email) for the daily digest and the document-expiry/task reminders — both currently report-only by design, pending a decision on the send mechanism.
 
 ---

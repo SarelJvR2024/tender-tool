@@ -209,7 +209,10 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
 
     # 2. Technical Submission workbook (the real filler for this family)
     filled_xlsm = os.path.join(tech_dir, f"{slug}_FILLED.xlsm")
-    FILLERS[family].main(technical_tpl, pack_yaml, filled_xlsm)
+    # Returns notes for projects left off a position's Form B1 because that
+    # position's form doesn't offer their project type (sanral_fill.
+    # projects_for_block) - surfaced on the contents page, never silent.
+    warnings += FILLERS[family].main(technical_tpl, pack_yaml, filled_xlsm) or []
 
     # 3. Form B print reports (print_reports.py, LibreOffice headless). Imported
     # here, not at module top: it needs the `uno` bridge, which only exists on

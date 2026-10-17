@@ -13,7 +13,7 @@ import {
 import { estimateSanralConventional, pastPerformanceFromExperience, type SanralProject } from "@/lib/sanralScoring";
 import { findMatchingExperience, isScoreableEvidence, type ExperienceItem } from "@/lib/experience";
 import { chooseEvidenceRule, evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
-import { TENDER_ROLE_COLUMNS, roleFitCheck, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
+import { TENDER_ROLE_COLUMNS, roleCodeForPosition, roleFitCheck, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
 import { COMPANY_OFFICE_COLUMNS, type CompanyOffice } from "@/lib/locality";
 
 /**
@@ -121,15 +121,33 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   // Company experience (Experience Library, migration 0012), checked against
   // THIS tender's own evidence rule (tenders.evaluation_rules) - or, only
   // when that hasn't been read, SANRAL's B6 pattern labelled as an
-  // assumption (experienceEvidence.ts). Every tender in this family is SANRAL
-  // roads consulting, so "similar scope" is read as the roads_civil
-  // discipline tag - stated in the UI, not hidden.
+  // assumption (experienceEvidence.ts). "Similar scope" is read as the
+  // disciplines of THIS tender's own key positions (tender_roles.discipline
+  // of each SETUP position's role: a DS Electrical or DS Electronic Systems
+  // position is electrical_mechanical, PL/CE/RE and the civil DS specialisms
+  // roads_civil). Until 2026-10-17 it was fixed at roads_civil because all six
+  // sample tenders were PL + DS Pavement; SANRAL also tenders consultancy
+  // whose positions are electrical/ITS/structures. Falls back to roads_civil
+  // (SANRAL is the roads agency) only when no position resolves to a role.
+  // The disciplines used are shown in the UI.
+  const experienceDisciplines = Array.from(
+    new Set(
+      positionCodes
+        .map((code) => {
+          const req = requirements.find((r) => r.position_code === code);
+          const roleCode = roleCodeForPosition(code, req?.position_description ?? null);
+          return roles.find((r) => r.code === roleCode)?.discipline ?? null;
+        })
+        .filter((d): d is string => !!d),
+    ),
+  );
+  if (experienceDisciplines.length === 0) experienceDisciplines.push("roads_civil");
   const chosenRule = chooseEvidenceRule(evaluationRules);
   const companyId = (company?.id as string | undefined) ?? null;
   const asOf = closingDate ? closingDate.slice(0, 10) : undefined;
   const experience = companyId
     ? await findMatchingExperience(supabase, companyId, {
-        disciplines: ["roads_civil"],
+        disciplines: experienceDisciplines,
         ...(chosenRule.rule.window_years ? { completedWithinYears: chosenRule.rule.window_years } : {}),
         asOf,
       })
@@ -163,7 +181,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     const asg = assignments.find((a) => a.position_code === code) ?? null;
     const person = asg?.confirmed_person_id ? personById.get(asg.confirmed_person_id) ?? null : null;
     const suggested = !person && asg?.suggested_person_id ? personById.get(asg.suggested_person_id) ?? null : null;
-    const min = checkMinimumRequirement(code, person, closingDate);
+    const min = checkMinimumRequirement(code, person, closingDate, req?.position_description ?? null);
     const cv = person ? cvUploads.find((c) => c.person_id === person.id) ?? null : null;
     const tenderCv = generatedCvs.find((g) => g.position_code === code) ?? null;
     const personProjects = person ? projects.filter((p) => p.person_id === person.id) : [];
@@ -210,6 +228,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     experience,
     expItems,
     experienceAvailable,
+    experienceDisciplines,
     chosenRule,
     qualitySystem,
     beeProofValid,

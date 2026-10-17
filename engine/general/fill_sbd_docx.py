@@ -180,14 +180,14 @@ def fill_sbd1(path, comp, name, position, log):
                       "No postal address on file." if not comp.get("postal_address") else None)
     fill_table_label(d, "STREET ADDRESS", comp.get("registered_address"), log, "sbd1.street_address",
                       "No registered/street address on file." if not comp.get("registered_address") else None)
-    log.missing("sbd1.telephone_number",
-                "Company-level telephone number is not on file in config/klipcorp_profile.json "
-                "(only a key person's cellphone is) - fill by hand or add it to the profile.")
+    fill_table_label(d, "TELEPHONE NUMBER", comp.get("telephone"), log, "sbd1.telephone_number",
+                      "No company telephone number on file - fill by hand or add it to the company profile."
+                      if not comp.get("telephone") else None)
     log.missing("sbd1.facsimile_number", "No fax number on file - most SA bidders no longer use fax; "
                 "confirm with Sarel whether to leave this blank or write N/A.")
-    log.missing("sbd1.email_address",
-                "No company-level email address is on file in config/klipcorp_profile.json - fill by "
-                "hand or add one to the profile.")
+    fill_table_label(d, "E-MAIL ADDRESS", comp.get("email"), log, "sbd1.email_address",
+                      "No company e-mail address on file - fill by hand or add it to the company profile."
+                      if not comp.get("email") else None)
     fill_table_label(d, "VAT REGISTRATION NUMBER", comp.get("vat_number"), log, "sbd1.vat_registration_number",
                       "No VAT number on file." if not comp.get("vat_number") else None)
     fill_table_label(d, "CSD No", comp.get("csd_supplier_number"), log, "sbd1.csd_number",

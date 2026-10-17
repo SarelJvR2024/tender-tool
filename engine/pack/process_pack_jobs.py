@@ -223,6 +223,10 @@ def adapt_company(row):
                      "expiry": row.get("iso_9001_expiry")},
         "registered_address": row.get("registered_address") or "",
         "postal_address": row.get("postal_address"),
+        # 0018 company contact columns - C.1.2.3 "Telephone" (company) reads these.
+        "telephone": row.get("telephone"),
+        "cellphone": row.get("cellphone"),
+        "email": row.get("email"),
         "head_office_per_form_b3": row.get("head_office"),
         "other_offices": row.get("other_offices"),
         "ecsa_registered_staff_count": row.get("ecsa_registered_staff_count"),
@@ -243,6 +247,8 @@ def adapt_person(row, projects):
         "role": row.get("role"),
         "signatory_capacity": row.get("signatory_capacity"),
         "phone": row.get("phone") or "",
+        "email": row.get("email"),
+        "employment_status": row.get("employment_status"),  # 0036; null = not recorded
         "qualifications": {k: row.get(k) for k in (
             "ecsa_level", "ecsa_number", "ecsa_date", "sacpcmp_number", "sacpcmp_date", "highest_level",
             "highest_description", "highest_institution", "highest_graduated", "initial_description",

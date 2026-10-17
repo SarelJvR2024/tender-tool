@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
-import { DOCUMENT_TYPES, DISCIPLINES, SERVICE_STAGES, CLIENT_TYPES, PERFORMANCE_RATINGS } from "@/lib/experience";
+import { DOCUMENT_TYPES, SERVICE_STAGES, CLIENT_TYPES, PERFORMANCE_RATINGS, disciplineSlug } from "@/lib/experience";
 
 /**
  * Company experience library (0012_experience_items.sql). Two separate steps,
@@ -43,7 +43,6 @@ function oneOf<T extends string>(value: string | null, allowed: readonly T[]): T
 }
 
 const DOC_TYPE_VALUES = DOCUMENT_TYPES.map((d) => d.value);
-const DISCIPLINE_VALUES = DISCIPLINES.map((d) => d.value) as string[];
 const STAGE_VALUES = SERVICE_STAGES.map((s) => s.value) as string[];
 const RATING_VALUES = PERFORMANCE_RATINGS.map((r) => r.value);
 
@@ -111,7 +110,12 @@ export async function saveExperienceTags(formData: FormData) {
 
   const projectName = str(formData, "project_name");
   const documentType = oneOf(str(formData, "document_type"), DOC_TYPE_VALUES);
-  const disciplines = formData.getAll("disciplines").map(String).filter((d) => DISCIPLINE_VALUES.includes(d));
+  // Ticked tags (suggested or the item's own) plus any typed in "Other
+  // disciplines" - not limited to the suggested 7 (migration 0036).
+  const typed = (str(formData, "other_disciplines") ?? "").split(",");
+  const disciplines = Array.from(
+    new Set([...formData.getAll("disciplines").map(String), ...typed].map((d) => disciplineSlug(d)).filter((d): d is string => !!d)),
+  );
   const stages = formData.getAll("service_stages").map(String).filter((s) => STAGE_VALUES.includes(s));
   const valueRaw = str(formData, "value_rm");
   const value = valueRaw === null ? null : Number(valueRaw);

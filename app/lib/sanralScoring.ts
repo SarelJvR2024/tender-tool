@@ -32,6 +32,8 @@ import {
   TECH_POSITION_ROWS,
   baseCode,
   matrixForPosition,
+  matrixRowKey,
+  normPositionCode,
   normType,
 } from "./sanralMatrices";
 
@@ -112,7 +114,7 @@ function periodPoints(p: SanralProject, closing: Date): Range {
 function projectTypePoints(matrixKey: string | null, tenderType: string | null, experienceType: string | null): Range {
   if (!matrixKey) return r(0, 5);
   const m = PROJECT_TYPE_MATRICES[matrixKey];
-  const row = m.rows[normType(experienceType) || "NONE"] ?? m.rows.NONE;
+  const row = m.rows[matrixRowKey(matrixKey, experienceType) ?? "NONE"];
   if (tenderType) {
     const idx = m.columns.indexOf(normType(tenderType));
     if (idx >= 0) return r(row[idx], row[idx]);
@@ -123,7 +125,7 @@ function projectTypePoints(matrixKey: string | null, tenderType: string | null, 
 function lookup(rows: Record<string, number[]>, cols: string[], held: string | null, required: string): number | null {
   const col = cols.indexOf(required);
   if (col < 0) return null;
-  const row = rows[(held ?? "").toUpperCase()];
+  const row = rows[normPositionCode(held)];
   return row ? row[col] : 0; // unknown held code = SANRAL's own "Undefined" row (0)
 }
 
@@ -133,7 +135,7 @@ function capSum(values: Range[], cap: number): Range {
 }
 
 export function estimatePosition(input: SanralPositionInput, closing: Date): PositionEstimate {
-  const required = baseCode(input.positionCode);
+  const required = normPositionCode(baseCode(input.positionCode));
   const matrix = matrixForPosition(input.positionCode, input.description);
   const notes: string[] = [];
   // SANRAL's managerial position-held matrix only has PL/CE/RE/RM (+ toll)
@@ -146,8 +148,19 @@ export function estimatePosition(input: SanralPositionInput, closing: Date): Pos
     return { positionCode: input.positionCode, personName: null, matrix, projectsCounted: 0, technical: r(0, 0), management: r(0, 0), managementMax: managerialMax, notes };
   }
 
+  // A project whose type this position's matrix doesn't list can't be put on
+  // this position's Form B1 at all (its dropdown doesn't offer the code), so
+  // the pack leaves it off and cites the next one (sanral_fill.py
+  // projects_for_block) - the estimate does the same, and says so.
+  const excluded = matrix ? input.person.projects.filter((p) => matrixRowKey(matrix, p.project_type) === null) : [];
+  if (excluded.length > 0) {
+    notes.push(
+      `${excluded.length} project(s) left off this position's Form B1: project type ${Array.from(new Set(excluded.map((p) => `"${p.project_type}"`))).join(", ")} isn't in SANRAL's ${PROJECT_TYPE_MATRICES[matrix!].title} matrix (offers ${Object.keys(PROJECT_TYPE_MATRICES[matrix!].rows).join(", ")}). They still count on a position whose matrix lists that type.`,
+    );
+  }
   // Form B1 lists "the most recent 5 projects"; each criterion caps at 15 (3 x 5).
-  const projects = [...input.person.projects]
+  const projects = input.person.projects
+    .filter((p) => !excluded.includes(p))
     .sort((a, b) => (b.end_date ?? b.start_date ?? "").localeCompare(a.end_date ?? a.start_date ?? ""))
     .slice(0, 5);
   if (projects.length === 0) notes.push("No project history on file for this person - technical and management points are 0.");
@@ -166,10 +179,10 @@ export function estimatePosition(input: SanralPositionInput, closing: Date): Pos
   const technical = add(add(capSum(typePts, 15), capSum(periodPts, 15)), capSum(posPts, 15));
 
   const clientPts = projects.map((p) => {
-    const v = p.client_type ? CLIENT_POINTS[p.client_type] : undefined;
+    const v = p.client_type ? CLIENT_POINTS[p.client_type.trim()] : undefined;
     return v === undefined ? r(0, 5) : r(v, v);
   });
-  if (projects.some((p) => !p.client_type || CLIENT_POINTS[p.client_type] === undefined)) {
+  if (projects.some((p) => !p.client_type || CLIENT_POINTS[p.client_type.trim()] === undefined)) {
     notes.push("Some projects have no SANRAL client code on file - client points shown as a range.");
   }
   let management = capSum(clientPts, 15);
@@ -225,7 +238,7 @@ export function estimateSanralConventional(opts: {
   // combine a low numerator with a high denominator that can't co-occur.
   // Only codes in SANRAL's managerial matrix (PL, CE, RE, RM and the toll
   // equivalents) can be managerial at all - a DS is never uncertain.
-  const canBeManagerial = (p: SanralPositionInput) => MAN_POSITION_COLUMNS.includes(baseCode(p.positionCode));
+  const canBeManagerial = (p: SanralPositionInput) => MAN_POSITION_COLUMNS.includes(normPositionCode(baseCode(p.positionCode)));
   const unknownIdx = opts.positions
     .map((p, i) => (p.managerial === null && canBeManagerial(p) ? i : -1))
     .filter((i) => i >= 0);

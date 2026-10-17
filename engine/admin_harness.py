@@ -49,10 +49,39 @@ PACK_RUN_OUT_DIR = "/tmp/admin_harness_pack_runs"
 RUN_OUT_DIR = "/tmp/admin_harness_runs"
 
 
+SAMPLES_DIR = os.path.join(HERE, "..", "templates", "samples")
+
+
+def harness_pack(test_profile_path, slug, out_dir):
+    """A minimal confirmed pack.yaml for the forms run: the test company's
+    first key person confirmed on every position the tender's own SETUP sheet
+    lists (templates/samples/<slug>_ran.xlsm) - the same assignment the --pack
+    run makes for these one-person test companies. C.1.2.3's key-person table
+    is filled from the confirmed pack (fill_docx_forms.key_persons_by_row), so
+    without one the harness would no longer exercise that path. None when the
+    sample workbook isn't on hand."""
+    import yaml
+    sys.path.insert(0, os.path.join(HERE, "pack_generator"))
+    from sanral_fill import Workbook
+    from suggest_pack import read_required_positions
+    xlsm = os.path.join(SAMPLES_DIR, f"{slug}_ran.xlsm")
+    if not os.path.exists(xlsm):
+        return None
+    profile = json.load(open(test_profile_path))
+    person = dict(profile["key_people"][0])
+    primary, _ = read_required_positions(Workbook(xlsm))
+    path = os.path.join(out_dir, "harness_pack.yaml")
+    yaml.safe_dump({"people": {"person_0": person},
+                    "key_persons": [{"position": p["code"], "person": "person_0"} for p in primary]},
+                   open(path, "w"), sort_keys=False)
+    return path
+
+
 def run_one(test_profile_path, tender_dir, out_dir):
     os.makedirs(out_dir, exist_ok=True)
     slug = os.path.basename(tender_dir.rstrip("/"))
-    docx_log = fill_docx_forms.main(tender_dir, test_profile_path, out_dir)
+    docx_log = fill_docx_forms.main(tender_dir, test_profile_path, out_dir, None,
+                                    harness_pack(test_profile_path, slug, out_dir))
     _, a_forms_log = fill_a_forms.main(f"{tender_dir}/A_Forms.docx", test_profile_path, out_dir, slug, "")
     merged_path = f"{out_dir}/field_provenance.json"
     merge_and_save(merged_path, docx_log, a_forms_log)

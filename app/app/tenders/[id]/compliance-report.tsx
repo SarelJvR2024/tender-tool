@@ -2,7 +2,7 @@ import Link from "next/link";
 import { loadTenderCompliance } from "./compliance-data";
 import { type ComplianceItem, type ComplianceStatus } from "@/lib/tenderCompliance";
 import { estimateSanralConventional, type Range } from "@/lib/sanralScoring";
-import { DOCUMENT_TYPES, isScoreableEvidence, labelFor, type ExperienceItem } from "@/lib/experience";
+import { DOCUMENT_TYPES, disciplineLabel, isScoreableEvidence, labelFor, type ExperienceItem } from "@/lib/experience";
 import { acceptedDocTypes, describeRule, type ChosenRule, type EvaluationRules } from "@/lib/experienceEvidence";
 import { matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
 
@@ -57,6 +57,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     experience,
     expItems,
     experienceAvailable,
+    experienceDisciplines,
     chosenRule,
     qualitySystem,
     beeProofValid,
@@ -181,7 +182,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
       </div>
 
       {/* Company experience (Experience Library) */}
-      <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} chosen={chosenRule} />
+      <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} chosen={chosenRule} disciplines={experienceDisciplines} />
 
       {/* Locality (office locations vs the tender's own locality rows) */}
       <LocalitySection rules={evaluationRules} offices={offices} />
@@ -282,12 +283,14 @@ function ExperienceSection({
   items,
   closingDate,
   chosen,
+  disciplines,
 }: {
   available: boolean;
   error: string | null;
   items: ExperienceItem[];
   closingDate: string | null;
   chosen: ChosenRule;
+  disciplines: string[];
 }) {
   const { rule, source } = chosen;
   const ruleBox = (
@@ -340,7 +343,7 @@ function ExperienceSection({
         />
       </div>
       <div style={{ fontSize: 12, color: "#6B6758" }}>
-        Tagged roads &amp; civil projects in your Experience Library
+        Tagged {disciplines.map((d) => disciplineLabel(d).toLowerCase()).join(" / ")} projects (the disciplines of this tender&apos;s key positions) in your Experience Library
         {rule.window_years ? ` completed within ${rule.window_years} years of` : " up to"}
         {closingDate ? ` ${new Date(closingDate).toLocaleDateString()}` : " closing"}.
       </div>

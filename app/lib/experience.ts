@@ -27,9 +27,13 @@ export const DOCUMENT_TYPES = [
 ] as const;
 export type DocumentType = (typeof DOCUMENT_TYPES)[number]["value"];
 
-// Exactly engine/discovery/assess_tender.py DISCIPLINE_KEYWORDS keys, so a
-// discovered tender's categories match this column directly. Do not add a key
-// here without adding it there (and to the 0012 check constraint).
+// The SUGGESTED disciplines: exactly engine/discovery/assess_tender.py
+// DISCIPLINE_KEYWORDS keys, so a discovered tender's categories match this
+// column directly. Not a closed list (migration 0036): those 7 are Tender
+// Tool's own keyword buckets for the eTenders feed, not a published
+// classification of all the work companies do, so a company can add its own
+// tags (disciplineSlug). A custom tag is matched wherever a caller asks for
+// it; discovered tenders are only ever categorised into the 7 below.
 export const DISCIPLINES = [
   { value: "roads_civil", label: "Roads & civil" },
   { value: "water", label: "Water & sanitation" },
@@ -40,6 +44,20 @@ export const DISCIPLINES = [
   { value: "security_facilities", label: "Security & facilities" },
 ] as const;
 export type Discipline = (typeof DISCIPLINES)[number]["value"];
+
+/** A company's own discipline tag as stored (0036 format check: lower-case slug). */
+export function disciplineSlug(text: string): string | null {
+  const slug = text.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").replace(/^[0-9_]+/, "").slice(0, 63);
+  return slug.length > 0 ? slug : null;
+}
+
+/** Label for a discipline tag: the suggested label, else the tag in words. */
+export function disciplineLabel(value: string): string {
+  const known = DISCIPLINES.find((d) => d.value === value);
+  if (known) return known.label;
+  const words = value.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 // SANRAL's own client codes (Form B1/B2 "CLIENT (coded)"), scored in the
 // managerial-knowledge "Client" criterion. Same values projects.client_type holds.
@@ -74,38 +92,73 @@ export const PERFORMANCE_RATINGS = [
   { value: "poor", label: "Poor" },
 ] as const;
 
-// SANRAL project-type codes, verbatim from a real tender's Book 1
-// (R.396-010-2025/1F, "lists with ... different project types"). Offered as
-// suggestions only - other buyers don't code project types, so the column is
-// free text.
-export const SANRAL_PROJECT_TYPES: { code: string; label: string }[] = [
-  { code: "MO/MA", label: "Maintenance Operations and Ad-hoc Maintenance (excl. RRM)" },
-  { code: "MP/MS", label: "Periodic Maintenance and Special Maintenance" },
-  { code: "DS", label: "Development Strengthening" },
-  { code: "DI", label: "Development Improvement" },
-  { code: "DN", label: "Development New Facilities" },
-  { code: "CD", label: "Community Development" },
-  { code: "RRM", label: "Routine Road Maintenance" },
-  { code: "MSC", label: "Special Maintenance Concrete" },
-  { code: "MSB", label: "Maintenance Special Bridge" },
-  { code: "DIB", label: "Development Improvement Bridge" },
-  { code: "DNB", label: "Development New Bridge" },
-  { code: "MSS", label: "Maintenance Special Structures" },
-  { code: "DIS", label: "Development Improvement Structures" },
-  { code: "DNS", label: "Development New Structures" },
-  { code: "STREET LIGHTING", label: "Street Lighting" },
-  { code: "TRAFFIC LIGHTS", label: "Traffic Lights" },
-  { code: "BUILDING RETICULATION", label: "Building Reticulation" },
-  { code: "INTERSECTION IMPROVEMENTS", label: "Intersection Improvements" },
-  { code: "CAPACITY IMPROVEMENT", label: "Capacity Improvement" },
-  { code: "ADDITIONAL LANES", label: "Additional Lanes" },
-  { code: "INTERCHANGE DESIGN", label: "Interchange Design" },
-  { code: "H/V RE-ALIGNMENT", label: "Horizontal / Vertical Re-Alignment" },
-  { code: "NEW ALIGNMENT", label: "New Alignment" },
-  { code: "ROUTE DETERMINATION", label: "Route Determination" },
-  { code: "TOLLS", label: "Tolls" },
-  { code: "FMS", label: "Freeway Management Systems" },
-  { code: "ITS systems", label: "ITS systems" },
+// SANRAL project-type codes - the COMPLETE list SANRAL publishes, not the
+// handful seen in one company's projects. Source: the "Proj Relevance Codes"
+// sheet of SANRAL's own Consultant Technical Submission workbook, which Book 1
+// itself names as the authority ("For a comprehensive list of matrixes please
+// refer to the Consultant Technical Submission Spreadsheet. Below are
+// examples", R.396-010-2025/1F p. T-25). That sheet is byte-identical in all 7
+// workbooks on hand (the six 2025 Conventional tenders and the 2023 RRM
+// X.002-188-2023/1F) - 46 codes, verbatim below, each with the matrices
+// (= key positions) it scores on. The last 6 are in Book 1's printed matrices
+// (T-20 Geometrics, T-23 Engineering Geologist) but not in the workbook's
+// sheet. Which codes a given position's Form B1 accepts is that position's
+// matrix ("appliesTo"); a code can be right for one position and not offered
+// for another (sanral_fill.py projects_for_block). Offered as suggestions:
+// other buyers don't code project types, so the column stays free text.
+export const SANRAL_PROJECT_TYPES: { code: string; label: string; appliesTo: string[] }[] = [
+  { code: "MO/MA", label: "Maintenance Opertations and Adhoc Maintenance", appliesTo: ["PL, CE, RE - CONVENTIONAL"] },
+  { code: "MP/MS", label: "Periodic Maintenance and Special Maintenance", appliesTo: ["PL, CE, RE - CONVENTIONAL", "CE, RM/ARM - RRM", "DS - Pavement and Materials"] },
+  { code: "DS", label: "Development Strengthening", appliesTo: ["PL, CE, RE - CONVENTIONAL", "CE, RM/ARM - RRM", "DS - Pavement and Materials"] },
+  { code: "DI", label: "Development Improvement", appliesTo: ["PL, CE, RE - CONVENTIONAL", "CE, RM/ARM - RRM"] },
+  { code: "DN", label: "Development New Facilities", appliesTo: ["PL, CE, RE - CONVENTIONAL", "CE, RM/ARM - RRM"] },
+  { code: "CD", label: "Community Development", appliesTo: ["PL, CE, RE - CONVENTIONAL", "CE, RM/ARM - RRM"] },
+  { code: "RRM", label: "Routine Road Maintenance", appliesTo: ["CE, RM/ARM - RRM"] },
+  { code: "MO/MA (Excl. RRM)", label: "Maintenance Operations and Adhoc Maintenance (Excl. RRM Projects)", appliesTo: ["CE, RM/ARM - RRM"] },
+  { code: "MSC", label: "Special Maintenance Concrete", appliesTo: ["DS - Pavement and Materials"] },
+  { code: "DI/DN", label: "Development Improvement / New Facilities", appliesTo: ["DS - Pavement and Materials"] },
+  { code: "MSB", label: "Maintenance Special Bridge", appliesTo: ["DS - Structures"] },
+  { code: "DIB", label: "Development Improvement Bridge", appliesTo: ["DS - Structures"] },
+  { code: "DNB", label: "Development New Bridge", appliesTo: ["DS - Structures"] },
+  { code: "MSS", label: "Maintenance Special Structures", appliesTo: ["DS - Structures"] },
+  { code: "DIS", label: "Development Improvement Structures", appliesTo: ["DS - Structures"] },
+  { code: "DNS", label: "Development New Structures", appliesTo: ["DS - Structures"] },
+  { code: "STREET LIGHTING", label: "Steet Lighting", appliesTo: ["DS - Electrical"] },
+  { code: "TRAFFIC LIGHTS", label: "Traffic Lights", appliesTo: ["DS - Electrical"] },
+  { code: "BUILDING RETICULATION", label: "Building Reticulation", appliesTo: ["DS - Electrical"] },
+  { code: "INTERSECTION IMPROVEMENTS", label: "Intersection Improvements", appliesTo: ["DS - Geometrics"] },
+  { code: "CAPACITY IMPROVEMENT", label: "Capacity Improvement", appliesTo: ["DS - Geometrics"] },
+  { code: "ADDITIONAL LANES", label: "Additional Lanes", appliesTo: ["DS - Geometrics", "DS - GEOTECHNICAL"] },
+  { code: "INTERCHANGE DESIGN", label: "Interchange Design", appliesTo: ["DS - Geometrics"] },
+  { code: "H/V RE-ALIGNMENT", label: "Horizontal / Vertical Re-Alignment", appliesTo: ["DS - Geometrics"] },
+  { code: "NEW ALIGNMENT", label: "New Alignment", appliesTo: ["DS - Geometrics"] },
+  { code: "Strategic modelling/ demand forecasting", label: "Strategic modelling/ demand forecasting", appliesTo: ["DS - TRAFFIC AND TRANSPORTATION"] },
+  { code: "Static (meso) network simulation models", label: "Static (meso) network simulation models", appliesTo: ["DS - TRAFFIC AND TRANSPORTATION"] },
+  { code: "Dynamic (micro) simulation modelling", label: "Dynamic (micro) simulation modelling", appliesTo: ["DS - TRAFFIC AND TRANSPORTATION"] },
+  { code: "Traffic impact studies / local intersections", label: "Traffic impact studies / local intersections", appliesTo: ["DS - TRAFFIC AND TRANSPORTATION"] },
+  { code: "NMT and PT operations", label: "NMT and PT operations", appliesTo: ["DS - TRAFFIC AND TRANSPORTATION"] },
+  { code: "Transport economic studies", label: "Transport economic studies", appliesTo: ["DS - TRAFFIC AND TRANSPORTATION"] },
+  { code: "Transport policy development", label: "Transport policy development", appliesTo: ["DS - TRAFFIC AND TRANSPORTATION"] },
+  { code: "ITS systems", label: "ITS systems", appliesTo: ["DS - TRAFFIC AND TRANSPORTATION"] },
+  { code: "FOUNDATIONS (PILING, PILE CAPS)", label: "FOUNDATIONS (PILING, PILE CAPS)", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "DEEP EXCAVATIONS (DEEP CUTS/HIGH FILLS)", label: "DEEP EXCAVATIONS (DEEP CUTS/HIGH FILLS)", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "RETAINING STRUCTURES", label: "RETAINING STRUCTURES", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "ROCK ANCHORS (MOUNTAIN PASSES)", label: "ROCK ANCHORS (MOUNTAIN PASSES)", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "MATERIAL & ROCK SOURCES", label: "MATERIAL & ROCK SOURCES", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "ENGINEERING GEOPHYSICS", label: "ENGINEERING GEOPHYSICS", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "REMOTE SENSING (GIS)", label: "REMOTE SENSING (GIS)", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "ENGINEERING GEOLOGICAL MAPPING", label: "ENGINEERING GEOLOGICAL MAPPING", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "SUBSURFACE DRAINING (GEOHYDROLOGY)", label: "SUBSURFACE DRAINING (GEOHYDROLOGY)", appliesTo: ["DS - GEOTECHNICAL"] },
+  { code: "MAJOR TCC (WEIGH BRIDGES)", label: "Major Traffic Control Centres (Weighbridge)", appliesTo: ["DS - ELECTRONIC SYSTEMS"] },
+  { code: "TOLLS", label: "Tolls", appliesTo: ["DS - ELECTRONIC SYSTEMS"] },
+  { code: "FMS", label: "Freeway Managment Systems", appliesTo: ["DS - ELECTRONIC SYSTEMS"] },
+  { code: "MINOR TCC (BASIC WEIGH BRIDGE)", label: "Minor Traffic Control Centres (Basic Weighbridge)", appliesTo: ["DS - ELECTRONIC SYSTEMS"] },
+  { code: "ROUTE DETERMINATION", label: "Route Determination", appliesTo: ["DS - Geometrics (Book 1 T-20 only)"] },
+  { code: "GEOHAZARD INVESTIGATION (SLOPE STABILITY)", label: "Geohazard Investigation (Slope Stability)", appliesTo: ["DS - Engineering Geologist (Book 1 T-23 only)"] },
+  { code: "GEOHAZARD INVESTIGATION (SUBSIDENCE)", label: "Geohazard Investigation (Subsidence)", appliesTo: ["DS - Engineering Geologist (Book 1 T-23 only)"] },
+  { code: "GEOTECHNICAL INVESTIGATION (CL, QUARRY & BP MATERIALS RELATED)", label: "Geotechnical Investigation (CL, Quarry & BP Materials Related)", appliesTo: ["DS - Engineering Geologist (Book 1 T-23 only)"] },
+  { code: "GEOTECHNICAL INVESTIGATION (TUNNELLING)", label: "Geotechnical Investigation (Tunnelling)", appliesTo: ["DS - Engineering Geologist (Book 1 T-23 only)"] },
+  { code: "GEOPHYSICAL INVESTIGATION (GROUND BASED & AIRBORNE)", label: "Geophysical Investigation (Ground Based & Airborne)", appliesTo: ["DS - Engineering Geologist (Book 1 T-23 only)"] },
 ];
 
 export type ExperienceItem = {

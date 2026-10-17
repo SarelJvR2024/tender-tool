@@ -8,6 +8,7 @@ import {
   findMatchingExperience,
   isScoreableEvidence,
   labelFor,
+  disciplineLabel,
   type ExperienceItem,
 } from "@/lib/experience";
 
@@ -59,7 +60,9 @@ export default async function ExperiencePage({
   // A discipline filter goes through the same experience_matches() query a
   // tender compliance check would use, so what this page shows is exactly
   // what a check would count (tagged items only).
-  const activeDiscipline = DISCIPLINES.some((d) => d.value === discipline) ? discipline! : null;
+  // Suggested disciplines plus any custom tags this company uses (0036).
+  const disciplineOptions = Array.from(new Set([...DISCIPLINES.map((d) => d.value as string), ...all.flatMap((i) => i.disciplines)]));
+  const activeDiscipline = discipline && disciplineOptions.includes(discipline) ? discipline : null;
   let filtered: ExperienceItem[] | null = null;
   let filterError: string | null = null;
   if (activeDiscipline && companyId) {
@@ -168,13 +171,13 @@ export default async function ExperiencePage({
         {/* Discipline filter - runs experience_matches() */}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
           <FilterLink href="/experience" active={!activeDiscipline} text="All" />
-          {DISCIPLINES.map((d) => (
-            <FilterLink key={d.value} href={`/experience?discipline=${d.value}`} active={activeDiscipline === d.value} text={d.label} />
+          {disciplineOptions.map((v) => (
+            <FilterLink key={v} href={`/experience?discipline=${encodeURIComponent(v)}`} active={activeDiscipline === v} text={disciplineLabel(v)} />
           ))}
         </div>
         {activeDiscipline && (
           <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
-            Tagged items matching {labelFor(DISCIPLINES, activeDiscipline)} - the same query a tender check uses. Untagged uploads never count.
+            Tagged items matching {disciplineLabel(activeDiscipline)} - the same query a tender check uses. Untagged uploads never count.
           </div>
         )}
 
@@ -233,7 +236,7 @@ function ExperienceRow({ item: e, url }: { item: ExperienceItem; url?: string })
           {e.tagged_at && e.disciplines.length > 0 && (
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
               {e.disciplines.map((d) => (
-                <Chip key={d} text={labelFor(DISCIPLINES, d)} tone={GREY} />
+                <Chip key={d} text={disciplineLabel(d)} tone={GREY} />
               ))}
             </div>
           )}

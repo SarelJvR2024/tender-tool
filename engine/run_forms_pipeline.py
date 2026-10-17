@@ -50,7 +50,7 @@ def main(templates_dir, profile_path, out_dir, contract_label, nra_ref, pack_pat
     a_forms_provenance = f"{out_dir}/_a_forms_provenance.json"
     merged_provenance = f"{out_dir}/field_provenance.json"
 
-    docx_log = fill_docx_forms.main(templates_dir, profile_path, out_dir, docx_provenance)
+    docx_log = fill_docx_forms.main(templates_dir, profile_path, out_dir, docx_provenance, pack_path)
     _, a_forms_log = fill_a_forms.main(
         f"{templates_dir}/A_Forms.docx", profile_path, out_dir, contract_label, nra_ref, a_forms_provenance
     )

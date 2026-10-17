@@ -498,7 +498,22 @@ export function sanralConventionalDocumentChecks(input: {
 // C3.1.11(d) minimum requirements. "Pr Eng or Pr Tech Eng" = registered with
 // ECSA as a Professional Engineer or Professional Engineering Technologist
 // (footnote 1) - a Professional Engineering Technician does NOT qualify.
-type MinReq = { registration: "pr_eng_or_tech" | "candidate"; years: number | null; label: string };
+//
+// Source and scope, stated (hardcoded-assumptions audit, 2026-10-17): this is
+// ONE tender's table - R.396-010-2025/1F Book 2/3 C3.1.11(d) (C3-14/C3-15) -
+// and C3.1.11 lives in each tender's own Scope of Services ("The minimum
+// qualifications ... shall be as indicated in the table below"), so another
+// SANRAL tender can set different years or registrations. Every result names
+// the source so the user checks it against THIS tender's table. The same
+// R.396 table also lists Surveyor (SAGC, 5 yrs), Engineering Geologist (Pr
+// Sci.Nat + SAIEG, 5 yrs), OHS Specialist (SACPCMP), Road Safety Audit Team
+// Leader and Programmer - only the Engineering Geologist is a DS specialism
+// here (sanralMatrices DS_SPECIALISMS); a DS whose description names it is
+// checked against Pr Sci.Nat, not ECSA.
+const MIN_REQ_SOURCE = "R.396-010-2025/1F C3.1.11 table - check this tender's own C3.1.11";
+type MinReq = { registration: "pr_eng_or_tech" | "candidate" | "pr_sci_nat"; years: number | null; label: string };
+const ENGINEERING_GEOLOGIST_REQ: MinReq = { registration: "pr_sci_nat", years: 5, label: "Pr Sci.Nat (SACNASP), member of SAIEG, 5 years' relevant experience" };
+const PR_SCI_NAT_RE = /pr\.?\s*sci\.?\s*nat|professional\s+natural\s+scientist/i;
 export const SANRAL_MIN_REQUIREMENTS: Record<string, MinReq> = {
   PL: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience" },
   APL: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years" },
@@ -524,19 +539,27 @@ export function checkMinimumRequirement(
   positionCode: string,
   person: PersonFacts | null,
   closingDate: string | null,
+  description: string | null = null,
 ): { status: ComplianceStatus; detail: string; requirement: string | null } {
   const code = positionCode.replace(/\d+$/, "");
-  const req = SANRAL_MIN_REQUIREMENTS[code];
+  const found = code === "DS" && description && /geolog/i.test(description) ? ENGINEERING_GEOLOGIST_REQ : SANRAL_MIN_REQUIREMENTS[code];
+  const req = found ? { ...found, label: `${found.label} (${MIN_REQ_SOURCE})` } : undefined;
   if (!person) return { status: "missing", detail: "No key person confirmed for this position.", requirement: req?.label ?? null };
   if (!req) return { status: "check", detail: "No minimum requirement on file for this position code - check the tender's C3.1.11 table.", requirement: null };
 
   const problems: string[] = [];
   const unknowns: string[] = [];
   const level = person.ecsa_level ?? "";
-  const regOk = req.registration === "pr_eng_or_tech" ? PR_ENG_OR_TECH_RE.test(level) : CANDIDATE_RE.test(level);
-  if (!level) unknowns.push("no ECSA registration on file");
-  else if (!regOk) problems.push(`ECSA "${level}" doesn't meet "${req.registration === "pr_eng_or_tech" ? "Pr Eng or Pr Tech Eng" : "registered candidate"}"`);
-  else if (!person.ecsa_number) unknowns.push("ECSA number not on file");
+  if (req.registration === "pr_sci_nat") {
+    // SACNASP registration isn't a field in the schema yet (only ECSA/SACPCMP)
+    // - read from the registration text on file, else confirm by hand.
+    if (!PR_SCI_NAT_RE.test(level)) unknowns.push("Pr Sci.Nat (SACNASP) registration isn't recorded - the People page only holds ECSA/SACPCMP fields");
+  } else {
+    const regOk = req.registration === "pr_eng_or_tech" ? PR_ENG_OR_TECH_RE.test(level) : CANDIDATE_RE.test(level);
+    if (!level) unknowns.push("no ECSA registration on file");
+    else if (!regOk) problems.push(`ECSA "${level}" doesn't meet "${req.registration === "pr_eng_or_tech" ? "Pr Eng or Pr Tech Eng" : "registered candidate"}"`);
+    else if (!person.ecsa_number) unknowns.push("ECSA number not on file");
+  }
 
   let yearsNote = "";
   if (req.years !== null) {

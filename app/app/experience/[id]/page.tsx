@@ -9,6 +9,7 @@ import {
   SERVICE_STAGES,
   PERFORMANCE_RATINGS,
   SANRAL_PROJECT_TYPES,
+  disciplineLabel,
   type ExperienceItem,
 } from "@/lib/experience";
 
@@ -151,19 +152,24 @@ export default async function ExperienceDetailPage({
           <div style={sectionTitle}>What the work was</div>
           <label style={label}>Discipline * <span style={{ fontWeight: 400 }}>(tick all that apply - tenders are matched on this)</span></label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-            {DISCIPLINES.map((d) => (
-              <label key={d.value} style={checkLabel}>
-                <input type="checkbox" name="disciplines" value={d.value} defaultChecked={item.disciplines.includes(d.value)} />
-                {d.label}
+            {[...DISCIPLINES.map((d) => d.value as string), ...item.disciplines.filter((t) => !DISCIPLINES.some((d) => d.value === t))].map((v) => (
+              <label key={v} style={checkLabel}>
+                <input type="checkbox" name="disciplines" value={v} defaultChecked={item.disciplines.includes(v)} />
+                {disciplineLabel(v)}
               </label>
             ))}
           </div>
+          <Field>
+            <label style={label}>Other disciplines <span style={{ fontWeight: 400 }}>(optional, comma-separated)</span></label>
+            <input style={field} name="other_disciplines" placeholder="e.g. Geotechnical investigation, Environmental assessment" />
+            <div style={hint}>For work the list above doesn&apos;t cover. Discovered tenders are only sorted into the listed disciplines, so also tick the closest one if there is one.</div>
+          </Field>
           <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <Field>
               <label style={label}>Project type</label>
               <input style={field} name="project_type" list="sanral-project-types" defaultValue={item.project_type ?? ""} placeholder="e.g. DS, RRM, MP/MS" />
               <datalist id="sanral-project-types">
-                {SANRAL_PROJECT_TYPES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}
+                {SANRAL_PROJECT_TYPES.map((p) => <option key={p.code} value={p.code}>{`${p.label} (${p.appliesTo.join("; ")})`}</option>)}
               </datalist>
               <div style={hint}>SANRAL&apos;s code where it applies; plain words for other clients.</div>
             </Field>

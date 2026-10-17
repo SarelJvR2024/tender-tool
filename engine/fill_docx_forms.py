@@ -32,10 +32,72 @@ Usage:
 fetched from the real tender's Drive folder (not reconstructed from memory - these
 forms vary per contract, e.g. different NRA reference numbers in the headers).
 """
+import re
 import sys
 import json
 import docx
+import yaml
 from provenance import ProvenanceLog
+
+
+# Book 1's key-person titles (R.396-010-2025/1F T-24 abbreviation list, plus
+# the C3.1.11 wording "Contract Engineer" / "Engineer's Representative (RE)"),
+# used to find each position's row in C.1.2.3's key-person table BY ITS LABEL.
+# Until 2026-10-17 the table was filled by fixed row index - row 1 = PL and
+# row 3 = DS, both with the signatory - which is only right for a tender whose
+# positions are exactly PL + DS1 and a company whose signatory holds both
+# (all six samples, and Klipcorp). Any other SANRAL tender lists its own
+# positions (C3.1.11 a: "The key persons required for this project are listed
+# in Form C1.2.2"), and any other company confirms its own people per position.
+POSITION_TITLES = {
+    "PL": ["project leader"], "APL": ["assistant project leader"],
+    "DS": ["design specialist"], "DA": ["design assistant"],
+    "CE": ["contracts engineer", "contract engineer"], "ACE": ["assistant contracts engineer", "assistant contract engineer"],
+    "RE": ["resident engineer", "engineer's representative", "engineer’s representative"],
+    "ARE": ["assistant resident engineer", "assistant re"],
+    "RM": ["route manager"], "ARM": ["assistant route manager"],
+    "SMT": ["senior materials technician"], "CM": ["contracts manager"], "SA": ["site agent"],
+    "MT": ["materials technician"], "ETS": ["electronics systems engineer", "electronic systems engineer"],
+    "ES": ["electrical systems engineer"], "MS": ["mechanical systems engineer"],
+}
+
+
+def _base_code(code):
+    return re.sub(r"\d+$", "", str(code or "").strip().upper())
+
+
+def _row_code(label):
+    """Book 1 position code a C.1.2.3 row label names, or None. Longest title
+    wins, so "Assistant Project Leader" is APL, not PL. "Alternate to ..."
+    rows return None (the alternate is optional, "if applicable")."""
+    text = re.sub(r"\s+", " ", label.strip().lower())
+    if text.startswith("alternate"):
+        return None
+    best = None
+    for code, titles in POSITION_TITLES.items():
+        for t in titles:
+            if text.startswith(t) and (best is None or len(t) > best[1]):
+                best = (code, len(t))
+    return best[0] if best else None
+
+
+def key_persons_by_row(table, assignments):
+    """{table row index: (person, position code)} for C.1.2.3's key-person
+    table. `assignments` = [(position code, person dict)] in SETUP order, as
+    the confirmed pack lists them. Several positions sharing a base code (DS1,
+    DS2) fill that code's rows in order."""
+    queues = {}
+    for code, person in assignments:
+        queues.setdefault(_base_code(code), []).append((code, person))
+    out = {}
+    for i, row in enumerate(table.rows):
+        if i == 0:
+            continue
+        code = _row_code(row.cells[0].text)
+        if code and queues.get(code):
+            pos, person = queues[code].pop(0)
+            out[i] = (person, pos)
+    return out
 
 
 def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
@@ -69,12 +131,19 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
                 p.add_run(henning["phone"])
                 log.confirmed("c123.representative_telephone", henning["phone"])
             elif telephone_seen == 2:
-                log.missing("c123.representative_telephone", "Henning's telephone number is not on file.")
+                log.missing("c123.representative_telephone", f"{henning['name']}'s telephone number is not on file.")
+            elif comp.get("telephone"):
+                p.add_run(comp["telephone"])
+                log.confirmed("c123.company_telephone", comp["telephone"])
             else:
-                log.missing("c123.company_telephone", "Klipcorp's company telephone number is not on file.")
+                log.missing("c123.company_telephone", "The company's telephone number is not on file.")
             continue
         if p.text == "E-mail Address: \t":
-            log.missing("c123.representative_email", "Henning's email address is not on file.")
+            if henning.get("email"):
+                p.add_run(henning["email"])
+                log.confirmed("c123.representative_email", henning["email"])
+            else:
+                log.missing("c123.representative_email", f"{henning['name']}'s email address is not on file.")
             continue
         if p.text in fills:
             label = p.text
@@ -86,14 +155,34 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
                 log.missing(f"c123.{_slug(label)}", f"No value on file for '{label.strip()}'.")
 
     kp_table = d.tables[1]
-    for row_idx, label_substr in [(1, "Project Leader"), (3, "Design Specialist")]:
-        row = kp_table.rows[row_idx]
-        assert label_substr in row.cells[0].text, f"row {row_idx} label changed - check mapping"
-        person = key_persons.get(row_idx)
-        if person:
-            row.cells[1].text = person["name"]
-            row.cells[2].text = "Permanent"
+    rows = key_persons_by_row(kp_table, key_persons) if key_persons is not None else {}
+    for row_idx, row in enumerate(kp_table.rows):
+        if row_idx == 0:
+            continue
+        label = row.cells[0].text.strip()
+        code = _row_code(label)
+        if code is None:
+            continue  # "Alternate to ... (if applicable)" - optional, left blank as before
+        if row_idx not in rows:
+            log.missing(f"c123.key_person_row_{row_idx}",
+                        f"No key person confirmed for '{label}' in this pack - fill the name by hand."
+                        if key_persons is not None else
+                        f"No confirmed key-person assignment (pack.yaml) was given - fill '{label}' by hand.")
+            continue
+        person, pos = rows[row_idx]
+        row.cells[1].text = person["name"]
+        status = person.get("employment_status")
+        if status == "not_full_time_employee":
+            row.cells[2].text = "Not permanent"
             log.confirmed(f"c123.key_person_row_{row_idx}", person["name"])
+        else:
+            row.cells[2].text = "Permanent"
+            if status == "full_time_employee":
+                log.confirmed(f"c123.key_person_row_{row_idx}", person["name"])
+            else:
+                log.assumed_default(f"c123.key_person_row_{row_idx}", person["name"],
+                                    f"{person['name']} ({pos}) written as Permanent - whether they are a full-time "
+                                    "employee is not recorded on their People page; confirm before signing.")
 
     dir_table = d.tables[2]
     dir_table.rows[1].cells[0].text = comp["director"]["name"]
@@ -135,19 +224,28 @@ def fill_form_of_offer(src_dir, out_dir, comp, henning, log):
                 "from the signatory, never fabricated.")
 
 
-def main(src_dir, profile_path, out_dir, provenance_out=None):
+def assignments_from_pack(pack_path):
+    """[(position code, person dict)] from a confirmed pack.yaml, in the order
+    the pack lists its positions (SETUP order); None when no pack is given."""
+    if not pack_path:
+        return None
+    pack = yaml.safe_load(open(pack_path))
+    people = pack.get("people", {})
+    return [(a["position"], people[a["person"]]) for a in pack.get("key_persons", []) if a.get("person") in people]
+
+
+def main(src_dir, profile_path, out_dir, provenance_out=None, pack_path=None):
     profile = json.load(open(profile_path))
     comp = profile["company"]
-    henning = profile["key_people"][0]
-    # block_row -> (table row index) mapping, same convention as fill_conventional.py's
-    # key_persons list: 37 = PL = table row 1, 137 = DS1 = table row 3.
-    # "henning" (key_people[0]) is the signatory, not necessarily the PL or
-    # DS1 - process_pack_jobs.py passes the real per-position people in
-    # profile["role_people"] (keyed "PL"/"DS") whenever it has them. Falls
-    # back to the signatory when absent (admin_harness.py's test-company
-    # fixtures, and any company where one person covers every role).
-    role_people = profile.get("role_people") or {}
-    key_persons = {1: role_people.get("PL", henning), 3: role_people.get("DS", henning)}
+    henning = profile["key_people"][0]  # the signatory (same convention as fill_a_forms.py)
+    # Key persons come from the CONFIRMED pack (who the company put on each of
+    # this tender's positions), never assumed to be the signatory. Without a
+    # pack, process_pack_jobs.py's profile["role_people"] ({base code:
+    # person}) is used when present; with neither, the rows are left blank and
+    # logged missing.
+    key_persons = assignments_from_pack(pack_path)
+    if key_persons is None and profile.get("role_people"):
+        key_persons = list(profile["role_people"].items())
     log = ProvenanceLog(source="fill_docx_forms.py")
 
     fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log)

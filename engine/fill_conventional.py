@@ -10,7 +10,7 @@ UNLOCKED, non-formula cells (not only the yellow ones: BEE level K33/L33 and the
 Form B7 targeted-enterprise cells are unlocked but not yellow).
 """
 import sys, yaml, datetime
-from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for
+from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for, projects_for_block
 
 T = "TEND 1X"
 
@@ -48,7 +48,10 @@ def blocks_for(wb, code):
         raise ValueError(f"Position '{code}' is not listed on this tender's SETUP sheet")
     return bases
 
-def fill_person(wb, base, person, projects_lib):
+def fill_person(wb, base, person, projects_lib, slot=None):
+    """Fills one Form B1/B2 block. Returns notes (projects left off this block
+    because this position's form doesn't offer their project type - see
+    sanral_fill.projects_for_block)."""
     wb.set_value(T, at(B["name"], base), person["name"])
     # Written as text, not int(): SA ID numbers routinely start with 0 (anyone born
     # 2000 or later), and int() silently drops leading zeros - confirmed as a real
@@ -58,8 +61,7 @@ def fill_person(wb, base, person, projects_lib):
     wb.set_value(T, at(B["id"], base), str(person["id_number"]))
     wb.set_value(T, at(B["description"], base), person.get("description", ""))
     projs = [projects_lib[p] if isinstance(p, str) else p for p in person["projects"]]
-    if len(projs) > B["max_projects"]:
-        raise ValueError(f"{person['name']}: form accepts {B['max_projects']} projects")
+    projs, notes = projects_for_block(wb, T, base + B["proj_first"], person["name"], projs, B["max_projects"], slot)
     for i, pr in enumerate(projs):
         r = base + B["proj_first"] + i
         wb.set_value(T, f"B{r}", pr["client_and_number"])
@@ -76,6 +78,10 @@ def fill_person(wb, base, person, projects_lib):
     q = person["qualifications"]
     who = person["name"]
     set_dropdown_for(wb, T, at(B["employment"], base), person["employment"], who, "employment type")
+    if "employment_status" in person and not person["employment_status"]:
+        notes.append(f"{who}: Form B1 declares them a full-time employee of the tenderer - not recorded on their "
+                     "People page (employment status); confirm before signing, SANRAL's minimums require permanent "
+                     "employment for several key positions.")
     set_dropdown_for(wb, T, at(B["ecsa_level"], base), q["ecsa_level"], who, "ECSA registration level")
     if q.get("ecsa_number"): wb.set_value(T, at(B["ecsa_number"], base), q["ecsa_number"])
     if q.get("ecsa_date"): wb.set_date(T, at(B["ecsa_date"], base), q["ecsa_date"])
@@ -90,6 +96,7 @@ def fill_person(wb, base, person, projects_lib):
     wb.set_value(T, at(B["initial_desc"], base), q["initial_description"])
     wb.set_value(T, at(B["initial_inst"], base), q["initial_institution"])
     wb.set_date(T, at(B["initial_date"], base), q["initial_graduated"])
+    return notes
 
 def main(tpl, pack_path, out):
     pack = yaml.safe_load(open(pack_path))
@@ -128,13 +135,18 @@ def main(tpl, pack_path, out):
           "| closes", serial(wb.cached("SETUP", "C3")))
 
     # Key persons
+    notes = []
     for a in pack["key_persons"]:
         bases = [a["block_row"]] if a.get("block_row") else blocks_for(wb, a["position"])
         for base in bases:
-            fill_person(wb, base, pack["people"][a["person"]], pack.get("projects", {}))
+            notes += fill_person(wb, base, pack["people"][a["person"]], pack.get("projects", {}), a.get("position"))
+    notes = list(dict.fromkeys(notes))  # an ALT slot repeats its primary's block notes
 
     wb.save(out)
     print(f"Wrote {out}: {len(wb.log)} cell writes")
+    for n in notes:
+        print(f"NOTE: {n}")
+    return notes
 
 if __name__ == "__main__":
     main(*sys.argv[1:4])

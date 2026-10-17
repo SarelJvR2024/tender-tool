@@ -57,6 +57,11 @@ export async function savePerson(formData: FormData) {
     description: str(formData, "description"),
     role: str(formData, "role"),
     signatory_capacity: str(formData, "signatory_capacity"),
+    // SANRAL Form B1 "employment" (0036). Only the form's own two answers are
+    // stored; anything else is "not recorded".
+    employment_status: ((v) => (v === "full_time_employee" || v === "not_full_time_employee" ? v : null))(
+      str(formData, "employment_status"),
+    ),
     phone: str(formData, "phone"),
     email: str(formData, "email"),
     ecsa_level: str(formData, "ecsa_level"),

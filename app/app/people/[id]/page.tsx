@@ -6,6 +6,8 @@ import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
 import { credentialExpiries } from "@/lib/personCredentials";
 import { ROLE_FAMILY_LABEL, ROLE_FAMILY_ORDER, TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
+import { CLIENT_TYPES, SANRAL_PROJECT_TYPES } from "@/lib/experience";
+import { SANRAL_POSITION_CODES } from "@/lib/sanralMatrices";
 
 // Per-request: loads one real person's record (or a blank "new" form) under
 // RLS. Same Cache Components escape hatch as dashboard/page.tsx and ../page.tsx.
@@ -18,6 +20,7 @@ type Person = {
   description: string | null;
   role: string | null;
   signatory_capacity: string | null;
+  employment_status?: string | null; // 0036
   phone: string | null;
   email: string | null;
   ecsa_level: string | null;
@@ -286,6 +289,14 @@ export default async function PersonDetailPage({
             <Field><label style={label}>Role / job title</label><input style={field} name="role" defaultValue={person?.role ?? ""} placeholder="e.g. Contracts Engineer" /></Field>
             <Field><label style={label}>Description (position type)</label><input style={field} name="description" defaultValue={person?.description ?? ""} /></Field>
             <Field><label style={label}>Signatory capacity</label><input style={field} name="signatory_capacity" defaultValue={person?.signatory_capacity ?? ""} /></Field>
+            <Field>
+              <label style={label}>Employment (SANRAL Form B1)</label>
+              <select style={field} name="employment_status" defaultValue={person?.employment_status ?? ""}>
+                <option value="">Not recorded</option>
+                <option value="full_time_employee">Full-time employee of the company</option>
+                <option value="not_full_time_employee">Not a full-time employee (e.g. subconsultant, JV partner)</option>
+              </select>
+            </Field>
             <Field><label style={label}>Phone</label><input style={field} name="phone" defaultValue={person?.phone ?? ""} /></Field>
             <Field><label style={label}>Email</label><input style={field} type="email" name="email" defaultValue={person?.email ?? ""} /></Field>
           </div>
@@ -579,9 +590,26 @@ export default async function PersonDetailPage({
                 <input type="hidden" name="person_id" value={person!.id} />
                 <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <Field><label style={label}>Client and contract number *</label><input style={field} name="client_and_number" placeholder={"e.g. ACSA (OR Tambo)\\nORT5737/2018/RFP"} required /></Field>
-                  <Field><label style={label}>Client type</label><input style={field} name="client_type" placeholder="e.g. Relevant SOE" /></Field>
-                  <Field><label style={label}>Project type</label><input style={field} name="project_type" placeholder="e.g. DS" /></Field>
-                  <Field><label style={label}>Position code</label><input style={field} name="position_code" placeholder="e.g. CE" /></Field>
+                  {/* Suggestions are SANRAL's complete published code lists (Book 1 /
+                      the Technical Submission workbook), not values seen in one
+                      company's data. Free text: other buyers code differently. */}
+                  <Field>
+                    <label style={label}>Client type</label>
+                    <input style={field} name="client_type" list="sanral-client-types" placeholder="e.g. Relevant SOE" />
+                    <datalist id="sanral-client-types">{CLIENT_TYPES.map((c) => <option key={c} value={c} />)}</datalist>
+                  </Field>
+                  <Field>
+                    <label style={label}>Project type</label>
+                    <input style={field} name="project_type" list="sanral-project-types" placeholder="e.g. DS" />
+                    <datalist id="sanral-project-types">
+                      {SANRAL_PROJECT_TYPES.map((p) => <option key={p.code} value={p.code}>{`${p.label} (${p.appliesTo.join("; ")})`}</option>)}
+                    </datalist>
+                  </Field>
+                  <Field>
+                    <label style={label}>Position code</label>
+                    <input style={field} name="position_code" list="sanral-position-codes" placeholder="e.g. CE" />
+                    <datalist id="sanral-position-codes">{SANRAL_POSITION_CODES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}</datalist>
+                  </Field>
                   <Field><label style={label}>Position held</label><input style={field} name="position_held" placeholder="e.g. Contract Engineer" /></Field>
                   <Field><label style={label}>Value (R million)</label><input style={field} type="number" step="0.01" name="value_rm" /></Field>
                   <Field><label style={label}>Referee name</label><input style={field} name="contact_name" /></Field>
