@@ -111,6 +111,23 @@ bridged by `engine/general/process_general_jobs.py`.
 
 13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; ~~documents can't be attached to a shared discovered tender~~ (**closed** by `0032`: "Your private documents"); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once (expired_certs_co now builds - see the hardcoded-assumptions pass).
 
+14. **Company master data: what onboarding should eventually collect.** The spec is `Company-Master-Data-List.md` (2026-10-17). It was built by hand-reading 104 open tenders from 88 buyers (123 sampled; 14 advert-only, 5 unreachable).
+    - **85 company-level items:** 13 have a home, 22 are partial, 49 are gaps. Each is cited to the tenders that ask for it and checked against `0001`-`0040`.
+    - **The biggest gap:** the schema holds **one director and one ownership %**. Real tenders want a full directors/shareholders register, certified IDs, and ownership by black / women / youth / disabled.
+    - **Next gaps in rank order:** CIPC documents and entity type; municipal accounts per company **and per director**; the CSD report file; B-BBEE proof variants (CIPC/dtic certificates, certificate number); the authority resolution in the general pack; CIDB CRS number and multi-class grading; buyer supplier-database registrations; a generic company/person registrations store; public liability insurance; a plant/vehicle register; AFS and turnover.
+    - **Ranked list:** §4 of that doc. Nothing is built yet.
+
+## This pass (2026-10-17, ~20:00 UTC): company master data list (research only)
+
+Full write-up: `Company-Master-Data-List.md`. No code, schema or UI was changed.
+
+- **Sample.** 123 open OCDS releases from 102 buyers (all buyer types). 287 documents were downloaded. 104 tenders were read: 93 from their text layer, 11 by OCR.
+- **Hand read vs `requirements.py`.** The returnables were cross-checked on 18 tenders. The automated read finds the vault's standard items but misses most sector- and buyer-specific ones (PSIRA, UIF/bargaining council, SARACCA, ICASA, vendor forms, shareholding breakdowns).
+- **Categories.** Every tender was categorised by hand with the new taxonomy's slugs. `taxonomy.py` agrees on 104/123; the 19 differences are listed there §6.1 as input for the taxonomy review loop.
+- **SANRAL via eTenders.** N.011-010-2027/1F's **full** pack (Book 1, Books 2&3, Technical/Financial `.xlsm`, `.docx` Returnable Schedules with a different A-form set incl. A5 DPIP and A18 FSP letter) is downloadable from eTenders with no CAPTCHA. That is a 7th SANRAL Conventional sample, not yet fingerprinted or harnessed.
+- **City of Tshwane.** Its documents are only on SAP Ariba, which Discovery can't reach.
+- **Open decisions for Sarel (Q-MD1-4 there):** bank account numbers, directors' personal data (POPIA), landlord/property tenders, and a shared registrations catalog.
+
 ## This pass (2026-10-17, ~19:30 UTC): tender updates after discovery - addenda, changed dates, new documents
 
 Sarel: "monitor any new documents that gets added to eTenders to see what they contain, if it's potentially addendums ... notify the clients that's interested in the tender ... changes of closing dates ... might also allow someone to tender for something if they have more time." Built table row above has the what; here the evidence and the decisions.
