@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e) (test companies in Discovery, Discovery seen store in the database, digest live mode per company - below); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7 (MO/MA equivalence, per-company Discovery, company-owned letters - below); ~16:20 UTC independent verification of the 10 commits since the last check-in (below); hardcoded-assumptions audit at ~16:00 UTC, below that.
+Last full pass: 2026-10-17, ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters (below); ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e) (test companies in Discovery, Discovery seen store in the database, digest live mode per company); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7 (MO/MA equivalence, per-company Discovery, company-owned letters); ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -107,6 +107,52 @@ bridged by `engine/general/process_general_jobs.py`.
     - **`print_reports.Office.__exit__` runs `pkill -9 -x soffice.bin`**, which kills every LibreOffice on the host, including another job's. Seen this pass: one run lost its Financial print to a concurrent process (caught, reported in the pack as "Not included", rest of the pack built). Harmless with one worker; worth scoping to its own PID before running bridges in parallel.
 
 13. **Scenario-pass leftovers (2026-10-17, `Engine-Scenario-Test-Results.md`).** Fixed in the pass: MBD 7.2 misread as MBD 9; advert-only and unreadable tenders declared "uses no standard forms"; corrupt PDFs called "scanned"; a document valid on the closing day shown as "Don't have"; "0 days left" after closing; reminders that never escalated; filler refusals naming a cell instead of the person/field; `print_reports.py` `pkill`-ing every LibreOffice on the host; the worker image missing `fingerprints/` (template check silently skipped in production); `seed_supabase_opportunities.py`'s upsert targeting a partial index PostgREST can't use. Still open: LibreOffice default-profile contention in `generate_cv._convert_to_pdf` / the contents page (loud, transient); discovered tenders keep Discovery's first-document fit verdict; `test_manual_intake.py` needs Postgres so isn't in CI; ~~documents can't be attached to a shared discovered tender~~ (**closed** by `0032`: "Your private documents"); the two `--pack` harness baselines for `expired_certs_co`/`new_co` hold the old refusal wording and need `--pack --reset` once (expired_certs_co now builds - see the hardcoded-assumptions pass).
+
+## This pass (2026-10-17, ~18:25 UTC): independent verification of the per-company Discovery fanout and company-owned letters
+
+The two biggest-blast-radius changes in this batch — the Discovery feed's rearchitecture from
+one shared Klipcorp profile to per-company scoring (`8382a29`, `f85d889`, Q4) and the new
+company-owned-letters system replacing hardcoded Klipcorp wording (`8382a29`, Q7) — both touch
+every company's data, not just Klipcorp's, so they got a from-scratch run rather than a read of
+the diff:
+
+- **Full migration replay, `0001`→`0038`**, fresh scratch Postgres 16: clean, including the two
+  new ones (`0037_company_document_templates`, `0038_discovery_seen_releases`).
+- **`test_discovery_fanout.py`, both parts** (Part 2 needs `FANOUT_PSQL` — a live-replayed
+  schema — and had never been run against one before, same situation as `test_manual_intake.py`
+  last pass): 0 failures. Confirms, under real RLS rather than a mock: 4 distinct companies each
+  scored independently from their own Experience Library/offices rows on the same release (3
+  different verdicts on one tender), the database seen-store (`discovery_seen_releases`) writes
+  one row per company × release with its own fingerprint, a member reads only their own company's
+  seen rows and verdict rows, and a member cannot write the seen store at all (service-role
+  only). `is_test_company` companies are included by default, per Sarel's "let it come up in the
+  discovery results."
+- **`test_company_documents.py`, including the DB part** (`COMPANY_DOCS_PSQL`, same situation):
+  0 failures. Confirms a company can only set its own letter template, can't write another
+  company's, sees only its own row, and the three states (uploaded verbatim / AI-filled
+  guideline / not set up — no fallback wording) all come back correctly from the real table.
+- **No regression in the discipline-fit fix** (`b41d0c8`, verified last pass): `assess_tender.py`
+  split `assess_fit()` into `read_release()`/`score_release()` for the fan-out, but
+  `assess_fit()` itself — where the `known_disciplines` fix lives — is untouched; confirmed by
+  reading it directly, not assumed from the split.
+- **`fill_authority_letter.py` now correctly delegates to `company_documents.produce()`** rather
+  than carrying a second, parallel implementation — read in full to confirm it's a thin wrapper,
+  not a duplicate.
+- **`seed_supabase_opportunities.py`'s near-total rewrite (190 lines) kept its upsert key**
+  (`company_id, ocid` on `discovered_opportunities`, from `0024`) — a different table from the
+  `tenders.ocid` uniqueness `0032` scoped to shared tenders only, so no interaction between the
+  two fixes to check for.
+- `general/test_general_bridge.py` re-run for regression: ALL PASSED (private-documents/`0032`
+  checks still hold under the discipline-fit and discovery changes).
+- `npm run typecheck` / `npm run lint`: clean.
+
+Not independently re-run: the Q1 MO/MA-equivalence fix (`sanral_fill.py`/`sanralMatrices.ts`) —
+read the diff, logic is a straightforward lookup-table addition with both real RRM workbooks'
+read-back already in the commit's own evidence; no regression risk to the rest of the fill
+pipeline. The "freeze pricing table's Tender column" UI commit (`275ab8d`) — pure CSS
+(`position: sticky` + `WebkitOverflowScrolling`), no logic touched, confirmed by the diff alone.
+
+Nothing found needing a fix this pass. No new gaps opened.
 
 ## This pass (2026-10-17, ~18:00 UTC): audit follow-ups (a), (d), (e)
 
