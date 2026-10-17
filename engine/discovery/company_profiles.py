@@ -28,6 +28,7 @@ exported profile) is still accepted by profiles_from_files() - for a local run
 without Supabase, and only ever as the profile of the company it names, never
 as a stand-in for every company.
 """
+import hashlib
 import json
 import os
 import sys
@@ -50,11 +51,12 @@ def profile_from_company_rows(client, company_id, company=None):
             "has_cidb_grading": bool(company.get("cidb_grading")), "offices": offices}
 
 
-def all_company_profiles(client, include_test_companies=False):
+def all_company_profiles(client, include_test_companies=True):
     """[{company_id, legal_name, key, profile}] for every company in the
-    system. Synthetic test companies (companies.is_test_company, 0007) are
-    left out unless asked for - they exist for the admin harness, and a
-    Discovery row on one is noise on nobody's real feed."""
+    system, synthetic test companies (companies.is_test_company, 0007)
+    included. Sarel, 2026-10-17 (audit follow-up (a)): "Yes, let it for now,
+    let it come up in the discovery results." include_test_companies=False
+    (the watch's --exclude-test-companies) leaves them out again."""
     rows = client.select("companies")
     out = []
     for c in sorted(rows, key=lambda r: (r.get("legal_name") or "", r["id"])):
@@ -63,6 +65,13 @@ def all_company_profiles(client, include_test_companies=False):
         out.append({"company_id": c["id"], "legal_name": c.get("legal_name"), "key": c["id"],
                     "profile": profile_from_company_rows(client, c["id"], c)})
     return out
+
+
+def profile_fingerprint(profile):
+    """sha256 of a profile's canonical JSON - recorded with each seen-store
+    verdict (discovery_seen_releases.profile_fingerprint, 0038) so a later
+    rule can tell whether the company's profile changed since it was scored."""
+    return hashlib.sha256(json.dumps(profile, sort_keys=True, default=str).encode()).hexdigest()
 
 
 def profiles_from_files(paths):
@@ -107,8 +116,17 @@ class RestClient:
             raise RuntimeError(f"{method} {path.split('?')[0]} failed: {e.code} {e.read().decode(errors='replace')[:300]}")
 
     def select(self, table, filters=None, order=None):
+        """filters: {column: value} -> eq; {column: [values]} -> in.(...)
+        (each value double-quoted, so a contract number with a comma or a
+        slash is one value - PostgREST's own quoting rule)."""
         import urllib.parse
-        parts = [f"{k}=eq.{urllib.parse.quote(str(v), safe='')}" for k, v in (filters or {}).items()]
+
+        def cond(k, v):
+            if isinstance(v, (list, tuple)):
+                vals = ",".join('"' + str(x).replace("\\", "\\\\").replace('"', '\\"') + '"' for x in v)
+                return f"{k}=in.{urllib.parse.quote('(' + vals + ')', safe='')}"
+            return f"{k}=eq.{urllib.parse.quote(str(v), safe='')}"
+        parts = [cond(k, v) for k, v in (filters or {}).items()]
         parts.append("select=*")
         if order:
             parts.append(f"order={order}")

@@ -20,11 +20,18 @@ read one well-known file per person instead of inventing email content from
 three raw reports by hand.
 
 What this script reuses rather than reimplements, concretely:
-  - New-tender fit: engine/discovery/assess_tender.py's assess_release()
-    (the exact same scoring assess_tender.py already does for
-    watch_new_tenders.py), run fresh against the national OCDS feed.
-    REPORT_WORTHY_VERDICTS is imported from watch_new_tenders.py, not
-    re-declared, so "report-worthy" means the same thing in both places.
+  - New-tender fit: the Discovery feed's own per-company scoring -
+    watch_new_tenders.fan_out() (each tender's documents read once,
+    assess_tender.read_release(), then scored for each company with
+    assess_tender.score_release() against that company's OWN profile), run
+    fresh against the national OCDS feed. In live mode the profiles come
+    from engine/discovery/company_profiles.py's all_company_profiles() -
+    each company's own Experience Library disciplines, CIDB grading, B-BBEE
+    and offices, exactly what the Discovery feed itself uses - and each
+    person's digest gets only their own company's verdicts. In local mode
+    the one --profile file is the one company. REPORT_WORTHY_VERDICTS is
+    imported from watch_new_tenders.py, not re-declared, so "report-worthy"
+    means the same thing in both places.
   - Document expiry + tender tasks: engine/compliance/watch_deadlines.py's
     find_due_documents()/find_due_person_credentials()/find_due_tasks() are
     called directly, unchanged. Per-person registrations (ECSA/SACPCMP,
@@ -53,14 +60,17 @@ SUPABASE_SERVICE_ROLE_KEY in the environment - see docs/specs/System-Status.md):
 
   --mode live (default when Supabase env vars are set): reads company_members
     (role + tender_role), companies, tender_tasks and field_provenance over
-    the Supabase REST API, exactly like watch_deadlines.py already does.
-    Written but NOT verified end-to-end against a real project in this
-    environment - flagged honestly, same as every other "live" path this
-    repo's engine scripts have had to add without a live project to test
-    against (see write_admin_harness_results.py's and seed_supabase_*.py's
-    own history).
+    the Supabase REST API, exactly like watch_deadlines.py already does, and
+    every company's own profile (company_profiles.all_company_profiles; test
+    companies included like the Discovery feed, --exclude-test-companies
+    leaves them out). Every section is per company: a person sees only their
+    own company's tender verdicts, document expiries, tasks and readiness
+    changes. Verified by engine/notify/test_digest_live.py (in-memory rows,
+    real sample tender PDFs) and a CLI run over a local PostgREST stand-in
+    on a replayed scratch Postgres (Hardcoded-Assumptions-Audit §9.3), not
+    against a real Supabase project - none exists (System-Status gap 9).
 
-  --mode local (the only mode actually run and verified this pass): no
+  --mode local (verified with a real run when it was first built): no
     Supabase needed. Takes a small local roster file (--roster, see
     config/team_roster.example.json for the shape - name/email/tender_role
     per person) standing in for company_members until a live project
@@ -92,8 +102,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "discovery"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "compliance"))
 import etenders_national
 import assess_tender
+import company_profiles
 import watch_new_tenders
 import watch_deadlines
+
+LOCAL_COMPANY_KEY = "local"  # --mode local: the one --profile company
 
 DEFAULT_SEEN_STORE = os.path.join(os.path.dirname(__file__), "..", "..", "state", "seen_digest_readiness.json")
 DEFAULT_ROSTER_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "team_roster.json")
@@ -153,21 +166,47 @@ def save_seen(path, seen):
 # for both signals so the OCDS feed is only ever fetched once per run.
 # ---------------------------------------------------------------------------
 
-def fetch_scored_releases(profile, days=14, fetch_documents=True):
+def fetch_releases(days=14):
     today = datetime.date.today()
     date_from = (today - datetime.timedelta(days=days)).isoformat()
-    date_to = today.isoformat()
-    raw = etenders_national.fetch_releases(date_from, date_to)
-    normalized = [etenders_national.normalize(r) for r in raw]
-    scored = []
-    for r in normalized:
-        try:
-            result = assess_tender.assess_release(r, profile, fetch_document=fetch_documents)
-        except Exception as e:
-            result = {"contract_number": r.get("contract_number"), "verdict": "ERROR", "error": str(e)}
-        scored.append({**result, "ocid": r.get("ocid"), "closing_date": r.get("closing_date"),
-                       "documents": r.get("documents")})
-    return scored
+    raw = etenders_national.fetch_releases(date_from, today.isoformat())
+    return [etenders_national.normalize(r) for r in raw]
+
+
+def score_per_company(releases, companies, fetch_documents=True, fetch_text=None):
+    """{company key: [scored release]} - the Discovery feed's own fan-out
+    (watch_new_tenders.fan_out: each tender read once, scored per company
+    from that company's own profile). A fresh seen dict, so nothing is
+    recorded in the Discovery seen store: the digest is a daily summary,
+    not the "never reported before" alert. Every verdict up to needs_review
+    is kept (submission_due needs the wide set; new_tender_signals narrows)."""
+    out = {c["key"]: [] for c in companies}
+    entries = watch_new_tenders.fan_out(releases, companies, {}, watch_new_tenders.REPORT_WORTHY_VERDICTS_WIDE,
+                                        fetch_document=fetch_documents, fetch_text=fetch_text)
+    for e in entries:
+        release = {k: v for k, v in e.items() if k != "company_results"}
+        for c in e["company_results"]:
+            out[c["company_key"]].append({**release, "verdict": c["verdict"], "reasons": c["reasons"],
+                                          "score_outlook": c["score_outlook"]})
+    return out
+
+
+def company_signals(company_key, scored_by_company, document_expiry, tender_tasks, readiness_changes,
+                    submission_lead_days, company_id=None):
+    """One company's signals. With company_id set (live mode), the
+    company-tagged sections (every item watch_deadlines/find_readiness_changes
+    returns carries company_id) are narrowed to that company - a person never
+    sees another tenant's expiries, tasks or readiness changes."""
+    def own(items):
+        return items if company_id is None else [i for i in items if i.get("company_id") == company_id]
+    scored = scored_by_company.get(company_key, [])
+    return {
+        "new_tenders": new_tender_signals(scored),
+        "document_expiry": own(document_expiry),
+        "tender_tasks": own(tender_tasks),
+        "readiness_changes": own(readiness_changes),
+        "submission_due": submission_due_signals(scored, lead_days=submission_lead_days),
+    }
 
 
 def new_tender_signals(scored):
@@ -400,6 +439,9 @@ def main():
     ap.add_argument("--doc-lead-days", type=int, default=watch_deadlines.DEFAULT_DOC_LEAD_DAYS)
     ap.add_argument("--task-lead-days", type=int, default=watch_deadlines.DEFAULT_TASK_LEAD_DAYS)
     ap.add_argument("--submission-lead-days", type=int, default=14)
+    ap.add_argument("--exclude-test-companies", action="store_true",
+                     help="live mode: leave companies flagged is_test_company out of the tender scoring "
+                          "(default: scored like every other company, same as the Discovery feed)")
     ap.add_argument("--seen-store", default=DEFAULT_SEEN_STORE)
     ap.add_argument("--out", default=None, help="write the full list of per-person digests to this JSON file")
     args = ap.parse_args()
@@ -417,8 +459,7 @@ def main():
             sys.exit(1)
         profile = assess_tender.load_company_profile(args.profile)
         roster = load_roster_local(args.roster)
-        print(f"Fetching OCDS releases ({args.days} days)...")
-        scored = fetch_scored_releases(profile, days=args.days, fetch_documents=not args.no_fetch_documents)
+        companies = [{"company_id": None, "legal_name": None, "key": LOCAL_COMPANY_KEY, "profile": profile}]
         document_expiry = (local_document_expiry(profile, today, args.doc_lead_days)
                            + local_person_credential_expiry(profile, today, args.doc_lead_days))
         tender_tasks = []  # Supabase-only, no local fixture (see module docstring)
@@ -428,34 +469,38 @@ def main():
             print("ERROR: --mode live needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
             sys.exit(1)
         roster = load_roster_live(url, key)
-        profile = None
-        scored = []
-        print("WARNING: live mode's national-feed fetch needs a company profile per company "
-              "(assess_tender.load_company_profile doesn't yet read one from Supabase) - "
-              "new_tenders/submission_due will be empty in live mode until that's wired up. "
-              "See docs/specs/System-Status.md.")
+        companies = company_profiles.all_company_profiles(company_profiles.RestClient(url, key),
+                                                          not args.exclude_test_companies)
         document_expiry = (watch_deadlines.find_due_documents(url, key, seen, today, args.doc_lead_days)
                            + watch_deadlines.find_due_person_credentials(url, key, seen, today, args.doc_lead_days))
         tender_tasks = watch_deadlines.find_due_tasks(url, key, seen, today, args.task_lead_days)
         readiness_changes = find_readiness_changes(url, key, seen, today)
 
+    print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
+          f"{'y' if len(companies) == 1 else 'ies'}, each from its own profile...")
+    scored_by_company = score_per_company(fetch_releases(args.days), companies,
+                                          fetch_documents=not args.no_fetch_documents)
+
     save_seen(args.seen_store, seen)
 
-    signals = {
-        "new_tenders": new_tender_signals(scored),
-        "document_expiry": document_expiry,
-        "tender_tasks": tender_tasks,
-        "readiness_changes": readiness_changes,
-        "submission_due": submission_due_signals(scored, lead_days=args.submission_lead_days),
-    }
+    digests, totals = [], {}
+    for p in roster:
+        ckey = LOCAL_COMPANY_KEY if mode == "local" else p["company_id"]
+        signals = company_signals(ckey, scored_by_company, document_expiry, tender_tasks, readiness_changes,
+                                  args.submission_lead_days, company_id=None if mode == "local" else p["company_id"])
+        for k, v in signals.items():
+            totals.setdefault(k, {})[ckey] = len(v)
+        digests.append(build_digest_for_person(p, signals))
 
-    print(f"\nSignals this run: {len(signals['new_tenders'])} new matching tender(s), "
-          f"{len(signals['document_expiry'])} document(s) due for expiry reminder, "
-          f"{len(signals['tender_tasks'])} tender task(s) due, "
-          f"{len(signals['readiness_changes'])} readiness change(s), "
-          f"{len(signals['submission_due'])} tender(s) closing soon.")
-
-    digests = [build_digest_for_person(p, signals) for p in roster]
+    def total(k):
+        return sum((totals.get(k) or {}).values())
+    print(f"\nSignals this run (summed over the {len({p['company_id'] for p in roster})} roster compan"
+          f"{'y' if len({p['company_id'] for p in roster}) == 1 else 'ies'}): "
+          f"{total('new_tenders')} new matching tender(s), "
+          f"{total('document_expiry')} document(s) due for expiry reminder, "
+          f"{total('tender_tasks')} tender task(s) due, "
+          f"{total('readiness_changes')} readiness change(s), "
+          f"{total('submission_due')} tender(s) closing soon.")
 
     print(f"\n{len(digests)} per-person digest(s) built ({mode} mode):")
     for d in digests:

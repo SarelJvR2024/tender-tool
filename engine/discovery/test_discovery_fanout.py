@@ -21,9 +21,13 @@ replayed, same method as engine/intake/test_manual_intake.py): Supabase mode.
 Companies, tagged experience items and offices are real rows; profiles are
 built by company_profiles.all_company_profiles() from those rows;
 seed_supabase_opportunities.seed() writes the rows; they are read back per
-company. Also: a test company (is_test_company) is left out by default, a
-second run reports nothing new, and a company added later IS scored on the
-releases still in the window.
+company. Also: a test company (is_test_company) is scored like any other by
+default (Sarel, 2026-10-17: "let it come up in the discovery results") and left
+out only with include_test_companies=False; the seen store is the
+discovery_seen_releases table (0038) - rows read back, a second run reports
+nothing and reads no document, a company added later IS scored on the releases
+still in the window, the local JSON file is not touched, and under RLS a member
+reads only its own company's seen rows and can't write any.
 
     python3 engine/discovery/test_discovery_fanout.py
     FANOUT_PSQL="psql -h /tmp/sock -p 54411 -U postgres -d tpltest" python3 engine/discovery/test_discovery_fanout.py
@@ -123,6 +127,16 @@ def part1():
           "seen store records every company per release")
     again = watch.fan_out(RELEASES, companies, seen, ALL, fetch_text=counting_fetch)
     check(again == [] and len(reads) == len(RELEASES), "second run: nothing new, no document re-read")
+    # No Supabase companies (profile files): watch.run() keeps the local JSON store.
+    import tempfile
+    store = os.path.join(tempfile.mkdtemp(), "seen.json")
+    first = watch.run(RELEASES, companies, ALL, client=None, seen_store=store, log=lambda m: None)
+    on_disk = json.load(open(store))
+    check(len(first) == 2 and set(on_disk) == {r["ocid"] for r in RELEASES} and
+          all(set(e["companies"]) == {c["key"] for c in companies} for e in on_disk.values()),
+          "profile-file run: seen store is the local JSON file (both releases, every company)")
+    check(watch.run(RELEASES, companies, ALL, client=None, seen_store=store, log=lambda m: None) == [],
+          "profile-file run: second run against the same JSON file reports nothing")
     legacy = {RELEASES[0]["ocid"]: {"first_seen": "2026-10-01", "verdict": "possible"}}
     out3 = watch.fan_out(RELEASES[:1], companies[:1], legacy, ALL)
     check(len(out3) == 1 and "companies" in legacy[RELEASES[0]["ocid"]] and
@@ -148,7 +162,8 @@ def part2(psql):
     from test_manual_intake import Client
     print("Part 2 - Supabase mode on a scratch Postgres (every migration replayed)")
     c = Client(psql, "/nonexistent")
-    c.sql("delete from discovered_opportunities; delete from experience_items; delete from company_offices; "
+    c.sql("delete from discovered_opportunities; delete from discovery_seen_releases; "
+          "delete from experience_items; delete from company_offices; "
           "delete from companies where legal_name like 'Fanout %'")
 
     def company(name, tags, cidb=None, province=None, test=False):
@@ -168,16 +183,32 @@ def part2(psql):
         "Fanout Roads (Pty) Ltd": company("Fanout Roads (Pty) Ltd", ["roads_civil"], "7CE", "Gauteng"),
         "Fanout Test Harness Co": company("Fanout Test Harness Co", ["security_facilities"], test=True),
     }
-    all_rows = [r for r in company_profiles.all_company_profiles(c) if r["legal_name"].startswith("Fanout ")]
+
+    def fanout_rows(**kw):
+        return [r for r in company_profiles.all_company_profiles(c, **kw) if r["legal_name"].startswith("Fanout ")]
+    all_rows = fanout_rows()
     names = [r["legal_name"] for r in all_rows]
-    check("Fanout Test Harness Co" not in names, "is_test_company left out of the national feed by default")
-    check(len(all_rows) == 3, f"3 real companies scored ({', '.join(names)})")
+    check("Fanout Test Harness Co" in names, "is_test_company scored like any other company by default (audit (a))")
+    check(len(all_rows) == 4, f"4 companies scored ({', '.join(names)})")
+    excl = [r["legal_name"] for r in fanout_rows(include_test_companies=False)]
+    check("Fanout Test Harness Co" not in excl and len(excl) == 3,
+          "include_test_companies=False (--exclude-test-companies) leaves it out")
     guard = next(r for r in all_rows if r["legal_name"] == "Fanout Guarding CC")
     check(guard["profile"]["disciplines"] == ["security_facilities"] and
           guard["profile"]["offices"][0]["province"] == "Northern Cape",
           "profile built from the company's own experience tags + offices rows")
-    seen = {}
-    out = watch.fan_out(RELEASES, all_rows, seen, watch.REPORT_WORTHY_VERDICTS_WIDE)
+
+    reads = []
+    real_fetch = assess_tender.fetch_pdf_text
+
+    def counting_fetch(url):
+        reads.append(url)
+        return real_fetch(url)
+    import tempfile
+    json_store = os.path.join(tempfile.mkdtemp(), "never_written_seen.json")
+    out = watch.run(RELEASES, all_rows, watch.REPORT_WORTHY_VERDICTS_WIDE, client=c, seen_store=json_store,
+                    fetch_text=counting_fetch, log=lambda m: print("   ", m))
+    check(not os.path.exists(json_store), "Supabase run: the local JSON seen store is not written")
     written = seeder.seed(c, out, log=lambda m: print("   ", m))
     rows = c.sql("select coalesce(json_agg(t), '[]') from (select c.legal_name, d.contract_number, d.verdict, "
                  "d.score_outlook is not null as has_outlook from discovered_opportunities d join companies c "
@@ -188,21 +219,46 @@ def part2(psql):
     tn = SAMPLES["dawid_kruiper_tn051"]["reference"]
     tn_rows = {r["legal_name"]: r["verdict"] for r in rows if r["contract_number"] == tn}
     check(tn_rows.get("Fanout Guarding CC") == "strong_fit", "TN051 row for the guarding company: strong_fit")
+    check(tn_rows.get("Fanout Test Harness Co") == "strong_fit",
+          "TN051 row for the test company too (security tags) - it comes up in the discovery results")
     check("Fanout Architects Inc" not in tn_rows and "Fanout Roads (Pty) Ltd" not in tn_rows,
           "TN051: no row for companies it isn't report-worthy for (their own not_a_fit)")
-    check(seen[RELEASES[0]["ocid"]]["companies"][ids["Fanout Architects Inc"]] == "not_a_fit",
-          "the architects' own not_a_fit is recorded in the seen store")
     check(all(r["has_outlook"] for r in rows), "each row carries its own score outlook")
     check(sum(written.values()) == len(rows), f"{len(rows)} rows written, one per company x report-worthy tender")
-    check(watch.fan_out(RELEASES, all_rows, seen, watch.REPORT_WORTHY_VERDICTS_WIDE) == [], "second run: nothing new")
+
+    seen_rows = json.loads(c.sql(
+        "select coalesce(json_agg(t), '[]') from (select c.legal_name, s.release_key, s.ocid, s.contract_number, "
+        "s.verdict, s.profile_fingerprint, s.first_seen from discovery_seen_releases s join companies c "
+        "on c.id = s.company_id where c.legal_name like 'Fanout %' order by 2, 1) t"))
+    for r in seen_rows:
+        print(f"    seen: {r['release_key']:<20} {r['verdict']:<13} {r['legal_name']:<24} {r['profile_fingerprint'][:12]}")
+    check(len(seen_rows) == len(RELEASES) * len(all_rows),
+          f"seen store in the database: {len(seen_rows)} rows = {len(RELEASES)} releases x {len(all_rows)} companies")
+    arch = {r["release_key"]: r for r in seen_rows if r["legal_name"] == "Fanout Architects Inc"}
+    check(arch[RELEASES[0]["ocid"]]["verdict"] == "not_a_fit",
+          "the architects' own not_a_fit on TN051 is a seen row (recorded, not reported)")
+    check(all(r["profile_fingerprint"] == company_profiles.profile_fingerprint(
+        next(x["profile"] for x in all_rows if x["legal_name"] == r["legal_name"])) for r in seen_rows),
+          "each seen row carries the fingerprint of the profile it was scored against")
+    check(all(r["ocid"] == r["release_key"] and r["contract_number"] for r in seen_rows),
+          "seen rows keep ocid + contract number")
+
+    n_reads = len(reads)
+    check(watch.run(RELEASES, all_rows, watch.REPORT_WORTHY_VERDICTS_WIDE, client=c, seen_store=json_store,
+                    fetch_text=counting_fetch, log=lambda m: None) == [] and len(reads) == n_reads,
+          "second run, seen store read back from the database: nothing new, no document re-read")
     late = company("Fanout Late Joiner Guards", ["security_facilities"], province="Northern Cape")
-    all_rows = [r for r in company_profiles.all_company_profiles(c) if r["legal_name"].startswith("Fanout ")]
-    out = watch.fan_out(RELEASES, all_rows, seen, watch.REPORT_WORTHY_VERDICTS_WIDE)
+    all_rows = fanout_rows()
+    out = watch.run(RELEASES, all_rows, watch.REPORT_WORTHY_VERDICTS_WIDE, client=c, seen_store=json_store,
+                    log=lambda m: None)
     check([[x["legal_name"] for x in r["company_results"]] for r in out] == [["Fanout Late Joiner Guards"]],
           "a company added later is scored on releases still in the window (and only it)")
     seeder.seed(c, out)
     n = c.sql(f"select count(*) from discovered_opportunities where company_id = '{late}'")
     check(n == "1", "the late company's own row written")
+    n = c.sql(f"select count(*) from discovery_seen_releases where company_id = '{late}'")
+    check(n == str(len(RELEASES)), f"the late company's seen rows written ({n})")
+    check(not os.path.exists(json_store), "the local JSON file still never written in Supabase mode")
     # RLS: each company sees only its own row (0004 tenant isolation).
     uid = c.sql("insert into auth.users default values returning id").splitlines()[0]
     c.insert("company_members", {"company_id": ids["Fanout Guarding CC"], "user_id": uid, "role": "owner"})
@@ -210,6 +266,11 @@ def part2(psql):
           "grant execute on all functions in schema public to authenticated")
     ok, seen_rows = c.as_user(uid, "select count(*) from discovered_opportunities")
     check(ok and seen_rows == "1", f"a Fanout Guarding member sees only its own row under RLS ({seen_rows})")
+    ok, n = c.as_user(uid, "select count(*) from discovery_seen_releases")
+    check(ok and n == str(len(RELEASES)), f"a Fanout Guarding member reads only its own seen rows under RLS ({n})")
+    ok, err = c.as_user(uid, f"insert into discovery_seen_releases (company_id, release_key, verdict) "
+                             f"values ('{ids['Fanout Guarding CC']}', 'x', 'possible')")
+    check(not ok, "a member can't write the seen store (service role only)")
 
 
 if __name__ == "__main__":
