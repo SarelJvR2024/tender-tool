@@ -20,6 +20,7 @@ Contents:
 6. Positioning and messaging
 7. Pre-launch checklist, risks and open questions
 8. Sources
+9. Deep dive: Leads 2 Business (L2B)
 
 ---
 
@@ -55,7 +56,7 @@ South African tender tools (prices as shown on the vendor's page):
 | VUZA | **Free, no account** | Discovery across eTenders and about 90 other sources, plain-language summaries | [getvuza.com](https://getvuza.com/) |
 | AITenders | Starter R199/mo (R1,990/yr); Pro R899/mo (R8,990/yr), up to 5 users; Licence: custom | Matching, digests, award intelligence; AI drafting only on Licence. Starter and Pro include VAT | [aitenders.co.za/pricing](https://aitenders.co.za/pricing) |
 | BidsStack | Starter R300/mo; NotifyPlus R100/mo per province, R500/mo national | Alerts, documents, awarded data back to 2018; 30-day money-back guarantee | [bidsstack pricing](https://app.bidsstack.com/pricing) |
-| L2B (Leads 2 Business) | Daily Tenders SA about R1,426/mo excl. VAT (sources conflict) | Tender leads service | [L2B pricing comparison](https://www.l2b.co.za/Tenders/Tender-Pricing) |
+| L2B (Leads 2 Business) | Tenders SA R1,495.65/mo excl. VAT (live page; the FAQ still lists an older R1,426.09) | Research-led tender and construction-project leads, since 1999; no compliance or pack features (section 9) | [l2b.co.za/pricing](https://www.l2b.co.za/pricing) |
 | Tender Aid | from R699/yr | Vault, expiry alerts, pre-submission audit; 0 reviews on Capterra | [Capterra](https://www.capterra.com/p/10045780/Tender-Aid/) |
 | TenderProSA | R299 / R799 / R1,999 / R4,999 / R7,999 per month, credit-limited (a full analysis is about 50 credits) | Construction BoQ pricing, method statements, PDF bid-pack export | [tenderprosa.co.za/pricing](https://tenderprosa.co.za/pricing) |
 | TenderFlow | Free; Professional R1,900/mo or R12,000/yr (2 users, +R200/user); Enterprise R3,500/mo or R25,000/yr (5 users, +R300/user) | Management, CV repository on paid plans, AI proposals, 14-day trial; Tender Academy R4,995 once-off | [tenderflow.co.za/pricing](https://www.tenderflow.co.za/pricing/) |
@@ -550,7 +551,7 @@ Anonymise Klipcorp's data (or use the `complete_co` test company) per the Deep-D
 - [TenderProSA pricing](https://tenderprosa.co.za/pricing)
 - [AITenders pricing](https://aitenders.co.za/pricing)
 - [BidsStack pricing](https://app.bidsstack.com/pricing)
-- [L2B tender pricing](https://www.l2b.co.za/Tenders/Tender-Pricing)
+- [L2B pricing](https://www.l2b.co.za/pricing) (more L2B sources in section 9)
 - [VUZA](https://getvuza.com/)
 - [Tender Aid on Capterra](https://www.capterra.com/p/10045780/Tender-Aid/)
 - [Xero SA pricing](https://www.xero.com/za/pricing-plans/)
@@ -692,6 +693,6 @@ Quarterly, six-monthly and annual billing are offered, but those prices aren't s
 1. **Don't position against L2B.** A director who pays L2B is a *good* prospect: they already pay to find tenders, so the next pain is preparing them. The message: *"Keep L2B for finding work. Tender Tool builds the submission."*
 2. **Ask about L2B in the customer interviews** (section 5.4): "Do you pay for L2B or another lead service? Does it carry the SANRAL consultant tenders you bid, and how quickly?" That answers the coverage question 9.3 couldn't, and tells Sarel whether Tender Watch adds anything for that firm.
 3. **Possible partnership, later and low priority:** L2B already sells data integration ("L2B Unplugged", price on application). A future "import this L2B tender into Tender Tool" link, or a referral arrangement, would add their coverage to Tender Tool's workflow without competing. Only worth exploring after the first 10 paying firms; nobody has asked L2B anything yet.
-4. **Correct section 1.2's L2B row** to R1,495.65/mo (live page, 17 Oct 2026) at the next edit, and point the source link at [l2b.co.za/pricing](https://www.l2b.co.za/pricing).
+4. Section 1.2's L2B row and section 8's link have been updated to the live R1,495.65 price and the working pricing URL.
 
 **Sources for this section:** [l2b.co.za](https://www.l2b.co.za/), [pricing](https://www.l2b.co.za/pricing), [FAQ](https://www.l2b.co.za/faq), [about us](https://www.l2b.co.za/about-us), [free trial](https://www.l2b.co.za/free-trial), [testimonials](https://www.l2b.co.za/testimonials), [25-years post (June 2024)](https://www.l2b.co.za/blog/celebrating-25-years-of-leads-2-business), [how to use tenders (blog)](https://blog.l2b.co.za/how-to-make-the-most-of-our-tenders/), [public tender page, DTA 1110712](https://www.l2b.co.za/Tender/Construction-of-Slab-Supply-and-Mounting-of-Prefa/1110712), [next.l2b.co.za tender listing, DTA 1151573](https://next.l2b.co.za/tenders/supply-delivery-and-installation-of-clearview-fencing/1151573) (returned 503 when fetched; seen in search results), [Mining Weekly on the 2013 mobile app](https://www.miningweekly.com/article/company-annoucementsleads-2-go-mobility-revives-construction-opportunities-2013-10-03). Repo: `engine/discovery/etenders_national.py` (OCDS limits), `docs/specs/System-Status.md`.
