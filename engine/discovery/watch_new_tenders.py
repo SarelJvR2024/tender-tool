@@ -1,9 +1,21 @@
 """
 Stream 5 (discovery), new-tender watch: runs the national OCDS discovery feed
-(etenders_national.py), scores every release against the real company profile
-(assess_tender.py), and diffs against a local "seen" store so a run only ever
-reports releases it has never reported before - not the same few hundred
-releases every single time this is run.
+(etenders_national.py), scores every release against EVERY company in the
+system - each from its own profile (company_profiles.py: that company's own
+Experience Library disciplines, CIDB grading, B-BBEE and offices) - and diffs
+against a local "seen" store so a run only ever reports, per company,
+releases it has never reported to that company before.
+
+Fan-out, not one shared verdict (Sarel, 2026-10-17, Hardcoded-Assumptions-Audit
+Q4: "It should score for all companies in the app. Nothing must be klipcorp
+specific, they are just a company, not a benchmark"). Before this, the feed
+was scored against config/klipcorp_profile.json and every result attached to
+"Klipcorp (Pty) Ltd". Now each tender's documents are read ONCE
+(assess_tender.read_release) and that reading is scored separately for each
+company (assess_tender.score_release), so the same tender can be a strong fit
+for one company and not a fit for another. Each company's report-worthy
+verdict becomes its own discovered_opportunities row
+(seed_supabase_opportunities.py).
 
 Why this exists: Sarel cannot auto-download SANRAL's own tender documents
 (gated behind a name/company/email form plus a CAPTCHA - see
@@ -16,15 +28,24 @@ documents itself.
 
 The "seen" store (state/seen_tenders.json, gitignored - this is per-deployment
 state, not code) tracks every release this script has ever scored, keyed by
-ocid (falling back to contract_number for the rare release with no ocid), so
-a release already reported is never reported again even if its score would
+ocid (falling back to contract_number for the rare release with no ocid), and
+under it which companies it has been scored for ("companies": {company key:
+verdict}). A company added later is scored on the releases still in the
+window; a company already scored on a release is never re-notified about it,
+even if its score would
 change on a later run (a verdict can drift as more of the document becomes
 readable, but re-notifying about something already seen defeats the point of
 a "what's new" alert).
 
 Usage:
-    python3 watch_new_tenders.py [--days N] [--profile PATH] [--seen-store PATH]
-        [--buyer SUBSTRING] [--out report.json]
+    python3 watch_new_tenders.py [--days N] [--seen-store PATH] [--buyer SUBSTRING]
+        [--out report.json] [--include-test-companies]
+        (every company, read from Supabase: NEXT_PUBLIC_SUPABASE_URL +
+        SUPABASE_SERVICE_ROLE_KEY)
+    python3 watch_new_tenders.py --profile a.json --profile b.json ...
+        (local run without Supabase: exactly the companies these files name)
+There is no default profile file: with neither Supabase nor --profile the
+script stops instead of scoring the feed for one sample company.
 
 Exit/output contract for whatever wraps this (an email/WhatsApp notifier,
 a scheduled task): prints one line per newly-seen, report-worthy release to
@@ -41,6 +62,7 @@ import datetime
 sys.path.insert(0, os.path.dirname(__file__))
 import etenders_national
 import assess_tender
+import company_profiles
 
 DEFAULT_SEEN_STORE = os.path.join(os.path.dirname(__file__), "..", "..", "state", "seen_tenders.json")
 
@@ -76,14 +98,80 @@ def save_seen(path, seen):
         json.dump(seen, f, indent=2)
 
 
+RELEASE_FIELDS = ("contract_number", "buyer", "title", "description", "closing_date", "categories",
+                  "document_depth", "signals", "confidence_note")
+
+
+def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document=True, fetch_text=None):
+    """Scores each release once per company not yet scored on it. Returns the
+    new, report-worthy releases: release-level facts (the same for every
+    company) plus `company_results`, one entry per company whose OWN verdict is
+    report-worthy - {company_id, legal_name, company_key, verdict, reasons,
+    score_outlook}. Mutates `seen`. A seen-store entry written before the
+    fan-out (no "companies" key) was scored against one shared profile file,
+    not any company's own rows, so it is scored again for every company."""
+    today = (today or datetime.date.today()).isoformat()
+    out = []
+    for r in releases:
+        key = r.get("ocid") or r.get("contract_number")
+        if not key:
+            continue
+        entry = seen.get(key)
+        if not entry or not isinstance(entry.get("companies"), dict):
+            entry = {"first_seen": (entry or {}).get("first_seen") or today,
+                     "contract_number": r.get("contract_number"), "title": r.get("title"), "companies": {}}
+            seen[key] = entry
+        pending = [c for c in companies if c["key"] not in entry["companies"]]
+        if not pending:
+            continue
+        try:
+            reading = assess_tender.read_release(r, fetch_document=fetch_document, fetch_text=fetch_text)
+        except Exception as e:
+            reading, read_error = None, str(e)
+        results, base = [], None
+        for c in pending:
+            try:
+                if reading is None:
+                    raise RuntimeError(read_error)
+                res = assess_tender.score_release(r, reading, c["profile"])
+            except Exception as e:
+                res = {"contract_number": r.get("contract_number"), "verdict": "ERROR", "error": str(e)}
+            entry["companies"][c["key"]] = res.get("verdict")
+            base = base or (res if res.get("verdict") != "ERROR" else None)
+            if res.get("verdict") in report_worthy:
+                results.append({"company_id": c["company_id"], "legal_name": c["legal_name"], "company_key": c["key"],
+                                "verdict": res["verdict"], "reasons": res.get("reasons") or [],
+                                "score_outlook": res.get("score_outlook")})
+        if results:
+            out.append({**{k: base.get(k) for k in RELEASE_FIELDS}, "ocid": r.get("ocid"),
+                        "documents": r.get("documents"), "company_results": results})
+    return out
+
+
+def load_companies(profile_paths=None, include_test_companies=False, client=None):
+    """--profile files if given, else every company in Supabase. Never a
+    default sample profile."""
+    if profile_paths:
+        return company_profiles.profiles_from_files(profile_paths), "profile files"
+    client = client or company_profiles.RestClient.from_env()
+    if client is None:
+        raise SystemExit("ERROR: no companies to score for. Set NEXT_PUBLIC_SUPABASE_URL and "
+                         "SUPABASE_SERVICE_ROLE_KEY (every company in the system is scored from its own rows), "
+                         "or pass --profile for a local run. There is deliberately no default company profile.")
+    return company_profiles.all_company_profiles(client, include_test_companies), "Supabase"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--days", type=int, default=14,
                      help="how many days back to search for releases (default 14 - wide enough to "
                           "survive a missed run or two without losing anything, since the seen "
                           "store - not the date window - is what prevents duplicate reports)")
-    ap.add_argument("--profile", default=None,
-                     help=f"path to a company profile JSON (default: {assess_tender.DEFAULT_PROFILE_PATH})")
+    ap.add_argument("--profile", action="append", default=None,
+                     help="a company profile JSON to score for (repeatable) - a local run without Supabase. "
+                          "Without it, every company in Supabase is scored from its own rows.")
+    ap.add_argument("--include-test-companies", action="store_true",
+                     help="also score companies flagged is_test_company (Supabase mode)")
     ap.add_argument("--seen-store", default=DEFAULT_SEEN_STORE)
     ap.add_argument("--buyer", default=None,
                      help="case-insensitive substring filter on the buyer/organ-of-state name")
@@ -95,7 +183,12 @@ def main():
     args = ap.parse_args()
 
     report_worthy = REPORT_WORTHY_VERDICTS_WIDE if args.include_needs_review else REPORT_WORTHY_VERDICTS
-    profile = assess_tender.load_company_profile(args.profile)
+    companies, source = load_companies(args.profile, args.include_test_companies)
+    print(f"Scoring for {len(companies)} compan{'y' if len(companies) == 1 else 'ies'} ({source}): "
+          + ", ".join(c["legal_name"] or c["key"] for c in companies))
+    if not companies:
+        print("  No companies to score for - nothing to do.")
+        return []
     seen = load_seen(args.seen_store)
 
     today = datetime.date.today()
@@ -109,31 +202,16 @@ def main():
         normalized = [r for r in normalized if r["buyer"] and needle in r["buyer"].lower()]
     print(f"  {len(normalized)} release(s) in range" + (f" matching buyer '{args.buyer}'" if args.buyer else ""))
 
-    new_releases = []
-    for r in normalized:
-        key = r.get("ocid") or r.get("contract_number")
-        if not key or key in seen:
-            continue
-        try:
-            result = assess_tender.assess_release(r, profile)
-        except Exception as e:
-            result = {"contract_number": r.get("contract_number"), "verdict": "ERROR", "error": str(e)}
-        seen[key] = {
-            "first_seen": today.isoformat(),
-            "contract_number": r.get("contract_number"),
-            "title": r.get("title"),
-            "verdict": result.get("verdict"),
-        }
-        if result.get("verdict") in report_worthy:
-            new_releases.append({**result, "ocid": r.get("ocid"), "documents": r.get("documents")})
-
+    new_releases = fan_out(normalized, companies, seen, report_worthy, today)
     save_seen(args.seen_store, seen)
 
-    print(f"\n{len(new_releases)} new, report-worthy release(s) (never seen before, "
-          f"verdict in {sorted(report_worthy)}):")
+    print(f"\n{len(new_releases)} new, report-worthy release(s) for at least one company "
+          f"(verdict in {sorted(report_worthy)}):")
     for r in new_releases:
         docs = ", ".join(d["url"] for d in (r.get("documents") or []) if d.get("url")) or "(no document URL on file)"
-        print(f"  {r.get('contract_number'):>14}  {r['verdict']:<14}  {r.get('buyer')}  -  {r.get('title')}")
+        print(f"  {r.get('contract_number'):>14}  {r.get('buyer')}  -  {r.get('title')}")
+        for c in r["company_results"]:
+            print(f"      {c['verdict']:<14} {c['legal_name']}")
         print(f"      closes {r.get('closing_date')}  |  {docs}")
 
     if args.out:

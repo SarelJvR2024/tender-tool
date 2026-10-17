@@ -33,6 +33,7 @@ import {
   baseCode,
   matrixForPosition,
   matrixRowKey,
+  equivalentTypes,
   normPositionCode,
   normType,
 } from "./sanralMatrices";
@@ -116,7 +117,9 @@ function projectTypePoints(matrixKey: string | null, tenderType: string | null, 
   const m = PROJECT_TYPE_MATRICES[matrixKey];
   const row = m.rows[matrixRowKey(matrixKey, experienceType) ?? "NONE"];
   if (tenderType) {
-    const idx = m.columns.indexOf(normType(tenderType));
+    const tt = normType(tenderType);
+    let idx = m.columns.indexOf(tt);
+    if (idx < 0) idx = m.columns.findIndex((c) => equivalentTypes(tt).includes(c));
     if (idx >= 0) return r(row[idx], row[idx]);
   }
   return r(Math.min(...row), Math.max(...row));

@@ -11,7 +11,9 @@ by running the REAL existing fill engines - never a reimplementation of them:
   print_financial.py       the filled Financial workbook's visible sheets as PDF
   run_forms_pipeline.py    C.1.1.1, C.1.2.3, A-Forms bundle, ACTIONS_TO_SIGN.md,
                            merged field_provenance.json
-  fill_authority_letter.py A2 authority letter (DRAFT, unsigned)
+  fill_authority_letter.py A2 authority letter: the company's own uploaded letter
+                           as-is, or generated from its own guideline, or listed
+                           as not set up (engine/company_documents.py)
   make_envelope_covers.py  outer / technical / financial covers
 
 then merges those with the company's vault documents and any CVs into two
@@ -63,6 +65,8 @@ import fill_financial  # noqa: E402
 import fill_financial_hours  # noqa: E402
 import run_forms_pipeline  # noqa: E402
 import fill_authority_letter  # noqa: E402
+import company_documents  # noqa: E402
+from provenance import ProvenanceLog  # noqa: E402
 import make_envelope_covers  # noqa: E402
 from sanral_fill import Workbook, n2col  # noqa: E402
 from generate_cv import _convert_to_pdf  # noqa: E402
@@ -276,19 +280,40 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     # 5. docx returnables: C.1.1.1, C.1.2.3, A-Forms + checklist + provenance
     run_forms_pipeline.main(forms_dir, profile_path, forms_out, contract_label, nra_ref or "", pack_yaml)
 
-    # 6. Authority letter + envelope covers (need the tender's own description/NRA ref)
+    # 6. Authority letter: the company's own choice (company_documents.py,
+    # table company_document_templates) - its uploaded letter as-is, or its own
+    # guideline filled with this tender's details, or "not set up". Never
+    # another company's wording.
     signatory = profile["key_people"][0]
-    letter_docx = covers = None
+    rfp_number = (f"SANRAL {nra_ref} / Contract {contract_no}" if nra_ref and contract_no
+                  else (f"Contract {contract_no}" if contract_no else None))
+    letter_log = ProvenanceLog("company_documents.py")
+    letter = fill_authority_letter.produce_letter(
+        profile, os.path.join(forms_out, "company_documents"), signatory,
+        {"contract_no": contract_no, "nra_reference": nra_ref, "description": description, "closing_date": closing},
+        rfp_number, letter_log, logo_path=logo_path, llm=company_documents.default_llm_client())
+    if letter["status"] in ("not_set_up", "failed"):
+        warnings.append(letter["reason"])
+    elif letter["method"] == "verbatim":
+        warnings.append("Authority letter: generated from your guideline word for word - no {{fields}} were placed; "
+                        "check it names this tender before signing.")
+    # Its provenance joins the forms' own, so ACTIONS_TO_SIGN.md lists any
+    # [NOT ON FILE] field or "not set up" item too.
+    merged = os.path.join(forms_out, "field_provenance.json")
+    if os.path.exists(merged):
+        entries = json.load(open(merged)) + letter_log.entries
+        json.dump(entries, open(merged, "w"), indent=2)
+        run_forms_pipeline.generate_action_checklist.main(
+            forms_out, contract_label, merged, run_forms_pipeline.specialism_note_from_pack(pack_yaml))
+
+    # Envelope covers (need the tender's own description/NRA ref).
+    covers = None
     cover_reason = None
     if not (nra_ref and description and closing):
         missing = [k for k, v in (("NRA reference", nra_ref), ("description", description),
                                   ("closing date", closing)) if not v]
         cover_reason = f"tender record has no {', '.join(missing)} - never invented"
     else:
-        rfp_number = f"SANRAL {nra_ref} / Contract {contract_no}"
-        letter_docx = os.path.join(forms_out, "A2_Authority_Letter.docx")
-        fill_authority_letter.build_letter(profile_path, logo_path, letter_docx, signatory["name"],
-                                           signatory.get("signatory_capacity") or "", rfp_number, description)
         time_txt = closing_time or "the time stated in the Tender Data"
         args = (profile, logo_path, forms_out, f"SANRAL {contract_no}", nra_ref, description, closing, time_txt)
         covers = {
@@ -319,8 +344,16 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
 
     sections.append(sec("Envelope 1 cover - Technical Submission", TECHNICAL,
                         docx_pdf(covers and covers["technical"]), cover_reason))
-    sections.append(sec("A2 - Authority for signatory letter (DRAFT, to be signed by the director)", TECHNICAL,
-                        docx_pdf(letter_docx), cover_reason))
+    if letter["path"]:
+        letter_pdf, letter_err = _to_pdf(letter["path"], conv_dir)
+    else:
+        letter_pdf, letter_err = None, letter["reason"]
+    letter_how = {"uploaded": "your own letter, as uploaded",
+                  "fields": "generated from your own guideline", "ai_placed": "generated from your own guideline",
+                  "verbatim": "your own guideline, word for word"}.get(letter.get("method"), "")
+    sections.append(sec(f"A2 - Letter of authority to sign ({letter_how}; to be signed)" if letter_how
+                        else "A2 - Letter of authority to sign", TECHNICAL, letter_pdf,
+                        letter_err if letter["path"] else letter["reason"]))
     sections.append(sec("A-Forms bundle (A2-A23), completed", TECHNICAL,
                         docx_pdf(os.path.join(forms_out, "A_Forms_FILLED.docx"))))
 
@@ -430,6 +463,9 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
         "contract_no": contract_no,
         "warnings": warnings,
         "financial": fin_manifest,
+        # Each company-owned document and how it was produced (uploaded as-is /
+        # generated from the company's guideline / not set up).
+        "company_documents": {"authority_to_sign": {k: letter.get(k) for k in ("status", "method", "path", "reason")}},
         "outputs": {
             "pdf": out_pdf,
             "financial_pdf": fin_pdf,

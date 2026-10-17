@@ -34,7 +34,7 @@ export default async function OnboardingPage({
           <input
             name="legal_name"
             required
-            placeholder="e.g. Klipcorp (Pty) Ltd"
+            placeholder="Registered name, as on your CIPC certificate"
             style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", marginBottom: 18, borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit" }}
           />
           <button

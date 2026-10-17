@@ -389,7 +389,7 @@ def main():
                           "SUPABASE_SERVICE_ROLE_KEY); local uses --roster + --profile. "
                           "Default: live if both env vars are set, else local.")
     ap.add_argument("--profile", default=None,
-                     help=f"local mode: company profile JSON (default: {assess_tender.DEFAULT_PROFILE_PATH})")
+                     help="local mode: the company profile JSON to use (required in local mode - no default company)")
     ap.add_argument("--roster", default=DEFAULT_ROSTER_PATH,
                      help="local mode: roster JSON (see config/team_roster.example.json)")
     ap.add_argument("--days", type=int, default=14, help="how many days back to search the national feed")
@@ -412,6 +412,9 @@ def main():
     seen = load_seen(args.seen_store)
 
     if mode == "local":
+        if not args.profile:
+            print("ERROR: --mode local needs --profile <the company's profile JSON> (there is no default company).")
+            sys.exit(1)
         profile = assess_tender.load_company_profile(args.profile)
         roster = load_roster_local(args.roster)
         print(f"Fetching OCDS releases ({args.days} days)...")

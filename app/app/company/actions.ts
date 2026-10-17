@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { BEE_PROOF_TYPES, MAX_UPLOAD_BYTES, VAULT_BUCKET, VAULT_DOCUMENTS, isVaultDocumentKind } from "@/lib/vaultDocuments";
+import { COMPANY_DOCUMENT_TYPES, GUIDELINE_MAX_CHARS, isCompanyDocumentType, isDocumentTemplateMode } from "@/lib/companyDocuments";
 
 /**
  * Fields the edit form is allowed to write. Deliberately excludes any bank
@@ -160,4 +161,84 @@ export async function uploadVaultDocument(companyId: string, formData: FormData)
 
   revalidatePath("/company");
   redirect("/company?saved=doc");
+}
+
+/**
+ * Saves the company's choice for one letter/document type (0037,
+ * company_document_templates) - the same two-way choice as the CV upload's
+ * "use as-is" / "AI-extract" (people/actions.ts uploadCv):
+ *
+ *   uploaded      - the company's own file, used as-is every time this document
+ *                   is needed. A new file replaces the previous one; switching
+ *                   back to "uploaded" without a new file keeps the one on file.
+ *   ai_guideline  - the company's own wording with {{field}} marks, stored
+ *                   exactly as typed (only CRLF -> LF and trimmed, same as
+ *                   how_we_work). The engine fills the marks and nothing else.
+ *
+ * Both are kept on the row when the mode switches, so nothing is lost. RLS
+ * ("company_document_templates: tenant isolation") and the company-documents
+ * storage prefix policy (0014) gate the writes.
+ */
+export async function saveDocumentTemplate(companyId: string, formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const back: (msg: string) => never = (msg) => redirect(`/company?error=${encodeURIComponent(msg)}#letters`);
+  const documentType = formData.get("document_type");
+  if (!isCompanyDocumentType(documentType)) back("Unknown document type.");
+  const type = COMPANY_DOCUMENT_TYPES.find((t) => t.key === documentType)!;
+  const mode = formData.get("mode");
+  if (!isDocumentTemplateMode(mode)) back(`Choose how the ${type.label.toLowerCase()} should be made: upload your own, or generate it from your guideline.`);
+
+  const { data: existing } = await supabase
+    .from("company_document_templates")
+    .select("storage_path, original_filename, guideline")
+    .eq("company_id", companyId)
+    .eq("document_type", type.key)
+    .maybeSingle();
+
+  const row: Record<string, unknown> = {
+    company_id: companyId,
+    document_type: type.key,
+    mode,
+    storage_path: existing?.storage_path ?? null,
+    original_filename: existing?.original_filename ?? null,
+    guideline: existing?.guideline ?? null,
+    updated_by: user.id,
+    updated_at: new Date().toISOString(),
+  };
+
+  let uploadedPath: string | null = null;
+  if (mode === "uploaded") {
+    const file = formData.get("file") as File | null;
+    if (file && file.size > 0) {
+      if (file.size > MAX_UPLOAD_BYTES) back("File is larger than 4.4 MB - save it at a lower resolution or compress the PDF.");
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      uploadedPath = `${companyId}/templates/${type.key}/${randomUUID()}-${safeName}`;
+      const { error: upErr } = await supabase.storage
+        .from(VAULT_BUCKET)
+        .upload(uploadedPath, file, { contentType: file.type || "application/octet-stream" });
+      if (upErr) back(`Could not upload file: ${upErr.message}`);
+      row.storage_path = uploadedPath;
+      row.original_filename = file.name;
+    } else if (!existing?.storage_path) {
+      back(`Choose your own ${type.label.toLowerCase()} file to upload.`);
+    }
+  } else {
+    const text = String(formData.get("guideline") ?? "").replace(/\r\n/g, "\n").trim();
+    if (!text) back(`Write your guideline for the ${type.label.toLowerCase()} - your own wording, with {{fields}} where the tender's details go.`);
+    if (text.length > GUIDELINE_MAX_CHARS) back(`The guideline is ${text.length} characters - keep it under ${GUIDELINE_MAX_CHARS}.`);
+    row.guideline = text;
+  }
+
+  const { error } = await supabase.from("company_document_templates").upsert(row, { onConflict: "company_id,document_type" });
+  if (error) {
+    if (uploadedPath) await supabase.storage.from(VAULT_BUCKET).remove([uploadedPath]);
+    back(error.message);
+  }
+  if (uploadedPath && existing?.storage_path) await supabase.storage.from(VAULT_BUCKET).remove([existing.storage_path]);
+
+  revalidatePath("/company");
+  redirect("/company?saved=letter#letters");
 }

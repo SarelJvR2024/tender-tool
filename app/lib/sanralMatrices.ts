@@ -316,19 +316,38 @@ export function normType(t: string | null | undefined): string {
 }
 
 /**
+ * Project-type codes that are the SAME real experience under two spellings
+ * (Sarel, 2026-10-17, Hardcoded-Assumptions-Audit Q1): the Conventional
+ * PL/CE/RE matrix's "MO/MA" is what the RRM CE/RM/ARM form renames to
+ * "MO/MA (Excl. RRM)" (RRM's form has no plain "MO/MA"; RRM work has its own
+ * separate "RRM" code, which stays distinct). Same table as
+ * engine/sanral_fill.py PROJECT_TYPE_EQUIVALENTS - keep the two in step.
+ */
+export const PROJECT_TYPE_EQUIVALENTS: string[][] = [["MO/MA", "MO/MA (EXCL. RRM)"]];
+
+/** The other spellings of a (normType-ed) project-type code, or []. */
+export function equivalentTypes(t: string): string[] {
+  const group = PROJECT_TYPE_EQUIVALENTS.find((g) => g.includes(t));
+  return group ? group.filter((x) => x !== t) : [];
+}
+
+/**
  * The matrix row a person's project type scores on, or null when this
  * position's matrix has no such row - i.e. SANRAL's form for this position
  * doesn't offer that project type at all (each Form B1 block's project-type
  * dropdown is that position's own matrix list; engine/sanral_fill.py
  * projects_for_block() leaves such a project off that block). Same matching
- * as the filler: exact code, else one part of a combined row ("DI" on
- * "DI/DN"). A blank type is "NONE".
+ * as the filler: exact code, else an equivalent spelling ("MO/MA (Excl. RRM)"
+ * on "MO/MA"), else one part of a combined row ("DI" on "DI/DN"). A blank
+ * type is "NONE".
  */
 export function matrixRowKey(matrixKey: string, experienceType: string | null | undefined): string | null {
   const m = PROJECT_TYPE_MATRICES[matrixKey];
   if (!m) return null;
   const t = normType(experienceType) || "NONE";
   if (m.rows[t]) return t;
+  const same = equivalentTypes(t).find((e) => m.rows[e]);
+  if (same) return same;
   if (!t.includes("/")) {
     const combined = Object.keys(m.rows).find((k) => k.includes("/") && k.split("/").map((x) => x.trim()).includes(t));
     if (combined) return combined;

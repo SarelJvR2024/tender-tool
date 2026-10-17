@@ -45,16 +45,43 @@ def norm(v):
     return str(v).strip().casefold()
 
 
+# Project-type codes that are the SAME real experience under two spellings
+# (Sarel, 2026-10-17, audit Q1): the Conventional PL/CE/RE matrix's "MO/MA"
+# (Maintenance Operations and Adhoc Maintenance) is the code the RRM CE/RM/ARM
+# form renames to "MO/MA (Excl. RRM)" - RRM's form doesn't offer a plain
+# "MO/MA" at all, and lists RRM work under its own separate "RRM" code. A
+# project tagged either spelling fits a block offering the other. "RRM" stays
+# a distinct code. Add a group here only when SANRAL's own forms show the same
+# code renamed, never to merge genuinely different codes.
+PROJECT_TYPE_EQUIVALENTS = (
+    ("MO/MA", "MO/MA (Excl. RRM)"),
+)
+
+
+def equivalent_codes(label):
+    """The other spellings of `label` per PROJECT_TYPE_EQUIVALENTS (normalised;
+    empty when it has none)."""
+    want = norm(label)
+    for group in PROJECT_TYPE_EQUIVALENTS:
+        g = [norm(x) for x in group]
+        if want in g:
+            return [x for x in g if x != want]
+    return []
+
+
 def resolve_option(opts, label):
     """1-based index of `label` in a dropdown's options, or None. Exact match
     first (case/space-insensitive); then the toll-code spelling (code_alias);
+    then an equivalent spelling of the same project type
+    (PROJECT_TYPE_EQUIVALENTS: "MO/MA" <-> RRM's "MO/MA (Excl. RRM)");
     then, for a combined option such as Book 1's DS-Pavement "DI/DN"
     ("Development Improvement / New Facilities"), a label equal to one of its
     parts ("DI" or "DN" - both codes the PL/CE/RE matrix lists separately)."""
     want = norm(label)
     if not want:
         return None
-    for cand in (want, norm(code_alias(label)) if code_alias(label) else None):
+    alias = norm(code_alias(label)) if code_alias(label) else None
+    for cand in [want, alias, *equivalent_codes(label)]:
         if cand:
             idx = next((i + 1 for i, o in enumerate(opts) if norm(o) == cand), None)
             if idx is not None:
@@ -292,7 +319,9 @@ def projects_for_block(wb, sheet, first_row, person_name, projects, max_projects
     offers NONE/MO/MA/MP/MS/DS/DI/DN/CD, the DS-Pavement block on the same
     tender NONE/MP/MS/MSC/DS/DI/DN, the RRM CE block NONE/RRM/MO/MA (Excl.
     RRM)/MP/MS/DS/DI/DN/CD). A real project can therefore carry a code that is
-    valid for one position and simply not offered for another.
+    valid for one position and simply not offered for another. (A project
+    tagged plain "MO/MA" DOES fit the RRM block's "MO/MA (Excl. RRM)" option
+    and vice versa - same code, renamed; see PROJECT_TYPE_EQUIVALENTS.)
 
     Sarel's rule for that case (2026-10-17): don't refuse the whole pack -
     leave that one project off the block it doesn't fit and say so. Projects

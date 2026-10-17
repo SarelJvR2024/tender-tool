@@ -1,6 +1,13 @@
 import { createClient } from "@/lib/supabase/server";
 import { expiryStatus, type StatusChip } from "@/lib/dates";
-import { updateCompanyProfile, uploadVaultDocument } from "./actions";
+import { saveDocumentTemplate, updateCompanyProfile, uploadVaultDocument } from "./actions";
+import {
+  COMPANY_DOCUMENT_TYPES,
+  GUIDELINE_MAX_CHARS,
+  unknownGuidelineFields,
+  type CompanyDocumentTemplateRow,
+  type CompanyDocumentType,
+} from "@/lib/companyDocuments";
 import {
   BANK_LETTER_RENEW_SOON_DAYS,
   BEE_PROOF_TYPES,
@@ -97,6 +104,25 @@ export default async function CompanyPage({
     });
   }
 
+  // The company's own letters/documents (0037): one row per document type it
+  // has set up. A type with no row is "not set up".
+  const templates: Record<string, CompanyDocumentTemplateRow> = {};
+  const templateUrls: Record<string, string> = {};
+  if (row && !editing) {
+    const { data: tplRows } = await supabase
+      .from("company_document_templates")
+      .select("id, document_type, mode, storage_path, original_filename, guideline, updated_at")
+      .eq("company_id", row.id);
+    for (const t of (tplRows ?? []) as CompanyDocumentTemplateRow[]) templates[t.document_type] = t;
+    const withFiles = Object.values(templates).filter((t) => t.storage_path);
+    const signed = await Promise.all(
+      withFiles.map((t) => supabase.storage.from(VAULT_BUCKET).createSignedUrl(t.storage_path as string, 600)),
+    );
+    signed.forEach((r, i) => {
+      if (r.data?.signedUrl) templateUrls[withFiles[i].document_type] = r.data.signedUrl;
+    });
+  }
+
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
       <SiteNav active="company" />
@@ -126,6 +152,12 @@ export default async function CompanyPage({
           </div>
         )}
 
+        {row && !editing && saved === "letter" && (
+          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+            Letter set-up saved.
+          </div>
+        )}
+
         {row && !editing && saved === "doc" && (
           <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
             Document uploaded.
@@ -139,6 +171,8 @@ export default async function CompanyPage({
         )}
 
         {row && (editing ? <EditForm company={row} /> : <ReadOnlyView company={row} docUrls={docUrls} />)}
+
+        {row && !editing && <LettersSection companyId={row.id} templates={templates} urls={templateUrls} />}
 
         {/* Office locations (0015) - self-contained, its own forms. */}
         {row && !editing && saved === "office" && (
@@ -651,6 +685,167 @@ function DocumentRow({
           style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E5E1D5", color: "#16233B", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
         >
           {filename ? "Replace" : "Upload"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// The company's own letters/documents (0037). One card per document type:
+// its state, and the same two-way choice the CV upload offers (people/[id]
+// page: "AI-extract" / "Use as-is") - here "Upload your own" (used as-is) or
+// "Generate from your guideline" (your own wording, {{fields}} filled in, no
+// other wording added). Nothing set up = "Not set up": the pack leaves the
+// document out and says so - it never uses another company's wording.
+function LettersSection({
+  companyId,
+  templates,
+  urls,
+}: {
+  companyId: string;
+  templates: Record<string, CompanyDocumentTemplateRow>;
+  urls: Record<string, string>;
+}) {
+  return (
+    <div id="letters">
+      <Section title="Letters &amp; documents">
+        <div style={{ fontSize: 13, color: "#6B6758", lineHeight: 1.5, marginBottom: 4 }}>
+          Letters a tender needs from your company. For each one, upload your own (it is used exactly as uploaded,
+          every time) or write the guideline it should be generated from - your own wording, with{" "}
+          <code style={{ fontSize: 12 }}>{"{{fields}}"}</code> where the tender&apos;s details go. Tender Tool fills
+          only those fields; it never adds or rewrites wording. Until you choose, the letter is left out of your
+          packs and marked &quot;not set up&quot;.
+        </div>
+        {COMPANY_DOCUMENT_TYPES.map((t) => (
+          <LetterCard key={t.key} companyId={companyId} type={t} row={templates[t.key] ?? null} url={urls[t.key]} />
+        ))}
+      </Section>
+    </div>
+  );
+}
+
+function LetterCard({
+  companyId,
+  type,
+  row,
+  url,
+}: {
+  companyId: string;
+  type: CompanyDocumentType;
+  row: CompanyDocumentTemplateRow | null;
+  url: string | undefined;
+}) {
+  const save = saveDocumentTemplate.bind(null, companyId);
+  const status = !row
+    ? { label: "Not set up", bg: "#FEF3C7", color: "#B45309" }
+    : row.mode === "uploaded"
+      ? { label: "Your own upload - used as-is", bg: "#DCFCE7", color: "#15803D" }
+      : { label: "Generated from your guideline", bg: "#DCFCE7", color: "#15803D" };
+  const unknown = row?.guideline ? unknownGuidelineFields(type, row.guideline) : [];
+  const fieldStyle: React.CSSProperties = {
+    width: "100%",
+    boxSizing: "border-box",
+    padding: "10px 12px",
+    borderRadius: 8,
+    border: "1px solid #E5E1D5",
+    fontSize: 13,
+    fontFamily: "inherit",
+    lineHeight: 1.5,
+    resize: "vertical",
+  };
+  return (
+    <div style={{ borderTop: "1px solid #F0EEE6", padding: "14px 0 6px", marginTop: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0, maxWidth: 600 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B", marginBottom: 3 }}>{type.label}</div>
+          <div style={{ fontSize: 12, color: "#6B6758" }}>{type.usedFor}</div>
+          {row?.mode === "uploaded" && row.original_filename && (
+            <div style={{ fontSize: 12, marginTop: 4 }}>
+              {url ? (
+                <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#D97706", fontWeight: 600, textDecoration: "none", wordBreak: "break-all" }}>
+                  {row.original_filename}
+                </a>
+              ) : (
+                <span style={{ color: "#6B6758" }}>{row.original_filename}</span>
+              )}
+            </div>
+          )}
+          {!row && (
+            <div style={{ fontSize: 12, color: "#B45309", marginTop: 4 }}>
+              Left out of your packs until you upload your own or write a guideline below.
+            </div>
+          )}
+        </div>
+        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: status.bg, color: status.color, whiteSpace: "nowrap" }}>
+          {status.label}
+        </span>
+      </div>
+
+      {unknown.length > 0 && (
+        <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "8px 12px", marginTop: 10, fontSize: 12, color: "#B91C1C" }}>
+          Your guideline uses {unknown.map((u) => `{{${u}}}`).join(", ")}, which {unknown.length === 1 ? "isn't a field" : "aren't fields"} Tender
+          Tool knows - {unknown.length === 1 ? "it prints" : "they print"} as [UNKNOWN FIELD] until corrected.
+        </div>
+      )}
+
+      <form action={save} style={{ marginTop: 12 }}>
+        <input type="hidden" name="document_type" value={type.key} />
+        <div style={{ display: "flex", gap: 16, marginBottom: 10, flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 13, color: "#16233B", maxWidth: 320 }}>
+            <input type="radio" name="mode" value="uploaded" defaultChecked={row?.mode === "uploaded"} required style={{ marginTop: 3 }} />
+            <span>
+              <strong>Upload your own</strong> - your real letter, used exactly as uploaded every time, no AI
+              involvement at all.
+            </span>
+          </label>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 13, color: "#16233B", maxWidth: 320 }}>
+            <input type="radio" name="mode" value="ai_guideline" defaultChecked={row?.mode === "ai_guideline"} style={{ marginTop: 3 }} />
+            <span>
+              <strong>Generate from your guideline</strong> - your own wording below, with this tender&apos;s details
+              filled into the fields you mark.
+            </span>
+          </label>
+        </div>
+
+        <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: "#16233B", marginBottom: 5 }}>
+          Your file (for &quot;Upload your own&quot;){row?.storage_path ? " - leave empty to keep the one on file" : ""}
+        </label>
+        <input
+          type="file"
+          name="file"
+          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+          aria-label={`Upload your own ${type.label.toLowerCase()}`}
+          style={{ fontSize: 12, color: "#16233B", maxWidth: "100%", marginBottom: 12 }}
+        />
+
+        <label htmlFor={`guideline_${type.key}`} style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: "#16233B", marginBottom: 5 }}>
+          Your guideline (for &quot;Generate from your guideline&quot;)
+        </label>
+        <textarea
+          id={`guideline_${type.key}`}
+          name="guideline"
+          rows={7}
+          maxLength={GUIDELINE_MAX_CHARS}
+          defaultValue={row?.guideline ?? ""}
+          placeholder={`Your own wording, e.g. ${type.example}`}
+          style={fieldStyle}
+        />
+        <div style={{ fontSize: 11, color: "#9A9684", margin: "6px 0 12px", lineHeight: 1.6 }}>
+          Fields you can mark:{" "}
+          {type.fields.map((f, i) => (
+            <span key={f.key}>
+              <code style={{ fontSize: 11, color: "#16233B" }}>{`{{${f.key}}}`}</code> {f.label}
+              {i < type.fields.length - 1 ? " · " : ""}
+            </span>
+          ))}
+          . A blank line starts a new paragraph; a line starting &quot;# &quot; is a heading. A field with nothing
+          on file prints as [NOT ON FILE] and is added to the sign-off checklist.
+        </div>
+        <button
+          type="submit"
+          style={{ minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}
+        >
+          Save
         </button>
       </form>
     </div>

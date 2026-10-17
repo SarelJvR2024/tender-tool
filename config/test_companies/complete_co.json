@@ -78,5 +78,12 @@
     }
   ],
   "gaps": [],
-  "_single_key_person_note": "fill_docx_forms.py's current main() always uses key_people[0] as the signatory for both the PL and DS1 CV-summary rows (matches real Klipcorp data, which also has one key person covering both positions) - this fixture matches that, rather than testing a two-signatory scenario the scripts don't support yet."
+  "_single_key_person_note": "fill_docx_forms.py's current main() always uses key_people[0] as the signatory for both the PL and DS1 CV-summary rows (matches real Klipcorp data, which also has one key person covering both positions) - this fixture matches that, rather than testing a two-signatory scenario the scripts don't support yet.",
+  "document_templates": {
+    "_note": "SYNTHETIC. This test company's own (made-up) letter wording, stored the way company_document_templates (0037) stores a guideline: its own words, {{field}} marks for the tender's details. The other test companies have none, so their packs show the letter as 'not set up' (Hardcoded-Assumptions-Audit Q7).",
+    "authority_to_sign": {
+      "mode": "ai_guideline",
+      "guideline": "# RESOLUTION OF THE BOARD - SIGNING AUTHORITY\n\nTest Complete Engineering's board resolved that {{signatory_name}} ({{signatory_capacity}}) signs for {{company_legal_name}} on tender {{tender_reference}}: {{tender_description}}.\n\nDated {{date}}.\n\n__________________\n{{director_name}}\nDirector, for the board"
+    }
+  }
 }

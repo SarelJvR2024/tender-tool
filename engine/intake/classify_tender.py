@@ -36,7 +36,7 @@ new detection or scoring method:
    discovered tender's downloaded PDF.
 
 Usage (local check, no Supabase):
-    python3 engine/intake/classify_tender.py <file-or-dir>... [--title T] [--buyer B] [--profile config/x.json]
+    python3 engine/intake/classify_tender.py <file-or-dir>... [--title T] [--buyer B] --profile config/x.json
 """
 import argparse
 import datetime
@@ -299,7 +299,7 @@ def main():
     ap.add_argument("paths", nargs="+")
     ap.add_argument("--title", default="")
     ap.add_argument("--buyer", default="")
-    ap.add_argument("--profile", default=None)
+    ap.add_argument("--profile", required=True, help="the company profile JSON to assess fit for (no default company)")
     args = ap.parse_args()
     import requirements as req
     import shutil

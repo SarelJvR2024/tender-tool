@@ -225,7 +225,13 @@ def assess_fit(categories, signals, depth, profile):
     return verdict, reasons
 
 
-DEFAULT_PROFILE_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "config", "klipcorp_profile.json")
+# No default company profile (Sarel, 2026-10-17: "Nothing must be klipcorp
+# specific, they are just a company, not a benchmark"). Every caller names the
+# company it is scoring for: the Discovery fan-out builds each company's
+# profile from its own rows (company_profiles.py), the bridge from the job's
+# company, and a CLI run takes --profile. This used to default to
+# config/klipcorp_profile.json.
+DEFAULT_PROFILE_PATH = None
 
 # Used only when no profile file can be read at all - this module is meant to
 # run for any tenant's company profile (see load_company_profile), not just
@@ -248,6 +254,10 @@ def load_company_profile(path=None):
     the profile's own `gaps` list when there is no explicit field, since that
     is where this currently lives in the real data."""
     path = path or DEFAULT_PROFILE_PATH
+    if not path:
+        raise ValueError("No company profile given - pass the profile of the company you are scoring for "
+                         "(--profile config/test_companies/<company>.json, or that company's own exported "
+                         "profile). There is deliberately no default company.")
     try:
         profile = json.load(open(path))
     except (OSError, json.JSONDecodeError) as e:
@@ -294,26 +304,21 @@ def offices_from_company(company):
     return []
 
 
-def assess_release(release, profile, fetch_document=True, max_documents=3):
+def read_release(release, fetch_document=True, max_documents=3, fetch_text=None):
+    """The company-independent half of an assessment: categories, document
+    depth and signals read from the tender's own documents. Done ONCE per
+    tender, however many companies it is then scored for (score_release) -
+    the Discovery fan-out (watch_new_tenders.py) scores the same reading for
+    every company, so a buyer's server is asked for each document once, not
+    once per company. `fetch_text(url) -> (text, error)` defaults to
+    fetch_pdf_text; a test passes its own."""
+    fetch_text = fetch_text or fetch_pdf_text
     categories = categorize(release.get("title"), release.get("description"),
                              release.get("procurement_category"))
-
     if release.get("is_closed"):
-        verdict, reasons = "closed", ["Closing date already passed - kept for reference, not actionable."]
-        return {
-            "contract_number": release.get("contract_number"),
-            "buyer": release.get("buyer"),
-            "title": release.get("title"),
-            "description": release.get("description"),
-            "closing_date": release.get("closing_date"),
-            "categories": categories,
-            "document_depth": "not_fetched",
-            "signals": {},
-            "confidence_note": "Document not fetched - this tender's closing date has already passed.",
-            "verdict": verdict,
-            "reasons": reasons,
-            "score_outlook": estimate_score_outlook("", "not_fetched", profile),
-        }
+        return {"categories": categories, "closed": True, "depth": "not_fetched", "signals": {},
+                "confidence": "Document not fetched - this tender's closing date has already passed.",
+                "text": ""}
 
     depth, signals, confidence = "metadata_only", {}, "No document was fetched for this assessment."
     best_text = ""
@@ -321,7 +326,7 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
     if fetch_document and docs:
         fetch_notes = []
         for doc in docs[:max_documents]:
-            text, err = fetch_pdf_text(doc["url"])
+            text, err = fetch_text(doc["url"])
             if err:
                 fetch_notes.append(f"{doc.get('title') or doc['url']}: {err}")
                 continue
@@ -339,12 +344,23 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
             depth = "no_extractable_text"
             confidence = "Every attached document failed to download or read: " + "; ".join(fetch_notes)
             signals, _ = extract_signals("", depth)
+    return {"categories": categories, "closed": False, "depth": depth, "signals": signals,
+            "confidence": confidence, "text": best_text}
 
-    verdict, reasons = assess_fit(categories, signals, depth, profile)
-    # Suitability (verdict/reasons above) and scoring outlook are deliberately
-    # separate answers: a strong-fit tender can still be one the company would
-    # score poorly on, and vice versa. See score_outlook.py's docstring.
-    outlook = estimate_score_outlook(best_text, depth, profile, signals.get("cidb_grading"))
+
+def score_release(release, reading, profile):
+    """The per-company half: one company's fit verdict and scoring outlook,
+    from read_release()'s reading and THAT company's own profile."""
+    categories, depth, signals = reading["categories"], reading["depth"], reading["signals"]
+    if reading["closed"]:
+        verdict, reasons = "closed", ["Closing date already passed - kept for reference, not actionable."]
+        outlook = estimate_score_outlook("", "not_fetched", profile)
+    else:
+        verdict, reasons = assess_fit(categories, signals, depth, profile)
+        # Suitability (verdict/reasons above) and scoring outlook are deliberately
+        # separate answers: a strong-fit tender can still be one the company would
+        # score poorly on, and vice versa. See score_outlook.py's docstring.
+        outlook = estimate_score_outlook(reading["text"], depth, profile, signals.get("cidb_grading"))
     return {
         "contract_number": release.get("contract_number"),
         "buyer": release.get("buyer"),
@@ -356,11 +372,16 @@ def assess_release(release, profile, fetch_document=True, max_documents=3):
         "categories": categories,
         "document_depth": depth,
         "signals": signals,
-        "confidence_note": confidence,
+        "confidence_note": reading["confidence"],
         "verdict": verdict,
         "reasons": reasons,
         "score_outlook": outlook,
     }
+
+
+def assess_release(release, profile, fetch_document=True, max_documents=3, fetch_text=None):
+    """One release for one profile (read + score). Unchanged result shape."""
+    return score_release(release, read_release(release, fetch_document, max_documents, fetch_text), profile)
 
 
 def main():
@@ -371,7 +392,7 @@ def main():
     ap.add_argument("--category-keyword", default=None,
                      help="only assess releases whose title/description contains this (case-insensitive)")
     ap.add_argument("--profile", default=None,
-                     help=f"path to a company profile JSON (default: {DEFAULT_PROFILE_PATH})")
+                     required=True, help="path to the company profile JSON to score for (no default company)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
 

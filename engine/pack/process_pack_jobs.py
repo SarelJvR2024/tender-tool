@@ -284,6 +284,27 @@ def _ts():
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
+def load_document_templates(client, company_id, dest_dir):
+    """{document_type: template} from the company's company_document_templates
+    rows (0037), in the shape engine/company_documents.produce() takes. An
+    uploaded copy that can't be fetched is passed with path None, so the pack
+    says so instead of silently leaving the document out. A document type with
+    no row is simply absent = "not set up"."""
+    out = {}
+    for row in client.select("company_document_templates", {"company_id": company_id}):
+        t = {"mode": row["mode"], "guideline": row.get("guideline"),
+             "original_filename": row.get("original_filename")}
+        if row["mode"] == "uploaded":
+            try:
+                t["path"] = client.download("company-documents", row["storage_path"],
+                                            os.path.join(dest_dir, row["document_type"],
+                                                         os.path.basename(row["storage_path"])))
+            except RuntimeError:
+                t["path"] = None
+        out[row["document_type"]] = t
+    return out
+
+
 def gather(client, job, work):
     """Downloads/reads everything for one job into `work`. Returns the kwargs
     for build_submission_pack() plus the path of the confirmed pack.yaml."""
@@ -433,6 +454,10 @@ def gather(client, job, work):
                                    os.path.join(work, "logo", os.path.basename(company["logo_storage_path"])))
         except RuntimeError:
             logo = None
+
+    # The company's own letters/documents (0037): uploaded copies are fetched
+    # here so the pack binds in the exact file; guidelines travel as text.
+    profile["document_templates"] = load_document_templates(client, company["id"], os.path.join(work, "company_templates"))
 
     closing_time = None
     if tender.get("closing_date") and "T" in tender["closing_date"]:

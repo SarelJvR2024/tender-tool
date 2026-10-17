@@ -217,22 +217,13 @@ def _http_get(url):
 
 def profile_from_company(client, company_id):
     """assess_tender's profile shape, from the company's own rows instead of a
-    local JSON file (the Discovery cron uses config/<company>_profile.json;
-    the bridge has the real rows). Disciplines = the union of the company's
-    tagged Experience Library items (0012 uses exactly assess_tender's
-    DISCIPLINE_KEYWORDS keys); CIDB from companies.cidb_grading (0018);
-    offices from company_offices (0015), else derived from the registered
-    address the same way assess_tender.offices_from_company() does."""
-    company = (client.select("companies", {"id": company_id}) or [{}])[0]
-    items = client.select("experience_items", {"company_id": company_id})
-    disciplines = sorted({d for i in items if i.get("tagged_at") for d in (i.get("disciplines") or [])})
-    offices = [{k: o.get(k) for k in ("province", "district_municipality", "local_municipality", "town", "office_kind")}
-               for o in client.select("company_offices", {"company_id": company_id})]
-    if not offices:
-        offices = intake.assess_tender.offices_from_company({"registered_address": company.get("registered_address")})
-    return {"disciplines": disciplines, "bee_level": company.get("bee_level"),
-            "black_ownership_pct": company.get("black_ownership_pct"),
-            "has_cidb_grading": bool(company.get("cidb_grading")), "offices": offices}
+    local JSON file. Shared with the Discovery fan-out
+    (engine/discovery/company_profiles.py), so the intake and the national feed
+    build a company's profile the same way: disciplines from its tagged
+    Experience Library items, CIDB from companies.cidb_grading (0018), offices
+    from company_offices (0015) else derived from the registered address."""
+    import company_profiles
+    return company_profiles.profile_from_company_rows(client, company_id)
 
 
 def _template_storage_path(tender, doc_type, local, sources):
