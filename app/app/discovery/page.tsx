@@ -180,6 +180,17 @@ export default async function DiscoveryPage({
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
+      {/* The right-hand "Closes / action / docs" rail is a fixed flex-basis
+          with flex-shrink: 0 so it keeps its width on desktop - but that same
+          fixed width means that once a card wraps it to its own line on a
+          phone (it always does: 320px + 180px never fits a phone's content
+          width), it stays stuck at 180px on the left with empty space next to
+          it, instead of using the row it has to itself. */}
+      <style>{`
+        @media (max-width: 600px) {
+          .disco-right { flex: 1 1 100% !important; text-align: left !important; }
+        }
+      `}</style>
       <SiteNav active="discovery" />
 
       <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
@@ -497,7 +508,7 @@ export default async function DiscoveryPage({
                   )}
                 </div>
 
-                <div style={{ flex: "0 0 180px", textAlign: "right" }}>
+                <div className="disco-right" style={{ flex: "0 0 180px", textAlign: "right" }}>
                   <div style={{ fontSize: 11, color: "#9A9684", marginBottom: 2 }}>Closes</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 10 }}>
                     {o.closing_date ? new Date(o.closing_date).toLocaleString("en-ZA", SAST_DATETIME) : "-"}
