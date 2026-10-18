@@ -37,12 +37,28 @@ function Pill({ status }: { status: ReviewStatus }) {
   );
 }
 
+// At-a-glance totals across every section, same idea as the summary chips on
+// the facts card above and the vault-health chips on the Company page - a
+// screen built to answer "can I compile this pack" should lead with that
+// answer, not make you expand every section to add it up yourself.
+function SummaryChip({ count, label, bg, color }: { count: number; label: string; bg: string; color: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color }}>
+      {count} {label}
+    </span>
+  );
+}
+
 export async function PackReview({ tenderId }: { tenderId: string }) {
   const snapshot = await loadPackReviewSnapshot(tenderId);
 
   if (!snapshot.mapped) {
     return null; // family's returnable list isn't mapped - nothing to preview (same gate as compliance-data.ts's own packReadiness.checked)
   }
+
+  const allItems = snapshot.sections.flatMap((s) => s.items);
+  const confirmedCount = allItems.filter((i) => i.status === "confirmed").length;
+  const toLookAtCount = allItems.length - confirmedCount;
 
   return (
     <div id="pack-review" style={card}>
@@ -53,6 +69,19 @@ export async function PackReview({ tenderId }: { tenderId: string }) {
         section, use &quot;Change&quot; to jump to where it&apos;s edited, then confirm below - &quot;Generate submission
         pack&quot; needs this review first.
       </div>
+
+      {allItems.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+          {toLookAtCount === 0 ? (
+            <SummaryChip count={confirmedCount} label="confirmed - ready to compile" bg="#DCFCE7" color="#15803D" />
+          ) : (
+            <>
+              {confirmedCount > 0 && <SummaryChip count={confirmedCount} label="confirmed" bg="#DCFCE7" color="#15803D" />}
+              <SummaryChip count={toLookAtCount} label={toLookAtCount === 1 ? "item to look at" : "items to look at"} bg="#FEF3C7" color="#B45309" />
+            </>
+          )}
+        </div>
+      )}
 
       {snapshot.reviewed && (
         <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "8px 14px", marginBottom: 12, fontSize: 12, color: "#15803D" }}>
