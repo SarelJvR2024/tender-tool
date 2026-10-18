@@ -9,9 +9,12 @@ import { createClient } from "@/lib/supabase/client";
  * Auth settings before this works - this page alone doesn't do that.
  */
 export default function LoginPage() {
-  const supabase = createClient();
-
   const signInWith = async (provider: "google" | "azure") => {
+    // Created here, not at the top of the component: this page is
+    // statically prerendered, and instantiating the Supabase client during
+    // that prerender throws if the env vars aren't present at build time
+    // (see lib/supabase/client.ts) - only ever needed once someone clicks.
+    const supabase = createClient();
     await supabase.auth.signInWithOAuth({
       provider,
       options: {
