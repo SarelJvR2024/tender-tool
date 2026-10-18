@@ -1,0 +1,2328 @@
+{
+ "note": "Real records read 2026-10-17 by award_outcomes.py (public: SANRAL awarded/closed pages, eTenders Awarded tab). Personal fields were already dropped by award_outcomes.py at parse time.",
+ "portal": {
+  "records": [
+   {
+    "source": "etenders_portal_awarded",
+    "source_url": "https://www.etenders.gov.za/Home/opportunities?id=2",
+    "portal_id": 157638,
+    "ocid": "ocds-9t57fa-157638",
+    "bid_number": "CONTRACT SANRAL: X.003-080-2024/1",
+    "buyer": "South African National Roads Agency Soc Limited (SANRAL)",
+    "title": "AD-HOC STRUCTURAL AND DRAINAGE SERVICES IN THE SOUTHERN REGION – EMERGENCY REPAIR WORKS (REPAIR OF CICIRA RIVER BRIDGE B4117 AND CULVERT C0246 (EFATA) ON THE R61 SECTION 7 KM 43.6).",
+    "category": "Civil engineering",
+    "procurement_type": "Request for Bid(Open-Tender)",
+    "province": "Eastern Cape",
+    "published": "2026-05-29",
+    "closing_date": "2026-06-26",
+    "award_date": "2026-08-28",
+    "awards": [
+     {
+      "supplier": "BLACK TORRES 96",
+      "amount_zar": 22681492.44,
+      "amount_raw": "R22 681 492,44",
+      "enterprise_type": "QSE",
+      "award_date": "2026-08-28"
+     }
+    ],
+    "bidders": [
+     {
+      "bidder": "MORIEL INFRASTRUCTURE GROUP",
+      "amount_zar": 21734495.15
+     },
+     {
+      "bidder": "BLACK TORRES 96",
+      "amount_zar": 22681492.44
+     },
+     {
+      "bidder": "CHAUKE BUSINESS ENTERPRISE",
+      "amount_zar": 17872100.55
+     },
+     {
+      "bidder": "DEVOMIX",
+      "amount_zar": 17087604.48
+     },
+     {
+      "bidder": "DLN CONSULTING",
+      "amount_zar": 16509959.48
+     },
+     {
+      "bidder": "KKG INVESTMENTS",
+      "amount_zar": 17681973.35
+     },
+     {
+      "bidder": "KULA AFRIKA AGRICULTURE AND CONSTRUCTION PROJECTS",
+      "amount_zar": 19858856.08
+     },
+     {
+      "bidder": "LITTLE ROCKY DEVELOPMENT PROJECTS",
+      "amount_zar": 16874154.07
+     },
+     {
+      "bidder": "MAKALI PLANT AND CONSTRUCTION",
+      "amount_zar": 20734140.05
+     },
+     {
+      "bidder": "MBETE GLOBAL INVESTMENTS",
+      "amount_zar": 22270684.95
+     },
+     {
+      "bidder": "Z K S AND NAM GENERAL TRADING",
+      "amount_zar": 17406081.78
+     },
+     {
+      "bidder": "MAHCON",
+      "amount_zar": 23021958.4
+     },
+     {
+      "bidder": "HOLOBYE TRADING 2",
+      "amount_zar": 25797971.28
+     },
+     {
+      "bidder": "CUBICLE FACILITIES",
+      "amount_zar": 20308031.1
+     },
+     {
+      "bidder": "Tefla Group JV Leafy Space",
+      "amount_zar": 29675899.59
+     },
+     {
+      "bidder": "INDLELA ROAD CONSTRUCTION",
+      "amount_zar": 32076609.46
+     },
+     {
+      "bidder": "VECTORCORE PARTNERS",
+      "amount_zar": 19364232.45
+     },
+     {
+      "bidder": "ZIMELO",
+      "amount_zar": 18626424.76
+     },
+     {
+      "bidder": "ESOTHO TRADING",
+      "amount_zar": 22980155.6
+     },
+     {
+      "bidder": "DAMIANS CONTRACTORS",
+      "amount_zar": 34585379.45
+     },
+     {
+      "bidder": "NDOKO PROJECTS",
+      "amount_zar": 25838427.46
+     },
+     {
+      "bidder": "MANTISHE CONSTRUCTION",
+      "amount_zar": 23572840.99
+     },
+     {
+      "bidder": "THELBRIDGE ENTERPRISE",
+      "amount_zar": 41168820.1
+     },
+     {
+      "bidder": "WHITE LEOPARD TRADING",
+      "amount_zar": 29441181.05
+     },
+     {
+      "bidder": "AXTON MATRIX CONSTRUCTION",
+      "amount_zar": 32295797.01
+     },
+     {
+      "bidder": "FRANCE MF GROUP",
+      "amount_zar": 24988915.1
+     },
+     {
+      "bidder": "TARCRON PROJECTS",
+      "amount_zar": 23210165.38
+     },
+     {
+      "bidder": "AZRA DEVELOPMENTS",
+      "amount_zar": 20335025.7
+     },
+     {
+      "bidder": "ELEPHAN-TE TRADING",
+      "amount_zar": 25720897.13
+     },
+     {
+      "bidder": "VIDE INVESTMENTS",
+      "amount_zar": 34411050.88
+     },
+     {
+      "bidder": "AMANDLOMDALI",
+      "amount_zar": 31052597.28
+     }
+    ]
+   },
+   {
+    "source": "etenders_portal_awarded",
+    "source_url": "https://www.etenders.gov.za/Home/opportunities?id=2",
+    "portal_id": 172895,
+    "ocid": "ocds-9t57fa-172895",
+    "bid_number": "E2934NTCSAMWP",
+    "buyer": "ESKOM",
+    "title": "The provision of Owner’s Engineer (OE) services for the Switching and Harmonic Study for Carmel Shunt Capacitor Bank 1",
+    "category": "Professional, scientific and technical activities",
+    "procurement_type": "Request for Quotation",
+    "province": "National",
+    "published": "2026-10-01",
+    "closing_date": "2026-10-02",
+    "award_date": "2026-10-01",
+    "awards": [
+     {
+      "supplier": "IYANDA POWER TECHNOLOGIES",
+      "amount_zar": 435950.0,
+      "amount_raw": "R435 950,00",
+      "enterprise_type": "EME",
+      "award_date": "2026-10-01"
+     }
+    ],
+    "bidders": [
+     {
+      "bidder": "EYA BANTU GROUP",
+      "amount_zar": 1634244.0
+     },
+     {
+      "bidder": "K2018239548 (SOUTH AFRICA)",
+      "amount_zar": 723044.0
+     },
+     {
+      "bidder": "ASCENG-Thabile",
+      "amount_zar": 1049200.0
+     },
+     {
+      "bidder": "IYANDA POWER TECHNOLOGIES",
+      "amount_zar": 435950.0
+     },
+     {
+      "bidder": "E-SQUARE BIGEN JOINT VENTURE",
+      "amount_zar": 1220032.0
+     },
+     {
+      "bidder": "LYON AND PARTNERS",
+      "amount_zar": 1585700.0
+     },
+     {
+      "bidder": "ZUTARI",
+      "amount_zar": 1683209.0
+     }
+    ]
+   },
+   {
+    "source": "etenders_portal_awarded",
+    "source_url": "https://www.etenders.gov.za/Home/opportunities?id=2",
+    "portal_id": 174379,
+    "ocid": "ocds-9t57fa-174379",
+    "bid_number": "Q27-171-SN",
+    "buyer": "uMngeni-uThukela Water",
+    "title": "Supply and delivery of AUMA Multi-turn Actuators and Controllers",
+    "category": "Supplies: Electrical Equipment",
+    "procurement_type": "Sole source bidding",
+    "province": "KwaZulu-Natal",
+    "published": "2026-10-15",
+    "closing_date": "2026-10-16",
+    "award_date": "2026-10-14",
+    "awards": [
+     {
+      "supplier": "AUMANAT",
+      "amount_zar": 551189.0,
+      "amount_raw": "R551 189,00",
+      "enterprise_type": "EME",
+      "award_date": "2026-10-14"
+     }
+    ],
+    "bidders": []
+   }
+  ]
+ },
+ "sanral": {
+  "awarded": {
+   "records": [
+    {
+     "source": "sanral_awarded",
+     "source_url": "https://www.nra.co.za/awarded-tenders/for-upgrading-of-national-route-11-section-2-from-elandslaagte-km-28-00-to-nkunzi-river-km-47-80",
+     "attribution": "Source: SANRAL (nra.co.za), copyright SANRAL; reproduced unmodified with acknowledgement under SANRAL's website Terms & Conditions.",
+     "reference": "CONTRACT SANRAL N.011-020-2018/1",
+     "project_type": "Construction Projects",
+     "province": "National",
+     "closing_date_raw": "2024/09/13 11:00",
+     "title": "FOR UPGRADING OF NATIONAL ROUTE 11 SECTION 2 FROM ELANDSLAAGTE (km 28.00) TO NKUNZI RIVER (km 47.80) CONTRACT SANRAL N.011-020-2018/1",
+     "awarded_to": "Down Touch Inventments (Pty) Ltd",
+     "bbbee_points": "10.00",
+     "full_points": "100.00",
+     "approved_contract_amount_raw": "R 1 209 098 827.03",
+     "approved_contract_amount_zar": 1209098827.03,
+     "awarded_on_raw": "24 November 2025",
+     "awarded_on": "2025-11-24",
+     "contract_start_date_raw": null,
+     "contract_duration": "40 Months",
+     "consultant": "None",
+     "estimate_raw": "TBC",
+     "estimate_zar": null,
+     "opening_register": [
+      {
+       "tenderer": "Down Touch Inventments (Pty) Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R 1 209 098 827.03",
+         "amount_zar": 1209098827.03
+        }
+       ],
+       "alt_tender": "None",
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Raubex Construction (Pty) Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R 1 658 888 888.00",
+         "amount_zar": 1658888888.0
+        }
+       ],
+       "alt_tender": "None",
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "CSCEC-Grinaker Joint Venture",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R 1 555 910 622.78",
+         "amount_zar": 1555910622.78
+        }
+       ],
+       "alt_tender": "None",
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Unik Joint Venture",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R 1 542 388 690.19",
+         "amount_zar": 1542388690.19
+        }
+       ],
+       "alt_tender": "None",
+       "notes": "B-BBEE Level 1"
+      }
+     ],
+     "opening_register_note": null
+    },
+    {
+     "source": "sanral_awarded",
+     "source_url": "https://www.nra.co.za/awarded-tenders/contract-sanral-x-003-080-2024-1",
+     "attribution": "Source: SANRAL (nra.co.za), copyright SANRAL; reproduced unmodified with acknowledgement under SANRAL's website Terms & Conditions.",
+     "reference": "CONTRACT SANRAL: X.003-080-2024/1",
+     "project_type": "Construction Projects",
+     "province": "Eastern Cape",
+     "closing_date_raw": "2026/06/26 12:00",
+     "title": "AD-HOC STRUCTURAL AND DRAINAGE SERVICES IN THE SOUTHERN REGION – EMERGENCY REPAIR WORKS (REPAIR OF CICIRA RIVER BRIDGE B4117 AND CULVERT C0246 (EFATA) ON THE R61 SECTION 7 KM 43.6). CONTRACT SANRAL: X.003-080-2024/1",
+     "awarded_to": "Black Torres JV",
+     "bbbee_points": "20",
+     "full_points": "100",
+     "approved_contract_amount_raw": "R 22 681 492.44",
+     "approved_contract_amount_zar": 22681492.44,
+     "awarded_on_raw": "31 August 2026",
+     "awarded_on": "2026-08-31",
+     "contract_start_date_raw": null,
+     "contract_duration": null,
+     "consultant": null,
+     "estimate_raw": null,
+     "estimate_zar": null,
+     "opening_register": [
+      {
+       "tenderer": "Mbete Global Investments",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R22 270 684.95",
+         "amount_zar": 22270684.95
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Little Rocky Simairo JV",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R16 874 154.07",
+         "amount_zar": 16874154.07
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "France MF Group",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R24 988 915.10",
+         "amount_zar": 24988915.1
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Devomix Construction",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R17 087 604.48",
+         "amount_zar": 17087604.48
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Axton Matrix",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R32 295 797.01",
+         "amount_zar": 32295797.01
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Intertrading Africa",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R29 675 899.59",
+         "amount_zar": 29675899.59
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Indlela Road Construction",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R32 076 609.46",
+         "amount_zar": 32076609.46
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "DLN Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R16 509 959.48",
+         "amount_zar": 16509959.48
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Elephante Trading",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R25 720 897.13",
+         "amount_zar": 25720897.13
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Mahcon (Pty) Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R23 021 958.40",
+         "amount_zar": 23021958.4
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Moriel Infrastructure",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R21 734 495.15",
+         "amount_zar": 21734495.15
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Push Zeal White Leopard",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R29 441 181.05",
+         "amount_zar": 29441181.05
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "ZKS & NAM",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R17 406 081.78",
+         "amount_zar": 17406081.78
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "KKG Investments",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R17 681 973.35",
+         "amount_zar": 17681973.35
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Thelbridge Enterprise",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R41 168 820.10",
+         "amount_zar": 41168820.1
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Holobye Trading",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R25 797 971.28",
+         "amount_zar": 25797971.28
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Azra Development cc",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R20 335 025.70",
+         "amount_zar": 20335025.7
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Tarcron Projects",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R23 210 165.38",
+         "amount_zar": 23210165.38
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Black Torres JV",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R22 681 492.44",
+         "amount_zar": 22681492.44
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Vide Investments",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R34 411 050.88",
+         "amount_zar": 34411050.88
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Zimele (Pty) Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R18 626 424.76",
+         "amount_zar": 18626424.76
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Vectorecore Partners",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R19 364 232.45",
+         "amount_zar": 19364232.45
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Cubicle Facilities",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R20 308 031.10",
+         "amount_zar": 20308031.1
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Esotho Trading",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R22 980 155.60",
+         "amount_zar": 22980155.6
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Mantishe Construction",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R23 572 840.99",
+         "amount_zar": 23572840.99
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Chauke Business enterprise",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R17 872 100.55",
+         "amount_zar": 17872100.55
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Damians Contractors",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R34 585 379.45",
+         "amount_zar": 34585379.45
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Makali Plant & Construction",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R20 734 140.05",
+         "amount_zar": 20734140.05
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Kula Afrika Agriculture",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R19 858 856.08",
+         "amount_zar": 19858856.08
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Ndoko Projects (Pty) Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R25 838 427.46",
+         "amount_zar": 25838427.46
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "Amandlomdali (Pty) Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R31 052 597.28",
+         "amount_zar": 31052597.28
+        }
+       ],
+       "bbbee": null,
+       "alt_tender": null,
+       "notes": null
+      }
+     ],
+     "opening_register_note": null
+    },
+    {
+     "source": "sanral_awarded",
+     "source_url": "https://www.nra.co.za/awarded-tenders/contract-sanral-r-062-070-2021-1f",
+     "attribution": "Source: SANRAL (nra.co.za), copyright SANRAL; reproduced unmodified with acknowledgement under SANRAL's website Terms & Conditions.",
+     "reference": "CONTRACT SANRAL R.062-070-2021/1F",
+     "project_type": "Consulting Services",
+     "province": "National",
+     "closing_date_raw": "Friday, 23 April 2021 at 11h00",
+     "title": "CONSULTING ENGINEERING SERVICES FOR THE SPECIAL MAINTENANCE ON NATIONAL ROUTE R62 SECTION 7 BETWEEN JOUBERTINA (km 0.0) AND KAREEDOUW (km 42.50) CONTRACT SANRAL R.062-070-2021/1F",
+     "awarded_to": "NEXOR 312 (PTY) LTD T/A VNA CONSULTING (PTY) LTD",
+     "bbbee_points": "10",
+     "full_points": "99.49",
+     "approved_contract_amount_raw": "R 58 628 549.05",
+     "approved_contract_amount_zar": 58628549.05,
+     "awarded_on_raw": "08.12.2021",
+     "awarded_on": null,
+     "contract_start_date_raw": null,
+     "contract_duration": null,
+     "consultant": null,
+     "estimate_raw": null,
+     "estimate_zar": null,
+     "opening_register": [
+      {
+       "tenderer": "Mpamot Africa",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Proper Consulting Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Map Africa Consulting Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "V3 Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Ndodana Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Mariswe Pty Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Bosch Projects",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 2"
+      },
+      {
+       "tenderer": "NKRS",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Iliso",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R59 887 393.10",
+         "amount_zar": 59887393.1
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Ero Engineering",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Element Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R66 385 944.20",
+         "amount_zar": 66385944.2
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 2"
+      },
+      {
+       "tenderer": "Merchelles Collective",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "GIBB Engineering",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "EAS",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R58 299 654.80",
+         "amount_zar": 58299654.8
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 2"
+      },
+      {
+       "tenderer": "Africoast",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "SMEC",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R59 939 569.75",
+         "amount_zar": 59939569.75
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Ingerop SA",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R60 067 499.20",
+         "amount_zar": 60067499.2
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "MSBA",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 2"
+      },
+      {
+       "tenderer": "SNA Civil & Structural",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R59 933 776.05",
+         "amount_zar": 59933776.05
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Lunar Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "iX Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Zutari",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "VNA Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R58 628 549.05",
+         "amount_zar": 58628549.05
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "EFG Engineers Pty Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE level 1"
+      },
+      {
+       "tenderer": "Afrisa Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Leo Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Nathoo Mbenyane Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Glad Africa",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R59 347 416.35",
+         "amount_zar": 59347416.35
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Naidu Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R59 063 827.49",
+         "amount_zar": 59063827.49
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "BVi Consulting Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R59 474 738.60",
+         "amount_zar": 59474738.6
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level"
+      },
+      {
+       "tenderer": "Lathiso",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Delta Infrastructure",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level"
+      },
+      {
+       "tenderer": "GG&G",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": null
+      },
+      {
+       "tenderer": "ROMH Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R58 884 110.10",
+         "amount_zar": 58884110.1
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "JG Afrika Pty Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Infrachamps Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Bovicon Onmi JV",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      },
+      {
+       "tenderer": "Klipcorp Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "alt_tender": null,
+       "notes": "B-BBEE Level 1"
+      }
+     ],
+     "opening_register_note": null
+    },
+    {
+     "source": "sanral_awarded",
+     "source_url": "https://www.nra.co.za/awarded-tenders/sanral-ho-57000-1002-2026-1",
+     "attribution": "Source: SANRAL (nra.co.za), copyright SANRAL; reproduced unmodified with acknowledgement under SANRAL's website Terms & Conditions.",
+     "reference": "SANRAL HO 57000/1002/2026/1",
+     "project_type": "Other Projects",
+     "province": "",
+     "closing_date_raw": "2026/03/12 11:00",
+     "title": "FOR THE APPOINTMENT OF A SERVICE PROVIDER FOR THE PROVISION OF: ROAD CONDITION SURVEY SERVICES FOR A PERIOD OF 6 MONTHS. SANRAL HO 57000/1002/2026/1",
+     "awarded_to": "1. ARRB Systems SA (Pty) Ltd (for Package A) 2. Specialized Road Technologies (Pty) Ltd (for Package B)",
+     "bbbee_points": "1. ARRB Systems (Pty)Ltd (scored 10 Points for Package A and 20 Points for Package B) 2. Specialized Road Technologies (Pty) Ltd (scored 20 Points for Package B).",
+     "full_points": "1. ARRB Systems (Pty)Ltd (scored 100 Points for Package A and -385.62 Points for Package B) 2. Specialized Road Technologies (Pty) Ltd (scored 100 Points for Package B).",
+     "approved_contract_amount_raw": "1. ARRB Systems SA (Pty) Ltd (Package A) = R120,124,940.50 2. Specialized Road Technologies (Pty) Ltd (Package B) = R14,833,351.31",
+     "approved_contract_amount_zar": 1.1201249405021484e+20,
+     "awarded_on_raw": "15 April 2026",
+     "awarded_on": "2026-04-15",
+     "contract_start_date_raw": "15 April 2026",
+     "contract_duration": "6 months",
+     "consultant": null,
+     "estimate_raw": null,
+     "estimate_zar": null,
+     "opening_register": [
+      {
+       "tenderer": "Specialized Road Technologies",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R14 833 351.31",
+         "amount_zar": 14833351.31
+        }
+       ],
+       "alt_tender": "N/A",
+       "notes": "Tendered for - Package B only"
+      },
+      {
+       "tenderer": "ARRB Systems SA (PTY) Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R120 124 940.50",
+         "amount_zar": 120124940.5
+        }
+       ],
+       "alt_tender": "N/A",
+       "notes": "Tendered for - Package A"
+      },
+      {
+       "tenderer": "ARRB Systems SA (PTY) Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered",
+         "amount_raw": "R104 875 059.50",
+         "amount_zar": 104875059.5
+        }
+       ],
+       "alt_tender": "N/A",
+       "notes": "Tendered for - Package B"
+      }
+     ],
+     "opening_register_note": null
+    }
+   ]
+  },
+  "closed": {
+   "records": [
+    {
+     "source": "sanral_closed",
+     "source_url": "https://www.nra.co.za/closed-tenders/nra-2026-0084-b",
+     "attribution": "Source: SANRAL (nra.co.za), copyright SANRAL; reproduced unmodified with acknowledgement under SANRAL's website Terms & Conditions.",
+     "reference": "NRA 2026/0084(B)",
+     "project_type": "Consulting Services",
+     "province": "Western Cape",
+     "closing_date_raw": "2026/10/02 12:00",
+     "title": "FOR THE PROVISION OF ROUTINE ROAD MAINTENANCE CONSULTING SERVICES FOR THE PROJECTS IN THE WESTERN CAPE PROVINCE NRA 2026/0084(B)",
+     "awarded_to": null,
+     "bbbee_points": null,
+     "full_points": null,
+     "approved_contract_amount_raw": null,
+     "approved_contract_amount_zar": null,
+     "awarded_on_raw": null,
+     "awarded_on": null,
+     "contract_start_date_raw": null,
+     "contract_duration": null,
+     "consultant": null,
+     "estimate_raw": null,
+     "estimate_zar": null,
+     "opening_register": [
+      {
+       "tenderer": "VST",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R37 099 037.38",
+         "amount_zar": 37099037.38
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R22 046 454.06",
+         "amount_zar": 22046454.06
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R36 985 186.80",
+         "amount_zar": 36985186.8
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Civil Design",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 431 778.91",
+         "amount_zar": 23431778.91
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Madan Sign & Associates",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R39 1453 554.20",
+         "amount_zar": 391453554.2
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 304 168.31",
+         "amount_zar": 23304168.31
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R36 744 094.43",
+         "amount_zar": 36744094.43
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Ikusaselihle Construction",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R539 343 850.26",
+         "amount_zar": 539343850.26
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 191 801.74",
+         "amount_zar": 23191801.74
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R539 892 373.00",
+         "amount_zar": 539892373.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Klipcorp Pty Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R39 057 887.00",
+         "amount_zar": 39057887.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 004 609.96",
+         "amount_zar": 23004609.96
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R38 280 869.00",
+         "amount_zar": 38280869.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Moralla Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R37 372 182.85",
+         "amount_zar": 37372182.85
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R22 744 120.66",
+         "amount_zar": 22744120.66
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R37 443 665.00",
+         "amount_zar": 37443665.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Wamil Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R42 955 743.00",
+         "amount_zar": 42955743.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R26 669 190.00",
+         "amount_zar": 26669190.0
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R42 826 943.00",
+         "amount_zar": 42826943.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Nankhoo",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": null,
+         "amount_zar": null
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": null,
+         "amount_zar": null
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Dyosana Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R41 209 082.75",
+         "amount_zar": 41209082.75
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R24 501 526.11",
+         "amount_zar": 24501526.11
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R41 174 525.25",
+         "amount_zar": 41174525.25
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "PMAX Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R37 957 726.90",
+         "amount_zar": 37957726.9
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 204 367.90",
+         "amount_zar": 23204367.9
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R37 843 876.90",
+         "amount_zar": 37843876.9
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Dinokeng Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R41 053 890.90",
+         "amount_zar": 41053890.9
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R26 171 539.12",
+         "amount_zar": 26171539.12
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R40 218 254.25",
+         "amount_zar": 40218254.25
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Mothilal Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R42 146 120.35",
+         "amount_zar": 42146120.35
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R26 126 849.86",
+         "amount_zar": 26126849.86
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R45 085 060.35",
+         "amount_zar": 45085060.35
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "MBSA Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R39 864 233.65",
+         "amount_zar": 39864233.65
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R24 046 212.35",
+         "amount_zar": 24046212.35
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R38 715 381.35",
+         "amount_zar": 38715381.35
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Delta Built Environment",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R41 261 333.00",
+         "amount_zar": 41261333.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R24 505 315.71",
+         "amount_zar": 24505315.71
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R40 309 570.00",
+         "amount_zar": 40309570.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Kahaar Consult",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R39 991 000.00",
+         "amount_zar": 39991000.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 832 000.00",
+         "amount_zar": 23832000.0
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R40 247 000.00",
+         "amount_zar": 40247000.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Afrisa Consulting Pty Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R43 316 068.04",
+         "amount_zar": 43316068.04
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R26 579 887.90",
+         "amount_zar": 26579887.9
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R42 969 113.04",
+         "amount_zar": 42969113.04
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Ndodana Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R42 100 711.39",
+         "amount_zar": 42100711.39
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R25 646 734.92",
+         "amount_zar": 25646734.92
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R41 828 542.18",
+         "amount_zar": 41828542.18
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Nexa Ventures",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R42 419 173.47",
+         "amount_zar": 42419173.47
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R25 469 602.41",
+         "amount_zar": 25469602.41
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R42 290 378.88",
+         "amount_zar": 42290378.88
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Lathiso Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R39 423 317.39",
+         "amount_zar": 39423317.39
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 609 386.59",
+         "amount_zar": 23609386.59
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R38 978 587.16",
+         "amount_zar": 38978587.16
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "KBK RMC Pty Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R24 524 863.96",
+         "amount_zar": 24524863.96
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R39 973 544.65",
+         "amount_zar": 39973544.65
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "IRI Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R38 980 394.25",
+         "amount_zar": 38980394.25
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 367 778.76",
+         "amount_zar": 23367778.76
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R38 890 024.25",
+         "amount_zar": 38890024.25
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Quantra",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R42 663 621.12",
+         "amount_zar": 42663621.12
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R27 386 261.54",
+         "amount_zar": 27386261.54
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R42 142 554.72",
+         "amount_zar": 42142554.72
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Nadeson Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R44 370 496.50",
+         "amount_zar": 44370496.5
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "EFG Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R38 801 465.75",
+         "amount_zar": 38801465.75
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 496 978.25",
+         "amount_zar": 23496978.25
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R38 965 915.75",
+         "amount_zar": 38965915.75
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "BVI Consulting WC",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R44 867 307.50",
+         "amount_zar": 44867307.5
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R26 917 992.50",
+         "amount_zar": 26917992.5
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R44 891 802.50",
+         "amount_zar": 44891802.5
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Masututsa Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R38 015 435.00",
+         "amount_zar": 38015435.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R22 617 901.00",
+         "amount_zar": 22617901.0
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R37 901 585.00",
+         "amount_zar": 37901585.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Kukhanya Projects",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R37 680 290.50",
+         "amount_zar": 37680290.5
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R22 626 560.00",
+         "amount_zar": 22626560.0
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R38 105 802.00",
+         "amount_zar": 38105802.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Daveng Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R39 366 358.54",
+         "amount_zar": 39366358.54
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 428 455.12",
+         "amount_zar": 23428455.12
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R39 252 508.54",
+         "amount_zar": 39252508.54
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Mpamot Africa",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R43 590 934.58",
+         "amount_zar": 43590934.58
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R27 781 262.86",
+         "amount_zar": 27781262.86
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R43 699 103.35",
+         "amount_zar": 43699103.35
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Bosch Projects",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R46 136 251.03",
+         "amount_zar": 46136251.03
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R38 313 903.28",
+         "amount_zar": 38313903.28
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R45 832 431.78",
+         "amount_zar": 45832431.78
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "ONMI Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R42 433 375.50",
+         "amount_zar": 42433375.5
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R25 391 816.00",
+         "amount_zar": 25391816.0
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        }
+       ],
+       "bbbee": "Level 2",
+       "notes": null
+      },
+      {
+       "tenderer": "Royal Mndawe Holdings",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R40 129 273.00",
+         "amount_zar": 40129273.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R24 006 894.00",
+         "amount_zar": 24006894.0
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R40 295 370.08",
+         "amount_zar": 40295370.08
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Ibhongo Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R37 833 702.94",
+         "amount_zar": 37833702.94
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R22 479 547.70",
+         "amount_zar": 22479547.7
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R37 492 738.99",
+         "amount_zar": 37492738.99
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Batatise Consulting Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R39 497 725.68",
+         "amount_zar": 39497725.68
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R24 353 650.42",
+         "amount_zar": 24353650.42
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R39 451 809.04",
+         "amount_zar": 39451809.04
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "SKI Civil & Structure",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R38 309 961.50",
+         "amount_zar": 38309961.5
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 007 072.50",
+         "amount_zar": 23007072.5
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R38 228 424.50",
+         "amount_zar": 38228424.5
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Q & A Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R39 266 681.00",
+         "amount_zar": 39266681.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R24 191 790.86",
+         "amount_zar": 24191790.86
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R39 152 831.00",
+         "amount_zar": 39152831.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Gwaca Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R45 128 300.00",
+         "amount_zar": 45128300.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R26 214 594.86",
+         "amount_zar": 26214594.86
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R41 659 325.00",
+         "amount_zar": 41659325.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Sivest PTY Ltd",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R44 221 652.63",
+         "amount_zar": 44221652.63
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R28 522 432.37",
+         "amount_zar": 28522432.37
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R44 067 332.63",
+         "amount_zar": 44067332.63
+        }
+       ],
+       "bbbee": "Level 2",
+       "notes": null
+      },
+      {
+       "tenderer": "Makhaotse Narosimul & Associates",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R41 290 894.29",
+         "amount_zar": 41290894.29
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R40 980 238.86",
+         "amount_zar": 40980238.86
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Naidu Consulting",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R36 773 433.48",
+         "amount_zar": 36773433.48
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "-",
+         "amount_zar": null
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Nyeleti",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R41 786 320.00",
+         "amount_zar": 41786320.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R26 618 970.00",
+         "amount_zar": 26618970.0
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R40 637 470.00",
+         "amount_zar": 40637470.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Zimile",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R41 064 585.43",
+         "amount_zar": 41064585.43
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R23 214 506.43",
+         "amount_zar": 23214506.43
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R41 987 719.00",
+         "amount_zar": 41987719.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Endecon Ubuntu",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R40 982 70.35",
+         "amount_zar": 4098270.35
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R24 968 483.75",
+         "amount_zar": 24968483.75
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R40 917 576.15",
+         "amount_zar": 40917576.15
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "Lukhosi Construction Engineers",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R9 041 765.65",
+         "amount_zar": 9041765.65
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R25 634 443.12",
+         "amount_zar": 25634443.12
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R42 570 435.50",
+         "amount_zar": 42570435.5
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      },
+      {
+       "tenderer": "MMK Group",
+       "amounts": [
+        {
+         "column": "Amount Tendered For N.001-012-2026/1F & N.001-014-2026/1F",
+         "amount_raw": "R48 985 906.00",
+         "amount_zar": 48985906.0
+        },
+        {
+         "column": "Amount Tendered For N.007-046-2026/1F",
+         "amount_raw": "R29 079 935.00",
+         "amount_zar": 29079935.0
+        },
+        {
+         "column": "Amount Tendered For N.002-025-2026/1F",
+         "amount_raw": "R47 610 207.00",
+         "amount_zar": 47610207.0
+        }
+       ],
+       "bbbee": "Level 1",
+       "notes": null
+      }
+     ],
+     "opening_register_note": null
+    },
+    {
+     "source": "sanral_closed",
+     "source_url": "https://www.nra.co.za/closed-tenders/contract-sanral-r-531-020-2026-2",
+     "attribution": "Source: SANRAL (nra.co.za), copyright SANRAL; reproduced unmodified with acknowledgement under SANRAL's website Terms & Conditions.",
+     "reference": "CONTRACT SANRAL: R.531-020-2026/2",
+     "project_type": "Consulting Services",
+     "province": "Limpopo",
+     "closing_date_raw": "2026/09/30 12:00",
+     "title": "FOR THE PROVISION OF A CONTRACTOR FOR THE EMERGENCY REPAIRS OF DAMAGED STEEL RIBBED PIPE CULVERT AT KM 6.9 AND SINKHOLE AT KM 11.4. CONTRACT SANRAL: R.531-020-2026/2",
+     "awarded_to": null,
+     "bbbee_points": null,
+     "full_points": null,
+     "approved_contract_amount_raw": null,
+     "approved_contract_amount_zar": null,
+     "awarded_on_raw": null,
+     "awarded_on": null,
+     "contract_start_date_raw": null,
+     "contract_duration": null,
+     "consultant": null,
+     "estimate_raw": null,
+     "estimate_zar": null,
+     "opening_register": [],
+     "opening_register_note": "Register published only as an attachment inside the tender download (not fetched)."
+    }
+   ]
+  }
+ }
+}

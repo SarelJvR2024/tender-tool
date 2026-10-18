@@ -18,6 +18,7 @@ import {
 } from "@/lib/dealEconomics";
 import { SiteNav } from "../../_components/SiteNav";
 import { EconomicsForm, type CreditPerson } from "../economics-form";
+import { MarketComparison } from "./market-comparison";
 
 // Per-company data under RLS on every request (same as /pipeline).
 export const instant = false;
@@ -177,7 +178,7 @@ export default async function PricingHistoryPage({
         <Link href="/pipeline" style={{ fontSize: 13, color: "#6B6758", textDecoration: "none" }}>← Pipeline</Link>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "6px 0 4px" }}>Pricing history</h1>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
-          What you have submitted at, by tender type, client and sector. Internal only: nothing here goes into a submission pack.
+          What you have submitted at, by tender type, client and sector, and how it compared with the published results. Internal only: nothing here goes into a submission pack.
         </p>
 
         {(error || sp.error) && (
@@ -344,6 +345,9 @@ export default async function PricingHistoryPage({
                 </tbody>
               </table>
             </div>
+
+            {/* Published registers / awards for these tenders (0044). */}
+            <MarketComparison tenders={rows.map((r) => ({ tenderId: r.tenderId, contractNo: r.contractNo, title: r.title, price: r.price }))} />
           </>
         )}
       </div>

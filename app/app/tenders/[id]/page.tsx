@@ -14,6 +14,7 @@ import { IntakeCard } from "./intake-card";
 import { ActivityLog } from "./activity-log";
 import { TenderUpdates } from "./tender-updates";
 import { formatDay } from "@/lib/tenderUpdates";
+import { MarketContext } from "./market-context";
 import { ReusePastSubmission } from "./reuse-past-submission";
 import { TenderTemplates } from "./tender-templates";
 import { PositionPersonSelect } from "./position-person-select";
@@ -35,6 +36,7 @@ type TenderFacts = {
   briefing_time: string | null;
   family: string | null;
   source: string | null;
+  buyer: string | null;
 };
 
 type TenderPack = {
@@ -150,7 +152,7 @@ export default async function TenderWorkspacePage({
 
   const { data: tender, error: tenderError } = await supabase
     .from("tenders")
-    .select("id, contract_no, nra_reference, description, closing_date, briefing_date, briefing_time, family, source")
+    .select("id, contract_no, nra_reference, description, closing_date, briefing_date, briefing_time, family, source, buyer")
     .eq("id", id)
     .maybeSingle();
 
@@ -393,6 +395,7 @@ export default async function TenderWorkspacePage({
                 {isGeneralFamily && <JumpLink href="#general-preparation" label="Needs" />}
                 {isGeneralFamily && <JumpLink href="#general-documents" label="Documents" />}
                 {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
+                <JumpLink href="#market" label="Market" />
                 <JumpLink href="#tasks-milestones" label="Tasks" />
                 <JumpLink href="#activity" label="Notes & activity" />
                 {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
@@ -505,6 +508,11 @@ export default async function TenderWorkspacePage({
             ) : tenderFacts.family ? (
               <ComplianceReport tenderId={id} />
             ) : null}
+
+            {/* Published bids/awards for this tender + similar tenders (0044,
+                market-context.tsx): where this company's price sat, and how
+                crowded / price-driven this kind of tender is. */}
+            <MarketContext tender={{ id, buyer: tenderFacts.buyer, family: tenderFacts.family }} />
 
             <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
 

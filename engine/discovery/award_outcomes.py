@@ -49,8 +49,9 @@ updatedBy, and SANRAL's "Tenders Opened by" / "Tender Recorded by" /
 "In Attendance" (names of individual officials). None of those are needed to
 answer "who won, at what price, who else bid".
 
-Report-only, like etenders_national.py: writes a JSON report, stores nothing
-in Supabase (no table exists for public awards yet - see the findings doc).
+Report-only, like etenders_national.py: writes a JSON report. Storing it is
+store_award_outcomes.py's job (public_tender_outcomes, migration 0053 - see
+docs/specs/Award-Price-Analysis-Findings.md).
 
 Usage:
     python3 award_outcomes.py [--source portal|sanral|both] [--limit 200]

@@ -87,6 +87,9 @@ jobs:
       - name: Award outcomes - parsing of eTenders/SANRAL award records (offline fixtures)
         run: python3 engine/discovery/test_award_outcomes.py
 
+      - name: Award prices - published outcomes merged per tender, winner placed, honest data notes (real records)
+        run: python3 engine/discovery/test_award_prices.py
+
       - name: General engine - bridge end to end (fake Supabase, real tender documents)
         run: |
           sudo apt-get install -y --no-install-recommends poppler-utils
