@@ -6,8 +6,11 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18, ~16:20 UTC — independently reproduced and confirmed the tenth QA
-run's fix (`tender_changes.py` one-bad-listing-crashes-everyone bug, Finding 11) - below. ~14:15
+Last full pass: 2026-10-18, ~17:00 UTC — verified Pack Review (migration `0059`) and tender
+scope/tags/value-band (migration `0060`), plus answered a cross-session relay's TenderFlow
+feature-parity gap check (no code changed - report sent back, below). ~16:20 UTC —
+independently reproduced and confirmed the tenth QA run's fix (`tender_changes.py`
+one-bad-listing-crashes-everyone bug, Finding 11) - below. ~14:15
 UTC — quiet check-in, 2 small low-risk commits verified (a Discovery mobile-layout fix - stranded
 right-rail column, no System-Status entry of its own until now; and a one-line `is not None`
 fix for an undercounted R0,00 award in a diagnostic
@@ -1025,6 +1028,51 @@ Two commits, both small and already well-verified; one had no System-Status entr
   and `test_award_prices.py` myself: 0 failures both, confirming the fix.
 
 Nothing further needed this pass.
+
+## This pass (2026-10-18, ~17:00 UTC): verified Pack Review + tender scope/tags/value-band; answered a TenderFlow gap check
+
+**TenderFlow feature-parity gap check** (relayed from another session, Sarel's ask): compared
+the Deep-Dive's TenderFlow row in the feature-comparison table against the actual codebase (grep,
+not the aging doc's own claims) and against Marketing-Pricing-Strategy §6.3's positioning
+constraints. No code changed, per the instruction - findings sent back to the originating
+session. Summary: Go/No-Go screening is already built and arguably stronger than TenderFlow's
+(per-company profile scoring, not a shared default); Collaboration is partial (comments + an
+activity feed exist, a formal approvals/sign-off step doesn't). Three genuine, verified-by-grep
+gaps recommended as quick, positioning-safe wins: a working-day deadline calculator excluding SA
+public holidays, a CIDB-grade-vs-tender-value calculator, and a B-BBEE preference-point
+calculator (all three: standalone free-tool shape, no AI/bid-writing claim, reinforce the
+existing "correct" positioning pillar). Recommended against saved-filter keyword alerts (real
+work, and a step backward from the smarter per-company fit scoring already built) and deferred
+the approvals/sign-off gap to Sarel's own scoping call (real design work, closer to the "generic
+bid management" space the product deliberately doesn't compete on).
+
+**Pack Review + tender scope/tags/value-band** (migrations `0059`, `0060`, 3 commits - one of
+them itself a TenderFlow-benchmarking pass by another session, on the new Pack Review screen's
+layout, not the feature set): replayed `0001`→`0060` fresh (52 migrations, sequential, no gaps)
+and verified directly:
+
+- Read both migrations in full. `0059` (`pack_review_confirmations`) uses the same
+  `is_company_member` tenant-isolation pattern as the rest of the schema; manually verified it
+  myself against the replayed DB (company B sees 0 of company A's review rows, and B's insert
+  claiming company A is refused by RLS) since no test file yet covers this specific new table.
+  `0060` (`tender_scope_records` + `tenders.industry_tags`/`discipline_tags`) is careful about
+  what's real extraction vs. heuristic (an honest `null`/`'unknown'` rather than a guessed value
+  band or BOQ line items that no parser in this repo actually produces) - read in full, agree
+  with the reasoning; correctly reuses `discipline_categories` (0040) as its vocabulary instead
+  of inventing a second taxonomy.
+- `discovery/test_tender_enrichment.py`: 0 failures (this file prints only on FAIL, by design -
+  confirmed by reading it, not a missing-output surprise).
+- `pack-review-logic.test.ts` (Node's built-in test runner): the file's own documented run
+  command (`node --experimental-strip-types --test <path>`) found 0 tests in this sandbox -
+  running it without `--test` (`node --experimental-strip-types <path>`) correctly executed all
+  19 cases, 19 pass / 0 fail. Likely a Node-version/glob quirk with the `[id]` bracket in the
+  path interacting with `--test`'s own file-discovery, not a real problem with the test or the
+  code - noting it here so the next person reaching for the documented command isn't surprised
+  by 0 tests and assumes something is broken.
+- Regression: `test_tenant_isolation.py` ALL PASSED, `test_general_bridge.py` ALL PASSED,
+  `npm run typecheck`/`lint` clean.
+
+Nothing found needing a fix. No new gaps opened.
 
 ## This pass (2026-10-18, ~16:20 UTC): independent reproduction of the tenth QA run's fix (Finding 11)
 
