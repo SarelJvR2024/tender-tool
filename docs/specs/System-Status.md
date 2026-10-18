@@ -1004,6 +1004,20 @@ place that name was ever written down, and the "decision" it was meant to record
 Item (b) (`how_we_work` on the Tender Workspace) is untouched by this pass, per instruction, and
 stays open below.
 
+## This pass (2026-10-18, standing QA/robustness review - ninth run)
+
+Picked the award/price-intelligence feature (`engine/discovery/award_outcomes.py`,
+`store_award_outcomes.py`) - new ground for this review, and it deals with real money. Ran the
+real CLI against the live eTenders portal rather than only reading code. Found and fixed one
+minor bug: a genuine R0,00 award (a real live record - a disciplinary-matter appointment) was
+miscounted as "no amount on file" in the run's summary stats, because `with_award_amount`/
+`with_contract_amount` used a bare truthiness check instead of `is not None` - the classic
+"zero is falsy" mistake. The actual stored record and the per-award print line were both already
+correct; only the summary counter was wrong, so nothing downstream was ever silently wrong -
+fixed anyway since it's a one-line, zero-risk correction. Also checked the duplicate-award
+detection and the price-plausibility gate for the same "could this misfire" question - both
+sound, by design, not bugs. Full evidence in `docs/specs/QA-Edge-Case-Findings.md` (Finding 10).
+
 ## This pass (2026-10-18, standing QA/robustness review - sixth run)
 
 Rotated to the compliance/reminders engine. Pulled latest `main` first (small this time - a

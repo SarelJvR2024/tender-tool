@@ -420,7 +420,12 @@ def summarize_portal(records):
     return {
         "fetched": len(records),
         "with_winner": sum(1 for r in records if r["awards"]),
-        "with_award_amount": sum(1 for r in records if any(a["amount_zar"] for a in r["awards"])),
+        # `is not None`, not a truthiness check: a genuine R0,00 award (seen
+        # live, 2026-10-18 - a disciplinary-matter bid number) is a real
+        # amount on file, not a missing one, and the per-award print line a
+        # few lines down already gets this right ("R{amount:,.2f}" guarded by
+        # `is not None`) - this summary count was the one place that didn't.
+        "with_award_amount": sum(1 for r in records if any(a["amount_zar"] is not None for a in r["awards"])),
         "with_bidders_list": sum(1 for r in records if r["bidders"]),
         "with_award_date": sum(1 for r in records if r["award_date"]),
     }
@@ -431,7 +436,10 @@ def summarize_sanral(block):
     return {
         "fetched": len(recs),
         "with_winner": sum(1 for r in recs if r["awarded_to"]),
-        "with_contract_amount": sum(1 for r in recs if r["approved_contract_amount_zar"]),
+        # Same `is not None` fix as summarize_portal()'s with_award_amount,
+        # for the same reason: a genuine R0,00 contract amount must still
+        # count as "on file", not get mistaken for a missing one.
+        "with_contract_amount": sum(1 for r in recs if r["approved_contract_amount_zar"] is not None),
         "with_opening_register": sum(1 for r in recs if r["opening_register"]),
         "register_only_as_attachment": sum(1 for r in recs if r["opening_register_note"]),
     }

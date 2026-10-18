@@ -823,3 +823,65 @@ Geotechnical") resolves to the first match in `DS_SPECIALISMS`'s declared order 
 intended behaviour); a bare "DS1" with no specialism text, and an empty or `null` description,
 all correctly return `matrix: null` (the honest unknown-range fallback) rather than crashing or
 guessing. **No bug found** - this closes Finding 2 clean rather than leaving it open.
+
+---
+
+## 2026-10-18 (ninth run): Discovery's award/price intelligence - a genuine R0,00 award
+undercounted as "no amount on file"
+
+**Context:** the award-outcomes/price-intelligence feature (`engine/discovery/award_outcomes.py`,
+`store_award_outcomes.py`, Deep-Dive items 17/28) is new since this review's last discovery pass
+and deals with real money, so it was this run's pick. Pulled latest `main` first (quiet - no new
+commits since the eighth run). Ran the real CLI against the live eTenders portal
+(`python3 award_outcomes.py --source portal --limit 20`, no mock) rather than only reading code -
+the live network was flaky through the proxy on two attempts (`ws_closed_mid_exchange`) but one
+run completed and printed real current awards.
+
+### Finding 10 (CONFIRMED, FIXED, minor): a genuine R0,00 award miscounted as missing in the
+summary stats (not in the stored record itself)
+
+**Where:** `award_outcomes.py`'s `summarize_portal()`/`summarize_sanral()`.
+
+**What was found:** the live run surfaced a real record - bid number
+`NDA03/DEVI03/26(Disciplinary 2)`, winner `MORAR`, amount `R0.00` (a disciplinary-matter
+appointment, genuinely a zero-Rand outcome, not a missing value - `parse_rand("R0,00")` already
+has a dedicated test case proving it correctly returns `0.0`, not `None`). The per-record print
+line and the stored `amount_zar` field both handle this correctly (the print line explicitly
+guards with `is not None`). But `with_award_amount`'s summary count used a bare truthiness
+check - `any(a["amount_zar"] for a in r["awards"])` - which is `False` for `0.0`, so the one
+summary statistic a person would glance at to sanity-check a run undercounts by exactly the
+number of genuine zero-Rand awards in the batch. Confirmed directly by reproducing the real
+record shape and comparing the buggy count (1) against the correct one (2) for a 2-award,
+1-no-award batch. The SANRAL side (`with_contract_amount`) has the identical pattern, fixed the
+same way, though a zero-Rand *approved contract* amount is less likely in practice than a
+zero-Rand *disciplinary award* - same bug class, fixed for the same reason regardless of how
+often it fires.
+
+**Severity, honestly stated:** minor - this is a diagnostic summary count, not the actual stored
+or reported data (which was already correct), so nothing downstream was ever silently wrong.
+Fixed anyway because it's a one-line, zero-risk correction and the exact "truthy zero" mistake
+this project has now caught and fixed in several other places.
+
+**Fix:** both counts now use `is not None` instead of a bare truthiness check, matching the
+convention the per-record print line and `store_award_outcomes.py`'s `plausible()` already use
+elsewhere in the same feature.
+
+**Verification:** reproduced the real record shape (one genuine R0,00 award, one real priced
+award, one with no award at all) and confirmed the count goes from 1 (wrong) to 2 (correct).
+`test_award_outcomes.py` and `test_award_prices.py`: all passed, 0 failures. `python3
+-m py_compile` clean.
+
+### Also checked, found already sound (no fix needed)
+
+- **Duplicate-award detection** (`clean_name()` + `(name.upper(), amount)` dedup key): only merges
+  exact name+amount duplicates, deliberately not fuzzy-matching near-identical names (e.g. with
+  or without a "(PTY) LTD" suffix) - a reasonable, narrow scope, since aggressive name
+  normalisation would risk merging two genuinely different suppliers that happen to sound
+  similar. `store_award_outcomes.py`'s separate matching logic already handles "names compare
+  without legal-form noise" for the winner-to-bidder-list matching case, confirmed by its own
+  passing test - not a gap, just a different problem than the raw dedup solves.
+- **`plausible()`'s `0 < amount <= MAX_PLAUSIBLE_ZAR` gate** (`store_award_outcomes.py`): this
+  one deliberately excludes zero/negative amounts from the price-intelligence numbers (not a
+  bug - a R0 outcome isn't a useful market-price data point, and the winner/supplier is still
+  kept regardless; only the *price* signal is suppressed). Checked this was an intentional design
+  choice, not an oversight, before leaving it alone.
