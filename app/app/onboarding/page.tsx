@@ -1,4 +1,5 @@
 import { createCompany } from "./actions";
+import { Logo } from "../_components/Logo";
 
 // Depends on the signed-in user's session, same reason as dashboard/page.tsx.
 export const instant = false;
@@ -13,8 +14,8 @@ export default async function OnboardingPage({
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F5F1", padding: 16 }}>
       <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <div style={{ width: 40, height: 40, borderRadius: 8, background: "#16233B", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 18, color: "#FFFFFF" }}>
-          T
+        <div style={{ marginBottom: 20 }}>
+          <Logo size={40} />
         </div>
         <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Set up your company</h1>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 24px" }}>
