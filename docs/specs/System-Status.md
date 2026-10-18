@@ -158,6 +158,38 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-18, standing QA/robustness review - thirteenth run): the new bulk onboarding
+document scan was silently dropping six AI-read fields on confirm
+
+Picked up migrations `0059`-`0063` (landed by other sessions since the twelfth run) and focused on
+the newest, highest-stakes one: the bulk onboarding document scan (`engine/onboarding/
+classify_documents.py` + `app/app/company/document-scan/`, migration `0063`) - upload many
+compliance documents at once, AI classifies and extracts fields, a human confirms, it's filed
+onto an existing table/column. The Python classification side checked out clean (quote
+verification, OCR handling, SA-ID redaction all reused correctly from `extract_cv_fields.py`, no
+new bugs found).
+
+**Finding 13 (fixed, severe):** `classify_documents.py`'s `KIND_FIELDS` asks the AI for more
+fields per document kind than `onboardingScan.ts`'s `VAULT_FIELD_COLUMNS` has a `companies` column
+for - `cidb_registration`'s `registration_number`/`contractor_name`, `bbbee_certificate`'s
+`entity_name`, `bank_confirmation_letter`'s `bank_name`/`account_holder`, `iso_9001_certificate`'s
+`certified_entity_name`. `actions.ts` was already correct (it only ever writes a column that
+exists), but `review.tsx` rendered every one of these the same way as a field that really gets
+saved: pre-filled, ticked by default, under the single "Confirm and file" button. A reviewer who
+confirmed a CIDB certificate's registration number had no way to know it vanished on submit - no
+error, no warning, not even a trace in the stored `applied` audit JSON. Fixed by adding
+`isFieldPersisted()` to `onboardingScan.ts` (single source of truth, used by both the UI and a new
+test) and splitting `review.tsx`'s field list into tick-able "will be saved" fields and a new
+read-only "also read from this document - not saved anywhere" block for the rest. No schema
+change; flagged as future work that these six fields have no column at all yet (and that a
+mismatch between a CIDB certificate's `contractor_name` and the company's own registered name
+would be a real compliance signal worth surfacing, not just metadata).
+
+**Verification:** `node --experimental-strip-types --test app/lib/onboardingScan.test.ts` - 12/12
+pass (8 pre-existing + 4 new, pinning `isFieldPersisted()` for every real field including the
+`bee_level` special case and all six dropped fields). Full detail, including the asked-for-vs-
+persisted table: `QA-Edge-Case-Findings.md`, "thirteenth run."
+
 ## Quiet check-in (2026-10-18, ~10:20 UTC)
 
 Two new commits, both low-risk, both self-verified already:

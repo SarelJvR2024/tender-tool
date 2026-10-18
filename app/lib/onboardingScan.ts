@@ -130,6 +130,30 @@ export const VAULT_SUBFOLDER: Record<string, string> = {
 };
 export const VAULT_KINDS = Object.keys(VAULT_FIELD_COLUMNS) as DocumentKind[];
 
+// Some KIND_FIELDS are read from the document but have no dedicated
+// companies column to persist to (e.g. a CIDB certificate's registration
+// number/contractor name, a B-BBEE certificate's entity name, a bank
+// letter's bank name/account holder - there is no companies.cidb_
+// registration_number etc.). actions.ts's confirmVaultDocument only ever
+// writes a VAULT_FIELD_COLUMNS[kind] column, plus the one special case
+// below (bee_level, applied separately because companies.bee_level is a
+// plain int column, not part of the field-name-to-column map). Before this
+// was tracked explicitly, the review screen showed every KIND_FIELDS entry
+// with the same tick-box and "Confirm and file" button regardless of
+// whether ticking it did anything - a reviewer had no way to tell that
+// ticking "Registration number" and confirming silently filed the document
+// but dropped that one value. review.tsx uses this to show the gap
+// honestly: fields that are actually saved get a tick-box, fields that
+// aren't are shown read-only with a "not saved" note.
+const PERSISTED_EXTRA_FIELDS: Partial<Record<DocumentKind, string[]>> = {
+  bbbee_certificate: ["bee_level"],
+};
+
+export function isFieldPersisted(kind: DocumentKind, field: string): boolean {
+  if (VAULT_FIELD_COLUMNS[kind] && field in VAULT_FIELD_COLUMNS[kind]) return true;
+  return (PERSISTED_EXTRA_FIELDS[kind] ?? []).includes(field);
+}
+
 /** bee_level comes back from the model as text ("Level 2"); companies.bee_level is an int. */
 export function parseBeeLevel(raw: string | null): number | null {
   if (!raw) return null;

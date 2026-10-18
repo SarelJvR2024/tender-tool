@@ -1129,3 +1129,71 @@ four pre-existing cases used comma-as-decimal, which is exactly why this shipped
 fix has durable regression coverage, not just this run's own check. `test_tender_enrichment.py`,
 `test_market_trend.py`, `test_award_outcomes.py`, `test_taxonomy.py`: all clean, 0 failures.
 `python3 -m py_compile` clean.
+
+## 2026-10-18 (thirteenth run): the new bulk onboarding document scan silently drops six
+AI-read fields on "Confirm and file" - no error, no warning, same tick-box as the fields that
+really are saved
+
+**Context:** synced with `origin/main` and picked up migrations 0059-0063 landed by other
+sessions since the twelfth run, including a brand-new feature: `engine/onboarding/
+classify_documents.py` + `app/app/company/document-scan/` (bulk upload -> AI classify -> one
+review screen -> confirm -> file into an existing table, migration 0063). This run picked that
+area since it is new, untested by this review, and high-stakes (it writes real compliance
+records once confirmed). The Python classification/extraction side (`classify_documents.py`,
+`validate_proposal()`, quote-verification, OCR handling) is sound and was not touched. The bug is
+entirely in the web layer that routes a confirmed proposal onto real tables.
+
+**Finding 13 (CONFIRMED, FIXED, severe - silent data loss presented as success):** `classify_
+documents.py`'s `KIND_FIELDS` asks the AI to read more fields per document kind than `app/lib/
+onboardingScan.ts`'s `VAULT_FIELD_COLUMNS` has companies columns for:
+
+| document kind | asked for (KIND_FIELDS) | actually has a column (VAULT_FIELD_COLUMNS) | silently dropped |
+|---|---|---|---|
+| cidb_registration | registration_number, grade_class, expiry_date, contractor_name | grade_class, expiry_date | **registration_number, contractor_name** |
+| bbbee_certificate | bee_level, proof_type, expiry_date, entity_name | proof_type, expiry_date (+ bee_level, special-cased in actions.ts) | **entity_name** |
+| bank_confirmation_letter | bank_name, account_holder, letter_date | letter_date | **bank_name, account_holder** |
+| iso_9001_certificate | certificate_number, expiry_date, certified_entity_name | certificate_number, expiry_date | **certified_entity_name** |
+
+`actions.ts`'s `confirmVaultDocument()` only ever writes `Object.entries(VAULT_FIELD_COLUMNS[kind])`,
+so a dropped field is never even looked at - not a write failure, just never attempted. But
+`review.tsx`'s `DocumentReviewCard` rendered every `KIND_FIELDS[kind]` entry identically: a
+default-ticked (when verified) checkbox, an editable value, the source quote, under the same
+single "Confirm and file" button as the fields that really are persisted. A reviewer who reads a
+CIDB certificate, sees "Registration number: 1234567" pre-filled with its quote, ticks it (or
+leaves the default tick), and clicks "Confirm and file" has no way to know that value is gone the
+moment the page redirects - no error, no warning, nothing in `onboarding_document_results.applied`
+either (that JSON only records the column names `confirmVaultDocument` actually touched, so even
+the audit trail is silent about the drop). This is exactly the "gate" this review exists to catch:
+not a crash, a confident, silent, successful-looking loss of a value the user explicitly confirmed.
+
+Checked first whether this was intentional: `onboardingScan.test.ts`'s own test ("every vault
+kind's field columns are a subset of its own KIND_FIELDS") already accepts `VAULT_FIELD_COLUMNS
+⊊ KIND_FIELDS` as valid, so asking the AI for more than gets persisted is by design (these fields
+are genuinely useful for the reviewer to see - e.g. checking a CIDB certificate's contractor_name
+against the company's own registered name - even with no column to store them in yet). The gap is
+only that the UI never told the reviewer which was which.
+
+**Fix (`app/lib/onboardingScan.ts`, `app/app/company/document-scan/review.tsx`):** added
+`isFieldPersisted(kind, field)` as the single source of truth (checks `VAULT_FIELD_COLUMNS[kind]`,
+plus the `bee_level` special case already in `actions.ts`) and used it in `review.tsx` to split a
+kind's fields into `persistedFields` (unchanged: tick-box, editable, `FieldRow`) and
+`notSavedFields` (new `NotSavedFields` component: plain read-only label/value/quote, no tick-box,
+no input, under a "not saved anywhere - for your own check only" heading). `actions.ts` needed no
+change - it was already correct; only the UI was lying about what "Confirm and file" would do.
+
+**Not done (flagged, future work, bigger than a QA-pass fix):** none of the six dropped fields
+have ever had a home. Adding `companies` columns (and, for `cidb_registration`/`bbbee_certificate`,
+a cross-check against the company's own registered name - a mismatched contractor_name on a CIDB
+certificate is a real compliance signal, not just metadata) would need a new migration and product
+sign-off on what a mismatch should do, so it's out of scope here; the contained fix was to stop the
+UI misrepresenting what gets saved today.
+
+**Verification:** `node --experimental-strip-types --test app/lib/onboardingScan.test.ts` - 12/12
+pass, including four new tests pinning `isFieldPersisted()`'s answer for every real field (every
+`VAULT_FIELD_COLUMNS` entry true, `bee_level` true despite not being a literal key, all six
+dropped fields explicitly false, and every `KIND_FIELDS` entry for every vault kind resolves to a
+real boolean, never throws/undefined). `npx tsc --noEmit` on this environment reports only
+pre-existing, unrelated module-resolution noise (`node_modules` is not installed here at all -
+no `next`, `react`, or `@types/*` packages exist on disk; same limitation this review has hit on
+other `app/` TypeScript files) - confirmed this is not new by checking `ls node_modules/next`
+before concluding, not just by reading past the errors.

@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   DOCUMENT_KINDS,
+  isFieldPersisted,
   KIND_FIELDS,
   ROUTABLE_KINDS,
   UNROUTED_KINDS,
@@ -75,4 +76,43 @@ test("parseBeeLevel: null/empty/non-compliant never crash and never fabricate a 
   assert.equal(parseBeeLevel(null), null);
   assert.equal(parseBeeLevel(""), null);
   assert.equal(parseBeeLevel("Non-compliant"), null);
+});
+
+// QA-Edge-Case-Findings.md, 2026-10-18 (thirteenth run): several KIND_FIELDS
+// entries (cidb_registration/registration_number+contractor_name,
+// bbbee_certificate/entity_name, bank_confirmation_letter/bank_name+
+// account_holder, iso_9001_certificate/certified_entity_name) have no
+// companies column at all - confirmVaultDocument silently drops them while
+// the review screen showed a tick-box and "Confirm and file" exactly like
+// a field that IS saved. isFieldPersisted() is what review.tsx now uses to
+// tell the two apart; this pins its answer for every real field so a future
+// column addition (or removal) is caught here, not discovered by a
+// reviewer whose confirmed value silently vanished.
+test("isFieldPersisted: every VAULT_FIELD_COLUMNS mapping is persisted", () => {
+  for (const kind of VAULT_KINDS) {
+    for (const field of Object.keys(VAULT_FIELD_COLUMNS[kind])) {
+      assert.ok(isFieldPersisted(kind, field), `${kind}.${field} is in VAULT_FIELD_COLUMNS but isFieldPersisted says no`);
+    }
+  }
+});
+
+test("isFieldPersisted: bee_level is persisted despite not being a VAULT_FIELD_COLUMNS key (companies.bee_level is a plain int column, applied as a special case in actions.ts)", () => {
+  assert.ok(isFieldPersisted("bbbee_certificate", "bee_level"));
+});
+
+test("isFieldPersisted: fields with nowhere to be saved come back false, not true by default", () => {
+  assert.equal(isFieldPersisted("cidb_registration", "registration_number"), false);
+  assert.equal(isFieldPersisted("cidb_registration", "contractor_name"), false);
+  assert.equal(isFieldPersisted("bbbee_certificate", "entity_name"), false);
+  assert.equal(isFieldPersisted("bank_confirmation_letter", "bank_name"), false);
+  assert.equal(isFieldPersisted("bank_confirmation_letter", "account_holder"), false);
+  assert.equal(isFieldPersisted("iso_9001_certificate", "certified_entity_name"), false);
+});
+
+test("isFieldPersisted: every KIND_FIELDS entry for every vault kind is accounted for as persisted or not (never throws, never silently undefined)", () => {
+  for (const kind of VAULT_KINDS) {
+    for (const field of KIND_FIELDS[kind]) {
+      assert.equal(typeof isFieldPersisted(kind, field), "boolean", `${kind}.${field} should resolve to a real boolean`);
+    }
+  }
 });

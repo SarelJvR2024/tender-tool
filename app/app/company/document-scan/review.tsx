@@ -10,6 +10,7 @@ import {
 import {
   DATE_FIELDS,
   FIELD_LABELS,
+  isFieldPersisted,
   KIND_FIELDS,
   KIND_LABELS,
   MANUAL_REVIEW_LINK,
@@ -99,6 +100,25 @@ function ReadOnlyFields({ kind, fields }: { kind: DocumentKind; fields: Onboardi
   );
 }
 
+// Fields KIND_FIELDS asks the AI for but that confirmVaultDocument has no
+// companies column to write (see onboardingScan.ts's isFieldPersisted) -
+// shown so the reviewer still sees what was read, but with no tick-box and
+// no editable input, so confirming can never be mistaken for filing them.
+function NotSavedFields({ fields, names }: { fields: OnboardingFields; names: string[] }) {
+  if (names.length === 0) return null;
+  return (
+    <div style={{ background: "#F6F5F1", borderRadius: 9, padding: "9px 12px", margin: "8px 0", fontSize: 12, color: MUTED }}>
+      <div style={{ fontWeight: 600, color: NAVY, marginBottom: 4 }}>Also read from this document (not saved anywhere - for your own check only):</div>
+      {names.map((f) => (
+        <div key={f} style={{ marginTop: 3 }}>
+          <strong style={{ color: NAVY }}>{FIELD_LABELS[f] ?? f}:</strong> {String(fields[f].value ?? "-")}
+          {fields[f].evidence && <span style={{ fontStyle: "italic" }}> - &ldquo;{fields[f].evidence}&rdquo;</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function DocumentReviewCard({
   result,
   filename,
@@ -112,6 +132,8 @@ export function DocumentReviewCard({
 }) {
   const kind = result.document_kind;
   const editableFields = KIND_FIELDS[kind].filter((f) => !READ_ONLY_FIELDS.has(f) && result.fields[f]);
+  const persistedFields = editableFields.filter((f) => isFieldPersisted(kind, f));
+  const notSavedFields = editableFields.filter((f) => !isFieldPersisted(kind, f));
   const unrouted = UNROUTED_KINDS.includes(kind);
   const manualLink = MANUAL_REVIEW_LINK[kind];
 
@@ -214,9 +236,10 @@ export function DocumentReviewCard({
           {editableFields.length === 0 && kind !== "cv" && (
             <div style={{ fontSize: 13, color: MUTED, margin: "8px 0" }}>No fields to confirm - the document itself will still be filed.</div>
           )}
-          {kind !== "cv" && editableFields.map((f) => (
+          {kind !== "cv" && persistedFields.map((f) => (
             <FieldRow key={f} field={f} item={result.fields[f]} />
           ))}
+          {kind !== "cv" && <NotSavedFields fields={result.fields} names={notSavedFields} />}
 
           <div style={{ display: "flex", gap: 10, marginTop: 14, flexWrap: "wrap" }}>
             <button type="submit" style={btnPrimary}>
