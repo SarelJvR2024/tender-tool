@@ -20,6 +20,9 @@ import etenders_portal  # noqa: E402
 import eskom_bulletin  # noqa: E402
 import transnet_etenders  # noqa: E402
 import capetown_procurement  # noqa: E402
+import sars_procurement  # noqa: E402
+import cidb_tenders  # noqa: E402
+import dbsa_procurement  # noqa: E402
 import gov_sources  # noqa: E402
 import tender_changes  # noqa: E402
 
@@ -59,6 +62,27 @@ TRANSNET_ROW = {"nameOfTender": "BT1TRIMRFPWR2 Orchard", "descriptionOfTender": 
 CAPETOWN_RFQ_HTML = """<table><tr><th>Reference Number</th><th>Title</th><th>Category</th><th>Closing Date</th><th>Closing Date Sortable</th><th>Posted Date</th><th>Posted Date Sortable</th><th></th></tr>
 <tr><td>GA12700333</td><td>Ladies softshell jacket navy 3xl</td><td>Clothing, PPE &amp; Accessories</td><td>2026/10/28</td><td>10/28/2026 12:00:00 PM</td><td>2026/10/17</td><td>10/17/2026 2:20:39 PM</td><td><a href="/web1/procurementportal/RFQ/Details/331433">View</a></td></tr></table>"""
 CAPETOWN_AWARD_DETAIL = "<div><h3>Award Status</h3><dl><dt>Status</dt><dd>Awarded</dd><dt>Reference Number</dt><dd>GH12700188</dd><dt>Title</dt><dd>THERMOSTAT;HWC;35-70 Celc;VKF-11</dd><dt>Date</dt><dd>2026/10/16</dd><dt>To</dt><dd>ALWAYS SUPERLATIVE</dd></dl><a>Back</a></div>"
+
+# --- real rows, 18 Oct 2026 (sars_procurement / cidb_tenders / dbsa_procurement) ---
+SARS_PAGE_HTML = """<h2>What&#8217;s New</h2><ul><li><strong>16 October 2026 &#8211; New Tender</strong><ul>
+<li><a href="https://www.sars.gov.za/tender/rfp14-2026-appointment-of-armed-security/">RFP14/2026: Appointment of armed security service provider | South African Revenue Service</a></li>
+</ul></li><li><strong>15 October 2026 &#8211;</strong><ul>
+<li><a href="https://www.sars.gov.za/tender/rfp13-2026-specialist-resources/">RFP13/2026: Appointment of specialist resources | South African Revenue Service</a></li>
+</ul></li></ul>"""
+
+CIDB_FEED_OPEN = {"tender_ID": "34", "description": "Appointment of a service provider to review the cidb standard",
+                   "bid_number": "cidb 010 2526", "tender_advert_file": "https://www.cidb.org.za/wp-content/x.pdf",
+                   "tender_briefing_file": "", "tender_advert_date_time": "2025-10-24 12:17:31",
+                   "tender_awards_date_time": "2025-10-24 12:17:31", "status": "active", "realstatus": "Open"}
+CIDB_FEED_AWARDED = {"tender_ID": "47", "description": "Website hosting and maintenance",
+                      "bid_number": "cidb 001 2627", "tender_advert_file": "", "tender_briefing_file": "",
+                      "tender_advert_date_time": "2026-09-14 09:12:33", "tender_awards_date_time": "2026-10-15 08:16:17",
+                      "status": "active", "realstatus": "Awarded"}
+
+DBSA_TABLE_HTML = """<table><tr><th>OPEN RFP's and RFR's</th><th>Date Published</th><th>Closing Date and Time</th></tr>
+<tr><td><a href="/sites/default/files/x.pdf">RFP 164/2026:  Appointment of a Professional Service Provider</a></td><td>12 October 2026</td><td>02 November 2026 @ 23H55</td></tr>
+<tr><td>RFP 186/2026:  A typo&#39;d closing date tender</td><td>2 October 2026</td><td>23 Ocober 2026 @ 23H55</td></tr>
+</table>"""
 
 
 def sanral_site(reference, closing, scm=None, title=None, slug=None):
@@ -122,6 +146,38 @@ def test_transnet_capetown():
     check("Cape Town RFQ", r["contract_number"] == "GA12700333" and r["closing_date"] == "2026-10-28T12:00:00+02:00"
           and r["ocid"] == "capetown-rfq:331433" and r["procurement_category"] == "Clothing, PPE & Accessories")
     check("Cape Town award supplier", capetown_procurement.parse_award_detail(CAPETOWN_AWARD_DETAIL) == "ALWAYS SUPERLATIVE")
+
+
+def test_new_sources():
+    print("sars_procurement / cidb_tenders / dbsa_procurement")
+    import html as html_mod
+    entries = sars_procurement.parse_listing(html_mod.unescape(SARS_PAGE_HTML))
+    check("SARS: 2 dated entries found", len(entries) == 2, len(entries))
+    r = sars_procurement.normalize(entries[0])
+    check("SARS ref parsed", r["contract_number"] == "RFP14/2026")
+    check("SARS title excludes the ' | South African Revenue Service' suffix",
+          r["title"] is not None and "South African Revenue Service" not in r["title"], r["title"])
+    check("SARS published date", r["published_date"] == "2026-10-16T00:00:00+02:00")
+
+    open_r = cidb_tenders.normalize(CIDB_FEED_OPEN)
+    awarded_r = cidb_tenders.normalize(CIDB_FEED_AWARDED)
+    check("cidb: status field ('active') is NOT the open signal", CIDB_FEED_AWARDED["status"] == "active")
+    check("cidb: realstatus is", open_r["status"] == "advertised" and awarded_r["status"] == "awarded")
+    check("cidb: no closing_date field published -> unset, not treated as expired",
+          open_r["closing_date"] is None and open_r["is_closed"] is False)
+
+    rows = dbsa_procurement.parse_table(DBSA_TABLE_HTML)
+    check("DBSA: header row skipped, 2 tenders parsed", len(rows) == 2, len(rows))
+    rels = [dbsa_procurement.normalize(r) for r in rows]
+    check("DBSA ref + closing date", rels[0]["contract_number"] == "RFP164/2026"
+          and rels[0]["closing_date"] == "2026-11-02T00:00:00+02:00")
+    check("DBSA doc link resolved to an absolute URL", rels[0]["documents"][0]["url"].startswith("https://www.dbsa.org/"))
+    check("DBSA: a typo'd month ('Ocober') in the closing date -> unset, not a crash", rels[1]["closing_date"] is None)
+
+    check("new sources registered in ALL_SOURCES", {"sars_procurement", "cidb_tenders", "dbsa_procurement"}
+          <= set(gov_sources.ALL_SOURCES))
+    check("new sources have labels", all(gov_sources.SOURCE_LABELS.get(s) for s in
+          ("sars_procurement", "cidb_tenders", "dbsa_procurement")))
 
 
 def test_merge():
@@ -249,6 +305,7 @@ if __name__ == "__main__":
     test_portal()
     test_eskom()
     test_transnet_capetown()
+    test_new_sources()
     test_merge()
     test_changes()
     test_digest()

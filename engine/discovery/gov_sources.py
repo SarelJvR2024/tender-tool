@@ -29,6 +29,16 @@ reader's docstring and in docs/specs/Government-Tender-Coverage-Findings.md):
                          104 open, most on the portal; documents incl. addenda.
   capetown_procurement   City of Cape Town's procurement portal RFQs
                          (capetown_procurement.py): 246 open, none on eTenders.
+  sars_procurement       SARS's own Published Tenders page (sars_procurement.py):
+                         5 open RFP/RFI entries checked 2026-10-18, run on its
+                         own WordPress site rather than the central portal.
+  cidb_tenders           cidb's OWN procurement (cidb_tenders.py, not the
+                         contractor-registration system this product already
+                         reads elsewhere) - 1 open of 34 listed, a small JSON
+                         feed behind the "Current Tenders" page.
+  dbsa_procurement       Development Bank of Southern Africa's open RFPs/RFRs
+                         table (dbsa_procurement.py): 14 open of 14 listed
+                         checked 2026-10-18.
 
 merge() keeps one release per tender: a direct-site tender that is also on
 the portal (any shared identifier - ref_keys(): the reference after
@@ -59,7 +69,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import source_http as sh  # noqa: E402
 
-ALL_SOURCES = ("etenders_portal", "sanral", "eskom_bulletin", "transnet_etenders", "capetown_procurement")
+ALL_SOURCES = ("etenders_portal", "sanral", "eskom_bulletin", "transnet_etenders", "capetown_procurement",
+               "sars_procurement", "cidb_tenders", "dbsa_procurement")
 SOURCE_LABELS = {
     "etenders_portal": "eTenders portal (National Treasury)",
     "etenders_ocds": "eTenders OCDS feed (National Treasury)",
@@ -67,6 +78,9 @@ SOURCE_LABELS = {
     "eskom_bulletin": "Eskom Tender Bulletin",
     "transnet_etenders": "Transnet eTenders",
     "capetown_procurement": "City of Cape Town procurement portal",
+    "sars_procurement": "SARS Published Tenders",
+    "cidb_tenders": "cidb's own procurement",
+    "dbsa_procurement": "DBSA open RFPs/RFRs",
 }
 # A direct-site tender is only folded into a portal row of the SAME buyer:
 # reference numbers aren't unique across buyers ("RFQ 01/2026").
@@ -190,6 +204,15 @@ def read_source(name, with_documents=True, log=print):
     if name == "capetown_procurement":
         import capetown_procurement
         return capetown_procurement.fetch_rfqs(log=log), []
+    if name == "sars_procurement":
+        import sars_procurement
+        return sars_procurement.fetch_releases(with_documents=with_documents, log=log), []
+    if name == "cidb_tenders":
+        import cidb_tenders
+        return cidb_tenders.fetch_releases(log=log), []
+    if name == "dbsa_procurement":
+        import dbsa_procurement
+        return dbsa_procurement.fetch_releases(log=log), []
     raise ValueError(f"unknown source {name!r}")
 
 
