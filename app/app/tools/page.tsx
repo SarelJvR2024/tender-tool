@@ -25,6 +25,11 @@ const TOOLS = [
     title: "B-BBEE preference points calculator",
     blurb: "Work out the actual 80/20 or 90/10 preference points (PPPFA Preferential Procurement Regulations, 2022) for a price and B-BBEE level.",
   },
+  {
+    href: "/tools/b6-estimator",
+    title: "SANRAL B6 functionality score estimator",
+    blurb: "Estimate a key position's SANRAL functionality score from the real published Book 1 scoring matrices - no SANRAL competitor covers this at all.",
+  },
 ];
 
 export default function ToolsIndexPage() {
