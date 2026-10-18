@@ -6,7 +6,18 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18 follow-up to the seventh QA run: **`watch_tender_updates.run()` now isolates each pursued tender** (one bad tender no longer stops the update watch for every other one; the seventh run's named open item, closed - below). Before that, the standing QA review's seventh run: **repo-wide sweep for the malformed-date-in-a-batch bug class** (4 more dangerous instances fixed, below). ~07:30 UTC **regression found and fixed**: Discovery was scoring valuation panels, ethics assessments, stevedoring etc. as `strong_fit` for roads/engineering firms (whole-group tags widened by 0040; migration `0058` - below). ~06:20 UTC quiet check-in (one small, well-verified UI fix - sticky jump-nav on the Person page, below; nothing further needed). ~04:15 UTC quiet check-in (one small, well-verified fix landed - "likely a scanned image" wrong-explanation bug, below; nothing further needed). ~02:30 UTC independent verification of the batch below (cross-tenant isolation extended through `0057`, principals/registrations/bank-accounts RLS, taxonomy admin approval) plus one test-script fix - below. 2026-10-18 ~02:00 UTC form-by-form, field-by-field audit (`Form-Field-Audit.md`: 26 fixes, 13 open decisions for Sarel, migration `0057`); 2026-10-18 SANRAL Form B7 Targeted-Enterprise subcontracting answered by the company (compliance review G3, migration `0056` - below); 2026-10-18 Sarel's answers to taxonomy O1/O2/O4/O5 - buyer's eTenders category cross-check, `/admin/taxonomy` + company tag suggestions, SACAP/SACPLAN/SACQSP/SACPVP/PSIRA asked for only when a tender asks (on the 0050 catalog), each tender's own C3.1.11 minimums (migration `0054` - below); 2026-10-18, ~01:15 UTC Sarel's answer on stale Discovery rows after a downgrade (a re-score that makes a verdict worse is flagged on the Discovery card, the Workspace and the Pipeline until marked seen, and carried once in the digest - migration `0055`, below); POPIA / cross-tenant audit follow-up (shared blank templates are now per-company copies, migration `0045`; audit write-up `POPIA-Security-Audit.md` - below); award and price analysis (market feedback on submitted prices, migration `0053` - below); government tender coverage + listing-change tracking (eTenders portal read in full, SANRAL/Eskom/Transnet/Cape Town direct, cancellations and extensions, migration `0051` - row below and `Government-Tender-Coverage-Findings.md`); 2026-10-18 directors & shareholders register, shared registrations catalog, restricted bank accounts and landlord property records (Sarel's Q-MD1-4, migration `0050` - below); ~00:30 UTC independent verification of the cross-tenant isolation fixes and 8 other commits, including filling in the missing write-up for the isolation fix itself (below); 2026-10-17 ~21:15 UTC Sarel's three tender-update decisions (accept a disagreeing date from the Workspace, a real briefing date + milestone, people named by e-mail in the alert report and the digest - migration `0048`); ~21:00 UTC tender regulatory compliance review (Public Procurement Act 2024 struck down; B-BBEE affidavit vs SANRAL A12); ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039`); ~19:00 UTC Sarel's three decisions on the §9.4 open questions (re-score on a profile change, every local seen store into the database, central system alerts e-mailed to Sarel); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters; ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7; ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
+Last full pass: 2026-10-18, ~08:30 UTC — independently verified the last 4 commits (below):
+**`watch_tender_updates.run()` now isolates each pursued tender** (one bad tender no longer stops
+the watch for every other one); the standing QA review's seventh run, a **repo-wide sweep for the
+malformed-date-in-a-batch bug class** (4 more dangerous instances fixed); a **daily compliance
+reminder run that a single malformed expiry date used to abort for every company**, now skips
+just the bad record; and a **regression Discovery had introduced**, scoring valuation panels,
+ethics assessments and stevedoring as `strong_fit` for roads/engineering firms (migration `0058`).
+All four re-run against a fresh `0001`→`0058` scratch-Postgres replay with 0 failures.
+
+Everything before this is in **Detailed pass history** below, each dated entry self-contained
+with its own evidence — this line only needs to carry the last few passes, not the whole project
+history (trimmed this pass; nothing deleted, just no longer restated at the top every time).
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -122,6 +133,52 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-18, ~08:30 UTC): independent verification of the last 4 commits (the Discovery scoring regression, 2 date-crash fixes, tender-update isolation)
+
+Trimmed this file's own header line (above) down to the last pass's summary - it had grown back
+into an append-only log after I flagged it last pass without acting; acted on it this time.
+
+Replayed `0001`→`0058` fresh (49 migrations - `0059`-and-up don't exist yet) and ran every
+suite these 4 commits touch:
+
+- **`test_tenant_isolation.py`:** ALL PASSED - reproduces the "216 pass" claim with `0058` in
+  the schema too.
+- **`test_taxonomy.py` Part 1 (including the new "Part 1b" regression pins) and Part 2 (DB):**
+  0 failures both. Worth noting what Part 1b actually re-runs: the exact real-world
+  misclassifications named in the commit message - herbicides, due-diligence training, shunting
+  torches, a precinct plan, governance training, stevedoring, an ethics assessment, a fire-
+  resistance lab test, a valuation panel, strategic advisory - every one now comes back
+  `needs_review` instead of the `strong_fit` a roads/engineering company used to get, while the
+  genuine fits (architectural PSP, structural engineer, RRM consulting, SANRAL geotech, bridge,
+  road rehab) still correctly score `strong_fit`. This is the same kind of silent-wrong-result
+  bug as the discipline-fit fix from earlier in this session, just at the opposite end (too
+  permissive instead of too strict) - worth remembering both directions exist.
+- **The 5 compliance test files + `test_digest_live.py`** (`watch_deadlines_urgency`,
+  `reminder_seen_db`, `principals_registrations`, `watch_conditional_registrations`,
+  `watch_person_credentials`): 0 failures across all six, confirming the malformed-expiry-date
+  fix didn't change any correct behavior, only added the missing guard.
+- **`test_tender_updates.py` Part 1 (including the new "Part 2b" isolation test) and Part 3
+  (DB):** ALL PASSED. Part 2b's own numbers match the commit exactly - 2 of 4 pursued tenders
+  deliberately broken (a malformed document, a simulated DB-write timeout), both isolated with
+  one system alert each naming the tender and reason, the other 2 tenders still checked and
+  reported, and the skipped one catches up cleanly on the next run.
+- **Read the repo-wide date-sweep diff in full** (`604bf6e`): all 4 Python sites
+  (`source_http.parse_sast`, `watch_tender_updates._sanral_closing`,
+  `process_general_jobs._within`/`_years_before`, `watch_deadlines.find_documents_lapsing_before_closing`)
+  follow the same pattern - catch the specific exception, record a named `system_alerts` warning,
+  degrade to "skip this one record" rather than crash the batch. The TS side
+  (`app/lib/dates.ts daysUntil()`) now returns `null` instead of `NaN` for an unparseable date -
+  checked this matters: `NaN < 0` and `NaN <= 60` are both `false` in JS, so `expiryStatus()` used
+  to fall through to its last branch and show a malformed expiry as green "Current", the most
+  dangerous possible wrong answer for a compliance badge. `python3 -m py_compile` clean on every
+  changed engine file; `npm run typecheck`/`lint` clean; `test_general_bridge.py` still ALL
+  PASSED.
+
+Nothing found needing a fix. No new gaps opened. Good example this pass of the standing review
+working as intended: a real, severe bug (one bad date aborting the whole multi-tenant compliance
+run) was caught and fixed by another agent before I ever saw it live, and I confirmed the fix
+holds rather than just trusting the commit message.
 
 ## This pass (2026-10-18, follow-up to the QA seventh run): per-tender error isolation in the tender-update watch
 
