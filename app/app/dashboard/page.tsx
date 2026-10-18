@@ -81,7 +81,8 @@ export default async function DashboardPage() {
         <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
           {rows.length === 0 && !error && (
             <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
-              No tenders yet - run <code>supabase/seed_tenders.sql</code> to load the known SANRAL tenders.
+              No tenders yet. Check the <Link href="/discovery" style={{ color: "#16233B", fontWeight: 600 }}>Discovery</Link> feed for open SANRAL tenders, or{" "}
+              <Link href="/tenders/new" style={{ color: "#16233B", fontWeight: 600 }}>load one manually</Link> if you already have the documents.
             </div>
           )}
           {rows.map((t, i) => {
