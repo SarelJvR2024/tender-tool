@@ -38,6 +38,9 @@ export default function ForgotPasswordPage() {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F5F1", padding: 16, boxSizing: "border-box" }}>
         <div style={CARD}>
+          <div style={{ width: 40, height: 40, borderRadius: 8, background: "#16233B", margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 18, color: "#FFFFFF" }}>
+            T
+          </div>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Check your email</h1>
           <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
             If an account exists for <strong>{email}</strong>, a password reset link is on its way.
@@ -53,6 +56,9 @@ export default function ForgotPasswordPage() {
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F5F1", padding: 16, boxSizing: "border-box" }}>
       <div style={CARD}>
+        <div style={{ width: 40, height: 40, borderRadius: 8, background: "#16233B", margin: "0 auto 20px", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 18, color: "#FFFFFF" }}>
+          T
+        </div>
         <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Reset your password</h1>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 28px" }}>We&apos;ll email you a link to set a new one</p>
 

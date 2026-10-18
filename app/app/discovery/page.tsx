@@ -306,9 +306,9 @@ export default async function DiscoveryPage({
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {visibleRows.length === 0 && !error && (
             <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
-              No discovered opportunities{activeFilter !== "all" ? " in this filter" : ""} yet - run{" "}
-              <code>engine/discovery/watch_new_tenders.py</code> and{" "}
-              <code>engine/discovery/seed_supabase_opportunities.py</code> to load new ones.
+              {activeFilter !== "all"
+                ? "Nothing matches this filter yet - try \"All\" to see everything scored so far."
+                : "Nothing scored for your company profile yet. The daily scan checks every open tender against it automatically, or you can load a tender you've already found with the button above."}
             </div>
           )}
           {visibleRows.map((o) => {
