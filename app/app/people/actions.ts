@@ -110,7 +110,8 @@ export async function savePerson(formData: FormData) {
  * strips them from key-position rankings and signatory answers). Their CV
  * FILES are not rows - Storage only deletes a file through the Storage API -
  * so the uploaded and generated CVs are removed here first, from the paths
- * the rows record plus anything left in the person's own folder.
+ * the rows record plus anything left in the person's own folder. Their
+ * signatory_scopes (0061) go by the same person_id cascade.
  */
 export async function deletePerson(formData: FormData) {
   const companyId = await requireCompanyId();
@@ -507,4 +508,53 @@ export async function addPersonCatalogRegistration(formData: FormData) {
   if (error) redirect(`${back}?error=${encodeURIComponent(error.message.replace(/^held_registrations: /, ""))}#registrations-asked`);
   revalidatePath(back);
   redirect(`${back}#registrations-asked`);
+}
+
+/**
+ * Signatory scopes (0061) - optional region/industry/discipline tags on a
+ * signatory, used only to SUGGEST the right default on the per-tender
+ * signatory selector (app/app/tenders/[id]/signatory-logic.ts). At least
+ * one of region/industry_tag/discipline_tag must be set (the 0061 check
+ * constraint also enforces this). Adding or removing a scope never affects
+ * which signatories a company can CHOOSE for a tender - that list is
+ * everyone with a signatory_capacity, unchanged by this table.
+ */
+export async function addSignatoryScope(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+
+  const personId = str(formData, "person_id");
+  if (!personId) redirect("/people");
+  const back = `/people/${personId}#signatory-scope`;
+
+  const region = str(formData, "region");
+  const industryTag = str(formData, "industry_tag");
+  const disciplineTag = str(formData, "discipline_tag");
+  if (!region && !industryTag && !disciplineTag) {
+    redirect(`${back.replace("#signatory-scope", "")}?error=${encodeURIComponent("Set a region and/or an industry/discipline for this scope.")}#signatory-scope`);
+  }
+
+  const { error } = await supabase.from("signatory_scopes").insert({
+    company_id: companyId,
+    person_id: personId,
+    region,
+    industry_tag: industryTag,
+    discipline_tag: disciplineTag,
+  });
+  if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}#signatory-scope`);
+  revalidatePath(`/people/${personId}`);
+  redirect(back);
+}
+
+export async function deleteSignatoryScope(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const personId = str(formData, "person_id");
+  const scopeId = str(formData, "scope_id");
+  if (!personId || !scopeId) redirect("/people");
+
+  const { error } = await supabase.from("signatory_scopes").delete().eq("id", scopeId).eq("company_id", companyId);
+  if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}#signatory-scope`);
+  revalidatePath(`/people/${personId}`);
+  redirect(`/people/${personId}#signatory-scope`);
 }

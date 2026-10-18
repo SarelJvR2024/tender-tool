@@ -5,6 +5,7 @@ import { loadB7State } from "./b7-data";
 import { TENDER_TEMPLATES } from "@/lib/tenderTemplates";
 import type { ChecklistRow } from "./pack-checklist";
 import { b7Status, docItemStatus, fieldStatus, humanizeFieldKey, positionStatus, provenanceStatus, signatureStatus, type ReviewStatus } from "./pack-review-logic";
+import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
 
 export type { ReviewStatus } from "./pack-review-logic";
 
@@ -226,13 +227,22 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
 
   // --- 4. Signature ----------------------------------------------------------
   try {
-    const [{ data: signerAnswer }, { data: signers }] = await Promise.all([
+    const [{ data: signerAnswer }, { data: signers }, { data: scopeRows }, { data: tenderRow }] = await Promise.all([
       supabase.from("tender_answers").select("value").eq("tender_id", tenderId).eq("field_key", "signatory_person_id").maybeSingle(),
       supabase.from("people").select("id, name, signatory_capacity").not("signatory_capacity", "is", null).order("created_at"),
+      // signatory_scopes (0061): optional region/industry/discipline tags per
+      // signatory, used only to pick the suggested default below - never to
+      // block a free choice among `signers`.
+      supabase.from("signatory_scopes").select("person_id, region, industry_tag, discipline_tag"),
+      supabase.from("tenders").select("region, industry_tags, discipline_tags").eq("id", tenderId).maybeSingle(),
     ]);
-    const signerList = (signers ?? []) as { id: string; name: string; signatory_capacity: string }[];
+    const signerList = (signers ?? []) as Signatory[];
+    const scopes = (scopeRows ?? []) as SignatoryScope[];
     const chosenId = (signerAnswer?.value as string | null | undefined) ?? null;
-    const fallback = signerList[0] ?? null;
+    const tenderScope = tenderRow
+      ? { region: (tenderRow.region as string | null) ?? null, industryTags: (tenderRow.industry_tags as string[] | null) ?? [], disciplineTags: (tenderRow.discipline_tags as string[] | null) ?? [] }
+      : NO_TENDER_SCOPE;
+    const fallback = pickDefaultSignatory({ signers: signerList, scopes, tender: tenderScope });
     const { reviewStatus, checklistStatus, value, note } = signatureStatus({ chosenId, fallback });
     pushChecklist({ title: "Signature", envelope: "Technical", status: checklistStatus, pages: null, note });
     sections.push(section("signature", "Signature", "#submission-pack", "Choose signatory", [{ key: "signatory", label: "Who signs this bid", value, status: reviewStatus, note }]));

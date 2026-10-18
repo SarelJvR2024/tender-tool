@@ -74,7 +74,16 @@ export function b7Status(input: {
   return { applies, reviewStatus: "confirmed", checklistStatus: "included", value: input.planMode ?? "Answered", note: null };
 }
 
-/** Signature status: who signs, given the chosen person (if any) and the default fallback signer. */
+/**
+ * Signature status: who signs, given the chosen person (if any) and the
+ * default fallback signer. `fallback` is whichever signatory would be
+ * pre-selected if nobody has chosen one yet - with migration 0061 that's
+ * the best region/industry/discipline scope match for this tender
+ * (signatory-logic.ts pickDefaultSignatory), falling back to the first
+ * signatory on file when there's no scope data or no match; before 0061 it
+ * was always "first signatory on file". Either way this function doesn't
+ * care which kind of fallback it was given - only that a choice exists.
+ */
 export function signatureStatus(input: {
   chosenId: string | null;
   fallback: { name: string; signatory_capacity: string } | null;
@@ -87,7 +96,7 @@ export function signatureStatus(input: {
       reviewStatus: "needs_input",
       checklistStatus: "included_warning",
       value: `${input.fallback.name} - ${input.fallback.signatory_capacity}`,
-      note: `Not chosen - will default to ${input.fallback.name} (first signatory on file).`,
+      note: `Not chosen - will default to ${input.fallback.name} (suggested signatory for this tender).`,
     };
   }
   return { reviewStatus: "confirmed", checklistStatus: "included", value: `${input.fallback.name} - ${input.fallback.signatory_capacity}`, note: null };

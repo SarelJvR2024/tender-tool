@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 import { loadB7State } from "./b7-data";
 import { requestSubmissionPack } from "./actions";
 import { PackAutoRefresh } from "./pack-auto-refresh";
 import { PackChecklist, checklistOf, type ChecklistRow } from "./pack-checklist";
+import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -61,7 +63,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   const readiness = packReadiness(await loadTenderCompliance(tenderId));
   const b7 = await loadB7State(tenderId);
 
-  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }, { data: reviewRow }] = await Promise.all([
+  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }, { data: reviewRow }, { data: scopeRows }, { data: tenderRow }] = await Promise.all([
     supabase.from("tender_documents").select("doc_type").eq("tender_id", tenderId),
     supabase
       .from("pack_generation_jobs")
@@ -75,8 +77,17 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     supabase.from("tender_answers").select("value").eq("tender_id", tenderId).eq("field_key", "signatory_person_id").maybeSingle(),
     // Pack review (0059): has a human looked at the full pre-compile list (pack-review.tsx) yet?
     supabase.from("pack_review_confirmations").select("reviewed_at").eq("tender_id", tenderId).maybeSingle(),
+    // signatory_scopes (0061): optional region/industry/discipline tags per
+    // signatory - advisory only, used to suggest a default below.
+    supabase.from("signatory_scopes").select("person_id, region, industry_tag, discipline_tag"),
+    supabase.from("tenders").select("region, industry_tags, discipline_tags").eq("id", tenderId).maybeSingle(),
   ]);
-  const signers = (signerRows ?? []) as { id: string; name: string; signatory_capacity: string }[];
+  const signers = (signerRows ?? []) as Signatory[];
+  const scopes = (scopeRows ?? []) as SignatoryScope[];
+  const tenderScope = tenderRow
+    ? { region: (tenderRow.region as string | null) ?? null, industryTags: (tenderRow.industry_tags as string[] | null) ?? [], disciplineTags: (tenderRow.discipline_tags as string[] | null) ?? [] }
+    : NO_TENDER_SCOPE;
+  const suggested = pickDefaultSignatory({ signers, scopes, tender: tenderScope });
   const chosenSigner = (signerAnswer?.value as string | null | undefined) ?? "";
   const jobs = (jobRows ?? []) as PackJob[];
   const onFile = new Set((docRows ?? []).map((d) => d.doc_type as string));
@@ -170,14 +181,27 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
         <form action={requestSubmissionPack} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input type="hidden" name="tender_id" value={tenderId} />
           <input type="hidden" name="tender_pack_id" value={tenderPackId} />
+          {signers.length === 0 && (
+            <div style={{ fontSize: 12, color: "#92400E" }}>
+              No one on your <Link href="/people" style={{ color: "#92400E", fontWeight: 700 }}>People page</Link> has a signatory
+              capacity set yet - add one before generating, so the pack has someone to name as signing it.
+            </div>
+          )}
+          {signers.length === 1 && (
+            <div style={{ fontSize: 12, color: "#16233B" }}>
+              Signs this bid: <strong>{signers[0].name} - {signers[0].signatory_capacity}</strong>
+            </div>
+          )}
           {signers.length > 1 && (
             <label id="signatory-select" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B", flexWrap: "wrap" }}>
               Who signs this bid
               <select name="signatory_person_id" defaultValue={signers.some((p) => p.id === chosenSigner) ? chosenSigner : ""}
                 style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px", maxWidth: "100%" }}>
-                <option value="">Not chosen - {signers[0].name} (first signatory on file; the pack will say so)</option>
+                <option value="">
+                  Not chosen - {suggested?.name ?? signers[0].name} (suggested for this tender; the pack will say so)
+                </option>
                 {signers.map((p) => (
-                  <option key={p.id} value={p.id}>{p.name} - {p.signatory_capacity}</option>
+                  <option key={p.id} value={p.id}>{p.name} - {p.signatory_capacity}{p.id === suggested?.id ? " (suggested)" : ""}</option>
                 ))}
               </select>
             </label>

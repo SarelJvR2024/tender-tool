@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { expiryStatus } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
-import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration } from "../actions";
+import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
+import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { SiteNav } from "../../_components/SiteNav";
 import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
@@ -99,6 +100,13 @@ const GENERATED_CV_STATUS_LABEL: Record<string, { label: string; bg: string; col
 const CV_FORMAT_LABEL: Record<string, string> = {
   sanral_keyperson: "SANRAL key-person (Form B1.1/B2.1 shape)",
   world_bank: "World Bank format",
+};
+
+type SignatoryScope = {
+  id: string;
+  region: string | null;
+  industry_tag: string | null;
+  discipline_tag: string | null;
 };
 
 type Project = {
@@ -238,6 +246,12 @@ export default async function PersonDetailPage({
   let taggedRoles = new Set<string>();
   let rolesError: string | null = null;
   let pendingExtractions: CvExtractionResult[] = [];
+  let signatoryScopes: SignatoryScope[] = [];
+  // 0061: optional region/industry/discipline tags shown on the "Signatory
+  // capacity" field - reuses discipline_categories (0040), same taxonomy
+  // the Experience Library and pricing form already read.
+  const taxonomy = await loadDisciplineTaxonomy(supabase);
+  const disciplineGroups = taxonomyGroups(taxonomy);
   // Which conditional registrations (SACNASP, SAGC) a tender on the system
   // asks for - the fields are shown only then, or when already held.
   const askedFor: AskedFor = await registrationsAskedFor(supabase);
@@ -296,6 +310,13 @@ export default async function PersonDetailPage({
       .is("tender_id", null)
       .order("requested_at", { ascending: false });
     generatedCvs = (genRows ?? []) as GeneratedCv[];
+
+    const { data: scopeRows } = await supabase
+      .from("signatory_scopes")
+      .select("id, region, industry_tag, discipline_tag")
+      .eq("person_id", id)
+      .order("created_at");
+    signatoryScopes = (scopeRows ?? []) as SignatoryScope[];
 
     // Signed URLs for anything actually downloadable (private bucket) -
     // generated once at render time, short-lived, never stored.
@@ -499,6 +520,73 @@ export default async function PersonDetailPage({
             {isNew ? "Add person" : "Save changes"}
           </button>
         </form>
+
+        {!isNew && person?.signatory_capacity && (
+          <div id="signatory-scope" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Signatory scope (optional)</div>
+            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+              A region and/or industry/discipline this person usually signs for - e.g. &quot;Western Cape&quot;, or a
+              discipline such as roads/civil. This only SUGGESTS {person!.name} as the default pick on a matching
+              tender&apos;s &quot;Who signs this bid&quot; selector - the company can still choose anyone with a
+              signatory capacity for any tender. Leave it blank if this person signs across the board.
+            </div>
+            {signatoryScopes.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                {signatoryScopes.map((s) => (
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#16233B", border: "1px solid #F0EEE6", borderRadius: 8, padding: "6px 10px" }}>
+                    <span style={{ flex: 1 }}>
+                      {[s.region, s.industry_tag ? taxonomyLabel(taxonomy, s.industry_tag) : null, s.discipline_tag ? taxonomyLabel(taxonomy, s.discipline_tag) : null]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                    <form action={deleteSignatoryScope}>
+                      <input type="hidden" name="person_id" value={person!.id} />
+                      <input type="hidden" name="scope_id" value={s.id} />
+                      <button type="submit" style={{ background: "none", border: "none", color: "#B91C1C", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                        Remove
+                      </button>
+                    </form>
+                  </div>
+                ))}
+              </div>
+            )}
+            <form action={addSignatoryScope} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <input type="hidden" name="person_id" value={person!.id} />
+              <Field>
+                <label style={label}>Region</label>
+                <input style={field} name="region" placeholder="e.g. Western Cape" />
+              </Field>
+              <Field>
+                <label style={label}>Industry</label>
+                <select style={field} name="industry_tag" defaultValue="">
+                  <option value="">Not scoped by industry</option>
+                  {disciplineGroups.map(({ group }) => (
+                    <option key={group.slug} value={group.slug}>{group.label}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field>
+                <label style={label}>Discipline</label>
+                <select style={field} name="discipline_tag" defaultValue="">
+                  <option value="">Not scoped by discipline</option>
+                  {disciplineGroups.map(({ group, children }) => (
+                    <optgroup key={group.slug} label={group.label}>
+                      {children.map((c) => (
+                        <option key={c.slug} value={c.slug}>{c.label}</option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </Field>
+              <button
+                type="submit"
+                style={{ minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer" }}
+              >
+                Add scope
+              </button>
+            </form>
+          </div>
+        )}
 
         {!isNew &&
           catalogBodiesShown.length > 0 &&
