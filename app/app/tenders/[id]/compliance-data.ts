@@ -16,6 +16,7 @@ import { findMatchingExperience, isScoreableEvidence, type ExperienceItem } from
 import { chooseEvidenceRule, evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
 import { TENDER_ROLE_COLUMNS, roleCodeForPosition, roleFitCheck, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
 import { COMPANY_OFFICE_COLUMNS, type CompanyOffice } from "@/lib/locality";
+import { CONDITIONAL_REGISTRATION_COLUMNS, loadHeldCatalogRegistrations } from "@/lib/personCredentials";
 
 /**
  * The compliance report's data, loaded once per request (React cache()) and
@@ -108,12 +109,15 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   let generatedCvs: GeneratedCvRow[] = [];
   if (personIds.length > 0) {
     const [{ data: ppl }, { data: prj }, { data: cvs }, { data: gen }] = await Promise.all([
-      supabase.from("people").select("id, name, ecsa_level, ecsa_number, initial_graduated, sacnasp_category, sacnasp_number, sacnasp_expiry, sagc_category, sagc_number, sagc_expiry").in("id", personIds),
+      // conditional registrations (0040 columns, 0050 catalog) are read only for a position whose requirement names the body
+      supabase.from("people").select(`id, name, ecsa_level, ecsa_number, initial_graduated, sacpcmp_number, sacpcmp_expiry, ${CONDITIONAL_REGISTRATION_COLUMNS}` as const).in("id", personIds),
       supabase.from("projects").select("person_id, client_type, project_type, position_code, start_date, end_date").in("person_id", personIds),
       supabase.from("cv_uploads").select("person_id, mode, original_filename, created_at").in("person_id", personIds).order("created_at", { ascending: false }),
       supabase.from("generated_cvs").select("position_code, status").eq("tender_id", tenderId),
     ]);
-    people = (ppl ?? []) as PersonRow[];
+    // 0050 catalog registrations (SACQSP, SACAP, ...) of the same people
+    const held = await loadHeldCatalogRegistrations(supabase, personIds);
+    people = ((ppl ?? []) as PersonRow[]).map((p) => ({ ...p, held: held.filter((h) => h.person_id === p.id) }));
     projects = (prj ?? []) as ProjectRow[];
     cvUploads = (cvs ?? []) as CvUpload[];
     generatedCvs = (gen ?? []) as GeneratedCvRow[];
@@ -144,6 +148,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
   );
   if (experienceDisciplines.length === 0) experienceDisciplines.push("roads_civil");
   const chosenRule = chooseEvidenceRule(evaluationRules);
+  const keyPersonMinimums = evaluationRules?.key_person_minimums ?? null;
   const taxonomy = await loadDisciplineTaxonomy(supabase);
   const companyId = (company?.id as string | undefined) ?? null;
   const asOf = closingDate ? closingDate.slice(0, 10) : undefined;
@@ -185,7 +190,9 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     const asg = assignments.find((a) => a.position_code === code) ?? null;
     const person = asg?.confirmed_person_id ? personById.get(asg.confirmed_person_id) ?? null : null;
     const suggested = !person && asg?.suggested_person_id ? personById.get(asg.suggested_person_id) ?? null : null;
-    const min = checkMinimumRequirement(code, person, closingDate, req?.position_description ?? null);
+    // THIS tender's own C3.1.11 table when it has been read (audit Q5),
+    // else R.396's table labelled as an assumption (tenderCompliance.ts).
+    const min = checkMinimumRequirement(code, person, closingDate, req?.position_description ?? null, keyPersonMinimums);
     const cv = person ? cvUploads.find((c) => c.person_id === person.id) ?? null : null;
     const tenderCv = generatedCvs.find((g) => g.position_code === code) ?? null;
     const personProjects = person ? projects.filter((p) => p.person_id === person.id) : [];
@@ -234,6 +241,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     experienceAvailable,
     experienceDisciplines,
     chosenRule,
+    keyPersonMinimums,
     qualitySystem,
     beeProofValid,
   };

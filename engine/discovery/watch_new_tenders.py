@@ -210,6 +210,7 @@ def save_seen_db(client, seen, loaded, companies):
 # source_http.release) - passed through to discovered_opportunities (0051).
 LISTING_FIELDS = ("source", "listing_sources", "province", "tender_type", "briefing", "status")
 RELEASE_FIELDS = ("contract_number", "buyer", "title", "description", "closing_date", "categories",
+                  "etenders_category", "etenders_category_check",  # audit O1 cross-reference
                   "document_depth", "signals", "confidence_note")
 
 
@@ -362,6 +363,9 @@ def main():
                           "gov_sources names, or 'ocds' for the old OCDS-only read")
     ap.add_argument("--no-track-changes", action="store_true",
                      help="skip tender_changes.py's listing-change tracking on this run's read")
+    ap.add_argument("--no-site-categories", action="store_true",
+                     help="don't read the buyer's own category from the eTenders site (a cross-reference "
+                          "shown next to Tender Tool's categories; never used for the fit verdict)")
     ap.add_argument("--include-needs-review", action="store_true",
                      help="also report needs_review verdicts, not just strong_fit/possible - noisy on the "
                           "unfiltered national feed (confirmed: 72 of 74 on a real run were irrelevant "
@@ -408,6 +412,18 @@ def main():
         needle = args.buyer.lower()
         normalized = [r for r in normalized if r["buyer"] and needle in r["buyer"].lower()]
     print(f"  {len(normalized)} release(s) in range" + (f" matching buyer '{args.buyer}'" if args.buyer else ""))
+    if not args.no_site_categories:
+        # The buyer's own eTenders category, next to Tender Tool's own (audit
+        # O1). Cross-reference only: a site outage leaves it null, nothing else.
+        # A release read from the portal (gov_sources / etenders_portal)
+        # already carries it; the portal list is fetched separately only for
+        # eTenders releases that don't (an OCDS-only run).
+        missing = [r for r in normalized if not r.get("etenders_category") and etenders_national.site_id_of(r.get("ocid"))]
+        if missing:
+            site, _ = etenders_national.fetch_site_categories()
+            etenders_national.attach_site_categories(missing, site)
+        n = sum(1 for r in normalized if r.get("etenders_category"))
+        print(f"  {n} of {len(normalized)} release(s) carry the buyer's own eTenders category")
 
     new_releases = run(normalized, companies, report_worthy, client, args.seen_store, today)
 

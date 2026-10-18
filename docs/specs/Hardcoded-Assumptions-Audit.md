@@ -391,7 +391,7 @@ Sarel: *"We can accommodate that into the structure, but don't specifically ask 
   - a geologist whose registration lapses before closing fails the minimum;
   - the expiry reminder fires for a SACNASP registration due in 15 days and a lapsed SAGC one, on real replayed rows.
 
-**Still open from Q5:** per-tender C3.1.11 extraction. New questions O1-O5 are in `Discipline-Taxonomy-Findings.md` §7.
+**Still open from Q5:** per-tender C3.1.11 extraction - *closed 2026-10-18, §12.* New questions O1-O5 are in `Discipline-Taxonomy-Findings.md` §7; O1, O2, O4 and O5 are answered and built (§12), O3 stays open.
 
 ## 11. Sarel's answers to the §9.4 questions (2026-10-17) - built and verified
 
@@ -432,3 +432,16 @@ Sarel: *"When evaluation downgrades opportunity it must be flagged."* Not silent
 - **Digest:** `reassessed_tenders`, each downgrade once (`downgrade_digested_at`, the 0039 `digested_at` idea), skipped if already marked seen. A pursued tender's downgrade is first, urgency high, and goes to every role ("You are working on this tender (bidding) - check whether to continue"); a plain-feed downgrade goes where new tenders go (full_cycle, viewer as a count).
 - **Verified:** `test_discovery_downgrades.py` (CI Part 1 on the real TN051 PDF; Part 2 on a fresh `0001`→`0055` replay with RLS) - 0 failures; rendered with real PostgREST + `next dev` at 390/1280 px, "Mark as seen" clicked for real; seeder and `daily_digest.py --mode live` run over HTTP. Evidence in System-Status, 2026-10-18 ~01:15 UTC pass.
 - **Open (new):** (1) should a downgrade on a pursued tender also go into the watch's immediate alert to the company (today: in the watch's CLI output / `--out` for Sarel's e-mail, and in the company's next digest)? (2) The flag has no time limit - it stays until someone marks it seen; is that right, or should it fade after N days? (3) "Mark as seen" is company-wide (one member clears the banner for all), like the 0048 accept - or per person?
+
+## 12. Sarel's answers to the §10 follow-up questions O1, O2, O4, O5 (2026-10-18) - built and verified
+
+Full evidence: `Discipline-Taxonomy-Findings.md` §8. Migration `0054_taxonomy_admin_and_etenders_category.sql`.
+
+| Question | Sarel | Built | Verified |
+|---|---|---|---|
+| **O1** - also read the buyer's own eTenders category? | Yes, as a cross-reference alongside Tender Tool's taxonomy | `etenders_national.fetch_site_categories()` (the site's own table data, once per run, joined on the ocid's site id); `Taxonomy.etenders_crosscheck()` -> agrees / differs / generic / unmapped; stored on `discovered_opportunities.etenders_category(_check)`; shown on Discovery. Never used by the fit verdict | Live: 295 of 300 OCDS releases matched a site category; over all 2 211 advertised tenders agrees 54.8%, catch-all 25.2%, differs 20.0%, unmapped 0. 15 "differs" hand-checked: mostly Tender Tool's reading was better, ~3 where the buyer's entry adds something - a review prompt, not a correction |
+| **O2** - in-app screen; promote a company's own tag? | Yes; companies suggest, Sarel reviews, never auto-promoted | `/admin/taxonomy` (add / edit / retire categories, review suggestions) for platform admins (0043) only; `discipline_category_suggestions` + `approve_discipline_suggestion()` (same slug, so the company's data needs no change); "Suggest this as a shared category" on Experience items | `test_taxonomy.py` Part 3 (27 DB checks: RLS, refusals, approve/reject/withdraw, Discovery uses the approved category); browser end-to-end 23/23 |
+| **O4** - SACAP, SACPLAN, SACQSP, SACPVP, PSIRA the same way? | Yes, only when a tender asks | On the shared registrations catalog that landed in parallel (0050 `registration_types` + `held_registrations`) - **no `people` columns** (one home per fact). `find_person_registrations()` detects the five (definitions/statute tables skipped); the People page shows a body's card only when an open tender asks or it's held; the compliance check reads the catalog only for a position that names the body; reminders are the catalog's own | Corpus of 123 hand-read tenders: SACAP 2, SACPLAN 2, SACQSP 2, SACPVP 1, PSIRA 6, all real asks; the definition filter removed exactly 2 false positives. SACQSP tested end to end on the real N.011-010-2027-1F QS row |
+| **O5** - read each tender's own C3.1.11 table | "Rest of Q5: build it" | `key_person_minimums.py extract_key_person_minimums()` -> `tenders.evaluation_rules.key_person_minimums` (seeder with Book 2/3; manual-load intake); the compliance report uses the tender's own row, R.396's table only as a labelled "Assumed rule" fallback (banner + per position) | Both real tables read cell by cell (36 checks); they really differ (N.011: CE Pr Eng only, RE 10-15 years, ARE 5 years, a QS/SACQSP row); no false table in 137 other texts; the browser shows the tender's-own banner on N.011 and the amber assumed banner on R.396 |
+
+Still open: **O3** (where SACNASP/SAGC go on the SANRAL forms). New: `Discipline-Taxonomy-Findings.md` §8.6 N1-N5.

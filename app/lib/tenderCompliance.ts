@@ -25,7 +25,7 @@
 // status has always come from the number + expiry on file.
 
 import { closingDayOf, daysUntil } from "./dates";
-import { SAGC_POSITION_RE } from "./personCredentials";
+import { SACQSP_POSITION_RE, SAGC_POSITION_RE, catalogSlug, type CatalogBody, type HeldCatalogRegistration, type PersonCredentialFields } from "./personCredentials";
 
 export type ComplianceStatus = "have" | "missing" | "check";
 
@@ -514,62 +514,180 @@ export function sanralConventionalDocumentChecks(input: {
 // ECSA as a Professional Engineer or Professional Engineering Technologist
 // (footnote 1) - a Professional Engineering Technician does NOT qualify.
 //
-// Source and scope, stated (hardcoded-assumptions audit, 2026-10-17): this is
-// ONE tender's table - R.396-010-2025/1F Book 2/3 C3.1.11(d) (C3-14/C3-15) -
-// and C3.1.11 lives in each tender's own Scope of Services ("The minimum
-// qualifications ... shall be as indicated in the table below"), so another
-// SANRAL tender can set different years or registrations. Every result names
-// the source so the user checks it against THIS tender's table. The same
-// R.396 table also lists Surveyor (SAGC, 5 yrs), Engineering Geologist (Pr
-// Sci.Nat + SAIEG, 5 yrs), OHS Specialist (SACPCMP), Road Safety Audit Team
-// Leader and Programmer - only the Engineering Geologist is a DS specialism
-// here (sanralMatrices DS_SPECIALISMS); a position whose own description
-// names it is checked against the person's SACNASP fields, not ECSA, and a
-// Surveyor position against SAGC.
+// Source, per tender (audit Q5, Sarel 2026-10-17 "Rest of Q5: build it"):
+// C3.1.11 lives in each tender's own Scope of Services ("The minimum
+// qualifications ... shall be as indicated in the table below"), and real
+// tenders differ - N.011-010-2027-1F wants Pr Eng (only) for the Contract
+// Engineer, 10-15 years for the RE and 5 for the ARE, where R.396 says Pr Eng
+// or Pr Tech Eng / 5 / 2. So the check uses THIS tender's own table when
+// engine/discovery/key_person_minimums.py has read it into
+// tenders.evaluation_rules.key_person_minimums (seed_tender_evaluation_rules.py
+// with Book 2/3, or the intake of a manually loaded tender) - exactly as the
+// experience-evidence rule uses the tender's own rule. Only when the tender's
+// table hasn't been read (or has no row for the position) does it fall back
+// to R.396-010-2025/1F Book 2/3 C3.1.11(d) (C3-14/C3-15) below, and then every
+// result says "Assumed rule" (same banner as the experience-evidence
+// fallback).
 //
-// SACNASP / SAGC (0040, audit Q5): the person's own registration fields are
-// read ONLY for a position whose requirement names that body - Engineering
-// Geologist -> SACNASP Pr Sci.Nat, Surveyor -> SAGC - never for every key
-// person ("don't specifically ask for it unless the tender requires it").
-const MIN_REQ_SOURCE = "R.396-010-2025/1F C3.1.11 table - check this tender's own C3.1.11";
-type MinReq = { registration: "pr_eng_or_tech" | "candidate" | "pr_sci_nat" | "sagc"; years: number | null; label: string };
-const ENGINEERING_GEOLOGIST_REQ: MinReq = { registration: "pr_sci_nat", years: 5, label: "Pr Sci.Nat (SACNASP), member of SAIEG, 5 years' relevant experience" };
-const SURVEYOR_REQ: MinReq = { registration: "sagc", years: 5, label: "Registered with SAGC (SA Geomatics Council), 5 years' relevant experience" };
+// Conditional registrations (SACNASP / SAGC: people columns, 0040; SACQSP /
+// SACAP / SACPLAN / SACPVP / PSIRA: the person's held_registrations in the
+// 0050 catalog): read ONLY for a position whose requirement names that body -
+// never for every key person ("don't specifically ask for it unless the
+// tender requires it").
+export const ASSUMED_MIN_REQ_SOURCE = "R.396-010-2025/1F C3.1.11 table - check this tender's own C3.1.11";
+export const OWN_MIN_REQ_SOURCE = "this tender's own C3.1.11 table";
+
+export type RegistrationCode =
+  | "pr_eng"
+  | "pr_eng_or_tech"
+  | "pr_tech_eng"
+  | "pr_techni_eng"
+  | "candidate"
+  | "pr_sci_nat"
+  | "sagc"
+  | "sacqsp"
+  | "sacap"
+  | "sacplan"
+  | "sacpvp"
+  | "psira"
+  | "sacpcmp"
+  | "none"
+  | "qualification"
+  | "refer"
+  | "alternatives";
+
+/** One row of a tender's own C3.1.11 table (engine/discovery/key_person_minimums.py). */
+export type KeyPersonMinimumRow = {
+  position: string;
+  position_code: string | null;
+  specialist: string | null;
+  qualification: string | null;
+  registration: RegistrationCode | null;
+  bodies: string[];
+  years_text: string | null;
+  years_min: number | null;
+  years_under: number | null;
+  other: string | null;
+  alternatives: { qualification: string; registration: RegistrationCode | null; years_text: string; years_min: number | null }[];
+  quote: string;
+};
+export type KeyPersonMinimums = {
+  source: "tender_document" | "not_found";
+  clause: string | null;
+  rows: KeyPersonMinimumRow[];
+  unparsed?: string[];
+  reason?: string;
+};
+
+export type MinReq = {
+  registration: RegistrationCode | null;
+  years: number | null;
+  label: string;
+  source: "tender_document" | "assumed";
+  other?: string | null;
+  alternatives?: KeyPersonMinimumRow["alternatives"];
+  qualification?: string | null;
+};
+const ENGINEERING_GEOLOGIST_REQ: MinReq = { registration: "pr_sci_nat", years: 5, label: "Pr Sci.Nat (SACNASP), member of SAIEG, 5 years' relevant experience", source: "assumed" };
+const SURVEYOR_REQ: MinReq = { registration: "sagc", years: 5, label: "Registered with SAGC (SA Geomatics Council), 5 years' relevant experience", source: "assumed" };
 const PR_SCI_NAT_RE = /pr\.?\s*sci\.?\s*nat|professional\s+natural\s+scientist/i;
 const CAND_SCI_NAT_RE = /cand\.?\s*sci\.?\s*nat|cert\.?\s*sci\.?\s*nat|candidate|certificated/i;
 export const SANRAL_MIN_REQUIREMENTS: Record<string, MinReq> = {
-  PL: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience" },
-  APL: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years" },
-  DS: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience" },
-  ADS: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years" },
-  CE: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience" },
-  ACE: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years" },
-  RE: { registration: "pr_eng_or_tech", years: 5, label: "Pr Eng or Pr Tech Eng, 5 years' relevant experience" },
-  ARE: { registration: "candidate", years: 2, label: "Registered candidate (engineer, technologist or technician), 2 years" },
+  PL: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience", source: "assumed" },
+  APL: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years", source: "assumed" },
+  DS: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience", source: "assumed" },
+  ADS: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years", source: "assumed" },
+  CE: { registration: "pr_eng_or_tech", years: 10, label: "Pr Eng or Pr Tech Eng, 10 years' relevant experience", source: "assumed" },
+  ACE: { registration: "pr_eng_or_tech", years: null, label: "Pr Eng or Pr Tech Eng, under 10 years", source: "assumed" },
+  RE: { registration: "pr_eng_or_tech", years: 5, label: "Pr Eng or Pr Tech Eng, 5 years' relevant experience", source: "assumed" },
+  ARE: { registration: "candidate", years: 2, label: "Registered candidate (engineer, technologist or technician), 2 years", source: "assumed" },
 };
 
 const PR_ENG_OR_TECH_RE = /professional\s+engineer(?!ing\s+technician)|professional\s+engineering\s+technologist|\bpr\.?\s*eng\b|\bpr\.?\s*tech\s*eng\b/i;
+// "Pr Eng" only (N.011's Contract Engineer): a Professional Engineer, not a technologist.
+const PR_ENG_ONLY_RE = /professional\s+engineer\b|\bpr\.?\s*eng\b/i;
+const PR_TECH_ENG_RE = /professional\s+engineer\b|professional\s+engineering\s+technologist|\bpr\.?\s*(?:eng|tech\s*eng)\b/i;
+// Pr Techni Eng minimum: a professional technician, or a higher professional category.
+const PR_TECHNI_ENG_RE = /professional\s+engineer|professional\s+engineering\s+(?:technologist|technician)|\bpr\.?\s*(?:eng|tech\s*eng|techni\s*eng)\b/i;
 const CANDIDATE_RE = /candidate|professional|\bpr\.?\s*(eng|tech)/i;
+
+// Catalog body (0050 held_registrations) per registration code.
+const BODY_FOR_CODE: Partial<Record<RegistrationCode, CatalogBody>> = {
+  sacqsp: "SACQSP",
+  sacap: "SACAP",
+  sacplan: "SACPLAN",
+  sacpvp: "SACPVP",
+  psira: "PSIRA",
+};
 
 export type PersonFacts = {
   name: string;
   ecsa_level: string | null;
   ecsa_number: string | null;
   initial_graduated: string | null;
-  // 0040 - read only when the position's requirement names the body
-  sacnasp_category?: string | null;
-  sacnasp_number?: string | null;
-  sacnasp_expiry?: string | null;
-  sagc_category?: string | null;
-  sagc_number?: string | null;
-  sagc_expiry?: string | null;
-};
+  // 0035 - read only when the position's requirement names SACPCMP
+  sacpcmp_number?: string | null;
+  sacpcmp_expiry?: string | null;
+  // 0050 catalog registrations this person holds (SACQSP, SACAP, ...)
+  held?: HeldCatalogRegistration[];
+} & PersonCredentialFields;
 
-/** Which requirement applies to a position: by its own SETUP description first (geologist, surveyor), else the code. */
-export function minimumRequirementFor(positionCode: string, description: string | null): MinReq | undefined {
+// A position whose own SETUP description names a profession with its own
+// council is checked against that council, not ECSA.
+function specialistOf(description: string | null): string | null {
+  if (!description) return null;
+  if (/geolog/i.test(description)) return "engineering_geologist";
+  if (SACQSP_POSITION_RE.test(description)) return "quantity_surveyor";
+  if (SAGC_POSITION_RE.test(description)) return "surveyor";
+  return null;
+}
+
+function fromOwnRow(r: KeyPersonMinimumRow): MinReq {
+  const years =
+    r.registration === "alternatives"
+      ? null
+      : r.years_under
+        ? null
+        : r.years_min;
+  const parts = [r.qualification ?? "no qualification stated"];
+  if (r.years_under) parts.push(`under ${r.years_under} years`);
+  else if (r.years_text && /\d/.test(r.years_text) && !/[A-Za-z]/.test(r.years_text)) parts.push(`${r.years_text} years' relevant experience`);
+  else if (r.years_text) parts.push(`experience: ${r.years_text}`);
+  return {
+    registration: r.registration,
+    years,
+    label: `${r.position}: ${parts.join(", ")}`,
+    source: "tender_document",
+    other: r.other,
+    alternatives: r.alternatives,
+    qualification: r.qualification,
+  };
+}
+
+/**
+ * Which requirement applies to a position: THIS tender's own C3.1.11 row
+ * when its table was read (matched by the position's own SETUP description
+ * for a specialist - geologist, surveyor, quantity surveyor - else by the
+ * position code), otherwise R.396's table (source "assumed").
+ */
+export function minimumRequirementFor(
+  positionCode: string,
+  description: string | null,
+  own: KeyPersonMinimums | null = null,
+): MinReq | undefined {
   const code = positionCode.replace(/\d+$/, "");
-  if (description && /geolog/i.test(description)) return ENGINEERING_GEOLOGIST_REQ;
-  if (description && SAGC_POSITION_RE.test(description)) return SURVEYOR_REQ;
+  const spec = specialistOf(description);
+  if (own?.source === "tender_document") {
+    const row = spec ? own.rows.find((r) => r.specialist === spec) : own.rows.find((r) => r.position_code === code);
+    if (row) return fromOwnRow(row);
+  }
+  if (spec === "engineering_geologist") return ENGINEERING_GEOLOGIST_REQ;
+  if (spec === "surveyor") return SURVEYOR_REQ;
+  if (spec === "quantity_surveyor") {
+    // R.396's table has no QS row; the council is the one fact the position
+    // itself gives. Years not assumed.
+    return { registration: "sacqsp", years: null, label: "Registered with SACQSP (the position is a quantity surveyor - years not assumed)", source: "assumed" };
+  }
   return SANRAL_MIN_REQUIREMENTS[code];
 }
 
@@ -580,73 +698,181 @@ function registrationValidity(expiry: string | null | undefined, closingDate: st
   return { ok: v.status === "have", text: v.text };
 }
 
+type RegResult = { problems: string[]; unknowns: string[]; regText: string };
+
+/** Does the person's record meet one registration code? */
+function checkRegistration(reg: RegistrationCode | null, qualification: string | null | undefined, person: PersonFacts, closingDate: string | null): RegResult {
+  const problems: string[] = [];
+  const unknowns: string[] = [];
+  let regText = "";
+  const level = person.ecsa_level ?? "";
+  const ecsa = (re: RegExp, need: string) => {
+    if (!level) unknowns.push("no ECSA registration on file");
+    else if (!re.test(level)) problems.push(`ECSA "${level}" doesn't meet "${need}"`);
+    else if (!person.ecsa_number) unknowns.push("ECSA number not on file");
+  };
+  switch (reg) {
+    case "pr_eng_or_tech":
+      ecsa(PR_ENG_OR_TECH_RE, "Pr Eng or Pr Tech Eng");
+      break;
+    case "pr_eng":
+      ecsa(PR_ENG_ONLY_RE, "Pr Eng");
+      break;
+    case "pr_tech_eng":
+      ecsa(PR_TECH_ENG_RE, "Pr Tech Eng");
+      break;
+    case "pr_techni_eng":
+      ecsa(PR_TECHNI_ENG_RE, "Pr Techni Eng");
+      break;
+    case "candidate":
+      ecsa(CANDIDATE_RE, "registered candidate");
+      break;
+    case "pr_sci_nat": {
+      // SACNASP fields (0040). Older records may only carry it in the ECSA
+      // level text, so that still counts as stated.
+      const cat = person.sacnasp_category ?? "";
+      const stated = PR_SCI_NAT_RE.test(cat) || PR_SCI_NAT_RE.test(level);
+      if (!person.sacnasp_number && !cat && !PR_SCI_NAT_RE.test(level)) {
+        unknowns.push("no SACNASP registration on file - add it on the People page (it appears there because this tender asks for it)");
+      } else if (cat && !stated && CAND_SCI_NAT_RE.test(cat)) {
+        problems.push(`SACNASP "${cat}" isn't Pr Sci.Nat (professional) registration`);
+      } else {
+        if (!stated) unknowns.push("SACNASP category not recorded - confirm it is Pr Sci.Nat");
+        if (!person.sacnasp_number) unknowns.push("SACNASP number not on file");
+        const v = registrationValidity(person.sacnasp_expiry, closingDate);
+        if (v && !v.ok) problems.push(`SACNASP registration ${v.text}`);
+        else if (!v && person.sacnasp_number) unknowns.push("SACNASP renewal date not on file");
+        regText = `SACNASP ${cat || "registration"}${person.sacnasp_number ? ` ${person.sacnasp_number}` : ""}${v ? `, ${v.text}` : ""}`;
+      }
+      break;
+    }
+    case "sacpcmp": {
+      if (!person.sacpcmp_number) unknowns.push("no SACPCMP registration on file");
+      else {
+        const v = registrationValidity(person.sacpcmp_expiry, closingDate);
+        if (v && !v.ok) problems.push(`SACPCMP registration ${v.text}`);
+        else if (!v) unknowns.push("SACPCMP renewal date not on file");
+        regText = `SACPCMP ${person.sacpcmp_number}${v ? `, ${v.text}` : ""}`;
+      }
+      unknowns.push("confirm the SACPCMP category (e.g. Construction Health and Safety Agent) against the table");
+      break;
+    }
+    case "sagc": {
+      const cat = person.sagc_category ?? "";
+      if (!person.sagc_number && !cat) {
+        unknowns.push("no SAGC registration on file - add it on the People page (it appears there because this tender asks for it)");
+      } else {
+        if (!person.sagc_number) unknowns.push("SAGC number not on file");
+        const v = registrationValidity(person.sagc_expiry, closingDate);
+        if (v && !v.ok) problems.push(`SAGC registration ${v.text}`);
+        else if (!v) unknowns.push("SAGC renewal date not on file");
+        regText = `SAGC ${cat || "registration"}${person.sagc_number ? ` ${person.sagc_number}` : ""}${v ? `, ${v.text}` : ""}`;
+      }
+      break;
+    }
+    case "sacqsp":
+    case "sacap":
+    case "sacplan":
+    case "sacpvp":
+    case "psira": {
+      // The 0050 catalog: the person may hold several (e.g. renewed); the
+      // one valid longest counts (an undated one last).
+      const body = BODY_FOR_CODE[reg]!;
+      const held = (person.held ?? [])
+        .filter((h) => h.slug === catalogSlug(body))
+        .sort((a, b) => (b.expiry_date ?? "0000").localeCompare(a.expiry_date ?? "0000"));
+      const h = held[0];
+      if (!h) {
+        unknowns.push(`no ${body} registration on file - add it on the People page (it appears there because this tender asks for it)`);
+      } else {
+        if (!h.registration_number) unknowns.push(`${body} number not on file`);
+        const v = registrationValidity(h.expiry_date, closingDate);
+        if (v && !v.ok) problems.push(`${body} registration ${v.text}`);
+        else if (!v) unknowns.push(`${body} renewal date not on file`);
+        regText = `${body} ${h.category || "registration"}${h.registration_number ? ` ${h.registration_number}` : ""}${v ? `, ${v.text}` : ""}`;
+      }
+      break;
+    }
+    case "none":
+      regText = "no registration required";
+      break;
+    case "qualification":
+      unknowns.push(`the tender asks for a qualification ("${qualification ?? ""}") - check it against the CV`);
+      break;
+    case "refer":
+      unknowns.push(`the tender's table says "${qualification ?? "refer to another document"}" - check that document`);
+      break;
+    default:
+      unknowns.push(`couldn't read what "${qualification ?? "the table"}" requires - check the tender's table`);
+  }
+  return { problems, unknowns, regText };
+}
+
+function yearsCheck(years: number | null, person: PersonFacts, closingDate: string | null) {
+  const problems: string[] = [];
+  const unknowns: string[] = [];
+  let yearsNote = "";
+  if (years !== null) {
+    if (person.initial_graduated && closingDate) {
+      const yrs = (new Date(closingDate).getTime() - new Date(person.initial_graduated).getTime()) / (365.25 * 24 * 3600 * 1000);
+      const y = Math.floor(yrs);
+      yearsNote = ` ${y} years since first degree (a proxy - SANRAL counts relevant experience, not years since graduating).`;
+      if (yrs < years) problems.push(`only ${y} years since first degree, ${years} needed`);
+    } else {
+      unknowns.push("no graduation date to count experience from");
+    }
+  }
+  return { problems, unknowns, yearsNote };
+}
+
 export function checkMinimumRequirement(
   positionCode: string,
   person: PersonFacts | null,
   closingDate: string | null,
   description: string | null = null,
-): { status: ComplianceStatus; detail: string; requirement: string | null } {
-  const found = minimumRequirementFor(positionCode, description);
-  const req = found ? { ...found, label: `${found.label} (${MIN_REQ_SOURCE})` } : undefined;
-  if (!person) return { status: "missing", detail: "No key person confirmed for this position.", requirement: req?.label ?? null };
-  if (!req) return { status: "check", detail: "No minimum requirement on file for this position code - check the tender's C3.1.11 table.", requirement: null };
+  own: KeyPersonMinimums | null = null,
+): { status: ComplianceStatus; detail: string; requirement: string | null; source: "tender_document" | "assumed" | null } {
+  const found = minimumRequirementFor(positionCode, description, own);
+  const req = found ? { ...found, label: `${found.label} (${found.source === "tender_document" ? OWN_MIN_REQ_SOURCE : ASSUMED_MIN_REQ_SOURCE})` } : undefined;
+  const source = req?.source ?? null;
+  if (!person) return { status: "missing", detail: "No key person confirmed for this position.", requirement: req?.label ?? null, source };
+  if (!req) return { status: "check", detail: "No minimum requirement on file for this position code - check the tender's C3.1.11 table.", requirement: null, source };
 
-  const problems: string[] = [];
-  const unknowns: string[] = [];
-  const level = person.ecsa_level ?? "";
-  let regText = "";
-  if (req.registration === "pr_sci_nat") {
-    // SACNASP fields (0040). Older records may only carry it in the ECSA
-    // level text, so that still counts as stated.
-    const cat = person.sacnasp_category ?? "";
-    const stated = PR_SCI_NAT_RE.test(cat) || PR_SCI_NAT_RE.test(level);
-    if (!person.sacnasp_number && !cat && !PR_SCI_NAT_RE.test(level)) {
-      unknowns.push("no SACNASP registration on file - add it on the People page (it appears there because this tender asks for it)");
-    } else if (cat && !stated && CAND_SCI_NAT_RE.test(cat)) {
-      problems.push(`SACNASP "${cat}" isn't Pr Sci.Nat (professional) registration`);
-    } else {
-      if (!stated) unknowns.push("SACNASP category not recorded - confirm it is Pr Sci.Nat");
-      if (!person.sacnasp_number) unknowns.push("SACNASP number not on file");
-      const v = registrationValidity(person.sacnasp_expiry, closingDate);
-      if (v && !v.ok) problems.push(`SACNASP registration ${v.text}`);
-      else if (!v && person.sacnasp_number) unknowns.push("SACNASP renewal date not on file");
-      regText = `SACNASP ${cat || "registration"}${person.sacnasp_number ? ` ${person.sacnasp_number}` : ""}${v ? `, ${v.text}` : ""}`;
-    }
-  } else if (req.registration === "sagc") {
-    const cat = person.sagc_category ?? "";
-    if (!person.sagc_number && !cat) {
-      unknowns.push("no SAGC registration on file - add it on the People page (it appears there because this tender asks for it)");
-    } else {
-      if (!person.sagc_number) unknowns.push("SAGC number not on file");
-      const v = registrationValidity(person.sagc_expiry, closingDate);
-      if (v && !v.ok) problems.push(`SAGC registration ${v.text}`);
-      else if (!v) unknowns.push("SAGC renewal date not on file");
-      regText = `SAGC ${cat || "registration"}${person.sagc_number ? ` ${person.sagc_number}` : ""}${v ? `, ${v.text}` : ""}`;
-    }
-  } else {
-    const regOk = req.registration === "pr_eng_or_tech" ? PR_ENG_OR_TECH_RE.test(level) : CANDIDATE_RE.test(level);
-    if (!level) unknowns.push("no ECSA registration on file");
-    else if (!regOk) problems.push(`ECSA "${level}" doesn't meet "${req.registration === "pr_eng_or_tech" ? "Pr Eng or Pr Tech Eng" : "registered candidate"}"`);
-    else if (!person.ecsa_number) unknowns.push("ECSA number not on file");
+  // The table's "Other requirements" (permanent employment, SAIEG
+  // membership, a road-safety course) aren't on the person's record - named,
+  // never counted as met or failed.
+  // ("Member of SAGC" / "SACQSP" in that column is the registration itself,
+  // which IS checked.)
+  const otherIsTheBody = !!req.other && /^(?:member\s+of\s+)?(?:SAGC|SACQSP|SACAP|SACPLAN|SACPVP|PSIRA|SACNASP|SACPCMP)$/i.test(req.other.trim());
+  const otherNote = req.other && !otherIsTheBody ? ` Also required by the table (not checked from records): ${req.other}.` : "";
+
+  if (req.registration === "alternatives" && req.alternatives?.length) {
+    // Several qualification/years pairs (Senior Materials Technician): met
+    // when ANY one is.
+    const results = req.alternatives.map((a) => {
+      const r = checkRegistration(a.registration, a.qualification, person, closingDate);
+      const y = yearsCheck(a.years_min, person, closingDate);
+      const problems = [...r.problems, ...y.problems];
+      const unknowns = [...r.unknowns, ...y.unknowns];
+      return { a, problems, unknowns, status: (problems.length ? "missing" : unknowns.length ? "check" : "have") as ComplianceStatus, note: y.yearsNote, regText: r.regText };
+    });
+    const best = results.find((r) => r.status === "have") ?? results.find((r) => r.status === "check") ?? results[0];
+    const which = `${best.a.qualification}, ${best.a.years_text} years`;
+    if (best.status === "have") return { status: "have", detail: `Meets the "${which}" option.${best.note}${otherNote}`, requirement: req.label, source };
+    if (best.status === "check") return { status: "check", detail: `Can't confirm any option; closest "${which}": ${best.unknowns.join("; ")}.${best.note}${otherNote}`, requirement: req.label, source };
+    return { status: "missing", detail: `Doesn't meet any option (e.g. "${which}": ${best.problems.join("; ")}).${best.note}${otherNote}`, requirement: req.label, source };
   }
 
-  let yearsNote = "";
-  if (req.years !== null) {
-    if (person.initial_graduated && closingDate) {
-      const yrs = (new Date(closingDate).getTime() - new Date(person.initial_graduated).getTime()) / (365.25 * 24 * 3600 * 1000);
-      const y = Math.floor(yrs);
-      yearsNote = ` ${y} years since first degree (a proxy - SANRAL counts relevant experience, not years since graduating).`;
-      if (yrs < req.years) problems.push(`only ${y} years since first degree, ${req.years} needed`);
-    } else {
-      unknowns.push("no graduation date to count experience from");
-    }
-  }
-
+  const r = checkRegistration(req.registration, req.qualification ?? null, person, closingDate);
+  const y = yearsCheck(req.years, person, closingDate);
+  const problems = [...r.problems, ...y.problems];
+  const unknowns = [...r.unknowns, ...y.unknowns];
   if (problems.length) {
     const yearsProblem = problems.some((p) => p.includes("since first degree"));
-    return { status: "missing", detail: `Doesn't meet the minimum: ${problems.join("; ")}.${yearsProblem ? " (Years since first degree is a proxy - SANRAL counts relevant experience.)" : yearsNote}`, requirement: req.label };
+    return { status: "missing", detail: `Doesn't meet the minimum: ${problems.join("; ")}.${yearsProblem ? " (Years since first degree is a proxy - SANRAL counts relevant experience.)" : y.yearsNote}${otherNote}`, requirement: req.label, source };
   }
-  if (unknowns.length) return { status: "check", detail: `Can't confirm: ${unknowns.join("; ")}.${yearsNote}`, requirement: req.label };
-  const held = regText || `${level}${person.ecsa_number ? ` (ECSA ${person.ecsa_number})` : ""}`;
-  return { status: "have", detail: `${held}.${yearsNote}`, requirement: req.label };
+  if (unknowns.length) return { status: "check", detail: `Can't confirm: ${unknowns.join("; ")}.${y.yearsNote}${otherNote}`, requirement: req.label, source };
+  const level = person.ecsa_level ?? "";
+  const held = r.regText || `${level}${person.ecsa_number ? ` (ECSA ${person.ecsa_number})` : ""}`;
+  return { status: "have", detail: `${held}.${y.yearsNote}${otherNote}`, requirement: req.label, source };
 }

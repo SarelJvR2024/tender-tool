@@ -133,6 +133,49 @@ class Taxonomy:
         return [s for s in hits
                 if not any(self.parent_of(h) == s for h in hit_set)]
 
+    def etenders_crosscheck(self, categories, site_category):
+        """The buyer's own eTenders category (the site's 91-entry dropdown)
+        as a CROSS-CHECK on Tender Tool's categories for the same tender -
+        never a replacement (audit O1, Sarel 2026-10-17). Uses each
+        category's `etenders` cross-reference list (the seed's
+        etenders_categories column).
+          agrees    - one of the tender's categories (or its group) lists the
+                      buyer's category;
+          differs   - the buyer's category corresponds to other categories
+                      on the list (named in matching_categories) - worth a
+                      look: either the buyer mis-filed it or Tender Tool's
+                      keywords missed something;
+          generic   - a catch-all bucket ("Services: General", ...) that spans
+                      a dozen trades - says nothing either way;
+          unmapped  - no category on the list corresponds to it yet (a
+                      cross-reference to add in the review loop).
+        Returns None when there is no site category."""
+        if not site_category:
+            return None
+        site = site_category.strip()
+        matching = [r["slug"] for r in self.rows if site in (r.get("etenders") or [])]
+        ours = set()
+        for c in categories or []:
+            if c in self.by_slug:
+                ours.add(c)
+                ours.update(self.ancestors(c))
+        # a group the buyer's category maps to also agrees with any of its children
+        agree = [m for m in matching if m in ours or any(self.parent_of(c) == m for c in ours)]
+        uncategorised = not ours
+        if agree:
+            status, note = "agrees", f"The buyer filed it under \"{site}\", which matches {self.label(agree[0])}."
+        elif site in ETENDERS_GENERIC_CATEGORIES:
+            status, note = "generic", f"The buyer filed it under \"{site}\", a catch-all eTenders bucket - no cross-check either way."
+        elif not matching:
+            status, note = "unmapped", f"The buyer filed it under \"{site}\"; no category on Tender Tool's list is cross-referenced to it yet."
+        elif uncategorised:
+            status, note = "differs", (f"Tender Tool couldn't categorise it from the title/description; the buyer filed it under "
+                                       f"\"{site}\", which corresponds to {', '.join(self.label(m) for m in matching[:3])} - check by hand.")
+        else:
+            status, note = "differs", (f"The buyer filed it under \"{site}\", which corresponds to "
+                                       f"{', '.join(self.label(m) for m in matching[:3])} - not the categories read from the text. Check by hand.")
+        return {"status": status, "site_category": site, "matching_categories": matching, "note": note}
+
     def overlap(self, categories, company_disciplines):
         """How a tender's categories relate to a company's discipline tags.
         exact: same slug, or the company's tag is a GROUP the category sits
@@ -152,6 +195,13 @@ class Taxonomy:
 
 
 _ACTIVE = None
+
+# eTenders entries that are catch-all buckets: across all 2 211 advertised
+# tenders on 2026-10-17 each spanned a dozen unrelated trades
+# (Discipline-Taxonomy-Findings.md §1.1) - so they neither confirm nor
+# contradict a category.
+ETENDERS_GENERIC_CATEGORIES = {"Services: Professional", "Services: General", "Supplies: General",
+                               "Other service activities"}
 
 
 def load_seed(path=SEED_PATH):

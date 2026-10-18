@@ -1,10 +1,15 @@
 import Link from "next/link";
+import { expiryStatus } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
-import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility } from "../actions";
+import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration } from "../actions";
 import { SiteNav } from "../../_components/SiteNav";
 import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
 import {
+  CATALOG_BODIES,
+  catalogSlug,
+  loadHeldCatalogRegistrations,
+  type HeldCatalogRegistration,
   CONDITIONAL_BODIES,
   REGISTRATION_BODY_INFO,
   credentialExpiries,
@@ -211,6 +216,10 @@ export default async function PersonDetailPage({
   // Which conditional registrations (SACNASP, SAGC) a tender on the system
   // asks for - the fields are shown only then, or when already held.
   const askedFor: AskedFor = await registrationsAskedFor(supabase);
+  // 0050 catalog registrations this person holds (SACAP, SACPLAN, SACQSP,
+  // SACPVP, PSIRA ...) - shown below only for a body a tender asks for, or
+  // one already held.
+  const heldCatalog: HeldCatalogRegistration[] = isNew ? [] : await loadHeldCatalogRegistrations(supabase, [id]);
 
   if (!isNew) {
     const { data } = await supabase.from("people").select("*").eq("id", id).maybeSingle();
@@ -436,6 +445,71 @@ export default async function PersonDetailPage({
             {isNew ? "Add person" : "Save changes"}
           </button>
         </form>
+
+        {!isNew &&
+          (() => {
+            const shown = CATALOG_BODIES.filter((b) => askedFor[b].length > 0 || heldCatalog.some((h) => h.slug === catalogSlug(b)));
+            if (shown.length === 0) return null; // no tender asks for any of them - nothing to show (Sarel: don't ask unless required)
+            return (
+              <div id="registrations-asked" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>
+                  Other registrations a tender asks for
+                </div>
+                <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
+                  Shown only because a tender on the system asks for the body, or {person!.name} already holds it. Kept in the
+                  company&apos;s registrations list (<Link href="/company/registrations" style={{ color: "#D97706" }}>Company &gt; Registrations</Link>),
+                  which also sends the renewal reminder.
+                </div>
+                {shown.map((b) => {
+                  const info = REGISTRATION_BODY_INFO[b];
+                  const mine = heldCatalog.filter((h) => h.slug === catalogSlug(b));
+                  const asked = askedFor[b];
+                  return (
+                    <div key={b} style={{ border: "1px solid #F0EEE6", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
+                        {b} <span style={{ fontWeight: 400, color: "#6B6758" }}>- {info.name}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: asked.length ? "#B45309" : "#9A9684", margin: "2px 0 8px" }}>
+                        {asked.length
+                          ? `Asked for by ${asked.slice(0, 4).join(", ")}${asked.length > 4 ? ` and ${asked.length - 4} more` : ""}.`
+                          : `Held - no open tender asks for it right now.`}
+                      </div>
+                      {mine.map((h) => {
+                        const st = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Renewal date not on file", bg: "#F0EEE6", color: "#6B6758" };
+                        return (
+                          <div key={h.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: "#16233B", marginBottom: 6 }}>
+                            <span>{h.category || "Registration"}{h.registration_number ? ` ${h.registration_number}` : ""}{h.expiry_date ? `, valid to ${h.expiry_date}` : ""}</span>
+                            <ExpiryBadge status={st} />
+                          </div>
+                        );
+                      })}
+                      <details open={mine.length === 0}>
+                        <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#D97706", minHeight: 32, padding: "4px 0" }}>
+                          {mine.length ? `+ Add another ${b} registration` : `+ Add ${person!.name}'s ${b} registration`}
+                        </summary>
+                        <form action={addPersonCatalogRegistration}>
+                          <input type="hidden" name="person_id" value={person!.id} />
+                          <input type="hidden" name="slug" value={catalogSlug(b)} />
+                          <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                            <Field>
+                              <label style={label}>{b === "PSIRA" ? "Grade" : "Category"}</label>
+                              <input style={field} name="category" list={`${b}-cats`} />
+                              <datalist id={`${b}-cats`}>{info.categories.map((c) => <option key={c} value={c} />)}</datalist>
+                            </Field>
+                            <Field><label style={label}>{b} number</label><input style={field} name="registration_number" /></Field>
+                            <Field><label style={label}>Valid until / renewal due</label><input style={field} type="date" name="expiry_date" /></Field>
+                          </div>
+                          <button type="submit" style={{ minHeight: 40, padding: "0 16px", borderRadius: 9, background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer" }}>
+                            Add {b} registration
+                          </button>
+                        </form>
+                      </details>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
         {!isNew && (
           <form action={deletePerson} style={{ marginBottom: 28 }}>

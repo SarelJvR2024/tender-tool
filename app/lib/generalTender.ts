@@ -16,6 +16,7 @@
 import { BEE_PROOF_LABEL, validityAtClosing, type CompanyVault, type ComplianceStatus } from "./tenderCompliance";
 import type { EvidenceRule } from "./experienceEvidence";
 import type { LocalityRow } from "./locality";
+import type { RequiredBody } from "./personCredentials";
 
 export const GENERAL_FAMILY = "General (non-SANRAL)";
 
@@ -95,7 +96,8 @@ export type RequirementManifest = {
   // not on every person's record (requirements.py find_person_registrations).
   // Absent when the tender doesn't ask - the People page then keeps the
   // SACNASP / SAGC fields out of the way.
-  person_registrations?: { body: "SACNASP" | "SAGC"; mentions: number; document: string; quote: string; from_ocr?: boolean }[];
+  // plus the 0050 catalog bodies SACAP / SACPLAN / SACQSP / SACPVP / PSIRA.
+  person_registrations?: { body: RequiredBody; mentions: number; document: string; quote: string; from_ocr?: boolean }[];
   cidb: { grading: string; quote: string } | null;
   briefing: { compulsory: boolean; quote: string } | null;
   scoring: {

@@ -72,6 +72,10 @@ def to_row(r, company_id, c):
         "description": r.get("description"),  # 0018; null for JSON written before it
         "closing_date": r.get("closing_date"),
         "categories": r.get("categories") or [],
+        # 0054 (audit O1): the buyer's own eTenders category, a cross-check
+        # on `categories` - null when it wasn't read
+        "etenders_category": r.get("etenders_category"),
+        "etenders_category_check": r.get("etenders_category_check"),
         "document_depth": r.get("document_depth"),
         # THIS company's own verdict/reasons/outlook (company_results), never
         # another company's.

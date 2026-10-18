@@ -1,0 +1,195 @@
+C3.1.11 Personnel Requirements
+
+a)         Key persons
+
+The Service Provider’s key persons become a contractual commitment upon award. However, the Employer
+recognises that key persons may for some or other reason not be available for the full duration of the project
+and any changes to those listed are, to all intents and purposes, a change or variation to the contract. Any
+proposed change should be handled formally by way of written request and approval but does not require a
+                                                                                                               C3-15
+Works Authorisation to be submitted. Replacement personnel shall be of same or better competence and
+experience as those initially accepted. Re-evaluation by the Employer of any replacement key persons shall
+be paid for by the Service Provider as specified in Section 3.8 unless the circumstances dictating the change
+are completely outside of the Service Provider’s control.
+
+The key persons required for this project are listed in Form C1.2.2 Contract Data: Information provided by the
+Employer. The tenderer must list proposed candidates for the prescribed positions in the core team in Form
+C1.2.3 Contract Data: Information provided by the Tenderer.
+
+b) Additional required resources (Design Specialists)
+
+The provision of additional required resources (Design Specialists) other than Key Persons, becomes a
+condition of award. These additional required resources are listed in form C1.2.2: Contract Data: Information
+provided by the Employer. The successful tenderer must provide proposed candidates complying with the
+minimum requirements for the prescribed positions as a condition of award.
+
+c) Assistants to Key Persons and Additional Required Resources
+
+Provision has been made in the Pricing Schedule for assistants to all the Key Persons and additional required
+resources (Design Specialists) other than Key Persons to participate or to gain experience in the positions
+proposed.
+
+d) Minimum requirements
+
+The minimum qualifications and requirements for the service and sub-Service Provider’s personnel shall be
+as indicated in the table below.
+
+Minimum Requirements
+                                                             Minimum Relevant
+                                  Minimum                                                   Other
+ Position                                                       Experience
+                          Qualification/Registration                                     Requirements
+                                                                  (years)3
+                                                                                      In the permanent
+ Project Leader         Pr Eng or Pr Tech Eng1                        10              employment of the
+                                                                                      tendering entity
+                                                                                      In permanent
+ Assistant Project                                                                    employment of the
+                        Pr Eng or Pr Tech Eng1                       <10
+ Leader                                                                               tendering entity or
+                                                                                      Targeted Enterprise
+ Design Specialist      Pr Eng or Pr Tech Eng1                        10
+                                                                                      In permanent
+ Assistant Design                                                                     employment of the
+                        Pr Eng or Pr Tech Eng1                       <10
+ Specialist                                                                           tendering entity or
+                                                                                      Targeted Enterprise
+                        Registered Professional
+                        Surveyors, Technologist
+ Surveyor                                                              5              Member of SAGC6
+                        Surveyors, Technician
+                        Surveyors
+                        Registered Professional
+                        Quantity Surveyors,
+ Quantity Surveyor
+                        Technologist Quantity                          5              SACQSP8
+ (QS)
+                        Surveyors, Technician Quantity
+                        Surveyors
+ Engineering
+                        Pr Sci.Nat4                                    5              SAIEG3
+ Geologist
+ Environmental
+                        Refer to sub-service procurement document
+ Practitioner
+                        Design Phase:
+                        SACPCMP5 registration as a
+                                                                As required by
+ OHS Specialist         Professional Construction HSE
+                                                                 SACPCMP5
+                        Agent
+                        Construction Phase:
+
+
+
+                                                                                                       C3-16
+                                                              Minimum Relevant
+                                   Minimum                                                   Other
+    Position                                                     Experience
+                           Qualification/Registration                                     Requirements
+                                                                   (years)3
+                         SACPCMP5 registration as a
+                         Professional Construction HSE
+                         Agent or Manager
+                                                                                       Road safety course (5
+                                                                                       CPD)
+    Road Safety Audit
+                         Pr Eng or Pr Tech Eng1                        10              Minimum 2 (two)
+    Team Leader
+                                                                                       audits within 3 (three)
+                                                                                       years
+                         Pr Eng1
+    Contract Engineer                                                  10
+                                                                                       In permanent
+    Assistant Contract                                                                 employment of the
+                         Pr Eng or Pr Tech Eng1                       <10
+    Engineer                                                                           tendering entity or
+                                                                                       Targeted Enterprise
+
+
+    Engineer’s
+                                                                     10-15
+    Representative       Pr Eng or Pr Tech Eng1
+    (RE)
+
+
+
+                         Candidate Technician1 to Pr
+    Assistant RE                                                       5
+                         Eng1
+                                                                                       Proven on-site
+                                                                                       experience in
+                                                                                       construction planning
+                                                                                       and scheduling.
+                         Bachelor’s degree in                                          Expertise in
+    Programmer           construction management, Civil               5-10             construction
+                         Engineering, or a related field.                              scheduling software
+                                                                                       (e.g., Primavera,
+                                                                                       Microsoft Project)
+                                                                                       Knowledge of Critical
+                                                                                       Path Analysis (CPA)
+                         None specified                                20
+    Senior Materials     National Diploma in civil
+                                                                       10
+    Technician           engineering
+                         Pr Techni Eng1                                5
+                         None specified                                10
+    Materials            National Diploma in civil
+                                                                       5
+    Technician           engineering
+                         Pr Techni Eng1                                2
+  Trainee Technician Candidate Technician                               0
+1       Registered with Engineering Council of South Africa (ECSA) or any other international body
+        recognised by ECSA, i.e. Washington Accord, Dublin Accord and Sydney Accord.
+2       Registered with Environmental Assessment Practitioners of South Africa.
+3       Relevant experience is the actual number of years, measured from the date of acquiring the base
+        NQF qualification (either B.Eng / BSc.Eng / B.EngSci or BSc / B.Eng Tech (Hon) PGDip (Engineering)
+        / M.Eng for Pr.Eng or National Higher Diploma / National Diploma Eng / Masters Diploma / BTech /
+        B.Eng Tech / Dip Eng / Adv Dip Eng / Adv Cert (Engineering Practice) plus Adv Dip Eng for Pr.Tech
+        Eng and National Diploma / Dip Eng / Dip Eng Tech / Adv Cert (Engineering Practice) / Higher
+        Certificate (Eng) / Adv Cert (Engineering) / Adv Cert (Engineering Practice) for Pr.Techni Eng), or
+        measured from the date of acquiring the minimum required professional registration worked in the field
+        of the specified position. For the road safety audit team leader, the field shall be road safety design
+        and/or traffic and transportation engineering and/or geometric design.
+4       Full member of the South African Institute for Engineering Geologist.
+5       Registered with the South African Council for Natural Scientific Professions (SACNASP).
+
+                                                                                                         C3-17
+6          South African Council for Project and Construction Management Professions (SACPCMP)
+7          South African Geomatics Council (SAGC)
+8          South African Council for the Quantity Surveying Profession (SACQSP)
+
+
+e)    Personnel Category Definitions
+
+The category of personnel necessary to undertake the work shall be approved by the Employer in accordance
+with the following definitions:
+i)     Category A shall mean a top practitioner whose expertise is nationally or internationally recognised and
+       who provides advice at a level of specialisation where such advice is recognised as that of an expert.
+ii)    Category B shall mean a partner, a sole proprietor, a director, or a member who, jointly or severally
+       with his other partners, co-directors, or co-members, bears the risks of business, takes full responsibility
+       for the liabilities of such practice, performs work of a conceptual nature in engineering design and
+       development, provides strategy guidance in planning and executing a project and/or carries
+       responsibility for quality management pertaining to a project. (e.g. The Engineer for the project)
+iii)   Category C shall mean all salaried senior professional and technical staff performing work of an
+       engineering nature and who carry the direct technical responsibility for one or more specific activities
+       related to the project. A person referred to in Categories A or B may also fall in this category if such
+       person performs work of an engineering nature at this level. (e.g. the resident engineer for the project)
+iv)    Category D shall mean all other salaried technical staff performing work of an engineering nature under
+       the direction and control of any person contemplated in categories A, B or C.
+
+f)    Limitation on commitments of Key Persons and Other Required Resources (Design Specialists)
+
+Key Persons and additional required resources (Design Specialists) other than Key Persons will be limited to
+participate in a maximum number of 6 (six) conventional contracts in design phase.
+
+Each proposed candidate shall complete the relevant B1 and B2 forms included in the Returnable Schedules.
+The Project Leader (PL) and the Assistant Project Leader (APL) (if applicable) will be limited to participate in
+a maximum number of 6 (six) conventional contracts in active design phase which will be complete after the
+award of the Works Contract tender.
+
+Design Specialists (DS) and Assistant Design Specialists (ADS) (if applicable) will be limited to participate in
+a maximum number of 6 (six) conventional contracts in the design phase with the Employer which will be
+complete after the Detailed Design report is accepted by the Employer.
+
+C3.1.12 Meetings and Liaisons

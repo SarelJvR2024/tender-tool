@@ -59,9 +59,12 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     experienceAvailable,
     experienceDisciplines,
     chosenRule,
+    keyPersonMinimums,
     qualitySystem,
     beeProofValid,
   } = data;
+  const ownMinimums = keyPersonMinimums?.source === "tender_document" ? keyPersonMinimums : null;
+  const assumedPositions = positionRows.filter((p) => p.min.source === "assumed").map((p) => p.code);
 
   const groups: { status: ComplianceStatus; title: string; empty: string }[] = [
     { status: "missing", title: "Don't have", empty: "Nothing required is missing." },
@@ -111,8 +114,41 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
         <SectionTitle title="Key people & CVs" />
         <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
           Whether each position is filled by someone <strong>your company has tagged</strong> as fitting that role (set on
-          the person&apos;s People page - Tender Tool doesn&apos;t guess role fit), with SANRAL&apos;s C3.1.11 minimums checked
+          the person&apos;s People page - Tender Tool doesn&apos;t guess role fit), with the C3.1.11 minimums checked
           against the records on file as a cross-check, the CV on file and the tender-specific CV status.
+        </div>
+        {/* Whose C3.1.11 table the minimums come from - same banner pattern as the experience-evidence rule. */}
+        <div
+          style={{
+            background: ownMinimums && assumedPositions.length === 0 ? "#F6F5F1" : "#FEF3C7",
+            border: `1px solid ${ownMinimums && assumedPositions.length === 0 ? "#E5E1D5" : "#F5D08A"}`,
+            borderRadius: 9,
+            padding: "9px 12px",
+            margin: "0 0 10px",
+            fontSize: 12,
+            color: ownMinimums && assumedPositions.length === 0 ? "#16233B" : "#92400E",
+          }}
+        >
+          {ownMinimums ? (
+            <>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>Minimum requirements read from this tender&apos;s own C3.1.11 table</div>
+              <div>
+                {ownMinimums.rows.length} position row{ownMinimums.rows.length === 1 ? "" : "s"} read from {evaluationRules?.source_document ?? "the tender document"}.
+                {assumedPositions.length > 0 &&
+                  ` ${assumedPositions.join(", ")} ha${assumedPositions.length === 1 ? "s" : "ve"} no row in it - for ${assumedPositions.length === 1 ? "that position" : "those"} the R.396-010-2025/1F minimum is used and marked "Assumed rule".`}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>Assumed rule - this tender&apos;s own C3.1.11 minimum-requirements table hasn&apos;t been read</div>
+              <div>
+                The minimums below are R.396-010-2025/1F&apos;s table (Book 2/3, C3-14/C3-15), not a fact about this tender - other SANRAL
+                tenders set different registrations and years (N.011-010-2027-1F wants Pr Eng only for the Contract Engineer and 10-15
+                years for the RE). Run engine/seed_tender_evaluation_rules.py with this tender&apos;s Book 2/3 to replace them.
+              </div>
+              {keyPersonMinimums?.reason && <div style={{ marginTop: 3, color: "#6B6758" }}>Last read: {keyPersonMinimums.reason}</div>}
+            </>
+          )}
         </div>
         {positionRows.length === 0 && (
           <div style={{ fontSize: 12, color: "#9A9684" }}>
@@ -138,7 +174,12 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
                         : "No key person confirmed"}
                   </div>
                   {p.fit.roleTitle && <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>Role: {p.fit.roleTitle}</div>}
-                  {p.min.requirement && <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>Needs: {p.min.requirement}</div>}
+                  {p.min.requirement && (
+                    <div style={{ fontSize: 11, color: p.min.source === "assumed" ? "#B45309" : "#9A9684", marginTop: 2 }}>
+                      {p.min.source === "assumed" ? "Assumed rule - needs: " : "Needs: "}
+                      {p.min.requirement}
+                    </div>
+                  )}
                 </div>
                 <Chip
                   label={`Role fit: ${p.fit.status === "have" ? "tagged" : p.fit.status === "missing" ? "unfilled" : "confirm"}`}

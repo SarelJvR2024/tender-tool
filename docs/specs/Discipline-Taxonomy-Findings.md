@@ -285,8 +285,115 @@ Same verdicts and the same rules. Only "is this our discipline" is now `Taxonomy
 
 ## 7. Open questions for Sarel (new)
 
-- **O1 - use the buyer's own eTenders category too?** The site's `PaginatedTenderOpportunities` JSON carries each tender's category, and its `id` joins the OCDS release. Discovery deliberately uses only the OCDS open-data API ("not a scrape"). Reading the site's JSON as well would give the buyer's own category next to Tender Tool's, as a second signal and an extra review aid. Worth doing, or keep to the open-data API only?
-- **O2 - who adds categories?** Built: service role (`taxonomy.py add` / `sync`, or SQL), as for the role catalog. Should there be an in-app admin screen? And should a company's own custom tag (0036) be offered for promotion to the shared list?
-- **O3 - SACNASP/SAGC on the SANRAL forms.** The workbook's Form B1 has ECSA/SACPCMP registration cells only. Where a tender with a geologist or surveyor position wants the SACNASP/SAGC number printed (and on which form), nothing writes it yet. A real such tender would settle it (relates to audit Q2).
-- **O4 - the other bodies.** SACAP, SACPLAN, SACQSP, SACPVP and PSIRA are still not person fields (Gap #3 / CV-extraction other_registrations). The conditional mechanism built here is the pattern to add them the same way: shown only when a tender asks. Do it for those too?
-- **O5 - per-tender C3.1.11 extraction** (the other half of audit Q5). Not done: the Geologist/Surveyor/ECSA minimums still come from R.396's table, labelled as such, and are triggered by the position's own SETUP description.
+- **O1 - use the buyer's own eTenders category too?** *Answered 2026-10-18 (Sarel: yes, as a cross-reference) - built, §8.1.* The site's `PaginatedTenderOpportunities` JSON carries each tender's category, and its `id` joins the OCDS release. Discovery deliberately uses only the OCDS open-data API ("not a scrape"). Reading the site's JSON as well would give the buyer's own category next to Tender Tool's, as a second signal and an extra review aid. Worth doing, or keep to the open-data API only?
+- **O2 - who adds categories?** *Answered 2026-10-18 (Sarel: an in-app screen; companies may suggest, Sarel reviews) - built, §8.2.* Built: service role (`taxonomy.py add` / `sync`, or SQL), as for the role catalog. Should there be an in-app admin screen? And should a company's own custom tag (0036) be offered for promotion to the shared list?
+- **O3 - SACNASP/SAGC on the SANRAL forms.** *Still open.* The workbook's Form B1 has ECSA/SACPCMP registration cells only. Where a tender with a geologist or surveyor position wants the SACNASP/SAGC number printed (and on which form), nothing writes it yet. A real such tender would settle it (relates to audit Q2).
+- **O4 - the other bodies.** *Answered 2026-10-18 (Sarel: yes, same pattern) - built on the 0050 registrations catalog, §8.3.* SACAP, SACPLAN, SACQSP, SACPVP and PSIRA are still not person fields (Gap #3 / CV-extraction other_registrations). The conditional mechanism built here is the pattern to add them the same way: shown only when a tender asks. Do it for those too?
+- **O5 - per-tender C3.1.11 extraction** *Answered 2026-10-18 (Sarel: "rest of Q5: build it") - built, §8.4.* (the other half of audit Q5). Not done: the Geologist/Surveyor/ECSA minimums still come from R.396's table, labelled as such, and are triggered by the position's own SETUP description.
+
+---
+
+## 8. Sarel's answers to O1, O2, O4 and O5 (2026-10-18) - built and verified
+
+Migration `0054_taxonomy_admin_and_etenders_category.sql` (`0044`-`0053` are on `main` or claimed by other passes). Everything below was run against real data on the date given; nothing was taken from memory.
+
+### 8.1 O1 - the buyer's own eTenders category, next to Tender Tool's (cross-reference only)
+
+**Built.**
+
+- `engine/discovery/etenders_national.py`:
+  - `fetch_site_categories()` reads the site's own table data (`Home/PaginatedTenderOpportunities`, status 1 = advertised) once per run, 500 rows a page, each page retried once and then skipped. Only `category` / `categoriesID` are kept - the rows' contact names and e-mails are dropped.
+  - `site_id_of()` joins on the ocid's numeric suffix (`ocds-9t57fa-174436` = site id `174436`); `attach_site_categories()` sets `etenders_category` (None when not read - never guessed). `--no-site-categories` turns it off.
+- `taxonomy.Taxonomy.etenders_crosscheck(categories, site_category)` compares the buyer's entry with each category's own `etenders` cross-reference list: **agrees** (one of the tender's categories, or its group, lists it), **differs** (it corresponds to other categories, named), **generic** (one of the four catch-all buckets: Services: Professional / Services: General / Supplies: General / Other service activities), **unmapped** (no category lists it yet).
+- `assess_tender.read_release()` / `score_release()` carry `etenders_category` + `etenders_category_check` next to `categories`. **`assess_fit()` never reads them** - the verdict is unchanged.
+- Since the parallel government-coverage pass (`924813b`) Discovery reads the eTenders portal's own lists (`etenders_portal.py`); each portal release now carries `etenders_category` straight from its row, so no second read is needed. `watch_new_tenders.py` fetches the site list separately only for eTenders releases without it (an `--sources ocds` run); `seed_supabase_opportunities.py` writes the two new columns `discovered_opportunities.etenders_category` / `etenders_category_check` (0054).
+- Discovery page: "Buyer's eTenders category: X" with a chip (agrees / differs - check / catch-all bucket / not cross-referenced yet), and for a "differs" the categories it corresponds to on Tender Tool's list.
+
+**Verified against the live site (2026-10-18).**
+
+| Run | Result |
+|---|---|
+| Live OCDS releases, last 3 days (300; the API 500'd on page 4, as `fetch_releases` already handles) joined to the live site (2 211 rows) | **295 of 300 (98.3%)** matched a site category. Cross-check: agrees 151, generic 87, differs 57 |
+| All 2 211 advertised site tenders (description + the buyer's category) | agrees **1 212 (54.8%)**, generic **557 (25.2%)**, differs **442 (20.0%)**, unmapped **0**. Of the 66 Tender Tool can't categorise, 33 get a "differs" hint from the buyer's entry, 33 sit in a catch-all bucket |
+
+Hand-check of 15 random "differs": Tender Tool's own reading was the better one in about 10 (fresh meat filed as "Food and beverage service activities", a legal panel as "Other personal service activities", auctioneers as "Financial service activities", a borehole as "Manufacture of fabricated metal products"); the buyer's entry added something real in about 3 (an Eskom land acquisition Tender Tool left uncategorised -> "Real estate activities"; optical assistive devices read only as goods -> "Supplies: Medical"); the rest are judgement calls. So a "differs" is a review prompt, not a correction - which is why it never changes the verdict.
+
+Tests: `test_taxonomy.py` Part 1 - five real live tenders give agrees / agrees / differs / differs / generic; a "differs" names the matching categories (optical devices -> `medical_supplies_equipment`); uncategorised + a site category -> a hint; unknown entry -> unmapped; no site category -> no cross-check; `read_release`/`score_release` carry it and leave `categories` unchanged.
+
+### 8.2 O2 - an admin screen for the list, and company suggestions Sarel reviews
+
+**Who may write:** a **platform admin** (0043 `platform_admins` / `is_platform_admin()` - Tender Tool's own staff, not any company owner; the same rule 0043 put on `/admin`). 0054 adds insert/update policies on `discipline_categories` for them only. No delete for anyone but the service role (retire with `active = false`), and a new trigger stops a group that has disciplines being moved under another group (no third level).
+
+**`/admin/taxonomy`** (linked from `/admin`, Civic Navy, inline styles):
+- the whole list by group, each category editable (label, group, keywords, excludes, eTenders cross-references, active), with "no keywords - Discovery never sorts into it" flagged;
+- "Add a category" (slug, label, group, keywords, excludes, provenance note, eTenders entries) - the same as `taxonomy.py add`; Discovery uses it on its next run;
+- "Suggested by companies": pending suggestions with the company, the project it was used on and its note; **Approve** (label, group, keywords, a note) or **Reject** (a note shown to the company);
+- read-only for everyone who isn't a platform admin.
+
+**Suggestions** (`discipline_category_suggestions`, 0054): on an Experience Library item, each of the company's **own** tags (not on the list) gets "Suggest this as a shared category" (name, best-guess group, what it covers). It files a **pending** row - nothing is added to the list. The page says the reviewer sees the company name, tag, note and project name; the trigger snapshots those two names (a platform admin can't read another company's rows under RLS). `approve_discipline_suggestion()` creates the category **under the same slug** in one transaction, so the company's tagged items become a listed category with no change to their data. A member can withdraw a pending one; can't suggest for another company, point at another company's item, re-suggest a listed slug, file it as approved, or approve.
+
+**Verified.**
+- `test_taxonomy.py` Part 3 on a fresh replay (`0001` -> `0054`): 27 checks (87 in the whole file, 0 failures) - an owner can't add or edit; the admin adds, renames, retires; the third-level and no-delete rules; a member's pending suggestion with the snapshots; duplicate / other-company / other-company-item / listed-slug / pre-approved suggestions refused; company B doesn't see A's; the member can't approve directly or via the function; the admin approves (category created, same slug, note), A's item is then under a listed category, approving twice refused; `categorize()` sorts a "Bathymetric survey" tender into the approved category; reject with a note the company sees; review can't rewrite what was suggested; withdraw only while pending; deleting the example item keeps the suggestion.
+- **End to end in a browser** (Playwright + `next dev` + real PostgREST 12.2.3 + RLS on a replay, signed-in cookies for a company owner and a platform admin): 23 of 23 checks - see §8.5.
+
+### 8.3 O4 - SACAP, SACPLAN, SACQSP, SACPVP and PSIRA, only when a tender asks
+
+**On the shared registrations catalog, not new columns.** A parallel pass (migration `0050`, `Company-Master-Data-List.md` §9.2) landed `registration_types` + `held_registrations` with all five bodies (person-scoped; PSIRA both), with expiry reminders through `registration_reminders.py` -> `watch_deadlines._expiry_window()`. So this pass adds **no `people` columns** for them (an earlier draft did; dropped before merge - one home per fact) and wires the SACNASP/SAGC conditional pattern to the catalog:
+
+- **What a tender asks for** (`app/lib/personCredentials.ts registrationsAskedFor()`): a SANRAL position whose own SETUP description names the profession (quantity surveyor -> SACQSP, architect -> SACAP (not landscape), planner -> SACPLAN, valuer -> SACPVP, security officer/guard -> PSIRA), or a general tender's `document_requirements.person_registrations`, which `requirements.py find_person_registrations()` now fills for these five too (acronym, council name, the Act or the registered title, in a requirement context).
+- **Definitions are not asks.** A council *named* in a definitions clause or a statute table ("statutory council: a) South African Council for the Architectural Profession, established by the Architectural Profession Act ..." - CDC44126's gazette annexure) is skipped unless a requirement verb sits next to it. This removed exactly 2 false positives in the corpus (SACAP and SACPVP in t033) and nothing else, for SACNASP/SAGC too.
+- **People page:** an "Other registrations a tender asks for" card appears only for a body an open tender asks for (naming the tender: "Asked for by N.011-010-2027-1F (DS4)") or one the person already holds; it lists their catalog entries with the same expiry badge and adds one (`held_registrations`, `person_id`) in place. No asking tender, nothing held -> no card. `/company/registrations` remains where every type is managed.
+- **Compliance check** (`tenderCompliance.ts`): a position whose requirement names one of the five reads the person's `held_registrations` of that type (the longest-valid one): none -> confirm ("it appears on the People page because this tender asks for it"); lapses before closing -> not met. Never read for any other position.
+- **General workspace:** "Professional registrations this tender asks for" lists holders from the columns (SACNASP/SAGC) or the catalog (the five; for PSIRA the company or a director too).
+- **Reminders:** unchanged - the catalog's own (`test_principals_registrations.py` on the 0054 replay: a person-held PSIRA 45 days out -> renew soon; 0 failures).
+
+**Real tenders that ask** (the 123-tender hand-read corpus, `find_person_registrations()` after this change): SACAP 2 (ACSA COR8138 "registered in the relevant Built Environment Councils - (SACPCMP; SACAP; SACQSP; ECSA)"; DLRRD NC 001 "such as UDISA or SACAP"), SACPLAN 2 (DLRRD NC 001 "registered with the South African Council for Planners (SACPLAN) as a Professional Planner"; Mossel Bay TDR11 "Registration with SACPLAN carrying a weight of 30 points"), SACQSP 2 (ACSA COR8138; SANRAL N.011-010-2027-1F C3.1.11 QS row), SACPVP 1 (Maluti TVET "a Professional Valuer registered with the SACPVP"), PSIRA 6 (t012 CTICC CCTV/access control "must be PSIRA registered", t016 CoCT 99S urban CCTV, t032 EC Agriculture guarding, t086 a security-provider annexure asking for the PSIRA number and letter of good standing, t089 RAF "Security Officers must be PSIRA registered", t102 an asset-in-transit RFP). All hand-checked as real asks. Caveat: in most of the PSIRA tenders the ask is (also) the **company's** PSIRA registration, which the catalog holds at company level; the People card still appears for them because the people who guard need it too.
+
+**The registration tested end to end:** SACQSP, against the real N.011-010-2027-1F C3.1.11 table (a Quantity Surveyor position, DS4): the People card appears only for that reason, the registration is added there into `held_registrations`, and the tender's compliance report fails the minimum because it lapses before closing (§8.5).
+
+### 8.4 O5 - each tender's own C3.1.11 minimum-requirements table
+
+**Built:** `engine/discovery/key_person_minimums.py extract_key_person_minimums(text)` - the same precedent as `score_outlook.extract_experience_evidence()`: read the tender's own stated rule; never fall back inside the extractor. It finds C3.1.11 "Personnel requirements" -> "d) Minimum requirements", measures the table's columns from its header (again after each page break, where the header repeats with a different indent), and places each multi-line cell on its row by the row's anchor line (its years cell - SANRAL's cells are vertically centred on it). Per row: the position (and SANRAL code PL/APL/DS/ADS/CE/ACE/RE/ARE, or a specialist kind), the qualification/registration cell verbatim, a registration code (`pr_eng`, `pr_eng_or_tech`, `pr_techni_eng`, `candidate`, `pr_sci_nat`, `sagc`, `sacqsp`, `sacpcmp`, ..., `qualification`, `refer`), bodies, years (`10`, `<10` -> under 10, `5-10`, `10-15`), the "Other requirements" cell, and alternatives (Senior Materials Technician: none/20, ND/10, Pr Techni Eng/5). Whatever can't be placed is reported (`unparsed`), not guessed.
+
+It is stored on `tenders.evaluation_rules.key_person_minimums` (jsonb - no migration) by `seed_tender_evaluation_rules.py` (now `--document` once per book: Book 1 for the experience rule, Book 2/3 for C3.1.11; its broken import of the removed `supabase_request` was fixed) and by the manual-load intake (`requirements.py` manifest -> `process_general_jobs.py`).
+
+**What the two real tables say** (the only two SANRAL Book 2/3s in the corpus; verbatim excerpts committed as `engine/discovery/fixtures/c3111/`):
+
+| Position | R.396-010-2025/1F | N.011-010-2027-1F |
+|---|---|---|
+| Project Leader | Pr Eng or Pr Tech Eng, 10 | same, 10 - "In the permanent employment of the tendering entity" (no "or Targeted Enterprise") |
+| Contract Engineer | Pr Eng or Pr Tech Eng, 10 | **Pr Eng** (only), 10 |
+| Engineer's Representative | Pr Eng or Pr Tech Eng, **5** | Pr Eng or Pr Tech Eng, **10-15** |
+| Assistant RE | Registered Candidate, **2** | Candidate Technician to Pr Eng, **5** |
+| Quantity Surveyor | (no row) | Registered Professional / Technologist / Technician QS, 5, **SACQSP** |
+| Surveyor / Eng. Geologist / OHS / RSA Team Leader / Programmer / Materials technicians / Trainee | identical in both | |
+
+(The real R.396 table's footnote numbers are off by one - "SAGC6" while footnote 6 is SACPCMP - so bodies are read from the text, not the footnote numbers.)
+
+**The compliance report** (`tenderCompliance.ts minimumRequirementFor/checkMinimumRequirement`, `compliance-data.ts`, `compliance-report.tsx`): uses THIS tender's row when its table was read (matched by the position's own description for a specialist - geologist, surveyor, quantity surveyor - else by code), "Also required by the table (not checked from records): ..." for the other-requirements cell, alternatives met when any one is; and only when the tender's table hasn't been read (or has no row for that position) R.396's table, with an amber **"Assumed rule - this tender's own C3.1.11 minimum-requirements table hasn't been read"** banner and "Assumed rule - needs: ..." on each such position - the same pattern as the experience-evidence fallback.
+
+**Verified.**
+- `test_key_person_minimums.py`: 36 checks - every row of both real tables cell by cell, the R.396/N.011 differences, 4 no-table texts -> not_found, and the full R.396 Book 2/3 PDF (when on disk) reads the same 17 rows as its excerpt.
+- Corpus: 137 texts (123 hand-read tenders + the six SANRAL Book 1s + others): a table found only in N.011's Books 2&3 (correct - every other document has none); the SANRAL Book 1s -> not_found, so for the five seeded SANRAL tenders without their Book 2/3 the fallback banner applies.
+- `seed_tender_evaluation_rules.py` dry run on R.396 Book 1 + Book 2/3: the experience rule plus 17 C3.1.11 rows.
+- Compliance logic (jiti on the TS module, N.011's table): a Pr Tech Eng fails N.011's Contract Engineer minimum but meets R.396's (assumed); an RE with 7 years fails N.011's 10 but meets R.396's 5; QS with no SACQSP -> confirm, valid -> met, lapsing before closing -> not met; the PL employment requirement is named, not judged; a position missing from the tender's table falls back with source "assumed"; 11/11.
+- In the browser (§8.5).
+
+### 8.5 End-to-end browser check (2026-10-18)
+
+Playwright (Chromium) + `next dev` + real PostgREST 12.2.3 + RLS on a fresh replay of `0001` -> `0054` + `seed_tenders.sql`; signed-in cookies for a company owner and a platform admin. **23 of 23 passed:**
+
+1. Owner: `/admin/taxonomy` read-only, no Admin tab.
+2. Owner: an experience item tagged with the own tag `hydrographic_survey` offers the suggestion; sent -> "Suggested - waiting for review"; one pending row with the company + project snapshot; **not** on the list.
+3. Platform admin: has the Admin tab; sees the suggestion with company and project; adds `heritage_conservation` (row checked in the DB); approves the suggestion with keywords and a note (category created under the same slug, suggestion approved); retires `heritage_conservation` from its edit form (`active = false`).
+4. Owner: the item's tag now shows as a listed discipline; the own-tag card is gone.
+5. Owner, People: Quinton (assigned to N.011's DS4 "Quantity Surveyor") shows the SACQSP card "Asked for by N.011-010-2027-1F (DS4)" and no SACAP/PSIRA/SACPLAN/SACPVP card; adding SACQSP there writes `held_registrations` (catalog) and shows "Renew soon".
+6. N.011 compliance report: "Minimum requirements read from this tender's own C3.1.11 table"; the Contract Engineer (a Pr Tech Eng) fails the tender's own "Pr Eng"; DS4's SACQSP lapses before closing -> not met. The seeded R.396 (no table read): the amber "Assumed rule" banner and "Assumed rule - needs: ..." per position.
+
+### 8.6 New open questions
+
+- **N1 - PSIRA at company level in the general checklist.** Most PSIRA asks are for the company's registration; the catalog holds it (scope both), but the general workspace's returnables checklist doesn't yet say "on file" from it (same gap as `Company-Master-Data-List.md` §9.4).
+- **N2 - first platform admin.** Like `/admin` since 0043, the screen needs Sarel's account in `platform_admins` once (SQL editor). Should onboarding of Tender Tool staff get its own small screen?
+- **N3 - the C3.1.11 table of the other five seeded SANRAL tenders.** Only R.396's Book 2/3 is on disk; R.334, R.343, R.352 x2 and R.394 show the "Assumed rule" banner until their Book 2/3 is run through `seed_tender_evaluation_rules.py` (or uploaded through the manual load).
+- **N4 - "Other requirements" are named, not checked** (permanent employment, SAIEG membership, the road-safety course and two audits). Employment is on the person (0036 `employment_status`) - worth checking the "permanent employment of the tendering entity" cell against it?
+- **N5 - catalog bodies in the SANRAL C3.1.11 fallback.** R.396's table has no QS row, so without a tender table a QS position is checked only for SACQSP registration (years not assumed) - fine, but say so if a different default is wanted.

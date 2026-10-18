@@ -474,3 +474,37 @@ export async function saveRoleEligibility(formData: FormData) {
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}?roles_saved=1`);
 }
+
+/**
+ * Add a catalog registration (0050 held_registrations) to THIS person from
+ * the People page - the block that appears only when a tender on the system
+ * asks for that body (SACAP, SACPLAN, SACQSP, SACPVP, PSIRA; audit O4) or
+ * the person already holds one. Same row /company/registrations writes; the
+ * 0050 trigger checks scope and same-company holder.
+ */
+export async function addPersonCatalogRegistration(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const personId = str(formData, "person_id");
+  const slug = str(formData, "slug");
+  const back = `/people/${personId}`;
+  if (!personId || !slug) redirect(`${back}?error=${encodeURIComponent("Missing person or registration type.")}`);
+  const supabase = await createClient();
+  const { data: type } = await supabase
+    .from("registration_types")
+    .select("id")
+    .eq("slug", slug!)
+    .is("owner_company_id", null)
+    .maybeSingle();
+  if (!type) redirect(`${back}?error=${encodeURIComponent(`The registration type "${slug}" isn't in the catalog.`)}#registrations-asked`);
+  const { error } = await supabase.from("held_registrations").insert({
+    company_id: companyId,
+    registration_type_id: type!.id,
+    person_id: personId,
+    registration_number: str(formData, "registration_number"),
+    category: str(formData, "category"),
+    expiry_date: str(formData, "expiry_date"),
+  });
+  if (error) redirect(`${back}?error=${encodeURIComponent(error.message.replace(/^held_registrations: /, ""))}#registrations-asked`);
+  revalidatePath(back);
+  redirect(`${back}#registrations-asked`);
+}

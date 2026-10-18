@@ -51,6 +51,17 @@ type OpportunityRow = Downgrade & {
   tender_type: string | null;
   briefing: { date?: string | null; compulsory?: boolean | null; venue?: string | null } | null;
   listing_status: string | null;
+  // 0054 (audit O1): the buyer's own eTenders category - a cross-check on
+  // `categories`, never used for the verdict. Null = not read.
+  etenders_category: string | null;
+  etenders_category_check: { status: "agrees" | "differs" | "generic" | "unmapped"; note: string; matching_categories: string[] } | null;
+};
+
+const XREF_STYLE: Record<string, { label: string; bg: string; color: string }> = {
+  agrees: { label: "agrees", bg: "#DCFCE7", color: "#15803D" },
+  differs: { label: "differs - check", bg: "#FEF3C7", color: "#B45309" },
+  generic: { label: "catch-all bucket", bg: "#F0EEE6", color: "#6B6758" },
+  unmapped: { label: "not cross-referenced yet", bg: "#F0EEE6", color: "#6B6758" },
 };
 
 type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed";
@@ -115,7 +126,7 @@ export default async function DiscoveryPage({
   const [{ data: opportunities, error }, { data: packRows }, { data: labelRows }] = await Promise.all([
     supabase
       .from("discovered_opportunities")
-      .select(`id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status, ${DOWNGRADE_COLUMNS}`)
+      .select(`id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status, etenders_category, etenders_category_check, ${DOWNGRADE_COLUMNS}`)
       .order("first_seen", { ascending: false }),
     // RLS: this company's own packs - which re-assessed tenders it is working on.
     supabase.from("tender_packs").select("tender_id, pipeline_stage"),
@@ -428,6 +439,24 @@ export default async function DiscoveryPage({
                           {c.startsWith("uncategorized") ? c.replace(/_/g, " ") : taxonomyLabel(taxonomy, c)}
                         </span>
                       ))}
+                    </div>
+                  )}
+
+                  {o.etenders_category && (
+                    // The buyer's own pick on eTenders, as a cross-reference
+                    // only - Tender Tool's categories (above) drive the fit.
+                    <div title={o.etenders_category_check?.note ?? undefined} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11, color: "#6B6758", marginBottom: 6 }}>
+                      <span>Buyer&apos;s eTenders category: <span style={{ color: "#16233B", fontWeight: 600 }}>{o.etenders_category}</span></span>
+                      {o.etenders_category_check && XREF_STYLE[o.etenders_category_check.status] && (
+                        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: XREF_STYLE[o.etenders_category_check.status].bg, color: XREF_STYLE[o.etenders_category_check.status].color }}>
+                          {XREF_STYLE[o.etenders_category_check.status].label}
+                        </span>
+                      )}
+                      {o.etenders_category_check?.status === "differs" && o.etenders_category_check.matching_categories.length > 0 && (
+                        <span>
+                          (on Tender Tool&apos;s list that is {o.etenders_category_check.matching_categories.slice(0, 3).map((c) => taxonomyLabel(taxonomy, c)).join(", ")})
+                        </span>
+                      )}
                     </div>
                   )}
 

@@ -19,6 +19,16 @@ Part 1 (always, no network):
      discipline_categories client) is used by categorize() with no code or
      migration change; an unreadable table falls back to the seed and says so.
 
+Part 1 also checks the eTenders cross-check (audit O1, 0054): the buyer's
+own eTenders category compared with Tender Tool's categories for real live
+tenders (agrees / differs / generic / unmapped), never changing them.
+
+Part 3 (TAXONOMY_PSQL set): the in-app maintenance of 0054 - only a platform
+admin writes the list; a company member suggests their own tag (pending),
+can't for another company or with another company's item, can't approve;
+the admin approves (category created with the same slug, the company's
+tagged item is then on the list) or rejects with a note.
+
 Part 2 (TAXONOMY_PSQL set - a scratch Postgres with every migration
 replayed): the real table - 112 seed rows, an INSERT adds a category, the
 two-level rule and slug format are enforced, signed-in users can read but
@@ -159,6 +169,41 @@ def part1():
     os.unlink(f.name)
     check(res["total"] == len(REAL) + 1 and res["uncategorized"] == 1, f"coverage review reports the uncategorised one ({res['uncategorized']})")
 
+    # eTenders cross-check (0054, audit O1). Real live tenders, 2026-10-17
+    # (Home/PaginatedTenderOpportunities: description + the buyer's category).
+    XREF = [
+        ("Britstown Magistrate Court: Cleaning services for 36 months",
+         "Services: Functional (Including Cleaning and Security Services)", "agrees"),
+        ("Tender for the leasing of turnkey office space in region 2 inclusive of parking facilities",
+         "Rental and leasing activities", "agrees"),
+        ("SUPPLY AND DELIVERY OF FRESH MEAT ON AN AS AND WHEN REQUIRED BASIS FOR A PERIOD OF 3 YEARS TO KRIEL POWER STATION.",
+         "Food and beverage service activities", "differs"),
+        ("THE SUPPLY AND DELIVERY OF OPTICAL ASSISTIVE DEVICES TO THE GAUTENG DEPARTMENT OF HEALTH INSTITUTIONS",
+         "Supplies: Medical", "differs"),
+        ("The Maintenance and repairs of vehicles for King Shaka International Airport",
+         "Services: General", "generic"),
+    ]
+    for text, site, want in XREF:
+        cats = assess_tender.categorize(None, text, taxonomy=tax)
+        x = tax.etenders_crosscheck(cats, site)
+        check(x["status"] == want and x["site_category"] == site,
+              f"eTenders '{site}' vs {cats}: {x['status']} ({x['note'][:90]})")
+    optical = tax.etenders_crosscheck(assess_tender.categorize(None, XREF[3][0], taxonomy=tax), "Supplies: Medical")
+    check("medical_supplies_equipment" in optical["matching_categories"],
+          "a 'differs' names the categories the buyer's entry corresponds to (optical devices -> medical supplies)")
+    x = tax.etenders_crosscheck(["uncategorized_goods"], "Real estate activities")
+    check(x["status"] == "differs" and "couldn't categorise" in x["note"], "uncategorised by Tender Tool: the buyer's category is offered as a hint")
+    check(tax.etenders_crosscheck(["catering"], "Some Entry Not On The Site") ["status"] == "unmapped", "an entry no category lists -> unmapped")
+    check(tax.etenders_crosscheck(["catering"], None) is None, "no site category -> no cross-check (never guessed)")
+    rel = {"title": XREF[2][0], "description": XREF[2][0], "procurement_category": "goods", "is_closed": True,
+           "etenders_category": "Food and beverage service activities"}
+    reading = assess_tender.read_release(rel, fetch_document=False)
+    scored = assess_tender.score_release(rel, reading, {"disciplines": ["food_provisions"], "has_cidb_grading": False})
+    check(scored["categories"] == assess_tender.categorize(rel["title"], rel["description"], "goods")
+          and scored["etenders_category"] == "Food and beverage service activities"
+          and scored["etenders_category_check"]["status"] == "differs",
+          "read/score_release carry the cross-check next to the (unchanged) categories")
+
 
 def part2(psql):
     print("Part 2 - the real table (replayed migrations)")
@@ -217,11 +262,120 @@ def part2(psql):
     sql("delete from discipline_categories where slug = 'hydrographic_survey'")
 
 
+def part3(psql):
+    print("Part 3 - in-app maintenance (0054): platform admin writes, company suggestions reviewed")
+
+    def sql(q, uid=None):
+        if uid:
+            q = f"set role authenticated; set test.uid = '{uid}'; " + q
+        return subprocess.run(shlex.split(psql) + ["-q", "-tA", "-v", "ON_ERROR_STOP=1", "-c", q], capture_output=True, text=True)
+
+    ua, ub, ad = "a0000000-0000-0000-0000-00000000000a", "b0000000-0000-0000-0000-00000000000b", "ad000000-0000-0000-0000-0000000000ad"
+    sql("delete from discipline_category_suggestions where slug like 'tt_test_%'; delete from discipline_categories where slug like 'tt_test_%';"
+        f"delete from platform_admins where user_id in ('{ua}','{ub}','{ad}');"
+        "delete from companies where legal_name in ('O2 Company A', 'O2 Company B');"
+        f"delete from auth.users where id in ('{ua}','{ub}','{ad}');"
+        f"insert into auth.users (id, email) values ('{ua}','a@test'),('{ub}','b@test'),('{ad}','admin@test');"
+        f"insert into platform_admins (user_id, note) values ('{ad}', 'test admin');")
+    ca = sql("insert into companies (legal_name) values ('O2 Company A') returning id").stdout.strip().splitlines()[0]
+    cb = sql("insert into companies (legal_name) values ('O2 Company B') returning id").stdout.strip().splitlines()[0]
+    sql(f"insert into company_members (company_id, user_id, role) values ('{ca}','{ua}','owner'),('{cb}','{ub}','owner')")
+    ia = sql(f"insert into experience_items (company_id, project_name, document_type, disciplines) values "
+             f"('{ca}', 'Port Ngqura channel survey', 'reference_letter', array['tt_test_hydro']) returning id").stdout.strip().splitlines()[0]
+    ib = sql(f"insert into experience_items (company_id, project_name, document_type) values ('{cb}', 'B project', 'reference_letter') returning id").stdout.strip().splitlines()[0]
+
+    # the list: owners of a company are NOT platform admins
+    r = sql("insert into discipline_categories (slug, label) values ('tt_test_owner', 'x')", ua)
+    check(r.returncode != 0, "a company owner can't add to the shared list")
+    r = sql("update discipline_categories set label = 'hacked' where slug = 'catering' returning slug", ua)
+    check(r.stdout.strip() == "", "a company owner can't edit a shared category (0 rows)")
+    r = sql("insert into discipline_categories (slug, label, parent_slug, keywords) values "
+            "('tt_test_added', 'Added in the app', 'professional_services', array['tt test keyword']) returning slug", ad)
+    check(r.returncode == 0 and r.stdout.strip() == "tt_test_added", f"the platform admin adds a discipline {r.stderr.strip()[:150]}")
+    r = sql("update discipline_categories set label = 'Renamed', active = false where slug = 'tt_test_added' returning label, active", ad)
+    check(r.stdout.strip() == "Renamed|f", "the platform admin renames / retires it")
+    r = sql("update discipline_categories set parent_slug = 'water' where slug = 'roads_civil'", ad)
+    check(r.returncode != 0 and "must stay a group" in r.stderr, "a group with disciplines can't be moved under another group (no third level)")
+    r = sql("delete from discipline_categories where slug = 'tt_test_added' returning slug", ad)
+    check(r.stdout.strip() == "", "not even the admin deletes (retire instead)")
+    r = sql("select is_platform_admin()", ad)
+    r2 = sql("select is_platform_admin()", ua)
+    check(r.stdout.strip() == "t" and r2.stdout.strip() == "f", "is_platform_admin(): true for the admin, false for an owner")
+
+    # suggestions
+    r = sql(f"insert into discipline_category_suggestions (company_id, slug, label, suggested_parent_slug, note, example_item_id, suggested_by) "
+            f"values ('{ca}', 'tt_test_hydro', 'Hydrographic survey', 'professional_services', 'surveys of channels', '{ia}', '{ua}') "
+            "returning status, company_name, example_project_name", ua)
+    check(r.returncode == 0 and r.stdout.strip() == "pending|O2 Company A|Port Ngqura channel survey",
+          f"a member suggests their own tag: pending, with company and project name for the reviewer ({r.stdout.strip()} {r.stderr.strip()[:120]})")
+    r = sql(f"insert into discipline_category_suggestions (company_id, slug, label, suggested_by) values ('{ca}', 'tt_test_hydro', 'again', '{ua}')", ua)
+    check(r.returncode != 0 and "one_pending" in r.stderr, "the same tag twice while pending -> refused")
+    r = sql(f"insert into discipline_category_suggestions (company_id, slug, label, suggested_by) values ('{cb}', 'tt_test_b', 'x', '{ua}')", ua)
+    check(r.returncode != 0, "a member can't suggest on behalf of another company")
+    r = sql(f"insert into discipline_category_suggestions (company_id, slug, label, example_item_id, suggested_by) values ('{ca}', 'tt_test_x', 'x', '{ib}', '{ua}')", ua)
+    check(r.returncode != 0 and "not this company" in r.stderr, "...nor point at another company's experience item")
+    r = sql(f"insert into discipline_category_suggestions (company_id, slug, label, suggested_by) values ('{ca}', 'road_maintenance', 'x', '{ua}')", ua)
+    check(r.returncode != 0 and "already on the shared list" in r.stderr, "a slug already on the list can't be suggested")
+    r = sql(f"insert into discipline_category_suggestions (company_id, slug, label, suggested_by, status) values ('{ca}', 'tt_test_y', 'x', '{ua}', 'approved')", ua)
+    check(r.returncode != 0, "a member can't file it as already approved")
+    sid = sql("select id from discipline_category_suggestions where slug = 'tt_test_hydro'").stdout.strip()
+    r = sql("select count(*) from discipline_category_suggestions where slug = 'tt_test_hydro'", ub)
+    check(r.stdout.strip() == "0", "company B doesn't see company A's suggestion")
+    r = sql("select count(*) from discipline_category_suggestions where slug = 'tt_test_hydro'", ad)
+    check(r.stdout.strip() == "1", "the platform admin sees it")
+    r = sql(f"update discipline_category_suggestions set status = 'approved' where id = '{sid}' returning id", ua)
+    check(r.stdout.strip() == "", "the suggesting member can't approve it")
+    r = sql(f"select approve_discipline_suggestion('{sid}', 'x', null)", ua)
+    check(r.returncode != 0 and "Only a platform admin" in r.stderr, "...not through the approve function either")
+    r = sql(f"select approve_discipline_suggestion('{sid}', 'Hydrographic & bathymetric survey', 'professional_services', "
+            "array['hydrographic survey*', 'bathymetric*'], '{}', 'Added - thanks')", ad)
+    check(r.returncode == 0 and r.stdout.strip() == "tt_test_hydro", f"the admin approves {r.stderr.strip()[:150]}")
+    r = sql("select c.label, c.parent_slug, s.status, s.created_category_slug, s.review_note, s.company_name from discipline_categories c "
+            "join discipline_category_suggestions s on s.slug = c.slug where c.slug = 'tt_test_hydro'")
+    check(r.stdout.strip() == "Hydrographic & bathymetric survey|professional_services|approved|tt_test_hydro|Added - thanks|O2 Company A",
+          f"...the category exists under the same slug, the suggestion is approved with the note ({r.stdout.strip()})")
+    r = sql("select count(*) from experience_items e join discipline_categories c on c.slug = any(e.disciplines) "
+            f"where e.id = '{ia}' and c.slug = 'tt_test_hydro'", ua)
+    check(r.stdout.strip() == "1", "company A's tagged item is now under a listed category - its data unchanged")
+    r = sql(f"select approve_discipline_suggestion('{sid}', 'x', null)", ad)
+    check(r.returncode != 0 and "already approved" in r.stderr, "approving twice is refused")
+
+    class PsqlClient:
+        def select(self, table, filters=None, order=None):
+            return json.loads(sql(f"select coalesce(json_agg(t order by sort_order), '[]') from {table} t").stdout)
+
+    live = taxonomy.load_taxonomy(PsqlClient())
+    got = assess_tender.categorize(None, "Bathymetric survey of the Port of Ngqura", taxonomy=live)
+    check("tt_test_hydro" in got, f"Discovery sorts into the approved category on its next run ({got})")
+
+    sql(f"insert into discipline_category_suggestions (company_id, slug, label, suggested_by) values ('{ca}', 'tt_test_rej', 'Survey stuff', '{ua}')", ua)
+    rid = sql("select id from discipline_category_suggestions where slug = 'tt_test_rej'").stdout.strip()
+    r = sql(f"update discipline_category_suggestions set status = 'rejected', reviewed_by = '{ad}', reviewed_at = now(), "
+            f"review_note = 'Covered by Land surveying, GIS & mapping', company_name = 'forged' where id = '{rid}' returning company_name", ad)
+    check(r.stdout.strip() == "O2 Company A", "the admin rejects with a note; review can't rewrite what was suggested")
+    r = sql("select status, review_note from discipline_category_suggestions where slug = 'tt_test_rej'", ua)
+    check(r.stdout.strip() == "rejected|Covered by Land surveying, GIS & mapping", "the company sees the outcome and the note")
+    sql(f"insert into discipline_category_suggestions (company_id, slug, label, suggested_by) values ('{ca}', 'tt_test_wd', 'w', '{ua}')", ua)
+    r = sql("delete from discipline_category_suggestions where slug = 'tt_test_wd' returning slug", ua)
+    check(r.stdout.strip() == "tt_test_wd", "a member withdraws a pending suggestion")
+    r = sql("delete from discipline_category_suggestions where slug = 'tt_test_hydro' returning slug", ua)
+    check(r.stdout.strip() == "", "...but not a reviewed one")
+    r = sql(f"delete from experience_items where id = '{ia}'")
+    r2 = sql("select example_item_id is null, example_project_name from discipline_category_suggestions where slug = 'tt_test_hydro'")
+    check(r.returncode == 0 and r2.stdout.strip() == "t|Port Ngqura channel survey",
+          "deleting the example item keeps the suggestion (link set null, the snapshot name stays)")
+
+    sql("delete from discipline_category_suggestions where slug like 'tt_test_%'; delete from discipline_categories where slug like 'tt_test_%';"
+        f"delete from companies where id in ('{ca}','{cb}'); delete from platform_admins where user_id = '{ad}';"
+        f"delete from auth.users where id in ('{ua}','{ub}','{ad}')")
+
+
 def main():
     part1()
     psql = os.environ.get("TAXONOMY_PSQL")
     if psql:
         part2(psql)
+        part3(psql)
     else:
         print("(Part 2 skipped - set TAXONOMY_PSQL to a scratch Postgres with the migrations replayed)")
     print(f"\n{len(FAILS)} failure(s)")

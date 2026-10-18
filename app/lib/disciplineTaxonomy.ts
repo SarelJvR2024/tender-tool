@@ -78,3 +78,25 @@ export function expandDisciplines(t: DisciplineTaxonomy, slugs: string[]): strin
   for (const s of slugs) for (const c of t.categories) if (c.parent_slug === s) out.add(c.slug);
   return Array.from(out);
 }
+
+/** Same slug format as 0036 tt_all_slugs() / 0040 discipline_categories.slug / taxonomy.py SLUG_RE. */
+export const SLUG_RE = /^[a-z][a-z0-9_]{0,62}$/;
+
+/** "a, b*, c & d" -> ["a", "b*", "c & d"] (the keyword syntax taxonomy.py matches). */
+export function splitKeywords(s: string, sep: string = ","): string[] {
+  return Array.from(new Set(s.split(sep).map((k) => k.trim()).filter(Boolean)));
+}
+
+/** Every column the admin screen edits (0040), including retired rows. */
+export type DisciplineCategoryFull = DisciplineCategory & {
+  keywords: string[];
+  exclude_keywords: string[];
+  etenders_categories: string[];
+  l2b_categories: string[];
+  cidb_classes: string[];
+  active: boolean;
+  added_from: string | null;
+  updated_at: string;
+};
+export const DISCIPLINE_CATEGORY_FULL_COLUMNS =
+  "slug, label, parent_slug, sort_order, keywords, exclude_keywords, etenders_categories, l2b_categories, cidb_classes, active, added_from, updated_at";

@@ -53,6 +53,7 @@ if HERE not in sys.path:
 sys.path.insert(0, os.path.join(HERE, "..", "ocr"))
 import scan_ocr  # noqa: E402  (EXPERIMENTAL - docs/specs/OCR-Evaluation.md)
 from score_outlook import estimate_score_outlook, extract_experience_evidence, extract_locality  # noqa: E402
+from key_person_minimums import extract_key_person_minimums  # noqa: E402
 from assess_tender import CIDB_RE, BRIEFING_RE  # noqa: E402
 
 MANIFEST_VERSION = 1
@@ -476,7 +477,8 @@ def find_roles(docs):
 # Per-person professional registrations a tender asks for that are NOT on
 # every person's record (migration 0040, audit Q5): SACNASP (Pr Sci.Nat - e.g.
 # an engineering geologist, environmental scientist) and SAGC (land /
-# engineering surveyors; PLATO is the council's former name). Sarel: "don't
+# engineering surveyors; PLATO is the council's former name); and (held via the 0050 registrations catalog,
+# audit O4) SACAP, SACPLAN, SACQSP, SACPVP and PSIRA. Sarel: "don't
 # specifically ask for it unless the tender requires it" - so this list is
 # what makes the People page show those fields and the workspace name who
 # holds them. Same context rule as the roles: a glossary line or a passing
@@ -486,7 +488,31 @@ def find_roles(docs):
 PERSON_REGISTRATION_PATTERNS = [
     ("SACNASP", r"\bSACNASP\b|\bPr\.?\s?Sci\.?\s?Nat\b|natural\s+scientific\s+professions|professional\s+natural\s+scientist"),
     ("SAGC", r"\bSAGC\b|geomatics\s+council|\bPLATO\b|professional\s+land\s+surveyor"),
+    # 0050 catalog bodies (audit O4) - the other statutory councils, by acronym, council
+    # name or registered title. Read in the 123-tender corpus: ACSA COR8138
+    # (SACAP / SACQSP), DLRRD NC 001 and TDR11 (SACPLAN), Maluti TVET RFQ168
+    # (SACPVP), and six guarding / alarm-response tenders (PSIRA).
+    # "Landscape Architectural Profession" is SACLAP, not SACAP.
+    ("SACAP", r"\bSACAP\b|council\s+for\s+the\s+architectural\s+profession|(?<!landscape\s)architectural\s+profession\s+act|"
+              r"\bPr\.?\s?Arch\b|professional\s+(?:senior\s+)?architectural\s+(?:technologist|draughtsperson)|professional\s+architect\b"),
+    ("SACPLAN", r"\bSACPLAN\b|council\s+for\s+planners|planning\s+professions?\s+act|professional\s+planner\b|\bPr\.?\s?Pln\b"),
+    ("SACQSP", r"\bSACQSP\b|council\s+for\s+the\s+quantity\s+surveying\s+profession|quantity\s+surveying\s+profession\s+act|"
+               r"professional\s+quantity\s+surveyor|\bPr\.?\s?QS\b"),
+    ("SACPVP", r"\bSACPVP\b|council\s+for\s+the\s+property\s+valuers\s+profession|property\s+valuers\s+profession\s+act|"
+               r"professional\s+(?:associated\s+)?valuer\b"),
+    ("PSIRA", r"\bPSIRA\b|private\s+security\s+industry\s+regulat"),
 ]
+# A council NAMED, not asked for: a definitions clause or a statute table
+# ("statutory council: a) South African Council for the Architectural
+# Profession, established by the Architectural Profession Act of 2000 ...",
+# the CIDB standard's "Categories of registration ... Act" table, read in
+# CDC44126's gazette annexure) lists every council whether or not the tender
+# needs any of them. Such a mention is skipped unless a requirement verb sits
+# right next to it.
+DEFINITION_CONTEXT_RE = re.compile(r"established\s+by|\(Act\s+No|Act\s+No\.?\s*\d|Act\s+of\s+(?:19|20)\d\d|categor(?:y|ies)\s+of\s+registration",
+                                   re.IGNORECASE)
+REQUIREMENT_VERB_RE = re.compile(r"\bmust\b|\bshall\b|required|registered\s+with|proof\s+of\s+registration|certificate|be\s+registered",
+                                 re.IGNORECASE)
 
 
 def find_person_registrations(docs):
@@ -500,6 +526,9 @@ def find_person_registrations(docs):
                 if GLOSSARY_LINE_RE.match(_line_at(t, m.start())):
                     continue
                 if not ROLE_CONTEXT_RE.search(t[max(0, m.start() - 250): m.end() + 250]):
+                    continue
+                near = t[max(0, m.start() - 160): m.end() + 160]
+                if DEFINITION_CONTEXT_RE.search(near) and not REQUIREMENT_VERB_RE.search(near):
                     continue
                 n += 1
                 if hit is None:
@@ -812,6 +841,10 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         },
         "experience_evidence": extract_experience_evidence(all_text) if all_text.strip() else {"source": "not_found", "rules": []},
         "locality": {"rows": loc["rows"], "mandatory_local_office": loc["mandatory_local_office"]},
+        # the tender's own C3.1.11(d)-style key-person minimums table (audit
+        # Q5) - a manually loaded SANRAL tender's Book 2/3 carries it
+        "key_person_minimums": extract_key_person_minimums(all_text) if all_text.strip()
+        else {"source": "not_found", "clause": None, "rows": [], "unparsed": [], "reason": "No document text."},
         "questions": questions,
         "company_fields": company_fields,
         "gaps": _gaps(doc_entries, forms, suite, buyer_forms, _depth(all_text)) + _key_personnel_gap(docs),

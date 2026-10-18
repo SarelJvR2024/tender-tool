@@ -40,6 +40,10 @@ export type EvidenceRule = {
 export type EvaluationRules = {
   experience_evidence?: { source: "tender_document" | "not_found"; rules: EvidenceRule[]; reason?: string } | null;
   locality?: { rows: import("./locality").LocalityRow[]; mandatory_local_office: { area: string; disqualifies: boolean; quote: string } | null } | null;
+  // The tender's own C3.1.11(d) key-person minimums (audit Q5,
+  // engine/discovery/key_person_minimums.py) - tenderCompliance.ts uses
+  // these, R.396's table only as a labelled fallback.
+  key_person_minimums?: import("./tenderCompliance").KeyPersonMinimums | null;
   source_document?: string;
   extracted_at?: string;
 };

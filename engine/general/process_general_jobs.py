@@ -453,6 +453,9 @@ def run_extraction(client, job, work_root, fetch=None):
         patch["evaluation_rules"] = {
             "experience_evidence": clean["experience_evidence"],
             "locality": clean["locality"],
+            # audit Q5: the tender's own C3.1.11 minimums (tenderCompliance.ts
+            # uses them; R.396's table only as a labelled fallback)
+            "key_person_minimums": clean.get("key_person_minimums"),
             "source_document": "; ".join(sorted({d["name"] for d in clean["documents"] if d["chars"] > 0}))[:500],
             "extracted_at": clean["extracted_at"],
         }

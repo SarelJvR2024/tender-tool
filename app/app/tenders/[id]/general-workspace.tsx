@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { COMPANY_VAULT_COLUMNS, validityAtClosing, type ComplianceStatus } from "@/lib/tenderCompliance";
-import { REGISTRATION_BODY_INFO, type PersonCredentialFields } from "@/lib/personCredentials";
+import { CATALOG_BODIES, REGISTRATION_BODY_INFO, bodyKeys, catalogSlug, isCatalogBody, isColumnBody, isRequiredBody, type PersonCredentialFields } from "@/lib/personCredentials";
 import {
   FORM_STATUS_STYLE,
   GENERAL_COMPANY_COLUMNS,
@@ -159,7 +159,33 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const typedForms = manifest.forms.filter((f) => f.status === "overlay");
 
   // ----- per-person registrations the tender requires (0040) -----
-  const personRegs = manifest.person_registrations ?? [];
+  const personRegs = (manifest.person_registrations ?? []).filter((pr) => isRequiredBody(pr.body));
+  // Catalog bodies (0050 held_registrations: SACAP, SACPLAN, SACQSP, SACPVP,
+  // PSIRA) - read only when this tender asks for one of them.
+  type HeldRow = { person_id: string | null; principal_id: string | null; registration_number: string | null; category: string | null; expiry_date: string | null; registration_types: { slug: string } };
+  const askedCatalog = personRegs.filter((pr) => isCatalogBody(pr.body)).map((pr) => catalogSlug(pr.body as (typeof CATALOG_BODIES)[number]));
+  const { data: heldRows } = askedCatalog.length
+    ? await supabase
+        .from("held_registrations")
+        .select("person_id, principal_id, registration_number, category, expiry_date, registration_types!inner(slug)")
+        .in("registration_types.slug", askedCatalog)
+    : { data: [] };
+  const held = (heldRows ?? []) as unknown as HeldRow[];
+  /** Who holds a required body: {name, category, expiry} - people columns (SACNASP/SAGC) or catalog rows. */
+  const holdersOf = (body: string): { name: string; category: string | null; expiry: string | null }[] => {
+    if (isColumnBody(body)) {
+      const k = bodyKeys(body);
+      return people.filter((p) => p[k.number] || p[k.category]).map((p) => ({ name: p.name, category: p[k.category] ?? null, expiry: p[k.expiry] ?? null }));
+    }
+    if (!isCatalogBody(body)) return [];
+    return held
+      .filter((h) => h.registration_types.slug === catalogSlug(body))
+      .map((h) => ({
+        name: h.person_id ? people.find((p) => p.id === h.person_id)?.name ?? "a person" : h.principal_id ? "a director / shareholder" : "the company",
+        category: h.category,
+        expiry: h.expiry_date,
+      }));
+  };
 
   // ----- key people -----
   const roleRowsForTender = manifest.roles.map((mr) => {
@@ -411,12 +437,8 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             <>
               <SubTitle text="Professional registrations this tender asks for" />
               {personRegs.map((pr) => {
-                const key = pr.body === "SACNASP" ? "sacnasp" : "sagc";
-                const holders = people.filter((p) => p[`${key}_number`] || p[`${key}_category`]);
-                const valid = holders.filter((p) => {
-                  const exp = p[`${key}_expiry`];
-                  return !exp || validityAtClosing(exp, closingDate).status === "have";
-                });
+                const holders = holdersOf(pr.body);
+                const valid = holders.filter((p) => !p.expiry || validityAtClosing(p.expiry, closingDate).status === "have");
                 const st = valid.length > 0 ? STATUS_STYLE.have : holders.length > 0 ? STATUS_STYLE.check : STATUS_STYLE.missing;
                 return (
                   <div key={pr.body} title={pr.quote} style={{ borderTop: "1px solid #F0EEE6", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
@@ -424,8 +446,8 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                       <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{pr.body} registration ({REGISTRATION_BODY_INFO[pr.body].name})</div>
                       <div style={{ fontSize: 12, color: "#4B5563" }}>
                         {holders.length > 0
-                          ? `On file: ${holders.map((p) => `${p.name}${p[`${key}_category`] ? ` (${p[`${key}_category`]})` : ""}${p[`${key}_expiry`] ? `, valid to ${p[`${key}_expiry`]}` : ", renewal date not on file"}`).join("; ")}`
-                          : `Nobody has a ${pr.body} registration on file - add it on the person's page (the field shows there now that this tender asks for it).`}
+                          ? `On file: ${holders.map((p) => `${p.name}${p.category ? ` (${p.category})` : ""}${p.expiry ? `, valid to ${p.expiry}` : ", renewal date not on file"}`).join("; ")}`
+                          : `Nobody has a ${pr.body} registration on file - add it on the person's page (it shows there now that this tender asks for it)${isCatalogBody(pr.body) ? " or under Company > Registrations" : ""}.`}
                       </div>
                       <div style={{ fontSize: 11, color: "#9A9684", fontStyle: "italic", wordBreak: "break-word" }}>{pr.from_ocr ? OCR_TAG : ""}&ldquo;{pr.quote.slice(0, 150)}…&rdquo;</div>
                     </div>

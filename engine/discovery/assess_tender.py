@@ -330,10 +330,15 @@ def read_release(release, fetch_document=True, max_documents=3, fetch_text=None)
     fetch_text = fetch_text or fetch_pdf_text
     categories = categorize(release.get("title"), release.get("description"),
                              release.get("procurement_category"))
+    # The buyer's own eTenders category, as a cross-check only (audit O1):
+    # it never changes `categories` or the fit verdict.
+    site_cat = release.get("etenders_category")
+    xref = {"etenders_category": site_cat,
+            "etenders_category_check": _taxonomy.active().etenders_crosscheck(categories, site_cat) if site_cat else None}
     if release.get("is_closed"):
         return {"categories": categories, "closed": True, "depth": "not_fetched", "signals": {},
                 "confidence": "Document not fetched - this tender's closing date has already passed.",
-                "text": ""}
+                "text": "", **xref}
 
     depth, signals, confidence = "metadata_only", {}, "No document was fetched for this assessment."
     best_text = ""
@@ -360,7 +365,7 @@ def read_release(release, fetch_document=True, max_documents=3, fetch_text=None)
             confidence = "Every attached document failed to download or read: " + "; ".join(fetch_notes)
             signals, _ = extract_signals("", depth)
     return {"categories": categories, "closed": False, "depth": depth, "signals": signals,
-            "confidence": confidence, "text": best_text}
+            "confidence": confidence, "text": best_text, **xref}
 
 
 def score_release(release, reading, profile):
@@ -385,6 +390,9 @@ def score_release(release, reading, profile):
         "description": release.get("description"),
         "closing_date": release.get("closing_date"),
         "categories": categories,
+        # cross-reference only (audit O1) - not used by assess_fit()
+        "etenders_category": reading.get("etenders_category"),
+        "etenders_category_check": reading.get("etenders_category_check"),
         "document_depth": depth,
         "signals": signals,
         "confidence_note": reading["confidence"],

@@ -187,3 +187,53 @@ export async function deleteExperience(formData: FormData) {
   revalidatePath("/experience");
   redirect("/experience");
 }
+
+/**
+ * Offer one of the company's own experience tags (0036 - not on the shared
+ * list) to Sarel for the SHARED discipline list (audit O2, 0054
+ * discipline_category_suggestions). Files a PENDING suggestion only - nothing
+ * is added to the list until a platform admin approves it on
+ * /admin/taxonomy. RLS: members suggest for their own company only; the
+ * table's trigger refuses a slug already on the list and an example item
+ * that isn't this company's.
+ */
+export async function suggestSharedCategory(formData: FormData) {
+  const { companyId, userId } = await requireCompanyId();
+  const itemId = str(formData, "item_id");
+  const slug = (str(formData, "slug") ?? "").toLowerCase();
+  const back = itemId ? `/experience/${itemId}` : "/experience";
+  if (!/^[a-z][a-z0-9_]{0,62}$/.test(slug)) redirect(err(back, `"${slug}" isn't a tag that can be suggested.`));
+  const supabase = await createClient();
+  const { error } = await supabase.from("discipline_category_suggestions").insert({
+    company_id: companyId,
+    slug,
+    label: str(formData, "label") ?? slug.replace(/_/g, " "),
+    suggested_parent_slug: str(formData, "parent_slug"),
+    note: str(formData, "note"),
+    example_item_id: itemId,
+    suggested_by: userId,
+  });
+  if (error) {
+    const msg =
+      error.code === "23505"
+        ? "Your company has already suggested this tag - it is waiting for review."
+        : error.message.includes("already on the shared list")
+          ? "That tag is already on the shared list."
+          : error.message;
+    redirect(err(back, msg));
+  }
+  revalidatePath(back);
+  redirect(`${back}?suggested=1`);
+}
+
+export async function withdrawSuggestion(formData: FormData) {
+  await requireCompanyId();
+  const id = str(formData, "id");
+  const itemId = str(formData, "item_id");
+  const back = itemId ? `/experience/${itemId}` : "/experience";
+  const supabase = await createClient();
+  const { error } = await supabase.from("discipline_category_suggestions").delete().eq("id", id ?? "").eq("status", "pending");
+  if (error) redirect(err(back, error.message));
+  revalidatePath(back);
+  redirect(back);
+}

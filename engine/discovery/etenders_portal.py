@@ -176,6 +176,10 @@ def normalize(row, status_hint=None):
         description=sh.clean(row.get("description")),
         buyer=sh.clean(row.get("organ_of_State") or row.get("department")),
         procurement_category=sh.clean(row.get("category")),
+        # the same value under the name Discovery's cross-check reads (audit
+        # O1, taxonomy.Taxonomy.etenders_crosscheck): the buyer's own pick
+        # from the portal's Category dropdown
+        etenders_category=sh.clean(row.get("category")),
         closing_date=sh.iso_sast(row.get("closing_Date")),
         opening_date=sh.iso_sast(row.get("date_Published")),
         documents=documents(row),

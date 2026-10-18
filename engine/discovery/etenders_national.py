@@ -50,18 +50,41 @@ widens discovery to every organ of state that publishes through National
 Treasury's portal - provincial departments, municipalities, SOEs - which
 SANRAL's own site was never going to cover.
 
+The buyer's own category (audit O1, Sarel 2026-10-17). OCDS carries only
+goods / services / works. The eTenders website's own table data
+(Home/PaginatedTenderOpportunities, the JSON its public Opportunities page
+loads - also unauthenticated, no CAPTCHA) carries the buyer's pick from the
+site's 91-entry Category dropdown. fetch_site_categories() reads it once per
+run and attach_site_categories() joins it on the ocid's numeric suffix (the
+site's tender id). It is stored and shown as a CROSS-CHECK on Tender Tool's
+own taxonomy (taxonomy.Taxonomy.etenders_crosscheck), never instead of it:
+the buyers' own categories are too coarse to sort by (29% of live tenders sit
+in three catch-all buckets - Discipline-Taxonomy-Findings.md §1.1). Only the
+category is kept; the site rows' contact names and e-mails are dropped.
+
 Usage:
-    python3 etenders_national.py --days 14 [--buyer "SANRAL"] [--out report.json]
+    python3 etenders_national.py --days 14 [--buyer "SANRAL"] [--out report.json] [--no-site-categories]
 """
 import sys
 import json
 import time
 import argparse
 import datetime
+import urllib.parse
 import urllib.request
 import urllib.error
 
 API_BASE = "https://ocds-api.etenders.gov.za/api/OCDSReleases"
+# The public eTenders site's own table data (the JSON behind
+# Home/opportunities) - read ONLY for each tender's "category", the buyer's
+# own pick from the site's 91-entry Category dropdown, which the OCDS API does
+# not carry (audit O1, Sarel 2026-10-17: read it as a cross-reference
+# alongside Tender Tool's own categories). Public, unauthenticated, the same
+# request the site's table makes; one paginated pass per Discovery run.
+SITE_OPPORTUNITIES = "https://www.etenders.gov.za/Home/PaginatedTenderOpportunities"
+SITE_PAGE_SIZE = 500
+SITE_MAX_PAGES = 20  # 10 000 tenders - the site advertised 2 211 on 2026-10-17
+OCID_PREFIX = "ocds-9t57fa-"  # National Treasury's OCDS publisher prefix
 PAGE_SIZE = 100
 MAX_PAGES = 200  # hard stop so a bug can't loop forever against a live government API
 
@@ -128,6 +151,78 @@ def fetch_releases(date_from, date_to, max_pages=MAX_PAGES):
     return deduped
 
 
+def site_id_of(ocid):
+    """The eTenders site's tender id for an OCDS release: the ocid's numeric
+    suffix (ocds-9t57fa-174436 -> "174436"; confirmed 2026-10-17 by joining
+    the site's rows to OCDS releases). None for any other shape."""
+    if ocid and ocid.startswith(OCID_PREFIX) and ocid[len(OCID_PREFIX):].isdigit():
+        return ocid[len(OCID_PREFIX):]
+    return None
+
+
+def fetch_site_page(start, length, status=1, timeout=90):
+    q = urllib.parse.urlencode({"draw": 1, "start": start, "length": length, "status": status})
+    req = urllib.request.Request(f"{SITE_OPPORTUNITIES}?{q}", headers={
+        "User-Agent": "TenderTool-Discovery/1.0 (category cross-reference; one pass per run)",
+        "X-Requested-With": "XMLHttpRequest", "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.load(r)
+
+
+def fetch_site_categories(status=1, page_size=SITE_PAGE_SIZE, max_pages=SITE_MAX_PAGES, fetch_page=None, log=print):
+    """{site tender id: {"category", "category_id"}} for every tender the
+    site currently lists (status 1 = advertised). Only the category is kept -
+    the rows also carry contact names and e-mail addresses, which Tender Tool
+    has no use for here. A page that fails is retried once and then skipped:
+    this is cross-reference data, so a site outage never stops Discovery
+    (the releases just carry no site category, and the run says so).
+    Returns (categories, note)."""
+    fetch_page = fetch_page or fetch_site_page
+    out, failed, total = {}, [], None
+    for page in range(max_pages):
+        start = page * page_size
+        data = None
+        for attempt in range(2):
+            try:
+                data = fetch_page(start, page_size, status)
+                break
+            except Exception as e:  # noqa: BLE001 - any failure: retry once, then skip the page
+                err = e
+                time.sleep(2 * (attempt + 1))
+        if data is None:
+            failed.append(f"rows {start}-{start + page_size - 1}: {err}")
+            if total is not None and start + page_size >= total:
+                break
+            continue
+        total = data.get("recordsTotal", total)
+        rows = data.get("data") or []
+        for r in rows:
+            if r.get("id") is not None and r.get("category"):
+                out[str(r["id"])] = {"category": r["category"].strip(), "category_id": r.get("categoriesID")}
+        if len(rows) < page_size or (total is not None and start + page_size >= total):
+            break
+    note = f"{len(out)} tender categories read from the eTenders site"
+    if total is not None:
+        note += f" (site lists {total})"
+    if failed:
+        note += f"; {len(failed)} page(s) failed: " + "; ".join(failed)[:300]
+    log(f"  eTenders site categories: {note}")
+    return out, note
+
+
+def attach_site_categories(releases, site_categories):
+    """Sets etenders_category / etenders_category_id on each normalised
+    release whose site id is in the map; None otherwise (not read - never
+    guessed). Returns how many matched."""
+    n = 0
+    for r in releases:
+        sc = site_categories.get(site_id_of(r.get("ocid")) or "")
+        r["etenders_category"] = sc["category"] if sc else None
+        r["etenders_category_id"] = sc.get("category_id") if sc else None
+        n += bool(sc)
+    return n
+
+
 def normalize(release):
     tender = release.get("tender", {}) or {}
     buyer = release.get("buyer", {}) or {}
@@ -160,6 +255,9 @@ def normalize(release):
         "awards": release.get("awards", []),
         "contracts": release.get("contracts", []),
         "has_award_data": bool(release.get("awards")),
+        # the buyer's own eTenders site category - filled by
+        # attach_site_categories() (a separate read of the site), else None
+        "etenders_category": None,
     }
 
 
@@ -170,6 +268,8 @@ def main():
     ap.add_argument("--buyer", default=None,
                      help="case-insensitive substring filter on the buyer/organ-of-state name")
     ap.add_argument("--out", default=None, help="write the full normalized report to this JSON file")
+    ap.add_argument("--no-site-categories", action="store_true",
+                    help="don't read the eTenders site's own category for each tender (cross-reference only)")
     args = ap.parse_args()
 
     today = datetime.date.today()
@@ -181,6 +281,9 @@ def main():
     print(f"  {len(raw)} releases fetched")
 
     normalized = [normalize(r) for r in raw]
+    if not args.no_site_categories:
+        site, _ = fetch_site_categories()
+        print(f"  {attach_site_categories(normalized, site)} of {len(normalized)} releases matched a site category")
     if args.buyer:
         needle = args.buyer.lower()
         normalized = [r for r in normalized if r["buyer"] and needle in r["buyer"].lower()]

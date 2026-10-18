@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../../_components/SiteNav";
 import { isTaxonomySlug, loadDisciplineTaxonomy, taxonomyGroups } from "@/lib/disciplineTaxonomy";
-import { saveExperienceTags, deleteExperience } from "../actions";
+import { saveExperienceTags, deleteExperience, suggestSharedCategory, withdrawSuggestion } from "../actions";
 import {
   DOCUMENT_TYPES,
   CLIENT_TYPES,
@@ -40,16 +40,24 @@ export default async function ExperienceDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ error?: string; saved?: string; captured?: string }>;
+  searchParams: Promise<{ error?: string; saved?: string; captured?: string; suggested?: string }>;
 }) {
   const { id } = await params;
-  const { error: errorParam, saved, captured } = await searchParams;
+  const { error: errorParam, saved, captured, suggested } = await searchParams;
   const supabase = await createClient();
 
   const { data } = await supabase.from("experience_items").select("*").eq("id", id).maybeSingle();
   const item = data as ExperienceItem | null;
   const taxonomy = await loadDisciplineTaxonomy(supabase);
   const customTags = (item?.disciplines ?? []).filter((t) => !isTaxonomySlug(taxonomy, t));
+  // 0054 (audit O2): this company's suggestions to promote its own tags to
+  // the shared list - pending, approved or rejected, with Sarel's note.
+  type Suggestion = { id: string; slug: string; status: "pending" | "approved" | "rejected"; review_note: string | null };
+  const { data: suggestionRows } =
+    customTags.length > 0
+      ? await supabase.from("discipline_category_suggestions").select("id, slug, status, review_note").in("slug", customTags).order("created_at", { ascending: false })
+      : { data: [] };
+  const suggestionFor = (slug: string) => ((suggestionRows ?? []) as Suggestion[]).find((s) => s.slug === slug) ?? null;
 
   if (!item) {
     return (
@@ -98,6 +106,11 @@ export default async function ExperienceDetailPage({
         {captured === "1" && !item.tagged_at && (
           <div style={{ background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B45309" }}>
             Uploaded. Now tag what this document shows - it won&apos;t count towards any tender until it&apos;s tagged.
+          </div>
+        )}
+        {suggested === "1" && (
+          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+            Suggested for the shared discipline list. It is reviewed before anything is added - you&apos;ll see the outcome here.
           </div>
         )}
         {saved === "1" && (
@@ -254,6 +267,80 @@ export default async function ExperienceDetailPage({
             Save tags
           </button>
         </form>
+
+        {customTags.length > 0 && (
+          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 16px", marginBottom: 16 }}>
+            <div style={{ ...sectionTitle, marginTop: 0 }}>Your own tags and the shared list</div>
+            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
+              These tags aren&apos;t on Tender Tool&apos;s shared discipline list, so Discovery doesn&apos;t sort tenders into them. If
+              other companies would use one too, suggest it: Tender Tool reviews every suggestion before anything is added. The
+              reviewer sees your company name, the tag, your note and this project&apos;s name.
+            </div>
+            {customTags.map((t) => {
+              const sug = suggestionFor(t);
+              return (
+                <div key={t} style={{ borderTop: "1px solid #F0EEE6", padding: "10px 0" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{disciplineLabel(t)}</span>
+                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "#9A9684" }}>{t}</span>
+                    {sug && (
+                      <span
+                        style={{
+                          fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 100,
+                          background: sug.status === "pending" ? "#FEF3C7" : sug.status === "approved" ? "#DCFCE7" : "#FEE2E2",
+                          color: sug.status === "pending" ? "#B45309" : sug.status === "approved" ? "#15803D" : "#B91C1C",
+                        }}
+                      >
+                        {sug.status === "pending" ? "Suggested - waiting for review" : sug.status === "approved" ? "Added to the shared list" : "Not added"}
+                      </span>
+                    )}
+                  </div>
+                  {sug?.review_note && <div style={{ fontSize: 12, color: "#4B5563", marginTop: 4 }}>Reviewer&apos;s note: {sug.review_note}</div>}
+                  {sug?.status === "pending" && (
+                    <form action={withdrawSuggestion} style={{ marginTop: 6 }}>
+                      <input type="hidden" name="id" value={sug.id} />
+                      <input type="hidden" name="item_id" value={item.id} />
+                      <button type="submit" style={{ minHeight: 36, padding: "0 12px", borderRadius: 9, background: "#FFFFFF", color: "#6B6758", fontWeight: 600, fontSize: 12, border: "1px solid #E5E1D5", cursor: "pointer" }}>
+                        Withdraw the suggestion
+                      </button>
+                    </form>
+                  )}
+                  {(!sug || sug.status === "rejected") && (
+                    <details style={{ marginTop: 6 }}>
+                      <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#D97706", minHeight: 32 }}>
+                        {sug ? "Suggest it again" : "Suggest this as a shared category"}
+                      </summary>
+                      <form action={suggestSharedCategory} style={{ marginTop: 6 }}>
+                        <input type="hidden" name="item_id" value={item.id} />
+                        <input type="hidden" name="slug" value={t} />
+                        <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                          <Field>
+                            <label style={label}>Name it as it should appear</label>
+                            <input style={field} name="label" defaultValue={disciplineLabel(t)} required />
+                          </Field>
+                          <Field>
+                            <label style={label}>Which group it belongs in (your best guess)</label>
+                            <select style={field} name="parent_slug" defaultValue="">
+                              <option value="">Not sure</option>
+                              {taxonomyGroups(taxonomy).map(({ group }) => <option key={group.slug} value={group.slug}>{group.label}</option>)}
+                            </select>
+                          </Field>
+                        </div>
+                        <Field>
+                          <label style={label}>What kind of work it covers (optional)</label>
+                          <input style={field} name="note" placeholder="e.g. Hydrographic surveys of dams and harbours for DWS and TNPA" />
+                        </Field>
+                        <button type="submit" style={{ minHeight: 40, padding: "0 16px", borderRadius: 9, background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer" }}>
+                          Send for review
+                        </button>
+                      </form>
+                    </details>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         <form action={deleteExperience}>
           <input type="hidden" name="id" value={item.id} />
