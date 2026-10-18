@@ -1,3 +1,5 @@
+import { DowngradeFlag } from "../../discovery/downgrade-flag";
+import { ACTIVE_PURSUIT_STAGES, DOWNGRADE_COLUMNS, isDowngraded, isOpenDowngrade, verdictLabel, type Downgrade } from "@/lib/discoveryReassessment";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_STATUS_STYLE, type EngineJob } from "@/lib/generalTender";
 import type { TenderIntake } from "@/lib/manualTender";
@@ -30,7 +32,8 @@ const FP_STYLE: Record<string, { label: string; bg: string; color: string }> = {
   error: { label: "Fingerprint failed", bg: "#FEE2E2", color: "#B91C1C" },
 };
 
-type Opportunity = { verdict: string; reasons: string[] | null; score_outlook: { summary?: string[] } | null; source: string };
+type Opportunity = Downgrade & { id: string; verdict: string; reasons: string[] | null; score_outlook: { summary?: string[] } | null; source: string };
+const OPP_COLUMNS = `id, verdict, reasons, score_outlook, source, ${DOWNGRADE_COLUMNS}`;
 
 export async function IntakeCard({ tenderId }: { tenderId: string }) {
   const supabase = await createClient();
@@ -42,18 +45,19 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
   if (!tender) return null;
   // With private documents on a shared tender (0032), this company's own
   // intake record (on its tender_packs row) describes what was read.
-  const { data: ownPack } = await supabase.from("tender_packs").select("intake").eq("tender_id", tenderId).maybeSingle();
+  const { data: ownPack } = await supabase.from("tender_packs").select("intake, pipeline_stage").eq("tender_id", tenderId).maybeSingle();
+  const pursuingStage = ownPack?.pipeline_stage && ACTIVE_PURSUIT_STAGES.includes(ownPack.pipeline_stage as string) ? (ownPack.pipeline_stage as string) : null;
   const intake = ((ownPack?.intake ?? tender.intake) as TenderIntake | null) ?? null;
   const source = tender.source as string;
 
   const [{ data: jobRows }, { data: oppRows }] = await Promise.all([
     supabase.from("tender_engine_jobs").select("id, kind, status, error_message, requested_at, completed_at")
       .eq("tender_id", tenderId).eq("kind", "extract_requirements").order("requested_at", { ascending: false }).limit(1),
-    supabase.from("discovered_opportunities").select("verdict, reasons, score_outlook, source").eq("tender_id", tenderId).limit(1),
+    supabase.from("discovered_opportunities").select(OPP_COLUMNS).eq("tender_id", tenderId).limit(1),
   ]);
   let opp = ((oppRows ?? [])[0] as Opportunity | undefined) ?? null;
   if (!opp && tender.ocid) {
-    const { data } = await supabase.from("discovered_opportunities").select("verdict, reasons, score_outlook, source").eq("ocid", tender.ocid as string).limit(1);
+    const { data } = await supabase.from("discovered_opportunities").select(OPP_COLUMNS).eq("ocid", tender.ocid as string).limit(1);
     opp = ((data ?? [])[0] as Opportunity | undefined) ?? null;
   }
   const job = ((jobRows ?? [])[0] as Pick<EngineJob, "id" | "status" | "error_message" | "requested_at" | "completed_at"> | undefined) ?? null;
@@ -140,11 +144,19 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
         </>
       )}
 
+      {opp && isOpenDowngrade(opp) && (
+        <div style={{ marginTop: 6 }}>
+          <DowngradeFlag opportunityId={opp.id} verdict={opp.verdict} downgrade={opp} pursuingStage={pursuingStage} returnTo={`/tenders/${tenderId}`} acknowledgedByLabel={null} />
+        </div>
+      )}
       {opp && (
         <div style={{ marginTop: 6, padding: "10px 12px", background: "#F6F5F1", border: "1px solid #E5E1D5", borderRadius: 9 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: "#16233B" }}>Fit for your company</span>
             <span style={chip((VERDICT[opp.verdict] ?? VERDICT.closed).bg, (VERDICT[opp.verdict] ?? VERDICT.closed).color)}>{(VERDICT[opp.verdict] ?? { label: opp.verdict }).label}</span>
+            {isDowngraded(opp) && (
+              <span style={{ ...chip("#F6F5F1", "#6B6758"), border: "1px solid #E5E1D5", textDecoration: "line-through" }}>was {verdictLabel(opp.downgraded_from)}</span>
+            )}
           </div>
           <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#4B5563" }}>
             {(opp.reasons ?? []).map((r, i) => <li key={i}>{r}</li>)}

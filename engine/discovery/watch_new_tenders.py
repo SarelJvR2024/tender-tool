@@ -44,6 +44,14 @@ unless one of these holds (Sarel, 2026-10-17):
     being remembered as seen (rescored="retry_after_error"), and every
     failure is recorded in system_alerts (engine/alerts/system_alerts.py) so
     it reaches Sarel instead of sitting in the seen store.
+A re-score that makes the verdict WORSE is flagged, not silent (Sarel,
+2026-10-17: "When evaluation downgrades opportunity it must be flagged"): a
+re-scored company whose new verdict is no longer report-worthy is listed in
+the release's `company_reassessed` (with its previous_verdict), so the seeder
+can mark the company's existing Discovery row "was strong_fit, now not_a_fit"
+(discovery_downgrades.py, migration 0055) instead of leaving it saying a
+match; the CLI prints every downgrade. A release with only such entries is in
+--out with an empty `company_results`.
 A verdict that merely drifts on the same profile (more of a document became
 readable) is still not re-reported - that would defeat the point of a
 "what's new" alert. A seen entry with no stored fingerprint (written before
@@ -95,6 +103,7 @@ import etenders_national
 import gov_sources
 import assess_tender
 import company_profiles
+import discovery_downgrades
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
 import system_alerts  # noqa: E402
 
@@ -261,7 +270,7 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
             reading, read_error = None, str(e)
             system_alerts.record("discovery", f"Could not read a discovered tender for scoring: {type(e).__name__}: {e}",
                                  "error", exc=e, context=ctx)
-        results, base = [], None
+        results, reassessed, base = [], [], None
         for c in pending:
             try:
                 if reading is None:
@@ -282,11 +291,18 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
                                 "verdict": res["verdict"], "reasons": res.get("reasons") or [],
                                 "score_outlook": res.get("score_outlook"), "rescored": why[c["key"]],
                                 "previous_verdict": previous if why[c["key"]] else None})
-        if results:
+            elif why[c["key"]] and res.get("verdict") in discovery_downgrades.FIT_VERDICTS:
+                # Re-scored and no longer report-worthy: the seeder flags the
+                # company's existing Discovery row if this is a downgrade.
+                reassessed.append({"company_id": c["company_id"], "legal_name": c["legal_name"],
+                                   "company_key": c["key"], "verdict": res["verdict"],
+                                   "reasons": res.get("reasons") or [], "score_outlook": res.get("score_outlook"),
+                                   "rescored": why[c["key"]], "previous_verdict": previous})
+        if results or reassessed:
             out.append({**{k: base.get(k) for k in RELEASE_FIELDS}, "ocid": r.get("ocid"),
                         "documents": r.get("documents"),
                         **{k: r.get(k) for k in LISTING_FIELDS if r.get(k) is not None},
-                        "company_results": results})
+                        "company_results": results, "company_reassessed": reassessed})
     return out
 
 
@@ -395,16 +411,28 @@ def main():
 
     new_releases = run(normalized, companies, report_worthy, client, args.seen_store, today)
 
-    print(f"\n{len(new_releases)} new, report-worthy release(s) for at least one company "
+    worthy = [r for r in new_releases if r["company_results"]]
+    print(f"\n{len(worthy)} new, report-worthy release(s) for at least one company "
           f"(verdict in {sorted(report_worthy)}):")
-    for r in new_releases:
+    for r in worthy:
         docs = ", ".join(d["url"] for d in (r.get("documents") or []) if d.get("url")) or "(no document URL on file)"
         print(f"  {r.get('contract_number'):>14}  {r.get('buyer')}  -  {r.get('title')}")
         for c in r["company_results"]:
             again = {"profile_changed": f"  (re-scored: its profile changed since; was {c.get('previous_verdict')})",
                      "retry_after_error": "  (re-scored: the last scoring failed)"}.get(c.get("rescored"), "")
+            if discovery_downgrades.is_downgrade(c.get("previous_verdict"), c["verdict"]):
+                again += "  DOWNGRADE - flagged on its Discovery card"
             print(f"      {c['verdict']:<14} {c['legal_name']}{again}")
         print(f"      closes {r.get('closing_date')}  |  {docs}")
+
+    downgrades = [(r, c) for r in new_releases for c in r.get("company_reassessed") or []
+                  if discovery_downgrades.is_downgrade(c.get("previous_verdict"), c["verdict"])]
+    if downgrades:
+        print(f"\n{len(downgrades)} re-assessment(s) now WORSE than what the company was shown "
+              "(flagged on its Discovery card by seed_supabase_opportunities.py, and in its next digest):")
+        for r, c in downgrades:
+            print(f"  {r.get('contract_number'):>14}  {c['legal_name']}: was {c['previous_verdict']}, now {c['verdict']}"
+                  f"  ({c['rescored']})")
 
     if args.out:
         with open(args.out, "w") as f:

@@ -11,6 +11,15 @@ import {
   type ListingChange,
   type ListingSource,
 } from "@/lib/listingChanges";
+import { DowngradeFlag } from "./downgrade-flag";
+import {
+  ACTIVE_PURSUIT_STAGES,
+  DOWNGRADE_COLUMNS,
+  isDowngraded,
+  isOpenDowngrade,
+  verdictLabel,
+  type Downgrade,
+} from "@/lib/discoveryReassessment";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -18,7 +27,7 @@ export const instant = false;
 
 type DocumentUrl = { url: string | null; title: string | null };
 
-type OpportunityRow = {
+type OpportunityRow = Downgrade & {
   id: string;
   contract_number: string | null;
   buyer: string | null;
@@ -44,7 +53,7 @@ type OpportunityRow = {
   listing_status: string | null;
 };
 
-type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed";
+type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed";
 
 const FILTERS: { key: VerdictFilter; label: string }[] = [
   { key: "all", label: "All" },
@@ -54,6 +63,8 @@ const FILTERS: { key: VerdictFilter; label: string }[] = [
   // Tenders whose listing changed since it was found: cancelled, closing
   // date moved, addendum listed... (tender_listing_changes, 0051).
   { key: "changed", label: "Changed" },
+  // 0055: a re-assessment made the verdict worse (still flagged or already seen).
+  { key: "reassessed", label: "Re-assessed" },
 ];
 
 const SAST_DATE: Intl.DateTimeFormatOptions = { timeZone: "Africa/Johannesburg", day: "numeric", month: "short", year: "numeric" };
@@ -64,6 +75,7 @@ const SAST_DATETIME: Intl.DateTimeFormatOptions = { ...SAST_DATE, hour: "2-digit
 // (see assess_fit()'s docstring/logic in engine/discovery/assess_tender.py).
 function matchesFilter(verdict: string, filter: VerdictFilter): boolean {
   if (filter === "all" || filter === "changed") return true;
+  if (filter === "reassessed") return false; // handled on the row (isDowngraded)
   if (filter === "needs_review") return verdict === "possible" || verdict === "needs_review";
   return verdict === filter;
 }
@@ -100,12 +112,31 @@ export default async function DiscoveryPage({
 
   // Scoped to the signed-in user's company via RLS (is_company_member) -
   // this query shape works the same regardless of which company is asking.
-  const { data: opportunities, error } = await supabase
-    .from("discovered_opportunities")
-    .select("id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status")
-    .order("first_seen", { ascending: false });
+  const [{ data: opportunities, error }, { data: packRows }, { data: labelRows }] = await Promise.all([
+    supabase
+      .from("discovered_opportunities")
+      .select(`id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status, ${DOWNGRADE_COLUMNS}`)
+      .order("first_seen", { ascending: false }),
+    // RLS: this company's own packs - which re-assessed tenders it is working on.
+    supabase.from("tender_packs").select("tender_id, pipeline_stage"),
+    supabase.rpc("company_member_labels"),
+  ]);
+  const { data: { user } } = await supabase.auth.getUser();
+  const stageByTender = new Map<string, string>();
+  for (const p of (packRows ?? []) as { tender_id: string; pipeline_stage: string | null }[]) {
+    if (p.pipeline_stage && ACTIVE_PURSUIT_STAGES.includes(p.pipeline_stage)) stageByTender.set(p.tender_id, p.pipeline_stage);
+  }
+  const labels = new Map<string, string>();
+  for (const r of (labelRows ?? []) as { user_id: string; label: string }[]) labels.set(r.user_id, r.label);
+  const whoAcknowledged = (id: string | null) => (!id ? null : id === user?.id ? "you" : labels.get(id) ?? "a former member");
 
-  const rows = (opportunities ?? []) as unknown as OpportunityRow[];
+  // A downgrade nobody has marked seen yet comes first (the order is otherwise newest found first).
+  const rows = ((opportunities ?? []) as unknown as OpportunityRow[])
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => Number(isOpenDowngrade(b.r)) - Number(isOpenDowngrade(a.r)) || a.i - b.i)
+    .map(({ r }) => r);
+  const openDowngrades = rows.filter(isOpenDowngrade);
+  const openPursued = openDowngrades.filter((r) => r.tender_id && stageByTender.has(r.tender_id));
 
   // Listing changes on these tenders (public listing facts, readable by any
   // signed-in user - 0051). Chunked so the in.() list stays a sane URL length.
@@ -127,10 +158,13 @@ export default async function DiscoveryPage({
     needs_review: rows.filter((r) => r.verdict === "possible" || r.verdict === "needs_review").length,
     not_a_fit: rows.filter((r) => r.verdict === "not_a_fit").length,
     changed: rows.filter((r) => changesFor(r).length > 0).length,
+    reassessed: rows.filter(isDowngraded).length,
   };
 
-  const visibleRows = rows.filter(
-    (r) => matchesFilter(r.verdict, activeFilter) && (activeFilter !== "changed" || changesFor(r).length > 0),
+  const visibleRows = rows.filter((r) =>
+    activeFilter === "reassessed"
+      ? isDowngraded(r)
+      : matchesFilter(r.verdict, activeFilter) && (activeFilter !== "changed" || changesFor(r).length > 0),
   );
 
   return (
@@ -167,6 +201,29 @@ export default async function DiscoveryPage({
         {actionError && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
             {actionError}
+          </div>
+        )}
+
+        {openDowngrades.length > 0 && (
+          <div
+            style={{
+              background: openPursued.length ? "#FEE2E2" : "#FEF3C7",
+              border: `1px solid ${openPursued.length ? "#FCA5A5" : "#FCD34D"}`,
+              borderRadius: 9,
+              padding: "11px 16px",
+              marginBottom: 16,
+              fontSize: 13,
+              color: openPursued.length ? "#B91C1C" : "#B45309",
+            }}
+          >
+            <strong>
+              &#9888; {openDowngrades.length} tender{openDowngrades.length === 1 ? " is" : "s are"} no longer as good a fit as when
+              {openDowngrades.length === 1 ? " it was" : " they were"} found
+            </strong>
+            {openPursued.length > 0 && <> - including {openPursued.length} you are working on</>}.{" "}
+            {openDowngrades.length === 1 ? "It was" : "They were"} scored again (usually because your company profile changed) and came out
+            worse. {openDowngrades.length === 1 ? "It is" : "Each is"} flagged below until someone in your company marks it as seen.{" "}
+            <a href="/discovery?verdict=reassessed" style={{ color: "#16233B", fontWeight: 600 }}>Show re-assessed tenders</a>
           </div>
         )}
 
@@ -237,12 +294,15 @@ export default async function DiscoveryPage({
             const docs = (o.document_urls ?? []).filter((d) => d.url);
             const changes = changesFor(o);
             const facts = [o.province, o.tender_type].filter(Boolean).join(" · ");
+            const pursuingStage = o.tender_id ? stageByTender.get(o.tender_id) ?? null : null;
+            const open = isOpenDowngrade(o);
             return (
               <div
                 key={o.id}
+                id={`opp-${o.id}`}
                 style={{
                   background: "#FFFFFF",
-                  border: "1px solid #E5E1D5",
+                  border: open ? `2px solid ${pursuingStage ? "#B91C1C" : "#B45309"}` : "1px solid #E5E1D5",
                   borderRadius: 11,
                   padding: "14px 18px",
                   display: "flex",
@@ -253,6 +313,16 @@ export default async function DiscoveryPage({
                 }}
               >
                 <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+                  {open && (
+                    <DowngradeFlag
+                      opportunityId={o.id}
+                      verdict={o.verdict}
+                      downgrade={o}
+                      pursuingStage={pursuingStage}
+                      returnTo={activeFilter === "all" ? "/discovery" : `/discovery?verdict=${activeFilter}`}
+                      acknowledgedByLabel={null}
+                    />
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
                     <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#16233B" }}>
                       {o.contract_number || "(no reference number)"}
@@ -283,6 +353,14 @@ export default async function DiscoveryPage({
                     >
                       {chip.label}
                     </span>
+                    {isDowngraded(o) && (
+                      <span
+                        title="The verdict this tender had before it was re-assessed"
+                        style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F6F5F1", border: "1px solid #E5E1D5", color: "#6B6758", textDecoration: "line-through" }}
+                      >
+                        was {verdictLabel(o.downgraded_from)}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 2 }}>
                     {o.title || "(untitled)"}
@@ -361,6 +439,17 @@ export default async function DiscoveryPage({
                         </li>
                       ))}
                     </ul>
+                  )}
+
+                  {isDowngraded(o) && !open && (
+                    <DowngradeFlag
+                      opportunityId={o.id}
+                      verdict={o.verdict}
+                      downgrade={o}
+                      pursuingStage={pursuingStage}
+                      returnTo="/discovery"
+                      acknowledgedByLabel={whoAcknowledged(o.downgrade_acknowledged_by)}
+                    />
                   )}
 
                   {/* Fit (above) answers "is this our kind of work"; this answers

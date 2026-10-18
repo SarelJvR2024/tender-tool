@@ -24,6 +24,16 @@ reference number. Rows with no ocid are always inserted fresh rather than
 matched by contract_number - duplicates in that rare case are safer than a
 wrong merge.
 
+Downgrades are flagged, never silent (Sarel, 2026-10-17: "When evaluation
+downgrades opportunity it must be flagged"; discovery_downgrades.py, 0055).
+Before writing a company's row, the existing one is read: if the new verdict
+is worse than the one the company was shown (strong_fit > possible >
+needs_review > not_a_fit), the row keeps a marker of what it was
+(downgraded_from, downgraded_at, reasons_before) until a member marks it seen.
+A re-score that is no longer report-worthy (`company_reassessed` in the watch's
+--out) only ever updates a row that already exists - it never creates a
+not_a_fit row for a tender the company was never shown.
+
 Requires environment variables (see app/.env.local.example), read from the
 environment only, never hardcoded:
   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
@@ -44,6 +54,7 @@ import argparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import company_profiles  # noqa: E402
+import discovery_downgrades  # noqa: E402
 
 
 LISTING_SOURCES = ("etenders_ocds", "etenders_portal", "sanral", "eskom_bulletin", "transnet_etenders",
@@ -83,31 +94,66 @@ def to_row(r, company_id, c):
     }
 
 
+def _existing(client, company_id, ocid):
+    if not ocid:
+        return None
+    rows = client.select("discovered_opportunities", {"company_id": company_id, "ocid": ocid})
+    return rows[0] if rows else None
+
+
 def seed(client, releases, log=print):
-    """Writes one row per (company, release). Returns {company_id: rows written}."""
+    """Writes one row per (company, release). Returns {company_id: rows
+    written}; downgrades flagged are logged."""
     by_name = {}
     written = {}
+
+    def company_of(c, r):
+        company_id = c.get("company_id")
+        if company_id:
+            return company_id
+        name = c.get("legal_name")
+        if name not in by_name:
+            rows = client.select("companies", {"legal_name": name}) if name else []
+            by_name[name] = rows[0]["id"] if rows else None
+        if not by_name[name]:
+            log(f"  SKIPPED {r.get('contract_number')} for '{name}': no company row with that legal name.")
+        return by_name[name]
+
     for r in releases:
         if "company_results" not in r:
             log(f"  SKIPPED {r.get('contract_number')}: written by the pre-fan-out watch_new_tenders.py "
                 "(one shared verdict, no company_results) - re-run the watch to score it per company.")
             continue
         for c in r["company_results"]:
-            company_id = c.get("company_id")
+            company_id = company_of(c, r)
             if not company_id:
-                name = c.get("legal_name")
-                if name not in by_name:
-                    rows = client.select("companies", {"legal_name": name}) if name else []
-                    by_name[name] = rows[0]["id"] if rows else None
-                company_id = by_name[name]
-                if not company_id:
-                    log(f"  SKIPPED {r.get('contract_number')} for '{name}': no company row with that legal name.")
-                    continue
+                continue
             row = to_row(r, company_id, c)
             if row["ocid"]:
+                existing = _existing(client, company_id, row["ocid"])
+                flag = discovery_downgrades.flag_update(existing, row["verdict"], c.get("rescored"))
+                if flag:
+                    row.update(flag)
+                    if flag["downgraded_from"]:
+                        log(f"  DOWNGRADE flagged: {r.get('contract_number')} for {c.get('legal_name') or company_id}: "
+                            f"was {flag['downgraded_from']}, now {row['verdict']}")
                 client.upsert("discovered_opportunities", [row], "company_id,ocid")
             else:
                 client.insert("discovered_opportunities", row)
+            written[company_id] = written.get(company_id, 0) + 1
+        # Re-scored, no longer report-worthy: only an existing row is touched,
+        # and only to flag a downgrade (never a new not_a_fit row).
+        for c in r.get("company_reassessed") or []:
+            company_id = company_of(c, r)
+            existing = _existing(client, company_id, r.get("ocid")) if company_id else None
+            if not existing or not discovery_downgrades.is_downgrade(existing.get("verdict"), c.get("verdict")):
+                continue
+            flag = discovery_downgrades.flag_update(existing, c["verdict"], c.get("rescored"))
+            client.update("discovered_opportunities", {"id": existing["id"]},
+                          {"verdict": c["verdict"], "reasons": c.get("reasons") or [],
+                           "score_outlook": c.get("score_outlook"), **flag})
+            log(f"  DOWNGRADE flagged: {r.get('contract_number')} for {c.get('legal_name') or company_id}: "
+                f"was {flag['downgraded_from']}, now {c['verdict']}")
             written[company_id] = written.get(company_id, 0) + 1
     return written
 

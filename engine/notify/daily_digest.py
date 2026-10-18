@@ -116,6 +116,7 @@ import company_profiles
 import watch_new_tenders
 import watch_deadlines
 import watch_tender_updates
+import discovery_downgrades
 import system_alerts  # noqa: E402  (engine/alerts, on the path via watch_deadlines)
 
 LOCAL_COMPANY_KEY = "local"  # --mode local: the one --profile company
@@ -155,6 +156,17 @@ for _sections in SECTION_VISIBILITY.values():
 # viewer as a count, same reasoning as tender_updates.
 for _sections in SECTION_VISIBILITY.values():
     _sections.add("listing_changes")
+# Re-assessed tenders (0055, engine/discovery/discovery_downgrades.py): a
+# Discovery verdict a re-score made WORSE (Sarel, 2026-10-17: "When evaluation
+# downgrades opportunity it must be flagged"). Every role may get the section,
+# but which items depends on the item: a downgrade on a tender the company is
+# actively pursuing (tender_packs at found/bidding/submitted) goes to everyone,
+# like a tender update - real work may already have gone into it; a plain
+# Discovery-feed downgrade (no pack) only to the roles that get new tenders
+# (full_cycle, viewer as a count), the same audience the match was reported to.
+# A role left with nothing gets no key (see build_digest_for_person).
+for _sections in SECTION_VISIBILITY.values():
+    _sections.add("reassessed_tenders")
 
 # Heuristic keyword classifiers for sections that have no real "who cares
 # about this" tag in the schema yet (tender_tasks.kind is a closed enum of
@@ -239,7 +251,7 @@ def score_per_company(releases, companies, fetch_documents=True, fetch_text=None
     entries = watch_new_tenders.fan_out(releases, companies, {}, watch_new_tenders.REPORT_WORTHY_VERDICTS_WIDE,
                                         fetch_document=fetch_documents, fetch_text=fetch_text)
     for e in entries:
-        release = {k: v for k, v in e.items() if k != "company_results"}
+        release = {k: v for k, v in e.items() if k not in ("company_results", "company_reassessed")}
         for c in e["company_results"]:
             out[c["company_key"]].append({**release, "verdict": c["verdict"], "reasons": c["reasons"],
                                           "score_outlook": c["score_outlook"]})
@@ -247,7 +259,8 @@ def score_per_company(releases, companies, fetch_documents=True, fetch_text=None
 
 
 def company_signals(company_key, scored_by_company, document_expiry, tender_tasks, readiness_changes,
-                    submission_lead_days, company_id=None, tender_updates=None, listing_changes=None):
+                    submission_lead_days, company_id=None, tender_updates=None, listing_changes=None,
+                    reassessed_tenders=None):
     """One company's signals. With company_id set (live mode), the
     company-tagged sections (every item watch_deadlines/find_readiness_changes
     returns carries company_id) are narrowed to that company - a person never
@@ -266,6 +279,8 @@ def company_signals(company_key, scored_by_company, document_expiry, tender_task
         # person to their own company's rows like every other section.
         "tender_updates": own(tender_updates or []),
         "listing_changes": listing_change_signals(listing_changes or [], scored),
+        # Per company (discovered_opportunities rows), pursued first.
+        "reassessed_tenders": own(reassessed_tenders or []),
     }
 
 
@@ -501,6 +516,17 @@ def build_digest_for_person(person, signals):
         else:
             digest["listing_changes"] = items
 
+    if "reassessed_tenders" in visible:
+        items = [i for i in signals.get("reassessed_tenders") or []
+                 if i.get("pursuing") or "new_tenders" in visible]
+        if items:
+            if role == "viewer":
+                digest["reassessed_tenders"] = {"count": len(items),
+                                                "pursuing_count": sum(1 for i in items if i.get("pursuing"))}
+            else:
+                digest["reassessed_tenders"] = items
+            digest.setdefault("_delivered_downgrades", []).extend(i["opportunity_id"] for i in items)
+
     return digest
 
 
@@ -548,6 +574,7 @@ def main():
         tender_tasks = []  # Supabase-only, no local fixture (see module docstring)
         readiness_changes = []  # Supabase-only
         tender_updates, updates_client = [], None  # Supabase-only (0039)
+        reassessed = []  # Supabase-only (0055)
     else:
         if not url or not key:
             print("ERROR: --mode live needs NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.")
@@ -579,6 +606,14 @@ def main():
             system_alerts.record("digest", f"The daily digest could not read tender updates: {type(e).__name__}: {e}",
                                  "error", exc=e)
             tender_updates, updates_client = [], None
+        # Discovery verdicts a re-score made worse, not yet in a digest (0055).
+        try:
+            reassessed = discovery_downgrades.pending_digest_downgrades(client)
+        except Exception as e:
+            print(f"WARNING: re-assessed tenders could not be read ({e}) - digest goes out without them.")
+            system_alerts.record("digest", f"The daily digest could not read re-assessed tenders: {type(e).__name__}: {e}",
+                                 "error", exc=e)
+            reassessed = []
 
     print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
           f"{'y' if len(companies) == 1 else 'ies'}, each from its own profile...")
@@ -609,15 +644,18 @@ def main():
              + save_readiness_seen_db(client, readiness_seen, readiness_loaded, owners))
         print(f"  Seen stores: deadline_reminders_seen ({DIGEST_CONSUMER}) + {READINESS_TABLE} - {n} row(s) written")
 
-    digests, totals = [], {}
+    digests, totals, delivered_downgrades = [], {}, set()
     for p in roster:
         ckey = LOCAL_COMPANY_KEY if mode == "local" else p["company_id"]
         signals = company_signals(ckey, scored_by_company, document_expiry, tender_tasks, readiness_changes,
                                   args.submission_lead_days, company_id=None if mode == "local" else p["company_id"],
-                                  tender_updates=tender_updates, listing_changes=listing_changes)
+                                  tender_updates=tender_updates, listing_changes=listing_changes,
+                                  reassessed_tenders=reassessed)
         for k, v in signals.items():
             totals.setdefault(k, {})[ckey] = len(v)
-        digests.append(build_digest_for_person(p, signals))
+        d = build_digest_for_person(p, signals)
+        delivered_downgrades.update(d.pop("_delivered_downgrades", []))
+        digests.append(d)
 
     def total(k):
         return sum((totals.get(k) or {}).values())
@@ -629,7 +667,8 @@ def main():
           f"{total('readiness_changes')} readiness change(s), "
           f"{total('submission_due')} tender(s) closing soon, "
           f"{total('tender_updates')} tender update(s) (addenda, new documents), "
-          f"{total('listing_changes')} listing change(s) (cancellations, date moves) on tenders in the feed.")
+          f"{total('listing_changes')} listing change(s) (cancellations, date moves) on tenders in the feed, "
+          f"{total('reassessed_tenders')} re-assessed tender(s) no longer as good a fit.")
 
     # Each update is carried by one digest only: mark the ones that went to a
     # roster company as digested (the watch already alerted on them).
@@ -640,6 +679,16 @@ def main():
             watch_tender_updates.mark_digested(updates_client, delivered)
         except Exception as e:
             print(f"WARNING: could not mark {len(delivered)} tender update(s) as digested ({e}) - "
+                  "they will be carried again tomorrow.")
+
+    # Each downgrade is carried once: only the ones that reached at least one
+    # person (a plain-feed downgrade in a company with no full_cycle/viewer
+    # member stays pending - it is still flagged on the Discovery card).
+    if mode == "live" and delivered_downgrades:
+        try:
+            discovery_downgrades.mark_digested(client, [i for i in reassessed if i["opportunity_id"] in delivered_downgrades])
+        except Exception as e:
+            print(f"WARNING: could not mark {len(delivered_downgrades)} re-assessed tender(s) as digested ({e}) - "
                   "they will be carried again tomorrow.")
 
     print(f"\n{len(digests)} per-person digest(s) built ({mode} mode):")

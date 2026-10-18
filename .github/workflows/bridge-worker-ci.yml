@@ -102,6 +102,9 @@ jobs:
       - name: Discovery fan-out - same tender scored per company (real sample PDFs)
         run: python3 engine/discovery/test_discovery_fanout.py
 
+      - name: Discovery downgrades - a re-score that makes a verdict worse is flagged (real sample PDFs)
+        run: python3 engine/discovery/test_discovery_downgrades.py
+
       - name: Daily digest live mode - per-company scoring and per-company sections (in-memory rows, real sample PDFs)
         run: python3 engine/notify/test_digest_live.py
 

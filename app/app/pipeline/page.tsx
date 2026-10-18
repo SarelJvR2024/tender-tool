@@ -38,6 +38,9 @@ type Card = {
   stageChangedAt: string | null;
   submittedAt: string | null;
   verdict: string | null;
+  // 0055: the verdict before a re-assessment made it worse (null = never downgraded).
+  wasVerdict: string | null;
+  downgradeOpen: boolean;
   economics: PackEconomics | null;
   defaultSector: PriceSector | null;
 };
@@ -82,7 +85,7 @@ export default async function PipelinePage({
       .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, ${ECONOMICS_COLUMNS})`)
       .order("closing_date", { ascending: true }),
     // Discovery's fit verdict, where this tender came from the scored feed.
-    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories"),
+    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories, downgraded_from, downgrade_acknowledged_at"),
     // Who can get credit for a submission (item 26, migration 0034): the
     // company's people roster, same list the task assignee picker uses.
     supabase.from("people").select("id, name").order("name"),
@@ -91,11 +94,13 @@ export default async function PipelinePage({
   const taxonomy = await loadDisciplineTaxonomy(supabase);
 
   const verdictByKey = new Map<string, string>();
+  const downgradeByKey = new Map<string, { was: string; open: boolean }>();
   const categoriesByKey = new Map<string, string[]>();
-  for (const o of (opportunities ?? []) as { ocid: string | null; contract_number: string | null; tender_id: string | null; verdict: string; categories: string[] | null }[]) {
+  for (const o of (opportunities ?? []) as { ocid: string | null; contract_number: string | null; tender_id: string | null; verdict: string; categories: string[] | null; downgraded_from: string | null; downgrade_acknowledged_at: string | null }[]) {
     for (const key of [o.ocid && `ocid:${o.ocid}`, o.contract_number && `no:${o.contract_number}`, o.tender_id && `id:${o.tender_id}`]) {
       if (!key) continue;
       verdictByKey.set(key, o.verdict);
+      if (o.downgraded_from) downgradeByKey.set(key, { was: o.downgraded_from, open: !o.downgrade_acknowledged_at });
       if (o.categories?.length) categoriesByKey.set(key, o.categories);
     }
   }
@@ -120,6 +125,8 @@ export default async function PipelinePage({
       stageChangedAt: pack?.stage_changed_at ?? null,
       submittedAt: pack?.submitted_at ?? null,
       verdict: (t.ocid && verdictByKey.get(`ocid:${t.ocid}`)) || (t.contract_no && verdictByKey.get(`no:${t.contract_no}`)) || null,
+      wasVerdict: ((t.ocid && downgradeByKey.get(`ocid:${t.ocid}`)) || (t.contract_no && downgradeByKey.get(`no:${t.contract_no}`)) || null)?.was ?? null,
+      downgradeOpen: !!((t.ocid && downgradeByKey.get(`ocid:${t.ocid}`)) || (t.contract_no && downgradeByKey.get(`no:${t.contract_no}`)) || null)?.open,
       economics: pack ?? null,
       defaultSector: derivedSector(
         t.family,
@@ -238,6 +245,14 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
           )}
           {verdict && (
             <span style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: verdict.bg, color: verdict.color }}>{verdict.label}</span>
+          )}
+          {card.wasVerdict && (
+            <span
+              title="Re-assessed: the Discovery verdict got worse since this tender was found - see its Discovery entry"
+              style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 700, background: card.downgradeOpen ? "#FEE2E2" : "#F6F5F1", color: card.downgradeOpen ? "#B91C1C" : "#6B6758" }}
+            >
+              {card.downgradeOpen ? "\u26A0 " : ""}Re-assessed · was {VERDICT_CHIP[card.wasVerdict]?.label ?? card.wasVerdict}
+            </span>
           )}
         </div>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 2, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
