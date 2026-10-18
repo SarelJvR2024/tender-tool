@@ -1081,3 +1081,51 @@ Supabase-backed company+tender record end-to-end: the Pack Review screen's live 
 non-SANRAL company's own documents. Also flagged: the sample-document gap above (no real
 pest-control/vegetation or IT/software-support tender on file) - worth closing once Sarel can
 source one or two real ones.
+
+---
+
+## 2026-10-18 (twelfth run): brand-new tender-enrichment module - a 100x-wrong estimated project
+value from the same currency ambiguity `award_outcomes.py` already solved correctly
+
+**Context:** rotated to `engine/discovery/tender_enrichment.py` (tags, scope, pricing model and
+estimated value band, Sarel's own request - migrations `0060`/`0062`), new since this review's
+last discovery pass. A sibling QA pass (the "eleventh run" entry directly above, a different
+session, same file) had just finished a non-engineering-industries pass over the general pack
+pipeline, so this run picked a genuinely different module rather than duplicate that work.
+
+### Finding 12 (CONFIRMED, FIXED, severe): a real R1.5 million tender's estimated value came back
+as R150 million - exactly the "silently wrong, worse than a clear error" case this review exists
+to catch
+
+**Where:** `tender_enrichment.py`'s `_parse_amount()`, feeding `estimate_value_band()`.
+
+**What was found:** the function stripped every comma as a thousands separator before calling
+`float()` - `re.sub(r"[,\s]", "", raw_number)`. That's wrong whenever the comma is actually the
+**decimal** separator, a real and common South African convention
+(`award_outcomes.py`'s own docstring names the exact format: `"R551 189,00"` is R551,189.00, not
+R55,118,900). Confirmed directly: `"The estimated contract value is R1 500 000,00 including
+VAT."` - a real R1.5 million tender - parsed to `150000000.0` and banded as `"R50m+"` instead of
+`"R0-5m"`. No crash, no error, a confident wrong answer exactly two orders of magnitude off, in
+a brand-new field whose whole purpose is to tell someone at a glance roughly how big a tender is
+worth pursuing.
+
+**The telling part:** `award_outcomes.py`, in the very same directory, already solved this exact
+ambiguity correctly (`parse_rand()`'s own docstring: *"the last ',' or '.' followed by 1-2 digits
+at the end is the decimal separator; every other separator is a thousands separator"*) and has
+its own test coverage proving it on every format seen on two real sites. `tender_enrichment.py`
+reimplemented the same problem from scratch and got it wrong, instead of reusing the
+already-correct, already-tested function one import away.
+
+**Fix:** `_parse_amount()` now calls `award_outcomes.parse_rand()` for the numeric part (then
+applies the "million"/"k"/"billion" suffix multiplier on top, which `parse_rand()` doesn't know
+about and `tender_enrichment.py` still owns). Removes the duplicate, wrong logic rather than
+patching it in place.
+
+**Verification:** direct runs of all four cases - the real bug (comma-decimal, now correctly
+`R0-5m`), a period-decimal amount (regression, unchanged), a "million" suffix (regression,
+unchanged), and no stated value at all (regression, unchanged `basis="unknown"`). Added a fifth
+case to the existing `test_value_band_stated_amount_is_banded_correctly()` test (none of the
+four pre-existing cases used comma-as-decimal, which is exactly why this shipped untested) so the
+fix has durable regression coverage, not just this run's own check. `test_tender_enrichment.py`,
+`test_market_trend.py`, `test_award_outcomes.py`, `test_taxonomy.py`: all clean, 0 failures.
+`python3 -m py_compile` clean.

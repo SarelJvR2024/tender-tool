@@ -1148,6 +1148,29 @@ naming as a pattern for whoever next writes a new per-release/per-record loop ov
 compliance data: wrap it in isolation from the start, don't wait for a live crash to add it.
 `python3 -m py_compile` clean; all 9 discovery test suites still pass.
 
+## This pass (2026-10-18, standing QA/robustness review - twelfth run)
+
+Picked the brand-new tender-enrichment module (`engine/discovery/tender_enrichment.py`: tags,
+scope, pricing model, estimated value band - migrations `0060`/`0062`), after a sibling QA pass
+(logged as the "eleventh run" in `QA-Edge-Case-Findings.md`) had just finished a different,
+non-engineering-industries pass over the general pack pipeline.
+
+**Found and fixed a severe, real bug**: `_parse_amount()` stripped every comma as a thousands
+separator before parsing a stated contract value, which is wrong whenever the comma is actually
+the *decimal* separator - a real, common South African format
+(`award_outcomes.py`'s own docstring: "R551 189,00" is R551,189.00). A real R1.5 million tender
+("R1 500 000,00") came back estimated at R150 million and banded "R50m+" instead of "R0-5m" - a
+confident, silent, two-orders-of-magnitude-wrong answer, in a field whose whole purpose is a
+quick size judgement. `award_outcomes.py`, in the same directory, already solved this exact
+ambiguity correctly and has test coverage proving it; `tender_enrichment.py` reimplemented the
+same problem from scratch and got it wrong instead of reusing the already-correct function.
+Fixed by calling `award_outcomes.parse_rand()` instead of the broken local parser. Added a
+regression case to the existing test (none of the 4 pre-existing cases used comma-as-decimal,
+which is why this shipped untested). Verified directly against the real bug plus 3 regression
+cases; `test_tender_enrichment.py`, `test_market_trend.py`, `test_award_outcomes.py`,
+`test_taxonomy.py` all clean. Full evidence in `docs/specs/QA-Edge-Case-Findings.md`
+(Finding 12).
+
 ## This pass (2026-10-18, standing QA/robustness review - tenth run)
 
 Found the malformed-date-in-a-batch bug a fourth time: `engine/discovery/tender_changes.py`

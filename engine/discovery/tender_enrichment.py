@@ -87,6 +87,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import taxonomy as _taxonomy  # noqa: E402
+import award_outcomes as _award_outcomes  # noqa: E402  (parse_rand: the SA comma/period decimal-vs-thousands heuristic, see _parse_amount)
 
 
 # ---------------------------------------------------------------------------
@@ -230,10 +231,18 @@ _MULTIPLIERS = {"million": 1_000_000, "m": 1_000_000, "billion": 1_000_000_000, 
 
 
 def _parse_amount(raw_number, suffix):
-    cleaned = re.sub(r"[,\s]", "", raw_number or "")
-    try:
-        value = float(cleaned)
-    except ValueError:
+    # award_outcomes.parse_rand(), not a second hand-rolled parser: stripping
+    # every comma as a thousands separator (the original code here) silently
+    # inflates a real SA amount 100x whenever the comma is actually the
+    # DECIMAL separator - confirmed on a real, common SA format
+    # (award_outcomes.py's own docstring: "R551 189,00" is R551,189.00, not
+    # R55,118,900) - "the estimated contract value is R1 500 000,00" came
+    # back as a band of R50m+ instead of R0-5m before this fix. parse_rand()
+    # already resolves this correctly (last separator followed by 1-2 digits
+    # is the decimal one, everything else is thousands) and is already
+    # tested against every format seen on two real sites.
+    value = _award_outcomes.parse_rand(raw_number)
+    if value is None:
         return None
     if suffix:
         value *= _MULTIPLIERS.get(suffix.lower(), 1)

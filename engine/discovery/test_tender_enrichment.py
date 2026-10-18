@@ -153,6 +153,12 @@ def test_value_band_stated_amount_is_banded_correctly():
         ("Contract value: R15 million.", "R5-20m"),
         ("The engineer's estimate is R35,000,000.", "R20-50m"),
         ("Estimated project value of R120 million over the contract period.", "R50m+"),
+        # Comma as the DECIMAL separator, space as thousands - a real, common
+        # SA format (award_outcomes.py's own docstring: "R551 189,00" is
+        # R551,189.00). QA-Edge-Case-Findings.md, 2026-10-18: this used to
+        # come back as R150,000,000 (every comma stripped like a thousands
+        # separator) - a 100x-too-high band, R50m+ instead of R0-5m.
+        ("The estimated contract value is R1 500 000,00 including VAT.", "R0-5m"),
     ]
     for text, expected in cases:
         band, basis, amount, note = te.estimate_value_band(text)
