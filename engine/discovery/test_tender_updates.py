@@ -22,6 +22,12 @@ between discovery and the first watch is reported on the first look, a
 SANRAL page's new "Addendum 1" file is reported from its name, the digest hook
 carries each update once.
 
+Part 2b (always): per-tender isolation. Four pursued tenders, two failing - a
+malformed OCDS document entry (first in the loop) and a database write that
+times out. The run completes, the other two are checked and reported, one
+system alert names each failed tender, and once the DB write works again the
+next run reports the skipped tender's addendum.
+
 Part 3 (TU_PSQL set - a scratch Postgres with every migration replayed, same
 method as engine/intake/test_manual_intake.py): Part 2's scenario on real
 tables, plus 0039's RLS (a member sees only its own company's notifications;
@@ -424,6 +430,109 @@ def seed_mem(c):
 
 
 # ---------------------------------------------------------------------------
+# Part 2b - one tender's failure doesn't stop the watch for the rest (QA
+# seventh run, the "still open" item after Finding 9b)
+# ---------------------------------------------------------------------------
+
+class FlakyClient(MemClient):
+    """A database write that fails for one tender only (a constraint error,
+    a timeout) - every other write goes through."""
+
+    def __init__(self, fail_tender_id):
+        super().__init__()
+        self.fail_tender_id = fail_tender_id
+
+    def upsert(self, table, rows, on_conflict):
+        if self.fail_tender_id and table == "tender_watched_documents" and any(r.get("tender_id") == self.fail_tender_id for r in rows):
+            raise RuntimeError("HTTP 500 from PostgREST: canceling statement due to statement timeout")
+        return super().upsert(table, rows, on_conflict)
+
+
+def part2b():
+    print("Part 2b - per-tender isolation: one bad tender in the batch, the rest still checked")
+    sys.path.insert(0, os.path.join(ROOT, "engine", "alerts"))
+    import system_alerts
+    alerts = []
+    system_alerts.set_sink(lambda p: alerts.append(p) or "alert-id")
+    try:
+        mk = lambda **kw: {"id": str(uuid.uuid4()), "status": "open", "created_at": "2026-10-16T12:00:00Z", **kw}  # noqa: E731
+        bad_doc = mk(slug="etenders-990011", contract_no="BADDOC-01", ocid="ocds-9t57fa-990011", source="etenders_ocds",
+                     closing_date="2026-11-04T09:00:00Z")
+        good = mk(slug="etenders-990012", contract_no="WTE1062CE", ocid="ocds-9t57fa-990012", source="etenders_ocds",
+                  closing_date="2026-11-04T09:00:00Z",
+                  document_urls=[{"url": ocds_doc("cccccccc-0000-0000-0000-000000000001", "", "")["url"], "title": "Specification"}])
+        db_fail = mk(slug="etenders-990013", contract_no="DBFAIL-01", ocid="ocds-9t57fa-990013", source="etenders_ocds",
+                     closing_date="2026-11-04T09:00:00Z",
+                     document_urls=[{"url": ocds_doc("eeeeeeee-0000-0000-0000-000000000000", "", "")["url"], "title": "Bid document.pdf"}])
+        sanral = mk(slug="nra-2026-0757-c", contract_no="NRA 2026/0757 (C)", source="sanral", closing_date="2026-11-16T10:00:00Z")
+        c = FlakyClient(db_fail["id"])
+        co = {k: str(uuid.uuid4()) for k in ("a", "b")}
+        for k, name in (("a", "Pursuer One (Pty) Ltd"), ("b", "Pursuer Two CC")):
+            c.rows("companies").append({"id": co[k], "legal_name": name})
+        c.rows("tenders").extend([bad_doc, good, db_fail, sanral])
+        # Pack order = loop order: the malformed tender comes FIRST, so a crash
+        # there means no other tender is checked at all.
+        for k, t in (("a", bad_doc), ("a", good), ("b", good), ("b", db_fail), ("a", sanral)):
+            c.rows("tender_packs").append({"id": str(uuid.uuid4()), "company_id": co[k], "tender_id": t["id"], "pipeline_stage": "bidding"})
+        spec = ocds_doc("cccccccc-0000-0000-0000-000000000001", "Specification, roof trusses.pdf", "2026-10-16T08:05:36Z")
+        addm = ocds_doc("cccccccc-0000-0000-0000-000000000002", "Wte1062-Addendum.docx", "2026-10-17T14:55:46Z", "docx")
+        db_addm = ocds_doc("eeeeeeee-0000-0000-0000-000000000001", "ADDENDUM NO. 1.docx", "2026-10-17T11:00:00Z", "docx")
+        files = {addm["url"]: addendum_docx(fixture("dws_wte1062ce_addendum1_ocr")),
+                 db_addm["url"]: addendum_docx(fixture("ec_transport_scmu10_addendum1"))}
+        feed = Feed()
+        # The malformed release: a document entry that is a bare string, not an
+        # object (what a half-written OCDS release looks like).
+        bad_release = release(bad_doc["ocid"], [ocds_doc("ffffffff-0000-0000-0000-000000000001", "Bid.pdf", "2026-10-16T08:00:00Z")], "2026-11-04T09:00:00Z")
+        bad_release["tender"]["documents"].append("Addendum 1.pdf")
+        feed.releases[DAY] = [bad_release, release(good["ocid"], [spec, addm], "2026-11-04T09:00:00Z"),
+                              release(db_fail["ocid"], [ocds_doc("eeeeeeee-0000-0000-0000-000000000000", "Bid document.pdf", "2026-10-16T08:00:00Z"),
+                                                        db_addm], "2026-11-04T09:00:00Z")]
+        page = {"url": "https://www.nra.co.za/open-tenders/nra-2026-0757-c", "closing_date": "2026/11/16 12:00",
+                "attached_files": ["Tender document.pdf"], "file_count": "1"}
+        logs = []
+
+        def go():
+            return watch.run(c, today=TODAY, fetch_ocds_day=feed, fetch_sanral=lambda slug: page,
+                             fetch_doc=lambda url: files[url], log=logs.append)
+        try:
+            rep = go()
+            raised = None
+        except Exception as e:
+            rep, raised = [], e
+        check(raised is None, f"the run completes despite two failing tenders (raised: {type(raised).__name__ if raised else None}: {raised})")
+        checked = {s["tender_id"] for s in c.select("tender_watch_state") if s.get("last_checked_at")}
+        check(good["id"] in checked and sanral["id"] in checked,
+              f"the good eTenders tender and the SANRAL tender after the bad one were both checked ({len(checked)} checked)")
+        check(bad_doc["id"] not in checked and db_fail["id"] not in checked, "the two failing tenders were not marked checked")
+        upd = [(e["company_id"], t["contract_no"], u["kind"]) for e in rep for t in e["tenders"] for u in t["updates"]]
+        check(sorted(upd) == sorted([(co["a"], "WTE1062CE", "addendum"), (co["b"], "WTE1062CE", "addendum")]),
+              f"the good tender's addendum is reported to both its pursuers, nothing from the failed ones ({upd})")
+        s = c.select("tender_watched_documents", {"tender_id": sanral["id"]})
+        check(len(s) == 1 and s[0]["baseline"], "the SANRAL tender's attached file is recorded as baseline")
+        tu_alerts = [a for a in alerts if a["p_source"] == "tender_updates"]
+        msgs = [a["p_message"] for a in tu_alerts]
+        check(len(tu_alerts) == 2 and any("BADDOC-01" in m and "AttributeError" in m for m in msgs)
+              and any("DBFAIL-01" in m and "statement timeout" in m for m in msgs),
+              f"one system alert per failed tender, naming the tender and the reason ({msgs})")
+        check(all(a["p_severity"] == "error" and a["p_detail"] and "Traceback" in a["p_detail"]
+                  and a["p_context"].get("tender_id") in (bad_doc["id"], db_fail["id"]) for a in tu_alerts),
+              "each alert is severity error, carries the traceback and the tender id")
+        check(any("2 of 4 pursued tender(s) failed" in ln for ln in logs) and any("BADDOC-01: FAILED" in ln for ln in logs),
+              "the run log says which tender failed and how many")
+        # The fault clears (DB back): the next run catches up - nothing was lost.
+        c.fail_tender_id = None
+        alerts.clear()
+        rep2 = go()
+        upd2 = [(e["company_id"], t["contract_no"], u["kind"]) for e in rep2 for t in e["tenders"] for u in t["updates"]]
+        check(upd2 == [(co["b"], "DBFAIL-01", "addendum")],
+              f"next run, DB write works again: the skipped tender's addendum is reported then, once ({upd2})")
+        check(len([a for a in alerts if "BADDOC-01" in a["p_message"]]) == 1 and len(alerts) == 1,
+              "the still-malformed tender alerts again (one alert), nothing else does")
+    finally:
+        system_alerts.set_sink(None)
+
+
+# ---------------------------------------------------------------------------
 # Part 3 - the same on a replayed database, plus RLS
 # ---------------------------------------------------------------------------
 
@@ -590,6 +699,7 @@ def part3(psql):
 if __name__ == "__main__":
     part1()
     scenario(MemClient(), "2 - the watch end to end (in-memory rows)", seed_mem)
+    part2b()
     psql = os.environ.get("TU_PSQL")
     if psql:
         part3(psql)

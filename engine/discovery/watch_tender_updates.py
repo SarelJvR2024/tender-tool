@@ -434,6 +434,27 @@ def notify(client, tender, packs, docs):
     return out
 
 
+def _watch_one(client, tid, tender, packs, today, ocds, fetch_sanral, fetch_doc, work_dir, log):
+    """One pursued tender: re-read it, then record what is new to each of its
+    pursuers. Returns [(company_id, report item)]. May raise - run() isolates
+    each tender."""
+    active_ids = [p["company_id"] for p in packs]
+    check_tender(client, tender, today, ocds, fetch_sanral, fetch_doc, work_dir, log, active_ids)
+    ensure_briefing_tasks(client, tender, active_ids)
+    docs = [d for d in client.select("tender_watched_documents", {"tender_id": tid}) if not d.get("baseline")]
+    out = []
+    for company_id, fresh in notify(client, tender, packs, docs).items():
+        stage = next((p.get("pipeline_stage") for p in packs if p["company_id"] == company_id), None)
+        out.append((company_id, {
+            "tender_id": tid, "contract_no": tender.get("contract_no"), "title": tender.get("description") or tender.get("title"),
+            "buyer": tender.get("buyer"), "closing_date_on_file": tender.get("closing_date"), "pipeline_stage": stage,
+            "updates": sorted(({k: d.get(k) for k in ("id", "title", "url", "kind", "urgency", "summary", "changes",
+                                                         "read_basis", "read_error", "first_seen_at")} for d in fresh),
+                              key=lambda u: (URGENCY_ORDER.get(u["urgency"], 3), u.get("first_seen_at") or "")),
+        }))
+    return out
+
+
 def run(client, today=None, fetch_ocds_day=None, fetch_sanral=None, fetch_doc=None, work_dir=None, log=print):
     """The whole watch. Returns the alert report: one entry per company with
     updates new to it, {company_id, legal_name, members, tenders: [{tender,
@@ -446,21 +467,34 @@ def run(client, today=None, fetch_ocds_day=None, fetch_sanral=None, fetch_doc=No
     try:
         pursued = active_pursuits(client, today)
         log(f"{len(pursued)} tender(s) actively pursued by at least one company (stages {', '.join(ACTIVE_STAGES)})")
+        failed = []
         for tid, (tender, packs) in pursued.items():
-            active_ids = [p["company_id"] for p in packs]
-            check_tender(client, tender, today, ocds, fetch_sanral, fetch_doc, work_dir, log, active_ids)
-            ensure_briefing_tasks(client, tender, active_ids)
-            docs = [d for d in client.select("tender_watched_documents", {"tender_id": tid}) if not d.get("baseline")]
-            for company_id, fresh in notify(client, tender, packs, docs).items():
-                entry = report.setdefault(company_id, {"company_id": company_id, "tenders": []})
-                stage = next((p.get("pipeline_stage") for p in packs if p["company_id"] == company_id), None)
-                entry["tenders"].append({
-                    "tender_id": tid, "contract_no": tender.get("contract_no"), "title": tender.get("description") or tender.get("title"),
-                    "buyer": tender.get("buyer"), "closing_date_on_file": tender.get("closing_date"), "pipeline_stage": stage,
-                    "updates": sorted(({k: d.get(k) for k in ("id", "title", "url", "kind", "urgency", "summary", "changes",
-                                                                 "read_basis", "read_error", "first_seen_at")} for d in fresh),
-                                      key=lambda u: (URGENCY_ORDER.get(u["urgency"], 3), u.get("first_seen_at") or "")),
-                })
+            # One tender's failure (a malformed document entry in its release,
+            # a failed database write, anything check_tender/notify didn't
+            # expect) must not stop the watch for every other pursued tender -
+            # the same bug class as QA Findings 5/6/8/9 (one bad record ends a
+            # batch over every company). Caught here, recorded as a system
+            # alert naming the tender, and the loop moves on. Nothing is lost
+            # by skipping: a document not yet saved is new again next run, and
+            # notify() reports every saved update not yet reported.
+            try:
+                entries = _watch_one(client, tid, tender, packs, today, ocds, fetch_sanral, fetch_doc, work_dir, log)
+            except Exception as e:
+                label = tender.get("contract_no") or tid
+                failed.append(tid)
+                log(f"  {label}: FAILED, skipped this run ({type(e).__name__}: {e})")
+                system_alerts.record("tender_updates", f"The tender-update watch could not check pursued tender {label}: "
+                                     f"{type(e).__name__}: {e} - skipped this run, every other tender was still checked.",
+                                     "error", exc=e,
+                                     context={"tender_id": tid, "contract_no": tender.get("contract_no"),
+                                              "ocid": tender.get("ocid"), "source": tender.get("source"),
+                                              "slug": tender.get("slug"),
+                                              "companies": [p["company_id"] for p in packs]})
+                continue
+            for company_id, item in entries:
+                report.setdefault(company_id, {"company_id": company_id, "tenders": []})["tenders"].append(item)
+        if failed:
+            log(f"{len(failed)} of {len(pursued)} pursued tender(s) failed and were skipped (system alert recorded for each)")
     finally:
         if own_work:
             shutil.rmtree(work_dir, ignore_errors=True)

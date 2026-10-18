@@ -716,3 +716,65 @@ all already there before this change and none in changed lines.
   low rather than high and is display-only. Left as it is.
 - The stale-job sweepers (class a'') rely on DB typing. If any of those columns ever becomes
   free text, they would need the same guard.
+
+## 2026-10-18 (follow-up to the seventh run): the open `watch_tender_updates.run()` item, closed
+
+### Finding 9e (CONFIRMED, FIXED, moderate): one pursued tender's failure stopped the update watch for every pursued tender
+
+**Where:** `engine/discovery/watch_tender_updates.run()`, one loop over every tender that any
+company is actively pursuing. This is the seventh run's "Still open" item. 9b removed the
+date-parse crash, but there was still no error handling per tender: any exception in
+`check_tender()`, `ensure_briefing_tasks()` or `notify()` escaped the loop. That covers a
+malformed document entry in one release, a failed database write, or any other unexpected
+error. No other tender was checked that run, and `__main__` recorded only a generic `critical`
+"run failed" alert, with nothing to say which tender caused it.
+**Fix:** the per-tender body moved into `_watch_one()`, unchanged. `run()` calls it inside a
+try/except. A failure records one system alert (`tender_updates`, severity `error`) naming the
+tender and the reason: contract no. or id, exception type and message, traceback, and context
+{tender_id, contract_no, ocid, source, slug, pursuing companies}. It also writes a log line, and
+the loop continues. The run log ends with "N of M pursued tender(s) failed and were skipped". The
+report items for a tender are only added once its work has finished, so a half-processed tender
+never adds a partial entry. Retrying is safe: a document that was never saved is new again next
+run, and `notify()` reports every saved, unreported update. Only `Exception` is caught, so
+`KeyboardInterrupt`/`SystemExit` still stop the run.
+**Severity choice:** I used `error`, not the `warning` 9b used. 9b's alert is for bad *data* that
+the code now handles on purpose. This catch is for an *unexpected exception*, which
+`system_alerts.py` defines as `error`. That matches this file's existing OCDS-day and SANRAL-page
+fetch handlers. It is a one-word change if Sarel wants these at `warning`.
+**Network hiccups:** these were already isolated before this change. An OCDS day that fails to
+fetch, an unreadable SANRAL page, and a document download or read failure each had their own
+handler. The new catch covers everything those handlers don't.
+**Verified (`test_tender_updates.py` Part 2b, now in the suite):** 4 pursued tenders across 2
+companies, in loop order:
+1. `BADDOC-01`, whose OCDS release has a document entry that is a bare string instead of an
+   object.
+2. `WTE1062CE`, a good tender with an addendum added after discovery.
+3. `DBFAIL-01`, where the `tender_watched_documents` upsert raises "HTTP 500 ... statement
+   timeout".
+4. A good SANRAL tender.
+- **Before** (the same test, run against the pre-fix `watch_tender_updates.py` from `HEAD`):
+  `run()` raised `AttributeError: 'str' object has no attribute 'get'` on the first tender.
+  **0 of 4 tenders were checked**, nothing was reported, and there were no per-tender alerts.
+- **After:** the run completes. `WTE1062CE` and the SANRAL tender are checked (watch state
+  written, SANRAL baseline recorded). The addendum is reported to both pursuers, and nothing comes
+  from the 2 failing tenders. There are exactly 2 alerts, each naming its tender and reason
+  (`BADDOC-01 ... AttributeError`, `DBFAIL-01 ... statement timeout`), severity `error`, with the
+  traceback and tender id. The log says "2 of 4 pursued tender(s) failed". On the next run, with
+  the DB write working again, `DBFAIL-01`'s addendum is reported once to its pursuer. The
+  still-malformed `BADDOC-01` alerts again (1 alert), and nothing else does.
+
+**Regression:** `test_tender_updates.py` ALL PASSED (Parts 1, 2 and 2b; Part 3 needs `TU_PSQL`).
+Every other discovery test file, all 5 compliance test files, `test_digest_live.py` and
+`test_system_alerts.py`: 0 failures. `py_compile` is clean and `tsc --noEmit` is clean (no TS
+changed). Ruff's only new findings are the two intended broad `except Exception` (BLE001), the
+same as every other isolation handler in the file, plus a `noqa: E731` that follows the file's
+existing convention. There are no new F-class findings.
+
+### Still open (named, not fixed)
+
+- The `watch_tender_updates` item is **closed**. The other two seventh-run items (TS
+  `sanralScoring.periodPoints` NaN, the stale-job sweepers' reliance on DB typing) are unchanged.
+- A partial-failure edge, accepted: when `notify()` writes notification rows for one pursuer and
+  then fails on a later pursuer of the **same** tender, the first pursuer's rows are marked
+  alerted but are left out of this run's alert report. The daily digest still carries them
+  (`digested_at` is null), so the update reaches that company a day late rather than never.
