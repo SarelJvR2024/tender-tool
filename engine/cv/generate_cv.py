@@ -265,8 +265,19 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
     d.add_paragraph()
     _sub_heading(d, "FORM B2.1 - Candidate's Qualification and Registration Record")
     q = person.get("qualifications", {})
-    closing_date = (datetime.date.fromisoformat(tender_ctx["closing_date"]) if tender_ctx
-                    else datetime.date.today())
+    # A tender with no closing date on file (build_tender_ctx_from_assignment
+    # passes None) or an unreadable one raised TypeError/ValueError here and
+    # failed the whole CV; count experience to today instead, like a
+    # standard CV, and say so in the field log.
+    closing_date, as_of = datetime.date.today(), "today"
+    if tender_ctx and tender_ctx.get("closing_date"):
+        try:
+            closing_date = datetime.date.fromisoformat(str(tender_ctx["closing_date"])[:10])
+            as_of = f"the tender closing date {closing_date.isoformat()}"
+        except ValueError:
+            log.assumed_default("cv.b21.years_experience_as_of", closing_date.isoformat(),
+                                reason=f"tender closing date on file ('{tender_ctx['closing_date']}') is not a "
+                                       "valid date - years of experience counted to today")
     years = years_experience_at(person, closing_date)
     rows = [
         ("Professional registration body / level:", q.get("ecsa_level") or "MISSING"),
@@ -284,7 +295,7 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         ("Initial qualification institution:", q.get("initial_institution") or "MISSING"),
         ("Initial qualification graduated:", q.get("initial_graduated") or "MISSING"),
         ("Years of relevant experience:",
-         f"{years} (computed as of {'the tender closing date ' + tender_ctx['closing_date'] if tender_ctx else 'today'} "
+         f"{years} (computed as of {as_of} "
          f"from initial_graduated - never a stored static number)" if years is not None else "MISSING"),
     ]
     _kv_table(d, rows)

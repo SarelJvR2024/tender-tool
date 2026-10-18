@@ -85,7 +85,15 @@ def parse_sast(value):
         hh = int(hh or 0)
         if ap:
             hh = hh % 12 + (12 if ap.upper() == "PM" else 0)
-        dt = datetime.datetime(int(y), int(mo), int(d), hh, int(mm or 0), int(ss or 0))
+        # The regex only checks digit counts, so "13/45/2026" or "11/30/2026
+        # 25:00" reached datetime() and raised - out of every merge/change loop
+        # over the whole feed (gov_sources, tender_changes), so one buyer's
+        # typo dropped every other listing too. Unreadable = None, the same as
+        # an unreadable ISO value just below.
+        try:
+            dt = datetime.datetime(int(y), int(mo), int(d), hh, int(mm or 0), int(ss or 0))
+        except ValueError:
+            return None
     else:
         s2 = s.replace("/", "-").replace("Z", "+00:00")
         s2 = re.sub(r"(\.\d{6})\d+", r"\1", s2)  # .9495246 -> .949524 (7-digit .NET fractions)

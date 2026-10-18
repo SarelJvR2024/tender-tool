@@ -177,7 +177,18 @@ def _sanral_closing(page):
     if not m:
         return None
     y, mo, d, h, mi = m.groups()
-    return datetime.datetime(int(y), int(mo), int(d), int(h or 12), int(mi or 0), tzinfo=SAST).isoformat()
+    try:
+        return datetime.datetime(int(y), int(mo), int(d), int(h or 12), int(mi or 0), tzinfo=SAST).isoformat()
+    except ValueError:
+        # "2026/13/19" or "2026/11/19 24:00" on SANRAL's page: the regex matched
+        # but the date isn't real. Raising here escaped check_tender() and
+        # run()'s one loop over EVERY pursued tender, so no company got its
+        # update alerts that run. No listing closing date = nothing compared
+        # against the one on file; the alert keeps it visible.
+        system_alerts.record("tender_updates", f"A SANRAL tender page's closing date ('{c}') is not a real "
+                             "date - its closing date wasn't compared this run.", "warning",
+                             context={"slug": page.get("slug"), "url": page.get("url"), "closing_date": c})
+        return None
 
 
 # ---------------------------------------------------------------------------

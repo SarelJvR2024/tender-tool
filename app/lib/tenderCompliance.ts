@@ -834,8 +834,12 @@ function yearsCheck(years: number | null, person: PersonFacts, closingDate: stri
   const unknowns: string[] = [];
   let yearsNote = "";
   if (years !== null) {
-    if (person.initial_graduated && closingDate) {
-      const yrs = (new Date(closingDate).getTime() - new Date(person.initial_graduated).getTime()) / (365.25 * 24 * 3600 * 1000);
+    const yrs = person.initial_graduated && closingDate
+      ? (new Date(closingDate).getTime() - new Date(person.initial_graduated).getTime()) / (365.25 * 24 * 3600 * 1000)
+      : NaN;
+    // NaN (no date, or one that can't be read) is unknown - a NaN "yrs < years"
+    // is false, which used to pass the check silently for an unreadable date.
+    if (!Number.isNaN(yrs)) {
       const y = Math.floor(yrs);
       yearsNote = ` ${y} years since first degree (a proxy - SANRAL counts relevant experience, not years since graduating).`;
       if (yrs < years) problems.push(`only ${y} years since first degree, ${years} needed`);

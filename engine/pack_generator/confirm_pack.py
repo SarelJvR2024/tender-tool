@@ -32,7 +32,11 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
     if not selections.get("confirmed_date"):
         raise ValueError("pack_selections.yaml: confirmed_date is not set.")
 
-    closing_date = datetime.date.fromisoformat(suggestions["closing_date"])
+    try:
+        closing_date = datetime.date.fromisoformat(str(suggestions.get("closing_date") or "")[:10])
+    except ValueError:
+        raise ValueError(f"{suggestions_path}: closing_date ('{suggestions.get('closing_date')}') is not a valid "
+                         "YYYY-MM-DD date - years of experience can't be computed, refusing to guess.") from None
     key_persons = []
     pack_people = {}
     overrides = []

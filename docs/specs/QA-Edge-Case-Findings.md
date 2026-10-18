@@ -564,3 +564,155 @@ five compliance test files (`test_watch_deadlines_urgency.py`,
   the same malformed-date class this pass, though they likely share the same `days_until()` fix
   automatically if they call it - worth confirming directly next time this engine comes up in
   rotation.
+
+---
+
+## 2026-10-18 (seventh run): repo-wide sweep for the malformed-date-in-a-batch bug class
+
+**Context:** Findings 5, 6 and 8 were the same mistake three times: a date string parsed with no
+guard inside a function that walks every company/person/record in one call, so one bad value
+stopped the run for everyone. This run is a sweep of the whole `engine/` tree plus `app/lib/*.ts`
+for every date-string parse, not a rotation to one engine. I grepped for `fromisoformat`,
+`strptime`, `dateutil` (not used anywhere), `datetime.date(int(...))` / `datetime.datetime(int(...))`
+built by hand from regex groups, `.replace(year=...)` date arithmetic, and in TypeScript
+`new Date(...)` / `Date.parse` / `Number(...)`. Pulled latest `main` first; Findings 5-8 are
+still in place.
+
+**A note on what's actually reachable.** In live mode almost every date column is a Postgres
+`date` or `timestamptz` (`initial_graduated`, every `*_expiry`, `completion_date`,
+`release_date`, `claimed_at`, `started_at`, `tenders.closing_date`), so a malformed value can't
+come out of the database. Malformed dates can really arrive from four places: **scraped or feed
+data** (SANRAL's page, Transnet/Cape Town listings), **date arithmetic on valid dates** (29
+February), **local-mode JSON profiles and pack files**, and **TypeScript**, where an unreadable
+date doesn't throw but quietly becomes `NaN`. Findings 5 and 8 were fixed on DB-typed columns
+anyway, and the same discipline is applied below. The two genuinely reachable batch crashes
+this run found (9a, 9b) are both on scraped data, and 9c is arithmetic on valid dates.
+
+### Inventory: 36 Python parse sites (counted by function; 9a-9d cover 7 raw calls) + 4 TypeScript
+
+| Class | Count | Sites |
+|---|---|---|
+| (a) already guarded | 18 | `suggest_pack.years_experience_at`, `confirm_pack` grad date (Findings 5/6), `watch_deadlines.days_until` (Finding 8), `daily_digest.submission_due_signals`, `award_outcomes.parse_sanral_date`, `source_http.parse_sast` ISO branch + `parse_utc`, `tender_updates._date_from` (3 hand-built dates) + `to_date` (2), `extract_cv_fields.normalise_date` (2), `pdf_merge.expiry_warning` (2), `assemble_pack._excel_date`, `process_pack_jobs` SANRAL suggestion refresh |
+| (a') unguarded, but the input is a value this code wrote itself | 6 | `tender_updates.classify_document` summary lines (5 `fromisoformat` calls on dates that `_date_from()`/`to_date()` produced as `.isoformat()` a few lines earlier), `watch_tender_updates.check_tender` `release_date` (written by itself as `day.isoformat()`, a `date` column) |
+| (a'') unguarded batch loop, input is a DB `timestamptz` the worker wrote | 3 | stale-job sweepers: `process_pack_jobs.fail_stale_jobs`, `process_cv_jobs` stale sweep, `extract_cv_fields.fail_stale_uploads`. Left as they are: Python 3.13 `fromisoformat` reads every format Postgres returns, and nothing a user types reaches these columns |
+| **(b) unguarded AND in a multi-record batch: dangerous** | **4** | **9a-9d below** |
+| (c) unguarded, one record per call | 5 | `generate_cv` closing date, `sanral_fill.Workbook.set_date`, `confirm_pack` closing date, `process_pack_jobs` closing time (a DB `timestamptz`, left), `gov_sources.published_since` cut date (a CLI argument, left) |
+| TypeScript (`NaN` silently treated as a real value, never a crash) | 4 | `dates.daysUntil`, `principals.ageOn`, `tenderCompliance.yearsCheck` fixed; `sanralScoring.periodPoints` left (see below) |
+
+### Finding 9a (CONFIRMED, FIXED, severe): one Transnet/Cape Town listing with an impossible date dropped from the whole feed merge
+
+**Where:** `engine/discovery/source_http.parse_sast()`, US-style branch (`11/30/2026 3:00:00 PM`).
+The regex only checks how many digits there are, so `13/45/2026` or `11/30/2026 25:00` reached
+`datetime.datetime(...)` and raised `ValueError`. The ISO branch right below it was already
+guarded; this branch wasn't. `parse_sast()` runs inside every loop over the whole feed:
+`gov_sources` merge/`published_since`, and `tender_changes` (closing-date moves, publish dates,
+cancellations).
+**Before:** `ValueError: month must be in 1..12`. **Fix:** the hand-built date is wrapped, and an
+unreadable value returns `None`, the same as an unreadable ISO value. No alert: this is
+third-party feed data, the raw value is kept on the listing, and the ISO branch's existing
+behaviour is also silent.
+**Verified:** five-row feed (valid US date, `13/45/2026`, `11/30/2026 25:00`, ISO, US date
+only): the two bad rows give `None`, the other three parse correctly, and
+`gov_sources.published_since()` finishes over all five rows.
+
+### Finding 9b (CONFIRMED, FIXED, severe): one SANRAL tender page with an impossible closing date stopped the tender-update watch for every pursued tender
+
+**Where:** `engine/discovery/watch_tender_updates._sanral_closing()`, the same hand-built
+`datetime(int(y), int(mo), ...)` pattern on the scraped closing date (`2026/13/19 12:00`). It is
+called from `check_tender()`, and `run()` loops over every pursued tender in the system with no
+error handling per tender, so the exception stopped the whole watch. No company got addendum
+alerts that run, and the next run would fail the same way.
+**Fix:** a bad date gives `None` (no listing date to compare against, which `classify_document()`
+already handles) plus a `warning` system alert naming the slug, URL and raw value.
+**Verified end to end:** reused `test_tender_updates.py`'s `MemClient` + `seed_mem` (4 pursued
+tenders: 3 eTenders + 1 SANRAL) with the SANRAL page's closing date set to `2026/13/16 12:00`.
+With the old code (changes stashed): `WHOLE RUN CRASHED: ValueError month must be in 1..12`.
+With the fix: the run completes and all 4 tenders are checked, the SANRAL one included.
+
+### Finding 9c (CONFIRMED, FIXED, severe, reachable with perfectly valid data): a tender closing on 29 February crashed the general pack job
+
+**Where:** `engine/general/process_general_jobs._within()`, the filter applied to every
+Experience Library row while the general pack picks experience evidence.
+`ref.replace(year=ref.year - window_years)` raises `ValueError: day is out of range for month`
+when the closing date is 29 Feb and the target year isn't a leap year (closing 2028-02-29 with a
+5-year window gives 2023-02-29). That is valid data, not a typo, so the whole pack job would fail.
+The same filter also called `fromisoformat` / `int(comp[:4])` on each row's `completion_date`
+with no guard.
+**Fix:** a new `_years_before()` puts 29 Feb on 28 Feb. That matches Postgres'
+`date - make_interval(years => n)`, which the app's own `find_matching_experience` RPC (migration
+0012) uses, so the engine and the Workspace agree. A row whose completion date can't be read is
+treated like a row with no date (left out, which is what it already got) and records a `warning`
+alert. An unreadable closing date falls back to today.
+**Verified:** with the old code, both the Feb-29 closing and a `2024-13-01` row raised
+`ValueError`. With the fix, four rows (good, malformed, too old, exactly on the 2023-02-28
+boundary) against a 2028-02-29 closing date keep `[good, boundary]`, with one alert for the
+malformed row. A normal closing date gives the same result as before.
+
+### Finding 9d (CONFIRMED, FIXED, moderate): "documents lapsing before closing" had its own unguarded copy of the Finding 8 parse
+
+**Where:** `engine/compliance/watch_deadlines.find_documents_lapsing_before_closing()`, one loop
+over every (company, tender) pack in the system. It parsed `tenders.closing_date` and each
+company's expiry columns with raw `fromisoformat` and never went through the now-safe
+`days_until()`. This is the function the sixth run's "not yet tested (deferred)" note named.
+**Fix:** the expiry goes through `days_until()` (`None` plus its existing alert, skip). An
+unreadable closing date skips that one pack and records a `warning` alert.
+**Verified:** 4 companies × 2 tenders. One company has a bad COID expiry and a good SARS expiry;
+one tender has the closing date `20/11/2026`. The good companies are reported, the bad company's
+good field is still reported, the bad field and the bad tender's pack are skipped, there are
+exactly 2 alerts, and `days_left` for the valid rows is unchanged (14).
+
+### Class (c) and TypeScript fixes (quick, low-risk)
+
+- **`generate_cv.build_sanral_keyperson`:** a tender with **no** closing date on file
+  (`build_tender_ctx_from_assignment` passes `None`) raised `TypeError` in `fromisoformat(None)`.
+  Fixing that exposed a second crash further down (`'the tender closing date ' + None`, the same
+  "TypeError a few lines later" pattern as Finding 8's digest follow-on). Both are fixed: the
+  count is now taken to today and labelled that way, and an unreadable date is logged as
+  `assumed_default` with the reason. Verified with `config/klipcorp_profile.json` for `None`,
+  valid, and `20/11/2026`: all three CVs build.
+- **`sanral_fill.Workbook.set_date` / `confirm_pack` closing date:** these handle one pack each,
+  and refusing is still the right behaviour (a guessed date on a submitted form is worse). Both
+  now refuse with the cell or file and the bad value named, instead of a bare
+  `Invalid isoformat string`, the same discipline as Finding 6. Verified, and both messages
+  checked.
+- **`app/lib/dates.ts daysUntil()`:** an unreadable date gave `NaN`, and every comparison with
+  `NaN` is false, so **`expiryStatus()` showed a malformed expiry as "Current" (green)**. That
+  is a confidently wrong answer, not a crash. It now returns `null`, which shows "Not on file"
+  (grey). Run under `node --experimental-strip-types`: `2026-13-01` and `not a date` now show
+  "Not on file", and valid, past and null dates are unchanged.
+- **`principals.ageOn()`** returns `null` instead of `NaN`. **`tenderCompliance.yearsCheck()`:**
+  an unreadable graduation or closing date made `yrs < years` false, so the years-of-experience
+  check **passed silently**. It is now reported as unknown, the same as a missing date.
+
+### Secondary check: unguarded numeric parsing in batch functions
+
+I ran a quick scan of `int()` / `float()` on record fields across `engine/`. Nothing dangerous
+turned up. `sanral_b7.fill` casts `bee_level` / percentages only after `check_plan()` has
+validated them with a guarded `_num()`. `award_outcomes.parse_rand` is guarded. Every
+`score_outlook` / `requirements` / `tender_updates` cast works on a regex group that only matches
+digits. The rule's `window_years` / `since_year` / `projects_required` come out of
+`score_outlook` as regex-validated ints. `int(comp[:4])` in `_within` was the one exception, and
+9c removes it.
+
+### Regression
+
+All 5 compliance test files and all 9 discovery test files, `test_general_bridge.py` and
+`test_extract_cv_fields.py`: 0 failures / ALL PASSED. `test_digest_live.py`: 0 failures.
+`general_harness.py --no-pack`: 44 clean / 0 / 0. `process_cv_jobs.py --self-test`: OK.
+`admin_harness.py`: 18 FLAGGED, **identical with the changes stashed** (18 before, 18 after).
+These come from stale, gitignored local baselines under `state/admin_harness_baselines/`, not
+from this change. `npm run typecheck` and `eslint` on the 3 changed TS files: clean.
+`py_compile` passes on all 7 changed Python files. `ruff --select F` reports 3 unused imports,
+all already there before this change and none in changed lines.
+
+### Still open (named, not fixed)
+
+- **`watch_tender_updates.run()` has no error handling per tender.** 9b removes the date crash,
+  but any other exception in one tender's `check_tender()` (a bad document, a failed DB write)
+  still stops the watch for every pursued tender. Catching and alerting per tender would close
+  the general class here. It is a behaviour change to a cross-tenant job, so it is flagged rather
+  than slipped into a date sweep.
+- **`sanralScoring.periodPoints` (TS):** a `NaN` project date scores 0 period points, which errs
+  low rather than high and is display-only. Left as it is.
+- The stale-job sweepers (class a'') rely on DB typing. If any of those columns ever becomes
+  free text, they would need the same guard.

@@ -6,6 +6,10 @@
 export function daysUntil(dateStr: string | null): number | null {
   if (!dateStr) return null;
   const target = new Date(dateStr);
+  // An unreadable date gave NaN, and every NaN comparison is false - so
+  // expiryStatus() showed a malformed expiry as "Current" (green). Unknown
+  // instead, the same as no date: never a confident wrong answer.
+  if (Number.isNaN(target.getTime())) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   const msPerDay = 1000 * 60 * 60 * 24;

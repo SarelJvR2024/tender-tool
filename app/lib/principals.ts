@@ -127,6 +127,7 @@ export function parseSaId(id: string | null, today = new Date()): { birth: strin
 export function ageOn(birth: string | null, on = new Date()): number | null {
   if (!birth) return null;
   const b = new Date(birth);
+  if (Number.isNaN(b.getTime())) return null; // unreadable date -> unknown, not NaN
   let age = on.getUTCFullYear() - b.getUTCFullYear();
   const m = on.getUTCMonth() - b.getUTCMonth();
   if (m < 0 || (m === 0 && on.getUTCDate() < b.getUTCDate())) age--;

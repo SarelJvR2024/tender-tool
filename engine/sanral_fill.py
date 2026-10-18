@@ -257,7 +257,15 @@ class Workbook:
 
     def set_date(self, sheet, yref, d):
         """Dates are captured as Year | Month | Day dropdowns in three adjacent columns."""
-        if isinstance(d, str): d = datetime.date.fromisoformat(d)
+        if isinstance(d, str):
+            # One pack, one form: refusing is right (a guessed date on a submitted
+            # form is worse), but with the cell and value named, not a bare
+            # "Invalid isoformat string" (same discipline as confirm_pack.py).
+            try:
+                d = datetime.date.fromisoformat(d.strip()[:10])
+            except ValueError:
+                raise ValueError(f"{sheet}!{yref}: '{d}' is not a valid YYYY-MM-DD date - fix it on the "
+                                 "People page (qualification/registration/project dates) and build the pack again.") from None
         col, row = split(yref); n = col2n(col)
         self.set_dropdown(sheet, f"{col}{row}", str(d.year))
         self.set_dropdown(sheet, f"{n2col(n+1)}{row}", MONTHS[d.month - 1])

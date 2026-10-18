@@ -349,7 +349,18 @@ def find_documents_lapsing_before_closing(url, key, seen, today):
         if not company or not tender or tender.get("status") != "open" or not tender.get("closing_date"):
             continue
         # calendar day in SAST (UTC+2), like app/lib/dates.ts closingDayOf()
-        closing_ts = datetime.datetime.fromisoformat(tender["closing_date"].replace("Z", "+00:00"))
+        # Both parses below run inside ONE loop over every (company, tender)
+        # pack in the system - unguarded, one bad value aborted this whole
+        # check for every company (same bug class as days_until(), QA
+        # Finding 8). A bad value now skips just that pack/document, with an
+        # alert so it still gets fixed.
+        try:
+            closing_ts = datetime.datetime.fromisoformat(str(tender["closing_date"]).replace("Z", "+00:00"))
+        except ValueError:
+            system_alerts.record("deadlines", f"Tender {tender['id']}'s closing date ('{tender['closing_date']}') "
+                                 "is not a valid date - its lapsing-before-closing check was skipped.",
+                                 "warning", context={"tender_id": tender["id"], "closing_date": tender["closing_date"]})
+            continue
         closing_day = (closing_ts + datetime.timedelta(hours=2)).date() if closing_ts.tzinfo else closing_ts.date()
         to_closing = (closing_day - today).days
         if to_closing < 0:
@@ -358,7 +369,10 @@ def find_documents_lapsing_before_closing(url, key, seen, today):
             expiry = company.get(col)
             if not expiry:
                 continue
-            exp_day = datetime.date.fromisoformat(expiry[:10])
+            left = days_until(expiry, today)  # None (alert recorded) for a malformed date
+            if left is None:
+                continue
+            exp_day = today + datetime.timedelta(days=left)
             if exp_day >= closing_day or exp_day < today:
                 continue  # covers the closing date / already expired (reported by find_due_documents)
             seen_key = f"doc_before_closing::{company['id']}::{col}::{expiry}::{tender['id']}"

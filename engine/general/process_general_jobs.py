@@ -489,15 +489,42 @@ def run_extraction(client, job, work_root, fetch=None):
 # Pack
 # ---------------------------------------------------------------------------
 
+def _years_before(day, years):
+    """day minus whole years; 29 Feb lands on 28 Feb in a non-leap year (the
+    same as Postgres' `date - make_interval(years => n)`, which the app's own
+    find_matching_experience uses). date.replace(year=...) raised ValueError
+    for a 29 Feb closing date and killed the whole pack job."""
+    try:
+        return day.replace(year=day.year - years)
+    except ValueError:
+        return day.replace(year=day.year - years, day=28)
+
+
 def _within(item, rule, closing):
+    """Is one Experience Library row inside the tender's rule? Called in a
+    filter over every row the company has, so a row whose completion date
+    can't be read is treated like one with no date (not within - the same
+    answer it already got), with an alert, rather than crashing the pack job
+    for every other row too."""
     comp = item.get("completion_date")
-    if rule.get("since_year") and (not comp or int(comp[:4]) < int(rule["since_year"])):
+    comp_day = None
+    if comp:
+        try:
+            comp_day = datetime.date.fromisoformat(str(comp)[:10])
+        except ValueError:
+            system_alerts.record("general", f"Experience item {item.get('id')}'s completion date ('{comp}') is not a "
+                                 "valid date - left out of this pack's experience evidence until it's corrected.",
+                                 "warning", context={"experience_item_id": item.get("id"), "completion_date": comp})
+    if rule.get("since_year") and (not comp_day or comp_day.year < int(rule["since_year"])):
         return False
     if rule.get("window_years"):
-        if not comp:
+        if not comp_day:
             return False
-        ref = datetime.date.fromisoformat((closing or _now())[:10])
-        if datetime.date.fromisoformat(comp[:10]) < ref.replace(year=ref.year - int(rule["window_years"])):
+        try:
+            ref = datetime.date.fromisoformat(str(closing or _now())[:10])
+        except ValueError:
+            ref = datetime.date.fromisoformat(_now()[:10])
+        if comp_day < _years_before(ref, int(rule["window_years"])):
             return False
     return True
 
