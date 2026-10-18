@@ -6,7 +6,13 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18, ~19:00 UTC — **real bug found and fixed**: the new B-BBEE
+Last full pass: 2026-10-18, ~21:00 UTC — **milestone: a live Supabase project and a green Vercel
+deployment now exist** (Sarel's own commit `a232e77` — the first human-authored commit all
+session), three build-breaking prerender bugs fixed and independently re-verified (`npm run build`
+now completes cleanly, the long-standing `/login` prerender caveat is gone); plus a confirmed,
+fixed currency-parsing bug (100x-wrong tender values) and a new bulk onboarding-document-scan
+feature (migration `0063`), both verified clean - below. ~19:00 UTC — **real bug found and
+fixed**: the new B-BBEE
 preference-points calculator's Level 3 points table had a wrong value (90/10 = 7, should be 6),
 caught by cross-checking it against SANRAL's own policy table already verified elsewhere in this
 repo - below. Also verified the 2 other new free tools, migration `0061` (signatory scopes) and
@@ -129,7 +135,7 @@ bridged by `engine/general/process_general_jobs.py`.
 6. **No `people` storage-path column yet for the original uploaded CV file.** `cv_uploads.storage_path` actually covers this now (see Built table) — this gap from an earlier pass is **resolved**, recorded here only so the history entry below isn't mistaken for still-open.
 7. **`tender_requirements`' SETUP facts (managerial flag, tender project type, DS specialism description) are unseeded**, except for tenders whose templates went through the intake (manual load, 2026-10-17), which now get SETUP positions, descriptions and the Man/Non-Man flag written to `tender_requirements` from the uploaded workbook; so the SANRAL score estimate is wider than it needs to be, and every DS1 shows role fit as "Confirm by hand" (a DS role can't be matched to a tag without its specialism). `tenders.evaluation_rules` is also unseeded until `engine/seed_tender_evaluation_rules.py --write` runs against a live project. The vault-field half of this gap (TCS PIN, insurance, ISO, bank-letter date, B-BBEE proof) is **closed** by `0014`. Two related items remain: Klipcorp's ISO 9001 certificate number and expiry are still unknown, and CSD registration validity has no column.
 8. **Uploads are capped at ~4.4 MB** (Server Action body `4.5mb`, which is Vercel's hard 413 limit) for CVs, experience and the vault. **Narrowed this pass**: the pattern to fix it now exists and is proven — `app/app/tenders/new/manual-tender-form.tsx` uploads straight from the browser to the `tender-documents` bucket via the Supabase client (`supabase.storage.from(...).upload(...)`, RLS-gated by `manualPrefix()`), never touching a Server Action body at all. That's a real answer to "is it worth building" (the open item below) for one path; the other three (CVs, experience, vault) still go through a capped Server Action and haven't been migrated to this pattern yet.
-9. **No live Supabase project exists anywhere in this project.** This is the single biggest standing verification gap — every Supabase-reading/writing piece built across every pass (CV uploads, experience library, compliance report, daily digest live mode, admin harness Supabase wiring) is verified only by schema replay and/or local-mode runs, never against real rows. Named once here rather than repeated in every table row.
+9. **Narrowed 2026-10-18 (`a232e77`, Sarel's own commit — the first human-authored commit in this whole project): a live Supabase project and a Vercel deployment now exist.** Sarel applied every migration through `0062` to the real project and got a green Vercel build, after fixing three build-breaking issues the sandbox's own `next build` had never caught (no Supabase env vars here means those prerender failures never surfaced locally): `/login` instantiating the Supabase client at component-body top level (fails prerender when env vars aren't visible at build time), `/tools/deadline-calculator` reading `new Date()` during render (Next 16 rejects non-deterministic prerender output), and no `engines.node` pin in `package.json`. All three independently re-verified this pass: `npm run build` now completes cleanly end to end in this sandbox too (29/29 static pages, `/login` and all 3 `/tools/*` routes now genuinely static) — the "`/login`'s pre-existing prerender gap" caveat that every single pass's own build verification has carried all session is gone. **What this changes:** nothing built so far has been tested against real Supabase rows, and this pass still has no live credentials to do that itself — scratch-Postgres replay (now through `0063`) stays the verification method here. What it means going forward: the next person with real project access can actually click through the app, and any gap or bug that was "unverified against live rows" throughout this file can start being closed for real rather than only in a replayed schema. Decide, when there's time: should every pass's own verification note explicitly say "schema-replay only, not live" vs. "confirmed on the live project" now that the distinction is real and not purely theoretical.
 10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
 11. ~~A hard-killed worker leaves a CV job stuck in `generating`~~ — **fixed this pass.** Migration `0019_generated_cvs_claimed_at.sql` adds `generated_cvs.claimed_at` (set the moment a worker claims a row), and `process_cv_jobs.py` gained `fail_stale_jobs()`, same shape and 60-minute threshold as `process_pack_jobs.py`'s own, called at the top of every `poll_once()`. Verified: migration replays cleanly as part of the full `0001`→`0019` chain; `python3 engine/cv/process_cv_jobs.py --self-test` still passes unchanged; a direct functional test (monkeypatched `supabase_request`, no live Supabase needed) confirmed `fail_stale_jobs()` fails only a job claimed >60 minutes ago and leaves a 5-minute-old job and an unclaimed job alone.
@@ -1034,6 +1040,45 @@ Two commits, both small and already well-verified; one had no System-Status entr
   and `test_award_prices.py` myself: 0 failures both, confirming the fix.
 
 Nothing further needed this pass.
+
+## This pass (2026-10-18, ~21:00 UTC): live Supabase + Vercel milestone verified; currency-parsing bug and onboarding document scan confirmed clean
+
+**The milestone**, independently re-verified rather than taken on trust: ran `npm run build`
+(not just `typecheck`) myself in this sandbox - clean, 29/29 static pages, `/login` and all 3
+`/tools/*` routes now genuinely static (`○`). Every prior pass's own build verification this
+session carried the caveat "fails at the pre-existing /login prerender gap - no Supabase env vars
+in this container - unrelated"; that caveat is gone, confirming Sarel's three fixes
+(`createClient()` moved out of `/login`'s component-body top level into the click handler;
+`/tools/deadline-calculator` reworked onto `useSyncExternalStore` instead of a bare `new
+Date()` during render; `engines.node` pinned in `package.json`) actually hold. Updated
+Known-gaps item 9 directly (see above) rather than only noting it here, since this changes
+current *state*, not just this pass's activity - this is still the single update most likely to
+be read in a hurry and skimmed past, so it's worth saying plainly: **real credentials still
+don't reach this sandbox**; "the project now has a live Supabase + Vercel deployment" is Sarel's
+own primary-source commit, not something I can independently confirm beyond the build/migration
+evidence above - scratch-Postgres replay stays this file's own verification method until that
+changes.
+
+**Currency-parsing fix** (`35d55b8`, a confirmed 100x-wrong tender-value bug - comma-as-decimal
+vs. comma-as-thousands-separator, the classic SA Rand ambiguity): re-ran
+`test_tender_enrichment.py`, `test_award_outcomes.py`, `test_taxonomy.py`, `test_market_trend.py`
+myself - all clean. Good fix shape: reused `award_outcomes.parse_rand()` (already correct,
+already tested) instead of leaving a second, wrong parser in place.
+
+**Bulk onboarding document scan** (`eb5a846`, migration `0063`): replayed `0001`→`0063` fresh (55
+migrations). Read the migration in full - same proposal/confirm shape as the CV AI-extraction
+precedent (0023), routes each confirmed document to an *existing* table/column rather than
+inventing a new generic storage model, and correctly caught its own research gap mid-build
+(CIDB routes to new `companies.cidb_expiry`/`cidb_document_path` columns, not
+`held_registrations` - `0050`'s own check constraint would have refused that insert). Manually
+verified tenant isolation on `onboarding_uploads` myself (company B: 0 rows read, insert
+refused) since no test file covers the RLS directly. Ran `test_classify_documents.py` (32
+checks pass; the one that needs a live LLM call fails for the same pre-existing reason as CV
+extraction's own equivalent test - `anthropic` not installed in this sandbox, Known gap 3, not
+new) and `onboardingScan.test.ts` (8/8).
+
+Regression: `test_tenant_isolation.py` ALL PASSED, `test_general_bridge.py` ALL PASSED, `npm run
+typecheck`/`lint` clean.
 
 ## This pass (2026-10-18, ~19:00 UTC): real bug found and fixed in the new B-BBEE calculator; verified the rest of the gap-check build
 
