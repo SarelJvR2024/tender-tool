@@ -1946,3 +1946,130 @@ The standing Solution Architect review's TenderFlow feature-parity gap check (ve
 **Verified:** `publicHolidays.test.ts` (11 cases: full 2026 table, Easter-derived dates for 2025/2026/2027 against known reference dates, the s2A Sunday-holiday rule, `isBusinessDay` on weekends/holidays/an ordinary day, `addBusinessDays` from an ordinary day, skipping a holiday mid-window, starting FROM a non-business day itself - both a weekend and a holiday, spanning the Dec/Jan year boundary across Christmas, going backwards, and `businessDaysBetween` forward/same-day/backward-is-negative), `cidbGrading.test.ts` (6 cases: table contiguity with no gaps/overlaps, every published boundary value, invalid input, grade/band round-trip, sufficiency check), `preferencePoints.test.ts` (9 cases: the R50m threshold boundary itself, both systems' max points, the reg 4 worked example by hand - 10% above Pmin on an 80/20 contract scores exactly 72 of 80 - and the same ratio on 90/10, rounding, a non-positive Pmin throws, every level in the SBD 6.1 table on both systems, the full `calculatePreferencePoints()` breakdown on both systems and with an explicit system override) - all 26 cases pass via `node --experimental-strip-types --test`. `npm run typecheck` and `npm run lint` clean across the whole `app/` tree (no errors introduced; two pre-existing unrelated lint issues fixed as part of getting a clean run: an unused import and several unescaped quote/apostrophe characters in the new pages themselves).
 
 **Not done / open:** CIDB's "potential grading" mechanism (a contractor's track record earning it a higher grade) is out of scope by design - this tool only answers "what grade does this value require", not "what grade would my history earn me". No gazetted one-off public holiday (Public Holidays Act s2(2)) is in the table, since none is predictable in advance - `EXTRA_HOLIDAYS` in `publicHolidays.ts` is the place to add one once gazetted. Nothing rendered in a browser against a live Supabase project (same standing gap as every other pass this session) - these pages need no Supabase at all, but were only typechecked/linted/unit-tested, not opened in a real browser.
+
+### Bulk onboarding document scan (2026-10-18)
+
+Sarel: instead of a company manually uploading and tagging each compliance document one at a
+time, bulk-upload a folder/zip of everything it already has, let the system identify what each
+document is and extract its key fields, then show a review screen to confirm or correct each one
+before anything is saved to a real table. Modelled directly on the CV AI-extraction precedent
+(`engine/cv/extract_cv_fields.py` + `CV-Extraction-Findings.md`) - read side by side with the new
+code, not re-derived: text extraction with OCR fallback, one structured-output LLM call per
+document, quote-verification against the source text, a proposal row nobody but an explicit
+human confirm writes anywhere real.
+
+**Correction found while building this** (the task's own v1 mapping assumed it, incorrectly): a
+CIDB certificate does NOT route to `held_registrations`. Migration `0050`'s own seed row for the
+`cidb` registration type sets `stored_in = 'companies.cidb_grading'`, and
+`tt_held_registrations_check()` refuses any `held_registrations` insert whose type has `stored_in`
+set - a CIDB row would fail outright. `companies.cidb_grading` (`0018`) is a plain text column
+with no document or expiry slot at all - the one real gap in the Document Vault (`0014` covers
+COID/SARS/PI insurance/ISO/bank/B-BBEE, never CIDB). Migration `0063` adds `cidb_expiry` +
+`cidb_document_path` to `companies`, completing the vault the same way `0014` did for every other
+document, rather than forcing CIDB through the wrong table or inventing a new one.
+
+**Built:**
+- Migration `0063_onboarding_document_scan.sql`: a new private `onboarding-documents` Storage
+  bucket (path-prefix tenant isolation, same pattern as every other bucket here - unclassified,
+  unconfirmed files deliberately don't share a bucket with real compliance documents);
+  `onboarding_uploads` (one row per uploaded file, same request/status shape as `cv_uploads`,
+  `0008`) and `onboarding_document_results` (the AI proposal, same shape as
+  `cv_extraction_results`, `0023` - `review_status` starts `pending_review`, never auto-applied);
+  plus the CIDB vault columns above. `batch_id` is a plain client-generated uuid column, not its
+  own table (same "no separate batches table" choice `manualTender.ts`'s `tenderId` already made)
+  - nothing about a batch is ever queried except "every upload with this batch_id".
+- `engine/onboarding/classify_documents.py`: the classification/extraction logic (text
+  extraction + OCR fallback reusing `scan_ocr.py`/`requirements.py` outright; a filename/keyword
+  pre-filter, `keyword_hint()`, passed into the prompt as an explicit HINT ONLY - never the
+  classifier, never skips the LLM call or the quote-verification step, proven by a test that
+  greps `validate_proposal`'s own source for the absence of a `keyword_hint` call); one
+  structured-output Messages API call per document with a `document_kind` enum (the v1 type list
+  + `unknown`) and one flat `fields` object covering every kind (mirrors how
+  `extract_cv_fields.py` already handles two kinds with one shared field set); quote-verification
+  and date/digit checks reused directly from `extract_cv_fields.py` (`evidence_in_text`,
+  `normalise_date`, `find_and_redact_sa_ids`, `_norm`/`_digits`), not re-implemented. SA ID
+  numbers are matched locally and never sent to the model, same as the CV pipeline. For a
+  `document_kind` of `cv`, no field extraction happens at all here - see handoff below.
+- `engine/onboarding/process_onboarding_jobs.py`: the queue runner (claim/release/fail/stale-
+  reclaim), same shape and the same `supabase_request`/`storage_download` helpers imported
+  outright from `engine/cv/process_cv_jobs.py` / `extract_cv_fields.py`. Registered in
+  `engine/worker/run_bridges.py` as the `onboarding` bridge.
+- `app/app/company/document-scan/`: a new Company sub-page (linked from `/company`'s
+  "Directors, registrations & property" section, same card convention as Principals/
+  Registrations). `upload-form.tsx` uploads straight from the browser to the
+  `onboarding-documents` bucket (same reason and the same pattern as the manual tender load's
+  `manual-tender-form.tsx` - a Server Action's body is capped at 4.5 MB on Vercel, and a batch of
+  certificates together would blow past that), then registers the batch
+  (`registerOnboardingBatch`). `review.tsx` is the confirm-or-correct screen: a status pill per
+  document (same convention as the Pack Review screen), per-field tick + editable value + source
+  quote + warning (same layout as `cv-review.tsx`), and for `id_document`/`cv` a required picker
+  (which director/shareholder, which person) since there is no way to know who a bare ID or CV
+  belongs to from the document alone.
+- `app/app/company/document-scan/actions.ts` - the only code that writes an AI-proposed
+  onboarding document anywhere real, and only on explicit confirm, routing each v1 kind to its
+  already-existing table/column:
+  - `cidb_registration`, `bbbee_certificate`, `sars_tax_clearance`, `bank_confirmation_letter`,
+    `pi_insurance_certificate`, `iso_9001_certificate` → `confirmVaultDocument`, ticked fields
+    onto the matching `companies.*` columns (`app/lib/onboardingScan.ts`'s
+    `VAULT_FIELD_COLUMNS`/`VAULT_DOCUMENT_COLUMN`) + the file copied into the `company-documents`
+    vault bucket.
+  - `experience_reference_letter` → `confirmExperienceReferenceLetter`, inserts an
+    `experience_items` row (`0012`), file copied into `experience-documents`. Left untagged
+    (`tagged_at` null) on purpose - tagging is its own deliberate manual step per `0012`'s own
+    design, not something a reference letter alone can honestly auto-classify.
+  - `id_document` → `confirmIdDocument`: **found a real slot the task's own research didn't
+    name** - `company_principals.certified_id_path`/`certified_id_filename`/`certified_id_on`
+    (`0050`) already exists for exactly this. The reviewer must pick which principal before
+    filing (never guessed); if nobody is on the register yet, the screen says so and links to
+    `/company/principals` instead of inventing anywhere else to put it.
+  - `cv` → `confirmCvHandoff`: a HANDOFF, not a second extraction - copies the file into
+    `cv-documents` and inserts the exact `cv_uploads` row (`mode: 'ai_extract'`,
+    `status: 'extraction_requested'`) the People page's own upload form inserts, after the
+    reviewer picks which person. `engine/cv/extract_cv_fields.py` then takes over completely
+    unchanged - this module's own LLM call extracts nothing for a CV, only recognises one.
+  - `professional_registration_other` (ECSA/SACPCMP/SACNASP/SAGC/PSIRA etc.) and `unknown` are
+    never auto-routed - shown as "needs manual review" with a link (Registrations page / general
+    Company profile), explicitly acknowledged (`skipOnboardingDocument`) rather than silently
+    dropped. Out of v1 scope per the task's own instruction: these have dedicated, higher-stakes
+    per-person UI and this tool shouldn't guess which body or person they belong to.
+- `app/lib/onboardingScan.ts`: the shared constants/types, including the routing map as pure
+  data/functions (`VAULT_FIELD_COLUMNS`, `VAULT_DOCUMENT_COLUMN`, `VAULT_SUBFOLDER`,
+  `parseBeeLevel()` - `companies.bee_level` is an int, the model returns text like "Level 2") so
+  the mapping itself is unit-testable separately from the Supabase/redirect plumbing around it.
+
+**What got a real existing table/column (v1 "routable" set):** CIDB (→ `companies.cidb_*`, a
+correction - not `held_registrations`), B-BBEE, SARS TCS, bank confirmation letter, PI insurance,
+ISO 9001 (all → `companies.*` vault columns), experience/reference letters (→ `experience_items`),
+ID documents (→ `company_principals.certified_id_path`, found during this build, not assumed
+missing), and CVs (→ handoff into the existing `cv_uploads` pipeline, never re-extracted). Nothing
+in this pass needed a brand-new generic document-type table - every v1 kind had, or (CIDB) nearly
+had, a real home already.
+
+**Deliberately not routed:** `professional_registration_other` (ECSA/SACPCMP/SACNASP/SAGC/SACAP/
+PSIRA/...) and `unknown` - flagged for manual review, per the task's own scope decision.
+
+**Not done / open for Sarel:** cloud-storage connectors (Google Drive/SharePoint) are explicitly
+out of scope for this pass - the staging/job-queue shape (`onboarding_uploads` rows feeding the
+same classification pipeline) would let one feed in later without a schema change, but no OAuth/
+connector integration was built. The keyword/filename pre-filter is currently prompt-only (never
+skips the LLM call) - if real volume later justifies actually short-circuiting obvious filename
+matches to save cost, that would need its own confidence-threshold design, not assumed safe by
+default. Nothing verified against a live Supabase project or against a real Anthropic API call
+(same standing gap as every other AI-extraction pass this session - `extract_cv_fields.py`'s own
+Claude call has never run live either).
+
+**Verified:** `python3 engine/onboarding/test_classify_documents.py` - 1 of 1 passed internally
+(39 checks: text extraction + generic failure wording, the keyword-hint-is-advisory-only guarantee
+including a source-grep proof, `validate_proposal()` for one representative document per routed
+kind - CIDB/B-BBEE/SARS/ID/bank/PI insurance/ISO/reference letter - plus
+`professional_registration_other`/`unknown` never auto-routed, the quote-verification gate on
+invented string/date values, `call_llm()`'s request shape and stop-reason handling against a stub
+client, and queue plumbing: claim, missing-key put-back, success, a no-text-layer scan failing
+with no API call made, and stale-claim reclaim). `node --experimental-strip-types --test
+app/lib/onboardingScan.test.ts` - 8/8 pass (every document kind is exactly routable-or-unrouted
+never both/neither, the CIDB correction encoded as a test, every vault kind's written columns are
+a subset of the fields the model was actually asked for, `parseBeeLevel()` on real and edge-case
+input). `npm run typecheck` and `npm run lint` clean across the whole `app/` tree. `next build`
+compiles and type-checks cleanly, then fails at the same pre-existing `/login` prerender (no
+Supabase credentials in this sandbox) - unrelated to this change, same standing gap as every other
+entry in this file. Nothing verified against a live Supabase project or a live Anthropic API call.

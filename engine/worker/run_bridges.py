@@ -12,6 +12,9 @@ registered by name:
     pack     engine/pack/process_pack_jobs.py       (pack_generation_jobs, SANRAL)
     general  engine/general/process_general_jobs.py (pack_generation_jobs, engine='general':
                                                      non-SANRAL requirement extraction + packs)
+    onboarding engine/onboarding/process_onboarding_jobs.py (onboarding_uploads ->
+                                                     onboarding_document_results; needs
+                                                     ANTHROPIC_API_KEY once a document is queued)
 
 pack and general poll the SAME table (pack_generation_jobs - one queue), each
 claiming only its own `engine` value.
@@ -73,6 +76,9 @@ BRIDGES = {
     "pack": "engine/pack/process_pack_jobs.py",  # pack_generation_jobs, engine='sanral'
     # non-SANRAL requirement extraction + pack generation (pack_generation_jobs, engine='general')
     "general": "engine/general/process_general_jobs.py",
+    # bulk onboarding document scan (0063): onboarding_uploads -> onboarding_document_results;
+    # needs ANTHROPIC_API_KEY once a document is queued, same as cv_extract
+    "onboarding": "engine/onboarding/process_onboarding_jobs.py",
 }
 
 # A pass that finds nothing prints exactly this kind of line. In loop mode that

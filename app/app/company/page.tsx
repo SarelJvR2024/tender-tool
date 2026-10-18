@@ -46,6 +46,10 @@ type CompanyRow = {
   bank_branch_code: string | null;
   // 0014_vault_compliance_documents.sql
   coid_letter_document_path: string | null;
+  cidb_grading: string | null; // 0018_general_tender_preparation.sql
+  // 0063_onboarding_document_scan.sql (completes the CIDB vault slot - see that migration's header)
+  cidb_expiry: string | null;
+  cidb_document_path: string | null;
   sars_tcs_pin: string | null;
   sars_tcs_pin_expiry: string | null;
   sars_tcs_pin_document_path: string | null;
@@ -95,7 +99,7 @@ export default async function CompanyPage({
   const { data: company, error: loadError } = await supabase
     .from("companies")
     .select(
-      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work, head_office, other_offices, ecsa_registered_staff_count, sacpcmp_registered_staff_count, total_employees, typical_jv_share_pct"
+      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, cidb_grading, cidb_expiry, cidb_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work, head_office, other_offices, ecsa_registered_staff_count, sacpcmp_registered_staff_count, total_employees, typical_jv_share_pct"
     )
     .single();
 
@@ -364,6 +368,15 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
           />
           <DocumentRow
             companyId={company.id}
+            kind="cidb"
+            title="CIDB registration / grading"
+            lines={[`Grading ${company.cidb_grading ?? "—"}`, `Expires ${fmtDate(company.cidb_expiry)}`]}
+            status={company.cidb_grading || company.cidb_expiry ? expiryStatus(company.cidb_expiry) : NotStated({ label: "Not on file" })}
+            path={company.cidb_document_path}
+            url={docUrls.cidb}
+          />
+          <DocumentRow
+            companyId={company.id}
             kind="sars_tcs_pin"
             title="SARS Tax Compliance Status PIN"
             lines={[`PIN ${company.sars_tcs_pin ?? "—"}`, `Expires ${fmtDate(company.sars_tcs_pin_expiry)}`]}
@@ -474,6 +487,7 @@ function RegisterLinks({ counts }: { counts: { principals: number; registrations
         : "PSIRA, SETA accreditation, waste permits, HPCSA, SACAP ... - with expiry reminders",
     },
     { href: "/company/bank-accounts", title: "Bank accounts", detail: "Restricted - owners and admins only" },
+    { href: "/company/document-scan", title: "Bulk document scan", detail: "Drop in a folder of compliance documents - AI sorts and pre-fills them, you confirm each one" },
     {
       href: "/company/properties",
       title: "Buildings you lease to government",

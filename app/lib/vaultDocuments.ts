@@ -8,6 +8,7 @@ export const VAULT_BUCKET = "company-documents";
 
 export const VAULT_DOCUMENTS = {
   coid: { column: "coid_letter_document_path", label: "COID Letter of Good Standing" },
+  cidb: { column: "cidb_document_path", label: "CIDB registration/grading certificate" },
   sars_tcs_pin: { column: "sars_tcs_pin_document_path", label: "SARS Tax Compliance Status PIN letter" },
   pi_insurance: { column: "pi_insurance_document_path", label: "Professional indemnity insurance schedule" },
   iso_9001: { column: "iso_9001_document_path", label: "ISO 9001 certificate" },
