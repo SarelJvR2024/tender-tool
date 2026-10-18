@@ -10,3 +10,6 @@ config/team_roster.json
 out/
 assets/
 packs/generated/
+
+# Claude Code's own local tooling state (e.g. isolated agent worktrees)
+.claude/
