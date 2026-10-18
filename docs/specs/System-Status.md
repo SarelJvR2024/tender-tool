@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-17, ~21:15 UTC Sarel's three tender-update decisions (accept a disagreeing date from the Workspace, a real briefing date + milestone, people named by e-mail in the alert report and the digest - migration `0048`, below); ~21:00 UTC tender regulatory compliance review (Public Procurement Act 2024 struck down; B-BBEE affidavit vs SANRAL A12 - below); ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039` - below); ~19:00 UTC Sarel's three decisions on the §9.4 open questions (re-score on a profile change, every local seen store into the database, central system alerts e-mailed to Sarel - below); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks - below); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters (below); ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e) (test companies in Discovery, Discovery seen store in the database, digest live mode per company); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7 (MO/MA equivalence, per-company Discovery, company-owned letters); ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
+Last full pass: 2026-10-18, ~00:30 UTC independent verification of the cross-tenant isolation fixes and 8 other commits, including filling in the missing write-up for the isolation fix itself (below); 2026-10-17 ~21:15 UTC Sarel's three tender-update decisions (accept a disagreeing date from the Workspace, a real briefing date + milestone, people named by e-mail in the alert report and the digest - migration `0048`); ~21:00 UTC tender regulatory compliance review (Public Procurement Act 2024 struck down; B-BBEE affidavit vs SANRAL A12); ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039`); ~19:00 UTC Sarel's three decisions on the §9.4 open questions (re-score on a profile change, every local seen store into the database, central system alerts e-mailed to Sarel); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters; ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7; ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -119,6 +119,68 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), SANRAL Form B7 / 30% Targeted-Enterprise subcontracting never captured (G3), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-18, ~00:30 UTC): cross-tenant isolation fixes, written up + independently verified; 8 other commits checked
+
+**Filling a real documentation gap first:** `5523221` ("Cross-tenant isolation fixes: scope
+service-role bridges to the job company, enforce same-company references and own-folder storage
+paths") is the single most consequential commit in this batch and **touched no documentation at
+all** - not `System-Status.md`, not a findings doc. Its own commit message is thorough (before:
+133 pass / 53 fail on `engine/security/test_tenant_isolation.py`; after: 187 pass / 0 fail), but
+nothing pointed a future reader of this file at it. Written up here because it needs to be
+findable without reading `git log`:
+
+- **What it fixed:** RLS was already correct table-by-table, but the service-role bridges
+  (pack/CV/CV-extraction/general - these run with RLS bypassed, by design, to do their job) were
+  trusting a job's own stored references without checking they still point at the job's own
+  company. A company could get another company's confirmed-person CV, vault documents or
+  storage-path bytes pulled into its own job folder by pointing a reference at them (migration
+  `0043`, 414 lines: triggers refuse cross-company person/pack/task references and rows on
+  another company's private tender; CHECKs keep every storage path in the row's own company
+  folder; a shared SANRAL template can only be replaced by the company that uploaded it, and its
+  uploader identity is hidden from other companies via column-level `REVOKE`+a safe view, not
+  just RLS; the admin console is limited to a new `platform_admins` list instead of "any company
+  owner sees every customer's harness runs"). `0044` (109 lines) separately fixes person/user
+  deletion being blocked by `NO ACTION` FKs, removes a deleted person's traces from rankings and
+  signatory answers, and has `deletePerson` clear their CV files from Storage.
+- **Independently verified, not just read:** replayed `0001`→`0048` fresh (34 migrations; `0045`-
+  `0047` were never used, confirmed benign via `git log --all`, same as the `0020`/`0027`-`0029`
+  gaps before). Ran `engine/security/test_tenant_isolation.py` Part 2 (686 lines, needs a real
+  replayed Postgres - never run against one before this pass) against it: **first run showed 1
+  failure** (direct `SELECT` of `tender_documents.uploaded_by_company`/`original_filename` wasn't
+  refused) - traced it to my own scratch-DB setup applying a blanket `GRANT ALL ON ALL TABLES`
+  *after* replaying migrations, which clobbers `0043`'s deliberate column-level `REVOKE`+narrower
+  `GRANT`. Fixed by applying Supabase's baseline default-privilege grants *before* replaying
+  migrations instead (matching real deploy order, where the platform's default grant happens at
+  table-creation time and a migration's own narrower grant is what's left standing after). Reran
+  clean: **all 15 numbered checks pass, 0 failures** - independent, reproducible confirmation of
+  the commit's own "187/0" claim, covering storage-path refusal, cross-company reference
+  triggers, the anonymised shared-template uploader, the `platform_admins` gate, and the person/
+  user deletion fixes together in one pass.
+- **A second, separate test-isolation lesson from the same session:** running
+  `test_tender_updates.py` and `test_system_alerts.py` back-to-back against **one shared** scratch
+  database (to save setup time) produced 2 failures - `test_tender_updates.py`'s own setup script
+  issues a blanket `GRANT ALL ON ALL TABLES TO authenticated` to simulate baseline privileges
+  before its *own* migration's restrictions, and that grant leaked into the next test's database
+  session, undoing `0042`'s column/function privilege restrictions (`system_alerts`, 
+  `record_system_alert()`). Re-ran each standalone against its own fresh, correctly-migrated
+  database: **0 failures in both.** Lesson for future passes: these DB-backed test scripts assume
+  a dedicated database each, not a shared one - don't batch them in one session.
+- Also ran, standalone, against a correctly-migrated scratch Postgres: `test_taxonomy.py` Part 2,
+  `test_reminder_seen_db.py` Part 2, `test_watch_conditional_registrations.py` Part 2 - all 0
+  failures. Re-ran `test_discovery_fanout.py` and `test_general_bridge.py` for regression - both
+  clean.
+- **Other 7 commits in this batch** (`4a24b31` re-score-on-profile-change + DB seen stores +
+  system alerts; `0f6b985` regulatory compliance review; `c8bf291` company master data list -
+  research only, no code; `8d0a953` tender-update watch; `a9a5364` audit Q3/Q5; `7ae7fb3` SBD6.1
+  legacy-CLI fix; `d5a6727` tender-update decisions) - read, each already has its own dated
+  write-up below with its own evidence; `system_alerts` confirmed to be a distinct concept from
+  `daily_digest`/`watch_deadlines` (engine/worker failures for the platform operator, not company
+  business reminders), not a duplicate notification system.
+- `npm run typecheck` / `npm run lint`: clean.
+
+Nothing found needing a fix this pass beyond the documentation gap above (now closed). No new
+product bugs.
 
 ## This pass (2026-10-17, ~21:15 UTC): Sarel's three tender-update decisions (migration `0048`)
 
