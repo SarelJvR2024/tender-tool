@@ -6,7 +6,9 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18, ~08:30 UTC — independently verified the last 4 commits (below):
+Last full pass: 2026-10-18, ~10:20 UTC — quiet check-in, 2 small low-risk commits verified (a
+Login/Onboarding mobile-overflow fix, and a QA log entry with no code change - below). ~08:30
+UTC — independently verified the last 4 commits (below):
 **`watch_tender_updates.run()` now isolates each pursued tender** (one bad tender no longer stops
 the watch for every other one); the standing QA review's seventh run, a **repo-wide sweep for the
 malformed-date-in-a-batch bug class** (4 more dangerous instances fixed); a **daily compliance
@@ -133,6 +135,26 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## Quiet check-in (2026-10-18, ~10:20 UTC)
+
+Two new commits, both low-risk, both self-verified already:
+
+- `7cd2c35` - Login's card had a fixed `width: 360` with no `maxWidth`/`boxSizing` fallback and
+  no outer padding (Onboarding already had the right pattern); fixed, plus bumped Login/
+  Onboarding's inputs and buttons to the 44px `minHeight` used everywhere else. Read the diff in
+  full - purely additive style properties, nothing else touched. Re-ran `npm run typecheck`/
+  `lint` myself: both clean.
+- `fc7f603` - doc-only (`QA-Edge-Case-Findings.md`), no code change. Closes out "Finding 2," a
+  gap this standing review had explicitly deferred several passes ago (`sanralScoring.ts`'s
+  `estimatePosition()` only ever exercised against one of SANRAL's 8 Design Specialist
+  disciplines) - now run against all 8, clean, with two of the agent's own test-construction
+  mistakes caught and corrected before being mistaken for engine bugs (worth noting as a
+  methodology point, not a product issue). Also confirmed `run_bridges.py`'s `TimeoutExpired`
+  handling is correct as written (a `subprocess` quirk that looks like a `str`/`bytes` bug at a
+  glance but isn't) - read that reasoning directly, agree with it.
+
+Nothing further needed this pass.
 
 ## This pass (2026-10-18, ~08:30 UTC): independent verification of the last 4 commits (the Discovery scoring regression, 2 date-crash fixes, tender-update isolation)
 
