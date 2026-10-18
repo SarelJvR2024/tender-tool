@@ -57,7 +57,9 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
 import source_http as sh  # noqa: E402
+import system_alerts  # noqa: E402
 
 STATE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "state")
 LOCAL_SNAPSHOTS = os.path.join(STATE_DIR, "listing_snapshots.json")
@@ -130,9 +132,16 @@ def diff_listing(r, prev):
         return out
     if prev.get("closing_date") != now["closing_date"] and now["closing_date"] and prev.get("closing_date") \
             and sh.parse_sast(prev["closing_date"]) != sh.parse_sast(now["closing_date"]):
-        later = sh.parse_sast(now["closing_date"]) > sh.parse_sast(prev["closing_date"])
+        prev_dt, now_dt = sh.parse_sast(prev["closing_date"]), sh.parse_sast(now["closing_date"])
+        # One side can fail to parse (a scraped date) while the other parses
+        # fine - the `!=` check just above is true either way (None != a
+        # real datetime), so this used to compare None > a real datetime and
+        # crash. The string-level change is still real and worth reporting;
+        # only the "extended/brought forward" direction needs a readable date.
+        direction = "extended" if prev_dt and now_dt and now_dt > prev_dt else \
+                    "BROUGHT FORWARD" if prev_dt and now_dt else "changed"
         out.append(_event(r, "closing_date_changed",
-                          f"Closing date {'extended' if later else 'BROUGHT FORWARD'}: {_fmt(prev['closing_date'])} -> {_fmt(now['closing_date'])}",
+                          f"Closing date {direction}: {_fmt(prev['closing_date'])} -> {_fmt(now['closing_date'])}",
                           old=prev["closing_date"], new=now["closing_date"]))
     if prev.get("briefing_date") != now["briefing_date"] and (prev.get("briefing_date") or now["briefing_date"]):
         out.append(_event(r, "briefing_changed",
@@ -297,16 +306,31 @@ def detect(releases, snapshots, cancelled=(), notices=(), first_run_late_docs=Tr
     events, new_snaps, fresh = [], {}, []
     for r in releases:
         key = r.get("ocid") or f"{r.get('source')}:{r.get('contract_number')}"
-        prev = snapshots.get(key)
-        if prev is None:
-            fresh.append(r)
-            if first_run_late_docs:
-                events += diff_listing(r, None)
-        else:
-            events += diff_listing(r, prev)
-        events += disagreements(r)
-        new_snaps[key] = dict(snapshot_of(r), source=r.get("source"), contract_number=r.get("contract_number"),
-                              buyer=r.get("buyer"))
+        try:
+            prev = snapshots.get(key)
+            if prev is None:
+                fresh.append(r)
+                if first_run_late_docs:
+                    events += diff_listing(r, None)
+            else:
+                events += diff_listing(r, prev)
+            events += disagreements(r)
+            new_snaps[key] = dict(snapshot_of(r), source=r.get("source"), contract_number=r.get("contract_number"),
+                                  buyer=r.get("buyer"))
+        except Exception as e:
+            # One listing's own bad data (a scraped date, an unexpected
+            # shape - snapshot_of() itself can raise on this, not just the
+            # diff/disagreement checks, confirmed by testing a release whose
+            # documents field wasn't a list) must not cancel change
+            # detection for every OTHER tender in the run - same isolation
+            # as watch_tender_updates.py's per-pursued-tender guard.
+            # new_snaps[key] is deliberately left unset: next run this
+            # listing looks "fresh" again rather than diffed against a
+            # snapshot built from data that couldn't be read - degraded,
+            # not wrong.
+            system_alerts.record("tender_changes",
+                                 f"Change detection failed for one listing ({key}): {type(e).__name__}: {e}",
+                                 "warning", exc=e, context={"release_key": key, "source": r.get("source")})
     events += cancellations(cancelled)
     events += readvertisements(fresh, cancelled)
     events += relistings(releases)

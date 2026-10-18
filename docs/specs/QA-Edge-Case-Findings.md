@@ -885,3 +885,66 @@ award, one with no award at all) and confirmed the count goes from 1 (wrong) to 
   bug - a R0 outcome isn't a useful market-price data point, and the winner/supplier is still
   kept regardless; only the *price* signal is suppressed). Checked this was an intentional design
   choice, not an oversight, before leaving it alone.
+
+---
+
+## 2026-10-18 (tenth run): the malformed-date-in-a-batch bug class, found a fourth time, in the
+brand-new listing-change tracker
+
+**Context:** picked `engine/discovery/tender_changes.py` (listing-level change tracking across
+every tender in every one of Discovery's sources - migration `0051`) because it's part of the
+government-coverage expansion that landed in the last 24 hours, after the seventh run's
+repo-wide date sweep. Checked first whether the sweep had covered this specific file: its own
+inventory names `tender_updates.py` (a different file - addendum/document reading for *pursued*
+tenders, migration `0039`) and `source_http.py`'s parsers, but never `tender_changes.py` itself,
+which landed in the same window. That gap is exactly why this run picked it.
+
+### Finding 11 (CONFIRMED, FIXED, severe): one listing's unparseable closing date could cancel
+change detection for every tender in the system, pursued or not
+
+**Where:** `engine/discovery/tender_changes.py`'s `diff_listing()` and `detect()`.
+
+**What was found:** `diff_listing()`'s closing-date-changed check already used the sweep-fixed
+`source_http.parse_sast()` (which returns `None` on a bad date rather than raising) - but the
+code immediately did `sh.parse_sast(now) > sh.parse_sast(prev)` to decide "extended" vs "brought
+forward". The guard just above it (`sh.parse_sast(prev) != sh.parse_sast(now)`) is true whenever
+*either* side fails to parse (`None != a_real_datetime`), so a listing where only one side of the
+comparison is a real date reaches the `>` with one side `None` - `TypeError: '>' not supported
+between instances of 'NoneType' and 'datetime.datetime'`. And `detect()`'s per-release loop
+(`for r in releases: events += diff_listing(r, prev); ...`) had no per-release error handling at
+all, so that one `TypeError` propagated out of `detect()` and aborted change detection for every
+other tender in the same run - the identical blast-radius shape as Findings 5, 6 and 8, now in a
+newer file the sweep never saw. Confirmed directly: a 3-release batch (one malformed date, two
+clean) lost all 3 results to the crash before the fix.
+
+**A second, related crash found while testing the fix:** `detect()`'s loop also calls
+`snapshot_of(r)` for the *next* run's baseline, unconditionally, outside any guard. A release
+whose shape is malformed in a different way (tested: `documents` not a list at all) crashes
+`snapshot_of()` itself with an `AttributeError` - a different exception, same fatal-to-everyone
+effect. The first attempt at isolating only the diff/disagreement calls in a `try` left this
+line exposed and still crashing; confirmed by testing, then widened the `try` to cover the
+snapshot too.
+
+**Fix:**
+1. `diff_listing()` now computes the "extended"/"brought forward" direction only when *both*
+   dates parse; when one doesn't, it still reports the string-level change ("Closing date
+   changed: ... -> no date") rather than guessing a direction or crashing - same "say what you
+   don't know" discipline as the rest of the project.
+2. `detect()`'s per-release loop is now wrapped in a `try/except` covering the diff,
+   disagreement and snapshot calls together, isolating one listing's failure from every other
+   tender in the batch (the same pattern Finding 9e already established for
+   `watch_tender_updates.run()`), and records a `warning`-level system alert naming the listing
+   and the real error. The failed listing's snapshot is deliberately left unset rather than
+   faked - next run it is simply treated as newly-seen again, not diffed against bad data.
+
+**Verification:** re-ran both repro scenarios after the fix - the date-comparison crash (3
+listings, one malformed) now produces 3 honest events with no crash; the `snapshot_of()` crash
+(2 listings, one with a malformed `documents` field) now produces 1 event and 1 saved snapshot
+(the broken listing's own alert fires, and it's correctly excluded from the saved snapshots
+rather than silently given a fake one). All 9 of the discovery engine's committed test files: 0
+failures / ALL PASSED. `python3 -m py_compile` clean.
+
+**Flagged, not fixed:** `tender_changes.py` has no dedicated test file at all (`ls test_*.py`
+confirms no `test_tender_changes.py` exists), despite being 459 lines of exactly the kind of
+cross-tenant batch logic this bug class keeps turning up in. Worth a committed regression suite
+in a future pass, mirroring `test_tender_updates.py`'s own per-scenario shape.

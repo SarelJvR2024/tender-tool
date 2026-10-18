@@ -1023,6 +1023,25 @@ Two commits, both small and already well-verified; one had no System-Status entr
 
 Nothing further needed this pass.
 
+## This pass (2026-10-18, standing QA/robustness review - tenth run)
+
+Found the malformed-date-in-a-batch bug a fourth time: `engine/discovery/tender_changes.py`
+(listing-change tracking across every tender in every Discovery source, migration `0051`) landed
+in the government-coverage expansion, in the same window as the seventh run's repo-wide date
+sweep, but after the sweep's own inventory - so it was never checked. A listing where only one
+side of a closing-date comparison parsed (`source_http.parse_sast()` returns `None` on a bad
+date) hit `None > a_real_datetime` and crashed; `detect()`'s per-release loop had no error
+isolation, so one bad listing aborted change detection for every other tender in the run -
+pursued or not, any company's. A second crash (a differently-malformed release's `documents`
+field) surfaced while testing the fix, in the snapshot-saving line the first attempt at
+isolation didn't cover. Both fixed: the date-direction check now degrades to an honest
+"changed" when either side can't be read; the per-release loop is now wrapped in a try/except
+covering diff, disagreement and snapshot together, isolating one listing's failure the same way
+Finding 9e already isolated `watch_tender_updates.run()`. Verified directly against both repro
+scenarios; all 9 discovery test files still 0 failures / ALL PASSED. Flagged, not fixed:
+`tender_changes.py` has no dedicated test file at all. Full evidence in `docs/specs/QA-Edge-
+Case-Findings.md` (Finding 11).
+
 ## This pass (2026-10-18, standing QA/robustness review - ninth run)
 
 Picked the award/price-intelligence feature (`engine/discovery/award_outcomes.py`,
