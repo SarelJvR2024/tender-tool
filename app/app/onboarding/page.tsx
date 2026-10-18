@@ -35,11 +35,11 @@ export default async function OnboardingPage({
             name="legal_name"
             required
             placeholder="Registered name, as on your CIPC certificate"
-            style={{ width: "100%", boxSizing: "border-box", padding: "10px 12px", marginBottom: 18, borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit" }}
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px", marginBottom: 18, borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit" }}
           />
           <button
             type="submit"
-            style={{ width: "100%", padding: "10px 16px", borderRadius: 8, border: "none", background: "#16233B", fontSize: 14, fontWeight: 600, color: "#FFFFFF", cursor: "pointer" }}
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 16px", borderRadius: 8, border: "none", background: "#16233B", fontSize: 14, fontWeight: 600, color: "#FFFFFF", cursor: "pointer" }}
           >
             Create company and continue
           </button>
