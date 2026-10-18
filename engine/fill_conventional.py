@@ -10,6 +10,7 @@ UNLOCKED, non-formula cells (not only the yellow ones: BEE level K33/L33 and the
 Form B7 targeted-enterprise cells are unlocked but not yellow).
 """
 import sys, yaml, datetime
+import sanral_b7
 from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for, projects_for_block
 
 T = "TEND 1X"
@@ -121,8 +122,14 @@ def main(tpl, pack_path, out):
     else:
         print("NOTE: no C2.4 figures in this pack yet - FORM C2.4 TECH left exactly as SANRAL shipped it")
 
+    # Form B7 (same cells as the RRM template): the company's own captured
+    # subcontracting plan (sanral_b7.py, Tender Workspace), else the legacy
+    # single hand-written `targeted_enterprise` block of a CLI pack.yaml.
     te = td.get("targeted_enterprise")
-    if te:   # Form B7 (same cells as the RRM template)
+    if (td.get("subcontracting_plan") or {}).get("mode") == "subcontract":
+        n = sanral_b7.fill_b7(wb, td["subcontracting_plan"])
+        print(f"Form B7: {n} Targeted Enterprise(s) from the company's subcontracting plan")
+    elif te:
         wb.set_value(T, "C3906", te["name"]); wb.set_value(T, "J3906", te["status"])
         wb.set_value(T, "M3906", te["pct_of_contract"]); wb.set_value(T, "D3908", te["black_ownership"])
         wb.set_value(T, "H3908", te["bee_level"]); wb.set_value(T, "M3908", te["pct_excl_provisional"])

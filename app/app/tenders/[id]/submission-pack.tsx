@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
+import { loadB7State } from "./b7-data";
 import { requestSubmissionPack } from "./actions";
 import { PackAutoRefresh } from "./pack-auto-refresh";
 import { PackChecklist, checklistOf, type ChecklistRow } from "./pack-checklist";
@@ -58,6 +59,7 @@ const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E
 export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: string; tenderPackId: string }) {
   const supabase = await createClient();
   const readiness = packReadiness(await loadTenderCompliance(tenderId));
+  const b7 = await loadB7State(tenderId);
 
   const [{ data: docRows }, { data: jobRows }] = await Promise.all([
     supabase.from("tender_documents").select("doc_type").eq("tender_id", tenderId),
@@ -80,12 +82,15 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     ...(missingTemplates.length > 0
       ? [`Blank SANRAL templates not uploaded (Blank tender templates, above): ${missingTemplates.join(", ")}`]
       : []),
+    // Form B7 (0056): applies, or can't be ruled out, and the company hasn't answered.
+    ...(b7.blocker ? [b7.blocker] : []),
     ...(active ? ["A pack is already queued or generating for this tender"] : []),
   ];
   const gaps = [
     ...readiness.mandatoryMissing.map((g) => ({ text: g, tone: "red" as const, note: "mandatory - disqualifying" })),
     ...readiness.missing.map((g) => ({ text: g, tone: "red" as const, note: "don't have" })),
     ...readiness.toConfirm.map((g) => ({ text: g, tone: "amber" as const, note: "confirm by hand" })),
+    ...b7.warnings.map((g) => ({ text: `Form B7: ${g}`, tone: "amber" as const, note: "your subcontracting plan" })),
   ];
   const needsAck = !readiness.checked || gaps.length > 0;
 
@@ -109,7 +114,8 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
         Two PDFs, one per sealed envelope, each in submission order with a contents page and page numbers. The
         submission pack: outer cover, then Envelope 1 (Technical) - authority letter, A-Forms, your vault documents,
-        Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B7. Envelope 2 (Financial), separately: its
+        Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B5, and Form B7 from your own
+        subcontracting answer when it applies (otherwise listed as not included, with why). Envelope 2 (Financial), separately: its
         cover, the Form of Offer and the printed Financial workbook - kept out of the technical pack because it is
         opened only after technical evaluation. The filled .xlsm workbooks come with them. Each contents page doubles as
         the pack&apos;s checklist - every document with its status (included, included with a warning such as an

@@ -204,13 +204,97 @@ def seed(client, work):
                                     "detail": "detailed", "status": "ready", "storage_path_pdf": sp,
                                     "completed_at": "2026-10-16T10:00:00+00:00"})
 
+    return request_job(client, cid, tender["id"], tp["id"])
+
+
+def request_job(client, cid, tender_id, pack_id):
     # Same columns the Tender Workspace's requestSubmissionPack() inserts.
-    job = client.insert("pack_generation_jobs", {
-        "company_id": cid, "tender_id": tender["id"], "tender_pack_id": tp["id"], "status": "requested",
+    return client.insert("pack_generation_jobs", {
+        "company_id": cid, "tender_id": tender_id, "tender_pack_id": pack_id, "status": "requested",
         "readiness_snapshot": {"mandatory_missing": [], "missing": ["B-BBEE proof"], "to_confirm": [],
                                "unfilled_positions": []},
         "acknowledged_gaps": True})
-    return job
+
+
+# Form B7 (0056). R.396 is category 3 on its SETUP sheet (subcontracting
+# required for every size) but its Book 1 waives B7; the test company is a QSE.
+R396_WAIVER = ("No sub-contracting requirement for all Entities and submission of form B7 is not required for this "
+               "project - refer to Clause 11.8 of the Conditions of Contract.")
+TE_PLAN = [{"name": "Mpilo Consulting Engineers (Pty) Ltd", "to_be_identified": False, "size": "EME",
+            "pct_of_contract": 20, "pct_excl_provisional": 20, "black_ownership_pct": 100, "bee_level": 1,
+            "head_office": "14 Murchison St, Ladysmith, 036 631 0000", "in_project_province": "YES",
+            "consulting_engineering_firm": "YES", "tax_reference": "9123456789"},
+           {"name": None, "to_be_identified": True, "size": "QSE", "pct_of_contract": 10,
+            "pct_excl_provisional": 10, "black_ownership_pct": 75, "bee_level": 2, "head_office": None,
+            "in_project_province": "NO", "consulting_engineering_firm": "YES", "tax_reference": None}]
+
+
+def b7_row(manifest):
+    return next(c for c in manifest["checklist"] if c["title"].startswith("Form B7"))
+
+
+def b7_stages(client, job, storage, work):
+    """(a) no answer -> the job fails with the B7 gate's reason; (b) the
+    company records R.396's Book 1 waiver -> ready, B7 NOT INCLUDED with the
+    quote; (c) the company gives a 2-TE plan -> ready, B7 included and the
+    filled workbook holds exactly the plan. Returns the last job's id."""
+    from sanral_fill import Workbook
+    ok = True
+
+    def expect(cond, msg):
+        nonlocal ok
+        print(("  ok   " if cond else "  FAIL ") + msg)
+        ok = ok and cond
+
+    cid, tid, pid = job["company_id"], job["tender_id"], job["tender_pack_id"]
+    print("\n[B7 a] no Form B7 answer on a category-3 tender")
+    bridge.process_pending(client, os.path.join(work, "jobs"), keep=True)
+    row = client.select("pack_generation_jobs", {"id": job["id"]})[0]
+    expect(row["status"] == "failed" and "Form B7" in (row["error_message"] or ""),
+           f"job {row['status']}: {(row['error_message'] or '')[:220]}")
+    setup = client.select("tenders", {"id": tid})[0]["sanral_b7_setup"] or {}
+    expect(setup.get("category") == 3 and setup.get("required_by_size", {}).get("QSE") is True,
+           f"tenders.sanral_b7_setup read from the uploaded workbook: {setup.get('category')}, {setup.get('required_by_size')}")
+
+    print("[B7 b] company records R.396's own Book 1 waiver")
+    client.insert("tender_subcontracting_plans", {"company_id": cid, "tender_id": tid, "mode": "waived_by_tender",
+                                                  "waiver_quote": R396_WAIVER, "targeted_enterprises": []})
+    jb = request_job(client, cid, tid, pid)
+    bridge.process_pending(client, os.path.join(work, "jobs"), keep=True)
+    row = client.select("pack_generation_jobs", {"id": jb["id"]})[0]
+    expect(row["status"] == "ready", f"job {row['status']} {row['error_message'] or ''}")
+    if row["status"] == "ready":
+        c = b7_row(row["manifest"])
+        expect(c["status"] == "not_included" and "Book 1" in (c["note"] or "") and "No sub-contracting" in c["note"],
+               f"checklist: {c['status']} - {c['note']}")
+
+    print("[B7 c] company gives its plan (2 Targeted Enterprises, one not named yet)")
+    client.update("tender_subcontracting_plans", {"company_id": cid, "tender_id": tid},
+                  {"mode": "subcontract", "waiver_quote": None, "targeted_enterprises": TE_PLAN,
+                   "comments": "Drainage and hydrology design support"})
+    jc = request_job(client, cid, tid, pid)
+    bridge.process_pending(client, os.path.join(work, "jobs"), keep=True)
+    row = client.select("pack_generation_jobs", {"id": jc["id"]})[0]
+    expect(row["status"] == "ready", f"job {row['status']} {row['error_message'] or ''}")
+    if row["status"] == "ready":
+        c = b7_row(row["manifest"])
+        expect(c["status"] in ("included", "included_warning") and c["pages"],
+               f"checklist: {c['status']} p{c['pages']} - {c['note']}")
+        x = Workbook(os.path.join(storage, "submission-packs", row["output_files"]["technical_xlsm"]))
+        T = "TEND 1X"
+        got = [x.cached(T, r) for r in ("D3904", "C3906", "J3906", "M3906", "D3908", "H3908", "M3908", "C3910",
+                                        "G3910", "J3910", "M3910", "C3914", "J3914", "D3916", "H3916", "M3916",
+                                        "G3918", "B3940")]
+        want = [3, "Mpilo Consulting Engineers (Pty) Ltd", "EME", 0.2, 1, 1, 0.2,
+                "14 Murchison St, Ladysmith, 036 631 0000", "YES", "YES", "9123456789",
+                "To be identified after tender award", "QSE", 0.75, 2, 0.1, "NO",
+                "Drainage and hydrology design support"]
+        expect(got == want, f"filled workbook Form B7 cells read back: {got}")
+        fb7 = row["manifest"].get("form_b7") or {}
+        expect(fb7.get("included") and fb7.get("targeted_enterprises") == 2 and fb7["applicability"]["status"] == "required",
+               f"manifest.form_b7: {json.dumps({k: fb7.get(k) for k in ('included', 'plan_mode', 'targeted_enterprises')})}, "
+               f"{fb7.get('applicability', {}).get('status')}")
+    return jc, ok
 
 
 def main():
@@ -222,10 +306,10 @@ def main():
     job = seed(client, work)
     print(f"seeded job {job['id']} (status {job['status']})")
 
-    n = bridge.process_pending(client, os.path.join(work, "jobs"), keep=True)
+    job, b7_ok = b7_stages(client, job, storage, work)
     row = client.select("pack_generation_jobs", {"id": job["id"]})[0]
-    print(f"processed {n} job(s); row status = {row['status']}, error = {row['error_message']}")
-    if row["status"] != "ready":
+    print(f"\nlast job: row status = {row['status']}, error = {row['error_message']}")
+    if row["status"] != "ready" or not b7_ok:
         sys.exit(1)
     pdf = os.path.join(storage, "submission-packs", row["storage_path_pdf"])
     problems = verify_pack(pdf, row["manifest"])

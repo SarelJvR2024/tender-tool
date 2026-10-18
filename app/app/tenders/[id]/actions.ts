@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
+import { loadB7State } from "./b7-data";
 import { advanceFoundToBidding } from "@/lib/pipeline";
 
 /**
@@ -84,7 +85,8 @@ export async function requestTenderCv(formData: FormData) {
  * Gating is recomputed here from the compliance report's own data
  * (loadTenderCompliance), not trusted from the form:
  *   - hard stop: a required position with no confirmed key person, a missing
- *     blank template, or a pack already queued/generating - the bridge would
+ *     blank template, SANRAL Form B7 applying with no answer from the company
+ *     (b7-data.ts), or a pack already queued/generating - the bridge would
  *     only fail (or duplicate the work);
  *   - explicit acknowledgement: any gap the report shows (mandatory or not,
  *     "confirm by hand", or a family whose returnable list isn't mapped).
@@ -114,6 +116,11 @@ export async function requestSubmissionPack(formData: FormData) {
     fail(`This tender's blank SANRAL templates aren't uploaded yet (${missingTemplates.join(", ")}).`);
   }
 
+  // SANRAL Form B7 (0056): same hard stop as an unconfirmed position - a B7
+  // that applies (or can't be ruled out) is never generated blank.
+  const b7 = await loadB7State(tenderId);
+  if (b7.blocker) fail(b7.blocker);
+
   const { data: active } = await supabase
     .from("pack_generation_jobs")
     .select("id")
@@ -124,7 +131,7 @@ export async function requestSubmissionPack(formData: FormData) {
 
   const hasGaps =
     !readiness.checked ||
-    readiness.mandatoryMissing.length + readiness.missing.length + readiness.toConfirm.length > 0;
+    readiness.mandatoryMissing.length + readiness.missing.length + readiness.toConfirm.length + b7.warnings.length > 0;
   if (hasGaps && !acknowledged) {
     fail("The compliance check shows gaps - tick the box to generate a draft pack anyway.");
   }
@@ -140,6 +147,7 @@ export async function requestSubmissionPack(formData: FormData) {
       missing: readiness.missing,
       to_confirm: readiness.toConfirm,
       unfilled_positions: readiness.unfilledPositions,
+      form_b7: { status: b7.applies.status, reason: b7.applies.reason, plan_mode: b7.plan?.mode ?? null, warnings: b7.warnings },
     },
     acknowledged_gaps: hasGaps && acknowledged,
     requested_by: user?.id ?? null,

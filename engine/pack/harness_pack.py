@@ -57,6 +57,19 @@ SYNTHETIC_VAULT = {
 }
 
 
+# Form B7 answers the harness gives, per tender - only what the tender's OWN
+# documents say (sanral_b7.py): R.396-010-2025/1F's Book 1 Form B7 page
+# (T-74) waives it. Every other sample has no Book 1 on file, so no answer is
+# given and its pack lists Form B7 as "REQUIRED but not answered" - the real
+# behaviour for a company that hasn't answered.
+TENDER_B7 = {
+    "R.396-010-2025.1F": {"mode": "waived_by_tender", "targeted_enterprises": [], "comments": None,
+                          "waiver_quote": "No sub-contracting requirement for all Entities and submission of form "
+                                          "B7 is not required for this project - refer to Clause 11.8 of the "
+                                          "Conditions of Contract."},
+}
+
+
 def tender_facts(slug):
     """The same public facts a real `tenders` row carries, read from the
     committed seed (app/supabase/seed_tenders.sql) - never typed in here."""
@@ -150,7 +163,7 @@ def run_pack_one(profile_path, slug, out_dir):
             forms_dir=os.path.join(FORMS, slug), tender=tender_facts(slug),
             work_dir=os.path.join(out_dir, "pack"),
             financial_tpl=financial if os.path.exists(financial) else None,
-            vault_docs=vault, cv_docs=cvs)
+            vault_docs=vault, cv_docs=cvs, subcontracting_plan=TENDER_B7.get(slug))
     except ValueError as e:
         return {"outcome": "refused", "stage": "build_submission_pack", "reason": str(e)}
 

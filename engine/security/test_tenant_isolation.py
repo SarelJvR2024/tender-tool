@@ -205,6 +205,12 @@ def sanral_tender(store, company_ids, templates=True):
                   family="Conventional Consultant Tender", owner_company_id=None)
     if templates:
         add_templates(store, t)
+    # Form B7 (0056): R.396's own Book 1 waives it - each company's recorded
+    # answer, so the pack gate (sanral_b7.py) passes for the companies here.
+    for cid in company_ids:
+        store.add("tender_subcontracting_plans", company_id=cid, tender_id=t["id"], mode="waived_by_tender",
+                  waiver_quote="No sub-contracting requirement for all Entities and submission of form B7 is not "
+                               "required for this project", targeted_enterprises=[], comments=None)
     return t
 
 
@@ -316,6 +322,8 @@ def part1():
     evil = s.put("cv-documents", f"{a['id']}/people/{b_person['id']}/uploads/evil.pdf", A_EVIL_BYTES)
     s.add("cv_uploads", company_id=a["id"], person_id=b_person["id"], mode="as_is", storage_path=evil,
           original_filename="evil.pdf", created_at="2026-09-01")  # newer than B's own
+    s.add("tender_subcontracting_plans", company_id=a["id"], tender_id=t["id"], mode="subcontract",
+          waiver_quote=None, comments=None, targeted_enterprises=[{"name": "ATTACKER TE", "size": "EME"}])
     pack = s.add("tender_packs", company_id=b["id"], tender_id=t["id"])
     for code in ("PL", "DS1"):
         s.add("tender_pack_assignments", tender_pack_id=pack["id"], position_code=code, confirmed_person_id=b_person["id"])
@@ -326,6 +334,8 @@ def part1():
     cv_files = [open(c["path"], "rb").read() for c in ((out or {}).get("cv_docs") or {}).values() if c.get("path")]
     check(cv_files and all(c == B_CV_BYTES for c in cv_files), "B's pack binds B's own CV upload, not A's injected file")
     check(not leaked_anywhere(work, [A_EVIL_BYTES]), "A's injected file nowhere in B's job folder")
+    check(((out or {}).get("subcontracting_plan") or {}).get("mode") == "waived_by_tender",
+          "B's pack carries B's own Form B7 answer")
     shutil.rmtree(work, ignore_errors=True)
 
     print("\n[4] CV bridge: A requests a CV for B's person")

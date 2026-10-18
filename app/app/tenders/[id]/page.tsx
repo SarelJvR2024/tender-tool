@@ -17,6 +17,7 @@ import { formatDay } from "@/lib/tenderUpdates";
 import { MarketContext } from "./market-context";
 import { ReusePastSubmission } from "./reuse-past-submission";
 import { TenderTemplates } from "./tender-templates";
+import { SubcontractingPlan } from "./subcontracting-plan";
 import { PositionPersonSelect } from "./position-person-select";
 import { startTenderPack } from "./pack-inputs-actions";
 import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
@@ -400,6 +401,7 @@ export default async function TenderWorkspacePage({
                 <JumpLink href="#activity" label="Notes & activity" />
                 {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
                 {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
+                {showSubmissionPack && <JumpLink href="#form-b7" label="Form B7" />}
               </div>
             )}
 
@@ -653,6 +655,9 @@ export default async function TenderWorkspacePage({
 
             {/* The tender's blank SANRAL templates, uploaded by hand (0025). */}
             {showSubmissionPack && <TenderTemplates tenderId={id} saved={saved === "template"} />}
+
+            {/* SANRAL Form B7: the company's own subcontracting answer (0056) - gates the pack below. */}
+            {showSubmissionPack && <SubcontractingPlan tenderId={id} saved={saved === "b7"} />}
 
             {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
             {showSubmissionPack && tenderPack && <SubmissionPack tenderId={id} tenderPackId={tenderPack.id} />}

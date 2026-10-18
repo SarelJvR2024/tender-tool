@@ -35,6 +35,11 @@ so two workers never build the same job), and then:
      'submission-packs' and marks the row 'ready' (or 'failed' with the
      reason - e.g. confirm_pack.py's or fingerprint.py's own refusal text).
 
+Every poll also records, per uploaded Technical workbook, SANRAL's Form B7
+category and subcontracting matrix from its SETUP sheet
+(tenders.sanral_b7_setup, sync_b7_setup) - and a pack job hard-stops when
+Form B7 applies and the company hasn't answered it (sanral_b7.py).
+
 Every poll also fills in tender_requirements for any tender whose blank
 Technical workbook has been uploaded (Tender Workspace, tender_documents) but
 whose key positions haven't been read yet: straight from that workbook's own
@@ -86,6 +91,7 @@ for p in (ENGINE_DIR, os.path.join(ENGINE_DIR, "pack_generator"), os.path.join(E
 import confirm_pack  # noqa: E402
 from suggest_pack import read_required_positions, score_candidate  # noqa: E402
 from sanral_fill import Workbook  # noqa: E402
+import sanral_b7  # noqa: E402
 from assemble_pack import build_submission_pack  # noqa: E402
 from pdf_merge import verify_pack  # noqa: E402
 from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
@@ -337,6 +343,20 @@ def template_paths(rows, company_id):
     return out
 
 
+PLAN_KEYS = ("mode", "waiver_quote", "targeted_enterprises", "comments")
+
+
+def subcontracting_plan_for(client, company_id, tender_id):
+    """This company's own Form B7 answer for this tender (migration
+    tender_subcontracting_plans), in sanral_b7.py's plan shape, or None."""
+    rows = client.select("tender_subcontracting_plans", {"company_id": company_id, "tender_id": tender_id})
+    if not rows:
+        return None
+    plan = {k: rows[0].get(k) for k in PLAN_KEYS}
+    plan["targeted_enterprises"] = plan.get("targeted_enterprises") or []
+    return plan
+
+
 def gather(client, job, work):
     """Downloads/reads everything for one job into `work`. Returns the kwargs
     for build_submission_pack() plus the path of the confirmed pack.yaml."""
@@ -379,6 +399,24 @@ def gather(client, job, work):
     if unassigned:
         raise ValueError(f"No confirmed key person for position(s) {', '.join(unassigned)} required on this "
                          "tender's SETUP sheet - confirm one for each before generating the pack.")
+
+    # Form B7 (Targeted Enterprise subcontracting): the company's own answer
+    # (tender_subcontracting_plans), checked against what THIS template's
+    # SETUP sheet says (category + SANRAL's matrix) and the company's size.
+    # Same hard stop as an unconfirmed position: a B7 that applies (or can't
+    # be ruled out) is never generated blank or from a default.
+    b7_plan = subcontracting_plan_for(client, company["id"], tender["id"])
+    b7_applies = sanral_b7.applicability(sanral_b7.read_setup(Workbook(technical)), company.get("status"), b7_plan)
+    if b7_applies["needs_plan"] and not b7_plan:
+        raise ValueError("Form B7 (subcontracting to Targeted Enterprises) applies to this tender and hasn't been "
+                         f"answered: {b7_applies['reason']}. Give your subcontracting plan on the Tender Workspace "
+                         "(Form B7 card) - or, if the tender's own Book 1 says B7 is not required, record that there "
+                         "- before generating the pack.")
+    if b7_plan:
+        b7_errors, _ = sanral_b7.check_plan(b7_plan, b7_applies)
+        if b7_errors:
+            raise ValueError("Form B7 subcontracting plan: " + "; ".join(b7_errors)
+                             + " - correct it on the Tender Workspace (Form B7 card).")
 
     # People: the signatory first (fill_docx_forms.py / fill_a_forms.py read
     # key_people[0] as the signatory), then every confirmed key person.
@@ -518,7 +556,7 @@ def gather(client, job, work):
         tender={"contract_no": tender.get("contract_no"), "nra_reference": tender.get("nra_reference"),
                 "description": tender.get("description"), "closing_date": closing, "closing_time": closing_time},
         financial_tpl=financial, financial_hours_capture=hours, logo_path=logo,
-        vault_docs=vault, cv_docs=cvs,
+        vault_docs=vault, cv_docs=cvs, subcontracting_plan=b7_plan,
     )
 
 
@@ -683,6 +721,47 @@ def sync_tender_requirements(client, work_root):
     return written
 
 
+def sync_b7_setup(client, work_root):
+    """tenders.sanral_b7_setup from an uploaded blank Technical workbook's own
+    SETUP sheet (category + SANRAL's subcontracting matrix, sanral_b7.
+    read_setup) - for tenders not read yet, or whose workbook was replaced
+    since. That is what lets the Tender Workspace's Form B7 card say whether
+    B7 applies. One copy per tender: the shared buyer-published copy when
+    there is one, else the earliest company upload (0045) - the category is
+    SANRAL's own value, the same in every copy. tenders is readable by every
+    company, so only a hash of the copy's storage path is kept (a company's
+    path carries its company id). Pack jobs re-read their own copy anyway
+    (gather()). Returns {tender_id: setup}; a workbook that can't be read is
+    reported and skipped."""
+    import hashlib
+    written = {}
+    docs = client.select("tender_documents", {"doc_type": "technical_xlsm"})
+    if not docs:
+        return written
+    chosen = {}
+    for d in sorted(docs, key=lambda d: (d.get("company_id") is not None, str(d.get("downloaded_at") or ""))):
+        chosen.setdefault(d["tender_id"], d)
+    have = {t["id"]: t.get("sanral_b7_setup") for t in client.select("tenders", {"id": list(chosen)})}
+    for tid, d in chosen.items():
+        key = hashlib.sha256(d["storage_path"].encode()).hexdigest()[:16]
+        if tid not in have or (have[tid] or {}).get("source_key") == key:
+            continue
+        local = os.path.join(work_root, "b7_setup", tid, "technical.xlsm")
+        try:
+            client.download("tender-documents", d["storage_path"], local)
+            setup = dict(sanral_b7.read_setup(Workbook(local)), source_key=key, read_at=_ts())
+            client.update("tenders", {"id": tid}, {"sanral_b7_setup": setup})
+            written[tid] = setup
+            print(f"[b7] tender {tid}: category {setup['category']}, subcontracting by size {setup['required_by_size']}")
+        except Exception as e:
+            print(f"[b7] tender {tid}: could not read the Technical workbook's SETUP sheet ({type(e).__name__}: {e})")
+            system_alerts.record("pack", f"Could not read Form B7 category from an uploaded Technical workbook "
+                                         f"({type(e).__name__}: {e})", "error", exc=e, context={"tender_id": tid})
+        finally:
+            shutil.rmtree(os.path.dirname(local), ignore_errors=True)
+    return written
+
+
 SANRAL_FAMILIES = ("Conventional Consultant Tender", "RRM Consultant Tender")
 CANDIDATE_KEYS = ("person_id", "name", "score", "years_experience", "ecsa_level", "matched", "missing",
                   "specialism_warning", "rationale")
@@ -766,6 +845,7 @@ def process_pending(client, work_root, keep=False, quiet_when_empty=False):
     os.makedirs(work_root, exist_ok=True)
     fail_stale_jobs(client)
     sync_tender_requirements(client, work_root)
+    sync_b7_setup(client, work_root)
     sync_position_suggestions(client)
     jobs = client.select("pack_generation_jobs", {"status": "requested", "engine": ENGINE}, order="requested_at.asc")
     if not jobs and not quiet_when_empty:

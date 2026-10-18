@@ -117,6 +117,9 @@ jobs:
       - name: Company letters - uploaded as-is / own guideline / not set up (docx read-back)
         run: python3 engine/test_company_documents.py "$RUNNER_TEMP/company-documents"
 
+      - name: SANRAL Form B7 - category + matrix from the real templates, applicability, fill read-back
+        run: python3 engine/test_sanral_b7.py
+
       - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
         run: python3 engine/security/test_tenant_isolation.py
 

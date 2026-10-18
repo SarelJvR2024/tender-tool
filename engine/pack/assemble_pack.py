@@ -68,6 +68,7 @@ import fill_authority_letter  # noqa: E402
 import company_documents  # noqa: E402
 from provenance import ProvenanceLog  # noqa: E402
 import make_envelope_covers  # noqa: E402
+import sanral_b7  # noqa: E402
 from sanral_fill import Workbook, n2col  # noqa: E402
 from generate_cv import _convert_to_pdf  # noqa: E402
 from pdf_merge import merge_with_contents, expiry_warning  # noqa: E402
@@ -169,7 +170,7 @@ def positions_on_setup(xlsm):
 
 def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tender, work_dir,
                           financial_tpl=None, financial_hours_capture=None, logo_path=None,
-                          vault_docs=None, cv_docs=None, fingerprint_store=None):
+                          vault_docs=None, cv_docs=None, fingerprint_store=None, subcontracting_plan=None):
     """
     profile:     dict in config/*_profile.json shape (key_people[0] = the signatory,
                  same convention fill_docx_forms.py / fill_a_forms.py already use)
@@ -179,6 +180,10 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
                  own SETUP sheet; nothing else is ever invented
     vault_docs:  {key: local path or None} for the keys in VAULT_ORDER / ISO_KEY
     cv_docs:     {position_code: {"path", "person", "source"}} or {position_code: None}
+    subcontracting_plan: the company's own Form B7 answer (tender_subcontracting_plans
+                 row shape: {"mode": "subcontract"|"waived_by_tender", ...}) or None -
+                 see engine/sanral_b7.py. Never defaulted: with no answer, a B7 that
+                 applies is listed as NOT INCLUDED, required and unanswered.
     Returns (pdf_path, manifest). pdf_path is the technical pack; the separate
     Envelope 2 PDF is manifest["outputs"]["financial_pdf"], described by
     manifest["financial"] (same shape as the top-level manifest's
@@ -211,12 +216,38 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     slug = re.sub(r"[^A-Za-z0-9.]+", "-", contract_no).strip("-") or "tender"
     contract_label = contract_no
 
+    # 1b. Form B7 (Targeted Enterprise subcontracting): does it apply to this
+    # tender and this company (category from the template's own SETUP sheet +
+    # SANRAL's matrix there + the company's size), and what did the company
+    # answer? sanral_b7.py. A plan with errors refuses here (ValueError, the
+    # user's to fix) rather than half-filling the form.
+    pack_data = yaml.safe_load(open(pack_yaml)) or {}
+    b7_setup = sanral_b7.read_setup(wb)
+    legacy_te = (pack_data.get("tender") or {}).get("targeted_enterprise")
+    b7_plan = subcontracting_plan or (pack_data.get("tender") or {}).get("subcontracting_plan")
+    b7_applies = sanral_b7.applicability(b7_setup, (profile.get("company") or {}).get("status"), b7_plan)
+    b7_warnings = []
+    if b7_plan:
+        b7_errors, b7_warnings = sanral_b7.check_plan(b7_plan, b7_applies)
+        if b7_errors:
+            raise ValueError("Form B7 subcontracting plan: " + "; ".join(b7_errors)
+                             + " - correct it on the Tender Workspace (Form B7 card).")
+    # The filler reads the plan from its pack.yaml: a copy with it added, used
+    # for the Technical workbook fill only (the other steps keep the confirmed
+    # pack.yaml and its pack_suggestions.json sibling).
+    fill_yaml = pack_yaml
+    if subcontracting_plan:
+        pack_data.setdefault("tender", {})["subcontracting_plan"] = subcontracting_plan
+        fill_yaml = os.path.join(work_dir, "pack_with_b7.yaml")
+        yaml.safe_dump(pack_data, open(fill_yaml, "w"), sort_keys=False)
+    b7_filled = (b7_plan or {}).get("mode") == "subcontract" or (bool(legacy_te) and not b7_plan)
+
     # 2. Technical Submission workbook (the real filler for this family)
     filled_xlsm = os.path.join(tech_dir, f"{slug}_FILLED.xlsm")
     # Returns notes for projects left off a position's Form B1 because that
     # position's form doesn't offer their project type (sanral_fill.
     # projects_for_block) - surfaced on the contents page, never silent.
-    warnings += FILLERS[family].main(technical_tpl, pack_yaml, filled_xlsm) or []
+    warnings += FILLERS[family].main(technical_tpl, fill_yaml, filled_xlsm) or []
 
     # 3. Form B print reports (print_reports.py, LibreOffice headless). Imported
     # here, not at module top: it needs the `uno` bridge, which only exists on
@@ -410,7 +441,21 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     # is the one Financial-workbook page that belongs in Envelope 1 as well.
     sections.append(sec("Form C2.4 FIN - key persons' normalised hours (copy from the Financial workbook, "
                         "as generated)", TECHNICAL, c24_pdf, c24_note))
-    sections.append(sec("Form B7", TECHNICAL, reports.get("Form B7")))
+    if b7_filled:
+        sections.append(sec("Form B7 - Subcontracting to Targeted Enterprises (sign with each Targeted Enterprise)",
+                            TECHNICAL, reports.get("Form B7"),
+                            warning="; ".join(b7_warnings) or None))
+        warnings.append("Form B7: SANRAL asks for a duplicate hard copy signed by both the tenderer and each "
+                        "Targeted Enterprise / sub-contractor, with each one's B-BBEE proof (and proof of address "
+                        "for one based in the project's province).")
+    elif b7_applies["needs_plan"]:
+        b7_reason = ("REQUIRED but not answered - " + b7_applies["reason"]
+                     + ". Give your subcontracting plan on the Tender Workspace (Form B7 card)")
+        sections.append(sec("Form B7 - Subcontracting to Targeted Enterprises", TECHNICAL, None, b7_reason))
+        warnings.append("Form B7 is not in this pack: " + b7_reason + ".")
+    else:
+        sections.append(sec("Form B7 - Subcontracting to Targeted Enterprises", TECHNICAL, None,
+                            b7_applies["reason"][:1].upper() + b7_applies["reason"][1:]))
 
     fin_sections = [
         sec("Envelope 2 cover - Financial Submission", FINANCIAL,
@@ -465,6 +510,12 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
         "financial": fin_manifest,
         # Each company-owned document and how it was produced (uploaded as-is /
         # generated from the company's guideline / not set up).
+        # Form B7: whether it applied, why, and what was filled (sanral_b7.py).
+        "form_b7": {"setup": b7_setup, "applicability": b7_applies, "included": bool(b7_filled),
+                    "plan_mode": (b7_plan or {}).get("mode") or ("legacy_pack_yaml" if legacy_te else None),
+                    "targeted_enterprises": len((b7_plan or {}).get("targeted_enterprises") or [])
+                    if b7_plan else (1 if legacy_te else 0),
+                    "warnings": b7_warnings},
         "company_documents": {"authority_to_sign": {k: letter.get(k) for k in ("status", "method", "path", "reason")}},
         "outputs": {
             "pdf": out_pdf,
