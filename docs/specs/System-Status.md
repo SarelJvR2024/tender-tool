@@ -6,7 +6,10 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18, ~12:15 UTC — no new commits since the last check-in; `npm run
+Last full pass: 2026-10-18, ~14:15 UTC — quiet check-in, 2 small low-risk commits verified (a
+Discovery mobile-layout fix - stranded right-rail column, no System-Status entry of its own
+until now; and a one-line `is not None` fix for an undercounted R0,00 award in a diagnostic
+summary - below). ~12:15 UTC — no new commits since the last check-in; `npm run
 typecheck`/`lint` re-confirmed clean. ~10:20 UTC — quiet check-in, 2 small low-risk commits
 verified (a Login/Onboarding mobile-overflow fix, and a QA log entry with no code change -
 below). ~08:30 UTC — independently verified the last 4 commits (below):
@@ -1003,6 +1006,22 @@ full-repo search) and nothing else references it - the open item below appears t
 place that name was ever written down, and the "decision" it was meant to record was never made.
 Item (b) (`how_we_work` on the Tender Workspace) is untouched by this pass, per instruction, and
 stays open below.
+
+## Quiet check-in (2026-10-18, ~14:15 UTC)
+
+Two commits, both small and already well-verified; one had no System-Status entry of its own:
+
+- `57e66ba` - Discovery's opportunity cards split into a flexible main column and a fixed
+  `180px` right rail (closing date, "Prepare this tender", document links). On a phone the rail
+  always wraps to its own line but kept its fixed width there too, stranding the page's primary
+  action in a cramped sliver with empty space beside it. Fixed with the same `<style>` + media-
+  query override pattern already used on the Person and Experience pages (desktop untouched).
+  Read the diff in full - purely additive, no logic touched. Re-ran `npm run typecheck`/`lint`:
+  both clean.
+- `41d875a` - already has its own entry just below (ninth QA run). Re-ran `test_award_outcomes.py`
+  and `test_award_prices.py` myself: 0 failures both, confirming the fix.
+
+Nothing further needed this pass.
 
 ## This pass (2026-10-18, standing QA/robustness review - ninth run)
 
