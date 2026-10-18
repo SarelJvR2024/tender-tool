@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { addBusinessDays, businessDaysBetween, holidaysForYear, isPublicHoliday, isWeekend } from "@/lib/publicHolidays";
 
@@ -12,11 +12,29 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function subscribeNever() {
+  return () => {};
+}
+
+function getServerToday() {
+  return "";
+}
+
+// Reading the current date has to go through useSyncExternalStore, not a
+// plain `new Date()` call in the component body or a setState-in-effect:
+// this route is static-prerendered, and Next.js's build rejects a
+// prerender-time read of the current time outright. useSyncExternalStore's
+// getServerSnapshot (empty string) is what the prerender actually sees;
+// `today()` only runs once this is live in a real browser.
 export default function DeadlineCalculatorPage() {
   const [mode, setMode] = useState<"add" | "count">("add");
-  const [startDate, setStartDate] = useState(today());
+  const clientToday = useSyncExternalStore(subscribeNever, today, getServerToday);
+  const [startDateInput, setStartDateInput] = useState("");
   const [days, setDays] = useState(10);
-  const [endDate, setEndDate] = useState(today());
+  const [endDateInput, setEndDateInput] = useState("");
+
+  const startDate = startDateInput || clientToday;
+  const endDate = endDateInput || clientToday;
 
   const addResult = useMemo(() => {
     try {
@@ -34,11 +52,12 @@ export default function DeadlineCalculatorPage() {
     }
   }, [startDate, endDate]);
 
-  const year = new Date(startDate || today()).getFullYear() || new Date().getFullYear();
   const upcomingHolidays = useMemo(() => {
+    if (!startDate) return [];
+    const year = new Date(startDate + "T00:00:00Z").getUTCFullYear();
     const all = [...holidaysForYear(year), ...holidaysForYear(year + 1)];
-    return all.filter((h) => h.date >= (startDate || today())).slice(0, 6);
-  }, [year, startDate]);
+    return all.filter((h) => h.date >= startDate).slice(0, 6);
+  }, [startDate]);
 
   return (
     <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
@@ -74,7 +93,7 @@ export default function DeadlineCalculatorPage() {
         <div style={{ ...CARD, marginBottom: 20 }}>
           <div style={{ marginBottom: 16 }}>
             <label style={LABEL} htmlFor="start">{mode === "add" ? "Start date" : "From date"}</label>
-            <input id="start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} style={INPUT} />
+            <input id="start" type="date" value={startDate} onChange={(e) => setStartDateInput(e.target.value)} style={INPUT} />
           </div>
 
           {mode === "add" ? (
@@ -96,7 +115,7 @@ export default function DeadlineCalculatorPage() {
             <>
               <div style={{ marginBottom: 16 }}>
                 <label style={LABEL} htmlFor="end">To date</label>
-                <input id="end" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} style={INPUT} />
+                <input id="end" type="date" value={endDate} onChange={(e) => setEndDateInput(e.target.value)} style={INPUT} />
               </div>
               {countResult.error ? (
                 <p style={{ color: "#B91C1C", fontSize: 13 }}>{countResult.error}</p>
