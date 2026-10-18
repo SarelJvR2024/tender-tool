@@ -778,3 +778,48 @@ existing convention. There are no new F-class findings.
   then fails on a later pursuer of the **same** tender, the first pursuer's rows are marked
   alerted but are left out of this run's alert report. The daily digest still carries them
   (`digested_at` is null), so the update reaches that company a day late rather than never.
+
+---
+
+## 2026-10-18 (eighth run): worker/job-queue spot-check, and closing out Finding 2's deferred item
+
+**Context:** the rotation's remaining untouched area was worker/job-queue, but a sibling run
+(seventh run + its follow-up, above) had just landed a thorough repo-wide sweep closing out the
+exact bug class this review had been finding one engine at a time - including the worker/alerts
+machinery (`system_alerts`, `run_bridges.py`'s per-bridge isolation). Pulled latest `main` first
+and confirmed all eight of this review's own prior fixes (five from this session, three from the
+sibling sweep's own commits) are still in place. Rather than force a thin pass over code another
+session had just finished scrutinising, read `poll_loop.py` and `run_bridges.py` in full and
+spot-checked one specific thing worth verifying directly rather than trusting the comment: the
+`BridgeRunner`'s `TimeoutExpired` handling does `(e.stdout or b"") + (e.stderr or b"")`, which
+looks like a `str`/`bytes` mismatch risk given `subprocess.run(..., text=True)` - checked for
+real with a script that times out with partial stdout and no stderr: confirmed `TimeoutExpired`'s
+own `.stdout`/`.stderr` stay `bytes` even under `text=True` (a real, if obscure, `subprocess`
+quirk - the text decoding only applies to a `CompletedProcess`, which a timeout never produces),
+so the existing code is correct as written, not a bug. Worth recording so the next person reading
+that line doesn't re-flag it without checking.
+
+Spent the rest of this run closing out a deferred item from the very first run instead of forcing
+a shallow pass elsewhere - consistent with "go deeper rather than repeat shallow checks" once a
+rotation has been through every area at least once.
+
+### Finding 2, closed: `sanralScoring.ts`'s `estimatePosition()` verified clean across all 8 Book 1
+Design Specialist disciplines, not just Pavement and Materials
+
+Ran `estimatePosition()` directly (`npx tsx`, no Supabase or build step needed - a pure function)
+for each of the 8 `DS_SPECIALISMS` entries in `sanralMatrices.ts`, each matched to its own real
+Book 1 matrix. Two real mistakes in my OWN test construction were caught before being mistaken
+for engine bugs, worth recording as a methodology note: using a matrix's first *column* value as
+both the experience-type (a *row* key) and the tender's required type initially produced
+`{min:0,max:0}` for `DS_GEOTECHNICAL` and `DS_TRAFFIC_TRANSPORTATION` - looked like a bug, but
+those two matrices (and only those two, confirmed by printing every matrix's actual rows vs.
+columns) genuinely use different vocabularies for rows and columns, matching Book 1's own layout
+for them specifically (every other DS matrix happens to use the same labels for both axes). Reran
+with a real row key for each: all 8 specialisms correctly score the maximum (15/15 technical) for
+a project matching the tender's exact required type, with the same "only 1 project on file"
+range-widening note every specialism gets. Also checked `matrixForPosition()`'s regex matching
+on ambiguous/edge descriptions directly: a description naming two specialisms ("Structures and
+Geotechnical") resolves to the first match in `DS_SPECIALISMS`'s declared order (documented,
+intended behaviour); a bare "DS1" with no specialism text, and an empty or `null` description,
+all correctly return `matrix: null` (the honest unknown-range fallback) rather than crashing or
+guessing. **No bug found** - this closes Finding 2 clean rather than leaving it open.
