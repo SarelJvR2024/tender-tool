@@ -278,6 +278,51 @@ def adapt_person(row, projects):
     }
 
 
+UPDATE_KINDS = ("addendum", "clarification", "revised_document")
+
+
+def tender_updates_on_record(client, tender_id):
+    """Addenda / clarifications / revised documents the tender-updates watch
+    recorded for this tender (tender_watched_documents, 0039; baseline rows
+    are what was published at discovery), for Form A16. [] = watched, none
+    recorded; None = couldn't be read."""
+    try:
+        rows = client.select("tender_watched_documents", {"tender_id": tender_id, "baseline": "false"},
+                             order="date_published.asc.nullslast")
+    except Exception:  # noqa: BLE001 - not readable here: A16 says "list by hand"
+        return None
+    return [{"date": (r.get("date_published") or r.get("first_seen_at") or "")[:10] or None,
+             "title": r.get("title") or r.get("summary")}
+            for r in rows if r.get("kind") in UPDATE_KINDS]
+
+
+def directors_on_record(client, company_id):
+    """The company's directors / members from its own register
+    (company_principals, 0050: role director or both) for C.1.2.3's "Name of
+    Partners, Members or Directors" table - name, appointment date, position,
+    and the professional registration number of a linked person (ECSA, else
+    SACPCMP). [] = register empty; None = couldn't be read (the filler then
+    falls back to companies.director_name)."""
+    try:
+        rows = client.select("company_principals", {"company_id": company_id}, order="created_at.asc")
+    except Exception:  # noqa: BLE001 - not readable here: the single director_name row is used
+        return None
+    rows = [r for r in rows if r.get("role") in ("director", "both")]
+    linked = [r["person_id"] for r in rows if r.get("person_id")]
+    people = {}
+    if linked:
+        try:
+            people = {p["id"]: p for p in client.select("people", {"id": linked, "company_id": company_id})}
+        except Exception:  # noqa: BLE001
+            people = {}
+    out = []
+    for r in rows:
+        person = people.get(r.get("person_id")) or {}
+        out.append({"name": r.get("full_name"), "appointed_on": r.get("appointed_on"), "designation": r.get("position"),
+                    "registration_number": person.get("ecsa_number") or person.get("sacpcmp_number")})
+    return out
+
+
 def _strip_nulls_for_confirm(proj):
     # confirm_pack.py checks `"client_type" not in proj` - a key present with a
     # None value would slip past that check and reach the filler as None. Drop
@@ -425,7 +470,28 @@ def gather(client, job, work):
     if not signatories:
         raise ValueError("No person at this company has a signatory capacity set (People page) - the "
                          "Form of Offer, A-Forms and authority letter need a named signatory.")
-    person_ids = [signatories[0]["id"]] + [by_code[p["code"]]["confirmed_person_id"] for p in required]
+    # Who signs THIS bid: the tender's own answer when one is recorded
+    # (tender_answers 'signatory_person_id', the general flow's "Who signs
+    # this bid?"), else the company's first signatory. Form-Field-Audit
+    # 2026-10-18: it used to be the first signatory, silently - right for a
+    # company with one signatory (Klipcorp), a guess for one with several.
+    pack_notes = []
+    signatory = signatories[0]
+    try:
+        chosen = client.select("tender_answers", {"company_id": company["id"], "tender_id": tender["id"],
+                                                  "field_key": "signatory_person_id"})
+    except Exception:  # noqa: BLE001 - an unreadable answer leaves the default + its note
+        chosen = []
+    chosen_id = (chosen[0].get("value") if chosen else None) or None
+    if chosen_id and any(s["id"] == chosen_id for s in signatories):
+        signatory = next(s for s in signatories if s["id"] == chosen_id)
+    elif len(signatories) > 1:
+        others = ", ".join(f"{s['name']} ({s['signatory_capacity']})" for s in signatories[1:])
+        pack_notes.append(f"Signatory: {signatory['name']} ({signatory['signatory_capacity']}) signs every form in this "
+                          f"pack because they were the first person given a signatory capacity - {others} can also "
+                          "sign. Nothing on this tender says who signs; regenerate after choosing if it should be "
+                          "someone else.")
+    person_ids = [signatory["id"]] + [by_code[p["code"]]["confirmed_person_id"] for p in required]
     person_ids = list(dict.fromkeys(person_ids))
     # This company's people only: confirmed_person_id is written by the client
     # and the service role sees every company's people (POPIA-Security-Audit).
@@ -455,7 +521,9 @@ def gather(client, job, work):
     for p in required:
         base = re.sub(r"\d+$", "", p["code"].strip().upper())
         role_people.setdefault(base, key_people[index_of[by_code[p["code"]]["confirmed_person_id"]]])
-    profile = {"company": adapt_company(company), "key_people": key_people, "role_people": role_people}
+    profile = {"company": adapt_company(company), "key_people": key_people, "role_people": role_people,
+               "pack_notes": pack_notes, "tender_updates": tender_updates_on_record(client, tender["id"])}
+    profile["company"]["principals"] = directors_on_record(client, company["id"])
 
     # pack.yaml via confirm_pack.py's own confirm(), so its gates still apply.
     dp = os.path.join(work, "data_pack")
@@ -554,7 +622,10 @@ def gather(client, job, work):
     return dict(
         profile=profile, pack_yaml=pack_path, technical_tpl=technical, forms_dir=forms_dir,
         tender={"contract_no": tender.get("contract_no"), "nra_reference": tender.get("nra_reference"),
-                "description": tender.get("description"), "closing_date": closing, "closing_time": closing_time},
+                "description": tender.get("description"), "closing_date": closing, "closing_time": closing_time,
+                # read from the tender's own Tender Notice at intake (process_general_jobs)
+                "delivery_address": (((tender_pack.get("intake") or {}).get("delivery_address")
+                                      or (tender.get("intake") or {}).get("delivery_address")) or {}).get("lines")},
         financial_tpl=financial, financial_hours_capture=hours, logo_path=logo,
         vault_docs=vault, cv_docs=cvs, subcontracting_plan=b7_plan,
     )

@@ -187,6 +187,9 @@ export function sanralConventionalDocumentChecks(input: {
   // as an assumption there when the tender's rule hasn't been read. When
   // given, it replaces the fixed SANRAL-B6 reading below.
   evidence?: { status: ComplianceStatus; label: string; detail: string } | null;
+  // The company's own A2 letter of authority (company_document_templates, 0037):
+  // "uploaded" / "ai_guideline", null = not set up. undefined = not looked up.
+  authorityLetter?: "uploaded" | "ai_guideline" | null;
 }): ComplianceItem[] {
   const c = input.company;
   const items: ComplianceItem[] = [];
@@ -346,8 +349,26 @@ export function sanralConventionalDocumentChecks(input: {
       form: "A2",
       label: "Certificate of authority for signatory",
       mandatory: false,
-      status: c?.director_name ? fill.status ?? "have" : "missing",
-      detail: (c?.director_name ? `Director on file (${c.director_name}) to sign the resolution.` : "No director name on file to authorise the signatory.") + fill.note,
+      // Form-Field-Audit 2026-10-18: this used to be "have" whenever a
+      // director's name was on file (the director signs the resolution - true
+      // at Klipcorp, where the director is also the signatory). What the pack
+      // actually binds in as A2 is the company's OWN letter (0037), so that is
+      // what decides the status; the director's name is detail only (and there
+      // is no Company-page field for it).
+      status:
+        input.authorityLetter === undefined
+          ? c?.director_name ? fill.status ?? "have" : "missing"
+          : input.authorityLetter
+            ? fill.status ?? "have"
+            : "missing",
+      detail:
+        (input.authorityLetter === undefined
+          ? c?.director_name ? `Director on file (${c.director_name}) to sign the resolution.` : "No director name on file to authorise the signatory."
+          : input.authorityLetter
+            ? `Your own letter of authority is set up (${input.authorityLetter === "uploaded" ? "your uploaded letter, used as-is" : "generated from your guideline"}) - it goes into the pack to be signed.`
+            : "Your letter of authority isn't set up - upload your own or give your guideline on the Company page (Letters & documents); the pack leaves A2 out until then.") +
+        (input.authorityLetter !== undefined && c?.director_name ? ` Director on file: ${c.director_name}.` : "") +
+        fill.note,
     });
   }
 

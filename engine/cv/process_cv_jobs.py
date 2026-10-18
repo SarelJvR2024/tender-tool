@@ -170,6 +170,10 @@ def adapt_person_row(person_row, project_rows):
             "initial_description": person_row.get("initial_description"),
             "initial_institution": person_row.get("initial_institution"),
             "initial_graduated": person_row.get("initial_graduated"),
+            # 0040: other professional bodies - printed only when held, so a
+            # geologist's / surveyor's CV isn't reduced to "ECSA: MISSING".
+            **{k: person_row.get(k) for k in ("sacnasp_category", "sacnasp_number", "sacnasp_expiry",
+                                              "sagc_category", "sagc_number", "sagc_expiry")},
         },
         "projects": [adapt_project_row(p) for p in project_rows],
     }

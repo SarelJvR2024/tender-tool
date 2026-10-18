@@ -247,7 +247,11 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     # Returns notes for projects left off a position's Form B1 because that
     # position's form doesn't offer their project type (sanral_fill.
     # projects_for_block) - surfaced on the contents page, never silent.
-    warnings += FILLERS[family].main(technical_tpl, fill_yaml, filled_xlsm) or []
+    tech_log = ProvenanceLog(f"{FILLERS[family].__name__}.py")
+    warnings += FILLERS[family].main(technical_tpl, fill_yaml, filled_xlsm, tech_log) or []
+    # Notes the Supabase bridge made while gathering (e.g. which of several
+    # signatories signs) - printed on the contents page with the rest.
+    warnings += list(profile.get("pack_notes") or [])
 
     # 3. Form B print reports (print_reports.py, LibreOffice headless). Imported
     # here, not at module top: it needs the `uno` bridge, which only exists on
@@ -332,7 +336,7 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     # [NOT ON FILE] field or "not set up" item too.
     merged = os.path.join(forms_out, "field_provenance.json")
     if os.path.exists(merged):
-        entries = json.load(open(merged)) + letter_log.entries
+        entries = json.load(open(merged)) + tech_log.entries + letter_log.entries
         json.dump(entries, open(merged, "w"), indent=2)
         run_forms_pipeline.generate_action_checklist.main(
             forms_out, contract_label, merged, run_forms_pipeline.specialism_note_from_pack(pack_yaml))
@@ -347,13 +351,22 @@ def build_submission_pack(*, profile, pack_yaml, technical_tpl, forms_dir, tende
     else:
         time_txt = closing_time or "the time stated in the Tender Data"
         args = (profile, logo_path, forms_out, f"SANRAL {contract_no}", nra_ref, description, closing, time_txt)
+        # The tender box address is the tender's own (its Tender Notice), never
+        # a fixed SANRAL address - R.396's is the Southern Region office in
+        # Gqeberha, not head office in Pretoria (Form-Field-Audit 2026-10-18).
+        delivery = tender.get("delivery_address")
+        if not delivery:
+            warnings.append("Envelope covers: no delivery address on file for this tender - the covers are addressed "
+                            "to SANRAL without a street/box address. Write the tender-box address from this tender's "
+                            "Tender Notice (Book 1) on each envelope.")
         covers = {
-            "outer": make_envelope_covers.make_outer(*args),
+            "outer": make_envelope_covers.make_outer(*args, delivery_address=delivery),
             "technical": make_envelope_covers.make_inner(*args, 1, "TECHNICAL SUBMISSION",
-                                                         "CONTAINS NO PRICING INFORMATION"),
+                                                         "CONTAINS NO PRICING INFORMATION", delivery_address=delivery),
             "financial": make_envelope_covers.make_inner(
                 *args, 2, "FINANCIAL SUBMISSION",
-                "CONTAINS PRICING - TO BE OPENED ONLY AFTER TECHNICAL EVALUATION IS COMPLETE"),
+                "CONTAINS PRICING - TO BE OPENED ONLY AFTER TECHNICAL EVALUATION IS COMPLETE",
+                delivery_address=delivery),
         }
 
     def docx_pdf(path):

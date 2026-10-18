@@ -61,7 +61,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   const readiness = packReadiness(await loadTenderCompliance(tenderId));
   const b7 = await loadB7State(tenderId);
 
-  const [{ data: docRows }, { data: jobRows }] = await Promise.all([
+  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }] = await Promise.all([
     supabase.from("tender_documents").select("doc_type").eq("tender_id", tenderId),
     supabase
       .from("pack_generation_jobs")
@@ -69,7 +69,13 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       .eq("tender_id", tenderId)
       .order("requested_at", { ascending: false })
       .limit(5),
+    // Everyone who can sign (People page signatory capacity), oldest first -
+    // the pack's default when no one is chosen for this tender.
+    supabase.from("people").select("id, name, signatory_capacity").not("signatory_capacity", "is", null).order("created_at"),
+    supabase.from("tender_answers").select("value").eq("tender_id", tenderId).eq("field_key", "signatory_person_id").maybeSingle(),
   ]);
+  const signers = (signerRows ?? []) as { id: string; name: string; signatory_capacity: string }[];
+  const chosenSigner = (signerAnswer?.value as string | null | undefined) ?? "";
   const jobs = (jobRows ?? []) as PackJob[];
   const onFile = new Set((docRows ?? []).map((d) => d.doc_type as string));
   const missingTemplates = PACK_REQUIRED_TEMPLATES.filter((t) => !onFile.has(t));
@@ -152,6 +158,18 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
         <form action={requestSubmissionPack} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input type="hidden" name="tender_id" value={tenderId} />
           <input type="hidden" name="tender_pack_id" value={tenderPackId} />
+          {signers.length > 1 && (
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B", flexWrap: "wrap" }}>
+              Who signs this bid
+              <select name="signatory_person_id" defaultValue={signers.some((p) => p.id === chosenSigner) ? chosenSigner : ""}
+                style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px", maxWidth: "100%" }}>
+                <option value="">Not chosen - {signers[0].name} (first signatory on file; the pack will say so)</option>
+                {signers.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} - {p.signatory_capacity}</option>
+                ))}
+              </select>
+            </label>
+          )}
           {needsAck && (
             <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B" }}>
               <input type="checkbox" name="acknowledge_gaps" required style={{ width: 18, height: 18 }} />

@@ -81,6 +81,9 @@ export type SanralEstimate = {
   workplan: Range; // out of 30
   total: Range; // out of 100
   threshold: number;
+  // "tender" = read from this tender's own documents; "assumed" = not read,
+  // R.396's 70 used (Book 1 Annexure A: 70, 80 or 85, set per tender).
+  thresholdSource: "tender" | "assumed";
   outlook: "clears" | "cannot_clear" | "depends";
   outlookText: string;
   notes: string[];
@@ -222,7 +225,8 @@ export function estimateSanralConventional(opts: {
   pastPerformance?: { range: Range; note: string } | null;
 }): SanralEstimate {
   const closing = new Date(opts.closingDate);
-  const threshold = opts.threshold ?? 70;
+  const thresholdSource: "tender" | "assumed" = opts.threshold ? "tender" : "assumed";
+  const threshold = opts.threshold || 70;
   // Per-position display uses the non-managerial reading when the flag is
   // unknown; the management total below accounts for both readings.
   const positions = opts.positions.map((p) => estimatePosition({ ...p, managerial: p.managerial ?? false }, closing));
@@ -299,7 +303,12 @@ export function estimateSanralConventional(opts: {
     outlookText = `Key persons give about ${known.min === known.max ? known.max : `${known.min}-${known.max}`} of 45. Clearing ${threshold} then needs at least ${needed} of the remaining 55 (quality system, past performance, workplan hours).`;
   }
 
-  return { positions, technical, management, qualitySystem, pastPerformance, workplan, total, threshold, outlook, outlookText, notes };
+  if (thresholdSource === "assumed") {
+    notes.push(
+      "Functionality threshold: 70 is ASSUMED (R.396's own figure) - this tender's threshold wasn't read from its documents. SANRAL Book 1 Annexure A sets 70, 80 or 85 per tender (Category 1/2/3) - check the Tender Data.",
+    );
+  }
+  return { positions, technical, management, qualitySystem, pastPerformance, workplan, total, threshold, thresholdSource, outlook, outlookText, notes };
 }
 
 // Past performance (Form B6, T-27): up to 3 completed projects of similar

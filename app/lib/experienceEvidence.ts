@@ -44,6 +44,9 @@ export type EvaluationRules = {
   // engine/discovery/key_person_minimums.py) - tenderCompliance.ts uses
   // these, R.396's table only as a labelled fallback.
   key_person_minimums?: import("./tenderCompliance").KeyPersonMinimums | null;
+  // The tender's own functionality minimum as read at intake (score_outlook.py
+  // _functionality) - null threshold = not found in the documents read.
+  functionality?: { present?: boolean | null; threshold?: number | null; reason?: string } | null;
   source_document?: string;
   extracted_at?: string;
 };

@@ -7,7 +7,7 @@ in a reusable library section, so the next tender only needs a new
 """
 import sys, yaml, datetime
 import sanral_b7
-from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for, projects_for_block
+from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for, projects_for_block, fill_company_front
 
 T = "TEND 1X"
 
@@ -16,7 +16,7 @@ T = "TEND 1X"
 B = dict(name="B4", id="E4", description="I4",
          proj_first=10, proj_end_first=15, max_projects=3,
          employment="H35", ecsa_level="D39", ecsa_number="D40", ecsa_date="P40",
-         sacpcmp_date="P41", highest_qual="H39", highest_desc="J39",
+         sacpcmp_number="F40", sacpcmp_date="P41", highest_qual="H39", highest_desc="J39",
          highest_inst="L39", highest_date="P38", years_exp="H41",
          initial_desc="J41", initial_inst="L41", initial_date="P39")
 
@@ -74,6 +74,10 @@ def fill_person(wb, base, person, projects_lib, slot=None):
     set_dropdown_for(wb, T, at(B["ecsa_level"], base), q["ecsa_level"], who, "ECSA registration level")
     if q.get("ecsa_number"): wb.set_value(T, at(B["ecsa_number"], base), q["ecsa_number"])
     if q.get("ecsa_date"): wb.set_date(T, at(B["ecsa_date"], base), q["ecsa_date"])
+    # SACPCMP number (F40, the "SACPCMP" column beside ECSA - same cell as the
+    # Conventional template, checked on the RRM X.002-188-2023/1F workbook):
+    # until 2026-10-18 the RRM filler wrote the date but never the number.
+    if q.get("sacpcmp_number"): wb.set_value(T, at(B["sacpcmp_number"], base), q["sacpcmp_number"])
     if q.get("sacpcmp_date"): wb.set_date(T, at(B["sacpcmp_date"], base), q["sacpcmp_date"])
     set_dropdown_for(wb, T, at(B["highest_qual"], base), q["highest_level"], who, "highest qualification level")
     wb.set_value(T, at(B["highest_desc"], base), q["highest_description"])
@@ -86,18 +90,16 @@ def fill_person(wb, base, person, projects_lib, slot=None):
     wb.set_date(T, at(B["initial_date"], base), q["initial_graduated"])
     return notes
 
-def main(tpl, pack_path, out):
+def main(tpl, pack_path, out, log=None):
     pack = yaml.safe_load(open(pack_path))
     wb = Workbook(tpl)
     co, td = pack["company"], pack["tender"]
 
-    # Company front page
-    wb.set_value(T, "D1", co["name"])
-    wb.set_value(T, "K33", co["bee_level"]); wb.set_value(T, "L33", co["black_ownership_pct"])
-    wb.set_value(T, "H34", co["status"])
-    for ref, key in [("F3339","head_office"),("F3340","other_offices"),("F3341","ecsa_registered"),
-                     ("F3342","sacpcmp_registered"),("F3344","total_employees"),("F3345","jv_share_pct")]:
-        wb.set_value(T, ref, co[key])
+    # Company front page + Form B3 company block. K33 (BEE level, validation
+    # whole 1-9) and L33 (black ownership %) are unlocked inputs although not
+    # yellow; SANRAL ships K33 = 9. Only values on file are written - see
+    # sanral_fill.fill_company_front for what is left as shipped and noted.
+    front_notes = fill_company_front(wb, co, td.get("closing_date"), log, T)
 
     # Tender-specific: C2.4 financials (hours, value, category) are supplied
     # per real quote, not guessed. Skip cleanly when the pack doesn't have them
@@ -152,7 +154,7 @@ def main(tpl, pack_path, out):
                       "pending real figures from Sarel")
 
     # Key persons
-    notes = []
+    notes = list(front_notes)
     for a in pack["key_persons"]:
         bases = [a["block_row"]] if a.get("block_row") else blocks_for(wb, a["position"])
         for base in bases:

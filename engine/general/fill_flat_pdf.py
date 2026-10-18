@@ -104,7 +104,10 @@ FORMS = {
             {"key": "sbd1.name_of_bidder", "label": r"NAME\s+OF\s+BIDDER", "v": "legal_name"},
             {"key": "sbd1.postal_address", "label": r"POSTAL\s+ADDRESS", "v": "postal_address"},
             {"key": "sbd1.street_address", "label": r"STREET\s+ADDRESS|PHYSICAL\s+ADDRESS", "v": "registered_address"},
-            {"key": "sbd1.contact_person", "label": r"CONTACT\s+PERSON", "v": "signatory_name"},
+            # Form-Field-Audit 2026-10-18: the contact person is the signatory only by
+            # assumption (true of a one-person company) - logged assumed_default.
+            {"key": "sbd1.contact_person", "label": r"CONTACT\s+PERSON", "v": "signatory_name",
+             "assumed_reason": "Written as the bid's signatory - nothing on file names a separate contact person for this bid; change it by hand if someone else handles the buyer's enquiries."},
             {"key": "sbd1.telephone_number", "label": r"TELEPHONE(?:\s+NUMBER)?", "v": "telephone", "phone": True},
             {"key": "sbd1.cellphone_number", "label": r"CELL\s*PHONE(?:\s+NUMBER)?", "v": "cellphone"},
             {"key": "sbd1.email_address", "label": r"E-?\s?MAIL(?:\s+ADDRESS)?", "v": "email"},
@@ -179,7 +182,8 @@ FORMS = {
         "scope": (None, r"The\s+undersigned|Signed\b"),
         "fields": [
             {"key": "ceq.name_of_enterprise", "label": r"Name\s+of\s+enterprise:?", "v": "legal_name"},
-            {"key": "ceq.contact_person", "label": r"Contact\s+Person", "v": "signatory_name"},
+            {"key": "ceq.contact_person", "label": r"Contact\s+Person", "v": "signatory_name",
+             "assumed_reason": "Written as the bid's signatory - nothing on file names a separate contact person for this bid; change it by hand if someone else handles the buyer's enquiries."},
             {"key": "ceq.email", "label": r"^Email|^E-mail", "v": "email"},
             {"key": "ceq.telephone", "label": r"^Telephone", "v": "telephone"},
             {"key": "ceq.cellphone", "label": r"^Cell\s*phone", "v": "cellphone"},
@@ -230,6 +234,10 @@ def values_for(ctx):
     bank = " ".join(x for x in [c.get("bank_name"), (f"(branch {c['bank_branch_code']})" if c.get("bank_branch_code") else None)] if x) or None
     yn = lambda v: (v or "").lower() if (v or "").lower() in ("yes", "no") else None  # noqa: E731
     foreign = yn(a.get("sbd1.foreign_based"))
+    if os.path.dirname(os.path.abspath(__file__)) not in sys.path:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from fill_sbd_docx import bee_proof_lapse  # one rule for both fillers
+    lapsed = bool(bee_proof_lapse(c, t.get("closing_date")))
     return {
         "legal_name": c.get("legal_name"),
         "postal_address": c.get("postal_address"),
@@ -256,8 +264,9 @@ def values_for(ctx):
         "foreign_based": foreign or ("no" if c.get("cipc_registration_number") else None),
         "foreign_based_assumed": foreign is None and bool(c.get("cipc_registration_number")),
         "employed_by_state": yn(a.get("sbd4.employed_by_state")),
-        "bee_certificate": {"certificate": "yes", "qse_affidavit": "no", "eme_affidavit": "no"}.get(c.get("bee_proof_type")),
-        "bee_affidavit": {"certificate": "no", "qse_affidavit": "yes", "eme_affidavit": "yes"}.get(c.get("bee_proof_type")),
+        # not ticked at all when the proof lapses before closing (fill_sbd_docx.bee_proof_lapse)
+        "bee_certificate": None if lapsed else {"certificate": "yes", "qse_affidavit": "no", "eme_affidavit": "no"}.get(c.get("bee_proof_type")),
+        "bee_affidavit": None if lapsed else {"certificate": "no", "qse_affidavit": "yes", "eme_affidavit": "yes"}.get(c.get("bee_proof_type")),
     }
 
 
@@ -527,7 +536,7 @@ def place_text_fields(model, page_no, fields, vals, scope_fn, done, results):
                 size = _fit(text, box[2] - box[0], None if mode == "inline" else box[3] - box[1])
                 if not size:
                     break
-                pls.append(Placement(f["key"], text, page_no, box, mode, size))
+                pls.append(Placement(f["key"], text, page_no, box, mode, size, assumed=f.get("assumed_reason")))
             if len(pls) == len(cell):
                 results[f["key"]] = ("placed", pls, None)
                 done.add(f["key"])
@@ -570,7 +579,8 @@ def place_text_fields(model, page_no, fields, vals, scope_fn, done, results):
             results[f["key"]] = ("not_placed", None, "too long for the dotted line on the form")
             continue
         box = (run[0] + 1, line["top"] - 1, run[1], line["bottom"] + (0 if mode == "rule" else 1))
-        results[f["key"]] = ("placed", [Placement(f["key"], value, page_no, box, mode, size, whiteout=mode != "rule")], None)
+        results[f["key"]] = ("placed", [Placement(f["key"], value, page_no, box, mode, size, whiteout=mode != "rule",
+                                                  assumed=f.get("assumed_reason"))], None)
         done.add(f["key"])
 
 

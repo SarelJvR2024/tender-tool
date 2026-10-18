@@ -200,7 +200,7 @@ Remaining Klipcorp defaults were **CLI-local defaults only**. They were flagged,
 
 Already honest, no change needed:
 
-- `fill_a_forms.py` logs its defaults (JV = No, not employed by the state, …) as `assumed_default` with reasons, and they appear on `ACTIONS_TO_SIGN.md`.
+- `fill_a_forms.py` logs its defaults (JV = No, not employed by the state, …) as `assumed_default` with reasons, and they appear on `ACTIONS_TO_SIGN.md`. *(Correction, 2026-10-18 `Form-Field-Audit.md` §2: A3 "not a JV" was in fact logged `confirmed`, and A7/A12 carried Klipcorp's own CSD/affidavit facts - all fixed there.)*
 - `score_outlook` / `requirements.py` read each tender's own text (evidence rules, locality, preference system) and say "not found" rather than fall back.
 - Unknown SANRAL workbook families route to the general engine with a reason (`classify_tender.py`).
 - An unknown position code gets "check" in role fit and minimum checks.

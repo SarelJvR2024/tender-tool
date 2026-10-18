@@ -40,6 +40,21 @@ SHEET = "TENDERER INPUT DATA"
 ROW_FOR_POSITION = {"PL": 12, "DS1": 13}
 
 
+def row_for_position(wb, code):
+    """The TENDERER INPUT DATA row whose own column-B position code (a formula
+    SANRAL fills from the tender's SETUP sheet - its cached value is what the
+    shipped file shows) equals `code`, searched over the key-person rows
+    12-31. Form-Field-Audit 2026-10-18: only PL (12) and DS1 (13) were known,
+    because all six samples tender exactly PL + DS1, so a tender with any other
+    position (DS2, CE, RE ...) lost its whole Financial workbook. The fixed
+    rows remain the fallback when the cached codes aren't there to read."""
+    want = str(code or "").strip().upper()
+    for r in range(12, 32):
+        if str(wb.cached(SHEET, f"B{r}") or "").strip().upper() == want and want:
+            return r
+    return ROW_FOR_POSITION.get(code)
+
+
 def main(tpl, pack_path, out):
     pack = yaml.safe_load(open(pack_path))
     wb = Workbook(tpl)
@@ -47,11 +62,11 @@ def main(tpl, pack_path, out):
     wb.set_value(SHEET, "D1", pack["company"]["name"])
 
     for kp in pack["key_persons"]:
-        row = ROW_FOR_POSITION.get(kp.get("position"))
+        row = row_for_position(wb, kp.get("position"))
         if row is None:
             raise ValueError(
-                f"No confirmed TENDERER INPUT DATA row for position '{kp.get('position')}' - "
-                "add it to ROW_FOR_POSITION only after confirming against this contract's own file"
+                f"Position '{kp.get('position')}' has no row on this Financial workbook's TENDERER INPUT DATA sheet "
+                "(its column B lists the tender's key positions) - fill the name in by hand"
             )
         person = pack["people"][kp["person"]]
         wb.set_value(SHEET, f"C{row}", person["name"])

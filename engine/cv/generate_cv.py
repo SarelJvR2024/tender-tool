@@ -273,6 +273,10 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         ("ECSA number:", q.get("ecsa_number") or "MISSING"),
         ("ECSA registration date:", q.get("ecsa_date") or "MISSING"),
         ("SACPCMP number:", q.get("sacpcmp_number") or "Not registered / not on file"),
+        # Other councils (0040), only when the person holds them - the form
+        # used to show ECSA/SACPCMP only, an engineering firm's view.
+        *[(f"{body} registration:", " ".join(x for x in (q.get(f"{key}_category"), q.get(f"{key}_number")) if x))
+          for body, key in (("SACNASP", "sacnasp"), ("SAGC", "sagc")) if q.get(f"{key}_number")],
         ("Highest qualification:", q.get("highest_description") or "MISSING"),
         ("Highest qualification institution:", q.get("highest_institution") or "MISSING"),
         ("Highest qualification graduated:", q.get("highest_graduated") or "MISSING"),
@@ -347,9 +351,13 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
     if q.get("sacpcmp_number"):
         assoc_lines.append(f"SACPCMP - registration {q['sacpcmp_number']}")
         log.confirmed("cv.wb.professional_associations.sacpcmp", q["sacpcmp_number"])
+    for body, key in (("SACNASP", "sacnasp"), ("SAGC", "sagc")):
+        if q.get(f"{key}_number"):
+            assoc_lines.append(f"{body} - {q.get(f'{key}_category') or 'registered'}, registration {q[f'{key}_number']}")
+            log.confirmed(f"cv.wb.professional_associations.{key}", q[f"{key}_number"])
     if not assoc_lines:
         assoc_lines.append("MISSING")
-        log.missing("cv.wb.professional_associations", reason="No ECSA/SACPCMP or other "
+        log.missing("cv.wb.professional_associations", reason="No ECSA/SACPCMP/SACNASP/SAGC or other "
                     "professional-body registration on file for this person.")
     d.add_paragraph("\n".join(assoc_lines))
 

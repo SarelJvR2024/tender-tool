@@ -100,14 +100,14 @@ def key_persons_by_row(table, assignments):
     return out
 
 
-def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
+def fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log):
     d = docx.Document(f"{src_dir}/C.1.2.3_Contract_Data.docx")
     cell = d.tables[0].rows[0].cells[0]
 
     fills = {
         "The Service Provider is \t": comp["legal_name"],
         "Address: \t": comp["registered_address"],
-        "Name: \t": henning["name"] + f" ({henning['signatory_capacity']})",
+        "Name: \t": signatory["name"] + f" ({signatory['signatory_capacity']})",
     }
     telephone_seen = 0
     for p in cell.paragraphs:
@@ -127,11 +127,11 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
             continue
         if p.text == "Telephone: \t":
             telephone_seen += 1
-            if telephone_seen == 2 and henning.get("phone"):
-                p.add_run(henning["phone"])
-                log.confirmed("c123.representative_telephone", henning["phone"])
+            if telephone_seen == 2 and signatory.get("phone"):
+                p.add_run(signatory["phone"])
+                log.confirmed("c123.representative_telephone", signatory["phone"])
             elif telephone_seen == 2:
-                log.missing("c123.representative_telephone", f"{henning['name']}'s telephone number is not on file.")
+                log.missing("c123.representative_telephone", f"{signatory['name']}'s telephone number is not on file.")
             elif comp.get("telephone"):
                 p.add_run(comp["telephone"])
                 log.confirmed("c123.company_telephone", comp["telephone"])
@@ -139,11 +139,11 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
                 log.missing("c123.company_telephone", "The company's telephone number is not on file.")
             continue
         if p.text == "E-mail Address: \t":
-            if henning.get("email"):
-                p.add_run(henning["email"])
-                log.confirmed("c123.representative_email", henning["email"])
+            if signatory.get("email"):
+                p.add_run(signatory["email"])
+                log.confirmed("c123.representative_email", signatory["email"])
             else:
-                log.missing("c123.representative_email", f"{henning['name']}'s email address is not on file.")
+                log.missing("c123.representative_email", f"{signatory['name']}'s email address is not on file.")
             continue
         if p.text in fills:
             label = p.text
@@ -184,10 +184,48 @@ def fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log):
                                     f"{person['name']} ({pos}) written as Permanent - whether they are a full-time "
                                     "employee is not recorded on their People page; confirm before signing.")
 
+    # "Name of Partners, Members or Directors | Appointment Date | Designation |
+    # Professional Registration Number". The company record holds ONE director
+    # (companies.director_name). Until 2026-10-18 that one row was written and
+    # logged confirmed even when the name was blank, and nothing said the rest
+    # of the table (every other director/member/partner, the dates, the
+    # registration numbers) was left empty - complete only for a one-director
+    # company such as Klipcorp.
     dir_table = d.tables[2]
-    dir_table.rows[1].cells[0].text = comp["director"]["name"]
-    dir_table.rows[1].cells[2].text = "Director"
-    log.confirmed("c123.director_name", comp["director"]["name"])
+    director = ((comp.get("director") or {}).get("name") or "").strip()
+    principals = [p for p in (comp.get("principals") or []) if (p.get("name") or "").strip()]
+    is_cc = bool(re.search(r"\bCC\b|close\s+corporation", comp.get("legal_name") or "", re.IGNORECASE))
+    if principals:
+        # The company's own directors / members register (company_principals,
+        # 0050), every row the table has.
+        rows = dir_table.rows[1:]
+        for row, pr in zip(rows, principals):
+            designation = pr.get("designation") or ("Member" if is_cc else "Director")
+            row.cells[0].text = pr["name"]
+            row.cells[1].text = str(pr.get("appointed_on") or "")
+            row.cells[2].text = designation
+            row.cells[3].text = pr.get("registration_number") or ""
+        log.confirmed("c123.directors_table", "; ".join(p["name"] for p in principals[:len(rows)]))
+        undated = [p["name"] for p in principals[:len(rows)] if not p.get("appointed_on")]
+        if undated:
+            log.missing("c123.directors_appointment_dates",
+                        f"No appointment date on the directors register for {', '.join(undated)} - add it there or by hand.")
+        if len(principals) > len(rows):
+            log.missing("c123.directors_table_complete",
+                        f"{len(principals)} directors/members on the register, the form has {len(rows)} rows - list "
+                        f"{', '.join(p['name'] for p in principals[len(rows):])} on an attached page.")
+    elif director:
+        dir_table.rows[1].cells[0].text = director
+        dir_table.rows[1].cells[2].text = "Member" if is_cc else "Director"
+        log.confirmed("c123.director_name", director)
+        log.computed("c123.director_designation", "Member" if is_cc else "Director",
+                     "From the company record's director field" + (" (a close corporation's are members)" if is_cc else "") + ".")
+        log.missing("c123.directors_table_complete",
+                    f"Only one director/member is on file ({director}) and the directors register (Company page) is "
+                    "empty - add every other partner, member or director, and each one's appointment date and "
+                    "professional registration number, by hand or on the register.")
+    else:
+        log.missing("c123.director_name", "No director / member / partner on file - complete the table by hand.")
 
     d.save(f"{out_dir}/C.1.2.3_Contract_Data_FILLED.docx")
 
@@ -196,28 +234,38 @@ def _slug(label):
     return label.strip().rstrip(":\t").lower().replace(" ", "_")
 
 
-def fill_form_of_offer(src_dir, out_dir, comp, henning, log):
+def fill_form_of_offer(src_dir, out_dir, comp, signatory, log):
     d = docx.Document(f"{src_dir}/C.1.1.1_Form_of_Offer.docx")
     name_in_caps_count = 0
     for p in d.paragraphs:
         if p.text.startswith("I/we claim the following B-BBEE contributor status level"):
+            if not comp.get("bee_level"):
+                # Before 2026-10-18 a company with no level got " None " typed
+                # into the claim, logged confirmed.
+                log.missing("c111.bee_level", "No B-BBEE level on file - the claimed contributor status level is "
+                                              "left blank; fill it by hand from your certificate/affidavit (or leave it "
+                                              "if you claim none).")
+                continue
             for r in p.runs:
                 if ".........." in r.text:
                     r.text = r.text.replace("..........", f" {comp['bee_level']} ", 1)
                     log.confirmed("c111.bee_level", comp["bee_level"])
         if p.text.startswith("NAME AND ADDRESS OF ORGANISATION:"):
-            p.add_run(f"  {comp['legal_name']}, {comp['registered_address']}")
-            log.confirmed("c111.organisation_name_address", f"{comp['legal_name']}, {comp['registered_address']}")
+            value = ", ".join(x for x in (comp["legal_name"], comp.get("registered_address")) if x)
+            p.add_run(f"  {value}")
+            log.confirmed("c111.organisation_name_address", value)
+            if not comp.get("registered_address"):
+                log.missing("c111.organisation_address", "No registered address on file - add it after the name by hand.")
         if p.text.startswith("NAME (IN CAPITALS): "):
             name_in_caps_count += 1
             if name_in_caps_count == 1:
-                p.add_run(f"  {henning['name'].upper()}")
-                log.confirmed("c111.signatory_name", henning["name"].upper())
+                p.add_run(f"  {signatory['name'].upper()}")
+                log.confirmed("c111.signatory_name", signatory["name"].upper())
             # witness field (2nd+ occurrence) stays blank - a witness must be a real,
             # different person; see module docstring.
         if p.text.startswith("CAPACITY: "):
-            p.add_run(f"  {henning['signatory_capacity']}")
-            log.confirmed("c111.signatory_capacity", henning["signatory_capacity"])
+            p.add_run(f"  {signatory['signatory_capacity']}")
+            log.confirmed("c111.signatory_capacity", signatory["signatory_capacity"])
     d.save(f"{out_dir}/C.1.1.1_Form_of_Offer_FILLED.docx")
     log.missing("c111.witness_name_signature",
                 "Needs a witness to sign and print their name - must be a different real person "
@@ -237,7 +285,7 @@ def assignments_from_pack(pack_path):
 def main(src_dir, profile_path, out_dir, provenance_out=None, pack_path=None):
     profile = json.load(open(profile_path))
     comp = profile["company"]
-    henning = profile["key_people"][0]  # the signatory (same convention as fill_a_forms.py)
+    signatory = profile["key_people"][0]  # the signatory (same convention as fill_a_forms.py)
     # Key persons come from the CONFIRMED pack (who the company put on each of
     # this tender's positions), never assumed to be the signatory. Without a
     # pack, process_pack_jobs.py's profile["role_people"] ({base code:
@@ -248,8 +296,8 @@ def main(src_dir, profile_path, out_dir, provenance_out=None, pack_path=None):
         key_persons = list(profile["role_people"].items())
     log = ProvenanceLog(source="fill_docx_forms.py")
 
-    fill_contract_data(src_dir, out_dir, comp, henning, key_persons, log)
-    fill_form_of_offer(src_dir, out_dir, comp, henning, log)
+    fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log)
+    fill_form_of_offer(src_dir, out_dir, comp, signatory, log)
     print(f"Wrote 2 filled docx forms to {out_dir}")
     if provenance_out:
         log.save(provenance_out)

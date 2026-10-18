@@ -67,8 +67,15 @@ export async function registerManualTender(input: {
   let closing: string | null = null;
   if (input.closingDate) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.closingDate)) return { error: "Closing date isn't a valid date." };
-    const time = /^\d{2}:\d{2}$/.test(input.closingTime) ? input.closingTime : "12:00";
-    closing = `${input.closingDate}T${time}:00+02:00`;
+    // No assumed time (Form-Field-Audit 2026-10-18): the form used to pre-fill
+    // 12:00 and this fell back to it - R.396's closing time, not every
+    // tender's (many close at 11:00). The time goes onto the envelope covers
+    // and decides "closed" on the closing day, so it must be the notice's own.
+    if (!/^\d{2}:\d{2}$/.test(input.closingTime)) {
+      await cleanup();
+      return { error: "Enter the closing time from the tender notice (or leave the closing date blank too)." };
+    }
+    closing = `${input.closingDate}T${input.closingTime}:00+02:00`;
   }
 
   const { data, error } = await supabase.rpc("load_manual_tender", {

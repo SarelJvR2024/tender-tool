@@ -136,6 +136,27 @@ export async function requestSubmissionPack(formData: FormData) {
     fail("The compliance check shows gaps - tick the box to generate a draft pack anyway.");
   }
 
+  // Who signs this bid (form-field audit 2026-10-18): stored as the tender's
+  // own answer, the same key the general flow uses; the pack bridge reads it
+  // (engine/pack/process_pack_jobs.py). Only a person of this company with a
+  // signatory capacity is accepted.
+  const signatoryId = String(formData.get("signatory_person_id") ?? "").trim();
+  if (signatoryId) {
+    const { data: signer } = await supabase
+      .from("people")
+      .select("id")
+      .eq("id", signatoryId)
+      .eq("company_id", companyId)
+      .not("signatory_capacity", "is", null)
+      .maybeSingle();
+    if (!signer) fail("Choose a signatory from your People page (someone with a signatory capacity).");
+    const { error: ansErr } = await supabase.from("tender_answers").upsert(
+      { company_id: companyId, tender_id: tenderId, field_key: "signatory_person_id", value: signatoryId, answered_by: user?.id ?? null },
+      { onConflict: "company_id,tender_id,field_key" },
+    );
+    if (ansErr) fail(ansErr.message);
+  }
+
   const { error } = await supabase.from("pack_generation_jobs").insert({
     company_id: companyId,
     tender_id: tenderId,

@@ -129,6 +129,9 @@ jobs:
       - name: System alerts - real bridges fed malformed jobs, worker failure, check_system_alerts.py (fake Supabase)
         run: python3 engine/alerts/test_system_alerts.py
 
+      - name: Form-field audit - no Klipcorp-shaped default on any SANRAL/general form field (real templates, un-Klipcorp-like company)
+        run: python3 engine/test_form_field_audit.py
+
   container-build:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

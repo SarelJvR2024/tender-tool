@@ -280,7 +280,7 @@ function ScoreEstimate({
 
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
         <span style={{ fontSize: 22, fontWeight: 700, color: "#16233B" }}>{fmt(estimate.total)}</span>
-        <span style={{ fontSize: 12, color: "#6B6758" }}>of 100 · minimum {estimate.threshold} to reach price evaluation</span>
+        <span style={{ fontSize: 12, color: "#6B6758" }}>of 100 · minimum {estimate.threshold} to reach price evaluation{estimate.thresholdSource === "assumed" ? " (assumed - not read from this tender)" : " (from this tender's documents)"}</span>
       </div>
       <RangeBar range={estimate.total} max={100} threshold={estimate.threshold} />
       <div style={{ fontSize: 12, color: "#16233B", margin: "8px 0 12px" }}>{estimate.outlookText}</div>

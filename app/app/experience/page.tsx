@@ -153,7 +153,12 @@ export default async function ExperiencePage({
             </div>
             <div>
               <label style={label}>Document type *</label>
-              <select style={field} name="document_type" defaultValue="reference_letter">
+              {/* No pre-selected type (form-field audit 2026-10-18): it used to
+                  default to "Reference letter", which SANRAL's Form B6 scores -
+                  a completion certificate left on the default was counted as
+                  scoreable evidence. */}
+              <select style={field} name="document_type" defaultValue="" required>
+                <option value="" disabled>Choose…</option>
                 {DOCUMENT_TYPES.map((d) => (
                   <option key={d.value} value={d.value}>{d.label}</option>
                 ))}

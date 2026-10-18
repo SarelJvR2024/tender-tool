@@ -69,6 +69,8 @@ export function ManualTenderForm({ companyId }: { companyId: string }) {
     const title = String(form.get("title") ?? "").trim();
     const buyer = String(form.get("buyer") ?? "").trim();
     if (!title || !buyer) return setError("Give the tender a title and say who the buyer is.");
+    if (String(form.get("closing_date") ?? "") && !String(form.get("closing_time") ?? ""))
+      return setError("Enter the closing time from the tender notice too (or leave the closing date blank).");
     const bad = checkFiles(files);
     if (bad) return setError(bad);
     setError(null);
@@ -128,7 +130,8 @@ export function ManualTenderForm({ companyId }: { companyId: string }) {
         </div>
         <div>
           <label style={label} htmlFor="closing_time">Closing time (SAST)</label>
-          <input id="closing_time" name="closing_time" type="time" defaultValue="12:00" style={input} />
+          <input id="closing_time" name="closing_time" type="time" style={input} />
+          <div style={help}>As printed in the tender notice - needed with the closing date.</div>
         </div>
       </div>
       <div>

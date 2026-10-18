@@ -134,14 +134,21 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
             "bee_level": comp["bee_level"],
             "black_ownership_pct": comp["black_ownership_pct"],
             "status": comp["status"],
-            "head_office": comp.get("head_office_per_form_b3", "CHECK PROFILE - head_office not set"),
-            "other_offices": comp["other_offices"],
-            "ecsa_registered": comp["ecsa_registered_staff_count"],
-            "sacpcmp_registered": comp["sacpcmp_registered_staff_count"],
-            "total_employees": comp["total_employees"],
-            "jv_share_pct": comp["typical_jv_share_pct"],
+            # Not on file = None, never a placeholder: until 2026-10-18 a missing
+            # head office was written into Form B3 as the literal text
+            # "CHECK PROFILE - head_office not set". The filler leaves a None
+            # blank and notes it (sanral_fill.fill_company_front).
+            "head_office": comp.get("head_office_per_form_b3"),
+            "other_offices": comp.get("other_offices"),
+            "ecsa_registered": comp.get("ecsa_registered_staff_count"),
+            "sacpcmp_registered": comp.get("sacpcmp_registered_staff_count"),
+            "total_employees": comp.get("total_employees"),
+            "jv_share_pct": comp.get("typical_jv_share_pct"),
+            # TEND 1X C33 "Verification Certificate Attached?" is answered from these.
+            "bee_proof_type": comp.get("bee_proof_type"),
+            "bee_proof_expiry": comp.get("bee_proof_expiry"),
         },
-        "tender": {},
+        "tender": {"closing_date": suggestions["closing_date"]},
         "people": pack_people,
         "key_persons": key_persons,
     }

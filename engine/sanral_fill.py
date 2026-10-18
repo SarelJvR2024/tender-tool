@@ -347,3 +347,147 @@ def projects_for_block(wb, sheet, first_row, person_name, projects, max_projects
                 continue
         chosen.append(pr)
     return chosen, notes
+
+
+# ---------------------------------------------------------------------------
+# TEND 1X company front page + Form B3 company block (both template families:
+# the cells are identical in the Conventional and RRM workbooks).
+#
+# Form-Field-Audit 2026-10-18. Before, every value was written as-is from the
+# pack, with no record of where it came from:
+#   - a value not on file was written as an EMPTY cell, wiping the answer
+#     SANRAL ships (K33 = 9, "non compliant contributor"; H34 = "GENERIC");
+#   - Form B3's counts (other offices, ECSA / SACPCMP-registered staff) were
+#     written as 0 for every company created in the app - the database default
+#     (0001), not anything the company said, and there was no field to change
+#     it; a head office not on file was written as the literal text
+#     "CHECK PROFILE - head_office not set";
+#   - "% SHARE OF JV AGREEMENT" came from a company-wide "typical JV share";
+#   - C33 "Verification Certificate Attached?" was never touched, so SANRAL's
+#     shipped answer "Verification Certificate" went out for every company -
+#     including ones with an affidavit, an expired certificate or nothing.
+# Now each cell is written only from a value on file, and anything assumed or
+# not on file is logged (assumed_default / missing) and returned as a pack note.
+# ---------------------------------------------------------------------------
+
+B3_COUNTS = [  # (cell, pack company key, Form B3 label)
+    ("F3340", "other_offices", "OTHER OFFICES (number)"),
+    ("F3341", "ecsa_registered", "REGISTERED PROFESSIONALS: ECSA"),
+    ("F3342", "sacpcmp_registered", "REGISTERED PROFESSIONALS: SACPCMP"),
+    ("F3344", "total_employees", "TOTAL EMPLOYEES"),
+]
+CERT_CELL = "C33"
+CERT_YES, CERT_NO = "Verification Certificate", "No Valid Certificate"
+
+
+def _log(log, kind, key, value=None, reason=None):
+    if log is None:
+        return
+    if kind == "confirmed":
+        log.confirmed(key, value)
+    elif kind == "assumed":
+        log.assumed_default(key, value, reason)
+    else:
+        log.missing(key, reason)
+
+
+def fill_company_front(wb, co, closing_date=None, log=None, sheet="TEND 1X"):
+    """Writes the TEND 1X company front page and the Form B3 company block
+    from the pack's `company` block. Returns notes for the pack."""
+    notes = []
+    T = sheet
+    name = co.get("name")
+    wb.set_value(T, "D1", name)
+    _log(log, "confirmed", "tend1x.company_name", name)
+
+    # B-BBEE level (K33, whole 1-9; SANRAL ships 9 = non-compliant contributor)
+    if co.get("bee_level"):
+        wb.set_value(T, "K33", co["bee_level"])
+        _log(log, "confirmed", "tend1x.bee_level", co["bee_level"])
+    else:
+        notes.append("TEND 1X: no B-BBEE level on file - SANRAL's own answer (9, non-compliant contributor) is left "
+                     "in K33, which scores 0 specific-goal points. Add the level on the Company page if you have one.")
+        _log(log, "missing", "tend1x.bee_level", reason="No B-BBEE level on file - K33 left as SANRAL shipped it (9).")
+    if co.get("black_ownership_pct") is not None:
+        wb.set_value(T, "L33", co["black_ownership_pct"])
+        _log(log, "confirmed", "tend1x.black_ownership_pct", co["black_ownership_pct"])
+    else:
+        _log(log, "missing", "tend1x.black_ownership_pct", reason="No black ownership % on file - L33 left blank.")
+    if co.get("status"):
+        wb.set_value(T, "H34", co["status"])
+        _log(log, "confirmed", "tend1x.company_status", co["status"])
+    else:
+        notes.append("TEND 1X: the company's B-BBEE status (EME / QSE / Generic) is not on file - SANRAL's own "
+                     "answer 'GENERIC' is left in H34 (it also sets Form B7's main-tenderer size).")
+        _log(log, "missing", "tend1x.company_status",
+             reason="No B-BBEE status (EME/QSE/Generic) on file - H34 left as SANRAL shipped it ('GENERIC').")
+
+    # C33 "Verification Certificate Attached?"
+    proof, expiry = co.get("bee_proof_type"), co.get("bee_proof_expiry")
+    valid = bool(expiry) and (closing_date is None or str(expiry)[:10] >= str(closing_date)[:10])
+    if wb.controls.get(T, {}).get(CERT_CELL):
+        if proof == "certificate" and valid:
+            wb.set_dropdown(T, CERT_CELL, CERT_YES)
+            _log(log, "confirmed", "tend1x.verification_certificate", CERT_YES)
+        elif proof in ("qse_affidavit", "eme_affidavit") and valid:
+            notes.append("TEND 1X C33 'Verification Certificate Attached?' is left as SANRAL ships it ('Verification "
+                         f"Certificate'), but the proof on file is a {'QSE' if proof == 'qse_affidavit' else 'EME'} sworn "
+                         "affidavit. R.396's Form A12 accepts an affidavit only from an EME with annual revenue under "
+                         "R1.8 million - if this tender's A12 doesn't accept yours, change C33 to 'No Valid Certificate'.")
+            _log(log, "assumed", "tend1x.verification_certificate", CERT_YES,
+                 "SANRAL's shipped answer kept; the B-BBEE proof on file is a sworn affidavit, not a certificate - "
+                 "check this tender's Form A12 accepts it.")
+        else:
+            wb.set_dropdown(T, CERT_CELL, CERT_NO)
+            why = ("no B-BBEE proof is recorded" if not proof else
+                   "the B-BBEE proof on file has no expiry date" if not expiry else
+                   f"the B-BBEE proof on file expires {expiry}, before this tender closes")
+            notes.append(f"TEND 1X C33 set to 'No Valid Certificate' because {why} (SANRAL ships 'Verification "
+                         "Certificate'; with no valid certificate the B-BBEE score is 0). Update the vault and "
+                         "regenerate if you do hold a valid certificate.")
+            _log(log, "assumed", "tend1x.verification_certificate", CERT_NO,
+                 f"Set to 'No Valid Certificate' because {why}.")
+
+    # Form B3 company block
+    head = co.get("head_office")
+    if head:
+        wb.set_value(T, "F3339", head)
+        _log(log, "confirmed", "form_b3.head_office", head)
+    else:
+        notes.append("Form B3: HEAD OFFICE (city/town) is not on file - left blank; add it on the Company page.")
+        _log(log, "missing", "form_b3.head_office", reason="Head office city/town not on file - Form B3 F3339 left blank.")
+    # A company row created in the app before migration 0057 holds 0 in the
+    # three counts that had a column DEFAULT 0 (other offices, ECSA, SACPCMP)
+    # whether or not anyone entered them. total_employees never had a default,
+    # so "all three 0 and total employees not recorded" is the untouched
+    # default, not three answers - treated as not on file.
+    untouched = co.get("total_employees") is None and all(
+        co.get(k) in (0, None) for k in ("other_offices", "ecsa_registered", "sacpcmp_registered"))
+    for cell, key, label in B3_COUNTS:
+        v = co.get(key)
+        if untouched and v == 0:
+            v = None
+        if v is None:
+            notes.append(f"Form B3: {label} is not on file - left blank; add it on the Company page.")
+            _log(log, "missing", f"form_b3.{key}", reason=f"{label} not on file - Form B3 {cell} left blank.")
+            continue
+        wb.set_value(T, cell, v)
+        if v == 0 and key != "other_offices":
+            notes.append(f"Form B3: {label} = 0 is on file - check it, a company record holds 0 until someone enters "
+                         "the real number (Company page).")
+            _log(log, "assumed", f"form_b3.{key}", 0, f"{label} is 0 on file - confirm it is the real number.")
+        else:
+            _log(log, "confirmed", f"form_b3.{key}", v)
+    jv = co.get("jv_share_pct")
+    if jv is None:
+        notes.append("Form B3: % SHARE OF JV AGREEMENT is not on file - left blank (a tenderer bidding on its own "
+                     "normally enters 100).")
+        _log(log, "missing", "form_b3.jv_share_pct", reason="% share of JV agreement not on file - F3345 left blank.")
+    else:
+        wb.set_value(T, "F3345", jv)
+        why = ("the company's standing JV share on file - whether this bid is a JV, and the share, are decided per "
+               "tender; confirm it.")
+        if jv != 100:
+            notes.append(f"Form B3: % SHARE OF JV AGREEMENT = {jv} is {why}")
+        _log(log, "assumed", "form_b3.jv_share_pct", jv, f"{jv}% is {why}")
+    return notes

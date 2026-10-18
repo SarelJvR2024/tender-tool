@@ -34,6 +34,8 @@ const TEXT_FIELDS = [
   "pi_insurance_insurer",
   "pi_insurance_policy_number",
   "iso_9001_certificate_number",
+  // SANRAL Form B3 head office (form-field audit 2026-10-18)
+  "head_office",
 ] as const;
 
 const DATE_FIELDS = [
@@ -50,7 +52,16 @@ const NUMERIC_FIELDS = [
   "black_ownership_pct",
   "bee_procurement_recognition_pct",
   "pi_insurance_cover_zar",
+  // Form B3 counts: blank = null (not recorded), never 0 - see 0057.
+  "other_offices",
+  "ecsa_registered_staff_count",
+  "sacpcmp_registered_staff_count",
+  "total_employees",
+  "typical_jv_share_pct",
 ] as const;
+
+// Integer columns: a fractional count is refused rather than sent to Postgres.
+const INTEGER_FIELDS = new Set(["other_offices", "ecsa_registered_staff_count", "sacpcmp_registered_staff_count", "total_employees", "bee_level"]);
 
 const BEE_PROOF_VALUES = BEE_PROOF_TYPES.map((t) => t.value) as string[];
 
@@ -89,7 +100,11 @@ export async function updateCompanyProfile(companyId: string, formData: FormData
     const raw = formData.get(field);
     if (raw === null) continue;
     const trimmed = (raw as string).trim();
-    update[field] = trimmed === "" ? null : Number(trimmed);
+    const n = trimmed === "" ? null : Number(trimmed);
+    if (n !== null && (!Number.isFinite(n) || n < 0 || (INTEGER_FIELDS.has(field) && !Number.isInteger(n)))) {
+      redirect(`/company?edit=1&error=${encodeURIComponent(`"${field.replace(/_/g, " ")}" must be a ${INTEGER_FIELDS.has(field) ? "whole " : ""}number of 0 or more.`)}`);
+    }
+    update[field] = n;
   }
 
   // "How we work" (0030): the company's own words, stored as typed - only the

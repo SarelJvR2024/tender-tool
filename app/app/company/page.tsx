@@ -66,6 +66,16 @@ type CompanyRow = {
   bee_proof_document_path: string | null;
   // 0030_company_how_we_work.sql
   how_we_work: string | null;
+  // 0001 columns the SANRAL pack writes into Form B3 / C.1.2.3 - editable here
+  // since the 2026-10-18 form-field audit (before, only a seed could set them,
+  // and a new company's DB default 0 went onto Form B3 as fact). Directors for
+  // C.1.2.3 come from the directors register (/company/principals, 0050).
+  head_office: string | null;
+  other_offices: number | null;
+  ecsa_registered_staff_count: number | null;
+  sacpcmp_registered_staff_count: number | null;
+  total_employees: number | null;
+  typical_jv_share_pct: number | null;
 };
 
 type DocUrls = Partial<Record<VaultDocumentKind, string>>;
@@ -85,7 +95,7 @@ export default async function CompanyPage({
   const { data: company, error: loadError } = await supabase
     .from("companies")
     .select(
-      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work"
+      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work, head_office, other_offices, ecsa_registered_staff_count, sacpcmp_registered_staff_count, total_employees, typical_jv_share_pct"
     )
     .single();
 
@@ -305,6 +315,20 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
         </div>
       </Section>
 
+      <Section title="Size &amp; offices (SANRAL Form B3)">
+        <div style={fieldGrid}>
+          <Field label="Head office (city/town)" value={company.head_office} />
+          <Field label="Other offices (number)" value={company.other_offices} />
+          <Field label="ECSA-registered professionals" value={company.ecsa_registered_staff_count} />
+          <Field label="SACPCMP-registered professionals" value={company.sacpcmp_registered_staff_count} />
+          <Field label="Total employees" value={company.total_employees} />
+          <Field label="% share of JV agreement (usual)" value={company.typical_jv_share_pct} />
+        </div>
+        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
+          Written into SANRAL&apos;s Form B3. Blank means not recorded - the pack leaves it blank and lists it, never a 0.
+        </div>
+      </Section>
+
       <Section title="How we work">
         {company.how_we_work ? (
           <div style={{ fontSize: 14, color: "#16233B", lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
@@ -401,8 +425,9 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
           />
         </div>
         <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
-          Uploads up to 4.4 MB each (PDF, Word or image). A QSE or EME sworn affidavit counts as valid B-BBEE proof, the
-          same as a verification certificate.
+          Uploads up to 4.4 MB each (PDF, Word or image). A QSE or EME sworn affidavit is recorded as B-BBEE proof, but check
+          each tender&apos;s own rule: SANRAL&apos;s Form A12 asks for a SANAS verification certificate and accepts an affidavit
+          only from an EME with annual revenue under R1.8 million.
         </div>
       </Section>
 
@@ -490,6 +515,18 @@ function EditForm({ company }: { company: CompanyRow }) {
           <TextInput name="registered_address" label="Registered address" defaultValue={company.registered_address} textarea />
           <TextInput name="postal_address" label="Postal address" defaultValue={company.postal_address} textarea />
         </div>
+      </Section>
+
+      <Section title="Size &amp; offices (SANRAL Form B3)">
+        <div style={fieldGrid}>
+          <TextInput name="head_office" label="Head office (city/town)" defaultValue={company.head_office} />
+          <NumberInput name="other_offices" label="Other offices (number)" defaultValue={company.other_offices} step="1" />
+          <NumberInput name="ecsa_registered_staff_count" label="ECSA-registered professionals" defaultValue={company.ecsa_registered_staff_count} step="1" />
+          <NumberInput name="sacpcmp_registered_staff_count" label="SACPCMP-registered professionals" defaultValue={company.sacpcmp_registered_staff_count} step="1" />
+          <NumberInput name="total_employees" label="Total employees" defaultValue={company.total_employees} step="1" />
+          <NumberInput name="typical_jv_share_pct" label="% share of JV agreement (usual; 100 when bidding alone)" defaultValue={company.typical_jv_share_pct} step="0.1" />
+        </div>
+        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>Leave blank if you don&apos;t know - blank is never written as 0.</div>
       </Section>
 
       <Section title="How we work">

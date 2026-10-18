@@ -11,7 +11,7 @@ Form B7 targeted-enterprise cells are unlocked but not yellow).
 """
 import sys, yaml, datetime
 import sanral_b7
-from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for, projects_for_block
+from sanral_fill import Workbook, split, n2col, col2n, set_dropdown_for, projects_for_block, fill_company_front
 
 T = "TEND 1X"
 
@@ -99,19 +99,16 @@ def fill_person(wb, base, person, projects_lib, slot=None):
     wb.set_date(T, at(B["initial_date"], base), q["initial_graduated"])
     return notes
 
-def main(tpl, pack_path, out):
+def main(tpl, pack_path, out, log=None):
     pack = yaml.safe_load(open(pack_path))
     wb = Workbook(tpl)
     co, td = pack["company"], pack["tender"]
 
-    # Company front page. K33 (BEE level, validation whole 1-9) and L33 (black
-    # ownership %) are unlocked inputs although not yellow; SANRAL ships K33 = 9.
-    wb.set_value(T, "D1", co["name"])
-    wb.set_value(T, "K33", co["bee_level"]); wb.set_value(T, "L33", co["black_ownership_pct"])
-    wb.set_value(T, "H34", co["status"])
-    for ref, key in [("F3339","head_office"),("F3340","other_offices"),("F3341","ecsa_registered"),
-                     ("F3342","sacpcmp_registered"),("F3344","total_employees"),("F3345","jv_share_pct")]:
-        wb.set_value(T, ref, co[key])
+    # Company front page + Form B3 company block. K33 (BEE level, validation
+    # whole 1-9) and L33 (black ownership %) are unlocked inputs although not
+    # yellow; SANRAL ships K33 = 9. Only values on file are written - see
+    # sanral_fill.fill_company_front for what is left as shipped and noted.
+    front_notes = fill_company_front(wb, co, td.get("closing_date"), log, T)
 
     # C2.4 summary: this template carries only the two totals (no value/category
     # fields exist here - the full C2.4 lives in the separate Financial workbook).
@@ -142,7 +139,7 @@ def main(tpl, pack_path, out):
           "| closes", serial(wb.cached("SETUP", "C3")))
 
     # Key persons
-    notes = []
+    notes = list(front_notes)
     for a in pack["key_persons"]:
         bases = [a["block_row"]] if a.get("block_row") else blocks_for(wb, a["position"])
         for base in bases:

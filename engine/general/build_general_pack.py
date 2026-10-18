@@ -154,7 +154,12 @@ def guide_rows(code, ctx):
         return [
             ("Employed by the state?", _yn(a.get("sbd4.employed_by_state")), None),
             ("Relationship with an employee of this buyer?", _yn(a.get("sbd4.relationship_with_employee")), None),
-            ("Interest in a related enterprise bidding?", _yn(a.get("sbd4.interest_in_related_enterprise")), None),
+            # The form asks about ANY related enterprise "whether or not they are
+            # bidding for this contract" (Regulatory review G4b; renamed
+            # 2026-10-18 with the general-harness baseline reset).
+            ("Interest in any other related enterprise, bidding or not?", _yn(a.get("sbd4.interest_in_related_enterprise")),
+             None if a.get("sbd4.interest_in_related_enterprise") else
+             "not answered - if Yes, list every CSD-registered company linked to the directors"),
             ("Declarant name (I, ..., the undersigned)", s.get("name"), None),
             ("Designation", s.get("capacity"), None),
             ("Name of bidder", c.get("legal_name"), None),
@@ -536,7 +541,7 @@ if __name__ == "__main__":
     comp = dict(prof["company"])
     person = prof["key_people"][0]
     res = build_general_pack(manifest=m, local_docs=local_docs_for(m, args.docs, os.path.join(work, "src2")), company=comp,
-                             signatory={"name": person["name"], "capacity": person.get("signatory_capacity") or "Director"},
+                             signatory={"name": person["name"], "capacity": person.get("signatory_capacity")},
                              answers=json.load(open(args.answers)) if args.answers else {},
                              tender={"contract_no": "LOCAL", "buyer": None, "description": None, "closing_date": None},
                              files={}, work_dir=work, out_pdf=os.path.join(work, "submission_pack.pdf"))

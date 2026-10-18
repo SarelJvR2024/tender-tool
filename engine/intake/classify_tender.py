@@ -139,6 +139,53 @@ def find_nra_reference(all_text):
     return "NRA " + max(counts, key=counts.get)
 
 
+# The tender's own delivery address and closing time, as its Tender Notice
+# prints them (R.396 Book 1 T-6: "The closing time and date for receipt of
+# tenders is 12:00 on 22 October 2026 / Tenders must be placed inside the
+# tender box at: / The Reception Area / 20 Shoreward Drive / Bay West /
+# Gqeberha / 6025"). Form-Field-Audit 2026-10-18: the envelope covers used
+# a fixed SANRAL head-office address and the SETUP-sheet closing date was
+# given a fixed 12:00.
+DELIVERY_RE = re.compile(
+    r"(?:tender\s+box\s+(?:at|situated\s+at|located\s+at)|(?:delivered|deposited|submitted)\s+(?:to|at)\s+the\s+following\s+address)\s*:?[ \t]*\n",
+    re.IGNORECASE)
+CLOSING_TIME_RE = re.compile(
+    r"closing\s+(?:time\s+and\s+date|date\s+and\s+time|time)\s+(?:for\s+(?:the\s+)?receipt\s+of\s+tenders\s+)?is\s+"
+    r"(?:at\s+)?([01]?\d|2[0-3])[:h.]([0-5]\d)",
+    re.IGNORECASE)
+
+
+def find_delivery_address(all_text):
+    """{"lines": [...], "quote": "..."} - the address lines under the Tender
+    Notice's "tender box at:" heading, or None. Stops at a blank-run end, a
+    page footer (e.g. "T-6") or a sentence; never more than 7 lines."""
+    m = DELIVERY_RE.search(all_text or "")
+    if not m:
+        return None
+    lines = []
+    for raw in all_text[m.end():].split("\n")[:14]:
+        line = re.sub(r"\s+", " ", raw).strip()
+        if not line:
+            if lines:
+                break
+            continue
+        if (re.fullmatch(r"[A-Z]{1,2}-\d+", line) or line.endswith(".") or len(line) > 70
+                or line.startswith(("•", "-", "*")) or re.search(r"\b(?:tender|must|shall)\b", line, re.IGNORECASE)):
+            break
+        lines.append(line)
+        if re.fullmatch(r"\d{4}", line) or len(lines) >= 7:
+            break
+    if not lines:
+        return None
+    return {"lines": lines, "quote": " / ".join(lines)}
+
+
+def find_closing_time(all_text):
+    """'HH:MM' from the Tender Notice's own "closing time ... is 12:00" sentence, or None."""
+    m = CLOSING_TIME_RE.search(all_text or "")
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else None
+
+
 def check_fingerprint(technical_path, family, store=None):
     """Compare against the stored baseline WITHOUT storing anything."""
     store = store or fingerprint.DEFAULT_STORE

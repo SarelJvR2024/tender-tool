@@ -441,9 +441,24 @@ def run_extraction(client, job, work_root, fetch=None):
         if not tender.get("contract_no") and setup.get("contract_no"):
             patch["contract_no"] = setup["contract_no"]
         if not tender.get("closing_date") and setup.get("closing_date"):
-            patch["closing_date"] = setup["closing_date"] + "T12:00:00+02:00"  # SANRAL closes 12:00 SAST (R.396 Book 1: "The closing time ... is 12:00")
-            intake_rec["notes"].append(f"Closing date taken from the workbook's SETUP sheet ({setup['closing_date']}); "
-                                       "the time (12:00) is SANRAL's usual closing time - check the notice.")
+            # The time from the tender's OWN notice ("The closing time and date
+            # for receipt of tenders is 12:00 on ..."), not a fixed one
+            # (Form-Field-Audit 2026-10-18: 12:00 was always assumed - R.396's
+            # time, not every SANRAL tender's).
+            notice_time = intake.find_closing_time(all_text)
+            patch["closing_date"] = f"{setup['closing_date']}T{notice_time or '12:00'}:00+02:00"
+            intake_rec["notes"].append(
+                f"Closing date taken from the workbook's SETUP sheet ({setup['closing_date']}); "
+                + (f"the time ({notice_time}) from the Tender Notice." if notice_time else
+                   "no closing time found in the documents read - 12:00 was used as a placeholder, check the "
+                   "Tender Notice and correct it."))
+        # The tender box address, for the envelope covers (read, never assumed).
+        delivery = intake.find_delivery_address(all_text)
+        if delivery:
+            intake_rec["delivery_address"] = delivery
+        else:
+            intake_rec["notes"].append("No tender-box delivery address found in the documents read (it's in Book 1's "
+                                       "Tender Notice) - the envelope covers will be printed without one.")
     elif tender.get("family") in (None, "", "UNKNOWN") or tender.get("family") in intake.SANRAL_FAMILIES:
         patch["family"] = intake.GENERAL_FAMILY
     patch["intake"] = intake_rec
@@ -456,6 +471,10 @@ def run_extraction(client, job, work_root, fetch=None):
             # audit Q5: the tender's own C3.1.11 minimums (tenderCompliance.ts
             # uses them; R.396's table only as a labelled fallback)
             "key_person_minimums": clean.get("key_person_minimums"),
+            # The tender's own functionality minimum (score_outlook THRESHOLD_RE),
+            # so the SANRAL estimate stops assuming R.396's 70 for every tender
+            # (Book 1 Annexure A: 70, 80 or 85 per tender - regulatory review G7).
+            "functionality": (clean.get("scoring") or {}).get("functionality"),
             "source_document": "; ".join(sorted({d["name"] for d in clean["documents"] if d["chars"] > 0}))[:500],
             "extracted_at": clean["extracted_at"],
         }
@@ -522,7 +541,12 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
     if sid:
         ppl = client.select("people", {"id": sid, "company_id": job["company_id"]})
         if ppl:
-            signatory = {"name": ppl[0]["name"], "capacity": ppl[0].get("signatory_capacity") or ppl[0].get("role"),
+            # Capacity = the People page's signatory capacity only. It used to
+            # fall back to the person's job title ("role"), which then went onto
+            # SBD 1 "capacity under which this bid is signed" logged confirmed
+            # (form-field audit 2026-10-18); not on file now stays blank/missing,
+            # and the workspace already says "no signatory capacity on file".
+            signatory = {"name": ppl[0]["name"], "capacity": ppl[0].get("signatory_capacity"),
                          # MBD 4 3.2 "Identity Number" of the representative (typed onto flat PDFs)
                          "id_number": ppl[0].get("id_number")}
 

@@ -184,7 +184,7 @@ def fill_sbd1(path, comp, name, position, log):
                       "No company telephone number on file - fill by hand or add it to the company profile."
                       if not comp.get("telephone") else None)
     log.missing("sbd1.facsimile_number", "No fax number on file - most SA bidders no longer use fax; "
-                "confirm with Sarel whether to leave this blank or write N/A.")
+                "leave it blank or write N/A by hand.")
     fill_table_label(d, "E-MAIL ADDRESS", comp.get("email"), log, "sbd1.email_address",
                       "No company e-mail address on file - fill by hand or add it to the company profile."
                       if not comp.get("email") else None)
@@ -199,7 +199,7 @@ def fill_sbd1(path, comp, name, position, log):
         log.missing("sbd1.bee_certificate_attachment",
                     "BEE level is confirmed on file, but the current sworn affidavit/certificate "
                     "PDF still needs to be sourced and attached to THIS submission - re-check its "
-                    "validity window before relying on it. See company.bee_source_note.")
+                    "validity window before relying on it.")
     else:
         log.missing("sbd1.bee_status_level", "No B-BBEE status level on file.")
     log.missing("sbd1.total_bid_price",
@@ -491,6 +491,19 @@ def fill_line_above_caption(doc, caption_re, value, line_must_contain=None):
     return n
 
 
+def bee_proof_lapse(comp, closing_date):
+    """None when the company's B-BBEE proof is valid on the closing date (or
+    there is no closing date / no expiry recorded to test); else why not."""
+    exp = str(comp.get("bee_proof_expiry") or "")[:10]
+    if not exp:
+        return None
+    ref = str(closing_date or "")[:10] or _today_iso()
+    if exp < ref:
+        return (f"proof on file expires {exp}, before this tender closes ({ref})" if closing_date
+                else f"proof on file expired {exp}")
+    return None
+
+
 def _log_fill(log, key, value, n, missing_reason):
     if value and n:
         log.confirmed(key, value)
@@ -561,7 +574,12 @@ def fill_sbd_document(doc, ctx, log, forms):
              fill_blank_paragraphs(doc, r"TCS\s+PIN|TAX\s+COMPLIANCE\s+SYSTEM\s+PIN", pin)) if pin else 0
         _log_fill(log, "sbd1.tcs_pin", pin, n, None if pin else "No SARS TCS PIN in the vault.")
         proof = comp.get("bee_proof_type")
-        if proof:
+        lapse = bee_proof_lapse(comp, tender.get("closing_date"))
+        if proof and lapse:
+            # Form-Field-Audit 2026-10-18: the box used to be ticked from the
+            # proof type alone, even for a certificate/affidavit that had lapsed.
+            log.missing("sbd1.bee_proof_ticked", f"The B-BBEE {lapse} - renew it, then tick the certificate/affidavit box by hand.")
+        elif proof:
             want = r"VERIFICATION\s+CERTIFICATE" if proof == "certificate" else r"SWORN\s+AFFIDAVIT"
             n = answer_yes_no(doc, r"B-?BBEE\s+STATUS\s+LEVEL\s+" + want, "yes")
             if n:
@@ -757,9 +775,9 @@ def main():
 
     profile = json.load(open(args.profile_path))
     comp = profile["company"]
-    henning = profile["key_people"][0]
-    name = henning["name"]
-    position = henning.get("signatory_capacity", "Signatory")
+    signatory = profile["key_people"][0]
+    name = signatory["name"]
+    position = signatory.get("signatory_capacity")
 
     log = ProvenanceLog(source="engine/general/fill_sbd_docx.py")
     outputs = {}

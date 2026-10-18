@@ -56,6 +56,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     { data: roleRows },
     { data: tagRows },
     { data: officeRows },
+    { data: letterRows },
   ] = await Promise.all([
     supabase
       .from("companies")
@@ -70,6 +71,8 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     supabase.from("person_role_eligibility").select("person_id, role_code, notes"),
     // 0015: structured office locations for locality rows.
     supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS),
+    // 0037: the company's own letter of authority (what the pack binds in as A2).
+    supabase.from("company_document_templates").select("mode").eq("document_type", "authority_to_sign"),
   ]);
   const roles = (roleRows ?? []) as TenderRole[];
   const roleTags = (tagRows ?? []) as RoleTag[];
@@ -182,6 +185,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
     experience: experienceSummary,
     experienceAvailable,
     evidence: experienceAvailable ? evaluateEvidence(chosenRule, expItems, true) : null,
+    authorityLetter: ((letterRows ?? [])[0]?.mode as "uploaded" | "ai_guideline" | undefined) ?? null,
   });
 
   const personById = new Map(people.map((p) => [p.id, p]));
@@ -223,6 +227,7 @@ export const loadTenderCompliance = cache(async (tenderId: string) => {
           })),
           pastPerformance: experienceAvailable ? pastPerformanceFromExperience(expItems) : null,
           qualitySystem,
+          threshold: evaluationRules?.functionality?.threshold ?? undefined,
         })
       : null;
 

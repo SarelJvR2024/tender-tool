@@ -107,7 +107,11 @@ def candidate_person_text(person):
     for proj in person.get("projects", []):
         parts.append(proj.get("position_held", ""))
         parts.append(proj.get("client_and_number", ""))
-    return " ".join(parts)
+    # A key present with None (a person entered with only a name - e.g. a
+    # signatory-only director) used to raise TypeError here and stop the
+    # candidate scoring for every position on the tender (found by the
+    # form-field audit's bridge run, 2026-10-18).
+    return " ".join(p for p in parts if p)
 
 
 def score_candidate(person_id, person, position, closing_date):

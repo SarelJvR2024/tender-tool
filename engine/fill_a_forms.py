@@ -20,12 +20,12 @@ Three categories of field, handled differently:
    bank name/branch code, CSD supplier number. Filled directly.
 2. KNOWN BY ABSENCE - "does the tenderer have any outstanding debt to SANRAL",
    "is the tenderer on the Register of Tender Defaulters", "any litigation in
-   the last 10 years" etc. Nothing in Klipcorp's profile indicates any of
-   these apply, so the honest answer on file is No/None. Filled as such, but
-   every one of these also gets a line on the checklist telling Henning to
-   actually verify it (several of these are checkable against a public
-   register) before he signs - filling in the expected answer is not the same
-   as having verified it today.
+   the last 10 years" etc. Nothing in the company's own record indicates any
+   of these apply, so the expected answer is written - but every one is
+   logged assumed_default (never confirmed) and gets a line on the checklist
+   telling the signatory to actually verify it (several of these are
+   checkable against a public register) before signing - filling in the
+   expected answer is not the same as having verified it today.
 3. GENUINELY UNKNOWN OR REQUIRES A HUMAN ACT - a wet signature, a witness's
    signature (must be a different real person, never fabricated), a sworn
    oath before a Commissioner of Oaths, a SARS TCS PIN nobody has looked up,
@@ -39,9 +39,12 @@ Form A2 (Authority of Signatory) and Form A3 (Joint Venture Agreement) are
 structurally different from the rest - A2 needs a real board resolution on
 the company's own letterhead (the template itself says completing this
 example page is not accepted as authorisation), and A3 only applies to a
-Joint Venture, which Klipcorp is not. Both are left alone in the bundle
-(A3 gets a one-line "Not Applicable" note) with the real action on the
-checklist for A2.
+Joint Venture. Whether a bid is a JV is decided PER TENDER, and the SANRAL
+flow has no per-tender JV answer yet, so A3's "Not Applicable" line is an
+assumed_default (Form-Field-Audit 2026-10-18; it used to be logged
+confirmed as "a known fact about the company" - true of the company whose
+data the samples came from, not something the record shows for anyone).
+A2's real action is on the checklist.
 
 Usage: python3 fill_a_forms.py <A_Forms.docx> <profile.json> <out_dir> <contract_label> <nra_ref>
 """
@@ -87,7 +90,7 @@ def fill_declaration_blanks(doc, name, position, company, log):
 
     1. 'I, the undersigned, ....................' - the dots sit directly after
        the label with no separate hint text, so substituting the whole matched
-       span (label + dots) for 'I, the undersigned, HENNING...' actually REMOVES
+       span (label + dots) for 'I, the undersigned, <SIGNATORY>...' actually REMOVES
        the dots - this one is safe to fill inline, and usually shortens the line.
     2. 'I, ....................(name), the undersigned in my capacity as
        ....................(position), on behalf of ....................(name of
@@ -211,9 +214,15 @@ def fill_a3_not_applicable(doc, company, log):
             f"NOT APPLICABLE - {company} is tendering independently, not as part of a Joint Venture."
         )
         new_p.runs[0].bold = True
-        # Confirmed, not assumed: whether Klipcorp is a JV is a known fact about
-        # the company, not a guess standing in for something unverified.
-        log.confirmed("a_forms.A3.joint_venture", "Not applicable - not a Joint Venture")
+        # assumed_default, not confirmed: a JV is a per-tender decision and
+        # nothing on the SANRAL path records it for this tender (Form-Field-
+        # Audit 2026-10-18). Before, this was logged confirmed as "a known
+        # fact about the company" - which was only ever Klipcorp's situation.
+        log.assumed_default(
+            "a_forms.A3.joint_venture", "Not applicable - not a Joint Venture",
+            f"Written as 'not a Joint Venture' because nothing on file says {company} is bidding as one on this "
+            "tender - whether a bid is a JV is decided per tender. If it is a JV, replace this line with the "
+            "signed JV agreement (and note SANRAL also wants a consolidated JV B-BBEE certificate).")
 
 
 def fill_a8_litigation_table(doc, company, log):
@@ -303,28 +312,61 @@ def fill_a10_no_deviations(doc, company, log):
             return
 
 
-def fill_a16_no_addenda(doc, log):
-    p = para_matching(doc, "We confirm that the following communications")
-    if p is not None:
-        new_p = p.insert_paragraph_before(
-            "No addenda had been issued for this contract as at the date these documents were prepared - "
-            "see ACTIONS_TO_SIGN.md to re-check SANRAL's eTenders portal before the tender closes."
-        )
-        new_p.runs[0].italic = True
+def _a16_table(doc):
+    """Form A16's 'Date | Title or Details' table. The A16 statement ("We
+    confirm that the following communications ...") is the table's own first
+    row in every SANRAL edition on file, not a body paragraph."""
+    for t in doc.tables:
+        if any("following communications" in c.text for c in t.rows[0].cells):
+            return t
+    return None
+
+
+def fill_a16_addenda(doc, log, updates=None):
+    """Form A16 (schedule of addenda). Until 2026-10-18 this looked for the
+    statement among the body paragraphs only - it is in a table in all six
+    SANRAL editions - so it never matched: A16 was left blank and nothing at
+    all was logged, and had it matched it would have written "No addenda had
+    been issued" regardless of what the tender actually published.
+
+    updates: the addenda / clarifications / revised documents Tender Tool's
+    tender-updates watch recorded for this tender ([{date, title}], from
+    tender_watched_documents), [] when it recorded none, None when it wasn't
+    looked up (the local CLI)."""
+    t = _a16_table(doc)
+    if t is None:
+        log.missing("a_forms.A16.addenda_received",
+                    "Form A16's addenda table wasn't found in this edition - list every addendum by hand.")
+        return
+    rows = [r for r in t.rows[2:]]
+    if updates:
+        for r, u in zip(rows, updates):
+            r.cells[1].text = u.get("date") or ""
+            r.cells[2].text = u.get("title") or ""
+        log.assumed_default(
+            "a_forms.A16.addenda_received", "; ".join(f"{u.get('date') or '?'} {u.get('title') or ''}".strip() for u in updates),
+            "Listed from the documents Tender Tool's update watch saw published on this tender - check the buyer's "
+            "portal for anything later (or anything sent only by e-mail) before signing."
+            + (f" Only the first {len(rows)} fit the form's table." if len(updates) > len(rows) else ""))
+    elif updates is not None:
+        if rows:
+            rows[0].cells[2].text = "None issued as at the date these documents were prepared"
         log.assumed_default(
             "a_forms.A16.addenda_received", "None",
-            "No addenda were found locally for this contract as at the date these documents were "
-            "prepared - re-check SANRAL's eTenders portal before closing, addenda can be issued "
-            "right up to 10 working days before."
-        )
+            "Tender Tool's update watch recorded no addenda for this tender - re-check the buyer's portal before "
+            "closing; addenda can be issued right up to 10 working days before.")
+    else:
+        log.missing("a_forms.A16.addenda_received",
+                    "No record of this tender's addenda was available - list every addendum received (date and "
+                    "title) by hand, from the buyer's portal.")
 
 
 def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenance_out=None):
     profile = json.load(open(profile_path))
     comp = profile["company"]
-    henning = profile["key_people"][0]
-    name = henning["name"]
-    position = henning["signatory_capacity"]
+    signatory = profile["key_people"][0]
+    name = signatory["name"]
+    position = signatory["signatory_capacity"]
     company = comp["legal_name"]
     log = ProvenanceLog(source="fill_a_forms.py")
 
@@ -336,22 +378,21 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     fill_a8_litigation_table(d, company, log)
     fill_a10_no_deviations(d, company, log)
     mark_sbd4_no_answers(d, company, log)
-    fill_a16_no_addenda(d, log)
+    fill_a16_addenda(d, log, profile.get("tender_updates"))
 
     # A7: CSD registration - mechanical fields only, inline after the label.
     append_after_label(d, "Name of Service Provider:", company, log, "a_forms.A7.service_provider_name")
     append_after_label(d, "Central Supplier Database Supplier Number:", comp.get("csd_supplier_number"),
                         log, "a_forms.A7.csd_supplier_number", "No CSD supplier number on file.")
-    if comp.get("csd_report_note"):
-        log.confirmed("a_forms.A7.supplier_commodity", "Professional engineering services")
-        log.missing("a_forms.A7.commodity_code",
-                    "Commodity FAMILY ('Professional engineering services') is confirmed from the "
-                    "June 2026 CSD report, but no specific commodity CODE was found there - look "
-                    "one up on the live CSD report before relying on just the family name.")
-    else:
-        log.missing("a_forms.A7.supplier_commodity",
-                    "No current CSD commodity code on file - only a 2021 CSD report was found, "
-                    "confirm against an up-to-date report before filling this in.")
+    # Commodity: the CSD report lists the supplier's commodities; nothing in the
+    # company record holds them. Until 2026-10-18 a company with any
+    # "csd_report_note" got Klipcorp's own commodity family ("Professional
+    # engineering services", from its June 2026 CSD report) logged confirmed,
+    # and every other company was told "only a 2021 CSD report was found" -
+    # Klipcorp's situation, written into everyone's checklist.
+    log.missing("a_forms.A7.supplier_commodity",
+                "No CSD commodity / commodity code on file - copy it from the company's current CSD registration "
+                "report before signing.")
     log.missing("a_forms.A7.delivery_location",
                 "No CSD delivery location on file.")
 
@@ -396,9 +437,9 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
                 "left blank - the checkbox layout isn't safely automatable. Needs a human to "
                 "fill and sign by hand.")
     if comp.get("sars_tcs_pin"):
+        issued = f"issued {comp['sars_tcs_pin_issued']}, " if comp.get("sars_tcs_pin_issued") else ""
         log.confirmed("a_forms.A9.tcs_pin",
-                       f"{comp['sars_tcs_pin']} (issued {comp.get('sars_tcs_pin_issued')}, "
-                       f"expires {comp.get('sars_tcs_pin_expiry')})")
+                       f"{comp['sars_tcs_pin']} ({issued}expires {comp.get('sars_tcs_pin_expiry') or 'expiry not on file'})")
         log.missing("a_forms.A9.tcs_pin_still_valid",
                     "A SARS TCS PIN is on file, but the taxpayer can cancel a PIN at any time "
                     "before its printed expiry - re-verify it still resolves on SARS eFiling "
@@ -406,19 +447,38 @@ def main(a_forms_path, profile_path, out_dir, contract_label, nra_ref, provenanc
     else:
         log.missing("a_forms.A9.tcs_pin",
                     "No current SARS Tax Compliance Status PIN on file - look one up via SARS eFiling.")
-    if comp.get("bee_source_note") and "sworn 2026-09-09" in comp["bee_source_note"]:
+    # A12 from the company's OWN B-BBEE record (level, proof type, expiry,
+    # black ownership). Until 2026-10-18 this was "confirmed" only when a
+    # free-text note contained "sworn 2026-09-09", and the confirmed value was
+    # Klipcorp's own affidavit typed out ("100% black owned, Level 1, sworn
+    # 2026-09-09"); every other company got "missing" even with valid proof on file.
+    bee_level, proof, expiry = comp.get("bee_level"), comp.get("bee_proof_type"), comp.get("bee_proof_expiry")
+    proof_label = {"certificate": "B-BBEE verification certificate", "qse_affidavit": "QSE sworn affidavit",
+                   "eme_affidavit": "EME sworn affidavit"}.get(proof)
+    if bee_level and proof_label and expiry and expiry > _today_iso():
+        own = comp.get("black_ownership_pct")
         log.confirmed("a_forms.A12.bee_certificate",
-                       "Current sworn affidavit on file, 100% black owned, Level 1, sworn 2026-09-09, "
-                       "valid ~12 months (to ~2027-09-09)")
-        log.missing("a_forms.A12.bee_certificate_attachment",
-                    "The current affidavit's data is confirmed, but the actual signed PDF still "
-                    "needs to be sourced and attached to this specific submission - it is not "
-                    "reusable across tenders without re-checking it's still within its 12-month "
-                    "validity window on the day this tender is submitted.")
+                       f"{proof_label} on file: Level {bee_level}"
+                       + (f" ({comp['status']})" if comp.get("status") else "")
+                       + (f", {own}% black owned" if own is not None else "") + f", valid to {expiry}")
+        attach = ("The proof on file must be attached to this submission and still be valid on the closing date.")
+        if proof != "certificate":
+            attach += (" SANRAL's Form A12 (R.396 Book 1) asks for a SANAS verification certificate under the "
+                       "amended Construction Sector Code and accepts a sworn affidavit only from an EME with annual "
+                       "revenue under R1.8 million - check this tender's A12 before relying on an affidavit.")
+        log.missing("a_forms.A12.bee_certificate_attachment", attach)
     else:
-        bee_reason = "Needs a current, valid B-BBEE verification certificate or affidavit attached."
+        if not bee_level:
+            bee_reason = "No B-BBEE level on file."
+        elif not proof_label:
+            bee_reason = f"Level {bee_level} on file, but not which proof backs it (certificate or affidavit)."
+        elif not expiry:
+            bee_reason = f"{proof_label} (Level {bee_level}) on file, but no expiry date."
+        else:
+            bee_reason = f"The {proof_label} on file expired {expiry}."
+        bee_reason += " Needs a current, valid B-BBEE verification certificate or affidavit attached."
         if comp.get("bee_source_note"):
-            bee_reason += f" Known issue on file: {comp['bee_source_note']}"
+            bee_reason += f" Note on file: {comp['bee_source_note']}"
         log.missing("a_forms.A12.bee_certificate", bee_reason)
     log.missing("a_forms.A19.current_commitments",
                 "The company profile only tracks past reference projects for CV purposes, not a "
