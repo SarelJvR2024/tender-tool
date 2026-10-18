@@ -139,6 +139,31 @@ function Field({ children }: { children: React.ReactNode }) {
   return <div style={{ marginBottom: 12 }}>{children}</div>;
 }
 
+function PersonJumpLink({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      style={{
+        flexShrink: 0,
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 32,
+        padding: "0 12px",
+        borderRadius: 100,
+        fontSize: 12,
+        fontWeight: 600,
+        textDecoration: "none",
+        background: "#FFFFFF",
+        color: "#16233B",
+        border: "1px solid #E5E1D5",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </a>
+  );
+}
+
 // SACNASP / SAGC (0040): the same number / category / renewal-date shape as
 // ECSA, rendered only when held or asked for by a tender (see the caller).
 function ConditionalRegistration({
@@ -220,6 +245,10 @@ export default async function PersonDetailPage({
   // SACPVP, PSIRA ...) - shown below only for a body a tender asks for, or
   // one already held.
   const heldCatalog: HeldCatalogRegistration[] = isNew ? [] : await loadHeldCatalogRegistrations(supabase, [id]);
+  // Hoisted out of the "Other registrations" block below so the jump-nav can
+  // know whether that section will actually render, without duplicating the
+  // same filter twice.
+  const catalogBodiesShown = CATALOG_BODIES.filter((b) => askedFor[b].length > 0 || heldCatalog.some((h) => h.slug === catalogSlug(b)));
 
   if (!isNew) {
     const { data } = await supabase.from("people").select("*").eq("id", id).maybeSingle();
@@ -316,6 +345,31 @@ export default async function PersonDetailPage({
         <div style={{ fontSize: 13, color: "#6B6758", marginBottom: 16 }}>
           Real ID and registration numbers are stored for official SANRAL forms only - handle with care.
         </div>
+
+        {/* Jump nav - this page now runs edit form -> registrations ->
+            role tags -> CV documents -> project history, a long scroll on a
+            phone. Same sticky-anchor idea as the Tender Workspace page. */}
+        {!isNew && (
+          <div
+            style={{
+              position: "sticky",
+              top: 0,
+              zIndex: 5,
+              display: "flex",
+              gap: 6,
+              overflowX: "auto",
+              WebkitOverflowScrolling: "touch",
+              background: "#F6F5F1",
+              padding: "8px 2px",
+              marginBottom: 12,
+            }}
+          >
+            {catalogBodiesShown.length > 0 && <PersonJumpLink href="#registrations-asked" label="Registrations" />}
+            <PersonJumpLink href="#roles" label="Roles" />
+            <PersonJumpLink href="#cv-documents" label="CV documents" />
+            <PersonJumpLink href="#projects" label="Projects" />
+          </div>
+        )}
 
         {errorParam && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
@@ -447,9 +501,9 @@ export default async function PersonDetailPage({
         </form>
 
         {!isNew &&
+          catalogBodiesShown.length > 0 &&
           (() => {
-            const shown = CATALOG_BODIES.filter((b) => askedFor[b].length > 0 || heldCatalog.some((h) => h.slug === catalogSlug(b)));
-            if (shown.length === 0) return null; // no tender asks for any of them - nothing to show (Sarel: don't ask unless required)
+            const shown = catalogBodiesShown;
             return (
               <div id="registrations-asked" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>
@@ -528,7 +582,7 @@ export default async function PersonDetailPage({
 
         {!isNew && (
           <>
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+            <h2 id="roles" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
               Tender roles this CV qualifies for
             </h2>
             <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
@@ -587,7 +641,7 @@ export default async function PersonDetailPage({
               </form>
             )}
 
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+            <h2 id="cv-documents" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
               CV documents
             </h2>
             <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
@@ -700,7 +754,7 @@ export default async function PersonDetailPage({
               </div>
             )}
 
-            <h2 style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+            <h2 id="projects" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
               Project / reference history
             </h2>
             <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
