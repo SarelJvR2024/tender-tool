@@ -182,18 +182,68 @@ def assess_fit(categories, signals, depth, profile):
 
     known_disciplines = profile.get("disciplines") or []
     tax = _taxonomy.active()
-    # exact: same category, or the company's tag is the group it sits in;
-    # broad: the tender is only known at group level and the company works in
-    # one of that group's disciplines - same field, scope still to check.
-    exact, broad = tax.overlap(categories, known_disciplines)
-    discipline_match = bool(exact)
+    # taxonomy.fit_overlap(): exact / group / broad / peripheral / outside -
+    # see its docstring. Precision over recall (2026-10-18 regression,
+    # docs/specs/System-Status.md): this verdict decides what lands in the
+    # daily e-mail, and a wrong strong_fit costs more than a missed one.
+    fit = tax.fit_overlap(categories, known_disciplines)
+    exact = fit["exact"]
+    # a peripheral discipline (in a group the company is tagged with, but not
+    # one its group tag covers) is outside what the company has claimed too
+    outside = fit["outside"] + fit["peripheral"]
+    field_only = fit["group"] + fit["broad"]
+    # Another discipline of the same group as one the company matched is the
+    # same field, not a competing trade: "routine road maintenance" also
+    # reads as road construction ("road"), and that shouldn't knock a road
+    # maintenance company's match down to partial.
+    group_of = lambda c: tax.parent_of(c) or c  # noqa: E731
+    matched_groups = {group_of(c) for c in exact}
+    outside = [c for c in outside if group_of(c) not in matched_groups]
+    # A professional service on a construction project names the works it is
+    # FOR: "architectural services (PSP) for the renovation of an office",
+    # "structural engineer to assess the roof". When the company's match is a
+    # built-environment professional discipline, the construction-works
+    # categories (the ones with CIDB classes on the list) are the project,
+    # not another trade competing for the scope.
+    served = []
+    if any(tax.parent_of(c) == "professional_services" for c in exact):
+        served = [c for c in outside if (tax.by_slug.get(c) or {}).get("cidb")]
+        outside = [c for c in outside if c not in served]
+    discipline_match = False
     uncategorized = all(c.startswith("uncategorized") for c in categories)
     labels = lambda cs: ", ".join(f"{tax.label(c)} ({c})" if c in tax.by_slug else c for c in cs)  # noqa: E731
-    if discipline_match:
-        reasons.append(f"Discipline match: {labels(exact)} is within scope.")
-    elif broad:
-        reasons.append(f"Same discipline group: the tender reads only as {labels(broad)}, and the company works in "
+    if exact and not outside:
+        discipline_match = True
+        reasons.append(f"Discipline match: {labels(exact)} is within scope"
+                       + (f" (for the works it names: {labels(served)})." if served else "."))
+    elif exact and len(exact) >= len(outside):
+        # Part of the work is the company's, part is another trade (road
+        # works plus the supply of building materials): worth a look, but
+        # not a strong fit on a keyword overlap alone.
+        reasons.append(f"Partial discipline match: {labels(exact)} is within scope, but the tender also reads as "
+                       f"{labels(outside)}, outside the company's disciplines - check how much of the scope is its work.")
+    elif exact:
+        # Mostly another trade, with one of the company's disciplines named
+        # in passing - "herbicides on roads, pest control and fumigation"
+        # is pest control, not road work.
+        reasons.append(f"Mostly outside the company's disciplines: the tender reads as {labels(outside)}; "
+                       f"{labels(exact)} is only part of it (possibly just where the work is) - needs a human look.")
+        verdict = "needs_review"
+    elif field_only and not outside:
+        reasons.append(f"Same discipline group: the tender reads only as {labels(field_only)}, and the company works in "
                        "that group - check the tender's scope against what the company actually does.")
+    elif field_only:
+        reasons.append(f"Same discipline group only in general terms ({labels(field_only)}), and the tender's specific "
+                       f"work reads as {labels(outside)}, outside the company's disciplines - needs a human look.")
+        verdict = "needs_review"
+    elif fit["peripheral"]:
+        # The company is tagged with the GROUP these sit in, but a group tag
+        # doesn't cover them (taxonomy group_tag_match off): tagged
+        # professional_services is not a claim to be a property valuer.
+        reasons.append(f"{labels(fit['peripheral'])} sits in a discipline group the company is tagged with, but the "
+                       "group tag alone doesn't cover it - needs a human look. If the company does this work, tick the "
+                       "discipline itself on an Experience Library item.")
+        verdict = "needs_review"
     elif uncategorized:
         if categories != ["uncategorized"]:
             reasons.append(f"Could not match a discipline from title/description alone "

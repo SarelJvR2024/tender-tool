@@ -17,7 +17,10 @@ water, buildings, electrical_mechanical, it_telecoms, professional_services,
 security_facilities), so every experience tag, price_sector and stored
 discovered_opportunities.categories value written before 0038 is still a
 valid category. Children are the specific disciplines tenders are sorted
-into. A company tagged with a group matches every child of it.
+into. A company tagged with a group matches the children of it whose
+group_tag_match is on (discipline_categories.matched_by_group_tag, 0058) -
+off for the disciplines the 7 legacy groups gained in 0040 that their old
+buckets never meant (the 2026-10-18 regression: see fit_overlap()).
 
 Evidence for the seed list: docs/specs/Discipline-Taxonomy-Findings.md.
 
@@ -176,22 +179,69 @@ class Taxonomy:
                                        f"{', '.join(self.label(m) for m in matching[:3])} - not the categories read from the text. Check by hand.")
         return {"status": status, "site_category": site, "matching_categories": matching, "note": note}
 
-    def overlap(self, categories, company_disciplines):
-        """How a tender's categories relate to a company's discipline tags.
-        exact: same slug, or the company's tag is a GROUP the category sits
-        in (tagged roads_civil -> every road/bridge/stormwater child);
-        broad: the tender is only known at group level and the company has a
-        child of that group (tender 'civil works', company road_maintenance) -
-        same field, scope still to be checked. A sibling (architecture vs
-        geotechnical) is not a match."""
+    def group_tag_matches(self, slug):
+        """Whether a company tagged with this discipline's GROUP counts as
+        doing it (discipline_categories.matched_by_group_tag, 0058; seed
+        field group_tag_match). True unless switched off - off for the
+        disciplines a group grew to cover in 0040 that its old bucket never
+        meant (see fit_overlap)."""
+        r = self.by_slug.get(slug)
+        return bool(r.get("group_tag_match", True)) if r else True
+
+    def fit_overlap(self, categories, company_disciplines):
+        """How a tender's categories relate to a company's discipline tags,
+        for assess_tender.assess_fit(). Every category lands in one list:
+
+          exact      the company's own tag (a specific discipline), or a
+                     discipline of a GROUP the company is tagged with whose
+                     group_tag_match is on (tagged roads_civil ->
+                     road_maintenance);
+          group      the tender is only known at group level (no specific
+                     discipline of that group recognised - e.g. just
+                     "consultant" / "civil works") and the company is tagged
+                     with that group: same field, scope unknown;
+          broad      the tender is only known at group level and the company
+                     has a discipline in that group (tender 'civil works',
+                     company road_maintenance): same field, scope unknown;
+          peripheral a discipline of a group the company is tagged with, but
+                     one a group tag does NOT cover (group_tag_match off:
+                     a company tagged professional_services is not thereby a
+                     property valuer, a laboratory or a management
+                     consultancy);
+          outside    nothing to do with the company's tags.
+
+        Why `peripheral` exists (2026-10-18 regression, System-Status.md):
+        0040 kept the 7 old bucket keys as group slugs, but the
+        professional_services group grew from 4 engineering-PSP keywords
+        ("consulting engineer", "psp", ...) to 13 disciplines, and
+        roads_civil gained rail and ports. Every tag written before 0040
+        silently widened with them - Klipcorp's [roads_civil,
+        professional_services] came out strong_fit on 456 of 2 211 live
+        tenders (valuation panels, ethics assessments, stevedoring)."""
         tags = set(company_disciplines or [])
-        exact, broad = [], []
+        out = {"exact": [], "group": [], "broad": [], "peripheral": [], "outside": []}
         for c in categories:
-            if c in tags or any(a in tags for a in self.ancestors(c)):
-                exact.append(c)
+            is_group = c in self.by_slug and not self.parent_of(c)
+            anc = self.ancestors(c)
+            if c in tags and not is_group:
+                out["exact"].append(c)
+            elif c in tags:
+                out["group"].append(c)
+            elif any(a in tags for a in anc):
+                out["exact" if self.group_tag_matches(c) else "peripheral"].append(c)
             elif any(c in self.ancestors(t) for t in tags if t in self.by_slug):
-                broad.append(c)
-        return exact, broad
+                out["broad"].append(c)
+            else:
+                out["outside"].append(c)
+        return out
+
+    def overlap(self, categories, company_disciplines):
+        """(exact, broad) - fit_overlap() folded to its original two lists:
+        exact = exact + group, broad = broad. A sibling (architecture vs
+        geotechnical) is not a match, and neither is a discipline a group tag
+        doesn't cover (peripheral)."""
+        f = self.fit_overlap(categories, company_disciplines)
+        return f["exact"] + f["group"], f["broad"]
 
 
 _ACTIVE = None
@@ -209,7 +259,7 @@ def load_seed(path=SEED_PATH):
     return [{"slug": c["slug"], "label": c["label"], "parent": c.get("parent"),
              "keywords": c.get("keywords") or [], "exclude": c.get("exclude") or [],
              "etenders": c.get("etenders") or [], "l2b": c.get("l2b") or [], "cidb": c.get("cidb") or [],
-             "active": True} for c in data["categories"]]
+             "group_tag_match": c.get("group_tag_match", True), "active": True} for c in data["categories"]]
 
 
 def rows_from_db(db_rows):
@@ -218,7 +268,9 @@ def rows_from_db(db_rows):
     return [{"slug": r["slug"], "label": r["label"], "parent": r.get("parent_slug"),
              "keywords": r.get("keywords") or [], "exclude": r.get("exclude_keywords") or [],
              "etenders": r.get("etenders_categories") or [], "l2b": r.get("l2b_categories") or [],
-             "cidb": r.get("cidb_classes") or [], "active": r.get("active", True)} for r in rows]
+             "cidb": r.get("cidb_classes") or [],
+             # absent before 0058 is applied: every discipline matched by its group tag (the old behaviour)
+             "group_tag_match": r.get("matched_by_group_tag", True), "active": r.get("active", True)} for r in rows]
 
 
 def load_taxonomy(client=None, path=SEED_PATH):
@@ -283,6 +335,8 @@ def validate(rows):
             problems.append(f"{r['slug']}: parent {r['parent']!r} is itself a child (two levels only)")
         if not r.get("label"):
             problems.append(f"{r['slug']}: no label")
+        if not r.get("parent") and not r.get("group_tag_match", True):
+            problems.append(f"{r['slug']}: group_tag_match is off on a group row (it only means something on a discipline)")
     for g in LEGACY_GROUPS:
         if g not in known:
             problems.append(f"legacy group {g} missing - stored tags/price_sector values use it")
@@ -370,7 +424,8 @@ def db_row(r, sort_order, added_from):
     return {"slug": r["slug"], "label": r["label"], "parent_slug": r.get("parent"), "sort_order": sort_order,
             "keywords": r.get("keywords") or [], "exclude_keywords": r.get("exclude") or [],
             "etenders_categories": r.get("etenders") or [], "l2b_categories": r.get("l2b") or [],
-            "cidb_classes": r.get("cidb") or [], "added_from": added_from, "active": True}
+            "cidb_classes": r.get("cidb") or [], "matched_by_group_tag": r.get("group_tag_match", True),
+            "added_from": added_from, "active": True}
 
 
 def _client():

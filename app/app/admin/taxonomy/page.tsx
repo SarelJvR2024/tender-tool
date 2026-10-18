@@ -96,6 +96,21 @@ function CategoryForm({ c, groups, canEdit }: { c: DisciplineCategoryFull; group
         <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "#16233B", margin: "10px 0" }}>
           <input type="checkbox" name="active" defaultChecked={c.active} /> Active (untick to retire: no longer offered or matched, stored tags keep their label)
         </label>
+        {c.parent_slug ? (
+          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: "#16233B", margin: "0 0 10px" }}>
+            <input type="checkbox" name="matched_by_group_tag" defaultChecked={c.matched_by_group_tag} style={{ marginTop: 3 }} />
+            <span>
+              A company tagged with the whole group counts as doing this
+              <span style={{ display: "block", ...hint }}>
+                Untick for a discipline the group&apos;s name doesn&apos;t really claim (a firm tagged &quot;Professional &amp; consulting
+                services&quot; isn&apos;t thereby a property valuer): Discovery then matches it only for companies that ticked it
+                itself, and shows it to group-tagged companies as &quot;needs a look&quot;, never as a fit.
+              </span>
+            </span>
+          </label>
+        ) : (
+          <input type="hidden" name="matched_by_group_tag" value="on" />
+        )}
         <div style={{ fontSize: 11, color: "#9A9684", marginBottom: 8 }}>
           {c.added_from ? `Added from: ${c.added_from}. ` : ""}
           {c.l2b_categories.length ? `L2B: ${c.l2b_categories.join(", ")}. ` : ""}
@@ -300,6 +315,7 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
                       {c.label}
                       <span style={{ fontFamily: "monospace", fontSize: 11, color: "#9A9684" }}>{c.slug}</span>
                       {!c.active && <span style={{ fontSize: 11, color: "#B91C1C" }}>retired</span>}
+                      {!c.matched_by_group_tag && <span style={{ fontSize: 11, color: "#6B6758" }}>not matched by a group tag</span>}
                       {c.keywords.length === 0 && <span style={{ fontSize: 11, color: "#B45309" }}>no keywords - Discovery never sorts into it</span>}
                     </summary>
                     <CategoryForm c={c} groups={groups} canEdit={canEdit} />

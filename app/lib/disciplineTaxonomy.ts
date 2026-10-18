@@ -17,6 +17,13 @@ export type DisciplineCategory = {
   label: string;
   parent_slug: string | null;
   sort_order: number;
+  /**
+   * 0058: does a company tagged with this discipline's GROUP count as doing
+   * it? Off for disciplines the group's name doesn't really claim (tagged
+   * professional_services is not a claim to be a property valuer) - see
+   * engine/discovery/taxonomy.py fit_overlap(). Always true on a group row.
+   */
+  matched_by_group_tag: boolean;
 };
 
 export type DisciplineTaxonomy = {
@@ -30,7 +37,7 @@ export type DisciplineGroup = { group: DisciplineCategory; children: DisciplineC
 
 /** Used only when the table can't be read (e.g. 0040 not applied yet): the 7 original groups. */
 export const FALLBACK_TAXONOMY: DisciplineTaxonomy = {
-  categories: DISCIPLINES.map((d, i) => ({ slug: d.value, label: d.label, parent_slug: null, sort_order: (i + 1) * 10 })),
+  categories: DISCIPLINES.map((d, i) => ({ slug: d.value, label: d.label, parent_slug: null, sort_order: (i + 1) * 10, matched_by_group_tag: true })),
   source: "fallback",
   error: null,
 };
@@ -38,7 +45,7 @@ export const FALLBACK_TAXONOMY: DisciplineTaxonomy = {
 export async function loadDisciplineTaxonomy(supabase: SupabaseClient): Promise<DisciplineTaxonomy> {
   const { data, error } = await supabase
     .from("discipline_categories")
-    .select("slug, label, parent_slug, sort_order")
+    .select("slug, label, parent_slug, sort_order, matched_by_group_tag")
     .eq("active", true)
     .order("sort_order");
   if (error || !data || data.length === 0) {
@@ -99,4 +106,4 @@ export type DisciplineCategoryFull = DisciplineCategory & {
   updated_at: string;
 };
 export const DISCIPLINE_CATEGORY_FULL_COLUMNS =
-  "slug, label, parent_slug, sort_order, keywords, exclude_keywords, etenders_categories, l2b_categories, cidb_classes, active, added_from, updated_at";
+  "slug, label, parent_slug, sort_order, matched_by_group_tag, keywords, exclude_keywords, etenders_categories, l2b_categories, cidb_classes, active, added_from, updated_at";

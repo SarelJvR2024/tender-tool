@@ -68,6 +68,8 @@ export async function updateCategory(formData: FormData) {
       exclude_keywords: splitKeywords(text(formData, "exclude_keywords")),
       etenders_categories: splitKeywords(text(formData, "etenders_categories"), "\n"),
       active: formData.get("active") === "on",
+      // 0058: whether a company tagged with the whole group counts as doing it
+      matched_by_group_tag: formData.get("matched_by_group_tag") === "on",
     })
     .eq("slug", slug)
     .select("slug");

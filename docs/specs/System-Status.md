@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18 ~06:20 UTC quiet check-in (one small, well-verified UI fix - sticky jump-nav on the Person page, below; nothing further needed). ~04:15 UTC quiet check-in (one small, well-verified fix landed - "likely a scanned image" wrong-explanation bug, below; nothing further needed). ~02:30 UTC independent verification of the batch below (cross-tenant isolation extended through `0057`, principals/registrations/bank-accounts RLS, taxonomy admin approval) plus one test-script fix - below. 2026-10-18 ~02:00 UTC form-by-form, field-by-field audit (`Form-Field-Audit.md`: 26 fixes, 13 open decisions for Sarel, migration `0057`); 2026-10-18 SANRAL Form B7 Targeted-Enterprise subcontracting answered by the company (compliance review G3, migration `0056` - below); 2026-10-18 Sarel's answers to taxonomy O1/O2/O4/O5 - buyer's eTenders category cross-check, `/admin/taxonomy` + company tag suggestions, SACAP/SACPLAN/SACQSP/SACPVP/PSIRA asked for only when a tender asks (on the 0050 catalog), each tender's own C3.1.11 minimums (migration `0054` - below); 2026-10-18, ~01:15 UTC Sarel's answer on stale Discovery rows after a downgrade (a re-score that makes a verdict worse is flagged on the Discovery card, the Workspace and the Pipeline until marked seen, and carried once in the digest - migration `0055`, below); POPIA / cross-tenant audit follow-up (shared blank templates are now per-company copies, migration `0045`; audit write-up `POPIA-Security-Audit.md` - below); award and price analysis (market feedback on submitted prices, migration `0053` - below); government tender coverage + listing-change tracking (eTenders portal read in full, SANRAL/Eskom/Transnet/Cape Town direct, cancellations and extensions, migration `0051` - row below and `Government-Tender-Coverage-Findings.md`); 2026-10-18 directors & shareholders register, shared registrations catalog, restricted bank accounts and landlord property records (Sarel's Q-MD1-4, migration `0050` - below); ~00:30 UTC independent verification of the cross-tenant isolation fixes and 8 other commits, including filling in the missing write-up for the isolation fix itself (below); 2026-10-17 ~21:15 UTC Sarel's three tender-update decisions (accept a disagreeing date from the Workspace, a real briefing date + milestone, people named by e-mail in the alert report and the digest - migration `0048`); ~21:00 UTC tender regulatory compliance review (Public Procurement Act 2024 struck down; B-BBEE affidavit vs SANRAL A12); ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039`); ~19:00 UTC Sarel's three decisions on the §9.4 open questions (re-score on a profile change, every local seen store into the database, central system alerts e-mailed to Sarel); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters; ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7; ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
+Last full pass: 2026-10-18 ~07:30 UTC **regression found and fixed**: Discovery was scoring valuation panels, ethics assessments, stevedoring etc. as `strong_fit` for roads/engineering firms (whole-group tags widened by 0040; migration `0058` - below). ~06:20 UTC quiet check-in (one small, well-verified UI fix - sticky jump-nav on the Person page, below; nothing further needed). ~04:15 UTC quiet check-in (one small, well-verified fix landed - "likely a scanned image" wrong-explanation bug, below; nothing further needed). ~02:30 UTC independent verification of the batch below (cross-tenant isolation extended through `0057`, principals/registrations/bank-accounts RLS, taxonomy admin approval) plus one test-script fix - below. 2026-10-18 ~02:00 UTC form-by-form, field-by-field audit (`Form-Field-Audit.md`: 26 fixes, 13 open decisions for Sarel, migration `0057`); 2026-10-18 SANRAL Form B7 Targeted-Enterprise subcontracting answered by the company (compliance review G3, migration `0056` - below); 2026-10-18 Sarel's answers to taxonomy O1/O2/O4/O5 - buyer's eTenders category cross-check, `/admin/taxonomy` + company tag suggestions, SACAP/SACPLAN/SACQSP/SACPVP/PSIRA asked for only when a tender asks (on the 0050 catalog), each tender's own C3.1.11 minimums (migration `0054` - below); 2026-10-18, ~01:15 UTC Sarel's answer on stale Discovery rows after a downgrade (a re-score that makes a verdict worse is flagged on the Discovery card, the Workspace and the Pipeline until marked seen, and carried once in the digest - migration `0055`, below); POPIA / cross-tenant audit follow-up (shared blank templates are now per-company copies, migration `0045`; audit write-up `POPIA-Security-Audit.md` - below); award and price analysis (market feedback on submitted prices, migration `0053` - below); government tender coverage + listing-change tracking (eTenders portal read in full, SANRAL/Eskom/Transnet/Cape Town direct, cancellations and extensions, migration `0051` - row below and `Government-Tender-Coverage-Findings.md`); 2026-10-18 directors & shareholders register, shared registrations catalog, restricted bank accounts and landlord property records (Sarel's Q-MD1-4, migration `0050` - below); ~00:30 UTC independent verification of the cross-tenant isolation fixes and 8 other commits, including filling in the missing write-up for the isolation fix itself (below); 2026-10-17 ~21:15 UTC Sarel's three tender-update decisions (accept a disagreeing date from the Workspace, a real briefing date + milestone, people named by e-mail in the alert report and the digest - migration `0048`); ~21:00 UTC tender regulatory compliance review (Public Procurement Act 2024 struck down; B-BBEE affidavit vs SANRAL A12); ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039`); ~19:00 UTC Sarel's three decisions on the §9.4 open questions (re-score on a profile change, every local seen store into the database, central system alerts e-mailed to Sarel); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters; ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7; ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -51,7 +51,7 @@ bridged by `engine/general/process_general_jobs.py`.
 | CV generation (`engine/cv/generate_cv.py`) + web wiring (`cv_uploads`/`generated_cvs`, migration `0008`) | Builds a real Word+PDF CV in `sanral_keyperson`/`world_bank` formats, summary/detailed, standard/tender-customized (reuses `suggest_pack.py`'s `score_candidate()`, no new matcher). Two real integration points: upload-mode choice (as-is vs. AI-extract) on the People page, "Generate tender-specific CV" action on the Tender Workspace | Generator itself verified against real data (3 real combinations, python-docx + pdfplumber read-back, correctly raised a specialism warning). Web wiring confirmed by grep: both `cv_uploads`/`generated_cvs` inserts are real, not stubs. Fulfilment is deliberately asynchronous — `engine/cv/process_cv_jobs.py` is the bridge, because Vercel can't run Python/LibreOffice. It now runs without a person through the bridge worker (row below), but only once that is deployed. AI extraction: see the next row |
 | CV AI-extraction, review-then-confirm (`engine/cv/extract_cv_fields.py`, bridge `cv_extract` in `run_bridges.py`; migration `0023` `cv_extraction_results` + `cv_uploads.extraction_*`; People page review card `app/app/people/[id]/cv-review.tsx`, `applyCvExtraction`/`discardCvExtraction`) | An `ai_extract` upload's text is read (pdftotext / python-docx / LibreOffice for `.doc`, reusing `engine/general/requirements.py`). Scans, images, garbled text and whole tender packs are refused with a reason, with no API call. SA ID numbers are matched and removed locally before the text leaves the machine. One Claude structured-output call (`claude-opus-5-5`, `fallbacks: "default"`) proposes `people`/`projects` fields, each with a verbatim CV quote. Quotes, digits, SANRAL dropdown labels and date precision are re-checked, and anything that fails is left unticked. The People page shows on-file vs from-the-CV per field; only ticked fields are written. Re-upload replaces nothing unticked, likely-duplicate projects are unticked, and standard CV formats are queued at confirm (no longer at upload). `as_is` is untouched | `test_extract_cv_fields.py` (in CI, no secrets): real-format text step on synthetic .docx/.pdf/.doc, every refusal path, ID redaction, validation on hand-written test-double answers (validated against the exact output schema), request shape vs a stub client, queue state machine. Real files: Henning's SANRAL Form B1-B2 PDF read and its ID redacted; 3 real scans refused. `0001`→`0023` replayed with RLS tests. **Never run against the real Anthropic API (no key here) — extraction quality on real CVs is unmeasured** — and never against a live Supabase (Gap #9). Evidence, setup (API key) and cost (~$0.05-0.15/CV): `CV-Extraction-Findings.md` |
 | Experience library (`/experience`, `/experience/[id]`, migration `0012`) | Capture + manually tag company past-performance evidence (letters of award, reference letters, completion certificates); `experience_matches()` SQL function for tender-side matching. Discipline tags (since `0040`): Tender Tool's own maintained list, `discipline_categories` (19 groups / 93 disciplines, grouped checkboxes; a group tag or filter covers every discipline in it) plus the company's own tags (`0036`) - see the Discipline taxonomy row | Taxonomy checked by script against real data (`DISCIPLINE_KEYWORDS`, real client/project types all present). Functional SQL tests on a scratch DB confirm filter correctness and tenant isolation (own-company-only rows, rejected cross-company insert, rejected out-of-prefix storage write) |
-| Discipline taxonomy - Tender Tool's own, maintained list (audit Q3; migration `0040` `discipline_categories`; `engine/discovery/taxonomy.py`; seed `config/discipline_taxonomy.json`; `app/lib/disciplineTaxonomy.ts`) | What Discovery sorts tenders into and what companies tag experience / price sectors with. Two levels (19 groups incl. the original 7 bucket slugs, 93 disciplines) with keywords/excludes and eTenders / L2B / CIDB cross-references. **Grows without a migration:** a category is a row (`taxonomy.py add`, or SQL as service role); the engine reads the live table whenever the service-role env is present (seed file fallback, also in the worker image), the app reads it per request. `assess_tender.categorize()`/`assess_fit()` match through it (exact / group / broad "check scope"). Review loop: `taxonomy.py coverage <releases>` lists what stayed uncategorised | Built from 2 211 live eTenders tenders + 400 OCDS releases + the 17 samples: uncategorised 66.1% → 2.9% (OCDS 70.8% → 2.8%); 50-tender hand check in `Discipline-Taxonomy-Findings.md`. `test_taxonomy.py` (in CI; DB part on a `0001`→`0040` replay): real descriptions, overlap, verdicts, a table-only row used at once, INSERT/two-level/RLS/price_sector FK. Rendered on real PostgREST + RLS with `next dev` (experience grouped checkboxes + group filter, pricing optgroups). Not against a live project (Gap #9) |
+| Discipline taxonomy - Tender Tool's own, maintained list (audit Q3; migration `0040` `discipline_categories`; `engine/discovery/taxonomy.py`; seed `config/discipline_taxonomy.json`; `app/lib/disciplineTaxonomy.ts`) | What Discovery sorts tenders into and what companies tag experience / price sectors with. Two levels (19 groups incl. the original 7 bucket slugs, 93 disciplines) with keywords/excludes and eTenders / L2B / CIDB cross-references. **Grows without a migration:** a category is a row (`taxonomy.py add`, or SQL as service role); the engine reads the live table whenever the service-role env is present (seed file fallback, also in the worker image), the app reads it per request. `assess_tender.categorize()`/`assess_fit()` match through it (exact / group / broad "check scope"). Since 2026-10-18 (`0058`, regression fix - pass entry below): a whole-group tag covers only the disciplines with `matched_by_group_tag` on (17 off: what the legacy groups gained in 0040 beyond their old bucket, e.g. valuation/management consulting/labs under `professional_services`, rail/ports under `roads_civil`), and a match is `strong_fit` only when the tender doesn't also read as other trades (partly -> `possible`, mostly -> `needs_review`). Review loop: `taxonomy.py coverage <releases>` lists what stayed uncategorised | Built from 2 211 live eTenders tenders + 400 OCDS releases + the 17 samples: uncategorised 66.1% → 2.9% (OCDS 70.8% → 2.8%); 50-tender hand check in `Discipline-Taxonomy-Findings.md`. `test_taxonomy.py` (in CI; DB part on a `0001`→`0040` replay): real descriptions, overlap, verdicts, a table-only row used at once, INSERT/two-level/RLS/price_sector FK. Rendered on real PostgREST + RLS with `next dev` (experience grouped checkboxes + group filter, pricing optgroups). Not against a live project (Gap #9) |
 | SACNASP / SAGC person registrations (audit Q5; `0040` `people.sacnasp_*`, `sagc_*`; `app/lib/personCredentials.ts`; `requirements.py find_person_registrations`) | Category / number / renewal date, same shape as ECSA/SACPCMP, all optional. **Shown on the People page only when the person holds it or an open tender's own requirements ask for it** (SANRAL SETUP position naming an Engineering Geologist / Surveyor, or a general tender's `document_requirements.person_registrations`), naming the tender; otherwise behind a closed "add another registration" disclosure. Compliance reads them only for a Geologist (Pr Sci.Nat, valid at closing) or Surveyor (SAGC) position; general workspace lists who holds a required body. Expiry reminders via the same `find_due_person_credentials()` (`TRACKED_PERSON_EXPIRY_FIELDS`) | `test_watch_conditional_registrations.py` (in CI; Part 2 on real replayed rows): SACNASP due in 15 days → renew soon, SAGC lapsed → expired, ECSA-only person → nothing. UI on real PostgREST 12.2.3 + RLS + `next dev`: hidden with no asking tender, shown with "Asked for by R.396-010-2025/1F (DS2)" / a general SAGC tender; R.396 compliance: valid Pr.Sci.Nat → met, lapsing before closing → not met. Real R.396 Book 2/3 text: both bodies detected. No SANRAL form writes these numbers yet (open O3) |
 | Tender evaluation compliance report (`app/lib/tenderCompliance.ts`, `app/lib/sanralScoring.ts`, `compliance-report.tsx`, mounted on the Tender Workspace) | Required-documents checklist (Don't have / Confirm by hand / On file), key-people/CV minimums, company-experience match (via the Experience Library), SANRAL functionality score estimate with range bars. The Tender Workspace page now carries a sticky jump-nav (id anchors + a link row under the facts card) since this section stack can run to 10 full-width cards (SANRAL pack and general-pack sections included); the pack link — the page's actual deliverable — is a distinct amber "primary" pill pinned first in the row, not just one more identically-styled link at the end | Run against real Klipcorp vault values and a real `field_provenance.json`, plus edge cases (expired COID shows red, under-10-years fails). Reuses `app/lib/dates.ts`'s `daysUntil` for expiry math rather than reimplementing it — checked, no duplication. Only the SANRAL "Conventional Consultant Tender" family is mapped; others get an explicit "not mapped yet" message. Jump-nav changes are additive/styling-only (id attributes, nav markup, a `variant` prop) — no report/scoring logic touched by either jump-nav pass |
 | Tender role catalog + manual role tagging (migration `0016`, People page, `app/lib/tenderRoles.ts`, `app/lib/sanralMatrices.ts`) | 47 roles real tenders ask for: SANRAL's 23 Book 1 codes, with DS split into its 8 specialisms, plus 17 roles from other buyers (contractor key personnel, SACPCMP safety officer, SACAP/SACPLAN/SACPVP/ECSA professionals, trades, PSIRA, pest control). Each role carries its source citation. The company ticks which roles each person's CV fits (`person_role_eligibility`). The compliance report uses that tag for role fit; the C3.1.11 years/ECSA heuristic is now only a cross-check that turns the row amber on a contradiction. All 9 Book 1 project-type matrices are structured data (was 2 hardcoded) | Role-fit cases run on Henning's real record (tagged plus Pr Eng: on file; tagged plus Pr Techni: amber; untagged: amber, naming who is tagged). `0016` replayed with RLS tests: a cross-company tag is rejected by the with-check, an unknown role by the FK. `sanralScoring.ts` output identical to the pre-refactor code on R.396 (24.5 / 13.5 / 44-93). A new DS Structures case was hand-checked |
@@ -122,6 +122,136 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## Regression found and fixed (2026-10-18, ~07:30 UTC): Discovery called valuation panels, ethics assessments and stevedoring a "strong fit" for a roads/engineering firm (migration `0058`)
+
+**What happened.** The real daily watch (`watch_new_tenders.py --days 5 --sources ocds --profile
+config/klipcorp_profile.json`) returned 13 report-worthy releases for Klipcorp, **all 13 scored
+`strong_fit`**, and 11 of them were plainly wrong for a roads / civil / engineering-PSP firm:
+herbicides & pest control, a due-diligence training course, railway shunting torches & latex
+gloves, municipal-governance training, stevedoring, ethics risk assessments, a fire-resistance lab
+test, a valuation panel, a "bankable business case" advisory partner, and two precinct plans. Only
+the architectural PSP (SCMU5-26/27-0007SB) and the Sentech structural engineer (RFX 60000003737) were
+real fits. Sarel was about to get that e-mail. This is the failure the `REPORT_WORTHY_VERDICTS`
+safeguard in `watch_new_tenders.py` exists to prevent ("trains the reader to stop opening it"), and
+it got through because the verdicts became *more* permissive, not because the safeguard moved: these
+weren't `needs_review` noise leaking into the e-mail, they were genuine `strong_fit` verdicts.
+
+**Root cause (traced per release, reproduced on the live feed).** Commit `a9a5364` (0040, the
+discipline taxonomy) kept the 7 old bucket keys as **group** slugs so old tags still resolve, and
+`Taxonomy.overlap()` treated "company tagged with a group" as an exact match for **every**
+discipline in it. Two groups grew far past what their old bucket meant:
+- `professional_services`: the old bucket was 4 engineering-PSP keywords (`professional service
+  provider`, `consulting engineer`, `design specialist`, `psp`); the group now holds 13 disciplines,
+  including property valuation, management consulting (which matches "ethics", "governance", "risk
+  assessment"), laboratories (fire-resistance tests), feasibility/research/advisory ("due diligence",
+  "bankable", "business case") and town planning ("precinct plan").
+- `roads_civil`: gained `rail_infrastructure` ("railway" -> shunting torches) and
+  `ports_marine_works` ("stevedor*").
+
+Klipcorp's profile (and any Experience Library item tagged before 0040) carries exactly those two
+group tags, so every tag silently widened. Measured on the 2 211 tenders live on eTenders today
+(metadata level): **456 strong_fit for Klipcorp** (21%); the pre-taxonomy code gave 223 strong_fit
+and the new code gives 126. The remaining bad match (herbicides **on roads**) is a second, older
+weakness the widening made visible: any one overlapping category gave `strong_fit`, even when the
+tender also read as three other trades (pest control, gardening, transport) - the pre-taxonomy
+matcher called this one `strong_fit` too.
+
+Checked and ruled out, with evidence:
+- (b) the eTenders-category cross-read (`8c12431`) does **not** reach the verdict: `assess_fit()`
+  takes categories / signals / depth / profile only, and re-scoring all 100 live releases with the
+  real site category, none, "Civil engineering" and "Services: Professional" changed 0 verdicts. (The
+  portal reader does pass the site category as `procurement_category`, which only labels an
+  *uncategorised* tender `uncategorized_<x>` - verdict `needs_review` either way.)
+- (d) the portal-read coverage work (`924813b`) doesn't touch title/description used for matching
+  (the 13 came from the OCDS-only path anyway).
+- (c) generic keywords did contribute (consulting_engineering's bare "multidisciplinary" matched
+  artists and health & wellness; "civil engineer*" matched contractors' "civil engineering works";
+  buyer names like "Roads Agency Limpopo" / "Department of Roads and Transport" read as road works;
+  "George drainage area" read as stormwater) - fixed below, but these were not the main cause.
+- Per-company fan-out (`f85d889`, `4a24b31`): same `assess_fit()`, so the same regression - any
+  company whose Experience Library items are tagged with a whole group got the same widening (and
+  the Experience Library page told users "ticking a whole group matches every discipline in it").
+
+**Fix.**
+1. `discipline_categories.matched_by_group_tag` (migration `0058`; seed field `group_tag_match`):
+   off for the 17 disciplines each legacy group gained in 0040 that its old bucket never covered
+   (rail, ports; town planning, environmental, surveying/GIS, valuation, feasibility/advisory,
+   management consulting, laboratory, project/programme management; water meters; plumbing,
+   demolition, fencing; fire protection, pest control, gardening). A company tagged only with the
+   group now sees those as `needs_review` ("tick the discipline itself if you do this work"), never
+   `strong_fit`/`possible`; a company that ticked the discipline itself is matched as before. The
+   12 groups added in 0040 keep every discipline on (no older tags to widen). It is data: an admin
+   can flip it on `/admin/taxonomy` (new checkbox), the engine reads it on the next run.
+2. `assess_fit()` (`taxonomy.fit_overlap()`): a match is only `strong_fit` when nothing else the
+   tender reads as is outside the company's disciplines. Partly the company's work -> `possible`;
+   mostly another trade -> `needs_review` ("herbicides on roads, pest control and fumigation" is pest
+   control). Two exceptions keep genuine fits strong: another discipline of the same group is the
+   same field (routine road maintenance also reads as road construction), and when the company's
+   match is a built-environment professional service, the construction-works categories (those with
+   CIDB classes) are the project it is for (architectural PSP *for* a renovation). A tender known
+   only at group level that also reads as another trade -> `needs_review`.
+3. Keyword precision on the categories above (same edits in the seed and in `0058`, written as array
+   edits so admin changes survive).
+4. UI wording: Experience Library says which disciplines a whole-group tick does not cover ("tick on
+   its own"); the "All of ..." box is now "Whole group: ...".
+
+**Proof on the real data.** Replay of the same live window (100 OCDS releases + their documents,
+snapshotted) through the unchanged and the fixed code via `watch_new_tenders.fan_out()`:
+
+| Release | Before (HEAD `c852990`) | After |
+|---|---|---|
+| 174041 herbicides on roads / pest control / fumigation | strong_fit | needs_review (mostly other trades) |
+| 174423 two-day due-diligence training | strong_fit | needs_review (feasibility - not covered by the group tag) |
+| 174432 railway shunting torches & latex gloves | strong_fit | needs_review (rail - not covered) |
+| 174443 / 174446 precinct plans (N14, R380) | strong_fit | needs_review (town planning - not covered) |
+| 174454 (and the re-advert 174403) municipal-governance training | strong_fit | needs_review |
+| 174458 stevedoring container services | strong_fit | needs_review (ports - not covered) |
+| 174483 ethics risk assessments | strong_fit | needs_review |
+| 174491 fire-resistance test | strong_fit | needs_review (laboratory - not covered) |
+| 174517 valuation panel | strong_fit | needs_review (valuation - not covered) |
+| 174519 strategic advisory / bankable business case | strong_fit | needs_review |
+| **174193 architectural PSP, Somerset East** | strong_fit | **strong_fit** |
+| **174473 structural engineer, Bloemfontein OC roof** | strong_fit | **strong_fit** |
+
+Report-worthy: **14 -> 2** (the 13 of the original run plus 174403, a second municipal-governance
+release that was posted after it). Across the 2 211 live tenders, Klipcorp's report-worthy count went
+456 -> 186, and the 186 are road / bridge / stormwater / earthworks works and consulting-engineering /
+architectural PSP tenders (read through by hand; the residual noise is listed under limits below); for other tag shapes: a `road_maintenance`-only company
+keeps 43 strong fits (its 10 lost ones are lab-equipment "ad hoc maintenance", plant hire, a
+consulting-engineering tender for a contractor), `consulting_engineering` 27 strong. The exact live
+command, re-run after the fix against the live feed (fresh `--seen-store`, see limits; the OCDS API again
+stopped at 100 releases with an HTTP 500 on page 2, same window as the original run): **2 report-worthy - the
+architectural PSP and the structural engineer, both `strong_fit`**; the other 11 of the original 13 all
+`needs_review`; window totals 80 not_a_fit / 18 needs_review / 2 strong_fit. Its `--out
+/tmp/new_tenders_today.json` now holds those 2.
+
+**Regression suite** (fresh replay `0001`->`0058`, 50 migrations, Supabase auth/storage stub):
+`test_taxonomy.py` 121 PASS incl. the new Part 1b (every release above verbatim, the genuine
+roads/geotech/bridge/RRM-consulting fits, the keyword fixes, and the same through
+`profile_from_company_rows()` -> `fan_out()` - the path the real app uses) and Part 2 checks that the
+replayed table matches the seed exactly and an admin flip takes effect; `test_discovery_fanout.py`
+50, `test_discovery_downgrades.py` 39, `test_tenant_isolation.py` 216 - all pass; every CI Python
+suite passes; `npm run typecheck` / `lint` clean. `test_manual_intake.py` has 2 failures that are
+**pre-existing and unrelated** (identical on the unchanged code: its SANRAL pack fixture predates the
+Form B7 requirement from `defe346`, and its "shared SANRAL tenders" check needs `seed_tenders.sql`).
+
+**Honest limits / follow-ups.**
+- `state/seen_tenders.json` already holds these 14 releases (with the old verdicts) from the
+  morning's run, so the daily command with the default seen store reports nothing new for them -
+  neither the 12 wrong ones nor the 2 genuine ones. The re-run above used a fresh seen store. A
+  scoring-logic fix does not change a profile fingerprint, so it never triggers a re-score by itself;
+  in Supabase mode (not live yet, Gap #9) a fix like this would leave existing wrong rows in place -
+  worth a scoring-version in the fingerprint before go-live (then `0055`'s downgrade flag would mark
+  them).
+- A tender known only as "professional services" in general (no specific discipline recognised)
+  still comes out `possible` for a company tagged with that group (6 of the 2 211 today, half of them
+  genuinely PSP panels) - left as is, flagged.
+- Goods supply for road works (asphalt, road-marking paint) reads as `possible` for a roads-tagged
+  company: the profile has no "we are a consultant, not a supplier/contractor" field.
+- Why the QA passes missed it: `test_taxonomy.py` asserted "a company tagged with a group matches
+  every discipline in it" as intended behaviour, and no check ever scored a whole live window for a
+  real profile and read the result. Part 1b now pins the real cases.
 
 ## Quiet check-in (2026-10-18, ~06:20 UTC)
 

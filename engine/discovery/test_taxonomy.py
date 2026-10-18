@@ -10,9 +10,14 @@ Part 1 (always, no network):
      disciplines - including the two the old 7-bucket matcher got wrong
      (RAF plumbing -> roads_civil via "Road Accident Fund"; an architectural
      PSP in a "district" -> it_telecoms via the substring "ict");
-  3. group / discipline overlap: a company tagged with a group matches every
-     discipline in it; a company tagged with a discipline only "broadly"
-     matches a tender known just by its group; siblings don't match;
+  3. group / discipline overlap: a company tagged with a group matches the
+     disciplines in it that a group tag covers (0058); a company tagged with
+     a discipline only "broadly" matches a tender known just by its group;
+     siblings don't match;
+  3b. the 2026-10-18 regression set (part1_regression): the real releases a
+     live daily watch wrongly reported as strong_fit for a company tagged
+     [roads_civil, professional_services], the genuine fits that must stay,
+     and the same through the per-company fan-out from Experience Library rows;
   4. assess_fit() verdicts on that taxonomy (strong fit / not a fit /
      needs review), i.e. the fit-scoring logic still works;
   5. growing the list: a category that exists only as a ROW (a fake
@@ -205,6 +210,97 @@ def part1():
           "read/score_release carry the cross-check next to the (unchanged) categories")
 
 
+# The 2026-10-18 regression (System-Status.md): a real 5-day daily watch
+# (watch_new_tenders.py --days 5 --sources ocds) returned 14 strong_fit
+# releases for a company tagged with the two legacy GROUP slugs
+# [roads_civil, professional_services]; 12 were obviously wrong. Verbatim
+# OCDS tender descriptions from that run (ocid suffix), each with the verdict
+# it must get now (all had a full tender document, hence full_document).
+# Report-worthy = strong_fit/possible (watch_new_tenders.REPORT_WORTHY_VERDICTS).
+REGRESSION_2026_10_18 = [
+    ("174041 herbicides", "ESTABLISHMENT OF A PANEL FOR THE SUPPLY AND APPLICATION OF HERBICIDES ON ROADS, PEST CONTROL AND FUMIGATION SERVICES ACROSS ALL FACILITIES FOR A PERIOD OF THREE (3) YEARS IN THE GAUTENG DEPARTMENT OF ROADS AND TRANSPORT, AS AND WHEN REQUIRED.", "needs_review"),
+    ("174423 due diligence training", "TASEZ/RFQ070/2026 -Appointment of a Service Provider to Conduct a Two-Day Due Diligence Training for Fifteen (15) People at TASEZ Premises", "needs_review"),
+    ("174432 shunting torches", "APPOINTMENT OF A SERVICE PROVIDER FOR SUPPLY AND DELIVERY OF TRAIN OPERATIONS RAILWAY SHUNTING TORCHES AND LATEX GLOVES", "needs_review"),
+    ("174443 precinct plan", "APPOINTMENT OF A SERVICE PROVIDER / CONSORTIUM OF SUITABLY QUALIFIED FIRMS TO DEVELOP A DETAILED PRECINCT PLAN (N14 / BESTWOOD CORRIDOR PRECINCT PLAN) FOR GAMAGARA LOCAL MUNICIPALITY WITHIN A PERIOD OF SIXTEEN (16) MONTHS IN THE NORTHERN CAPE PROVINCE", "needs_review"),
+    ("174454 municipal governance training", "TRAINING ON MUNICIPAL GOVERNANCE PROGRAMME FOR 12 MUNICIPAL EMPLOYEES", "needs_review"),
+    ("174458 stevedoring", "PROVISION OF STEVEDORING CONTAINER SERVICES FOR TRANSNET SOC LTD (REG NO 1990/000900/30) OPERATES AS TRANSNET PORT TERMINALS AT THE PORT ELIZABETH CONTAINER TERMINAL, NGQURA CONTAINER TERMINAL, CAPE TOWN CONTAINER TERMINAL AND CAPE TOWN MULTI-PURPOSE TERMINAL FOR A PERIOD OF 2 (TWO) YEARS.", "needs_review"),
+    ("174483 ethics", "Ethics Risk Assessments", "needs_review"),
+    ("174491 fire resistance test", "RFQ 202109 THE APPOINTMENT OF A SERVICE PROVIDER TO CONDUCT THE ANALYSIS FIRE RESISTANCE TEST IN ACCORDANCE WITH SANS 10177:2", "needs_review"),
+    ("174517 valuation panel", "APPOINTMENT OF PANEL OF VALUATION SERVICE PROVIDERS", "needs_review"),
+    ("174519 strategic advisory", "APPOINTMENT OF A STRATEGIC ADVISORY PARTNER FOR THE DEVELOPMENT OF A BANKABLE BUSINESS CASE AND THE EXECUTION OF THE SABS REIMAGINE PROGRAMME.", "needs_review"),
+    # the two genuine fits in that run stay fits
+    ("174193 architectural PSP", "PROVISION OF PROFESSIONAL ARCHITECTURAL SERVICES (PSP) FOR REHABILITATION, RENOVATION AND REFURBISHMENT TO SOMERSET EAST SERVICE OFFICE IN SARAH BAARTMAN DISTRICT", "strong_fit"),
+    ("174473 structural engineer", "APPOINTMENT OF A SERVICE PROVIDER STRUCTURAL ENGINEER TO ASSESS, DESIGN AND RECOMMEND REMEDIAL WORK TO BE CARRIED OUT AT THE BLOEMFONTEIN OC BUILDING ROOF", "strong_fit"),
+    # genuine roads / civil / engineering-PSP work, live on eTenders the same day (site id)
+    ("172102 RRM consulting", "CONSULTING ENGINEERING SERVICES FOR THE ROUTINE ROAD MAINTENANCE IN THE FREE STATE PROVINCE", "strong_fit"),
+    ("172763 SANRAL geotech", "FOR CONSULTING ENGINEERING GEOTECHNICAL SERVICES FOR THE SANRAL FREE STATE PROVINCE", "strong_fit"),
+    ("172795 bridge", "CONSTRUCTION OF GALI RIVER BRIDGE", "strong_fit"),
+    ("173969 road rehab", "Rehabilitation of Kraalhoek internal road phase 2 (4KM)", "strong_fit"),
+    ("SANRAL R334", REAL[10][1], "strong_fit"),
+    # keyword-precision fixes, same day: none of these is the company's work
+    ("173737 oncology 'drainage area'", "THE PROVISION OF RADIATION ONCOLOGY SERVICES TO SELECT PATIENTS WITHIN THE GEORGE DRAINAGE AREA FOR RADIATION TREATMENT OVER A THREE-YEAR PERIOD.", "not_a_fit"),
+    ("173644 'Roads Agency' buyer", "Appointment of a service provider for the supply and installation of air-conditioners at Roads Agency Limpopo (SOC) Ltd.", "not_a_fit"),
+    ("174301 'multidisciplinary' artists", "CALL FOR ARTISTS AND SCULPTORS’ MULTIDISCIPLINARY ARTISTS TO SUBMIT PROFILES AND PORTFOLIOS.", "not_a_fit"),
+    ("170945 passenger loading bridges", "REFURBISHMENT OF PASSENGER LOADING BRIDGES WHEELS AT AIRPORTS COMPANY SOUTH AFRICA OR TAMBO INTERNATIONAL AIRPORT", "not_a_fit"),
+]
+
+
+def part1_regression():
+    print("Part 1b - 2026-10-18 regression: legacy group tags no longer match every discipline 0040 put under them")
+    import company_profiles  # noqa: E402
+    import watch_new_tenders  # noqa: E402
+    tax = taxonomy.load_taxonomy()
+    taxonomy.use_taxonomy(tax)
+    sig = {"cidb_grading": None}
+    legacy = {"disciplines": ["roads_civil", "professional_services"], "has_cidb_grading": True}
+    for name, text, want in REGRESSION_2026_10_18:
+        cats = assess_tender.categorize(None, text, taxonomy=tax)
+        v, reasons = assess_tender.assess_fit(cats, sig, "full_document", legacy)
+        check(v == want, f"[roads_civil, professional_services] on {name}: {want} ({v}; {cats}; {reasons[0][:80]})")
+
+    f = tax.fit_overlap(["property_valuation", "road_maintenance"], ["professional_services", "roads_civil"])
+    check(f["peripheral"] == ["property_valuation"] and f["exact"] == ["road_maintenance"],
+          f"fit_overlap: a group tag covers road_maintenance, not property_valuation ({f})")
+    check(tax.overlap(["property_valuation"], ["professional_services"]) == ([], []),
+          "overlap() (exact, broad) no longer counts a discipline the group tag doesn't cover")
+    cats = assess_tender.categorize(None, "APPOINTMENT OF PANEL OF VALUATION SERVICE PROVIDERS", taxonomy=tax)
+    v, _ = assess_tender.assess_fit(cats, sig, "full_document", {"disciplines": ["property_valuation"], "has_cidb_grading": True})
+    check(v == "strong_fit", f"a company that ticked property_valuation ITSELF still gets the valuation panel as strong_fit ({v})")
+    v, _ = assess_tender.assess_fit(["road_construction_upgrade", "road_maintenance"], sig, "full_document",
+                                    {"disciplines": ["road_maintenance"], "has_cidb_grading": True})
+    check(v == "strong_fit", f"a sibling in the company's own group doesn't make a match partial ({v})")
+    v, reasons = assess_tender.assess_fit(["road_construction_upgrade", "pest_control", "gardening_landscaping"], sig,
+                                          "full_document", {"disciplines": ["road_construction_upgrade"], "has_cidb_grading": True})
+    check(v == "needs_review" and "Mostly outside" in reasons[0], f"one of the company's disciplines among mostly other trades: needs_review ({v})")
+    flipped = [dict(r, group_tag_match=True) if r["slug"] == "property_valuation" else r for r in taxonomy.load_seed()]
+    alt = taxonomy.Taxonomy(flipped, "flag on")
+    check(alt.fit_overlap(["property_valuation"], ["professional_services"])["exact"] == ["property_valuation"],
+          "the switch is data (discipline_categories.matched_by_group_tag, 0058), not code: turned on, the group tag covers it")
+    bad = [dict(r, group_tag_match=False) if r["slug"] == "professional_services" else r for r in taxonomy.load_seed()]
+    check(any("group_tag_match" in p for p in taxonomy.validate(bad)), "validate(): the switch is refused on a group row")
+
+    # The per-company fan-out path the real app uses: the profile is built
+    # from the company's own tagged Experience Library rows
+    # (company_profiles.profile_from_company_rows), then watch_new_tenders.fan_out().
+    class Rows:
+        def select(self, table, filters=None, order=None):
+            return {"companies": [{"id": "c1", "legal_name": "Legacy Tags Co", "registered_address": "Gauteng"}],
+                    "experience_items": [{"tagged_at": "2026-10-01", "disciplines": ["roads_civil"]},
+                                         {"tagged_at": "2026-10-01", "disciplines": ["professional_services"]}],
+                    "company_offices": []}[table]
+    prof = company_profiles.profile_from_company_rows(Rows(), "c1")
+    check(prof["disciplines"] == ["professional_services", "roads_civil"], f"profile from rows: {prof['disciplines']}")
+    full = "TENDER DATA ... CONDITIONS OF TENDER ... RETURNABLE SCHEDULES ... SCOPE OF WORK"
+    rels = [{"ocid": f"ocds-test-{i}", "contract_number": n, "title": t, "description": t, "buyer": "Real buyer",
+             "documents": [{"url": f"file:///x/{i}.pdf", "title": "Tender document"}]}
+            for i, (n, t, _) in enumerate(REGRESSION_2026_10_18)]
+    out = watch_new_tenders.fan_out(rels, [{"company_id": "c1", "legal_name": "Legacy Tags Co", "key": "c1", "profile": prof}],
+                                    {}, watch_new_tenders.REPORT_WORTHY_VERDICTS, fetch_text=lambda url: (full, None))
+    reported = sorted(r["contract_number"] for r in out if r["company_results"])
+    expected = sorted(n for n, _, want in REGRESSION_2026_10_18 if want in watch_new_tenders.REPORT_WORTHY_VERDICTS)
+    check(reported == expected, f"fan_out() from Experience Library rows reports only the genuine fits ({len(reported)}: {reported})")
+
+
 def part2(psql):
     print("Part 2 - the real table (replayed migrations)")
 
@@ -266,6 +362,30 @@ def part2(psql):
     check(live.source == "discipline_categories table" and "hydrographic_survey" in got,
           f"categorize() reads the live table and uses the new row ({got})")
     sql("delete from discipline_categories where slug = 'hydrographic_survey'")
+
+    # 0058 (2026-10-18 regression): the switch is in the live table, and the
+    # live table scores the regression set exactly as the seed does.
+    r = sql("select string_agg(slug, ',' order by slug) from discipline_categories where not matched_by_group_tag")
+    seed_off = sorted(r2["slug"] for r2 in taxonomy.load_seed() if not r2["group_tag_match"])
+    check(r.stdout.strip() == ",".join(seed_off), f"0058: the live table switches off the same {len(seed_off)} disciplines as the seed")
+    live = taxonomy.load_taxonomy(PsqlClient())
+    seed = taxonomy.load_taxonomy()
+    legacy = {"disciplines": ["roads_civil", "professional_services"], "has_cidb_grading": True}
+    same = all(assess_tender.categorize(None, t, taxonomy=live) == assess_tender.categorize(None, t, taxonomy=seed)
+               for _, t, _ in REGRESSION_2026_10_18)
+    check(same, "0058: the live table's keywords/excludes sort the regression set exactly as the seed file does")
+    prev = taxonomy._ACTIVE
+    taxonomy.use_taxonomy(live)
+    got = {n: assess_tender.assess_fit(assess_tender.categorize(None, t), {}, "full_document", legacy)[0]
+           for n, t, _ in REGRESSION_2026_10_18}
+    check(all(got[n] == want for n, _, want in REGRESSION_2026_10_18),
+          f"0058: on the live table the regression set gets the same verdicts ({[n for n, _, w in REGRESSION_2026_10_18 if got[n] != w]})")
+    sql("update discipline_categories set matched_by_group_tag = true where slug = 'property_valuation'")
+    taxonomy.use_taxonomy(taxonomy.load_taxonomy(PsqlClient()))
+    v = assess_tender.assess_fit(["property_valuation"], {}, "full_document", legacy)[0]
+    check(v == "strong_fit", f"0058: switching it back on in the table (an admin, no code change) takes effect on the next read ({v})")
+    sql("update discipline_categories set matched_by_group_tag = false where slug = 'property_valuation'")
+    taxonomy.use_taxonomy(prev)
 
 
 def part3(psql):
@@ -378,6 +498,7 @@ def part3(psql):
 
 def main():
     part1()
+    part1_regression()
     psql = os.environ.get("TAXONOMY_PSQL")
     if psql:
         part2(psql)

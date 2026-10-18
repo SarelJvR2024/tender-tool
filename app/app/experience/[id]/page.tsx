@@ -168,7 +168,9 @@ export default async function ExperienceDetailPage({
           <label style={label}>Discipline * <span style={{ fontWeight: 400 }}>(tick all that apply - tenders are matched on this)</span></label>
           <div style={hint}>
             Tender Tool&apos;s own discipline list, built from real tenders and growing as new kinds of tender come in. Ticking a
-            whole group (e.g. Roads, bridges &amp; civil works) matches every discipline in it.
+            whole group (e.g. Roads, bridges &amp; civil works) matches the disciplines in it, except the ones marked
+            &quot;tick on its own&quot; - a whole-group tick is too broad to call those a fit (Professional &amp; consulting
+            services doesn&apos;t make a firm a property valuer). Tick one of those itself if the company does that work.
             {taxonomy.source === "fallback" && ` (Showing the original 7 groups only - the full list couldn't be read: ${taxonomy.error}.)`}
           </div>
           <div style={{ margin: "6px 0 12px" }}>
@@ -183,12 +185,13 @@ export default async function ExperienceDetailPage({
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
                     <label style={{ ...checkLabel, fontWeight: 600 }}>
                       <input type="checkbox" name="disciplines" value={group.slug} defaultChecked={item.disciplines.includes(group.slug)} />
-                      All of {group.label.toLowerCase()}
+                      Whole group: {group.label.toLowerCase()}
                     </label>
                     {children.map((c) => (
                       <label key={c.slug} style={checkLabel}>
                         <input type="checkbox" name="disciplines" value={c.slug} defaultChecked={item.disciplines.includes(c.slug)} />
                         {c.label}
+                        {c.matched_by_group_tag === false && <span style={{ fontSize: 11, color: "#9A9684" }}>(tick on its own)</span>}
                       </label>
                     ))}
                   </div>
