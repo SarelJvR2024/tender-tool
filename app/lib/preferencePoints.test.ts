@@ -58,7 +58,7 @@ test("beeGoalsPoints: SBD 6.1 standard table, both systems, known reference valu
 
   assert.equal(beeGoalsPoints("90/10", 1), 10);
   assert.equal(beeGoalsPoints("90/10", 2), 9);
-  assert.equal(beeGoalsPoints("90/10", 3), 7);
+  assert.equal(beeGoalsPoints("90/10", 3), 6);
   assert.equal(beeGoalsPoints("90/10", 4), 5);
   assert.equal(beeGoalsPoints("90/10", 5), 4);
   assert.equal(beeGoalsPoints("90/10", 6), 3);

@@ -6,9 +6,14 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18, ~17:00 UTC — verified Pack Review (migration `0059`) and tender
-scope/tags/value-band (migration `0060`), plus answered a cross-session relay's TenderFlow
-feature-parity gap check (no code changed - report sent back, below). ~16:20 UTC —
+Last full pass: 2026-10-18, ~19:00 UTC — **real bug found and fixed**: the new B-BBEE
+preference-points calculator's Level 3 points table had a wrong value (90/10 = 7, should be 6),
+caught by cross-checking it against SANRAL's own policy table already verified elsewhere in this
+repo - below. Also verified the 2 other new free tools, migration `0061` (signatory scopes) and
+`0062` (market trend), all built off the gap check from the previous pass. ~17:00 UTC — verified
+Pack Review (migration `0059`) and tender scope/tags/value-band (migration `0060`), plus answered
+a cross-session relay's TenderFlow feature-parity gap check (no code changed - report sent back,
+below). ~16:20 UTC —
 independently reproduced and confirmed the tenth QA run's fix (`tender_changes.py`
 one-bad-listing-crashes-everyone bug, Finding 11) - below. ~14:15
 UTC — quiet check-in, 2 small low-risk commits verified (a Discovery mobile-layout fix - stranded
@@ -1029,6 +1034,52 @@ Two commits, both small and already well-verified; one had no System-Status entr
   and `test_award_prices.py` myself: 0 failures both, confirming the fix.
 
 Nothing further needed this pass.
+
+## This pass (2026-10-18, ~19:00 UTC): real bug found and fixed in the new B-BBEE calculator; verified the rest of the gap-check build
+
+A build agent picked up the previous pass's TenderFlow gap-check recommendation directly
+(`ebdd794`, citing "Per the Solution Architect's TenderFlow gap check") and shipped all 3
+recommended free tools in one commit, plus `20e245f` (signatory scopes, migration `0061`) and
+`41e9645` (market trend, migration `0062`). Reviewed all of it carefully rather than trusting it
+more because I'd suggested the idea:
+
+- **Found a real bug**: `app/lib/preferencePoints.ts`'s hardcoded B-BBEE status-level points
+  table had Level 3 at `points9010: 7`. Cross-checked against
+  `Tender-Regulatory-Compliance-Review.md` §8.2 (which cites SANRAL's own Interim Preferential
+  Procurement Policy §6.4.1 Table 1, already independently verified against R.396 Book 1 in an
+  earlier pass) - every other level matched that source exactly, Level 3 was the one value that
+  didn't: the correct value is 6, not 7. The test suite's own assertion had encoded the same
+  wrong number (`beeGoalsPoints("90/10", 3), 7`), so 10/10 tests passed while asserting a wrong
+  regulatory figure - a case where "tests pass" didn't mean "the number is right." **Fixed both**
+  the table and the test; re-ran, 10/10 still pass with the corrected value. This is a public,
+  no-login compliance calculator - a wrong preference-points number here would have been a real,
+  visible mistake to a company relying on it to self-check its SANRAL/government bid score.
+- Spot-checked the other two new calculators against domain knowledge: `publicHolidays.ts`'s SA
+  holiday table (Public Holidays Act 36 of 1994, 10 fixed dates + Easter-derived Good Friday/
+  Family Day + the s2A Sunday-to-Monday rule) and Easter-date algorithm (Meeus/Jones/Butcher) -
+  ran it directly for 2026, got Good Friday 3 Apr / Family Day 6 Apr, which is correct. CIDB
+  grading value bands (R200k/R650k/R2m/R4m/R6.5m/R13m/R40m/R130m across grades 1-9) match known
+  public figures. Neither raised anything to fix.
+- Replayed `0001`→`0062` fresh (54 migrations). Read `0061`'s RLS (standard
+  `is_company_member` tenant-isolation pattern, same as every other per-company table) and
+  `0062`'s `market_trend_for_tags()` live SQL function (correctly gates on
+  `value_band_basis = 'stated_in_text'` before computing a price-vs-estimate ratio, never
+  touches `fill_financial.py`'s pricing-fill logic). Ran `test_market_trend.py` (its one `git
+  diff` sanity check failed only because I ran it as a different OS user in a root-owned repo -
+  a local environment artifact, confirmed by reproducing the same git error directly outside the
+  test; every substantive SQL-based check passed). Ran all 5 new Node test-runner suites
+  directly (`publicHolidays`, `cidbGrading`, `preferencePoints`, `marketTrendLogic`,
+  `signatory-logic`): 45 cases, all pass after the one fix above.
+- Regression: `test_tenant_isolation.py` ALL PASSED, `test_general_bridge.py` ALL PASSED,
+  `npm run typecheck`/`lint` clean.
+
+One real fix this pass; everything else in the batch verified clean.
+
+Also landed this window, doc-only, no code to verify: `1c32e88` (eleventh QA run - three
+synthetic non-engineering company fixtures run through the general pipeline, clean, two gaps
+flagged not bugs: no pest-control/IT sample tender on file yet, no Pack Review equivalent for
+general tenders) and `a4ddf8f` (marketing strategy: TenderFlow channel audit, Hormozi cadence
+findings).
 
 ## This pass (2026-10-18, ~17:00 UTC): verified Pack Review + tender scope/tags/value-band; answered a TenderFlow gap check
 

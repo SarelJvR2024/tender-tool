@@ -76,7 +76,7 @@ export type BeeLevel = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | "non_compliant";
 const BEE_POINTS_TABLE: Record<BeeLevel, { points8020: number; points9010: number }> = {
   1: { points8020: 20, points9010: 10 },
   2: { points8020: 18, points9010: 9 },
-  3: { points8020: 14, points9010: 7 },
+  3: { points8020: 14, points9010: 6 },
   4: { points8020: 12, points9010: 5 },
   5: { points8020: 8, points9010: 4 },
   6: { points8020: 6, points9010: 3 },
