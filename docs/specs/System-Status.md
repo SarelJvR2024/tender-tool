@@ -6,9 +6,11 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18, ~14:15 UTC — quiet check-in, 2 small low-risk commits verified (a
-Discovery mobile-layout fix - stranded right-rail column, no System-Status entry of its own
-until now; and a one-line `is not None` fix for an undercounted R0,00 award in a diagnostic
+Last full pass: 2026-10-18, ~16:20 UTC — independently reproduced and confirmed the tenth QA
+run's fix (`tender_changes.py` one-bad-listing-crashes-everyone bug, Finding 11) - below. ~14:15
+UTC — quiet check-in, 2 small low-risk commits verified (a Discovery mobile-layout fix - stranded
+right-rail column, no System-Status entry of its own until now; and a one-line `is not None`
+fix for an undercounted R0,00 award in a diagnostic
 summary - below). ~12:15 UTC — no new commits since the last check-in; `npm run
 typecheck`/`lint` re-confirmed clean. ~10:20 UTC — quiet check-in, 2 small low-risk commits
 verified (a Login/Onboarding mobile-overflow fix, and a QA log entry with no code change -
@@ -1022,6 +1024,28 @@ Two commits, both small and already well-verified; one had no System-Status entr
   and `test_award_prices.py` myself: 0 failures both, confirming the fix.
 
 Nothing further needed this pass.
+
+## This pass (2026-10-18, ~16:20 UTC): independent reproduction of the tenth QA run's fix (Finding 11)
+
+`tender_changes.py` has no dedicated test file (flagged, correctly, by the tenth run's own
+entry below) - its fix was verified there with one-off repro scripts, not a permanent regression
+test. Independently wrote and ran both repro scenarios myself against the fixed code, calling
+`tender_changes.detect()` directly:
+
+- **Scenario 1** (3 releases, one with an unparseable `closing_date` string): 3 honest events
+  came back, no crash - the malformed one correctly reports "Closing date changed: ... -> no
+  date" rather than guessing a direction; all 3 snapshots kept.
+- **Scenario 2** (2 releases, one with `documents` as a plain string instead of a list): the
+  malformed release is isolated with a named `system_alerts` warning naming the real
+  `AttributeError`, the other release is processed and its snapshot kept normally, 0 events
+  (correct - no prior snapshot to diff against on a first run), no crash.
+
+Both match the write-up's claims exactly. This is the fourth time this session the same
+"one bad record crashes a whole multi-tenant batch" bug class has been found and fixed (compliance
+reminders, tender-update watch, the repo-wide date sweep, now listing-change detection) - worth
+naming as a pattern for whoever next writes a new per-release/per-record loop over Discovery or
+compliance data: wrap it in isolation from the start, don't wait for a live crash to add it.
+`python3 -m py_compile` clean; all 9 discovery test suites still pass.
 
 ## This pass (2026-10-18, standing QA/robustness review - tenth run)
 
