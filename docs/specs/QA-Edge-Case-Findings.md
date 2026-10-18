@@ -485,3 +485,82 @@ unchanged generic message. `test_general_bridge.py` ALL PASSED; `general_harness
   general flow?), and a genuinely password-protected real PDF (the "not a readable PDF" message
   already names this as one of its causes, but it wasn't tested with an actual password-protected
   file this pass, only a mis-extensioned one).
+
+---
+
+## 2026-10-18 (sixth run): Compliance/reminders - the same malformed-date bug, found a third
+time, now in a cross-tenant daily batch job
+
+**Context:** rotated to the compliance engine (`engine/compliance/`) per the standing mandate.
+Pulled latest `main` first (small this time - a Person page UI pass only). Re-confirmed all six
+of this review's prior fixes are still present and untouched before starting.
+
+### Finding 8 (CONFIRMED, FIXED, severe): one company's or one person's malformed expiry date
+could have skipped the daily reminder run for EVERY company
+
+**Where:** `engine/compliance/watch_deadlines.py`'s `days_until()` - the single shared date-math
+helper behind `_expiry_window()`, which every one of this engine's "what's due" functions calls:
+`find_due_documents()` (every company's 6 tracked vault documents),
+`find_due_person_credentials()` (every person's ECSA/SACPCMP/SACNASP/SAGC registrations),
+and (newly landed this cycle) `registration_reminders.find_due_registrations()` /
+`find_due_property_documents()` (the shared registrations catalog and property documents,
+migration 0050).
+
+**What was tested:** the exact same malformed/boundary-date class already found twice this
+review (Findings 5-6, in the pack engine) - a typo'd month, a non-ISO string - run against this
+engine's own date helper.
+
+**What broke:** `days_until()` had no try/except around `datetime.date.fromisoformat()`, same as
+the two earlier findings. The blast radius here is the worst of the three: `main()`'s own
+`try/except` wraps ALL FIVE "find due X" calls together, in ONE run, across EVERY company in the
+system - so one malformed date, anywhere, for any single company's single document or any single
+person's single registration, would abort `main()` entirely. The run is caught at the top level
+(not silently lost - it's recorded as a `critical` system alert and exits non-zero) but the
+practical effect is that **no company gets its compliance reminders that day**, and every
+subsequent run keeps failing the same way until someone finds and manually fixes the one bad
+date in the database - a genuinely dangerous failure mode for a safety-critical reminder system
+(a missed COID renewal reminder can mean a company becomes ineligible to bid). Confirmed directly
+by running the real multi-company loop shape with one bad date sandwiched between two good ones:
+before the fix, the loop never reached the second good company.
+
+**A second, related bug found while fixing the first:** `engine/notify/daily_digest.py` calls
+`watch_deadlines.days_until()` directly (`local_person_credential_expiry()`) and ALSO
+reimplements the exact same `datetime.date.fromisoformat()` call inline, a second time, with no
+guard (`local_document_expiry()` - two separate date fields, both unguarded). Both are real
+crash risks in the daily digest's own local-mode path, independent of `watch_deadlines.py`'s.
+
+**Fix:** `days_until()` now catches the parse failure and returns `None` (same sentinel as "no
+date at all" - every one of its callers already treats `None` as "nothing due, skip"), and
+records a `warning`-level `system_alerts.record(...)` so the bad record doesn't vanish
+unnoticed - it just stops blocking everyone else's reminders while it's unfixed.
+`daily_digest.py`'s own direct caller of `days_until()` needed a small follow-on fix: it compared
+`left > lead_days` with no `None` check, which would have traded the original `ValueError` for a
+`TypeError` one line later - fixed to check `left is None` first, the same guard its sibling
+functions already use for "no date". `local_document_expiry()`'s two inline reimplementations
+were replaced with calls to the now-safe `watch_deadlines.days_until()` instead of patching the
+duplicate logic separately - removes the duplication its own docstring already said shouldn't
+exist ("Local-mode equivalent of... find_due_documents()") rather than just papering over it.
+
+**Verification:** `days_until()` run directly against malformed/non-ISO/valid/absent dates - only
+the first two now return `None` with a warning logged, others unchanged. Re-ran the exact
+multi-company `_expiry_window()` loop that used to crash: both good companies now get processed
+regardless of the bad one between them. `daily_digest.py`'s two edited functions re-run directly
+with a mix of good and malformed dates (including the professional-indemnity-insurance field) -
+no crash, only the malformed ones skipped, with a warning logged for each. Full regression: all
+five compliance test files (`test_watch_deadlines_urgency.py`,
+`test_watch_person_credentials.py`, `test_watch_conditional_registrations.py`,
+`test_reminder_seen_db.py`, `test_principals_registrations.py`) and `test_digest_live.py` -
+**0 failures across all six**. `python3 -m py_compile` clean on both changed files.
+
+### Not yet tested this pass (deferred)
+
+- The brand-new shared registrations catalog (`registration_reminders.py`, migration 0050 -
+  property documents, held registrations for any professional body) only landed this cycle and
+  wasn't otherwise exercised beyond confirming it goes through the now-fixed `_expiry_window()` -
+  worth a dedicated look at its own company-shape diversity (different registration types,
+  different holder shapes - person vs. principal vs. company-held) in a future pass.
+- `watch_deadlines.py`'s task-deadline and "lapsing before closing" functions
+  (`find_due_tasks`/`find_documents_lapsing_before_closing`) weren't specifically re-tested for
+  the same malformed-date class this pass, though they likely share the same `days_until()` fix
+  automatically if they call it - worth confirming directly next time this engine comes up in
+  rotation.

@@ -869,6 +869,33 @@ place that name was ever written down, and the "decision" it was meant to record
 Item (b) (`how_we_work` on the Tender Workspace) is untouched by this pass, per instruction, and
 stays open below.
 
+## This pass (2026-10-18, standing QA/robustness review - sixth run)
+
+Rotated to the compliance/reminders engine. Pulled latest `main` first (small this time - a
+Person page UI pass only) - confirmed all six of this review's prior fixes are still present and
+untouched before starting.
+
+**Found and fixed the same malformed-date bug a third time, in the worst place yet**:
+`engine/compliance/watch_deadlines.py`'s `days_until()` had no guard against a malformed date
+string, same as the two fixes in the fourth run's pass-entry above - but this function is the
+one shared date helper behind EVERY "what's due" check in the daily compliance reminder run
+(company documents, person registrations, and the newly-landed shared registrations catalog),
+and `main()`'s own `try/except` wraps all of them together across EVERY company in one go. One
+malformed date anywhere in the whole system - any single company, any single person - would
+abort the entire run, meaning **no company gets its compliance reminders that day**, and every
+later run keeps failing the same way until the bad date is found and fixed by hand. For a
+safety-critical reminder system (a missed COID renewal reminder can mean a company becomes
+ineligible to bid), this was the most severe instance of this bug class found so far. Also found
+and fixed the same unguarded pattern (one direct call, one inline reimplementation) in
+`engine/notify/daily_digest.py`'s local-mode functions while fixing the root cause.
+
+Fixed by having `days_until()` return `None` (not raise) on a malformed date - the same sentinel
+every caller already uses for "no date at all" - and recording a warning-level system alert so
+the bad record stays visible without blocking everyone else. Verified directly: the exact
+multi-company scenario that used to crash now processes every company regardless of the bad one
+in between. Full regression: all five compliance test files plus `test_digest_live.py` - 0
+failures across all six. Full evidence in `docs/specs/QA-Edge-Case-Findings.md` (Finding 8).
+
 ## This pass (2026-10-18, standing QA/robustness review - fifth run)
 
 Rotated to the intake engine. Pulled latest `main` first (more concurrent work had landed: a

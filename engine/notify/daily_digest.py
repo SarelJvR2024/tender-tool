@@ -729,8 +729,13 @@ def local_document_expiry(profile, today, lead_days):
         expiry = company.get(col)
         if not expiry:
             continue
-        left = (datetime.date.fromisoformat(expiry[:10]) - today).days
-        if left > lead_days:
+        # watch_deadlines.days_until() rather than reimplementing the same
+        # parse inline: this function's own docstring already calls itself
+        # the "local-mode equivalent" of find_due_documents(), and a bare
+        # fromisoformat() here crashed on a malformed date with no handling
+        # at all (watch_deadlines QA pass).
+        left = watch_deadlines.days_until(expiry, today)
+        if left is None or left > lead_days:
             continue
         due.append({
             "type": "document", "field": col, "label": label,
@@ -740,8 +745,8 @@ def local_document_expiry(profile, today, lead_days):
     pi = company.get("professional_indemnity_insurance") or {}
     pi_expiry = pi.get("period_to")
     if pi_expiry:
-        left = (datetime.date.fromisoformat(pi_expiry[:10]) - today).days
-        if left <= lead_days:
+        left = watch_deadlines.days_until(pi_expiry, today)
+        if left is not None and left <= lead_days:
             due.append({
                 "type": "document", "field": "professional_indemnity_insurance.period_to",
                 "label": "Professional indemnity insurance", "expiry_date": pi_expiry,
@@ -763,7 +768,12 @@ def local_person_credential_expiry(profile, today, lead_days):
             if not expiry:
                 continue
             left = watch_deadlines.days_until(expiry, today)
-            if left > (lead_override if lead_override is not None else lead_days):
+            # days_until() returns None for a malformed date too, not just a
+            # missing one (watch_deadlines QA pass) - this call site already
+            # guards "missing" with the `if not expiry` above, so it must
+            # guard "malformed" the same way, or a bad date here would trade
+            # days_until()'s own ValueError for a TypeError one line down.
+            if left is None or left > (lead_override if lead_override is not None else lead_days):
                 continue
             due.append({
                 "type": "person_credential", "person_name": person.get("name"), "field": col,

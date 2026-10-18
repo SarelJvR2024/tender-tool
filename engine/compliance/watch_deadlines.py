@@ -210,10 +210,29 @@ def save_seen_db(client, seen, loaded, consumer=CONSUMER):
 
 
 def days_until(date_str, today):
-    """Mirrors app/lib/dates.ts's daysUntil: midnight-truncated, ceil'd."""
+    """Mirrors app/lib/dates.ts's daysUntil: midnight-truncated, ceil'd.
+
+    None also means "can't tell, treat as no reminder due" for a malformed
+    date, not just a missing one - confirmed this matters for real: this
+    function is called, with no per-item error handling, from a loop over
+    EVERY company's documents, EVERY person's registrations and EVERY
+    held_registration/property_document across the WHOLE multi-tenant system
+    (find_due_documents/find_due_person_credentials/registration_reminders).
+    main()'s own try/except is one level up, around all of those calls
+    together - so one malformed date anywhere, for any one company, used to
+    abort the ENTIRE daily reminder run for EVERY company, not just the one
+    with bad data. Recorded as a system alert (not raised) so the bad record
+    is still visible and gets fixed, but doesn't block everyone else's
+    reminders until it is."""
     if not date_str:
         return None
-    d = datetime.date.fromisoformat(date_str[:10])
+    try:
+        d = datetime.date.fromisoformat(date_str[:10])
+    except ValueError:
+        system_alerts.record("deadlines", f"A tracked expiry date ('{date_str}') is not a valid "
+                             "date - skipped, not treated as due, until it's corrected.",
+                             "warning", context={"date_str": date_str})
+        return None
     return (d - today).days
 
 
