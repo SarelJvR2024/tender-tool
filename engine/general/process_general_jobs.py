@@ -286,7 +286,7 @@ def register_sanral_tender(client, tender, decision, sources):
     return setup, fp
 
 
-def record_fit(client, job, tender, all_text):
+def record_fit(client, job, tender, all_text, documents=None):
     """assess_tender + score_outlook on the tender's own text, for THIS
     company, into discovered_opportunities - the same row a discovered tender
     has, so /discovery and the workspace read fit the same way. A discovered
@@ -300,7 +300,8 @@ def record_fit(client, job, tender, all_text):
             client.update("discovered_opportunities", {"id": existing[0]["id"]}, {"tender_id": tender["id"]})
         return existing[0].get("verdict")
     profile = profile_from_company(client, job["company_id"])
-    fit = intake.assess_fit_from_text(tender.get("title"), tender.get("description"), all_text, profile)
+    fit = intake.assess_fit_from_text(tender.get("title"), tender.get("description"), all_text, profile,
+                                      documents=documents)
     row = {"company_id": job["company_id"], "contract_number": tender.get("contract_no"), "buyer": tender.get("buyer"),
            "title": tender.get("title"), "closing_date": tender.get("closing_date"), "categories": fit["categories"],
            "document_depth": fit["document_depth"], "verdict": fit["verdict"], "reasons": fit["reasons"],
@@ -420,7 +421,7 @@ def run_extraction(client, job, work_root, fetch=None):
                                        "submission pack uses the tender's blank templates - upload them under Blank tender "
                                        "templates on this page.")
         client.update("tender_packs", {"id": pack["id"]}, {"document_requirements": clean, "intake": intake_rec})
-        verdict = record_fit(client, job, tender, all_text)
+        verdict = record_fit(client, job, tender, all_text, documents=manifest["documents"])
         return {"route": decision["route"], "family": tender.get("family"), "verdict": verdict, "private_documents": len(private),
                 "forms": len(clean["forms"]), "returnables": len(clean["returnables"]), "questions": len(clean["questions"])}
     patch = {"document_requirements": clean}
@@ -479,7 +480,7 @@ def run_extraction(client, job, work_root, fetch=None):
             "extracted_at": clean["extracted_at"],
         }
     client.update("tenders", {"id": tender["id"]}, patch)
-    verdict = record_fit(client, job, {**tender, **patch}, all_text)
+    verdict = record_fit(client, job, {**tender, **patch}, all_text, documents=manifest["documents"])
     return {"route": decision["route"], "family": patch.get("family", tender.get("family")), "verdict": verdict,
             "forms": len(clean["forms"]), "returnables": len(clean["returnables"]), "questions": len(clean["questions"])}
 

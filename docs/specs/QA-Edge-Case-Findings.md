@@ -413,3 +413,75 @@ reading the traceback's own line number, which was past the code this pass touch
   as one.
 - CV AI-extraction itself (`extract_cv_fields.py`) changed again in the concurrent landing this
   pass pulled in - not reviewed this run, a reasonable candidate for a future CV-engine pass.
+
+---
+
+## 2026-10-18 (fifth run): Intake - a misleading diagnosis when a document isn't really what its
+extension claims
+
+**Context:** rotated to the intake engine (`engine/intake/`) per the standing mandate. Pulled
+latest `main` first (fast-forward - another large concurrent landing: multi-source discovery
+expansion - `gov_sources.py`, `transnet_etenders.py`, `key_person_minimums.py`,
+`store_award_outcomes.py` - plus `engine/sanral_b7.py` and cross-tenant isolation work).
+Re-confirmed all five of this review's prior fixes are still present and untouched before
+starting.
+
+Used `classify_tender.py`'s own local CLI mode (`--profile`, no Supabase needed) to run real
+adversarial document shapes through intake directly, rather than standing up a scratch Postgres
+for this rotation - the mandate's own "run the actual code" bar is met either way, and it let
+this pass cover more ground. First tried two real general-tender samples
+(`mthashana_tvet`, `ssa_change_mgmt`) against `new_co.json` (the empty-data fixture) - both ran
+cleanly, correctly `needs_review` with the "no disciplines on file" reason from the second run's
+fix still firing correctly on brand-new real samples, nothing new to report there.
+
+### Finding 7 (CONFIRMED, FIXED, moderate): a misread document's real reason was known, but the
+fit section showed a different, misleading one next to it
+
+**Where:** `engine/intake/classify_tender.py`'s `assess_fit_from_text()`.
+
+**What was tested:** a genuinely mundane, very real document-upload shape Sarel's mandate asks
+for - a real `.docx` tender document renamed to `.pdf` (a browser/OS rename, a mislabeled
+download, or a buyer who simply named the file wrong - all real-world, not contrived), run
+through the actual intake pipeline alongside a zero-byte file.
+
+**What broke:** `requirements.py`'s own per-document read already correctly diagnoses this -
+`pdftotext` itself reports "Syntax Warning: May not be a PDF file (continuing anyway)", and
+`requirements.py` surfaces that verbatim: `"not a readable PDF - corrupt, truncated or not really
+a PDF (...) - re-download it"`. But the SAME intake result's `fit.confidence_note` (the
+score-outlook section, built by `classify_tender.assess_fit_from_text()` calling
+`assess_tender.document_depth()`/`extract_signals()` on the aggregated text blob, with no
+visibility into *why* nothing was extracted) hardcoded **"likely a scanned image" regardless of
+the real reason** - a different, misleading diagnosis sitting right next to the correct one in
+the same manifest. Confirmed directly: ran the real file through both code paths and printed
+both messages side by side. The verdict itself stayed safely cautious either way
+(`needs_review`), so this isn't a wrong-decision bug - it's a wrong-explanation bug that could
+send someone chasing a scanner/OCR fix for a file that was never scanned at all.
+
+**Fix:** `assess_fit_from_text()` now takes an optional `documents` list (the same per-document
+manifest `requirements.py` already produces). When nothing could be extracted, it uses the real,
+specific `unreadable` reason(s) already known for those documents instead of a blind guess -
+except when a document's own reason already says "scanned image", which stays as-is (that
+guess is correct there). Both production call sites
+(`process_general_jobs.record_fit()`/`run_extraction()`) and the CLI now pass the manifest's
+`documents` through; the discovery-feed path (which never has this richer per-document context,
+only a single downloaded PDF) is unaffected and keeps its existing generic message - confirmed
+by testing it with `documents=None`.
+
+**Verification:** re-ran the exact renamed-file scenario after the fix - `confidence_note` now
+reads the real pdftotext-reported reason for each document, not "likely a scanned image". Two
+explicit regression checks: calling with `documents=None` (the discovery-feed shape) and with a
+document whose own reason genuinely says "scanned image" both still produce the original,
+unchanged generic message. `test_general_bridge.py` ALL PASSED; `general_harness.py --no-pack`
+44/0/0. `python3 -m py_compile` clean on all three changed files.
+
+### Not yet tested this pass (deferred)
+
+- The multi-source discovery expansion that landed in this pass's pull (`gov_sources.py`,
+  `transnet_etenders.py`, `key_person_minimums.py`) is entirely new ground for this review - a
+  strong candidate to revisit discovery again once CV/compliance/notify/worker have each had a
+  first pass.
+- Other malformed-extension shapes worth trying later: a `.xlsm` SANRAL workbook renamed to
+  `.docx` or `.pdf` (would it still be detected as a workbook, or silently misrouted to the
+  general flow?), and a genuinely password-protected real PDF (the "not a readable PDF" message
+  already names this as one of its causes, but it wasn't tested with an actual password-protected
+  file this pass, only a mis-extensioned one).

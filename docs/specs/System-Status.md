@@ -710,6 +710,27 @@ place that name was ever written down, and the "decision" it was meant to record
 Item (b) (`how_we_work` on the Tender Workspace) is untouched by this pass, per instruction, and
 stays open below.
 
+## This pass (2026-10-18, standing QA/robustness review - fifth run)
+
+Rotated to the intake engine. Pulled latest `main` first (more concurrent work had landed: a
+multi-source discovery expansion, `engine/sanral_b7.py`, cross-tenant isolation tests) -
+confirmed this review's five prior fixes are all still present and untouched before starting.
+Used `classify_tender.py`'s own local CLI mode to run real adversarial document shapes without
+needing a scratch Postgres for this rotation.
+
+Found and fixed one real, moderate-severity bug: a `.docx` tender document renamed to `.pdf` (a
+mundane, real-world upload shape) got a correct, specific per-document reason from
+`requirements.py` ("not a readable PDF - corrupt, truncated or not really a PDF... re-download
+it" - pdftotext itself detected it wasn't really a PDF), but the SAME intake result's fit/score-
+outlook section showed a different, misleading "likely a scanned image" message right next to
+it, because `classify_tender.assess_fit_from_text()` built that message from scratch with no
+visibility into the real, already-known reason. The verdict itself stayed safely cautious either
+way, so this was a wrong-explanation bug, not a wrong-decision one - but one that could send
+someone chasing the wrong fix (re-scanning a file that was never scanned). Fixed by threading the
+real per-document reasons through; the discovery-feed path (no such per-document context)
+correctly keeps its existing generic message. Full evidence in `docs/specs/QA-Edge-Case-
+Findings.md` (Finding 7).
+
 ## This pass (2026-10-18, standing QA/robustness review - fourth run)
 
 Rotated to the CV engine. Pulled latest `main` first (more concurrent work had landed: system

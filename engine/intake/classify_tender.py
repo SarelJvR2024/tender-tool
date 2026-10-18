@@ -294,7 +294,7 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
     }
 
 
-def assess_fit_from_text(title, description, all_text, profile):
+def assess_fit_from_text(title, description, all_text, profile, documents=None):
     """assess_release()'s own steps, on text already read from the documents."""
     categories = assess_tender.categorize(title, description)
     if all(c.startswith("uncategorized") for c in categories) and all_text:
@@ -307,6 +307,20 @@ def assess_fit_from_text(title, description, all_text, profile):
             categories = from_text
     depth = assess_tender.document_depth(all_text or "")
     signals, confidence = assess_tender.extract_signals(all_text or "", depth)
+    if depth == "no_extractable_text" and documents:
+        # extract_signals()'s "likely a scanned image" is a guess made with no
+        # visibility into WHY nothing was extracted - requirements.py's own
+        # per-document reason is already specific (confirmed: a real .docx
+        # tender renamed to .pdf comes back from requirements.py as "not a
+        # readable PDF - corrupt, truncated or not really a PDF", but this
+        # function used to show "likely a scanned image" anyway, in the same
+        # result, right next to the correct reason). Use the real reason(s)
+        # when they say something other than "scanned image" themselves.
+        specific = sorted({d["unreadable"] for d in documents
+                            if d.get("unreadable") and "scanned image" not in d["unreadable"]})
+        if specific:
+            confidence = ("No text could be extracted from the attached document(s): "
+                          + "; ".join(specific) + " - none of these signals could be checked at all.")
     verdict, reasons = assess_tender.assess_fit(categories, signals, depth, profile)
     if categories != assess_tender.categorize(title, description):
         reasons.append("Discipline read from the opening pages of the tender documents (the title alone didn't say).")
@@ -358,7 +372,7 @@ def main():
         out["setup"] = read_setup(tech)
         out["fingerprint"] = check_fingerprint(tech, decision["family"])
     profile = assess_tender.load_company_profile(args.profile)
-    out["fit"] = assess_fit_from_text(args.title, args.title, m.get("_all_text") or "", profile)
+    out["fit"] = assess_fit_from_text(args.title, args.title, m.get("_all_text") or "", profile, documents=m["documents"])
     out["readable_documents"] = sum(1 for d in m["documents"] if d["chars"] > 0 and not d["unreadable"])
     out["gaps"] = m["gaps"]
     print(json.dumps(out, indent=2, default=str))
