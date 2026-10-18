@@ -6,7 +6,10 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18, ~21:00 UTC — **milestone: a live Supabase project and a green Vercel
+Last full pass: 2026-10-18, ~23:00 UTC — verified email/password auth (Sarel's own second
+human-authored commit `d721965`: /signup, /forgot-password, /reset-password alongside the
+existing OAuth), the onboarding-scan silent-field-loss fix, and a mobile CSS fix - all clean,
+full production build still 32/32 pages - below. ~21:00 UTC — **milestone: a live Supabase project and a green Vercel
 deployment now exist** (Sarel's own commit `a232e77` — the first human-authored commit all
 session), three build-breaking prerender bugs fixed and independently re-verified (`npm run build`
 now completes cleanly, the long-standing `/login` prerender caveat is gone); plus a confirmed,
@@ -1072,6 +1075,45 @@ Two commits, both small and already well-verified; one had no System-Status entr
   and `test_award_prices.py` myself: 0 failures both, confirming the fix.
 
 Nothing further needed this pass.
+
+## This pass (2026-10-18, ~23:00 UTC): email/password auth verified (Sarel's own commit); onboarding-scan field-loss fix and a mobile CSS fix confirmed clean
+
+**Email/password auth** (`d721965`, `/signup` + `/login`'s new password form + `/forgot-password`
+→ `/reset-password`, Sarel's own second human-authored commit this session): read every new page
+in full rather than trusting "verified clean build/lint/typecheck/tests locally and a green
+Vercel preview" at face value. All four use Supabase's own native primitives directly
+(`signUp`/`signInWithPassword`/`updateUser` with `emailRedirectTo`) - no custom password
+handling, no new token/callback logic (reuses the existing `/auth/callback` PKCE exchange
+route). Signup requires email confirmation before the account is usable (standard Supabase
+gate) and enforces an 8-character minimum + confirm-password match client-side.
+`reset-password` correctly assumes a session already established by the callback route and
+fails cleanly (an "expired or invalid link" message, not a crash) if someone navigates there
+directly without one. Checked the one thing that would matter most if it were wrong: `proxy.ts`'s
+onboarding/company-membership redirect gate reads only the session + `company_members`
+membership, with no special-casing by auth method - a password-signed-in user goes through
+exactly the same `/onboarding` gate and RLS as an OAuth one. The Microsoft OAuth button is
+correctly hidden behind a `MICROSOFT_AUTH_READY = false` flag with a clear comment (Google
+credentials were pasted into the Azure provider slot by mistake - this stops a real visitor
+from hitting that until it's fixed). `npm run build`: 32/32 pages, `/signup`/`/forgot-password`/
+`/reset-password`/`/login` all genuinely static.
+
+**Onboarding-scan silent field loss** (`2d4c124`, thirteenth QA run): confirmed the underlying
+write path (`actions.ts`'s `confirmVaultDocument`) was already safe - it only ever wrote a real
+`companies` column, so no data was ever actually mis-saved. The bug was purely that the review
+screen showed every AI-read field with the same tick-box regardless of whether a column existed
+to save it to, so confirming a field with nowhere to go looked identical to confirming one that
+worked. `isFieldPersisted()` is now the one shared source of truth for which fields are
+tickable vs. shown read-only with a "not saved anywhere" note - re-ran `onboardingScan.test.ts`:
+12/12 pass.
+
+**Mobile CSS fix** (`4f9311d`): the document-scan review card's field grid gets the same
+`@media (max-width: 600px)` collapse already proven on the Person page's CV review rows -
+consistent reuse, not a new pattern. This commit's own build check independently confirmed the
+same milestone verified last pass (the `/login` prerender gap is gone, "all 27 routes, zero
+errors, for the first time this arc").
+
+Regression: `npm run typecheck`/`lint` clean; full `npm run build` still 32/32 pages with no
+errors.
 
 ## This pass (2026-10-18, ~21:00 UTC): live Supabase + Vercel milestone verified; currency-parsing bug and onboarding document scan confirmed clean
 
