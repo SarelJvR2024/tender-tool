@@ -364,6 +364,40 @@ export function firmsMet(entries: { outcome: TenderOutcome; position: OwnPositio
   return [...firms.values()].sort((a, b) => b.met - a.met || b.theyWon - a.theyWon || a.name.localeCompare(b.name));
 }
 
+// ------------------------------------------------------------ market trend (industry/discipline/value-band)
+
+/**
+ * Market-tendering trend for a group of comparable tenders (same
+ * industry/discipline tag, optionally narrowed to one value band, 0060),
+ * from market_trend_for_tags() (0062): sample sizes, winning price as a %
+ * of the stated estimate (only where a real estimate was published - never
+ * against a null/unknown one), bidder count, and the winning B-BBEE level
+ * distribution. "Once we get winning prices ... start building market
+ * tendering trends for similar future projects" (Sarel) - purely
+ * informational, never a price the system sets or recommends. The honesty
+ * gate itself (MARKET_TREND_MIN_SAMPLE, same reasoning as this module's own
+ * MIN_SAMPLE) is a pure function in marketTrendLogic.ts, unit-tested there
+ * without a database - this is a thin Supabase-reading shell around it,
+ * same split as pack-review-data.ts / pack-review-logic.ts.
+ */
+export { MARKET_TREND_MIN_SAMPLE, type MarketTrend } from "@/lib/marketTrendLogic";
+import { gateMarketTrend, type MarketTrendRow } from "@/lib/marketTrendLogic";
+import type { MarketTrend as MarketTrendType } from "@/lib/marketTrendLogic";
+
+export async function loadMarketTrend(
+  supabase: SupabaseClient,
+  tags: string[],
+  valueBand: string | null,
+  windowMonths = 24,
+): Promise<{ trend: MarketTrendType | null; error: string | null }> {
+  if (tags.length === 0) return { trend: null, error: null };
+  const { data, error } = await supabase
+    .rpc("market_trend_for_tags", { p_tags: tags, p_value_band: valueBand, p_window_months: windowMonths })
+    .maybeSingle();
+  if (error) return { trend: null, error: error.message };
+  return { trend: gateMarketTrend(data as MarketTrendRow | null), error: null };
+}
+
 export function signedPct(v: number | null): string {
   if (v === null) return "-";
   if (v === 0) return "same";

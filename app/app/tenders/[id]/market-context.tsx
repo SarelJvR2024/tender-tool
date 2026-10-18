@@ -9,6 +9,7 @@ import {
   SOURCE_LABEL,
   benchmark,
   bestOutcome,
+  loadMarketTrend,
   loadOutcomesForTenders,
   loadSegment,
   ownPosition,
@@ -16,6 +17,7 @@ import {
   segmentsFor,
   signedPct,
   type Benchmark,
+  type MarketTrend,
   type OwnPosition,
   type Segment,
   type TenderOutcome,
@@ -39,10 +41,15 @@ type Facts = { id: string; buyer: string | null; family: string | null };
 
 export async function MarketContext({ tender }: { tender: Facts }) {
   const supabase = await createClient();
-  const [{ data: pack }, { data: company }, { data: opps }, taxonomy, outcomes] = await Promise.all([
+  const [{ data: pack }, { data: company }, { data: opps }, { data: tenderTags }, { data: scopeRecord }, taxonomy, outcomes] = await Promise.all([
     supabase.from("tender_packs").select("pipeline_stage, submitted_price_zar, submitted_price_incl_vat, price_sector").eq("tender_id", tender.id).maybeSingle(),
     supabase.from("companies").select("legal_name, csd_trading_name").maybeSingle(),
     supabase.from("discovered_opportunities").select("categories").eq("tender_id", tender.id).limit(1),
+    // industry_tags/discipline_tags (0060) - the tags the market trend below groups by.
+    supabase.from("tenders").select("industry_tags, discipline_tags").eq("id", tender.id).maybeSingle(),
+    // tender_scope_records (0060) - this tender's own value band, if the text states one,
+    // used only to narrow the trend comparison; never required for it to show.
+    supabase.from("tender_scope_records").select("value_band").eq("tender_id", tender.id).maybeSingle(),
     loadDisciplineTaxonomy(supabase),
     loadOutcomesForTenders(supabase, [tender.id]),
   ]);
@@ -52,6 +59,10 @@ export async function MarketContext({ tender }: { tender: Facts }) {
   const categoryLabel = categories.length ? categories.map((c) => taxonomyLabel(taxonomy, c)).join(" / ") : "";
   const segments = segmentsFor({ buyerLabel: clientLabel(tender.buyer, tender.family), isSanral, categories: expandDisciplines(taxonomy, categories), categoryLabel });
   const segmentRows = await Promise.all(segments.map((s) => loadSegment(supabase, s)));
+
+  const trendTags = [...new Set([...((tenderTags?.industry_tags as string[] | null) ?? []), ...((tenderTags?.discipline_tags as string[] | null) ?? [])])];
+  const valueBand = (scopeRecord?.value_band as string | null) ?? null;
+  const { trend, error: trendError } = await loadMarketTrend(supabase, trendTags, valueBand);
 
   const outcome = bestOutcome(outcomes.byTender.get(tender.id));
   const submitted = toNumber(pack?.submitted_price_zar ?? null);
@@ -87,8 +98,65 @@ export async function MarketContext({ tender }: { tender: Facts }) {
       ) : (
         <SegmentTable segments={segments} results={segmentRows.map((r) => ({ b: benchmark(r.rows), error: r.error }))} />
       )}
+
+      {trendTags.length > 0 && (trend || trendError) && (
+        <>
+          <div style={h3}>Market tendering trend{valueBand ? ` (${valueBand})` : ""}</div>
+          {trendError ? (
+            <div style={{ ...muted, color: "#B91C1C" }}>Could not read the market trend: {trendError}</div>
+          ) : trend ? (
+            <MarketTrendBlock trend={trend} tags={trendTags} valueBand={valueBand} />
+          ) : null}
+        </>
+      )}
     </div>
   );
+}
+
+/**
+ * Discipline/value-band-level trend from comparable awarded, competitive
+ * outcomes (market_trend_for_tags(), 0062) - historical reference only,
+ * never a price the system sets or suggests. Only rendered when the caller
+ * (loadMarketTrend()) already cleared MIN_SAMPLE comparable awards; this
+ * component additionally hides the pct-of-estimate line on its own, thinner
+ * sample (most comparable awards have no stated estimate to compare
+ * against at all).
+ */
+function MarketTrendBlock({ trend, tags, valueBand }: { trend: MarketTrend; tags: string[]; valueBand: string | null }) {
+  const bbbeeEntries = Object.entries(trend.bbbeeLevelCounts).sort((a, b) => b[1] - a[1]);
+  const bbbeeTotal = bbbeeEntries.reduce((s, [, n]) => s + n, 0);
+  return (
+    <div>
+      <div style={{ fontSize: 13, color: "#16233B", lineHeight: 1.6 }}>
+        Based on <strong>{trend.n}</strong> comparable past award{trend.n === 1 ? "" : "s"} tagged {tags.map((t) => taxonomyLabelOrSlug(t)).join(" / ")}
+        {valueBand ? <> in the {valueBand} value band</> : null}
+        {trend.dateFrom && <> ({trend.dateFrom.slice(0, 7)} to {trend.dateTo?.slice(0, 7)})</>}.
+        {trend.pctOfEstimate.median !== null ? (
+          <>
+            {" "}Where the buyer stated an estimate ({trend.pctOfEstimate.n} of those awards), winners typically priced at{" "}
+            <strong>{Math.round(trend.pctOfEstimate.median * 100)}%</strong> of it.
+          </>
+        ) : (
+          <> None of these awards had both a stated estimate and a winning amount to compare, so no price-vs-estimate figure is shown.</>
+        )}
+        {trend.bidderCount.median !== null && <> Typically {trend.bidderCount.median} bidder{trend.bidderCount.median === 1 ? "" : "s"} per tender ({trend.bidderCount.n} with a bidder count recorded).</>}
+      </div>
+      {bbbeeTotal > 0 && (
+        <div style={{ ...muted, marginTop: 6 }}>
+          Winning B-BBEE level, {bbbeeTotal} award{bbbeeTotal === 1 ? "" : "s"}: {bbbeeEntries.map(([level, n]) => `${level} (${n})`).join(", ")}.
+        </div>
+      )}
+      <div style={{ fontSize: 11, color: "#9A9684", marginTop: 8 }}>
+        Historical reference only, from past published outcomes - not a prediction or a recommended price. Trailing 24 months,
+        competitive awards only.
+      </div>
+    </div>
+  );
+}
+
+/** Slugs read as-is when no taxonomy label is loaded here - a plain, honest fallback, never invented wording. */
+function taxonomyLabelOrSlug(slug: string): string {
+  return slug.replace(/_/g, " ");
 }
 
 /** The tender's discipline: the sector the company set, else Discovery's categories, else SANRAL consulting. */
