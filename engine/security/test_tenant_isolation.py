@@ -177,18 +177,82 @@ def leaked_anywhere(root, needles):
     return hits
 
 
-def sanral_tender(store, company_ids):
+R396_TECH = os.path.join(ROOT, "templates", "samples", "R.396-010-2025.1F_ran.xlsm")
+FORM_SOURCES = (("a_forms", "A_Forms.docx"), ("c111_form_of_offer", "C.1.1.1_Form_of_Offer.docx"),
+                ("c123_contract_data", "C.1.2.3_Contract_Data.docx"))
+
+
+def add_templates(store, t, company_id=None, technical=None, tag="t"):
+    """The tender's 5-file template set as tender_documents rows. company_id
+    None = the shared copy (registered by the service role from the buyer's
+    published documents); otherwise that company's own upload (0045). The
+    path is the pre-0045 one (<tender>/<type>/...) either way: a company row
+    with that path is what an upload made before 0045 becomes."""
+    tech_bytes = open(technical or R396_TECH, "rb").read()
+    rows = [("technical_xlsm", f"{tag}.xlsm", tech_bytes)] + [
+        (dt, f"{tag}_{fn}", open(os.path.join(ROOT, "templates", "forms", "R.396-010-2025.1F", fn), "rb").read())
+        for dt, fn in FORM_SOURCES]
+    for doc_type, fn, data in rows:
+        path = f"{t['id']}/{doc_type}/{fn}"
+        store.put("tender-documents", path, data)
+        store.add("tender_documents", tender_id=t["id"], doc_type=doc_type, storage_path=path,
+                  company_id=company_id, uploaded_by_company=company_id)
+    return [f"{t['id']}/{doc_type}/{fn}" for doc_type, fn, _ in rows]
+
+
+def sanral_tender(store, company_ids, templates=True):
     t = store.add("tenders", contract_no="R.396-010-2025/1F", closing_date="2026-12-15T12:00:00+02:00",
                   family="Conventional Consultant Tender", owner_company_id=None)
-    tech = os.path.join(ROOT, "templates", "samples", "R.396-010-2025.1F_ran.xlsm")
-    store.put("tender-documents", f"{t['id']}/technical_xlsm/t.xlsm", open(tech, "rb").read())
-    store.add("tender_documents", tender_id=t["id"], doc_type="technical_xlsm", storage_path=f"{t['id']}/technical_xlsm/t.xlsm")
-    for doc_type, fn in (("a_forms", "A_Forms.docx"), ("c111_form_of_offer", "C.1.1.1_Form_of_Offer.docx"),
-                         ("c123_contract_data", "C.1.2.3_Contract_Data.docx")):
-        src = os.path.join(ROOT, "templates", "forms", "R.396-010-2025.1F", fn)
-        store.put("tender-documents", f"{t['id']}/{doc_type}/{fn}", open(src, "rb").read())
-        store.add("tender_documents", tender_id=t["id"], doc_type=doc_type, storage_path=f"{t['id']}/{doc_type}/{fn}")
+    if templates:
+        add_templates(store, t)
     return t
+
+
+# A company's own data as fill_conventional.py writes it into the Technical
+# workbook - used to make "company A's filled-in workbook" for real, with the
+# real filler, rather than by poking strings into cells.
+def fill_person_data(name, id_number, n_projects, sacpcmp, tag):
+    return {"name": name, "id_number": id_number, "description": "",
+            "employment": "Key Person is a full time employee of the tenderer",
+            "qualifications": {"ecsa_level": "Professional Engineer", "ecsa_number": f"{tag}-ECSA-1", "ecsa_date": "2012-01-01",
+                               "sacpcmp_number": sacpcmp, "sacpcmp_date": "2015-01-01" if sacpcmp else None,
+                               "highest_level": "Masters Degree", "highest_description": f"{tag} MEng",
+                               "highest_institution": f"{tag} University", "highest_graduated": "2012-01-01",
+                               "initial_description": f"{tag} BEng", "initial_institution": f"{tag} University",
+                               "initial_graduated": "2008-01-01", "years_experience": 15},
+            "projects": [{"client_and_number": f"{tag} CLIENT PROJECT {i}", "client_type": "Provincial Authority",
+                          "project_type": "DS", "start": "2019-01-01", "end": "2021-12-31", "value_rm": 80,
+                          "position_held": f"{tag} role {i}", "position_code": "DS", "contact": f"{tag} Referee {i}",
+                          "contact_number": f"{tag}-082-555-000{i}"} for i in range(1, n_projects + 1)]}
+
+
+def fill_technical(tpl, company_name, person, out):
+    import yaml
+    import fill_conventional
+    from sanral_fill import Workbook
+    from suggest_pack import read_required_positions
+    primary, _ = read_required_positions(Workbook(tpl))
+    pack_path = out + ".pack.yaml"
+    yaml.safe_dump({"company": {"name": company_name, "bee_level": 1, "black_ownership_pct": 100, "status": "QSE",
+                                "head_office": f"{company_name} HQ", "other_offices": 1, "ecsa_registered": 6,
+                                "sacpcmp_registered": 2, "total_employees": 20, "jv_share_pct": 100},
+                    "tender": {}, "people": {"p": person},
+                    "key_persons": [{"position": p["code"], "person": "p"} for p in primary]}, open(pack_path, "w"))
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):
+        fill_conventional.main(tpl, pack_path, out)
+    return out
+
+
+def xlsm_text(path):
+    import zipfile
+    with zipfile.ZipFile(path) as z:
+        return b"".join(z.read(n) for n in z.namelist() if n.endswith(".xml"))
+
+
+A_FILLED_MARKERS = [b"ALICE ACO", b"8501015800088", b"ACO CLIENT PROJECT 2", b"ACO CLIENT PROJECT 3",
+                    b"ACO Referee 3", b"ACO-082-555-0003", b"ACO-SACPCMP-77", b"ACO Engineering"]
 
 
 def run_gather(bridge, store, job):
@@ -354,6 +418,86 @@ def part1():
         if hasattr(gen, "provenance_pack_id") else b_pack["id"]  # before the fix: job["tender_pack_id"] as given
     check(target == a_pack["id"], f"provenance written to A's own pack (target {'B' if target == b_pack['id'] else target})")
 
+    part1_shared_templates(bridge)
+
+
+def part1_shared_templates(bridge):
+    """The open item the first audit pass left (POPIA-Security-Audit.md,
+    "Shared templates"): one company's upload of a tender's "blank" template
+    was every company's template. If A uploaded its own filled-in workbook,
+    B's pack was built from it."""
+    print("\n[16] Shared template: A uploads its own FILLED-IN Technical workbook as the tender's blank template")
+    tmp = tempfile.mkdtemp(prefix="tenant_iso_tpl_")
+    a_filled = fill_technical(R396_TECH, "ACO Engineering (Pty) Ltd",
+                              fill_person_data("ALICE ACO", "8501015800088", 3, "ACO-SACPCMP-77", "ACO"),
+                              os.path.join(tmp, "A_filled.xlsm"))
+    check(all(m in xlsm_text(a_filled) for m in A_FILLED_MARKERS), "A's filled workbook really holds A's data (real filler)")
+    b_person_data = fill_person_data("BOB BCO", "9001015800085", 1, None, "BCO")
+
+    s = Store(bridge.NOT_NULL)
+    a, b, a_person, b_person = two_companies(s)
+    t = sanral_tender(s, [a["id"], b["id"]], templates=False)
+    a_paths = add_templates(s, t, company_id=a["id"], technical=a_filled, tag="a_upload")
+    pack = s.add("tender_packs", company_id=b["id"], tender_id=t["id"])
+    for code in ("PL", "DS1"):
+        s.add("tender_pack_assignments", tender_pack_id=pack["id"], position_code=code, confirmed_person_id=b_person["id"])
+    job = {"id": str(uuid.uuid4()), "company_id": b["id"], "tender_id": t["id"], "tender_pack_id": pack["id"],
+           "include_vault_documents": True, "include_cvs": True}
+    out, err, work = run_gather(bridge, s, job)
+    got = [p for _, p in s.downloads if p in a_paths]
+    check(not got, f"B's pack job downloaded none of A's uploaded files ({len(got)} downloaded)")
+    check(out is None and err is not None and "uploaded" in str(err),
+          f"B's job asks B to upload its own templates ({str(err)[:110] if err else 'built from A files'})")
+    leaked = []
+    if out and out.get("technical_tpl"):
+        # What B's pack would have carried: B's real fill on top of the
+        # template the bridge picked.
+        b_built = fill_technical(out["technical_tpl"], "BCO Consulting (Pty) Ltd", b_person_data, os.path.join(tmp, "B_built.xlsm"))
+        leaked = [m.decode() for m in A_FILLED_MARKERS if m in xlsm_text(b_built)]
+    check(not leaked, f"none of A's data in B's filled Technical workbook (left over from A: {leaked})")
+    shutil.rmtree(work, ignore_errors=True)
+
+    print("\n[16b] The legitimate cases: the buyer's shared template, and each company's own copy")
+    shared = add_templates(s, t, company_id=None, tag="buyer")
+    s.downloads.clear()
+    out, err, work = run_gather(bridge, s, job)
+    picked = [p for _, p in s.downloads if p.startswith(t["id"])]
+    check(out is not None, f"B builds from the buyer's shared copy ({str(err)[:100] if err else 'ok'})")
+    check(picked and all(p in shared for p in picked), f"B read only the shared copy ({sorted(set(picked) - set(shared))})")
+    shutil.rmtree(work, ignore_errors=True)
+
+    b_paths = add_templates(s, t, company_id=b["id"], tag="b_upload")
+    s.downloads.clear()
+    out, err, work = run_gather(bridge, s, job)
+    picked = [p for _, p in s.downloads if p.startswith(t["id"])]
+    check(out is not None and picked and all(p in b_paths for p in picked),
+          f"with its own upload on file B uses exactly that ({[p.split('/')[-1] for p in picked]})")
+    shutil.rmtree(work, ignore_errors=True)
+
+    a_pack = s.add("tender_packs", company_id=a["id"], tender_id=t["id"])
+    for code in ("PL", "DS1"):
+        s.add("tender_pack_assignments", tender_pack_id=a_pack["id"], position_code=code, confirmed_person_id=a_person["id"])
+    s.downloads.clear()
+    out, err, work = run_gather(bridge, s, {**job, "id": str(uuid.uuid4()), "company_id": a["id"], "tender_pack_id": a_pack["id"]})
+    picked = [p for _, p in s.downloads if p.startswith(t["id"])]
+    check(out is not None and picked and all(p in a_paths for p in picked),
+          f"A's own pack still uses A's own upload ({[p.split('/')[-1] for p in picked]})")
+    shutil.rmtree(work, ignore_errors=True)
+
+    print("\n[16c] Positions read from a company's own Technical workbook are that company's")
+    s.tables["tender_documents"] = [r for r in s.tables["tender_documents"] if r.get("company_id") is not None]
+    s.tables.pop("tender_requirements", None)
+    work_root = tempfile.mkdtemp(prefix="tenant_iso_req_")
+    bridge.sync_tender_requirements(s, work_root)
+    reqs = s.tables.get("tender_requirements", [])
+    by_company = {}
+    for r in reqs:
+        by_company.setdefault(r.get("company_id"), set()).add(r["position_code"])
+    check(by_company.get(a["id"]) and by_company.get(b["id"]) and None not in by_company,
+          f"one position set per company, none shared ({ {('A' if k == a['id'] else 'B' if k == b['id'] else k): sorted(v) for k, v in by_company.items()} })")
+    shutil.rmtree(work_root, ignore_errors=True)
+    shutil.rmtree(tmp, ignore_errors=True)
+
 
 def fake_rest(store):
     """process_cv_jobs.supabase_request(url, key, method, path, body) over the
@@ -461,11 +605,23 @@ insert into storage.objects (bucket_id, name) values
   ('tender-documents', 'manual/{i['B']}/{i['tPB']}/b.pdf'), ('tender-documents', 'private/{i['B']}/{i['tS']}/doc.pdf'),
   ('tender-documents', '{i['tPB']}/technical_xlsm/b.xlsm'), ('tender-documents', '{i['tS']}/technical_xlsm/b_upload.xlsm'),
   ('admin-harness-artifacts', 'pack/complete_co/r396/pack.pdf');
-insert into tender_documents (tender_id, doc_type, storage_path, uploaded_by, uploaded_by_company) values
-  ('{i['tS']}', 'technical_xlsm', '{i['tS']}/technical_xlsm/b_upload.xlsm', '{i['uB']}', '{i['B']}');
+insert into tender_documents (tender_id, doc_type, storage_path, uploaded_by, uploaded_by_company{', company_id' if per_company_templates(db) else ''}) values
+  ('{i['tS']}', 'technical_xlsm', '{i['tS']}/technical_xlsm/b_upload.xlsm', '{i['uB']}', '{i['B']}'{f", '{i['B']}'" if per_company_templates(db) else ''});
 insert into admin_harness_runs (test_company, tender_ref, status) values ('complete_co', 'r396', 'ok');
 select 1;""")
     return ids
+
+
+def tpl_path(company, tender, doc_type, fn):
+    """Where the templates card stores a company's own copy since 0045."""
+    return f"private/{company}/{tender}/templates/{doc_type}/{fn}"
+
+
+def per_company_templates(db):
+    """0045 applied (tender_documents.company_id). Lets cases 16-17 run on a
+    replay that stops before 0045, to show the hole they close."""
+    return db.one("select count(*) from information_schema.columns where table_name = 'tender_documents' "
+                  "and column_name = 'company_id'") == "1"
 
 
 def refused(db, sql, uid):
@@ -573,40 +729,52 @@ def part2(db):
         ok, _, err = db.run(sql, uA)
         check(ok, f"{label}: still allowed ({err[:100]})")
 
-    print("\n[13] Shared tender template: A can't replace the template B uploaded (which clears every company's positions)")
-    db.one(f"insert into storage.objects (bucket_id, name) values ('tender-documents', '{i['tS']}/technical_xlsm/a_swap.xlsm')")
-    db.one(f"insert into tender_requirements (tender_id, position_code) values ('{i['tS']}', 'PL')")
-    bad, why = refused(db, f"select record_tender_document('{i['tS']}', 'technical_xlsm', '{i['tS']}/technical_xlsm/a_swap.xlsm', 'a.xlsm')", uA)
-    path = db.one(f"select storage_path from tender_documents where tender_id = '{i['tS']}' and doc_type = 'technical_xlsm'")
-    check(bad and path.endswith("b_upload.xlsm"), f"B's template kept ({path}; {why[:100]})")
-    check(db.one(f"select count(*) from tender_requirements where tender_id = '{i['tS']}'") == "1", "positions not cleared")
-    db.one(f"insert into storage.objects (bucket_id, name) values ('tender-documents', '{i['tS']}/technical_xlsm/b_v2.xlsm'), "
-           f"('tender-documents', '{i['tS']}/a_forms/a_first.docx'), ('tender-documents', '{i['tPB']}/technical_xlsm/b_priv2.xlsm')")
-    ok, _, err = db.run(f"select record_tender_document('{i['tS']}', 'technical_xlsm', '{i['tS']}/technical_xlsm/b_v2.xlsm', 'b2.xlsm')", i["uB"])
+    print("\n[13] Tender templates (0043 -> 0045): a company's upload is its own copy; nobody replaces another's")
+    tS, tPB = i["tS"], i["tPB"]
+    reqB = "'" + B + "'" if per_company_templates(db) else "null"
+    db.one(f"insert into tender_requirements (tender_id, position_code{', company_id' if per_company_templates(db) else ''}) "
+           f"values ('{tS}', 'PL'{', ' + reqB if per_company_templates(db) else ''})")
+    a_own = tpl_path(A, tS, "technical_xlsm", "a_own.xlsm")
+    db.one(f"insert into storage.objects (bucket_id, name) values ('tender-documents', '{tS}/technical_xlsm/a_swap.xlsm'), "
+           f"('tender-documents', '{a_own}')")
+    bad, why = refused(db, f"select record_tender_document('{tS}', 'technical_xlsm', '{tS}/technical_xlsm/a_swap.xlsm', 'a.xlsm')", uA)
+    check(bad, f"A can't register a file in the shared tender folder ({why[:90]})")
+    ok, _, err = db.run(f"select record_tender_document('{tS}', 'technical_xlsm', '{a_own}', 'a.xlsm')", uA)
+    check(ok, f"A registers its own copy from its own folder ({err[:100]})")
+    path = db.one(f"select storage_path from tender_documents where tender_id = '{tS}' and doc_type = 'technical_xlsm' and uploaded_by_company = '{B}'")
+    check(path.endswith("b_upload.xlsm"), f"B's template untouched ({path})")
+    check(db.one(f"select count(*) from tender_requirements where tender_id = '{tS}'") == "1", "B's positions not cleared by A's upload")
+    b_v2 = tpl_path(B, tS, "technical_xlsm", "b_v2.xlsm")
+    a_first = tpl_path(A, tS, "a_forms", "a_first.docx")
+    b_priv2 = tpl_path(B, tPB, "technical_xlsm", "b_priv2.xlsm")
+    db.one(f"insert into storage.objects (bucket_id, name) values ('tender-documents', '{b_v2}'), "
+           f"('tender-documents', '{a_first}'), ('tender-documents', '{b_priv2}')")
+    ok, _, err = db.run(f"select record_tender_document('{tS}', 'technical_xlsm', '{b_v2}', 'b2.xlsm')", i["uB"])
     check(ok, f"B can still replace its own upload ({err[:100]})")
-    ok, _, err = db.run(f"select record_tender_document('{i['tS']}', 'a_forms', '{i['tS']}/a_forms/a_first.docx', 'a.docx')", uA)
-    check(ok, f"A can still upload a template nobody has uploaded yet ({err[:100]})")
-    db.one(f"insert into tender_documents (tender_id, doc_type, storage_path) values ('{i['tPB']}', 'technical_xlsm', '{i['tPB']}/technical_xlsm/b.xlsm')")
-    ok, _, err = db.run(f"select record_tender_document('{i['tPB']}', 'technical_xlsm', '{i['tPB']}/technical_xlsm/b_priv2.xlsm', 'p.xlsm')", i["uB"])
-    check(ok, f"B can replace an intake-registered template on its own private tender ({err[:100]})")
-    bad, _ = refused(db, f"select record_tender_document('{i['tPB']}', 'technical_xlsm', '{i['tPB']}/technical_xlsm/b_priv2.xlsm', 'p.xlsm')", uA)
+    check(db.one(f"select count(*) from tender_requirements where tender_id = '{tS}'") == "0", "...which clears B's own positions for a re-read")
+    ok, _, err = db.run(f"select record_tender_document('{tS}', 'a_forms', '{a_first}', 'a.docx')", uA)
+    check(ok, f"A can upload a template type it has no copy of yet ({err[:100]})")
+    bad, why = refused(db, f"select record_tender_document('{tS}', 'technical_xlsm', '{b_v2}', 'x.xlsm')", uA)
+    check(bad, f"A can't register B's file as its own ({why[:90]})")
+    db.one(f"insert into tender_documents (tender_id, doc_type, storage_path) values ('{tPB}', 'technical_xlsm', '{tPB}/technical_xlsm/b.xlsm')")
+    ok, _, err = db.run(f"select record_tender_document('{tPB}', 'technical_xlsm', '{b_priv2}', 'p.xlsm')", i["uB"])
+    check(ok, f"B can upload its own copy on its own private tender over the intake-registered one ({err[:100]})")
+    bad, _ = refused(db, f"select record_tender_document('{tPB}', 'technical_xlsm', '{tpl_path(A, tPB, 'technical_xlsm', 'x.xlsm')}', 'p.xlsm')", uA)
     check(bad, "A can't touch B's private tender's templates")
 
-    print("\n[13b] Shared template uploader: another company's upload is anonymous")
-    db.one(f"update tender_documents set original_filename = 'IsoB_Confidential_R396.xlsm' where tender_id = '{i['tS']}' and doc_type = 'technical_xlsm'")
-    bad, why = refused(db, f"select uploaded_by_company, original_filename from tender_documents where tender_id = '{i['tS']}'", uA)
+    print("\n[13b] Template uploads: nothing of another company's upload is visible, not even that it exists")
+    db.one(f"update tender_documents set original_filename = 'IsoB_Confidential_R396.xlsm' where tender_id = '{tS}' and uploaded_by_company = '{B}'")
+    bad, why = refused(db, f"select uploaded_by_company, original_filename from tender_documents where tender_id = '{tS}'", uA)
     check(bad, f"A can't read the uploader columns directly ({why[:70]})")
-    ok, out, err = db.run(f"select doc_type || '|' || uploaded_by_us || '|' || uploaded_by_another_company || '|' || coalesce(uploaded_by::text, '-') "
-                          f"|| '|' || coalesce(original_filename, '-') from tender_document_uploads('{i['tS']}') where doc_type = 'technical_xlsm'", uA)
-    line = (out.splitlines() or [""])[-1]
-    check(ok and line == "technical_xlsm|false|true|-|-", f"A sees only 'another company' - no user, no file name ({line or err[:80]})")
-    ok, out, _ = db.run(f"select coalesce(original_filename, '-') from tender_document_uploads('{i['tS']}') where doc_type = 'technical_xlsm'", i["uB"])
+    ok, out, err = db.run(f"select count(*) from tender_document_uploads('{tS}') where original_filename = 'IsoB_Confidential_R396.xlsm'", uA)
+    check(ok and out.splitlines()[-1] == "0", f"A never gets B's file name ({out or err[:80]})")
+    ok, out, err = db.run(f"select count(*) from tender_documents where tender_id = '{tS}' and storage_path in ('{tS}/technical_xlsm/b_upload.xlsm', '{b_v2}')", uA)
+    check(ok and out.splitlines()[-1] == "0", f"A sees no row of B's uploads ({out or err[:80]})")
+    ok, out, _ = db.run(f"select coalesce(original_filename, '-') from tender_document_uploads('{tS}') where doc_type = 'technical_xlsm'", i["uB"])
     check(ok and out.splitlines()[-1] == "IsoB_Confidential_R396.xlsm", "B still sees its own upload's file name")
-    ok, out, err = db.run(f"select count(*) from tender_document_uploads('{i['tPB']}')", uA)
+    ok, out, err = db.run(f"select count(*) from tender_document_uploads('{tPB}')", uA)
     n = (out.splitlines() or ["?"])[-1] if ok else "no such function"
     check(ok and n == "0", f"A gets nothing for B's private tender ({n})")
-    check(db.one(f"select count(storage_path) from tender_documents where tender_id = '{i['tS']}'", uA) != "0",
-          "A still reads the shared template's storage path (the pack needs it)")
 
     print("\n[14] Admin console: a customer company owner is not the platform admin")
     n = db.one("select count(*) from admin_harness_runs", uA)
@@ -621,6 +789,82 @@ def part2(db):
         db.one(f"delete from platform_admins where user_id = '{uA}'")
     else:
         check(False, "platform admin concept exists")
+
+
+def part2_shared_templates(db):
+    """Case 16's hole at the database / Storage layer: A uploads its own
+    filled-in workbook through the templates card, exactly as the app does
+    (pre-0045: <tender>/<type>/<uuid>.xlsm, readable by every company on the
+    tender; since 0045: A's own private/<A>/<tender>/templates/... folder)."""
+    print("\n[17] Shared template, database + Storage: A's uploaded workbook is not B's to read")
+    i = {k: str(uuid.uuid4()) for k in ("uA", "uB", "A", "B", "t", "pA", "pB")}
+    A, B, t = i["A"], i["B"], i["t"]
+    new = per_company_templates(db)
+    db.one(f"""
+insert into auth.users (id, email) values ('{i['uA']}', 'tpl-a@example.test'), ('{i['uB']}', 'tpl-b@example.test');
+insert into companies (id, legal_name) values ('{A}', 'Tpl A'), ('{B}', 'Tpl B');
+insert into company_members (company_id, user_id, role) values ('{A}', '{i['uA']}', 'owner'), ('{B}', '{i['uB']}', 'owner');
+insert into tenders (id, slug, contract_no, title, closing_date, family) values
+  ('{t}', 'tpl-{t[:8]}', 'TPL-SHARED', 'Shared SANRAL tender', now() + interval '30 days', 'Conventional Consultant Tender');
+insert into tender_packs (id, company_id, tender_id) values ('{i['pA']}', '{A}', '{t}'), ('{i['pB']}', '{B}', '{t}');
+insert into storage.buckets (id, name) values ('tender-documents', 'tender-documents') on conflict do nothing;
+insert into storage.objects (bucket_id, name) values ('tender-documents', 'tpl-{t[:8]}/a_forms.docx');
+insert into tender_documents (tender_id, doc_type, storage_path) values ('{t}', 'a_forms', 'tpl-{t[:8]}/a_forms.docx');
+select 1;""")
+    # A's upload, the way the templates card does it in this schema version.
+    old_path, new_path = f"{t}/technical_xlsm/{uuid.uuid4()}.xlsm", tpl_path(A, t, "technical_xlsm", f"{uuid.uuid4()}.xlsm")
+    a_path = None
+    for path in (old_path, new_path):
+        ok, _, _ = db.run(f"insert into storage.objects (bucket_id, name) values ('tender-documents', '{path}')", i["uA"])
+        if ok:
+            ok, _, err = db.run(f"select record_tender_document('{t}', 'technical_xlsm', '{path}', 'ACO_R396_Technical_FILLED.xlsm')", i["uA"])
+            if ok:
+                a_path = path
+                break
+    check(a_path is not None, f"A's upload accepted ({'shared tender folder' if a_path == old_path else 'own private folder' if a_path else 'refused'})")
+    check(a_path != old_path, "A's upload no longer lands in the folder every company on the tender can read")
+    n = db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name in ('{old_path}', '{new_path}')", i["uB"])
+    check(n == "0", f"B can't download A's uploaded workbook from Storage (B sees {n})")
+    n = db.one(f"select count(*) from tender_documents where tender_id = '{t}' and storage_path in ('{old_path}', '{new_path}')", i["uB"])
+    check(n == "0", f"B's view of the tender's templates doesn't include A's file (B sees {n} row(s) naming it)")
+    n = db.one(f"select count(*) from tender_document_uploads('{t}') where doc_type = 'technical_xlsm'", i["uB"])
+    check(n == "0", f"the templates card shows B no Technical workbook on file - B uploads its own ({n})")
+    n = db.one(f"select count(*) from tender_documents where tender_id = '{t}' and storage_path in ('{old_path}', '{new_path}')", i["uA"])
+    check(n == "1", f"A still sees and uses its own upload ({n})")
+    bad, why = refused(db, f"select record_tender_document('{t}', 'technical_xlsm', '{new_path}', 'stolen.xlsm')", i["uB"])
+    check(bad, f"B can't register A's file as B's template ({why[:90]})")
+
+    # A file A uploaded BEFORE 0045 (or an old version it replaced) is still
+    # in the shared tender folder - Storage is not rewritten by a migration.
+    legacy = f"{t}/technical_xlsm/legacy-{uuid.uuid4()}.xlsm"
+    db.one(f"insert into storage.objects (bucket_id, name) values ('tender-documents', '{legacy}')")
+    n = db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name = '{legacy}'", i["uB"])
+    check(n == "0", f"B can't read a pre-0045 / replaced upload of A's left in the tender folder ({n})")
+
+    # The legitimate shared case: the buyer's own published file (service role).
+    n = db.one(f"select count(*) from storage.objects where bucket_id = 'tender-documents' and name = 'tpl-{t[:8]}/a_forms.docx'", i["uB"])
+    check(n == "1", "the buyer's published A-Forms (service-role registered) stay readable by every company")
+    rows = db.one(f"select string_agg(doc_type || ':' || source, ',') from tender_document_uploads('{t}')", i["uB"]) if new else "?"
+    check(rows == "a_forms:buyer", f"B's card: A-Forms on file from the buyer, nothing else ({rows})")
+
+    # B uploads its own; A's copy and A's positions are untouched.
+    if new:
+        db.one(f"insert into tender_requirements (tender_id, position_code, company_id) values ('{t}', 'PL', '{A}'), "
+               f"('{t}', 'DS1', '{A}'), ('{t}', 'PL', null)")
+        n_b = db.one(f"select string_agg(position_code, ',' order by position_code) from tender_requirements where tender_id = '{t}'", i["uB"])
+        n_a = db.one(f"select string_agg(position_code, ',' order by position_code) from tender_requirements where tender_id = '{t}'", i["uA"])
+        check(n_b == "PL" and n_a == "DS1,PL", f"positions: B sees the shared set ({n_b}), A only its own ({n_a})")
+    b_path = tpl_path(B, t, "technical_xlsm", "b.xlsm")
+    ok, _, err = db.run(f"insert into storage.objects (bucket_id, name) values ('tender-documents', '{b_path}')", i["uB"])
+    ok = ok and db.run(f"select record_tender_document('{t}', 'technical_xlsm', '{b_path}', 'b.xlsm')", i["uB"])[0]
+    check(ok, f"B uploads its own Technical workbook ({err[:80]})")
+    n = db.one(f"select count(*) from tender_documents where tender_id = '{t}' and storage_path = '{a_path}'") if a_path else "0"
+    check(n == "1", "A's copy still on file after B's upload")
+    if new:
+        n_a = db.one(f"select count(*) from tender_requirements where tender_id = '{t}' and company_id = '{A}'")
+        check(n_a == "2", f"A's positions not cleared by B's upload ({n_a})")
+        n_b = db.one(f"select count(*) from tender_requirements where tender_id = '{t}'", i["uB"])
+        check(n_b == "1", f"B still sees the shared positions until its own are read ({n_b})")
 
 
 def part2_deletion(db):
@@ -675,6 +919,7 @@ def main():
     psql = os.environ.get("TENANT_PSQL")
     if psql:
         part2(Db(psql))
+        part2_shared_templates(Db(psql))
         part2_deletion(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")

@@ -26,7 +26,7 @@ import { closingDayOf } from "./dates";
 export type ActivityActor =
   | { kind: "user"; userId: string | null } // null = a removed user
   | { kind: "system" } // the Tender Tool itself (bridge worker, auto-seed)
-  | { kind: "other_company" }; // a shared tender's template, uploaded by another company
+  | { kind: "other_company" }; // another company on a shared tender (e.g. it accepted a tender update)
 
 export type ActivityCategory = "note" | "task" | "stage" | "positions" | "template" | "pack" | "cv" | "answers" | "tender" | "update";
 
@@ -67,14 +67,14 @@ export type ActivityInput = {
     stage_changed_at: string | null;
     submitted_at: string | null;
   } | null;
-  // tender_document_uploads() (0043): uploaded_by / original_filename are
-  // only filled for this company's own uploads.
+  // tender_document_uploads() (0043, 0045): this company's own copy per type
+  // ('own'), else the buyer's published one ('buyer') - never another
+  // company's upload.
   templates: {
     doc_type: string;
     original_filename: string | null;
     uploaded_by: string | null;
-    uploaded_by_us: boolean;
-    uploaded_by_another_company: boolean;
+    source: "own" | "buyer";
     downloaded_at: string;
   }[];
   jobs: {
@@ -206,12 +206,8 @@ export function buildTenderActivity(input: ActivityInput): ActivityEntry[] {
 
   for (const d of input.templates) {
     const label = isTenderTemplateType(d.doc_type) ? TENDER_TEMPLATES[d.doc_type].label : d.doc_type;
-    const uploaded = d.uploaded_by_us || d.uploaded_by_another_company;
-    const actor: ActivityActor | null = d.uploaded_by_another_company
-      ? { kind: "other_company" }
-      : d.uploaded_by
-        ? user(d.uploaded_by)
-        : null;
+    const uploaded = d.source === "own";
+    const actor: ActivityActor | null = uploaded && d.uploaded_by ? user(d.uploaded_by) : null;
     out.push({
       key: `template:${d.doc_type}`,
       at: d.downloaded_at,

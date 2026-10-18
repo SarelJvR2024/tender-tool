@@ -66,6 +66,8 @@ class PsqlClient:
         for col, v in (filters or {}).items():
             if v is bridge.NOT_NULL:
                 parts.append(f"{alias}{col} is not null")
+            elif v is None:
+                parts.append(f"{alias}{col} is null")
             elif isinstance(v, (list, tuple)):
                 parts.append(f"{alias}{col}::text in ({','.join(lit(str(x)) for x in v)})")
             else:

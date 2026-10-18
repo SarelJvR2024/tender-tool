@@ -236,6 +236,10 @@ def fetch_job_context(url, key, job):
             url, key, "GET",
             f"tender_requirements?tender_id=eq.{job['tender_id']}&position_code=eq.{job['position_code']}&select=*",
         )
+        # This company's own positions (read from its own uploaded workbook),
+        # else the shared ones - never another company's (0045).
+        req_rows = ([r for r in req_rows if r.get("company_id") == job["company_id"]]
+                    or [r for r in req_rows if r.get("company_id") is None])
         requirement_row = req_rows[0] if req_rows else None
 
         own_pack = supabase_request(url, key, "GET", f"tender_packs?id=eq.{job['tender_pack_id']}"

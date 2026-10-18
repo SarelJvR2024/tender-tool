@@ -131,7 +131,8 @@ class Supabase:
 
     @staticmethod
     def _q(filters, extra=None):
-        parts = [f"{k}=eq.{urllib.parse.quote(str(v), safe='')}" for k, v in (filters or {}).items()]
+        parts = [f"{k}=is.null" if v is None else f"{k}=eq.{urllib.parse.quote(str(v), safe='')}"
+                 for k, v in (filters or {}).items()]
         parts += extra or []
         return ("?" + "&".join(parts)) if parts else ""
 
@@ -266,18 +267,22 @@ def register_sanral_tender(client, tender, decision, sources):
             ct = "application/vnd.ms-excel.sheet.macroEnabled.12" if local.lower().endswith(".xlsm") else \
                 "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             client.upload(TENDER_DOCS_BUCKET, path, local, ct)
-        client.upsert("tender_documents", [{"tender_id": tender["id"], "doc_type": doc_type, "storage_path": path,
-                                            "downloaded_at": _now()}], "tender_id,doc_type")
-    client.delete("tender_requirements", {"tender_id": tender["id"]})
+        # company_id null: the shared copy - the buyer's own published file,
+        # the one source every company may build from (0045). Companies'
+        # own uploads (company_id set) are theirs and are not touched here.
+        client.upsert("tender_documents", [{"tender_id": tender["id"], "doc_type": doc_type, "company_id": None,
+                                            "storage_path": path, "downloaded_at": _now()}],
+                      "tender_id,doc_type,company_id")
+    client.delete("tender_requirements", {"tender_id": tender["id"], "company_id": None})
     rows = []
     for p in setup["positions"]:
-        base = {"tender_id": tender["id"], "position_code": p["code"], "position_description": p["description"],
+        base = {"tender_id": tender["id"], "company_id": None, "position_code": p["code"], "position_description": p["description"],
                 "managerial": p["managerial"]}
         rows.append({**base, "is_alternate": False})
         if p["has_alternate"]:
             rows.append({**base, "is_alternate": True})
     if rows:
-        client.upsert("tender_requirements", rows, "tender_id,position_code,is_alternate")
+        client.upsert("tender_requirements", rows, "tender_id,position_code,is_alternate,company_id")
     return setup, fp
 
 

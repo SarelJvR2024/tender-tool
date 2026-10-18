@@ -7,13 +7,16 @@ import { uploadTenderTemplate } from "./pack-inputs-actions";
  * (downloaded by hand: SANRAL's download form is reCAPTCHA-gated, playbook
  * section 1a). One row per tender_documents.doc_type the pack builder reads,
  * each with its own file input, so every upload is tagged by what it is.
- * Shared across companies, like the tender itself (0001/0025).
+ * Each company's upload is its own copy (0045): never shown to or used for
+ * another company preparing the same tender - the upload could be the
+ * company's own filled-in workbook. The one shared copy is a file the intake
+ * registered from the buyer's own published documents.
  */
 
-// tender_document_uploads() (0043): the file name is only returned for this
-// company's own uploads (or the buyer's own file) - another company's upload is
-// only flagged, so a competitor on the same tender stays anonymous.
-type DocRow = { doc_type: string; original_filename: string | null; downloaded_at: string; uploaded_by_another_company: boolean };
+// tender_document_uploads() (0043, 0045): per type, this company's own copy
+// (source 'own') or else the buyer's published one (source 'buyer') - never
+// another company's.
+type DocRow = { doc_type: string; original_filename: string | null; downloaded_at: string; source: "own" | "buyer" };
 
 const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
@@ -39,8 +42,8 @@ export async function TenderTemplates({ tenderId, saved }: { tenderId: string; s
       <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
         Download this tender&apos;s documents from SANRAL&apos;s tender page (its download form can&apos;t be automated),
         then upload the submission files here exactly as issued. The pack builder fills these copies; uploading the
-        Technical workbook is also what lists this tender&apos;s key positions above. Shared with anyone else
-        preparing this tender.
+        Technical workbook is also what lists this tender&apos;s key positions above. Only your company sees and
+        uses what you upload here - other companies preparing this tender upload their own copy.
       </div>
 
       {error && <div style={{ fontSize: 12, color: "#B91C1C", marginBottom: 8 }}>Could not load the templates on file: {error.message}</div>}
@@ -66,7 +69,7 @@ export async function TenderTemplates({ tenderId, saved }: { tenderId: string; s
               </div>
               <div style={{ fontSize: 11, color: "#6B6758", marginTop: 2, wordBreak: "break-word" }}>
                 {row
-                  ? `${row.original_filename ?? (row.uploaded_by_another_company ? "uploaded by another company preparing this tender" : "uploaded")} · ${new Date(row.downloaded_at).toLocaleDateString()}`
+                  ? `${row.source === "buyer" ? "from the buyer's published tender documents" : (row.original_filename ?? "uploaded")} · ${new Date(row.downloaded_at).toLocaleDateString()}`
                   : t.hint}
               </div>
             </div>
@@ -84,7 +87,7 @@ export async function TenderTemplates({ tenderId, saved }: { tenderId: string; s
                 type="submit"
                 style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: row ? "#FFFFFF" : "#16233B", color: row ? "#16233B" : "#FFFFFF", border: row ? "1px solid #E5E1D5" : "none", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
               >
-                {row ? "Replace" : "Upload"}
+                {row?.source === "own" ? "Replace" : row ? "Upload your own" : "Upload"}
               </button>
             </form>
           </div>

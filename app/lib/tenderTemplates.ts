@@ -1,4 +1,5 @@
-// A SANRAL tender's blank templates (tender_documents, 0001; uploads 0025).
+// A SANRAL tender's blank templates (tender_documents, 0001; uploads 0025;
+// each company's upload is its own copy since 0045).
 // The categories are tender_documents.doc_type's own check constraint - the
 // exact set engine/pack/process_pack_jobs.py downloads (technical_xlsm,
 // financial_xlsm, and FORM_FILES' three .docx forms). The general engine's

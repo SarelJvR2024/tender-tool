@@ -140,14 +140,17 @@ export async function confirmPositionPerson(
 
 /**
  * Upload one of the tender's blank SANRAL templates (downloaded by hand from
- * SANRAL's reCAPTCHA-gated site) to the 'tender-documents' bucket and record
- * it in tender_documents via record_tender_document() (0025), which checks
- * this company is working on the tender. Replacing a template uploads a new
- * file and repoints the row; the old object is left in place, since another
- * company's pack may have been built from it.
+ * SANRAL's reCAPTCHA-gated site) as THIS company's own copy: to the
+ * 'tender-documents' bucket under private/<company>/<tender>/templates/<type>/
+ * (readable only by this company's members, 0032's private scheme) and into
+ * tender_documents via record_tender_document() (0025, 0045), which registers
+ * or replaces only this company's copy. Since 0045 nothing a company uploads
+ * is used for, or visible to, any other company: the upload could be the
+ * company's own filled-in workbook (POPIA-Security-Audit.md "Shared
+ * templates"). Replacing uploads a new file and repoints the row.
  */
 export async function uploadTenderTemplate(formData: FormData) {
-  await requireCompanyId();
+  const { companyId } = await requireCompanyId();
   const supabase = await createClient();
 
   const tenderId = formData.get("tender_id") as string | null;
@@ -166,11 +169,9 @@ export async function uploadTenderTemplate(formData: FormData) {
   // copy can't be filled, so it's refused here rather than failing in the pack.
   if (ext !== template.extension) fail(`${template.label} must be the .${template.extension} file SANRAL issued (got .${ext || "?"}).`);
 
-  // The object name carries no part of the uploader's file name: this folder
-  // is readable by every company preparing the tender, and a name like
-  // "Acme_R396_Technical.xlsm" would tell them who else is bidding (0043).
-  // The original name is kept on the row, shown only to this company.
-  const storagePath = `${tenderId}/${docType}/${randomUUID()}.${template.extension}`;
+  // The object name carries no part of the uploader's file name (0043); the
+  // original name is kept on the row, shown only to this company.
+  const storagePath = `private/${companyId}/${tenderId}/templates/${docType}/${randomUUID()}.${template.extension}`;
   const { error: upErr } = await supabase.storage
     .from(TENDER_TEMPLATE_BUCKET)
     .upload(storagePath, file!, { contentType: file!.type || "application/octet-stream" });

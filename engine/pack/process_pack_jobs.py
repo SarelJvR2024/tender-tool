@@ -12,7 +12,9 @@ so two workers never build the same job), and then:
 
   1. reads the tender, the company, the tender pack and its confirmed
      positions, the people/projects, the blank SANRAL templates
-     (tender_documents -> 'tender-documents' bucket), the vault documents
+     (tender_documents -> 'tender-documents' bucket: this company's own
+     uploaded copy, else the buyer's shared one - never another company's
+     upload, 0045), the vault documents
      ('company-documents'), and per position the newest ready generated CV
      (generated_cvs -> 'cv-documents') or else the person's newest as-is CV
      upload (cv_uploads);
@@ -37,7 +39,8 @@ Every poll also fills in tender_requirements for any tender whose blank
 Technical workbook has been uploaded (Tender Workspace, tender_documents) but
 whose key positions haven't been read yet: straight from that workbook's own
 SETUP sheet (suggest_pack.read_required_positions - the same reader the pack
-build's confirm gate uses), never guessed. That is what lists the positions
+build's confirm gate uses), never guessed - per copy: a company's own upload
+gives that company's positions only (0045). That is what lists the positions
 on the Tender Workspace's Key positions card for a person to confirm.
 
 And every poll scores each of the company's people against each of those
@@ -320,6 +323,20 @@ def load_document_templates(client, company_id, dest_dir):
     return out
 
 
+def template_paths(rows, company_id):
+    """{doc_type: storage_path} for one company from a tender's
+    tender_documents rows. company_id null = the shared copy (registered by
+    the service role from the buyer's own published documents); otherwise a
+    company's own upload, used by that company only. The service role sees
+    every company's rows, so this is where "only your own" is enforced:
+    another company's upload may be its filled-in workbook (0045)."""
+    out = {}
+    for d in sorted(rows, key=lambda d: d.get("company_id") is not None):  # shared first, own overrides
+        if d.get("company_id") in (None, company_id):
+            out[d["doc_type"]] = d["storage_path"]
+    return out
+
+
 def gather(client, job, work):
     """Downloads/reads everything for one job into `work`. Returns the kwargs
     for build_submission_pack() plus the path of the confirmed pack.yaml."""
@@ -336,14 +353,16 @@ def gather(client, job, work):
         raise ValueError("tender not found")  # another company's private tender (0024)
     tender_pack = pack_rows[0]
 
-    # Blank SANRAL templates for this tender.
-    docs = {d["doc_type"]: d["storage_path"] for d in client.select("tender_documents", {"tender_id": tender["id"]})}
+    # Blank SANRAL templates for this tender: this company's own upload, else
+    # the shared copy from the buyer's published documents - never another
+    # company's upload (0045; POPIA-Security-Audit.md "Shared templates").
+    docs = template_paths(client.select("tender_documents", {"tender_id": tender["id"]}), company["id"])
     if "technical_xlsm" not in docs:
-        raise ValueError("The blank Technical Submission workbook for this tender has not been uploaded "
-                         "(tender_documents.technical_xlsm) - nothing to fill.")
+        raise ValueError("Your company has not uploaded this tender's blank Technical Submission workbook yet "
+                         "(Blank tender templates card) - nothing to fill.")
     missing_forms = [t for t in FORM_FILES if t not in docs]
     if missing_forms:
-        raise ValueError(f"Blank returnable forms not uploaded for this tender: {', '.join(missing_forms)}")
+        raise ValueError(f"Blank returnable forms not uploaded by your company for this tender: {', '.join(missing_forms)}")
     tpl_dir = os.path.join(work, "templates")
     technical = client.download("tender-documents", docs["technical_xlsm"], os.path.join(tpl_dir, "technical.xlsm"))
     financial = (client.download("tender-documents", docs["financial_xlsm"], os.path.join(tpl_dir, "financial.xlsm"))
@@ -596,15 +615,46 @@ def _managerial(v):
 
 def sync_tender_requirements(client, work_root):
     """tender_requirements from each uploaded blank Technical workbook's own
-    SETUP sheet, for tenders that have none yet (see module docstring).
-    Primary positions and their ALT slots, with SETUP's own description and
-    Man/Non-Man flag. Returns {tender_id: [codes]} for what it wrote. A
-    workbook that can't be read is reported and skipped - it never stops the
-    pack jobs below."""
+    SETUP sheet, for workbooks whose positions haven't been read yet (see
+    module docstring). Primary positions and their ALT slots, with SETUP's own
+    description and Man/Non-Man flag. Per copy (0045): a company's own upload
+    gives that company's positions (company_id set, only it sees them); the
+    shared buyer-published copy gives the shared ones. Returns
+    {(tender_id, company_id): [codes]} for what it wrote. A workbook that
+    can't be read is reported and skipped - it never stops the pack jobs
+    below."""
     written = {}
     docs = client.select("tender_documents", {"doc_type": "technical_xlsm"})
     if not docs:
         return written
+    have = {(r["tender_id"], r.get("company_id"))
+            for r in client.select("tender_requirements", {"tender_id": sorted({d["tender_id"] for d in docs})})}
+    for d in docs:
+        key = (d["tender_id"], d.get("company_id"))
+        if key in have:
+            continue
+        local = os.path.join(work_root, "requirements", d["tender_id"], d.get("company_id") or "shared", "technical.xlsm")
+        try:
+            client.download("tender-documents", d["storage_path"], local)
+            primary, alternates = read_required_positions(Workbook(local))
+            rows = [(p, False) for p in primary] + [(a, True) for alts in alternates.values() for a in alts[:1]]
+            for p, alt in rows:
+                client.insert("tender_requirements", {
+                    "tender_id": d["tender_id"], "company_id": d.get("company_id"), "position_code": p["code"],
+                    "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
+                    "managerial": _managerial(p.get("managerial")), "is_alternate": alt})
+            written[key] = [p["code"] for p, alt in rows if not alt]
+            print(f"[requirements] tender {d['tender_id']} ({'company ' + d['company_id'] if d.get('company_id') else 'shared copy'}): "
+                  f"{len(primary)} position(s) from SETUP ({', '.join(written[key])}), {len(rows) - len(primary)} ALT")
+        except Exception as e:
+            print(f"[requirements] tender {d['tender_id']}: could not read the uploaded Technical workbook's "
+                  f"SETUP sheet ({type(e).__name__}: {e})")
+            system_alerts.record("pack", f"Could not read an uploaded Technical workbook's SETUP sheet "
+                                         f"({type(e).__name__}: {e})", "error", exc=e,
+                                 context={"tender_id": d["tender_id"], "storage_path": d.get("storage_path")})
+        finally:
+            shutil.rmtree(os.path.dirname(local), ignore_errors=True)
+    return written
     have = {r["tender_id"] for r in client.select("tender_requirements", {"tender_id": [d["tender_id"] for d in docs]})}
     for d in docs:
         if d["tender_id"] in have:
@@ -663,9 +713,9 @@ def sync_position_suggestions(client, today=None):
     reqs = [r for r in client.select("tender_requirements") if not r.get("is_alternate")]
     if not reqs:
         return 0
-    by_tender = {}
+    by_tender = {}  # tender_id -> {company_id or None: [rows]} (0045: a company's own positions, else the shared ones)
     for r in reqs:
-        by_tender.setdefault(r["tender_id"], []).append(r)
+        by_tender.setdefault(r["tender_id"], {}).setdefault(r.get("company_id"), []).append(r)
     tenders = {t["id"]: t for t in client.select("tenders", {"id": list(by_tender)})
                if t.get("family") in SANRAL_FAMILIES}
     if not tenders:
@@ -688,7 +738,8 @@ def sync_position_suggestions(client, today=None):
                                                   "company_id": pack["company_id"]}) if people_rows else []
             existing = {a["position_code"]: a for a in client.select("tender_pack_assignments",
                                                                        {"tender_pack_id": pack["id"]})}
-            for req in by_tender[pack["tender_id"]]:
+            sets = by_tender[pack["tender_id"]]
+            for req in sets.get(pack["company_id"]) or sets.get(None) or []:
                 ranked = rank_candidates(people_rows, projects,
                                          {"code": req["position_code"], "description": req.get("position_description")},
                                          closing_date)
