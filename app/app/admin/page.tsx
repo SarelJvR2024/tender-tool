@@ -106,7 +106,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           )}
         </section>
 
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Admin harness results</h1>
+        <h2 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Admin harness results</h2>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
           Results of running every test company through the real tender-filling pipeline (engine/admin_harness.py),
           checked against the stored baseline for each. Open a run to read the documents it generated, then mark it
@@ -122,9 +122,6 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         )}
 
         <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1.6fr 0.7fr 0.9fr 1.3fr", gap: 12, padding: "9px 18px", fontSize: 11, fontWeight: 600, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", borderBottom: "1px solid #F0EEE6" }}>
-            <div>Test company</div><div>Tender</div><div>Status</div><div>Review</div><div>Last run</div>
-          </div>
           {rows.length === 0 && !error && (
             <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
               No harness runs recorded yet - run <code>python3 engine/write_admin_harness_results.py --pack</code> to populate this.

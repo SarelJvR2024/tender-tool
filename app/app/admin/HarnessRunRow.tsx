@@ -44,9 +44,9 @@ export default function HarnessRunRow(props: Props) {
         onClick={() => setOpen((v) => !v)}
         style={{
           width: "100%",
-          display: "grid",
-          gridTemplateColumns: "1.3fr 1.6fr 0.7fr 0.9fr 1.3fr",
-          gap: 12,
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "6px 12px",
           alignItems: "center",
           padding: "11px 18px",
           background: open ? "#F6F5F1" : "transparent",
@@ -54,27 +54,24 @@ export default function HarnessRunRow(props: Props) {
           textAlign: "left",
           cursor: "pointer",
           font: "inherit",
+          boxSizing: "border-box",
         }}
       >
-        <div style={{ fontSize: 13, color: "#16233B", fontWeight: 600 }}>{testCompany}</div>
-        <div>
-          <div style={{ fontSize: 12, fontFamily: "monospace", color: "#4B5563" }}>{tenderRef}</div>
-          <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>{KIND_LABEL[kind]}</div>
-        </div>
-        <div>
-          <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: chip.bg, color: chip.color }}>
-            {chip.label}
-          </span>
-        </div>
-        <div>
-          <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: review.bg, color: review.color }}>
-            {review.label}
-          </span>
-        </div>
-        <div style={{ fontSize: 11, color: "#9A9684" }}>
+        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: chip.bg, color: chip.color }}>
+          {chip.label}
+        </span>
+        <span style={{ fontSize: 13, color: "#16233B", fontWeight: 600 }}>{testCompany}</span>
+        <span style={{ flex: "1 1 220px", minWidth: 0 }}>
+          <span style={{ fontSize: 12, fontFamily: "monospace", color: "#4B5563" }}>{tenderRef}</span>
+          <span style={{ fontSize: 11, color: "#9A9684", marginLeft: 6 }}>{KIND_LABEL[kind]}</span>
+        </span>
+        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: review.bg, color: review.color }}>
+          {review.label}
+        </span>
+        <span style={{ fontSize: 11, color: "#9A9684" }}>
           {new Date(runAt).toLocaleString()}
           <span style={{ marginLeft: 6, color: "#D97706" }}>{open ? "hide ▲" : "open ▼"}</span>
-        </div>
+        </span>
       </button>
 
       {open && (
