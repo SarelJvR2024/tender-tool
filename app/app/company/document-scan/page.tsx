@@ -44,6 +44,17 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
   ]);
 
   return (
+    <>
+      {/* Same mobile collapse as people/[id]/page.tsx's .cvx-row - this
+          card's field grid (checkbox / 150px label / value) is the same
+          fixed-label-column shape, squeezed the same way on a phone. */}
+      <style>{`
+        @media (max-width: 600px) {
+          .obx-row { grid-template-columns: 28px 1fr !important; }
+          .obx-row > div:nth-child(2),
+          .obx-row > div:nth-child(3) { grid-column: 2; }
+        }
+      `}</style>
     <SubPage
       title="Bulk document scan"
       intro={
@@ -86,5 +97,6 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
         )}
       </Card>
     </SubPage>
+    </>
   );
 }

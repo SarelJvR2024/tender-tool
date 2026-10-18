@@ -62,7 +62,7 @@ function FieldRow({ field, item }: { field: string; item: OnboardingFields[strin
   const isNumber = NUMBER_FIELDS.has(field);
   const defaultTick = item.verified;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "28px 150px 1fr", gap: 8, alignItems: "start", padding: "8px 0", borderTop: "1px solid #F0EEE6" }}>
+    <div className="obx-row" style={{ display: "grid", gridTemplateColumns: "28px 150px 1fr", gap: 8, alignItems: "start", padding: "8px 0", borderTop: "1px solid #F0EEE6" }}>
       <input type="checkbox" name={`use_${field}`} defaultChecked={defaultTick} aria-label={`Use ${label}`} style={{ width: 18, height: 18, marginTop: 10 }} />
       <div style={{ fontSize: 13, fontWeight: 600, color: NAVY, paddingTop: 10 }}>{label}</div>
       <div>
