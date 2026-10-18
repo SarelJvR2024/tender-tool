@@ -10,6 +10,7 @@ import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
 import { requestTenderCv, addTenderTask, ensureBriefingMilestone, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 import { SubmissionPack } from "./submission-pack";
+import { PackReview } from "./pack-review";
 import { IntakeCard } from "./intake-card";
 import { ActivityLog } from "./activity-log";
 import { TenderUpdates } from "./tender-updates";
@@ -402,6 +403,7 @@ export default async function TenderWorkspacePage({
                 {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
                 {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
                 {showSubmissionPack && <JumpLink href="#form-b7" label="Form B7" />}
+                {showSubmissionPack && <JumpLink href="#pack-review" label="Pack review" />}
               </div>
             )}
 
@@ -658,6 +660,9 @@ export default async function TenderWorkspacePage({
 
             {/* SANRAL Form B7: the company's own subcontracting answer (0056) - gates the pack below. */}
             {showSubmissionPack && <SubcontractingPlan tenderId={id} saved={saved === "b7"} />}
+
+            {/* Pack review: the full pre-compile preview (pack_review_confirmations, 0059) - shown before the generate button. */}
+            {showSubmissionPack && tenderPack && <PackReview tenderId={id} />}
 
             {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
             {showSubmissionPack && tenderPack && <SubmissionPack tenderId={id} tenderPackId={tenderPack.id} />}

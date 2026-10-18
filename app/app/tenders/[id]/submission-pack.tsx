@@ -61,7 +61,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   const readiness = packReadiness(await loadTenderCompliance(tenderId));
   const b7 = await loadB7State(tenderId);
 
-  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }] = await Promise.all([
+  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }, { data: reviewRow }] = await Promise.all([
     supabase.from("tender_documents").select("doc_type").eq("tender_id", tenderId),
     supabase
       .from("pack_generation_jobs")
@@ -73,6 +73,8 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     // the pack's default when no one is chosen for this tender.
     supabase.from("people").select("id, name, signatory_capacity").not("signatory_capacity", "is", null).order("created_at"),
     supabase.from("tender_answers").select("value").eq("tender_id", tenderId).eq("field_key", "signatory_person_id").maybeSingle(),
+    // Pack review (0059): has a human looked at the full pre-compile list (pack-review.tsx) yet?
+    supabase.from("pack_review_confirmations").select("reviewed_at").eq("tender_id", tenderId).maybeSingle(),
   ]);
   const signers = (signerRows ?? []) as { id: string; name: string; signatory_capacity: string }[];
   const chosenSigner = (signerAnswer?.value as string | null | undefined) ?? "";
@@ -99,6 +101,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     ...b7.warnings.map((g) => ({ text: `Form B7: ${g}`, tone: "amber" as const, note: "your subcontracting plan" })),
   ];
   const needsAck = !readiness.checked || gaps.length > 0;
+  const reviewed = !!reviewRow?.reviewed_at;
 
   // Signed links for ready packs (private 'submission-packs' bucket, 10 min).
   const paths = jobs
@@ -154,12 +157,21 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
         </div>
       )}
 
+      {blockers.length === 0 && !reviewed && (
+        <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#92400E" }}>
+          <div style={{ fontWeight: 700, marginBottom: 2 }}>Review the pack first</div>
+          See the full <a href="#pack-review" style={{ color: "#92400E", fontWeight: 700 }}>Pack review</a> above - company data,
+          key positions and CVs, form answers, signature, documents, Form B7 - and click &quot;I&apos;ve reviewed this&quot;
+          there before generating.
+        </div>
+      )}
+
       {blockers.length === 0 && (
         <form action={requestSubmissionPack} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
           <input type="hidden" name="tender_id" value={tenderId} />
           <input type="hidden" name="tender_pack_id" value={tenderPackId} />
           {signers.length > 1 && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B", flexWrap: "wrap" }}>
+            <label id="signatory-select" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B", flexWrap: "wrap" }}>
               Who signs this bid
               <select name="signatory_person_id" defaultValue={signers.some((p) => p.id === chosenSigner) ? chosenSigner : ""}
                 style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px", maxWidth: "100%" }}>
@@ -170,15 +182,11 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
               </select>
             </label>
           )}
-          {needsAck && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B" }}>
-              <input type="checkbox" name="acknowledge_gaps" required style={{ width: 18, height: 18 }} />
-              Generate a draft anyway - the gaps will be listed in the pack
-            </label>
-          )}
           <button
             type="submit"
-            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+            disabled={!reviewed}
+            title={reviewed ? undefined : "Confirm the Pack review above first"}
+            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: reviewed ? "#16233B" : "#9A9684", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: reviewed ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
           >
             Generate submission pack
           </button>

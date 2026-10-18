@@ -88,9 +88,13 @@ export async function requestTenderCv(formData: FormData) {
  *     blank template, SANRAL Form B7 applying with no answer from the company
  *     (b7-data.ts), or a pack already queued/generating - the bridge would
  *     only fail (or duplicate the work);
- *   - explicit acknowledgement: any gap the report shows (mandatory or not,
- *     "confirm by hand", or a family whose returnable list isn't mapped).
- *     The gaps shown at request time are stored with the row.
+ *   - explicit review: a pack_review_confirmations row (migration 0059) -
+ *     set by "I've reviewed this" on the Pack Review card (pack-review.tsx,
+ *     pack-review-actions.ts) after looking at the full pre-compile list:
+ *     company data, key positions/CVs, form answers, signature, documents,
+ *     Form B7. Replaces the old single "acknowledge gaps" checkbox - Sarel,
+ *     2026-10-18: show the full list first, confirm there, not a blind tick.
+ *     The gaps shown at request time are still stored with the row.
  */
 export async function requestSubmissionPack(formData: FormData) {
   const companyId = await requireCompanyId();
@@ -99,7 +103,6 @@ export async function requestSubmissionPack(formData: FormData) {
 
   const tenderId = formData.get("tender_id") as string | null;
   const tenderPackId = formData.get("tender_pack_id") as string | null;
-  const acknowledged = formData.get("acknowledge_gaps") === "on";
   if (!tenderId) redirect("/tenders");
   const fail = (msg: string) => redirect(`/tenders/${tenderId}?error=${encodeURIComponent(msg)}#submission-pack`);
   if (!tenderPackId) fail("Create and confirm a tender pack for this tender before generating a submission pack.");
@@ -132,9 +135,19 @@ export async function requestSubmissionPack(formData: FormData) {
   const hasGaps =
     !readiness.checked ||
     readiness.mandatoryMissing.length + readiness.missing.length + readiness.toConfirm.length + b7.warnings.length > 0;
-  if (hasGaps && !acknowledged) {
-    fail("The compliance check shows gaps - tick the box to generate a draft pack anyway.");
+
+  // Pack review (0059): a human must have looked at the full pre-compile
+  // list (pack-review.tsx) before a pack can be requested, gaps or not.
+  const { data: reviewRow } = await supabase
+    .from("pack_review_confirmations")
+    .select("reviewed_at, reviewed_by")
+    .eq("tender_id", tenderId)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (!reviewRow?.reviewed_at) {
+    fail("Review the full Pack Review list above and click \"I've reviewed this\" before generating a pack.");
   }
+  const acknowledged = true; // reaching here means the review row exists; kept as a named value for readiness_snapshot below.
 
   // Who signs this bid (form-field audit 2026-10-18): stored as the tender's
   // own answer, the same key the general flow uses; the pack bridge reads it
@@ -171,6 +184,9 @@ export async function requestSubmissionPack(formData: FormData) {
       form_b7: { status: b7.applies.status, reason: b7.applies.reason, plan_mode: b7.plan?.mode ?? null, warnings: b7.warnings },
     },
     acknowledged_gaps: hasGaps && acknowledged,
+    // Audit copy of the review this request relied on (0059) - set once here, never updated afterwards.
+    reviewed_at: reviewRow?.reviewed_at ?? null,
+    reviewed_by: reviewRow?.reviewed_by ?? null,
     requested_by: user?.id ?? null,
   });
   if (error) fail(error.message);
