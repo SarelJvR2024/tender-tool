@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
@@ -12,6 +13,7 @@ const PRIMARY_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padd
 const MIN_PASSWORD_LENGTH = 8;
 
 export default function SignUpPage() {
+  const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -34,7 +36,7 @@ export default function SignUpPage() {
 
     setPending(true);
     const supabase = createClient();
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
@@ -43,6 +45,15 @@ export default function SignUpPage() {
 
     if (error) {
       setError(error.message);
+      return;
+    }
+    // A session comes back immediately when the project has email
+    // confirmation turned off (or for an already-confirmed address on
+    // some Supabase configs) - don't tell someone who's already signed
+    // in to go check their inbox for a link that was never sent.
+    if (data.session) {
+      router.push("/dashboard");
+      router.refresh();
       return;
     }
     setSubmitted(true);
