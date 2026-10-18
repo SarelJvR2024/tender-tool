@@ -316,3 +316,100 @@ discipline defaults, C3.1.11 "SANRAL-wide" framing, the non-SANRAL role catalog'
 about its limits), this pass stayed short and cross-checking rather than duplicating that work.
 Next rotation (per the standing list): CV, intake, compliance/reminders, notify, or
 worker/job-queue - none of which that audit touched.
+
+---
+
+## 2026-10-18 (fourth run): CV engine - malformed/boundary dates cascading through the whole
+candidate-scoring and pack-confirmation pipeline
+
+**Context:** rotated to the CV engine per the standing mandate. Pulled latest `main` first
+(fast-forward - more concurrent work had landed: system alerts, cross-tenant integrity tests,
+data-subject deletion, a tenant-isolation test suite, tender-update resolution). Re-confirmed
+this review's three prior fixes are all still present and untouched by the new work before
+starting.
+
+### Finding 5 (CONFIRMED, FIXED, severe): one key person's malformed graduation date crashed
+candidate-scoring for the WHOLE company, not just that person
+
+**Where:** `engine/pack_generator/suggest_pack.py`'s `years_experience_at()`, the shared helper
+both `score_candidate()` (used by `suggest()` when ranking every key person against every
+required position) and `generate_cv.py` (CV generation) call.
+
+**What was tested:** boundary/malformed input on `qualifications.initial_graduated` - a typo'd
+month (`"2008-13-01"`), a non-ISO format a human might type (`"01/2008"`), and a future-dated (or
+transposed-year) graduation (`"2028-01-01"` against a 2026 closing date) - exactly the "unusual
+dates at edge cases" class the mandate calls out, run against the real function, not theorised.
+
+**What broke:** the first two raised an uncaught `ValueError` straight out of
+`datetime.date.fromisoformat()`. Confirmed where this actually lands:
+`suggest_pack.suggest()` calls `score_candidate()` inside a single `sorted(...)` over *every* key
+person for *every* required position, with no per-candidate error isolation - so one person's
+date typo raised all the way up through `sorted()` and crashed suggestion-building for the whole
+company, blocking every OTHER person's suggestions too, not just the one with bad data. Ran this
+exact scenario for real (two candidates, one with a good date, one with `"2008-13-01"`): before
+the fix, the good candidate's score was never even computed. The third case (future-dated grad)
+didn't crash, but returned `-1` - a negative "years' experience" that would have printed on a
+real CV or a suggestion rationale as its own silently-wrong result.
+
+**Fix:** `years_experience_at()` now catches the parse failure and treats both a malformed date
+and a negative result as "unknown" (prints a `WARNING` naming the person and the bad value, then
+returns `None`) - the same sentinel both existing callers already handle gracefully by omitting
+the years-of-experience claim, not a new code path.
+
+**Verification:** all 5 cases run directly (malformed, non-ISO, future-dated, valid, absent) -
+only the first three now log a warning and return `None`; valid/absent are unchanged. Re-ran the
+exact two-candidate scoring scenario end-to-end through `score_candidate()`/`sorted()` the way
+`suggest()` actually calls it: both candidates now score without a crash, the bad-date one simply
+has no years-of-experience line in its rationale. `admin_harness.py` (24 clean) and
+`general_harness.py --no-pack` + `test_general_bridge.py` (44/0/0, ALL PASSED) all still clean.
+
+### Finding 6 (CONFIRMED, FIXED, severe): a negative years-of-experience value could have reached
+a real submitted SANRAL form
+
+**Where:** `engine/pack_generator/confirm_pack.py`'s `confirm()` - a **second, independent**
+reimplementation of the same grad-date-to-years computation (not reusing `years_experience_at()`
+- itself worth noting as duplication, not fixed here since the two call sites have genuinely
+different correct behaviour, explained below).
+
+**What was found:** this function is the pack's own stated gate ("refuses to run - loudly, not
+silently" per its own docstring) - the right design, for a different reason than
+`suggest_pack.py`: confirming a pack is a one-person, one-position act, so failing loudly here is
+correct, unlike batch-scoring many candidates where one bad apple shouldn't block the rest. But
+the code didn't live up to its own stated design in two ways:
+1. A malformed (non-empty) date crashed with a raw, unattributed `ValueError: Invalid isoformat
+   string: '...'` - not naming the person or field - inconsistent with every OTHER error in this
+   same function, which are all deliberately clear ("Position {code}: confirmed_person is not
+   set...").
+2. **A future-dated or transposed-year grad date computed a negative `years_experience` and let
+   it through** - the `if years_experience is None: raise ...` check only catches a missing date,
+   not an implausible one. `confirm()`'s output (`pack.yaml`) feeds directly into
+   `fill_conventional.py`/`fill_tender.py`, which types this value onto the real Form B2.1 "Years
+   of relevant experience" field in the actual submission pack. This is the worse case the
+   mandate names explicitly: not a crash, a confidently-wrong number that would have gone out on
+   a real government tender submission with nothing flagging it.
+
+**Fix:** parse failure now raises the same clear, person-named `ValueError` style as every other
+check in this function; a negative result now raises too, naming the person, the date, the
+tender's closing date, and where to fix it - consistent with "refuses to run loudly" rather than
+silently computing something false.
+
+**Verification:** built real `pack_suggestions.json` / `pack_selections.yaml` / `profile.json`
+fixtures and ran `confirm_pack.confirm()` end-to-end (not a mock) for: a future-dated grad (now
+correctly refused, naming the person/date/closing date), a malformed date (now correctly refused
+with a clear message instead of a raw traceback), and the underlying valid-date formula in
+isolation (unchanged, still produces a normal positive year count - the full end-to-end run for
+this case hit unrelated missing fields in the minimal test fixture, not this fix, confirmed by
+reading the traceback's own line number, which was past the code this pass touched).
+
+### Not yet tested this pass (deferred)
+
+- `confirm_pack.py` and `suggest_pack.py` compute years-of-experience two different ways with two
+  different (both now correct) failure behaviours. Not unified this pass - they're deliberately
+  different (batch-tolerant vs. hard-gate), and a shared helper would need a mode flag or a
+  second function; a genuine but small refactor, not today's fix.
+- The CV engine's own "other professional bodies have no column" gap (SACPLAN/SACAP/SAICE etc.)
+  was checked and confirmed to be the same, already-documented, honestly-handled gap named in
+  `CV-Extraction-Findings.md` §6 / System-Status Gap #3 - not a new finding, not re-logged here
+  as one.
+- CV AI-extraction itself (`extract_cv_fields.py`) changed again in the concurrent landing this
+  pass pulled in - not reviewed this run, a reasonable candidate for a future CV-engine pass.

@@ -52,13 +52,26 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
         person = people[person_id]
         qual = dict(person["qualifications"])
         grad = qual.get("initial_graduated")
-        qual["years_experience"] = (
-            round((closing_date - datetime.date.fromisoformat(grad)).days / 365.25)
-            if grad else None
-        )
-        if qual["years_experience"] is None:
+        if not grad:
             raise ValueError(f"{person['name']}: no initial_graduated date on file - "
                               f"years_experience cannot be computed, refusing to guess one.")
+        try:
+            grad_date = datetime.date.fromisoformat(grad)
+        except ValueError:
+            raise ValueError(f"{person['name']}: initial_graduated ('{grad}') is not a valid "
+                              f"YYYY-MM-DD date - fix it on the People page before confirming "
+                              f"this pack.") from None
+        qual["years_experience"] = round((closing_date - grad_date).days / 365.25)
+        if qual["years_experience"] < 0:
+            # Without this, a future-dated (or transposed-year) grad date would
+            # put a negative "years of relevant experience" straight onto a
+            # real Form B2.1 in the submitted pack - this gate's own docstring
+            # says it exists to refuse loudly rather than let something like
+            # this through quietly.
+            raise ValueError(f"{person['name']}: initial_graduated ('{grad}') is after this "
+                              f"tender's closing date ({closing_date.isoformat()}) - years of "
+                              f"experience would be negative. Fix the date on the People page "
+                              f"before confirming this pack.")
 
         # Every project goes into the pack, not just the first 3: Form B1 has 3
         # rows per position, but which 3 fit depends on the POSITION (each

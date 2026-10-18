@@ -549,6 +549,38 @@ place that name was ever written down, and the "decision" it was meant to record
 Item (b) (`how_we_work` on the Tender Workspace) is untouched by this pass, per instruction, and
 stays open below.
 
+## This pass (2026-10-18, standing QA/robustness review - fourth run)
+
+Rotated to the CV engine. Pulled latest `main` first (more concurrent work had landed: system
+alerts, cross-tenant integrity tests, data-subject deletion, tenant isolation tests) - confirmed
+this review's three prior fixes are all still present and untouched before starting.
+
+**Found and fixed two real, severe bugs**, both in how `initial_graduated` (a key person's
+graduation date) feeds "years of experience" calculations:
+
+1. `engine/pack_generator/suggest_pack.py`'s `years_experience_at()` crashed on a malformed date
+   (e.g. a typo'd month) with an uncaught `ValueError` - and because `suggest()` scores every key
+   person against every required position inside one `sorted(...)` call with no per-candidate
+   isolation, **one person's date typo crashed suggestion-building for the whole company**,
+   blocking every other person's suggestions too. A future-dated/transposed-year grad date didn't
+   crash but silently produced a negative "years of experience". Fixed: malformed or negative
+   results now log a warning and return `None`, which both existing callers (CV generation,
+   candidate scoring) already handle gracefully.
+2. `engine/pack_generator/confirm_pack.py` - a second, independent reimplementation of the same
+   computation - had the same two problems, but worse: this function's `pack.yaml` output feeds
+   directly into `fill_conventional.py`/`fill_tender.py`, which types years-of-experience onto the
+   real Form B2.1 in the actual submission pack. **A future-dated grad date would have put a
+   negative number on a real government tender submission with nothing flagging it** - the exact
+   "silently wrong, worse than a clear error" case the standing mandate names. This function's own
+   docstring says it exists to "refuse to run - loudly, not silently"; fixed it to actually do
+   that for both the malformed-date and negative-years cases, with clear, person-named errors
+   matching every other check already in the same function.
+
+Verified directly (not theorised): both fixes run end-to-end against real constructed fixtures,
+including the exact two-candidate scoring scenario that used to crash. `admin_harness.py` (24
+clean) and `general_harness.py --no-pack` + `test_general_bridge.py` (44/0/0) unaffected. Full
+evidence in `docs/specs/QA-Edge-Case-Findings.md` (Findings 5-6).
+
 ## This pass (2026-10-17, standing QA/robustness review - third run)
 
 Rotated to the non-SANRAL pack engine (`engine/general/`). Pulled latest `main` first - a large

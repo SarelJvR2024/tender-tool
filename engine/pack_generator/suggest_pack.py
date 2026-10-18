@@ -65,11 +65,36 @@ def read_required_positions(wb):
 
 
 def years_experience_at(person, closing_date):
+    """None means "treat as unknown", not "zero" - both this function's two
+    callers (CV generation, candidate suggestion scoring) already handle
+    None by quietly omitting years-of-experience rather than crashing, so
+    that's the safe fallback for a date this function can't trust, not a
+    ValueError. Confirmed this matters for real: this used to raise on a
+    malformed initial_graduated straight out of datetime.date.fromisoformat()
+    - called in a loop over every key person for every position
+    (suggest_pack.suggest()), so ONE person's typo'd date used to crash
+    suggestion-building for the WHOLE company, not just that one person."""
     grad = person.get("qualifications", {}).get("initial_graduated")
     if not grad:
         return None
-    grad = datetime.date.fromisoformat(grad)
-    return round((closing_date - grad).days / 365.25)
+    try:
+        grad = datetime.date.fromisoformat(grad)
+    except ValueError:
+        print(f"  WARNING: {person.get('name', '?')}'s initial_graduated ('{grad}') isn't a "
+              "valid YYYY-MM-DD date - years of experience treated as unknown for them. Fix it "
+              "on the People page.", file=sys.stderr)
+        return None
+    years = round((closing_date - grad).days / 365.25)
+    if years < 0:
+        # A future-dated (or badly mis-typed, e.g. a transposed year) grad
+        # date - not a crash, but printing "-3 years' experience" on a real
+        # CV or suggestion rationale is its own silently-wrong result.
+        print(f"  WARNING: {person.get('name', '?')}'s initial_graduated ('{grad.isoformat()}') "
+              f"is after the tender's closing date ({closing_date.isoformat()}) - years of "
+              "experience treated as unknown rather than negative. Check the date on the People page.",
+              file=sys.stderr)
+        return None
+    return years
 
 
 def candidate_person_text(person):
