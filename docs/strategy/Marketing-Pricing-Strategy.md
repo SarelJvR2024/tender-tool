@@ -818,3 +818,130 @@ What Tender Tool would do that L2B doesn't: free automated award prices for ever
 - **Politeness:** the portal was read in pages of 50 to 100 with 0.4 to 0.5 s pauses, and OCDS one day at a time. No document was downloaded (the zip check was a HEAD request plus a 4-byte range read). The raw pulls were scratch files and weren't committed.
 
 **Sources for this section:** [eTenders portal](https://www.etenders.gov.za/Home/opportunities?id=1) (advertised, closed, awarded and cancelled tabs, read through `/Home/TenderFilter/`), [OCDS API](https://ocds-api.etenders.gov.za/api/OCDSReleases), [SANRAL open tenders](https://www.nra.co.za/sanral-tenders/list/open-tenders), [Eskom Tender Bulletin](https://tenderbulletin.eskom.co.za/), [Transnet eTenders](https://transnetetenders.azurewebsites.net/Home/AdvertisedTenders), [City of Cape Town procurement portal (RFQs)](https://web1.capetown.gov.za/web1/procurementportal/RFQ), [MFMA Circular 83](https://mfma.treasury.gov.za/Circulars/MFMA%20Circular%2083%20-%20eTender%20Portal%20-%2018%20July%202016.pdf), [PMG NW1277](https://pmg.org.za/committee-question/22234/), [PMG NW2297](https://pmg.org.za/committee-question/29895/), [National Treasury on the Public Procurement Act's commencement (Aug 2024)](https://www.treasury.gov.za/comm_media/press/2024/2024081301%20Media%20Statement%20-%20Commencement%20of%20Public%20Procurement%20Act.pdf). Repo: `engine/discovery/etenders_national.py`, `list_tenders.py`, `detail.py`, `award_outcomes.py`.
+
+---
+
+## 11. Where else are tenders and awards published? A source survey beyond eTenders
+
+Added 17–18 Oct 2026 at Sarel's request: "see where else on the internet there are other tender adverts — look at all organs of state and municipalities, and across all companies and publications and news feeds, where else can [we find] more tender and award information." This builds on section 10. It assumes the eTenders portal reader (10.5 item 1) and the SANRAL, Eskom and Transnet direct readers (items 2 and 3) are being built in parallel, and asks what is worth adding *after* them. Everything was checked against live sites on these two days. Overlap was checked by tender reference against a fresh portal snapshot, as in 10.8. Method and limits are in 11.8.
+
+### 11.1 Verdict
+
+**No new source changes the picture for *finding* tenders: for every buyer subject to the PFMA, eTenders already is the source.** Since 2015, and under National Treasury's PFMA SCM Instruction 09 of 2022/23, national and provincial departments, public entities and SOEs must publish bid invitations, awards and notices on the eTender portal. In the own-site checks below, the portal matched or beat the buyer's own site for TCTA, ACSA, SITA and Denel, and for the KZN Provincial Treasury. The one buyer with a real listing gap was a water board (uMngeni-uThukela: 12 of 16).
+
+**The new value is in *award and price* data, and it is on buyers' own sites.** A 2011 National Treasury instruction note requires every organ of state to publish, within ten working days after a bid closes, the names of all bidders, and "where practical" their prices and preference points. Many buyers comply, but only on their own websites. Those registers are SANRAL-style competitor price data for municipal and SOE work, and they mostly *don't* reach eTenders. They are semi-structured PDFs, one layout per buyer, some of them scanned.
+
+**Dead ends, with evidence:** the Government Tender Bulletin, the Government Gazette and the trade press. Details are in 11.4 and 11.5.
+
+### 11.2 Provincial portals: separate systems, or copies of eTenders?
+
+| Province | What exists beyond eTenders | Also on eTenders? | Automatable? |
+| --- | --- | --- | --- |
+| **KwaZulu-Natal** (Provincial Treasury's own SharePoint site) | Pages for Advertisements, Awards, Closed Tenders, "Publication of Bidders" and Cancellations, all as PDF links. "Publication of Bidders" holds opening registers and certificates, and briefing minutes | **Yes for adverts:** the two current bids, BID 1264/2026-F and BID 1265/2026-F, are both on the portal. The award adverts and opening registers are only on the Treasury's own site | Yes: stable SharePoint lists of PDF links. But it covers only the Treasury's own bids, about 5 a year |
+| **Western Cape** | The interim 2021 page for "advertised, cancelled and awarded tenders" (put up during the GTB/eTenders outage) now returns **404**. The province's own tenders page says national and provincial tenders are advertised on eTenders. **The ePS (Electronic Procurement Solution)** handles everything from R10,000 to R1 million: about **41,000 RFQs a year** (41,197 in 2025/26, per the province's procurement disclosure reporting, seen through search) | **No: ePS RFQs never reach eTenders.** Formal bids above R1 million do | **Not publicly verified.** ePS works through supplier registration on the Western Cape Supplier Evidence Bank. I found no public, unauthenticated list of RFQs. It probably needs a supplier login (an inference) |
+| **Gauteng** | A provincial e-tender system: "Open Tender" for bids above R2 million, a 2025 "TendaSwift" e-procurement pilot (IOL, Dec 2025), and published evaluation outcomes for open tenders | Partly. Gauteng provincial bodies with a "Gauteng –" name had **43 portal rows in about 2 months**, against Eastern Cape 181, KZN 129 and Limpopo 120. That is low for the largest provincial economy, which suggests heavy use of its own system (inference: departments may also be named differently on the portal) | **Unknown.** `e-tender.gauteng.gov.za` did not resolve (DNS) from this environment or from WebFetch |
+| Other six provinces | The Treasury sites that loaded (Eastern Cape, Limpopo, Free State) are information sites. No separate bulletin was found | n/a | n/a |
+
+**What this means:** a provincial bulletin doesn't add listings. The real provincial gaps are **low-value RFQs**, such as Western Cape ePS and probably Gauteng's own system, which sit behind supplier registration. They are the same gap as municipal RFQs in section 10, on a larger scale. If a firm is registered on ePS as a supplier, ePS sends it the RFQs directly anyway.
+
+### 11.3 SOEs and other national entities: own sites against the portal
+
+Each entry was matched by reference against the portal's advertised tab (2,211 rows) plus the newest 3,982 closed-tab rows (published 18 Aug to 14 Oct).
+
+| Buyer | Own site | Own open tenders vs portal | What the own site adds | Worth a reader? |
+| --- | --- | --- | --- | --- |
+| **TCTA** (`tcta.co.za/tenders/`) | WordPress list; tells bidders to download from eTenders | **8 of 9** on the portal (missing: `100/2026/IA/ETHICS/RFQ`). The portal has 12 TCTA rows, so it carries more than the site | A sparse "Awarded tenders" page with letter-of-award PDFs | No |
+| **ACSA** (`airports.co.za` → current-and-future-tenders) | SharePoint table: 30 rows, some dating back to 2019 | Every row still in the comparison window matched the portal on description (14). The portal has **116** ACSA rows, including RFQs the site doesn't list | Nothing | No: the portal is the superset |
+| **SITA** (`rfq.sita.co.za`, ASP form) | 77 tender numbers for 2026 | 18 of the 20 most recent on the portal | **"Publications of bids received"**: a signed, **scanned** memo per tender. RFB 3199/2025 lists 23+ bidder names and **no prices**. `engine/ocr/scan_ocr.py` read it cleanly (mean confidence 88.5), with some names garbled ("Rosslyn Elec*~ic") | Low: names only, scanned, ICT-heavy |
+| **SARS** (`sars.gov.za/procurement/awarded-tenders/`) | HTML table | n/a | **The best structured award page found:** winner, B-BBEE level, preference points claimed, contract price, **and every unsuccessful bidder with its points and proposed price**. 8 RFPs awarded May to Sep 2026 | Yes for price data, but low volume and not construction-led |
+| **uMngeni-uThukela Water** (`umngeni-uthukela.co.za/tender/`) | Structured HTML table: 153 rows (title, reference, issue date, closing date, status, download) | **12 of 16** in the window on the portal. **Missing: 2026/068 Ekuvukeni WWW repairs and 2026/067 Olifantskop WTP refurbishment** (both issued 29 Sep, closing 29 Oct), plus 2025/009(B) and 2025/013(A) | 4 open works and services tenders missing from eTenders. The portal in turn has the water board's RFQs (`RFQ2027-LAB-…`, `OPS2027-BID-…`) that the site doesn't list | **Yes:** the only SOE checked with a real listing gap, it is civil and water work, and it is one clean HTML table |
+| **Denel** (`denel.co.za/tenders`) | "There are no tenders available yet" | The portal has 10 Denel rows | Nothing | No |
+| **Rand Water, PRASA** | Not reachable from this environment (connection failures; Rand Water returned HTTP 503 over plain HTTP) | The portal has Rand Water 18 and PRASA 123 rows | Unknown | Re-check from another network |
+
+**What this means:** for SOEs, the PFMA mandate works. Apart from Eskom and Transnet (section 10), the water boards are the place to look for listing gaps. Other water boards (Magalies, Vaal Central, Lepelle, Amatola, Overberg) weren't checked.
+
+### 11.4 Government Tender Bulletin and Government Gazette: closed (Observed)
+
+- **The Government Tender Bulletin has stopped.** The GPW's own archive (`gpwonline.co.za/Tender-Bulletin`, a SharePoint library embedded in WordPress) holds 410 issues. **The last is No. 3139, 29 January 2021.** That matches the GPW eGazette failure and the eTenders crash of early 2021 (10.8 sources). Under Treasury's 2021 instruction, eTenders took over. The issues are text PDFs, not scans, so OCR was never the obstacle. The obstacle is that the publication no longer exists. The Western Cape's page still mentions a postal subscription, which is out of date.
+- **The Government Gazette doesn't carry tenders.** I took the six most recent weekly "National Government" gazettes in GPW's online archive (22 Nov to 27 Dec 2024, **1,076 pages**). A text search for invitation to bid or tender, RFQ/RFP/RFB and "tender no" found **zero tender adverts**. The only matches were GPW's own "Request for Quotation for placement of the notice" boilerplate and comment deadlines. All six issues have a text layer, so **OCR isn't needed**, and there is nothing to extract.
+- **The archive also lags:** GPW's "2025–2028" folder ended at gazette 51942 (30 Dec 2024) when it was read. It sits behind a WordPress ajax nonce that proxies SharePoint, which is fragile for any reader.
+- **Provincial gazettes:** a search snippet shows the Western Cape Provincial Gazette has a "Tenders" heading. The issue that was linked returned 404, so this wasn't verified. These gazettes mostly carry by-laws and land-use notices.
+- **What this means for L2B:** "government gazettes" in L2B's FAQ (9.3) is very probably a legacy source. **Not worth building**, with or without OCR.
+
+### 11.5 Trade publications, news feeds and aggregators
+
+| Source | What it publishes | New information? | Automatable? |
+| --- | --- | --- | --- |
+| **Infrastructure News / IMIESA** (one shared Novus Media RSS feed) | Of the latest 10 items, one award story (Transnet–Wabtec, R6.6bn, 16 Oct) and two pipeline items (Gauteng to rehabilitate seven Tshwane bridges; R8.9bn iron-ore corridor) | **Early pipeline signals** before a tender is advertised; the occasional headline award | Yes, RSS. But it is news text: classifying "is this a future tender?" needs a person or an LLM |
+| **Engineering News** (Creamer Media) | Headline awards (for example "Sanral awards R1.4bn Eastern Cape contracts", 2024) and the twice-yearly *Projects in Progress* (paid) | The same as above. Awards it reports are big ones that are already on the portal or SANRAL | **No:** returns HTTP 403 (bot protection) to automated fetches. Paid research products |
+| **News24 Notices** (newspaper notices, where some municipal adverts and SCM notices appear) | A Tshwane SCM notice (addenda, cancellations) turned up there through search | Possibly municipal adverts that skip eTenders | **No:** Cloudflare challenge (403) |
+| **Aggregators: BidsStack, TenderFlow, Vuza, allbusiness.africa** | Resell eTenders listings *and awards*. BidsStack labels award pages "Source: eTenders Portal" and puts winners and amounts behind its **Pro tier at R750/month** | **Nothing new:** they are downstream of the same portal | Not a source. But see the positioning note below |
+
+**Positioning note (corrects 10.6):** section 10.6 counted "free automated award prices for every tender on the portal" as something L2B doesn't offer. True of L2B, but **BidsStack already sells exactly that for R750 a month.** Portal award data is a commodity. What no aggregator I found offers is SANRAL's opening registers and the buyer-site price registers in 11.6.
+
+### 11.6 Award and price data on buyers' own sites (the real find)
+
+**The rule behind it.** National Treasury's instruction note of 31 May 2011 on SCM transparency, as quoted on SARS's site, says the buyer "must within ten working days after the closure of any advertised competitive bid, publish on its website the names of all bidders… Where practical… also publish the total price and the preferences claimed." The same reasoning explains SANRAL's registers. MFMA s75 also requires municipalities to put supply chain management contracts on their websites (Treasury reply PQ 2334).
+
+**Part of it is already inside eTenders.** In 901 closed-tab rows (closing 21 Sep to 16 Oct), **89 (10%) carry bidder names inline, and 31 also carry each bidder's amount.** Examples: KZN EDTEA, Johannesburg Water, the National Lotteries Commission, ATNS and SACAA. That is pre-award competitor data, read by the same `/Home/TenderFilter/?status=3` call the portal reader already makes.
+
+**The rest is on own sites. Municipal sample:** 42 municipal sites were tried. **23 loaded, 3 were blocked by bot protection and 16 failed to connect** (the same fragility as 10.4). Of the 23 that loaded, **15 publish award lists and/or bid opening registers.** No such page was found on Drakenstein, George, Joburg, Mossel Bay, Steve Tshwete, Oudtshoorn, Govan Mbeki or Sedibeng, though some may sit deeper in the site. Formats:
+
+| Buyer | What is published | Prices? | Format | Effort to read |
+| --- | --- | --- | --- | --- |
+| **Swartland** | "Tenders received" per tender: **110 PDFs**. T03.26.27 (Ongegund water supply upgrade) lists 8 contractors from R4.43m to R8.04m, with B-BBEE level | **Yes, every bidder** | Text PDF, one stable layout | **Low** |
+| **Saldanha Bay** | "SCM Bids Register" per opening date. 9 Oct 2026: SBM 22/25/26 (Shelley Point WWTW upgrade), 7 tenderers from R25.1m to R68.4m, with B-BBEE and locality | **Yes, every bidder** | Text PDF, one stable layout | **Low** |
+| **Stellenbosch** | Monthly "Tender awards" (winner, B-BBEE, locality, amount or "RATES", date), plus a scanned opening register per tender | Awards: amount or "RATES". Registers: often "RATES" (rate-based contracts) | Awards are text PDFs. Registers are scans: OCR read BSM 08/27 cleanly (confidence 85) | Medium |
+| **Midvaal** | Monthly "7-day awards" and opening registers | Yes (awards) | Text PDF | Low to medium |
+| **Madibeng** | "Awarded tenders over R300k" | Yes (22 amounts in the Aug 2026 list) | Text PDF | Low to medium |
+| **City of Cape Town** | Monthly "Tenders awarded" register | **No amounts** (winner and decision date only) | Text PDF | Low |
+| **Mangaung** | Weekly bid opening registers, awarded lists, weekly quotation bulletin | Unknown | **Scanned PDF (no text layer)** | High (OCR, per-page layout) |
+| **Matlosana** | Tender results | Unknown | **Phone photos saved as PDF** (`20260119_125221.pdf`), no text layer | High |
+| **Hessequa** | "Opening results" posts for formal tenders and quotations | Per post | HTML posts | Medium |
+| Newcastle, Makhado, Mogale City, Buffalo City, Bergrivier, Beaufort West, Emalahleni | "Bids received" and/or "awarded" pages | Not sampled | Mixed | Unknown |
+| **Provincial departments** (KZN Transport, WC Infrastructure, EC Public Works, Gauteng Infrastructure Development, Limpopo Public Works) | Not reachable from here (connection failures, or 404) | — | — | Unknown |
+
+**Is this new information? Yes.** Swartland (11 rows), Saldanha Bay (6) and Stellenbosch (13) all advertise their tenders on eTenders, so Discovery already sees the *adverts*. None of their closed-tab rows carry bidders. **The price registers exist only on the municipalities' own sites.** For civil works and engineering services, that is the same "who bid and at what price" intelligence that section 3 of `Award-Outcomes-Findings.md` found for SANRAL, extended to municipal and water work.
+
+**How automatable, honestly:**
+
+- **Collecting is easy:** per buyer, a list page plus a PDF link pattern, downloaded when new.
+- **Parsing is per buyer:** the text PDFs (Swartland, Saldanha Bay, Madibeng, Midvaal, Stellenbosch awards) can be parsed with a small layout rule each. Bidder names come out reliably. Prices mostly do, but not where the register says "RATES".
+- **Scans need OCR and a person:** scanned registers (Stellenbosch, Mangaung, SITA) need `engine/ocr` plus human review, because OCR garbles company names. Phone-photo PDFs (Matlosana) aren't worth it.
+- **It needs upkeep:** expect each reader to break when a site is redesigned. And 16 of 42 sites couldn't even be reached from a cloud machine.
+
+### 11.7 What to build next, ranked by automatable value
+
+1. **Keep the closed tab's `bidders` field in the portal reader that is already being built.** *Hours, no new source:* about 10% of closed tenders gain bidder names and about 3% gain bidder prices, in the same JSON the reader already fetches. Snapshot the Awarded and Cancelled tabs too (10.5 item 1). This is the cheapest award and price data available.
+2. **Top recommendation for a new reader: a "published bid registers" collector, piloted on Swartland and Saldanha Bay, then Midvaal, Madibeng, Stellenbosch awards and SARS.** Each pilot buyer is a text PDF or HTML page with **every bidder's price**, in civil, water and engineering work, and it never reaches eTenders. It fits the award storage the findings doc already proposes (a shared table keyed by buyer and reference, with the register as jsonb). Effort: a few days for the framework and the first two buyers, then about half a day per added text-PDF buyer. Scanned registers go to a review queue, never straight into statistics. *This is the one source found that gives Tender Tool data a paying aggregator doesn't have (11.5).* The same caveats as SANRAL's apply: POPIA basis, terms of reuse, and name normalisation (`Award-Outcomes-Findings.md` section 6).
+3. **A uMngeni-uThukela Water direct reader:** *a small job* (one structured HTML table). It adds the 4 open works and services tenders the portal lacks. Then check the other water boards with the same method before building more.
+4. **Optional, low priority:** the Infrastructure News/IMIESA RSS feed, as a "projects coming" signal for the digest. Only worth it if someone reads it. It isn't tender data.
+5. **Don't build:** Government Tender Bulletin (ended 2021), Government Gazette (no tenders in 1,076 pages sampled), Engineering News or News24 (bot-blocked, and duplicate or paid), readers for ACSA, TCTA or Denel (the portal is the superset), aggregators (downstream of eTenders), OCR of phone-photo registers.
+6. **Needs a human or a login, the L2B-style work:** Western Cape ePS and other provincial RFQ systems (supplier registration), Gauteng's own system (couldn't be reached), and the 16 municipal sites that wouldn't load plus the long tail in 10.5 item 5.
+
+### 11.8 Method and limits
+
+- **Portal snapshot:** a portal snapshot from 17 Oct 2026 was used: the advertised tab in full (2,211 rows) plus the newest 3,982 closed-tab rows (published 18 Aug to 14 Oct). Some pages returned HTTP 500 and were re-read 10 rows at a time; about 20 rows were lost. A buyer's own tender counts as "on the portal" only when its reference (or, for ACSA, its description at Jaccard ≥ 0.45 on title words) matched a row. Tenders published before 18 Aug and already closed weren't in the snapshot, so the comparison only covers tenders still open or closed recently. Tenders that had moved to Awarded or Cancelled weren't counted. For the misses that matter (uMngeni-uThukela 2026/067 and 2026/068) this doesn't apply: they are open and were issued after 18 Aug.
+- **Bidder fields:** read from 901 closed-tab rows in pages of 100 with 0.5 s pauses, then summarised. No contact fields were kept.
+- **Documents read:**
+  - SITA RFB 3199/2025 (OCR);
+  - Tender Bulletin No. 3139;
+  - six Government Gazettes;
+  - Cape Town's August 2026 awards;
+  - Stellenbosch's September 2026 awards and BSM 08/27 register;
+  - Saldanha Bay's register of 9 Oct 2026;
+  - Swartland T03.26.27;
+  - one Madibeng, one Midvaal, one Mangaung and one Matlosana file.
+
+  All were read in a scratch directory and not committed.
+- **Not verified:**
+  - the full text of PFMA SCM Instruction 09 of 2022/23, and the current text and threshold of the 2011 bidders-list note. Both are cited through Western Cape Treasury, IDT and SARS pages, not read at source;
+  - whether Western Cape ePS RFQs are publicly viewable;
+  - Gauteng's e-tender system;
+  - Rand Water and PRASA's own sites;
+  - every provincial department's own site;
+  - News24 Notices content;
+  - the other water boards.
+- **Reachability:** connection failures from this environment are not proof that a site is down. Sarel should recheck the Gauteng and Rand Water sites from a normal browser.
+
+**Sources for this section:** [KZN Treasury tenders](https://www.kzntreasury.gov.za/tenders/SitePages/KwaZulu-Natal%20Treasury%20-%20Tenders.aspx) (Advertisements, Awards, Publication of Bidders), [Western Cape Treasury tenders](https://www.westerncape.gov.za/tenders), [WC Treasury Circular 35 of 2022 on the e-Tender portal (via search)](https://www.westerncape.gov.za/provincial-treasury/files/atoms/files/Treasury%20Circular%20No%2035%20of%202022%20%20E-TENDER%20PORTAL.pdf), [WC procurement disclosure report 2024/25](https://www.westerncape.gov.za/sites/default/files/2025-10/western-cape-procurement-disclosure-report-annual-2024-2025_0.pdf), [IOL on TendaSwift (Dec 2025)](https://iol.co.za/news/politics/2025-12-02-gauteng-finance-mec-launches-digital-tender-procurement-system-tendaswift-to-curb-tender-bid-related-corruption/), [IDT cancellation citing Instruction 09 of 2022/23](https://www.idt.org.za/wp-content/uploads/2024/03/IDTECRFP-56-CON-Cancellation.pdf), [SARS on the 2011 bidders-list instruction](https://www.sars.gov.za/?p=770), [SARS awarded tenders](https://www.sars.gov.za/procurement/awarded-tenders/), [Treasury reply PQ 2334 on MFMA s75](https://www.treasury.gov.za/publications/other/MinAnsw/2022/PQ%202334_Groenewald_NW2754E.pdf), [TCTA tenders](https://www.tcta.co.za/tenders/), [ACSA current tenders](https://www.airports.co.za/business/supply-chain-management/current-and-future-tenders), [SITA tender status](https://rfq.sita.co.za/TendersAdministration/TenderSearch.asp) and [bids received](https://rfq.sita.co.za/TendersAdministration/PublicationsOfBidsSelect.asp), [uMngeni-uThukela Water tenders](https://www.umngeni-uthukela.co.za/tender/), [Denel tenders](https://www.denel.co.za/tenders), [GPW Tender Bulletin archive](https://www.gpwonline.co.za/Tender-Bulletin), [GPW Government Gazettes](https://www.gpwonline.co.za/government-gazettes-3/), [Infrastructure News feed](https://www.infrastructurenews.co.za/feed/), [Engineering News on SANRAL EC awards (2024)](https://www.engineeringnews.co.za/article/sanral-awards-r14bn-in-contracts-in-the-eastern-cape-another-r38bn-to-follow-2024-09-27), [BidsStack features and pricing](https://app.bidsstack.com/features), [Swartland tender results](https://www.swartland.org.za/tenders/results), [Saldanha Bay bids register](https://sbm.gov.za/scm-bids-register/), [Stellenbosch tenders](https://stellenbosch.gov.za/tenders/), [Cape Town tenders awarded](https://web1.capetown.gov.za/web1/newsandnotices/Home/Release/Tenders-awarded), [Midvaal awards](https://www.midvaal.gov.za/contracts/7-day-ad-tenders/), [Madibeng tenders awarded](https://www.madibeng.gov.za/tenders/tenders-awarded/), [Mangaung awarded bids](https://www.mangaung.co.za/category/awarded-bids-tenders-quotations/), [Hessequa opening results](https://www.hessequa.gov.za/category/all-tenders-quotations/opening-results-formal-tenders/). Repo: `engine/ocr/scan_ocr.py`, `engine/discovery/award_outcomes.py`, `docs/specs/Award-Outcomes-Findings.md`.
