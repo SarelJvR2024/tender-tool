@@ -1,0 +1,84 @@
+{
+  "_note": "SYNTHETIC TEST FIXTURE (QA-Edge-Case-Findings.md, 2026-10-18 non-engineering audit pass). A private security services company - guarding and CCTV monitoring - deliberately NOT engineering-shaped, to stress-test the general (non-SANRAL) pipeline for Klipcorp/engineering bias (Form-Field-Audit.md's method, applied to a different industry). No CIDB grading, no ECSA/SACPCMP, PSIRA-registered instead.",
+  "_profile_name": "security_guarding_co",
+  "company": {
+    "legal_name": "Test Khanyisa Guarding & Monitoring (Pty) Ltd",
+    "csd_trading_name": "Test Khanyisa Security",
+    "cipc_registration_number": "2015/000111/07",
+    "vat_number": "4100000111",
+    "income_tax_number": "9100000111",
+    "paye_number": "7100000111",
+    "csd_supplier_number": "MAAA0001111",
+    "coid_registration_number": "1100111",
+    "coid_letter_of_good_standing_number": "2026001111",
+    "coid_letter_of_good_standing_expiry": "2027-05-31",
+    "coid_status_flag": "CURRENT",
+    "cidb_grading": null,
+    "bee_level": 2,
+    "black_ownership_pct": 80,
+    "bee_proof_type": "sanas_certificate",
+    "bee_proof_expiry": "2027-02-28",
+    "status": "QSE",
+    "registered_address": "14 Test Industrial Road, Benoni, Gauteng, 1501",
+    "postal_address": "PO Box 111, Benoni, 1500",
+    "telephone": "011 000 1111",
+    "cellphone": "082 000 1111",
+    "email": "admin@khanyisaguarding.test",
+    "bank": {
+      "bank_name": "Test Bank",
+      "branch_code": "000000",
+      "account_number": "WITHHELD - synthetic, never a real number"
+    },
+    "director": {
+      "name": "Nomsa Test-Director",
+      "id_number": "WITHHELD - synthetic",
+      "role": "signs BEE affidavit / CSD"
+    }
+  },
+  "key_people": [
+    {
+      "name": "Sipho Test-Guard",
+      "role": "Operations Manager (signatory) / fielded as Security Officer in charge of guarding and CCTV monitoring",
+      "id_number": "0000000001111",
+      "qualifications": {
+        "ecsa_level": null,
+        "sacpcmp_number": null,
+        "highest_level": "Grade 12",
+        "highest_description": "PSIRA Grade A security officer",
+        "highest_institution": "Test Private Security Training College",
+        "highest_graduated": "2010-01-01",
+        "initial_description": "PSIRA Grade A",
+        "initial_institution": "Test Private Security Training College",
+        "initial_graduated": "2010-01-01",
+        "years_experience": null,
+        "years_experience_note": "Computed at pack-generation time, same rule as the real profile.",
+        "psira_registration_number": "PSIRA/TEST/0001111",
+        "psira_grade": "A",
+        "psira_expiry": "2027-06-30"
+      },
+      "projects": [
+        {
+          "client_and_number": "Test Municipality\nTEST/SEC/2022/001",
+          "value_rm": 4,
+          "position_held": "Site Supervisor - guarding and access control",
+          "contact": "Lindiwe Test-Referee\nFacilities Manager",
+          "contact_phone": "000 000 0000",
+          "contact_email": "lindiwe.test@example.test",
+          "start": "2022-01-01",
+          "end": "2024-12-31",
+          "client_type": "Local Authority",
+          "project_type": "security_guarding",
+          "position_code": "security_officer"
+        }
+      ],
+      "phone": "+27 82 000 1111",
+      "signatory_capacity": "Operations Manager",
+      "employment_status": "full_time_employee"
+    }
+  ],
+  "disciplines": ["security_facilities", "security_guarding", "electronic_security"],
+  "gaps": [],
+  "document_templates": {
+    "_note": "SYNTHETIC. No authority-to-sign letter on file for this test company - its pack should show A2/the authority row as 'not set up', the same as any other company without one (Hardcoded-Assumptions-Audit Q7)."
+  }
+}

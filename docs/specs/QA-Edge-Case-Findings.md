@@ -948,3 +948,136 @@ failures / ALL PASSED. `python3 -m py_compile` clean.
 confirms no `test_tender_changes.py` exists), despite being 459 lines of exactly the kind of
 cross-tenant batch logic this bug class keeps turning up in. Worth a committed regression suite
 in a future pass, mirroring `test_tender_updates.py`'s own per-scenario shape.
+
+---
+
+## 2026-10-18 (eleventh run): three non-engineering industries, stress-testing the field/form/
+document/answer-selection pipeline for Klipcorp bias
+
+**Context:** Sarel (his own words): "we need an agent to keep running a few times through all
+tenders to make sure each field and form and document requirement is reviewed correctly and the
+answer or submission chosen correctly, not based on klipcorp answers but general." No live
+Supabase project exists yet (Sarel is setting one up), so this run used the same method as
+`Form-Field-Audit.md`: synthetic company profiles deliberately unlike Klipcorp, run through the
+real pipeline against real tender documents. Three passes, three industries, none of them
+engineering/roads/civil:
+
+1. **Private security services** (guarding, CCTV monitoring) - new fixture
+   `config/test_companies/security_guarding_co.json` ("Test Khanyisa Guarding & Monitoring (Pty)
+   Ltd"): no CIDB grading, no ECSA/SACPCMP, PSIRA-registered key person instead. Run against the
+   real `dawid_kruiper_tn051` sample - an actual municipal tender for "APPOINTMENT OF EXTERNAL
+   SECURITY SERVICES".
+2. **Environmental / pest control & vegetation management** - new fixture
+   `config/test_companies/pest_control_co.json` ("Test Veldwag Pest & Vegetation Control CC"): no
+   B-BBEE level recorded at all, no director recorded, a registered Pest Control Operator instead
+   of any statutory engineering/built-environment council.
+3. **IT / software services** - new fixture `config/test_companies/it_services_co.json` ("Test
+   Nexora Systems (Pty) Ltd"): a BSc Computer Science key person with no professional
+   registration of any kind - checking the system doesn't invent one.
+
+First grepped `klipcorp` (case-insensitive) across `engine/` and `app/` for literal references:
+every hit is either the literal Klipcorp fixture files (`config/klipcorp_profile.json`,
+`assets/klipcorp_logo.png`, the sample completed-tender PDFs) or comments in already-audited code
+explaining a *past* bug and its fix (`company_profiles.py`, `taxonomy.py`, etc.) - no live code
+path reads Klipcorp's data as a stand-in for "the company" any more; the 2026-10-17
+Hardcoded-Assumptions-Audit and 2026-10-18 Form-Field-Audit passes already closed that out for the
+SANRAL pipeline.
+
+**Which pipeline actually applies.** `suggest_pack.py` (key-position/CV suggestion),
+`compliance-data.ts` (`PACK_REQUIRED_TEMPLATES`, the B3/ECSA/SACPCMP counts, the Pack Review
+screen's `pack-review-data.ts`/`pack-review-logic.ts`, migration `0059`) and `submission-pack.tsx`
+are all gated on `tenders.family === SANRAL_CONVENTIONAL_FAMILY` (or the RRM family) - confirmed
+by reading `compliance-data.ts`'s `loadTenderCompliance` (returns `{mapped: false}` immediately
+for any other family) and `page.tsx`'s `showSubmissionPack` / `isGeneralFamily` gates. A
+municipal security tender, a parks/vegetation tender or an IT-support tender all come in as
+`GENERAL_FAMILY` ("General (non-SANRAL)"), which routes through an entirely different, already
+industry-agnostic pipeline: `engine/general/requirements.py` (role & registration pattern list
+already includes `services.security_officer`/PSIRA and `services.pest_control_operator` by name,
+alongside SACNASP/SAGC/SACAP/SACPLAN/SACQSP/SACPVP), `build_general_pack.py`,
+`process_general_jobs.py` (key-position CVs are matched from the company's own
+`person_role_eligibility` tags, never a keyword score), and `app/lib/generalTender.ts` /
+`general-workspace.tsx` on the UI side. The taxonomy (`config/discipline_taxonomy.json`, 112
+categories) already has `security_guarding`, `electronic_security`, `pest_control`,
+`gardening_landscaping`, `software_systems` and `it_support_managed_services` as named disciplines
+under non-engineering groups.
+
+### Pass 1 - security services company × real security tender: **clean, no fix needed**
+
+Ran `engine/general/general_harness.py` (both `--no-pack`, manifest-only, and the full `--pack`
+build with LibreOffice) with the new `security_guarding_co` fixture against `dawid_kruiper_tn051`.
+No crash either way. The extracted manifest correctly finds role `services.security_officer` and
+returnable `psira` (vault-untracked, so it always reads "upload a copy for this tender" -
+honestly, for every company, not a Klipcorp-shaped default). The built pack's field provenance
+shows nothing invented: `csd_report`/`municipal_account`/`psira`/`tax_compliance` are all
+correctly `omitted` (nothing on file), `sbd1.tcs_pin` and the signature lines are `missing`, and
+the only `assumed_default` is the existing, already-flagged `sbd1.foreign_based` (derived from
+having a CIPC number, same for every company, SANRAL or not - audit Q10). Compared field-for-field
+against `complete_co` (the engineering-shaped fixture) on the same tender: the by-hand-only form
+(MBD 6.1) is missing the identical set of fields for both companies - confirming that behaviour is
+a property of the *form*, not a Klipcorp-shaped assumption about the *company*.
+
+### Pass 2 - pest control / vegetation company: **clean, no fix needed; one real gap flagged**
+
+No real tender sample in `templates/general_samples/` is actually a parks/vegetation-management
+procurement (the closest, `overberg_q12`, is municipal lifeguard services). Ran `pest_control_co`
+through the full `general_harness.py` matrix against all 11 real samples anyway (28 combinations
+with the other two new fixtures and the existing four, `--pack` mode, LibreOffice) - 0 crashes, 0
+flagged baseline changes. With no B-BBEE level and no director on file, the company's rows come
+back `missing` (never defaulted) everywhere those facts are read, same as `new_co`'s rows do.
+**Flagged (not a bug, a real gap):** there is no real document in the sample set to prove
+`services.pest_control_operator` / `pest_control` actually gets matched end-to-end against a true
+vegetation-management tender's text the way `services.security_officer` is proved against
+`dawid_kruiper_tn051` above - worth adding a real pest-control/vegetation sample to
+`templates/general_samples/` (and an `EXPECTED` row in `general_harness.py`) once one is on hand,
+the same way `salb_15-10-2026`/`ecdpwi_scmu5_0007` were added for their own cases.
+
+### Pass 3 - IT / software services company: **clean, no fix needed**
+
+Ran `it_services_co` through the same 28-combination matrix. No crash. The closest real sample,
+`ssa_change_mgmt` ("RENDER CHANGE MANAGEMENT SERVICES"), isn't a software/systems-support tender
+either, so this pass also leans on the same gap noted above for pest control - no real
+IT/software-support tender document is in the sample set yet. The key person has no professional
+registration recorded at all (deliberately, to check the system doesn't invent one): no
+ECSA/SACPCMP/PSIRA/SACNASP/etc. field is written anywhere for this company in any pack, and no
+"Pr Eng" or similar engineering wording appears in any output. `grep` for `ECSA|SACPCMP|engineer`
+in `engine/general/*.py` (the general-engine source itself, not the SANRAL-only files) returns
+only the role-pattern entry for `psp.professional_engineer` - a *pattern to detect that role if a
+tender asks for one*, never a default.
+
+### Also checked, found already sound (no fix needed)
+
+- **Discovery's per-company fit scoring** (`engine/discovery/company_profiles.py`,
+  `engine/discovery/taxonomy.py`): already rebuilt (2026-10-17, Hardcoded-Assumptions-Audit Q4) to
+  read every company's own `experience_items`/`bee_level`/`company_offices` rows - confirmed by
+  reading the code, no shared profile file, no Klipcorp fallback.
+- **`app/lib/dealEconomics.ts`'s `derivedSector()`** falls back to `"roads_civil"` only when
+  `tenders.family` is neither `GENERAL_FAMILY` nor `"UNKNOWN"` - i.e. only for an actual SANRAL
+  family, where the comment "SANRAL only issues road work" is simply true. A security, pest-
+  control or IT tender is `GENERAL_FAMILY`, so this never fires for them; checked this isn't
+  reachable for a non-SANRAL tender before ruling it out as a false alarm.
+- **Pack Review (`pack-review-data.ts`, migration `0059`) and the `requestSubmissionPack`
+  review-confirmation gate (`actions.ts`)** are both scoped to the SANRAL pack path only;
+  `requestGeneralPack` (`general-actions.ts`) has no dependency on `pack_review_confirmations`, so
+  a non-SANRAL company is never blocked by (or shown) a SANRAL-shaped review screen. There is
+  currently no equivalent "review everything before compiling" screen for general tenders at all -
+  a product gap worth Sarel's attention, not a Klipcorp-bias bug.
+
+**Verification:** `engine/general/general_harness.py` (both modes) with the three new fixtures
+plus the existing four, across all 11 real samples: 77/77 clean on `--no-pack` manifest checks,
+28/28 clean on the full `--pack` LibreOffice build for the samples closest to the three
+industries, 0 crashes, 0 flagged baseline changes. `engine/test_form_field_audit.py`: 0 failures.
+`engine/general/test_general_bridge.py`: ALL PASSED. `engine/discovery/test_taxonomy.py`,
+`test_award_outcomes.py`, `test_company_documents.py`, `discovery/test_discovery_fanout.py`: all
+passing (pre-existing, unaffected). `node --experimental-strip-types
+"app/app/tenders/[id]/pack-review-logic.test.ts"`: 19/19 passing. `npx tsc --noEmit` (app/): clean.
+`python3 discovery/taxonomy.py check`: 112 categories, 0 problems.
+
+**Flagged for Sarel, still needing a real live Supabase project to verify properly:** everything
+above was checked at the engine level, against real tender *documents* but a local/offline
+company record (JSON fixture), because no live project exists yet. Not yet checked against a real
+Supabase-backed company+tender record end-to-end: the Pack Review screen's live Supabase reads
+(`pack-review-data.ts`), the general workspace's People-page role-tag UI
+(`person_role_eligibility`) for a non-engineering person, and RLS/tenant-isolation behaviour for a
+non-SANRAL company's own documents. Also flagged: the sample-document gap above (no real
+pest-control/vegetation or IT/software-support tender on file) - worth closing once Sarel can
+source one or two real ones.

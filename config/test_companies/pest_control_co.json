@@ -1,0 +1,79 @@
+{
+  "_note": "SYNTHETIC TEST FIXTURE (QA-Edge-Case-Findings.md, 2026-10-18 non-engineering audit pass). An environmental / pest-control and vegetation-management services company - deliberately NOT engineering-shaped. No CIDB grading, no ECSA/SACPCMP; a registered pest control operator instead.",
+  "_profile_name": "pest_control_co",
+  "company": {
+    "legal_name": "Test Veldwag Pest & Vegetation Control CC",
+    "csd_trading_name": "Test Veldwag",
+    "cipc_registration_number": "2012/000222/23",
+    "vat_number": "4100000222",
+    "income_tax_number": "9100000222",
+    "paye_number": "7100000222",
+    "csd_supplier_number": "MAAA0002222",
+    "coid_registration_number": "1100222",
+    "coid_letter_of_good_standing_number": "2026002222",
+    "coid_letter_of_good_standing_expiry": "2027-03-31",
+    "coid_status_flag": "CURRENT",
+    "cidb_grading": null,
+    "bee_level": null,
+    "black_ownership_pct": null,
+    "bee_proof_type": null,
+    "bee_proof_expiry": null,
+    "status": "EME",
+    "registered_address": "7 Test Nursery Lane, George, Western Cape, 6529",
+    "postal_address": "PO Box 222, George, 6530",
+    "telephone": "044 000 2222",
+    "cellphone": "083 000 2222",
+    "email": "admin@veldwag.test",
+    "bank": {
+      "bank_name": "Test Bank",
+      "branch_code": "000000",
+      "account_number": "WITHHELD - synthetic, never a real number"
+    },
+    "director": null
+  },
+  "key_people": [
+    {
+      "name": "Johan Test-Operator",
+      "role": "Owner (signatory) / fielded as Registered Pest Control Operator",
+      "id_number": "0000000002222",
+      "qualifications": {
+        "ecsa_level": null,
+        "sacpcmp_number": null,
+        "highest_level": "Grade 12",
+        "highest_description": "Registered Pest Control Operator (Act 36 of 1947)",
+        "highest_institution": "Test Dept. of Agriculture accredited course",
+        "highest_graduated": "2015-01-01",
+        "initial_description": "Assistant Pest Control Operator",
+        "initial_institution": "Test Dept. of Agriculture accredited course",
+        "initial_graduated": "2013-01-01",
+        "years_experience": null,
+        "years_experience_note": "Computed at pack-generation time, same rule as the real profile.",
+        "pco_registration_number": "PCO/TEST/0002222",
+        "pco_expiry": "2027-01-31"
+      },
+      "projects": [
+        {
+          "client_and_number": "Test District Municipality\nTEST/PARKS/2023/004",
+          "value_rm": 1.2,
+          "position_held": "Pest control & alien vegetation clearing supervisor",
+          "contact": "Riana Test-Referee\nParks Manager",
+          "contact_phone": "000 000 0000",
+          "contact_email": "riana.test@example.test",
+          "start": "2023-01-01",
+          "end": "2024-12-31",
+          "client_type": "Local Authority",
+          "project_type": "pest_control",
+          "position_code": "pest_control_operator"
+        }
+      ],
+      "phone": "+27 83 000 2222",
+      "signatory_capacity": "Owner",
+      "employment_status": "full_time_employee"
+    }
+  ],
+  "disciplines": ["security_facilities", "pest_control", "gardening_landscaping", "waste_environment", "environmental_rehabilitation"],
+  "gaps": [],
+  "document_templates": {
+    "_note": "SYNTHETIC. No authority-to-sign letter on file for this test company - its pack should show A2/the authority row as 'not set up', the same as any other company without one (Hardcoded-Assumptions-Audit Q7). No B-BBEE level recorded either, to check that an absent level is flagged missing rather than defaulted."
+  }
+}

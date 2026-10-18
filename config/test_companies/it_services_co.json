@@ -1,0 +1,81 @@
+{
+  "_note": "SYNTHETIC TEST FIXTURE (QA-Edge-Case-Findings.md, 2026-10-18 non-engineering audit pass). An IT / software services company bidding on government systems-support work - deliberately NOT engineering-shaped. No CIDB grading, no ECSA/SACPCMP/PSIRA; a company whose key person has no statutory professional registration at all, to check the system doesn't invent one.",
+  "_profile_name": "it_services_co",
+  "company": {
+    "legal_name": "Test Nexora Systems (Pty) Ltd",
+    "csd_trading_name": "Test Nexora Systems",
+    "cipc_registration_number": "2018/000333/07",
+    "vat_number": "4100000333",
+    "income_tax_number": "9100000333",
+    "paye_number": "7100000333",
+    "csd_supplier_number": "MAAA0003333",
+    "coid_registration_number": "1100333",
+    "coid_letter_of_good_standing_number": "2026003333",
+    "coid_letter_of_good_standing_expiry": "2027-07-31",
+    "coid_status_flag": "CURRENT",
+    "cidb_grading": null,
+    "bee_level": 1,
+    "black_ownership_pct": 60,
+    "bee_proof_type": "eme_affidavit",
+    "bee_proof_expiry": "2026-11-30",
+    "status": "EME",
+    "registered_address": "22 Test Office Park, Rosebank, Gauteng, 2196",
+    "postal_address": "PO Box 333, Rosebank, 2196",
+    "telephone": "011 000 3333",
+    "cellphone": "084 000 3333",
+    "email": "admin@nexorasystems.test",
+    "bank": {
+      "bank_name": "Test Bank",
+      "branch_code": "000000",
+      "account_number": "WITHHELD - synthetic, never a real number"
+    },
+    "director": {
+      "name": "Thabo Test-Director",
+      "id_number": "WITHHELD - synthetic",
+      "role": "signs BEE affidavit / CSD"
+    }
+  },
+  "key_people": [
+    {
+      "name": "Priya Test-Lead",
+      "role": "Technical Director (signatory) / fielded as Systems Support Lead",
+      "id_number": "0000000003333",
+      "qualifications": {
+        "ecsa_level": null,
+        "sacpcmp_number": null,
+        "highest_level": "Bachelors Degree",
+        "highest_description": "BSc Computer Science",
+        "highest_institution": "Test University",
+        "highest_graduated": "2011-01-01",
+        "initial_description": "National Diploma: Information Technology",
+        "initial_institution": "Test University of Technology",
+        "initial_graduated": "2008-01-01",
+        "years_experience": null,
+        "years_experience_note": "Computed at pack-generation time, same rule as the real profile."
+      },
+      "projects": [
+        {
+          "client_and_number": "Test National Department\nTEST/IT/2021/007",
+          "value_rm": 6.5,
+          "position_held": "Systems Support Lead - helpdesk, network and application support",
+          "contact": "Karabo Test-Referee\nCIO",
+          "contact_phone": "000 000 0000",
+          "contact_email": "karabo.test@example.test",
+          "start": "2021-04-01",
+          "end": "2024-03-31",
+          "client_type": "National Department",
+          "project_type": "it_support_managed_services",
+          "position_code": "it_support_lead"
+        }
+      ],
+      "phone": "+27 84 000 3333",
+      "signatory_capacity": "Technical Director",
+      "employment_status": "full_time_employee"
+    }
+  ],
+  "disciplines": ["it_telecoms", "software_systems", "it_support_managed_services", "networks_telecoms"],
+  "gaps": [],
+  "document_templates": {
+    "_note": "SYNTHETIC. No authority-to-sign letter on file for this test company - its pack should show A2/the authority row as 'not set up', the same as any other company without one (Hardcoded-Assumptions-Audit Q7)."
+  }
+}
