@@ -6,7 +6,7 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18 ~02:00 UTC form-by-form, field-by-field audit (`Form-Field-Audit.md`: 26 fixes, 13 open decisions for Sarel, migration `0057`); 2026-10-18 SANRAL Form B7 Targeted-Enterprise subcontracting answered by the company (compliance review G3, migration `0056` - below); 2026-10-18 Sarel's answers to taxonomy O1/O2/O4/O5 - buyer's eTenders category cross-check, `/admin/taxonomy` + company tag suggestions, SACAP/SACPLAN/SACQSP/SACPVP/PSIRA asked for only when a tender asks (on the 0050 catalog), each tender's own C3.1.11 minimums (migration `0054` - below); 2026-10-18, ~01:15 UTC Sarel's answer on stale Discovery rows after a downgrade (a re-score that makes a verdict worse is flagged on the Discovery card, the Workspace and the Pipeline until marked seen, and carried once in the digest - migration `0055`, below); POPIA / cross-tenant audit follow-up (shared blank templates are now per-company copies, migration `0045`; audit write-up `POPIA-Security-Audit.md` - below); award and price analysis (market feedback on submitted prices, migration `0053` - below); government tender coverage + listing-change tracking (eTenders portal read in full, SANRAL/Eskom/Transnet/Cape Town direct, cancellations and extensions, migration `0051` - row below and `Government-Tender-Coverage-Findings.md`); 2026-10-18 directors & shareholders register, shared registrations catalog, restricted bank accounts and landlord property records (Sarel's Q-MD1-4, migration `0050` - below); ~00:30 UTC independent verification of the cross-tenant isolation fixes and 8 other commits, including filling in the missing write-up for the isolation fix itself (below); 2026-10-17 ~21:15 UTC Sarel's three tender-update decisions (accept a disagreeing date from the Workspace, a real briefing date + milestone, people named by e-mail in the alert report and the digest - migration `0048`); ~21:00 UTC tender regulatory compliance review (Public Procurement Act 2024 struck down; B-BBEE affidavit vs SANRAL A12); ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039`); ~19:00 UTC Sarel's three decisions on the §9.4 open questions (re-score on a profile change, every local seen store into the database, central system alerts e-mailed to Sarel); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters; ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7; ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
+Last full pass: 2026-10-18 ~02:30 UTC independent verification of the batch below (cross-tenant isolation extended through `0057`, principals/registrations/bank-accounts RLS, taxonomy admin approval) plus one test-script fix - below. 2026-10-18 ~02:00 UTC form-by-form, field-by-field audit (`Form-Field-Audit.md`: 26 fixes, 13 open decisions for Sarel, migration `0057`); 2026-10-18 SANRAL Form B7 Targeted-Enterprise subcontracting answered by the company (compliance review G3, migration `0056` - below); 2026-10-18 Sarel's answers to taxonomy O1/O2/O4/O5 - buyer's eTenders category cross-check, `/admin/taxonomy` + company tag suggestions, SACAP/SACPLAN/SACQSP/SACPVP/PSIRA asked for only when a tender asks (on the 0050 catalog), each tender's own C3.1.11 minimums (migration `0054` - below); 2026-10-18, ~01:15 UTC Sarel's answer on stale Discovery rows after a downgrade (a re-score that makes a verdict worse is flagged on the Discovery card, the Workspace and the Pipeline until marked seen, and carried once in the digest - migration `0055`, below); POPIA / cross-tenant audit follow-up (shared blank templates are now per-company copies, migration `0045`; audit write-up `POPIA-Security-Audit.md` - below); award and price analysis (market feedback on submitted prices, migration `0053` - below); government tender coverage + listing-change tracking (eTenders portal read in full, SANRAL/Eskom/Transnet/Cape Town direct, cancellations and extensions, migration `0051` - row below and `Government-Tender-Coverage-Findings.md`); 2026-10-18 directors & shareholders register, shared registrations catalog, restricted bank accounts and landlord property records (Sarel's Q-MD1-4, migration `0050` - below); ~00:30 UTC independent verification of the cross-tenant isolation fixes and 8 other commits, including filling in the missing write-up for the isolation fix itself (below); 2026-10-17 ~21:15 UTC Sarel's three tender-update decisions (accept a disagreeing date from the Workspace, a real briefing date + milestone, people named by e-mail in the alert report and the digest - migration `0048`); ~21:00 UTC tender regulatory compliance review (Public Procurement Act 2024 struck down; B-BBEE affidavit vs SANRAL A12); ~19:30 UTC tender-update watch (addenda and new documents after discovery, migration `0039`); ~19:00 UTC Sarel's three decisions on the §9.4 open questions (re-score on a profile change, every local seen store into the database, central system alerts e-mailed to Sarel); ~18:40 UTC Sarel's answers to audit Q3/Q5 (own maintained discipline taxonomy, SACNASP/SAGC fields shown only when a tender asks); ~18:25 UTC independent verification of the per-company Discovery fanout and company-owned letters; ~18:00 UTC Sarel's answers to audit follow-ups (a)/(d)/(e); ~17:00 UTC Sarel's answers to audit Q1/Q4/Q7; ~16:20 UTC independent verification of the 10 commits before that; hardcoded-assumptions audit at ~16:00 UTC, below that.
 
 **Convention (added this pass, after the file drifted from its own purpose):** the tables and
 lists directly below ("Repo shape" through "Open items") are the **current state** — read only
@@ -122,6 +122,49 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-18, ~02:30 UTC): independent verification of 11 commits (cross-tenant isolation through `0057`, principals/registrations/bank accounts, taxonomy admin) + one test-script fix
+
+11 commits since the last check-in, 18.5k lines. Replayed `0001`→`0057` fresh (49 migrations;
+`0046`/`0047`/`0049`/`0052` were never used - confirmed via `git log --all`, the same benign
+numbering-race pattern as `0020`/`0027`-`0029` before) and ran every new/extended test suite
+against it:
+
+- **`engine/security/test_tenant_isolation.py` (now 331 lines larger - cases 16-17 added for the
+  shared-blank-template fix, `5523221`'s follow-up `8254fb5`):** ran clean on the first try this
+  time - **ALL PASSED**, reproducing the commit's own "215 pass / 0 fail on 0001->0045" claim and
+  extending it through `0057`. Getting this clean on the first attempt (vs. needing two rounds of
+  stub fixes last pass) confirms the scratch-DB recipe `POPIA-Security-Audit.md` now documents
+  (minimal auth/storage stand-in, Supabase's default privilege grants applied *before* replaying
+  migrations, service_role/anon/authenticated roles) is the right one - worth keeping as the
+  standard recipe for every future pass rather than rediscovering it.
+- **New suites, all run against fresh, dedicated scratch databases** (one per test, per the
+  lesson from the last pass): `test_sanral_b7.py`, `test_form_field_audit.py`,
+  `test_discovery_downgrades.py` (Parts 1+2), `test_award_prices.py` (Parts 1+2),
+  `test_gov_sources.py`, `test_key_person_minimums.py`, `test_principals_registrations.py`
+  (Parts 1+2 - including the bank-account masking RLS: a plain member reads 0 unmasked account
+  numbers, sees only a last-4-digits summary, and can't write one) - **all 0 failures.**
+- **Found and fixed a real gap in my own scratch-DB stub**, not a product bug: `authenticated`/
+  `anon` never had `USAGE` on schema `auth` (Supabase grants this by default so `auth.uid()` can
+  be called from `SECURITY INVOKER` functions, not just from policies owned by a `SECURITY
+  DEFINER` wrapper). Surfaced as "permission denied for schema auth" in `test_taxonomy.py`'s new
+  admin-approval function (`0054`, correctly `security invoker` since it must run as the calling
+  admin, not bypass their own checks). Added the grant to the stub recipe; now passes.
+- **Found and fixed one real gap, in a test script this time** (not the product): same test
+  file's `price_sector: a legacy group value` case assumed a `tenders` row already existed from
+  seed data that a plain migration replay never creates. Fixed with a 4-line guard (insert one
+  minimal tender if none exists) mirroring the same file's own pattern for `companies` two lines
+  above - `engine/discovery/test_taxonomy.py`. Verified: 0 failures after the fix.
+- **Duplication/overlap check:** the new governed discipline-taxonomy catalog (`0040`/`0054`)
+  explicitly reconciles with `0036`'s earlier free-form company tags rather than replacing them
+  (`Discipline-Taxonomy-Findings.md` says so directly) - already handled by the building agent,
+  nothing to fix.
+- Regression: `test_general_bridge.py` still ALL PASSED. `npm run typecheck` / `npm run lint`:
+  clean.
+
+Nothing else found needing a fix. No new product bugs - both issues this pass were in
+verification tooling (mine and the test file's), caught and corrected before reporting anything
+clean.
 
 ## This pass (2026-10-18): SANRAL Form B7 - Targeted-Enterprise subcontracting, answered by the company (migration `0056`)
 

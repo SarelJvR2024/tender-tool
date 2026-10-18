@@ -236,6 +236,12 @@ def part2(psql):
     if not r.stdout.strip():
         sql("insert into companies (legal_name) values ('Taxonomy Test Co')")
     co = sql("select id from companies limit 1").stdout.strip()
+    r = sql("select id from tenders limit 1")
+    if not r.stdout.strip():
+        # A fresh migrations-only replay (no seed_tenders.sql) has no tenders
+        # yet - this check only needs one row to attach a pack to, not any
+        # particular tender's data.
+        sql("insert into tenders (slug, title) values ('taxonomy-test-tender', 'Taxonomy test tender')")
     tid = sql("select id from tenders limit 1").stdout.strip()
     sql(f"delete from tender_packs where company_id = '{co}' and tender_id = '{tid}'")
     r = sql(f"insert into tender_packs (company_id, tender_id, price_sector) values ('{co}', '{tid}', 'roads_civil') returning id")
