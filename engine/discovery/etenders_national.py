@@ -135,10 +135,19 @@ def normalize(release):
     docs = tender.get("documents", []) or []
     closing_date = period.get("endDate")
     now = datetime.datetime.now().isoformat()
+    # On the live API tender.id is the eTenders portal's internal number
+    # (e.g. "174382"), tender.title is the buyer's bid number (e.g.
+    # "RFX6000003683") and tender.description is the actual title - checked
+    # against the portal's own tender_No/description for the same ids
+    # (Award-Outcomes-Findings.md "side finding"; fixed 2026-10-17 with
+    # etenders_portal.py). So contract_number is the bid number, title the
+    # description, and the portal id is kept as portal_id.
+    bid_number = tender.get("title")
     return {
         "ocid": release.get("ocid"),
-        "contract_number": tender.get("id"),
-        "title": tender.get("title"),
+        "contract_number": bid_number or tender.get("id"),
+        "portal_id": tender.get("id"),
+        "title": tender.get("description") or bid_number,
         "description": tender.get("description"),
         "buyer": buyer.get("name"),
         "procurement_category": tender.get("mainProcurementCategory"),

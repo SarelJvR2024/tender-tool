@@ -1,6 +1,7 @@
 """
-Stream 5 (discovery), new-tender watch: runs the national OCDS discovery feed
-(etenders_national.py), scores every release against EVERY company in the
+Stream 5 (discovery), new-tender watch: reads every government tender source
+(gov_sources.py: the eTenders portal in full, SANRAL, Eskom, Transnet, Cape
+Town - or the OCDS feed alone with --sources ocds), scores every release against EVERY company in the
 system - each from its own profile (company_profiles.py: that company's own
 Experience Library disciplines, CIDB grading, B-BBEE and offices) - and diffs
 against a per-company "seen" store so a run only ever reports, per company,
@@ -91,6 +92,7 @@ import datetime
 
 sys.path.insert(0, os.path.dirname(__file__))
 import etenders_national
+import gov_sources
 import assess_tender
 import company_profiles
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
@@ -195,6 +197,9 @@ def save_seen_db(client, seen, loaded, companies):
     return len(rows)
 
 
+# Listing facts a direct reader / the eTenders portal carries (gov_sources.py,
+# source_http.release) - passed through to discovered_opportunities (0051).
+LISTING_FIELDS = ("source", "listing_sources", "province", "tender_type", "briefing", "status")
 RELEASE_FIELDS = ("contract_number", "buyer", "title", "description", "closing_date", "categories",
                   "document_depth", "signals", "confidence_note")
 
@@ -279,7 +284,9 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
                                 "previous_verdict": previous if why[c["key"]] else None})
         if results:
             out.append({**{k: base.get(k) for k in RELEASE_FIELDS}, "ocid": r.get("ocid"),
-                        "documents": r.get("documents"), "company_results": results})
+                        "documents": r.get("documents"),
+                        **{k: r.get(k) for k in LISTING_FIELDS if r.get(k) is not None},
+                        "company_results": results})
     return out
 
 
@@ -334,6 +341,11 @@ def main():
     ap.add_argument("--buyer", default=None,
                      help="case-insensitive substring filter on the buyer/organ-of-state name")
     ap.add_argument("--out", default=None, help="write the full list of newly-seen, report-worthy releases to this JSON file")
+    ap.add_argument("--sources", default="all",
+                     help="'all' (default: every government source in gov_sources.py), a comma list of "
+                          "gov_sources names, or 'ocds' for the old OCDS-only read")
+    ap.add_argument("--no-track-changes", action="store_true",
+                     help="skip tender_changes.py's listing-change tracking on this run's read")
     ap.add_argument("--include-needs-review", action="store_true",
                      help="also report needs_review verdicts, not just strong_fit/possible - noisy on the "
                           "unfiltered national feed (confirmed: 72 of 74 on a real run were irrelevant "
@@ -351,9 +363,31 @@ def main():
     today = datetime.date.today()
     date_from = (today - datetime.timedelta(days=args.days)).isoformat()
     date_to = today.isoformat()
-    print(f"Fetching OCDS releases from {date_from} to {date_to}...")
-    raw = etenders_national.fetch_releases(date_from, date_to)
-    normalized = [etenders_national.normalize(r) for r in raw]
+    if args.sources == "ocds":
+        print(f"Fetching OCDS releases from {date_from} to {date_to}...")
+        raw = etenders_national.fetch_releases(date_from, date_to)
+        normalized = [etenders_national.normalize(r) for r in raw]
+    else:
+        # Every government source (gov_sources.py): the eTenders portal read in
+        # full (the OCDS API above stops at ~300-600 releases, about a fifth of a
+        # 14-day window), plus SANRAL, Eskom, Transnet and Cape Town direct.
+        # --days keeps its meaning: tenders published in the last N days (a
+        # listing with no publish date, e.g. SANRAL's list, is always kept).
+        names = gov_sources.ALL_SOURCES if args.sources == "all" else [x.strip() for x in args.sources.split(",")]
+        print(f"Reading government tender sources: {', '.join(names)}...")
+        normalized, res = gov_sources.releases_for_watch(names)
+        if not args.no_track_changes:
+            # Same read, so one scheduled run covers both: what is new
+            # (below) and what changed on every listing (cancellations,
+            # moved closing dates, addenda listed - tender_changes.py, 0051).
+            import tender_changes
+            store = tender_changes.SupabaseStore(client) if client is not None else tender_changes.LocalStore()
+            try:
+                new_changes, _, _ = tender_changes.run(res, store)
+                print(f"  Listing changes: {len(new_changes)} new (cancellations, date moves, addenda listed...)")
+            except Exception as e:
+                print(f"  WARNING: listing change tracking failed ({e}) - new-tender scoring continues.")
+        normalized = gov_sources.published_since(normalized, date_from)
     if args.buyer:
         needle = args.buyer.lower()
         normalized = [r for r in normalized if r["buyer"] and needle in r["buyer"].lower()]

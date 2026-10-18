@@ -109,6 +109,8 @@ import datetime
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "discovery"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "compliance"))
 import etenders_national
+import gov_sources
+import tender_changes
 import assess_tender
 import company_profiles
 import watch_new_tenders
@@ -146,6 +148,13 @@ SECTION_VISIBILITY = {
 # whatever their part - and the viewer gets the count, like its other sections.
 for _sections in SECTION_VISIBILITY.values():
     _sections.add("tender_updates")
+# Listing changes (0051, engine/discovery/tender_changes.py): cancellations,
+# moved closing/briefing dates, addenda listed, re-advertisements on tenders
+# in the company's Discovery feed - pursued or not (tender_updates above is
+# only for tenders being pursued, with the documents read). Every role, the
+# viewer as a count, same reasoning as tender_updates.
+for _sections in SECTION_VISIBILITY.values():
+    _sections.add("listing_changes")
 
 # Heuristic keyword classifiers for sections that have no real "who cares
 # about this" tag in the schema yet (tender_tasks.kind is a closed enum of
@@ -193,11 +202,30 @@ def save_readiness_seen_db(client, seen, loaded, owners):
 # for both signals so the OCDS feed is only ever fetched once per run.
 # ---------------------------------------------------------------------------
 
-def fetch_releases(days=14):
+def fetch_releases(days=14, sources="all"):
+    """The same government sources Discovery reads (gov_sources.py; the
+    OCDS-only read with sources='ocds'), published in the last `days` days.
+    Returns (releases, gov_sources result or None)."""
     today = datetime.date.today()
     date_from = (today - datetime.timedelta(days=days)).isoformat()
-    raw = etenders_national.fetch_releases(date_from, today.isoformat())
-    return [etenders_national.normalize(r) for r in raw]
+    if sources == "ocds":
+        raw = etenders_national.fetch_releases(date_from, today.isoformat())
+        return [etenders_national.normalize(r) for r in raw], None
+    names = gov_sources.ALL_SOURCES if sources == "all" else [x.strip() for x in sources.split(",")]
+    releases, res = gov_sources.releases_for_watch(names)
+    return gov_sources.published_since(releases, date_from), res
+
+
+def listing_change_signals(changes, scored):
+    """Listing changes (tender_changes.py, 0051: cancelled, closing date
+    moved, addendum listed, buyer's site disagrees with eTenders...) on the
+    tenders in THIS company's scored feed - matched by ocid. Cancellations
+    and moved dates first."""
+    mine = {r.get("ocid") for r in scored if r.get("ocid")}
+    order = {"cancelled": 0, "closing_date_changed": 1, "sources_disagree": 2, "briefing_changed": 3,
+             "readvertised": 4, "document_added": 5}
+    out = [c for c in changes if c.get("ocid") in mine]
+    return sorted(out, key=lambda c: (order.get(c.get("change_type"), 9), c.get("contract_number") or ""))
 
 
 def score_per_company(releases, companies, fetch_documents=True, fetch_text=None):
@@ -219,7 +247,7 @@ def score_per_company(releases, companies, fetch_documents=True, fetch_text=None
 
 
 def company_signals(company_key, scored_by_company, document_expiry, tender_tasks, readiness_changes,
-                    submission_lead_days, company_id=None, tender_updates=None):
+                    submission_lead_days, company_id=None, tender_updates=None, listing_changes=None):
     """One company's signals. With company_id set (live mode), the
     company-tagged sections (every item watch_deadlines/find_readiness_changes
     returns carries company_id) are narrowed to that company - a person never
@@ -237,6 +265,7 @@ def company_signals(company_key, scored_by_company, document_expiry, tender_task
         # (tender_update_notifications rows are per company); own() keeps a
         # person to their own company's rows like every other section.
         "tender_updates": own(tender_updates or []),
+        "listing_changes": listing_change_signals(listing_changes or [], scored),
     }
 
 
@@ -464,6 +493,14 @@ def build_digest_for_person(person, signals):
         else:
             digest["tender_updates"] = items
 
+    if "listing_changes" in visible:
+        items = signals.get("listing_changes") or []
+        if role == "viewer":
+            digest["listing_changes"] = {"count": len(items),
+                                         "cancelled": sum(1 for c in items if c.get("change_type") == "cancelled")}
+        else:
+            digest["listing_changes"] = items
+
     return digest
 
 
@@ -477,7 +514,9 @@ def main():
                      help="local mode: the company profile JSON to use (required in local mode - no default company)")
     ap.add_argument("--roster", default=DEFAULT_ROSTER_PATH,
                      help="local mode: roster JSON (see config/team_roster.example.json)")
-    ap.add_argument("--days", type=int, default=14, help="how many days back to search the national feed")
+    ap.add_argument("--days", type=int, default=14, help="tenders published in the last N days")
+    ap.add_argument("--sources", default="all",
+                     help="'all' government sources (gov_sources.py, default), a comma list, or 'ocds'")
     ap.add_argument("--no-fetch-documents", action="store_true",
                      help="metadata-only scoring (no per-release document download) - much faster, "
                           "useful for a quick local run; watch_new_tenders.py's own default fetches "
@@ -543,8 +582,27 @@ def main():
 
     print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
           f"{'y' if len(companies) == 1 else 'ies'}, each from its own profile...")
-    scored_by_company = score_per_company(fetch_releases(args.days), companies,
+    releases, gov_res = fetch_releases(args.days, args.sources)
+    scored_by_company = score_per_company(releases, companies,
                                           fetch_documents=not args.no_fetch_documents)
+    # Listing changes on the same read: recorded in the change store (Supabase
+    # tables in live mode, state/ JSON locally) and every change detected this
+    # run is matched to each company's feed. A failure must not cost anyone
+    # the rest of their digest.
+    listing_changes = []
+    if gov_res is not None:
+        try:
+            store = (tender_changes.SupabaseStore(company_profiles.RestClient(url, key)) if mode == "live"
+                     else tender_changes.LocalStore())
+            tender_changes.run(gov_res, store)
+            # Everything recorded in the last day on any tender in a company's
+            # feed - including what an earlier watch_new_tenders.py run today
+            # recorded from its own read (it runs the same tracker).
+            feed_ocids = {r.get("ocid") for rows in scored_by_company.values() for r in rows}
+            since = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=26)
+            listing_changes = store.recent_changes(feed_ocids, since)
+        except Exception as e:
+            print(f"WARNING: listing changes could not be tracked ({e}) - digest goes out without them.")
 
     if mode == "live":
         n = (watch_deadlines.save_seen_db(client, seen, seen_loaded, DIGEST_CONSUMER)
@@ -556,7 +614,7 @@ def main():
         ckey = LOCAL_COMPANY_KEY if mode == "local" else p["company_id"]
         signals = company_signals(ckey, scored_by_company, document_expiry, tender_tasks, readiness_changes,
                                   args.submission_lead_days, company_id=None if mode == "local" else p["company_id"],
-                                  tender_updates=tender_updates)
+                                  tender_updates=tender_updates, listing_changes=listing_changes)
         for k, v in signals.items():
             totals.setdefault(k, {})[ckey] = len(v)
         digests.append(build_digest_for_person(p, signals))
@@ -570,7 +628,8 @@ def main():
           f"{total('tender_tasks')} tender task(s) due, "
           f"{total('readiness_changes')} readiness change(s), "
           f"{total('submission_due')} tender(s) closing soon, "
-          f"{total('tender_updates')} tender update(s) (addenda, new documents).")
+          f"{total('tender_updates')} tender update(s) (addenda, new documents), "
+          f"{total('listing_changes')} listing change(s) (cancellations, date moves) on tenders in the feed.")
 
     # Each update is carried by one digest only: mark the ones that went to a
     # roster company as digested (the watch already alerted on them).

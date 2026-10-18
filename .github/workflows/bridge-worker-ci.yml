@@ -105,6 +105,9 @@ jobs:
       - name: Tender updates - addenda classified from real documents, watch end to end, pursuers only (in-memory rows)
         run: python3 engine/discovery/test_tender_updates.py
 
+      - name: Government sources + listing changes - portal/Eskom/Transnet/Cape Town readers, SANRAL dual-id merge, cancellations and date moves (real trimmed rows, offline)
+        run: python3 engine/discovery/test_gov_sources.py
+
       - name: Company letters - uploaded as-is / own guideline / not set up (docx read-back)
         run: python3 engine/test_company_documents.py "$RUNNER_TEMP/company-documents"
 

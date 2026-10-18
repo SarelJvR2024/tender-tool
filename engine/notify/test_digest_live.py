@@ -158,7 +158,7 @@ def main():
         return real_one(client, company_id, company)
     company_profiles.all_company_profiles = spy_all
     company_profiles.profile_from_company_rows = spy_one
-    daily_digest.fetch_releases = lambda days=14: [dict(r) for r in fanout.RELEASES]
+    daily_digest.fetch_releases = lambda days=14, sources="all": ([dict(r) for r in fanout.RELEASES], None)
 
     tmp = tempfile.mkdtemp()
     out_path = os.path.join(tmp, "digest.json")

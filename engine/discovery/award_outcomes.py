@@ -439,7 +439,12 @@ def summarize_sanral(block):
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--source", choices=["portal", "sanral", "both"], default="both")
+    ap.add_argument("--source", choices=["portal", "sanral", "both", "capetown", "eskom", "all"], default="both",
+                    help="both = portal + sanral (unchanged default); capetown = City of Cape Town RFQ "
+                         "awards (capetown_procurement.py: supplier per RFQ, no amount published); "
+                         "eskom = Eskom Tender Bulletin award / bidders-list / regret notices "
+                         "(eskom_bulletin.py: the notice and its document links); all = every source")
+    ap.add_argument("--capetown-limit", type=int, default=50, help="Cape Town award notices to read (default 50)")
     ap.add_argument("--limit", type=int, default=200,
                     help="eTenders portal awarded rows to read, newest first (default 200)")
     ap.add_argument("--department", type=int, default=None,
@@ -455,7 +460,7 @@ def main():
 
     report = {"generated_at": datetime.datetime.now().isoformat()}
 
-    if args.source in ("portal", "both"):
+    if args.source in ("portal", "both", "all"):
         print("Reading the eTenders portal's Awarded tab...", file=sys.stderr)
         raw, total, skipped = fetch_portal_awarded(args.limit, args.department)
         recs = [normalize_portal_award(r) for r in raw]
@@ -474,7 +479,26 @@ def main():
                             "records_filtered": total, "skipped_broken_records": skipped,
                             "summary": summary, "records": recs}
 
-    if args.source in ("sanral", "both"):
+    if args.source in ("capetown", "all"):
+        import capetown_procurement
+        recs = capetown_procurement.fetch_awards(limit=args.capetown_limit,
+                                                 log=lambda m: print(m, file=sys.stderr))
+        report["capetown"] = {"records": recs, "with_supplier": sum(1 for r in recs if r.get("supplier"))}
+
+    if args.source in ("eskom", "all"):
+        import eskom_bulletin
+        rels = eskom_bulletin.fetch_releases(with_documents=False, log=lambda m: print(m, file=sys.stderr))
+        keep = ("award", "bidders_list", "regret")
+        notices = [{"kind": r["notice_kind"], "reference": r["contract_number"],
+                    "refers_to_reference": r["refers_to_reference"], "title": r["title"], "buyer": r["buyer"],
+                    "published_date": r["published_date"], "url": r["source_url"],
+                    "documents_api": f"{eskom_bulletin.API}/Files/GetDocs?TENDER_ID={r['source_id']}"}
+                   for r in rels if r.get("notice_kind") in keep]
+        report["eskom"] = {"notices": notices,
+                           "counts": {k: sum(1 for n in notices if n["kind"] == k) for k in keep}}
+        print(f"  Eskom award/bidders-list/regret notices: {report['eskom']['counts']}", file=sys.stderr)
+
+    if args.source in ("sanral", "both", "all"):
         report["sanral"] = {}
         for key in [k.strip() for k in args.sanral_lists.split(",") if k.strip()]:
             print(f"Reading SANRAL's {SANRAL_LISTS[key]} list...", file=sys.stderr)

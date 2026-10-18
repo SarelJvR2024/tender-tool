@@ -819,6 +819,26 @@ What Tender Tool would do that L2B doesn't: free automated award prices for ever
 
 **Sources for this section:** [eTenders portal](https://www.etenders.gov.za/Home/opportunities?id=1) (advertised, closed, awarded and cancelled tabs, read through `/Home/TenderFilter/`), [OCDS API](https://ocds-api.etenders.gov.za/api/OCDSReleases), [SANRAL open tenders](https://www.nra.co.za/sanral-tenders/list/open-tenders), [Eskom Tender Bulletin](https://tenderbulletin.eskom.co.za/), [Transnet eTenders](https://transnetetenders.azurewebsites.net/Home/AdvertisedTenders), [City of Cape Town procurement portal (RFQs)](https://web1.capetown.gov.za/web1/procurementportal/RFQ), [MFMA Circular 83](https://mfma.treasury.gov.za/Circulars/MFMA%20Circular%2083%20-%20eTender%20Portal%20-%2018%20July%202016.pdf), [PMG NW1277](https://pmg.org.za/committee-question/22234/), [PMG NW2297](https://pmg.org.za/committee-question/29895/), [National Treasury on the Public Procurement Act's commencement (Aug 2024)](https://www.treasury.gov.za/comm_media/press/2024/2024081301%20Media%20Statement%20-%20Commencement%20of%20Public%20Procurement%20Act.pdf). Repo: `engine/discovery/etenders_national.py`, `list_tenders.py`, `detail.py`, `award_outcomes.py`.
 
+### 10.9 Update, 18 Oct 2026: items 1 to 3 of 10.5 are built
+
+Built on top of this section's findings (engineering detail and evidence: `docs/specs/Government-Tender-Coverage-Findings.md`).
+
+- **Item 1 is done.** Discovery and the daily digest now read the eTenders portal in full: 2,211 open tenders from 408 buyers, against the ~300 releases the OCDS read returned. The OCDS feed is kept as the fallback.
+- **Item 2 is done.** SANRAL's own site is merged in, matched on both identifiers, and diffed for changes. The first run caught 6 SANRAL tenders that eTenders shows as closed while SANRAL has extended them. NRA 2026/0754 (A) is one: eTenders shows it closed on 15 Oct, SANRAL's site says 6 Nov.
+- **Item 3 is done.** Eskom's bulletin and Transnet's own site are read directly. In the 60 days to 17 Oct, Eskom's bulletin carried 26 bidders lists, 12 award notices and 8 validity extensions. 3 Eskom extensions also weren't on eTenders.
+- **Section 11.7 item 1 is done.** The portal reader keeps the Closed tab's bidders field (names and any amounts), and Discovery shows it as a "bidders list published" change. On 18 Oct, 20 of the newest 201 closed rows had one.
+- **Item 4 is started.** The City of Cape Town's 246 RFQs now reach Discovery. On 17 Oct, none of them were on eTenders.
+- **Cancellations and re-advertisements are now tracked.** Cancellations come from the portal's Cancelled tab, with the reason: 55 in 14 days. A re-advertisement is flagged when a buyer re-lists the same bid number with a new date.
+- **Addenda are flagged.** Addendum-named documents uploaded after publication were found on 301 open tenders. For tenders a firm is actually pursuing, the separate document watch reads them.
+
+**What this closes against section 9.3's L2B table:**
+
+- **"Change tracking: No"** becomes **yes for listings**: cancellations, extensions, re-listings and addenda appear on Discovery and in the digest.
+- **"Award information: effectively no"** becomes **partly**: award notices from the eTenders portal, SANRAL, Eskom and Cape Town's RFQs (still not stored or shown in the app).
+- **"Bidders lists: no"** becomes **SANRAL registers and Eskom notices only**.
+
+The claim 10.7 says Tender Tool can make is now backed by running code: every eTenders tender plus SANRAL, Eskom and Transnet direct, with their cancellations and extensions, checked daily. Two parts are verified live but not yet in production: the worker isn't deployed, and there is no live Supabase (section 7.1). **10.6 is unchanged:** municipalities off eTenders, most bidders lists, and human curation remain L2B's ground. Don't claim "full L2B".
+
 ---
 
 ## 11. Where else are tenders and awards published? A source survey beyond eTenders

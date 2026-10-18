@@ -46,6 +46,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import company_profiles  # noqa: E402
 
 
+LISTING_SOURCES = ("etenders_ocds", "etenders_portal", "sanral", "eskom_bulletin", "transnet_etenders",
+                   "capetown_procurement")  # 0051's discovered_opportunities.source check, minus 'manual'
+
+
 def to_row(r, company_id, c):
     """One company's discovered_opportunities row for release r."""
     documents = r.get("documents") or []
@@ -67,6 +71,15 @@ def to_row(r, company_id, c):
         # assess_release()'s scoring outlook (score_outlook.py) - null for
         # JSON written before that existed, never a fabricated default.
         "score_outlook": c.get("score_outlook"),
+        # 0051: where the tender is listed and the listing's own facts
+        # (gov_sources.py). Absent from JSON written by an OCDS-only run, so
+        # those rows keep source etenders_ocds and empty listing fields.
+        "source": r.get("source") if r.get("source") in LISTING_SOURCES else "etenders_ocds",
+        "listing_sources": r.get("listing_sources") or [],
+        "province": r.get("province"),
+        "tender_type": r.get("tender_type"),
+        "briefing": r.get("briefing"),
+        "listing_status": r.get("status") if r.get("status") in ("advertised", "cancelled", "closed", "awarded") else None,
     }
 
 

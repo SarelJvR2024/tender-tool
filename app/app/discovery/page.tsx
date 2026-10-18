@@ -3,6 +3,14 @@ import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../_components/SiteNav";
 import { loadDisciplineTaxonomy, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { pursueOpportunity } from "./actions";
+import {
+  CHANGE_LABELS,
+  changeTone,
+  groupByOcid,
+  listingSourceLabels,
+  type ListingChange,
+  type ListingSource,
+} from "@/lib/listingChanges";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -27,22 +35,35 @@ type OpportunityRow = {
   // 0024: the tender this opportunity became (pursued, or loaded manually).
   tender_id: string | null;
   source: string | null;
+  // 0051: where it is listed + the listing's own facts (gov_sources.py).
+  ocid: string | null;
+  listing_sources: ListingSource[] | null;
+  province: string | null;
+  tender_type: string | null;
+  briefing: { date?: string | null; compulsory?: boolean | null; venue?: string | null } | null;
+  listing_status: string | null;
 };
 
-type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit";
+type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed";
 
 const FILTERS: { key: VerdictFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "strong_fit", label: "Strong fit" },
   { key: "needs_review", label: "Needs review" },
   { key: "not_a_fit", label: "Not a fit" },
+  // Tenders whose listing changed since it was found: cancelled, closing
+  // date moved, addendum listed... (tender_listing_changes, 0051).
+  { key: "changed", label: "Changed" },
 ];
+
+const SAST_DATE: Intl.DateTimeFormatOptions = { timeZone: "Africa/Johannesburg", day: "numeric", month: "short", year: "numeric" };
+const SAST_DATETIME: Intl.DateTimeFormatOptions = { ...SAST_DATE, hour: "2-digit", minute: "2-digit" };
 
 // "needs_review" groups assess_tender.py's "possible" and "needs_review" verdicts -
 // both mean "a human should look at this", just at different confidence levels
 // (see assess_fit()'s docstring/logic in engine/discovery/assess_tender.py).
 function matchesFilter(verdict: string, filter: VerdictFilter): boolean {
-  if (filter === "all") return true;
+  if (filter === "all" || filter === "changed") return true;
   if (filter === "needs_review") return verdict === "possible" || verdict === "needs_review";
   return verdict === filter;
 }
@@ -81,19 +102,36 @@ export default async function DiscoveryPage({
   // this query shape works the same regardless of which company is asking.
   const { data: opportunities, error } = await supabase
     .from("discovered_opportunities")
-    .select("id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source")
+    .select("id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status")
     .order("first_seen", { ascending: false });
 
   const rows = (opportunities ?? []) as unknown as OpportunityRow[];
+
+  // Listing changes on these tenders (public listing facts, readable by any
+  // signed-in user - 0051). Chunked so the in.() list stays a sane URL length.
+  const ocids = [...new Set(rows.map((r) => r.ocid).filter((o): o is string => !!o))];
+  const changeRows: ListingChange[] = [];
+  for (let i = 0; i < ocids.length; i += 150) {
+    const { data } = await supabase
+      .from("tender_listing_changes")
+      .select("id, ocid, change_type, summary, evidence_url, source_timestamp, detected_at")
+      .in("ocid", ocids.slice(i, i + 150));
+    changeRows.push(...((data ?? []) as ListingChange[]));
+  }
+  const changesByOcid = groupByOcid(changeRows);
+  const changesFor = (r: OpportunityRow) => (r.ocid ? changesByOcid.get(r.ocid) ?? [] : []);
 
   const counts: Record<VerdictFilter, number> = {
     all: rows.length,
     strong_fit: rows.filter((r) => r.verdict === "strong_fit").length,
     needs_review: rows.filter((r) => r.verdict === "possible" || r.verdict === "needs_review").length,
     not_a_fit: rows.filter((r) => r.verdict === "not_a_fit").length,
+    changed: rows.filter((r) => changesFor(r).length > 0).length,
   };
 
-  const visibleRows = rows.filter((r) => matchesFilter(r.verdict, activeFilter));
+  const visibleRows = rows.filter(
+    (r) => matchesFilter(r.verdict, activeFilter) && (activeFilter !== "changed" || changesFor(r).length > 0),
+  );
 
   return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
@@ -104,8 +142,11 @@ export default async function DiscoveryPage({
           <div style={{ flex: "1 1 320px" }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovery</h1>
             <p style={{ fontSize: 13, color: "#6B6758", margin: 0 }}>
-              Newly-found tender opportunities from the national OCDS feed, scored against your company profile.
-              Click through to download the real document from the buyer&apos;s own site.
+              Government tenders - national, provincial, municipal and state-owned buyers - scored against your company
+              profile. Read daily from National Treasury&apos;s eTenders portal (every buyer that publishes there) plus
+              SANRAL, Eskom, Transnet and the City of Cape Town&apos;s own sites, with cancellations, moved closing dates
+              and addenda tracked. Not covered: private-sector work, and municipal notices that never reach eTenders
+              or one of those sites.
             </p>
           </div>
           {/* A tender that isn't in this feed (SANRAL's own portal, a forwarded
@@ -194,6 +235,8 @@ export default async function DiscoveryPage({
           {visibleRows.map((o) => {
             const chip = verdictChip(o.verdict);
             const docs = (o.document_urls ?? []).filter((d) => d.url);
+            const changes = changesFor(o);
+            const facts = [o.province, o.tender_type].filter(Boolean).join(" · ");
             return (
               <div
                 key={o.id}
@@ -217,6 +260,15 @@ export default async function DiscoveryPage({
                     {o.source === "manual" && (
                       <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>Loaded manually</span>
                     )}
+                    {o.source !== "manual" &&
+                      listingSourceLabels(o.listing_sources, o.source).map((label) => (
+                        <span key={label} title="Where this tender is listed" style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>
+                          {label}
+                        </span>
+                      ))}
+                    {changes.some((c) => c.change_type === "cancelled") && (
+                      <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 100, background: "#FEE2E2", color: "#B91C1C" }}>Cancelled</span>
+                    )}
                     <span
                       style={{
                         display: "inline-flex",
@@ -235,7 +287,51 @@ export default async function DiscoveryPage({
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 2 }}>
                     {o.title || "(untitled)"}
                   </div>
-                  <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 6 }}>{o.buyer || "(unknown buyer)"}</div>
+                  <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 6 }}>
+                    {o.buyer || "(unknown buyer)"}
+                    {facts && <span style={{ color: "#9A9684" }}> · {facts}</span>}
+                  </div>
+                  {o.briefing?.date && (
+                    <div style={{ fontSize: 12, color: o.briefing.compulsory ? "#B45309" : "#4B5563", fontWeight: o.briefing.compulsory ? 600 : 400, marginBottom: 6 }}>
+                      {o.briefing.compulsory ? "Compulsory briefing" : "Briefing"}: {new Date(o.briefing.date).toLocaleString("en-ZA", SAST_DATETIME)}
+                      {o.briefing.venue && <span style={{ fontWeight: 400, color: "#6B6758" }}> · {o.briefing.venue.slice(0, 120)}</span>}
+                    </div>
+                  )}
+
+                  {/* What changed on the listing since it was found (0051). Most
+                      urgent first; the full list folds away past three. */}
+                  {changes.length > 0 && (
+                    <div style={{ margin: "4px 0 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+                      {changes.slice(0, 3).map((c) => {
+                        const tone = changeTone(c.change_type);
+                        return (
+                          <div key={c.id} style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, background: tone.bg, border: `1px solid ${tone.border}`, color: tone.color, overflowWrap: "anywhere" }}>
+                            <strong>{CHANGE_LABELS[c.change_type] ?? c.change_type}</strong>: {c.summary}
+                            {c.evidence_url && (
+                              <>
+                                {" "}
+                                <a href={c.evidence_url} target="_blank" rel="noopener noreferrer" style={{ color: tone.color, fontWeight: 600 }}>
+                                  source ↗
+                                </a>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {changes.length > 3 && (
+                        <details style={{ fontSize: 12, color: "#4B5563" }}>
+                          <summary style={{ cursor: "pointer" }}>{changes.length - 3} more change{changes.length - 3 === 1 ? "" : "s"}</summary>
+                          <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                            {changes.slice(3).map((c) => (
+                              <li key={c.id} style={{ marginBottom: 2, overflowWrap: "anywhere" }}>
+                                <strong>{CHANGE_LABELS[c.change_type] ?? c.change_type}</strong>: {c.summary}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      )}
+                    </div>
+                  )}
 
                   {(o.categories ?? []).length > 0 && (
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
@@ -286,11 +382,11 @@ export default async function DiscoveryPage({
                 <div style={{ flex: "0 0 180px", textAlign: "right" }}>
                   <div style={{ fontSize: 11, color: "#9A9684", marginBottom: 2 }}>Closes</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 10 }}>
-                    {o.closing_date ? new Date(o.closing_date).toLocaleDateString() : "-"}
+                    {o.closing_date ? new Date(o.closing_date).toLocaleString("en-ZA", SAST_DATETIME) : "-"}
                   </div>
                   {/* Into the Tender Workspace: what this tender needs, the questions
                       only you can answer, and a generated pack (migration 0018). */}
-                  {o.verdict !== "closed" && (
+                  {o.verdict !== "closed" && !changes.some((c) => c.change_type === "cancelled") && (
                     <form action={pursueOpportunity} style={{ marginBottom: 10 }}>
                       <input type="hidden" name="opportunity_id" value={o.id} />
                       <button
