@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo, useState, useSyncExternalStore } from "react";
-import Link from "next/link";
 import { addBusinessDays, businessDaysBetween, holidaysForYear, isPublicHoliday, isWeekend } from "@/lib/publicHolidays";
+import { ToolsHeader } from "../_components/ToolsHeader";
 
 const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
 const LABEL: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#16233B", display: "block", marginBottom: 6 };
@@ -61,11 +61,7 @@ export default function DeadlineCalculatorPage() {
 
   return (
     <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
-      <header style={{ background: "#16233B", color: "#FFFFFF", padding: "16px 20px" }}>
-        <Link href="/tools" style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, textDecoration: "none" }}>
-          &larr; Free tools
-        </Link>
-      </header>
+      <ToolsHeader />
 
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "32px 16px 64px", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>Working-day deadline calculator</h1>

@@ -36,12 +36,32 @@ export default function ToolsIndexPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
       <header style={{ background: "#16233B", color: "#FFFFFF", padding: "16px 20px" }}>
-        <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "#FFFFFF", width: "fit-content" }}>
-          <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>
-            T
-          </div>
-          <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
-        </Link>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "#FFFFFF", width: "fit-content" }}>
+            <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>
+              T
+            </div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
+          </Link>
+          <Link
+            href="/signup"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              minHeight: 36,
+              padding: "0 16px",
+              borderRadius: 8,
+              background: "#D97706",
+              color: "#FFFFFF",
+              fontSize: 13,
+              fontWeight: 700,
+              textDecoration: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Start free
+          </Link>
+        </div>
       </header>
 
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 16px 64px", boxSizing: "border-box" }}>
