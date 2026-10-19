@@ -180,6 +180,43 @@ def test_new_sources():
           ("sars_procurement", "cidb_tenders", "dbsa_procurement")))
 
 
+def test_new_sources_are_in_buyer_family():
+    # QA-Edge-Case-Findings.md, 2026-10-18 (fourteenth run): sars_procurement/
+    # cidb_tenders/dbsa_procurement shipped without a BUYER_FAMILY entry.
+    # _find()'s own family check (`not family or family.search(...)`) treats
+    # a missing entry as "any buyer matches" - the buyer-isolation merge()'s
+    # own docstring promises ("reference numbers aren't unique across
+    # buyers") silently didn't apply to any of the three newest sources.
+    # Reproduces the exact failure: an unrelated department's portal row and
+    # a SARS tender that happen to share a generic reference format must
+    # stay two separate tenders, not fold into one with the wrong buyer.
+    print("gov_sources.BUYER_FAMILY covers every foldable new source")
+    for name, buyer_const in (("sars_procurement", sars_procurement.BUYER),
+                              ("cidb_tenders", cidb_tenders.BUYER),
+                              ("dbsa_procurement", dbsa_procurement.BUYER)):
+        check(f"{name} is in BUYER_FAMILY", name in gov_sources.BUYER_FAMILY)
+        check(f"{name}'s BUYER_FAMILY pattern matches its own BUYER string",
+              bool(gov_sources.BUYER_FAMILY[name].search(buyer_const)), buyer_const)
+
+    portal_unrelated = etenders_portal.normalize(dict(
+        PORTAL_OTHER_BUYER_SAME_REF, id=900101, tender_No="RFP14/2026",
+        description="Appointment of a caterer for Head Office", organ_of_State="Department of Something Unrelated"))
+    sars_row = sars_procurement.normalize({"url": "https://sars/tender/rfp14-2026", "title": "ICT infrastructure audit",
+                                           "ref": "RFP14/2026", "published": "2026-10-16T00:00:00+02:00"})
+    merged = gov_sources.merge({"etenders_portal": [portal_unrelated], "sars_procurement": [sars_row]})
+    check("a SARS tender sharing a generic ref format with an unrelated department's portal row stays separate",
+          len(merged) == 2, [m["buyer"] for m in merged])
+
+    # Same buyer (SARS's own tender also listed on the portal under SARS's
+    # name): the fold must still happen - this isn't "never match SARS."
+    portal_sars = etenders_portal.normalize(dict(
+        PORTAL_OTHER_BUYER_SAME_REF, id=900102, tender_No="RFP14/2026",
+        description="ICT infrastructure audit", organ_of_State="South African Revenue Service"))
+    merged2 = gov_sources.merge({"etenders_portal": [portal_sars], "sars_procurement": [sars_row]})
+    check("a SARS tender listed on the portal under SARS's own name still folds",
+          len(merged2) == 1 and len(merged2[0]["listing_sources"]) == 2)
+
+
 def test_merge():
     print("gov_sources.merge")
     portal = [etenders_portal.normalize(x) for x in (PORTAL_SANRAL_0756C, PORTAL_SANRAL_N011, PORTAL_OTHER_BUYER_SAME_REF)]
@@ -306,6 +343,7 @@ if __name__ == "__main__":
     test_eskom()
     test_transnet_capetown()
     test_new_sources()
+    test_new_sources_are_in_buyer_family()
     test_merge()
     test_changes()
     test_digest()

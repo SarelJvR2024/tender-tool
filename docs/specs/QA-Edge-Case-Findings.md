@@ -1197,3 +1197,60 @@ pre-existing, unrelated module-resolution noise (`node_modules` is not installed
 no `next`, `react`, or `@types/*` packages exist on disk; same limitation this review has hit on
 other `app/` TypeScript files) - confirmed this is not new by checking `ls node_modules/next`
 before concluding, not just by reading past the errors.
+
+## 2026-10-19 (fourteenth run): 3 brand-new discovery sources could silently merge an unrelated
+buyer's tender into theirs on a coincidental reference-number match
+
+**Context:** synced with `origin/main` and picked up a large batch landed since the thirteenth
+run - 3 new discovery sources (`sars_procurement.py`, `cidb_tenders.py`, `dbsa_procurement.py`,
+all added in commit `cace3f7`), a super-admin portal, a new landing page, and auth-page redesigns.
+Picked the 3 new discovery sources for this run: brand new, untested by this review, and
+`gov_sources.py` is exactly the kind of merge/matching logic this review has already found real
+bugs in before (Findings 9b/10/11).
+
+**Finding 14 (CONFIRMED, FIXED, severe - a "gate": wrong data presented with total confidence,
+no error):** `gov_sources.py`'s own module docstring and a code comment on `BUYER_FAMILY` state
+the rule plainly: *"A direct-site tender is only folded into a portal row of the SAME buyer:
+reference numbers aren't unique across buyers ('RFQ 01/2026')."* `_find()` enforces this via
+`(not family or family.search(m.get("buyer") or ""))` - but `family = BUYER_FAMILY.get(name)`,
+and `BUYER_FAMILY` only had entries for the 4 original direct sources (`sanral`, `eskom_bulletin`,
+`transnet_etenders`, `capetown_procurement`). All 3 of the newly-added sources were missing, so
+for them `family` is `None` and `not family` is `True` - the buyer check is skipped entirely,
+exactly the failure the rule exists to prevent.
+
+Reproduced directly: built a portal release for "Department of Something Completely Unrelated"
+with reference "RFP14/2026", and a `sars_procurement` release for "South African Revenue Service"
+with the same reference but a completely different tender (an ICT infrastructure audit vs. a
+catering contract). Before the fix, `gov_sources.merge()` folded them into ONE release: the SARS
+tender vanished from the merged output entirely, and the surviving (wrong) release - still
+labelled as the unrelated department's catering tender - picked up the SARS tender's document
+("SARS advert.pdf") as if it were its own. No error, no warning, no `source_disagreements` entry
+(that mechanism only fires on a closing-date mismatch, not a buyer mismatch) - a reviewer or an
+automated digest would see a plausible-looking, wrong result with nothing to flag it.
+
+**Fix:** added the 3 missing entries to `BUYER_FAMILY` (`sars_procurement`, `cidb_tenders`,
+`dbsa_procurement`), matching the existing style (a regex on the source's own `BUYER` constant -
+`\bsars\b|revenue service`, `\bcidb\b|construction industry development board`,
+`\bdbsa\b|development bank of southern africa`). No change to `_find()`/`merge()` itself - the
+mechanism was always correct, only its source list was incomplete. Left a comment on
+`BUYER_FAMILY` itself spelling out the failure mode, since this is exactly the kind of omission a
+future "add source #9" pass could repeat silently.
+
+**Verification:** direct adversarial reruns of the exact scenario above - after the fix, the SARS
+tender and the unrelated department's tender stay two separate releases (confirmed for
+`sars_procurement`, `cidb_tenders`, and `dbsa_procurement` each against an unrelated buyer sharing
+a generic ref format). Also confirmed the fix doesn't break the legitimate case: a SARS tender
+also listed on the portal under SARS's own name still folds into one release as before. Added
+`test_new_sources_are_in_buyer_family()` to `test_gov_sources.py` - pins that all 3 sources are
+registered in `BUYER_FAMILY`, that each pattern actually matches its own source's `BUYER` string
+(so a typo'd regex would be caught too), and both the cross-buyer-must-not-fold and
+same-buyer-must-fold scenarios - called from `main()`. Full suite: `test_gov_sources.py` (now 2
+new checks + the regression test, all passing), `test_tender_enrichment.py`,
+`test_award_outcomes.py` - all clean. `python3 -m py_compile gov_sources.py test_gov_sources.py`
+clean.
+
+**Not yet tested / flagged:** `dbsa_procurement.py`, `cidb_tenders.py`, `sars_procurement.py`'s
+own parsing logic (date formats, malformed HTML, the cidb JSON feed's field names) wasn't
+adversarially re-tested this run beyond what `test_new_sources()` (added alongside them) already
+covers - worth a dedicated pass if this area is picked again. `tender_changes.py` still has no
+dedicated test file (flagged since the eleventh/twelfth run, still open).

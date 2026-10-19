@@ -83,12 +83,25 @@ SOURCE_LABELS = {
     "dbsa_procurement": "DBSA open RFPs/RFRs",
 }
 # A direct-site tender is only folded into a portal row of the SAME buyer:
-# reference numbers aren't unique across buyers ("RFQ 01/2026").
+# reference numbers aren't unique across buyers ("RFQ 01/2026"). Every
+# source in ALL_SOURCES that can fold into the portal needs an entry here -
+# a source missing from this dict skips the buyer check entirely (_find()'s
+# `not family or family.search(...)` - no family means always true), so its
+# tenders can be folded into ANY portal row sharing its reference format,
+# silently merging two unrelated tenders' documents/dates. QA-Edge-Case-
+# Findings.md, 2026-10-18 (fourteenth run): sars_procurement/cidb_tenders/
+# dbsa_procurement shipped without an entry here and reproduced exactly
+# that - a SARS tender folded into an unrelated department's portal row on
+# a coincidental "RFP14/2026" match, vanishing from the merged list while
+# contaminating the other tender's documents.
 BUYER_FAMILY = {
     "sanral": re.compile(r"sanral|national roads", re.I),
     "eskom_bulletin": re.compile(r"eskom", re.I),
     "transnet_etenders": re.compile(r"transnet", re.I),
     "capetown_procurement": re.compile(r"city of cape town", re.I),
+    "sars_procurement": re.compile(r"\bsars\b|revenue service", re.I),
+    "cidb_tenders": re.compile(r"\bcidb\b|construction industry development board", re.I),
+    "dbsa_procurement": re.compile(r"\bdbsa\b|development bank of southern africa", re.I),
 }
 PORTAL_CLOSED_LOOKBACK = 3000  # newest rows of the portal's Closed tab checked for extended tenders
 MIN_CONTAINED_REF = 8  # "one reference contains the other" only for references this long

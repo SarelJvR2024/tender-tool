@@ -166,6 +166,32 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - fourteenth run): 3 new discovery sources
+could silently merge an unrelated buyer's tender into theirs
+
+Picked up a large batch landed since the thirteenth run (3 new discovery sources, a super-admin
+portal, a landing page, auth-page redesigns) and focused on the 3 new discovery sources
+(`sars_procurement.py`, `cidb_tenders.py`, `dbsa_procurement.py`, commit `cace3f7`) - new,
+untested by this review, and in `gov_sources.py`'s merge/matching logic, which has already had
+real bugs found in it before.
+
+**Finding 14 (fixed, severe):** `gov_sources.py`'s own docstring states the rule: a direct-site
+tender only folds into a portal row of the **same buyer**, because reference numbers aren't
+unique across buyers. The mechanism (`BUYER_FAMILY`, checked in `_find()`) was correct, but all 3
+new sources were missing from it - so for them the buyer check silently skipped entirely (`not
+family` is `True` when a source has no entry). Reproduced directly: a SARS tender and an unrelated
+department's portal tender sharing a coincidental reference ("RFP14/2026") merged into ONE
+release - the SARS tender vanished from the output, and the surviving (wrong) release picked up
+the SARS tender's document as if it were its own, with no error and no `source_disagreements`
+entry to flag it. Fixed by adding the 3 missing `BUYER_FAMILY` entries. Confirmed the fix doesn't
+break the legitimate case (a SARS tender listed on the portal under SARS's own name still folds).
+
+**Verification:** added `test_new_sources_are_in_buyer_family()` to `test_gov_sources.py` -
+reproduces both the cross-buyer-must-not-fold bug and the same-buyer-must-still-fold case as
+durable regression coverage, plus pins that each new source's `BUYER_FAMILY` pattern actually
+matches its own `BUYER` string. Full suite (`test_gov_sources.py`, `test_tender_enrichment.py`,
+`test_award_outcomes.py`) clean. Full detail: `QA-Edge-Case-Findings.md`, "fourteenth run."
+
 ## This pass (2026-10-18, standing QA/robustness review - thirteenth run): the new bulk onboarding
 document scan was silently dropping six AI-read fields on confirm
 
