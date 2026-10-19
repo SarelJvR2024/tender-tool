@@ -94,14 +94,30 @@ def fetch_document(url, timeout=DOWNLOAD_TIMEOUT):
     """Returns (data, content_type, error). A failed download degrades to
     (None, None, <reason>) rather than raising - one bad document link on a
     public buyer's own site must not take out the whole run, same rule as
-    assess_tender.fetch_pdf_text."""
+    assess_tender.fetch_pdf_text.
+
+    A relative or scheme-less URL (confirmed reachable: sars_procurement.py's
+    own fetch_documents() used to store a raw regex-captured href with no
+    absolute-URL resolution at all, unlike dbsa_procurement.py's equivalent -
+    fixed separately) makes urllib.request.Request() itself raise ValueError
+    the moment it's constructed - a plain construction failure, not one of
+    urlopen's own network-error types, so it used to be uncaught here and
+    crashed the ENTIRE download_for_releases() run on the very first bad
+    link it hit, exactly the "one bad link taking out the whole run" failure
+    this function's own docstring says it prevents (QA-Edge-Case-Findings.md,
+    2026-10-19). Deliberately not also restricting the scheme itself to
+    http(s): file:// is this codebase's own established convention for
+    offline test fixtures standing in for a live link (test_discovery_fanout.py,
+    test_discovery_downgrades.py, test_taxonomy.py, and this module's own
+    test), feeding this exact production code path - narrowing it here would
+    just break that convention without closing a real, demonstrated gap."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             data = r.read()
             content_type = r.headers.get_content_type() or "application/octet-stream"
             return data, content_type, None
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError) as e:
         return None, None, f"could not download document: {e}"
 
 

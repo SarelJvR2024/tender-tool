@@ -159,6 +159,26 @@ def test_new_sources():
           r["title"] is not None and "South African Revenue Service" not in r["title"], r["title"])
     check("SARS published date", r["published_date"] == "2026-10-16T00:00:00+02:00")
 
+    # QA-Edge-Case-Findings.md, 2026-10-19: DOC_LINK has no scheme requirement
+    # (a real site's own HTML commonly links a same-site document with a
+    # relative href), but fetch_documents() used to store it unresolved -
+    # download_discovered_documents.py's urllib.request.Request() then
+    # raised ValueError on the raw href, crashing its whole run on the first
+    # such link. Fixed by resolving against the page it was found on.
+    real_http_get = sars_procurement.sh.http_get
+    sars_procurement.sh.http_get = lambda url, timeout=60: (
+        '<a href="/files/tender/spec.pdf">Specification</a>'
+        '<a href="https://www.sars.gov.za/files/addendum.pdf">Addendum</a>'
+    ).encode()
+    try:
+        docs = sars_procurement.fetch_documents("https://www.sars.gov.za/procurement/published-tenders/tender/rfp14-2026")
+    finally:
+        sars_procurement.sh.http_get = real_http_get
+    check("SARS: a relative document href is resolved against the page it was found on",
+          any(d["url"] == "https://www.sars.gov.za/files/tender/spec.pdf" for d in docs), docs)
+    check("SARS: an already-absolute href is left exactly as it was",
+          any(d["url"] == "https://www.sars.gov.za/files/addendum.pdf" for d in docs), docs)
+
     open_r = cidb_tenders.normalize(CIDB_FEED_OPEN)
     awarded_r = cidb_tenders.normalize(CIDB_FEED_AWARDED)
     check("cidb: status field ('active') is NOT the open signal", CIDB_FEED_AWARDED["status"] == "active")

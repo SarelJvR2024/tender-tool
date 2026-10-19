@@ -169,6 +169,44 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-ninth run): a relative document
+link crashed the entire new auto-download pass, taking every other tender down with it
+
+Picked up two sibling passes (twenty-seventh: narrowed the oscillation fix to a minute;
+twenty-eighth: a migration-ordering fix) plus a large new batch - `download_discovered_documents.py`
+(auto-downloads and permanently stores every discovered tender's documents, unattended, per
+Sarel's own direction), `opportunity_requirements.py`, and the admin discovered-opportunities
+review UI. Picked the auto-download module: new, runs with no human review before it fires, and
+its own docstring explicitly promises "one bad or dead link must not take out the whole run" -
+worth testing against, not trusting.
+
+**Finding 26 (fixed, severe):** `fetch_document()`'s exception handler didn't catch `ValueError` -
+and a relative or scheme-less URL makes `urllib.request.Request()` raise exactly that, before
+`urlopen` is even called. Confirmed directly reachable: `sars_procurement.py`'s own
+`fetch_documents()` captured a raw regex-matched href with no absolute-URL resolution at all
+(unlike `dbsa_procurement.py`'s equivalent, which does resolve relative links). A same-site
+relative link - an entirely ordinary thing for a real site's HTML - reaches this module with no
+scheme, raises uncaught, and crashes `download_for_releases()` for every OTHER tender's documents
+in that same run too. Reproduced directly before fixing.
+
+**Also checked, deliberately not kept:** first added an http(s)-only scheme allowlist as SSRF/
+`file://` defense-in-depth, then discovered `file://` is this codebase's own established,
+deliberate convention for offline test fixtures across several discovery tests, feeding the SAME
+production fetch path. Reverted that allowlist rather than silently breaking an intentional
+pattern to close a gap never shown to be reachable from a real external source - kept only the
+fix for the bug actually reproduced.
+
+**Fix:** root cause + containment, both applied. `sars_procurement.py`'s `fetch_documents()` now
+resolves every href with `urllib.parse.urljoin()` against the page it came from.
+`download_discovered_documents.py`'s `fetch_document()` also now catches `ValueError`, so a bad
+link from any source degrades to a normal `failed` row instead of crashing the run.
+
+**Verification:** `test_gov_sources.py` gained 2 new checks (relative-href resolution, absolute
+href left untouched) - `ALL PASSED`. `test_download_discovered_documents.py` gained a 6th case
+(relative URL + normal URL on the same release: one fails cleanly, the other still downloads,
+nothing raises) - `All checks passed`. `test_opportunity_requirements.py` unaffected, still
+clean. Full detail: `QA-Edge-Case-Findings.md`, "twenty-ninth run" (Finding 26).
+
 ## This pass (2026-10-19, standing QA/robustness review - twenty-eighth run): migration `0072` would have failed to apply to any fresh/real database - caught by replaying it, not by reading it
 
 Orientation: four new commits since the last pass - a company-profile jump-nav (`26d808d`, trivial,

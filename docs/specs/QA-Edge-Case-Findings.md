@@ -1581,3 +1581,64 @@ bucket-width change back to day-level and re-ran - the new test's third assertio
 as expected (`FAIL hour 11: ...`); restored the fix and re-ran clean. All 4 pre-existing tests
 still pass unchanged under minute-bucketing. Full regression: `test_gov_sources.py` -
 `ALL PASSED`; `engine/notify/test_digest_live.py` - `0 failure(s)`.
+
+## 2026-10-19 (twenty-ninth run): a relative document link crashed the entire new auto-download
+pass, taking every other tender's documents down with it
+
+**Context:** synced with `origin/main` and picked up two sibling passes landed since the
+twenty-sixth run - "twenty-seventh" (narrowed the oscillation fix to a minute, directly building
+on Finding 24) and "twenty-eighth" (a migration-ordering fix, Finding 25) - plus a large batch of
+brand-new discovery features: `download_discovered_documents.py` (auto-downloads and permanently
+stores every document for every discovered tender, unattended, per Sarel's own direction),
+`opportunity_requirements.py`, and the admin discovered-opportunities review UI (migrations
+0071/0072). Picked `download_discovered_documents.py`: new, unattended, runs automatically on
+every watch cycle with no human review before it fires, and explicitly promises in its own
+docstring that "one bad or dead link must not take out the whole run" - exactly the kind of
+promise worth adversarially testing rather than trusting.
+
+**Finding 26 (CONFIRMED, FIXED, severe - the exact failure its own docstring promises can't
+happen):** `fetch_document()`'s only exception handler caught `(URLError, HTTPError, TimeoutError,
+OSError)`. A relative or scheme-less URL makes `urllib.request.Request(url, ...)` itself raise
+`ValueError` the moment it's constructed - before `urlopen` is ever called, so none of those
+caught types apply. Confirmed this is directly reachable, not theoretical: `sars_procurement.py`'s
+own `fetch_documents()` captured a raw regex-matched `href` with **no absolute-URL resolution at
+all** (`DOC_LINK = re.compile(r'<a[^>]+href="([^"]+\.(?:pdf|docx?|xlsx?|zip))"'...)` - no scheme
+requirement, unlike `dbsa_procurement.py`'s equivalent, which does resolve relative hrefs, or
+`transnet_etenders.py`'s, which requires an absolute `https://` prefix in the regex itself). A
+same-site relative link (`href="/files/tender/spec.pdf"`, an entirely ordinary thing for a real
+site's HTML to contain) reaches `download_discovered_documents.py` as a bare `document.url` with
+no scheme. Reproduced directly: `fetch_document("/files/tender/RFP14-2026-spec.pdf")` raised
+`ValueError: unknown url type` uncaught, which propagates out of `download_for_releases()`'s
+per-document loop entirely - **taking down document downloads for every other release and
+document in that run**, exactly the "one bad link must not take out the whole run" failure the
+function's own docstring says it prevents.
+
+**Also checked, deliberately NOT fixed:** considered adding an http(s)-only scheme allowlist as
+defense-in-depth (SSRF/`file://`-read hardening) before calling `urlopen`, and implemented it
+first - but `file://` URLs turned out to be this codebase's own **established, deliberate**
+convention for offline test fixtures standing in for a live link, used across
+`test_discovery_fanout.py`, `test_discovery_downgrades.py`, `test_taxonomy.py`, and this module's
+own test, all feeding the SAME production fetch code path (`assess_tender.fetch_pdf_text` and now
+this module). A scheme allowlist would have silently broken that established pattern without
+closing any gap actually demonstrated to be reachable from a real external source. Reverted the
+allowlist; kept only the minimal, precisely-targeted fix for the bug actually reproduced.
+
+**Fix:** two changes, root cause and containment, same pattern as past findings in this log
+(compare Finding 14's `BUYER_FAMILY` entries / Finding 19's threading fix): (1)
+`sars_procurement.py`'s `fetch_documents()` now resolves every document href with
+`urllib.parse.urljoin(url, href)` against the page it was actually found on, rather than storing
+it unresolved; (2) `download_discovered_documents.py`'s `fetch_document()` also now catches
+`ValueError`, so even a bad link slipping through from some other source degrades to a normal
+`failed` row instead of crashing the run - containment, not just a root-cause patch, since a
+badly-formed link could in principle originate from any source reader, not only this one.
+
+**Verification:** direct reproduction of the exact crash before fixing, then confirmed fixed.
+New checks: `test_gov_sources.py` gained 2 new assertions (`sars_procurement`'s relative-href
+resolution, and that an already-absolute href is left untouched) - both the real `DOC_LINK` regex
+and `urljoin()` exercised together, not just the resolution logic in isolation.
+`test_download_discovered_documents.py` gained a 6th case (a relative URL alongside a normal one
+on the same release: the relative one gets a `failed` row with a reason, the normal one still
+downloads, the run never raises) - full suite `All checks passed`. `test_gov_sources.py` full
+suite - `ALL PASSED`, including `test_opportunity_requirements.py` (reads the same discovered-
+documents shape) - `All checks passed`. `python3 -m py_compile` clean on all four touched/tested
+files.

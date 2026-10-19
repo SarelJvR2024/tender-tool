@@ -30,6 +30,12 @@ Covers:
      appears via two separate release dicts (the same shape
      seed_supabase_opportunities.seed() tolerates, one dict per report-worthy
      company) and checking only one row/upload happened.
+  6. a relative/scheme-less document URL (QA-Edge-Case-Findings.md,
+     2026-10-19: confirmed reachable from sars_procurement.py's own
+     fetch_documents(), which used to store a raw regex-captured href with
+     no absolute-URL resolution at all) is recorded as a 'failed' row with
+     a reason, not an uncaught ValueError taking out the whole run - and the
+     OTHER documents in the same run are still processed normally.
 
 Run: python3 engine/discovery/test_download_discovered_documents.py
 """
@@ -238,8 +244,26 @@ def main():
     check("two company-result dicts for the same release: only one row/upload total",
           len(fake2.rows(ddd.TABLE)) == 1 and fake2.storage_posts == 1)
 
+    # --- a relative/scheme-less URL must degrade, never crash the run ------
+    fake3 = Fake()
+    client3 = company_profiles.RestClient(fake3.url, "test-key")
+    relative_url_releases = [
+        {"ocid": "ocds-relative", "contract_number": "RFP-14/2026", "buyer": "South African Revenue Service",
+         "title": "ICT infrastructure audit", "source": "sars_procurement",
+         "documents": [{"url": "/files/tender/RFP14-2026-spec.pdf", "title": "Specification.pdf"},
+                       {"url": url_a, "title": "Notice.pdf"}]},
+    ]
+    summary4 = ddd.download_for_releases(relative_url_releases, client3)
+    check("case 6: run does not raise on a relative URL", summary4["failed"] == 1, summary4)
+    check("case 6: the OTHER document on the same release still downloads",
+          summary4["downloaded"] == 1, summary4)
+    rel_row = next(r for r in fake3.rows(ddd.TABLE) if r["document_url"] == "/files/tender/RFP14-2026-spec.pdf")
+    check("case 6: the relative URL got a failed row with a reason, not a crash",
+          rel_row["status"] == "failed" and bool(rel_row.get("error")))
+
     fake.stop()
     fake2.stop()
+    fake3.stop()
 
     print(f"\n{len(FAILS)} failure(s)" if FAILS else "\nAll checks passed.")
     if FAILS:
