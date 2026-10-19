@@ -1365,3 +1365,59 @@ rely on `pending_digest_updates()`'s own pre-sort by urgency (not an unsorted `i
 would have been a real bug) rather than assumed safe. No further issues found in this file this
 run; `tender_changes.py` still has no dedicated test file (flagged since the eleventh/twelfth
 run, still open).
+
+## 2026-10-19 (twenty-first run): `run_bridges.py --script` without `--bridge` silently stopped
+ALL real queue processing, not just the quoted example
+
+**Context:** synced with `origin/main` and picked up the sibling pass's own "twentieth run"
+(migration 0068 verification, a stale-reference fix, and - genuinely important - Finding 20:
+migrations `0063`-`0068` are committed but **not yet applied to the live Supabase project**,
+already confirmed by a real production error per that pass's own evidence; needs Sarel's direct
+action, nothing a sandbox session can do without live credentials, already flagged, not
+re-flagging here). Picked `engine/worker/run_bridges.py` for this run - "worker/job-queue" is a
+standing rotation area that has only ever been verified once before (eighth run: confirmed the
+`TimeoutExpired` str/bytes handling was NOT a bug), never given a dedicated adversarial pass, and
+this is the one script every bridge's job fulfillment depends on in production (the container's
+own `CMD` runs nothing but `run_bridges.py --loop`).
+
+**Finding 21 (CONFIRMED, FIXED, severe - the module's own documented usage example silently
+broke production job processing):** `main()` computed which bridges to run as
+`args.bridge or ([] if args.script else sorted(BRIDGES))`. Giving `--script` **without**
+`--bridge` - exactly this file's own Usage example, `python3 run_bridges.py --loop --script
+engine/some/other_bridge.py` - resolved to `names = []`: **none** of the 5 registered bridges
+(`cv`, `cv_extract`, `pack`, `general`, `onboarding`) ran, only the one `--script` path. This
+directly contradicts the module's own docstring, which states the contract in plain words: "and
+any other one can be added with `--script PATH`" - "added," not "replace everything with."
+Reproduced directly: `names = args.bridge or (...)` with `bridge=None, script=["x.py"]` resolved
+to `[]`, confirmed against the real `BRIDGES` dict. In production this flag combination isn't
+used today (the container's `CMD` is plain `--loop`, no `--script`), so nothing is live-broken
+right now - but anyone following this file's own documented example to add a one-off custom
+bridge alongside the real ones (a very plausible, literally-suggested-by-the-docs operation)
+would have silently stopped all CV generation, pack generation, onboarding-document scanning and
+non-SANRAL pack extraction for as long as the worker ran that way - with no error, no alert, just
+a quiet absence of their log lines.
+
+**Fix:** extracted the resolution into `resolve_bridge_names(bridge_arg)` (`bridge_arg or
+sorted(BRIDGES)` - `--script` never participates in this decision at all now, matching the
+documented contract exactly), called from `main()` in place of the inline expression. `--bridge`
+still narrows to just the named bridge(s) when explicitly given; `--script` only ever adds.
+
+**Verification:** direct reproduction of the bug (`resolve_bridge_names` old vs. new logic against
+the real `BRIDGES` dict) before fixing. New unit test `test_script_flag_is_additive()` in
+`test_poll_loop.py` - no `--bridge`/no `--script` runs every registered bridge, `--script` alone
+(no `--bridge`) still runs every registered bridge plus the addition, `--bridge cv` still narrows
+to just `cv`. Full suite: `python3 engine/worker/test_poll_loop.py` - all 5 checks pass, including
+the pre-existing real-subprocess `run_bridges.py` test (`--script` given without `--bridge` in
+that test too - confirmed the fix doesn't change its outcome, by running it for real both before
+and after: the broken-bridge test's own assertions on `out_broken` all still hold, `took < 5`
+still holds at the same ~0.0s). Also ran the fixed CLI directly end-to-end
+(`python3 engine/worker/run_bridges.py --once --script /tmp/nonexistent_bridge.py`) and confirmed
+exit 0 with all 5 registered bridges now actually invoked, not just the missing extra one.
+`engine/alerts/test_system_alerts.py` (reads `run_bridges`' alert-recording path) unaffected,
+still clean. `python3 -m py_compile run_bridges.py test_poll_loop.py` clean.
+
+**Not yet tested / flagged:** `resolve_scripts()`'s label collision when two different `--script`
+paths share the same basename (e.g. `foo/a.py` and `bar/a.py` both labelled `"a.py"`) would
+confuse the "missing bridge" logging between cycles - narrow, operator-error-only, not fixed this
+run. `tender_changes.py` still has no dedicated test file (flagged since the eleventh/twelfth
+run, still open).

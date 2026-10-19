@@ -168,6 +168,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-first run): `run_bridges.py`'s
+own documented usage example silently stopped every real bridge from running
+
+Picked up the sibling pass's "twentieth run" (migration `0068` verification and, importantly,
+Finding 20 - migrations `0063`-`0068` aren't yet applied to the live Supabase project, already
+confirmed by a real production error; needs Sarel directly, not re-flagging here). Picked
+`engine/worker/run_bridges.py` for this run - "worker/job-queue" had only been verified once
+before (eighth run, confirming a non-bug), never a dedicated adversarial pass, and it's the one
+script every bridge's production job fulfillment depends on (the container's `CMD` is just
+`run_bridges.py --loop`).
+
+**Finding 21 (fixed, severe):** `main()`'s bridge-name resolution read `args.bridge or ([] if
+args.script else sorted(BRIDGES))`. Giving `--script` without `--bridge` - exactly this file's
+own Usage example, `--loop --script engine/some/other_bridge.py` - resolved to `names = []`:
+**none** of the 5 registered bridges (`cv`, `cv_extract`, `pack`, `general`, `onboarding`) ran,
+directly contradicting the module's own docstring ("and any other one can be added with
+`--script PATH`" - added, not "replace everything"). Not live-broken today (production's `CMD`
+never passes `--script`), but anyone following this file's own documented example to add a
+one-off custom bridge alongside the real ones would have silently stopped all CV generation,
+pack generation, onboarding scanning and non-SANRAL extraction, with no error and no alert - just
+an absence of log lines. Fixed by extracting the resolution into
+`resolve_bridge_names(bridge_arg)` (`bridge_arg or sorted(BRIDGES)`, `--script` no longer
+participates in the decision at all) and calling it from `main()`.
+
+**Verification:** reproduced the bug directly against the real `BRIDGES` dict before fixing.
+New unit test `test_script_flag_is_additive()` in `test_poll_loop.py`; full suite (5 checks,
+including the pre-existing real-subprocess `run_bridges.py` test, which also exercises `--script`
+without `--bridge`) passes before and after, same timing. Ran the fixed CLI directly end-to-end
+too, not just the unit tests. `test_system_alerts.py` unaffected. Full detail:
+`QA-Edge-Case-Findings.md`, "twenty-first run."
+
 ## This pass (2026-10-19, standing QA/robustness review - twentieth run): migration 0068 verified, a stale migration-number reference fixed, and a confirmed live/committed schema gap
 
 Orientation: 4 new commits since the last pass (`fd7b9c4` the `--no-fetch-documents` fix,

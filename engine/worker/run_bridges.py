@@ -144,6 +144,16 @@ class BridgeRunner:
         return did_something
 
 
+def resolve_bridge_names(bridge_arg):
+    """Which registered bridges to run, before --script's own additions
+    (resolve_scripts, below) are layered on top. --script is ADDITIVE
+    ("and any other one can be added with --script PATH" - this file's own
+    module docstring) - it must never be the reason the default set shrinks
+    to nothing. --bridge still narrows to just the named bridge(s) when
+    given. QA-Edge-Case-Findings.md, 2026-10-19."""
+    return bridge_arg or sorted(BRIDGES)
+
+
 def resolve_scripts(bridge_names, extra_scripts):
     scripts = [(name, os.path.join(REPO_ROOT, BRIDGES[name])) for name in bridge_names]
     for s in extra_scripts:
@@ -171,7 +181,7 @@ def main(argv=None):
     if args.interval <= 0:
         ap.error("--interval must be a positive number of seconds")
 
-    names = args.bridge or ([] if args.script else sorted(BRIDGES))
+    names = resolve_bridge_names(args.bridge)
     runner = BridgeRunner(resolve_scripts(names, args.script), timeout=args.timeout)
 
     if not args.loop:
