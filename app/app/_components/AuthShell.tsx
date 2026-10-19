@@ -1,9 +1,9 @@
 import { Logo } from "./Logo";
 
 const PROOF_POINTS = [
-  "Every page checked against its own contents",
-  "Nothing expired, nothing missing, nothing mis-filed",
-  "Built for SANRAL, ACSA and SASSA tenders",
+  "Finds tenders you qualify for, automatically",
+  "Builds your full SANRAL submission pack - forms, financials and CVs",
+  "Flags every expired, missing or mismatched document before you submit",
 ];
 
 /**
@@ -59,7 +59,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <h1 style={{ fontSize: 28, fontWeight: 700, color: "#F6F5F1", margin: "0 0 16px", lineHeight: 1.3, maxWidth: 420 }}>
-            Your technical and financial envelopes: built, numbered, bookmarked, and checked page by page.
+            Find government tenders, build winning submissions, never miss a deadline.
           </h1>
 
           <ul style={{ listStyle: "none", margin: "32px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 14 }}>
