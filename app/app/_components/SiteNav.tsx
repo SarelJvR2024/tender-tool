@@ -15,7 +15,7 @@ const NAV_ITEMS: { key: NavKey; href: string; label: string }[] = [
 // An 'employee' (0065) only ever gets this - their own CV and documents,
 // nothing about the company's tenders, pricing or other people. Matches
 // the RESTRICTIVE RLS policies on people/projects/cv_uploads/generated_cvs
-// (supabase/migrations/0066_company_invites_and_employee_role.sql); this
+// (supabase/migrations/0067_company_invites_and_employee_role.sql); this
 // nav swap is cosmetic (a link to a page RLS already blocks is harmless),
 // but showing it would be confusing, so it's left off entirely.
 const EMPLOYEE_NAV_ITEMS: { key: NavKey; href: string; label: string }[] = [
