@@ -77,6 +77,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <div style={{ display: "flex", gap: 14, fontSize: 13, marginBottom: 12 }}>
           <span style={{ color: "#16233B", fontWeight: 600 }}>Alerts &amp; harness results</span>
+          <Link href="/admin/customers" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Customers</Link>
+          <Link href="/admin/settings" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Settings</Link>
           <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
         </div>
         <section id="system-alerts" style={{ marginBottom: 36 }}>

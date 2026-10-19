@@ -95,3 +95,37 @@ export async function markSystemAlertResolved(formData: FormData) {
 export async function reopenSystemAlert(formData: FormData) {
   await writeAlertResolution(formData, false);
 }
+
+/**
+ * Customer console (0064): toggling a company's is_test_company flag and
+ * flipping a platform setting both go through a SECURITY DEFINER function
+ * gated on is_platform_admin() rather than a table write, so neither needs
+ * its own RLS policy on companies / platform_settings (see 0064's comment).
+ */
+export async function setTestCompany(formData: FormData) {
+  const companyId = String(formData.get("company_id") ?? "");
+  const isTest = formData.get("is_test") === "true";
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  if (!companyId) redirect(`/admin/customers?error=${encodeURIComponent("Missing company.")}`);
+
+  const { error } = await supabase.rpc("platform_admin_set_test_company", { p_company_id: companyId, p_is_test: isTest });
+  if (error) redirect(`/admin/customers?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/admin/customers");
+}
+
+export async function setPlatformSetting(formData: FormData) {
+  const key = String(formData.get("key") ?? "");
+  const value = formData.get("value") === "true";
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  if (!key) redirect(`/admin/settings?error=${encodeURIComponent("Missing setting.")}`);
+
+  const { error } = await supabase.rpc("platform_admin_set_setting", { p_key: key, p_value: value });
+  if (error) redirect(`/admin/settings?error=${encodeURIComponent(error.message)}`);
+  revalidatePath("/admin/settings");
+}
