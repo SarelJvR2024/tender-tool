@@ -69,7 +69,7 @@ export default async function DashboardPage() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 12, marginBottom: 20 }}>
           <StatCard label="Tenders tracked" value={rows.length} color="#16233B" />
           <StatCard label="Packs complete" value={completeCount} color="#15803D" />
-          <StatCard label="Needs your input" value={needsInputCount} color="#B45309" />
+          <StatCard label="Not yet complete" value={needsInputCount} color="#B45309" />
         </div>
 
         {/* A plain 4-column grid here had no mobile fallback at all - on a

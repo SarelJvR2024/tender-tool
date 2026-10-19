@@ -91,7 +91,7 @@ export default async function BankAccountsPage({ searchParams }: { searchParams:
                 <AccountForm a={a} principals={people} />
                 <form action={deleteBankAccount} style={{ marginTop: 10 }}>
                   <input type="hidden" name="account_id" value={a.id} />
-                  <DangerButton>Remove this account</DangerButton>
+                  <DangerButton confirmMessage="Remove this bank account? This can't be undone.">Remove this account</DangerButton>
                 </form>
               </Disclosure>
             </Card>

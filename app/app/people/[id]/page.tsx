@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
 import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { SiteNav } from "../../_components/SiteNav";
+import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
 import {
@@ -275,6 +276,7 @@ export default async function PersonDetailPage({
     ]);
     roleCatalog = (roleRows ?? []) as TenderRole[];
     taggedRoles = new Set((tagRows ?? []).map((r) => r.role_code as string));
+    if (roleErr) console.error("Failed to load tender_roles catalog:", roleErr.message);
     rolesError = roleErr?.message ?? null;
 
     const { data: projectRows } = await supabase
@@ -428,7 +430,7 @@ export default async function PersonDetailPage({
             <Field><label style={label}>Full name *</label><input style={field} name="name" defaultValue={person?.name ?? ""} required /></Field>
             <Field>
               <label style={label}>ID number (PII - masked)</label>
-              <input style={field} type="password" autoComplete="off" name="id_number" defaultValue={person?.id_number ?? ""} />
+              <input style={field} type="text" autoComplete="off" name="id_number" defaultValue={person?.id_number ?? ""} />
             </Field>
             <Field><label style={label}>Role / job title</label><input style={field} name="role" defaultValue={person?.role ?? ""} placeholder="e.g. Contracts Engineer" /></Field>
             <Field><label style={label}>Description (position type)</label><input style={field} name="description" defaultValue={person?.description ?? ""} /></Field>
@@ -542,9 +544,12 @@ export default async function PersonDetailPage({
                     <form action={deleteSignatoryScope}>
                       <input type="hidden" name="person_id" value={person!.id} />
                       <input type="hidden" name="scope_id" value={s.id} />
-                      <button type="submit" style={{ background: "none", border: "none", color: "#B91C1C", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                      <ConfirmSubmitButton
+                        confirmMessage="Remove this signatory scope? This can't be undone."
+                        style={{ background: "none", border: "none", color: "#B91C1C", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                      >
                         Remove
-                      </button>
+                      </ConfirmSubmitButton>
                     </form>
                   </div>
                 ))}
@@ -656,15 +661,15 @@ export default async function PersonDetailPage({
         {!isNew && (
           <form action={deletePerson} style={{ marginBottom: 28 }}>
             <input type="hidden" name="id" value={person!.id} />
-            <button
-              type="submit"
+            <ConfirmSubmitButton
+              confirmMessage={`Remove ${person!.name}? Their CVs and project history will also be removed. This can't be undone.`}
               style={{
                 minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#FEE2E2",
                 color: "#B91C1C", fontWeight: 600, fontSize: 13, border: "1px solid #FCA5A5", cursor: "pointer",
               }}
             >
               Remove person
-            </button>
+            </ConfirmSubmitButton>
           </form>
         )}
 
@@ -686,7 +691,7 @@ export default async function PersonDetailPage({
             )}
             {rolesError ? (
               <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 14px", marginBottom: 20, fontSize: 12, color: "#92400E" }}>
-                Couldn&apos;t load the role catalog ({rolesError}) - migration 0016 may not be applied yet.
+                Couldn&apos;t load role options — try again shortly.
               </div>
             ) : (
               <form action={saveRoleEligibility} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", marginBottom: 24 }}>
@@ -812,8 +817,7 @@ export default async function PersonDetailPage({
                   Standard generated CVs
                 </div>
                 <div style={{ fontSize: 11, color: "#9A9684", marginBottom: 8 }}>
-                  Fulfilled out-of-band by engine/cv/process_cv_jobs.py (the web app cannot run
-                  Python/LibreOffice) - status updates here once that process runs.
+                  Generated automatically, usually within a few minutes — refresh to check.
                 </div>
                 {generatedCvs.map((g) => {
                   const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#F0EEE6", color: "#6B6758" };
@@ -873,9 +877,12 @@ export default async function PersonDetailPage({
                   <form action={deleteProject}>
                     <input type="hidden" name="project_id" value={proj.id} />
                     <input type="hidden" name="person_id" value={person!.id} />
-                    <button type="submit" style={{ minHeight: 36, padding: "0 10px", borderRadius: 8, background: "#FEE2E2", color: "#B91C1C", fontSize: 11, fontWeight: 600, border: "1px solid #FCA5A5", cursor: "pointer" }}>
+                    <ConfirmSubmitButton
+                      confirmMessage="Remove this project from this person's history? This can't be undone."
+                      style={{ minHeight: 36, padding: "0 10px", borderRadius: 8, background: "#FEE2E2", color: "#B91C1C", fontSize: 11, fontWeight: 600, border: "1px solid #FCA5A5", cursor: "pointer" }}
+                    >
                       Remove
-                    </button>
+                    </ConfirmSubmitButton>
                   </form>
                 </div>
               </div>
