@@ -1254,3 +1254,65 @@ own parsing logic (date formats, malformed HTML, the cidb JSON feed's field name
 adversarially re-tested this run beyond what `test_new_sources()` (added alongside them) already
 covers - worth a dedicated pass if this area is picked again. `tender_changes.py` still has no
 dedicated test file (flagged since the eleventh/twelfth run, still open).
+
+## 2026-10-19 (sixteenth run): a reassigned key person's "won project" stays on their CV record
+forever, with no later sync ever correcting it
+
+**Context:** synced with `origin/main` and picked up migration `0065` (submission/opening
+reminders + won-project-to-CV sync, PR #19) plus `0066` (another session's own same-day fix of a
+severe RECORD-field bug it introduced in `tt_check_same_company()` - confirmed that fix is sound,
+re-read its reasoning and the real Postgres-backed test it cites; nothing more to do there).
+Picked `syncWonProjectToTeam()` (`app/app/tenders/[id]/actions.ts`) for this run: brand new,
+writes real CV-feeding history (`projects` table) once a tender is won, and the project's own
+"no live Supabase" gap means this kind of TypeScript/Supabase logic gets far less adversarial
+attention than the Python engine side - exactly the kind of under-covered area this rotation
+exists to reach.
+
+**Finding 16 (CONFIRMED, FIXED, severe - stale data with no way to self-correct):**
+`syncWonProjectToTeam()`'s own comment calls its upsert (`onConflict: "person_id,source_tender_
+pack_id,position_code"`) an "idempotent re-sync" - true only while nobody changes who is
+confirmed for a position. `position-person-select.tsx` (the Workspace's key-person picker) has
+**no `pipeline_stage` gate at all** - a key person can be reassigned off a position, or a position
+un-confirmed entirely, at any time, including after the tender is already Won and already synced
+once. Because the upsert's conflict key includes `person_id`, reassigning the position to someone
+else doesn't update the old person's row - it inserts a brand-new row for the new person and
+leaves the old person's row untouched. Every later re-sync repeats the same thing: the old
+person's `projects` row is never touched again, so their People-page CV history permanently
+claims they worked a project they were reassigned off, with no action anywhere in the product
+that ever corrects it.
+
+**Fix:** extracted the stale-row detection into a pure function, `staleSyncedProjectRows()`
+(new file `app/app/tenders/[id]/won-project-sync-logic.ts`, same "pure logic beside actions.ts"
+pattern `pack-review-logic.ts`/`signatory-logic.ts` already use, specifically so this is
+unit-testable without a live Supabase client). `syncWonProjectToTeam()` now fetches the pack's
+existing synced rows (`projects` where `source_tender_pack_id` = this pack), computes which no
+longer match the currently-confirmed person for their position (reassigned, or un-confirmed), and
+deletes those before the upsert - scoped to rows this same sync action created, never another
+pack's or another tenant's history. The reassigned-away person's People page is now also
+revalidated, not just the newly-confirmed person's.
+
+**Verification:** `node --experimental-strip-types "app/app/tenders/[id]/won-project-sync-logic.
+test.ts"` - 6/6 new tests pass: first-ever sync (nothing stale), unchanged re-sync (nothing
+stale), the real bug (reassigned position flags the old person's row), a position un-confirmed
+entirely (its old row flags too), multiple positions (only the changed one flags, not the whole
+pack), and a defensive case (never assumes at most one existing row per position). Methodology
+note: `node --experimental-strip-types --test "app/app/tenders/[id]/<file>.test.ts"` (the
+documented invocation two earlier sessions used successfully for `pack-review-logic.test.ts`/
+`signatory-logic.test.ts`) resolves to **0 tests found, no error** in this environment's Node
+(v22.22.0) - confirmed this is a pre-existing environment/tooling quirk, not a regression I
+introduced, by running those same two older test files the identical way and getting the same
+silent 0-tests result. The working form in this environment drops `--test` and runs the file
+directly (`node --experimental-strip-types "path/with/[id]/file.test.ts"` - `node:test`'s own
+`test()` calls execute immediately either way); re-ran `pack-review-logic.test.ts` and
+`signatory-logic.test.ts` that way too, 19/19 and 10/10 still pass, so nothing is actually broken
+by this - only the glob-based file-discovery path through `--test` can't resolve a `[id]`
+bracketed directory on this Node version. Worth a one-line callout for whichever session next
+touches test infra in this project, since every future session trying the documented invocation
+on this same Node version will hit the identical silent false-negative.
+
+**Not done (flagged):** `position-person-select.tsx` still has no `pipeline_stage` gate -
+reassignment after Won stays possible by design (this fix makes re-syncing honest about it
+afterwards, it doesn't prevent the reassignment itself, which may be exactly the point - a
+genuine staffing correction after completion is a legitimate use case, not a bug). Whether
+reassignment should be blocked, warned about, or left open once a tender is Won is a product
+call, not something this pass should pick unilaterally.

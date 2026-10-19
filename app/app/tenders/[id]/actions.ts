@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 import { loadB7State } from "./b7-data";
 import { advanceFoundToBidding } from "@/lib/pipeline";
+import { staleSyncedProjectRows } from "./won-project-sync-logic";
 
 /**
  * Tenant check, same pattern as app/app/people/actions.ts's own
@@ -496,6 +497,22 @@ export async function syncWonProjectToTeam(formData: FormData) {
   const confirmed = (assignmentRows ?? []).filter(
     (a): a is { position_code: string; confirmed_person_id: string } => !!a.confirmed_person_id,
   );
+
+  // Idempotent re-sync, for real - see won-project-sync-logic.ts's own
+  // header for why this is needed. Scoped to rows THIS sync created
+  // (source_tender_pack_id = this pack) - never another tenant's or
+  // another pack's project history.
+  const { data: existingSynced } = await supabase
+    .from("projects")
+    .select("id, person_id, position_code")
+    .eq("company_id", companyId)
+    .eq("source_tender_pack_id", tenderPackId!);
+  const stale = staleSyncedProjectRows(confirmed, existingSynced ?? []);
+  if (stale.length > 0) {
+    const { error: staleErr } = await supabase.from("projects").delete().in("id", stale.map((row) => row.id));
+    if (staleErr) fail(staleErr.message);
+  }
+
   if (confirmed.length > 0) {
     const rows = confirmed.map((a) => ({
       company_id: companyId,
@@ -517,6 +534,9 @@ export async function syncWonProjectToTeam(formData: FormData) {
     // app/app/people/actions.ts's saveProject revalidating "/people/<id>".
     for (const a of confirmed) revalidatePath(`/people/${a.confirmed_person_id}`);
   }
+  // A reassigned-away or un-confirmed person's page also needs
+  // revalidating - their stale row is gone, which they should see too.
+  for (const row of stale) revalidatePath(`/people/${row.person_id}`);
 
   revalidatePath("/people");
   revalidatePath(`/tenders/${tenderId}`);

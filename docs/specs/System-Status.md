@@ -166,6 +166,36 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - sixteenth run): a reassigned key person
+kept a stale "won project" on their CV record forever
+
+Picked up migration `0065` (submission/opening reminders + won-project CV sync) and the sibling
+QA pass's own same-day `0066` fix (re-read and confirmed sound - a real, severe RECORD-field bug
+in the shared `tt_check_same_company()` trigger, reproduced and fixed with solid Postgres-backed
+verification; nothing more needed there). Picked `syncWonProjectToTeam()`
+(`app/app/tenders/[id]/actions.ts`) for this run instead - new, writes real CV-feeding history,
+and TypeScript/Supabase action code gets far less adversarial coverage than the Python engine
+side in this standing review, precisely because there's no live Supabase to run it against.
+
+**Finding 16 (fixed, severe):** the key-person picker (`position-person-select.tsx`) has no
+`pipeline_stage` gate - a position can be reassigned to a different person, or un-confirmed
+entirely, even after a tender is Won and its project has already been synced to the team's CV
+history once. Because the sync's upsert conflict key includes `person_id`, reassigning a position
+never updates the old person's row - it only ever adds the new person's row, leaving the old
+person's `projects` entry claiming they worked a project they were reassigned off, forever, with
+no later re-sync ever correcting it. Fixed by extracting `staleSyncedProjectRows()` into a new
+pure-logic file (`won-project-sync-logic.ts`, same testable-sibling pattern as `pack-review-
+logic.ts`/`signatory-logic.ts`) and deleting the stale rows before every re-sync.
+
+**Verification:** `won-project-sync-logic.test.ts` - 6/6 new tests pass (first sync, unchanged
+re-sync, the real reassignment bug, un-confirming a position, multi-position isolation, a
+defensive multi-row case). Also surfaced and documented a tooling quirk: this environment's Node
+(v22.22.0) silently returns "0 tests found" for `node --test "path/with/[id]/brackets/..."` - not
+a regression, confirmed by re-running the two pre-existing bracketed test files
+(`pack-review-logic.test.ts`, `signatory-logic.test.ts`) the same way and getting the same silent
+0-tests result; running the file directly without `--test` works on this Node version and all
+three suites (19 + 10 + 6) pass. Full detail: `QA-Edge-Case-Findings.md`, "sixteenth run."
+
 ## This pass (2026-10-19, standing QA/robustness review - fifteenth run): super admin portal, won-project sync, 12-commit demo-prep batch
 
 Picked up the 12-commit batch landed since the fourteenth run (`f2f8925..7da446f`): super admin
