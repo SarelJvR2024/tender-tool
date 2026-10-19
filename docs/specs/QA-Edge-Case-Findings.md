@@ -1421,3 +1421,26 @@ paths share the same basename (e.g. `foo/a.py` and `bar/a.py` both labelled `"a.
 confuse the "missing bridge" logging between cycles - narrow, operator-error-only, not fixed this
 run. `tender_changes.py` still has no dedicated test file (flagged since the eleventh/twelfth
 run, still open).
+
+## 2026-10-19: closing out the thirteenth run's flagged "bigger than a QA-pass scope" item - the
+six orphaned onboarding-scan fields now have real columns, plus the CIDB mismatch signal
+
+The thirteenth run (commit `2d4c124`) fixed the review screen so it stopped claiming the six
+fields below would be saved when `confirmVaultDocument` had nowhere to write them, but explicitly
+flagged giving them a real home (and building the CIDB `contractor_name` vs. `legal_name`
+mismatch check that finding called out as "a real compliance signal, not just metadata") as
+out of scope for that pass, needing product sign-off. Migration `0069` adds the six `companies`
+columns (`cidb_registration_number`, `cidb_contractor_name`, `bee_entity_name`,
+`bank_confirmation_bank_name`, `bank_confirmation_account_holder`,
+`iso_9001_certified_entity_name`), `VAULT_FIELD_COLUMNS` in `app/lib/onboardingScan.ts` now routes
+all six, and `cidbNameMismatchWarning()` (same file) renders a red, non-blocking warning on
+`review.tsx` when a CIDB certificate's `contractor_name` doesn't closely match the company's own
+`legal_name` (legal-suffix-aware normalization + word-overlap threshold, so "(Pty) Ltd" formatting
+differences never trigger it, only a genuinely different name does). Bank fields stayed on
+`companies`, not the more-restricted `bank_accounts` (`0050`) that finding's own write-up
+suggested checking: `bank_accounts.account_number` is `NOT NULL` and the scan never extracts an
+account number, so a row can't be created there from `bank_name`/`account_holder` alone. All six
+fields go through the existing ticked/quote-verification gate unchanged - no new write path, no
+change to `confirmVaultDocument`'s generic field-writing loop. Full detail and column names:
+`System-Status.md`'s new "Onboarding document scan: the six previously-orphaned fields..." row.
+`node --experimental-strip-types --test app/lib/onboardingScan.test.ts` - 18/18 pass.

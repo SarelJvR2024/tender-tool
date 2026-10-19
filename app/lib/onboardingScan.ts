@@ -103,18 +103,36 @@ export const READ_ONLY_FIELDS = new Set(["id_number"]);
 // cidb_registration routes to companies.cidb_* (NOT held_registrations - a
 // correction from the task's own v1 mapping; see migration 0063's header
 // for why held_registrations refuses a CIDB row outright).
+//
+// registration_number/contractor_name (cidb_registration), entity_name
+// (bbbee_certificate), bank_name/account_holder (bank_confirmation_letter)
+// and certified_entity_name (iso_9001_certificate) used to have no column
+// at all (QA-Edge-Case-Findings.md, thirteenth run / commit 2d4c124) - they
+// were read from the document but silently dropped on confirm. Migration
+// 0069 added the six columns below so they now actually persist.
 // ---------------------------------------------------------------------------
 
 export const VAULT_FIELD_COLUMNS: Record<string, Record<string, string>> = {
-  cidb_registration: { grade_class: "cidb_grading", expiry_date: "cidb_expiry" },
-  bbbee_certificate: { proof_type: "bee_proof_type", expiry_date: "bee_proof_expiry" },
+  cidb_registration: {
+    grade_class: "cidb_grading", expiry_date: "cidb_expiry",
+    registration_number: "cidb_registration_number", contractor_name: "cidb_contractor_name",
+  },
+  bbbee_certificate: {
+    proof_type: "bee_proof_type", expiry_date: "bee_proof_expiry", entity_name: "bee_entity_name",
+  },
   sars_tax_clearance: { pin: "sars_tcs_pin", expiry_date: "sars_tcs_pin_expiry" },
-  bank_confirmation_letter: { letter_date: "bank_confirmation_letter_date" },
+  bank_confirmation_letter: {
+    letter_date: "bank_confirmation_letter_date",
+    bank_name: "bank_confirmation_bank_name", account_holder: "bank_confirmation_account_holder",
+  },
   pi_insurance_certificate: {
     insurer: "pi_insurance_insurer", policy_number: "pi_insurance_policy_number",
     cover_zar: "pi_insurance_cover_zar", expiry_date: "pi_insurance_expiry",
   },
-  iso_9001_certificate: { certificate_number: "iso_9001_certificate_number", expiry_date: "iso_9001_expiry" },
+  iso_9001_certificate: {
+    certificate_number: "iso_9001_certificate_number", expiry_date: "iso_9001_expiry",
+    certified_entity_name: "iso_9001_certified_entity_name",
+  },
 };
 export const VAULT_DOCUMENT_COLUMN: Record<string, string> = {
   cidb_registration: "cidb_document_path",
@@ -130,21 +148,16 @@ export const VAULT_SUBFOLDER: Record<string, string> = {
 };
 export const VAULT_KINDS = Object.keys(VAULT_FIELD_COLUMNS) as DocumentKind[];
 
-// Some KIND_FIELDS are read from the document but have no dedicated
-// companies column to persist to (e.g. a CIDB certificate's registration
-// number/contractor name, a B-BBEE certificate's entity name, a bank
-// letter's bank name/account holder - there is no companies.cidb_
-// registration_number etc.). actions.ts's confirmVaultDocument only ever
-// writes a VAULT_FIELD_COLUMNS[kind] column, plus the one special case
-// below (bee_level, applied separately because companies.bee_level is a
-// plain int column, not part of the field-name-to-column map). Before this
-// was tracked explicitly, the review screen showed every KIND_FIELDS entry
-// with the same tick-box and "Confirm and file" button regardless of
-// whether ticking it did anything - a reviewer had no way to tell that
-// ticking "Registration number" and confirming silently filed the document
-// but dropped that one value. review.tsx uses this to show the gap
-// honestly: fields that are actually saved get a tick-box, fields that
-// aren't are shown read-only with a "not saved" note.
+// Every KIND_FIELDS entry for a vault kind now has a real column (migration
+// 0069 closed the last gap - see VAULT_FIELD_COLUMNS's own comment above).
+// actions.ts's confirmVaultDocument only ever writes a VAULT_FIELD_COLUMNS[kind]
+// column, plus the one special case below (bee_level, applied separately
+// because companies.bee_level is a plain int column, not part of the
+// field-name-to-column map). isFieldPersisted() stays as the single source
+// of truth review.tsx uses to split tick-able/saved fields from anything
+// not in this map - kept so a future field the model is asked for but that
+// still has nowhere to go (or a column later removed) fails this check
+// honestly instead of silently.
 const PERSISTED_EXTRA_FIELDS: Partial<Record<DocumentKind, string[]>> = {
   bbbee_certificate: ["bee_level"],
 };
@@ -159,6 +172,61 @@ export function parseBeeLevel(raw: string | null): number | null {
   if (!raw) return null;
   const m = raw.match(/\d+/);
   return m ? Number(m[0]) : null;
+}
+
+// ---------------------------------------------------------------------------
+// CIDB contractor-name mismatch signal (QA-Edge-Case-Findings.md, thirteenth
+// run / commit 2d4c124: "a mismatched contractor_name on a CIDB certificate
+// is a real compliance signal, not just metadata"). A company could have
+// uploaded someone else's certificate, or its registered name could have
+// changed since the certificate was issued - either way, worth surfacing on
+// the review screen, never blocking: a trading name or a recent, legitimate
+// rename are both plausible innocent explanations, so this is a warning for
+// a human to weigh, not a validation error.
+//
+// Comparison is deliberately not byte-exact: legal-suffix formatting
+// ("(Pty) Ltd" vs "Pty Ltd" vs missing entirely, "CC", punctuation,
+// capitalisation) varies constantly between a certificate and a company's
+// own records without meaning anything. Strip that noise, then compare; if
+// the names still share no real overlap, warn.
+// ---------------------------------------------------------------------------
+
+const LEGAL_SUFFIX_WORDS = new Set([
+  "pty", "proprietary", "ltd", "limited", "cc", "close", "corporation",
+  "inc", "incorporated", "co", "company",
+]);
+
+function normalizeCompanyName(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[().,]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !LEGAL_SUFFIX_WORDS.has(w))
+    .join(" ")
+    .trim();
+}
+
+/**
+ * Returns a human-readable warning when a CIDB certificate's contractor
+ * name looks substantially different from the company's own registered
+ * legal_name, or null when they match closely enough (including a
+ * formatting-only difference such as a missing/extra "(Pty) Ltd"). Never
+ * throws, never warns on missing input (nothing to compare).
+ */
+export function cidbNameMismatchWarning(contractorName: string | null, legalName: string | null): string | null {
+  const a = normalizeCompanyName(contractorName ?? "");
+  const b = normalizeCompanyName(legalName ?? "");
+  if (!a || !b) return null;
+  if (a === b) return null;
+
+  const aWords = new Set(a.split(" ").filter(Boolean));
+  const bWords = new Set(b.split(" ").filter(Boolean));
+  const shared = [...aWords].filter((w) => bWords.has(w)).length;
+  const union = new Set([...aWords, ...bWords]).size;
+  const overlap = union === 0 ? 1 : shared / union;
+  if (overlap >= 0.6) return null; // close enough - formatting / word-order / minor difference
+
+  return `The CIDB certificate's contractor name ("${contractorName}") doesn't closely match your company's registered legal name ("${legalName}"). This could mean the certificate belongs to a different entity, or your registered name has changed since it was issued - check before confirming (a trading name is also a valid reason).`;
 }
 
 export function safeFileName(name: string): string {

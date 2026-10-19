@@ -8,6 +8,7 @@ import {
   skipOnboardingDocument,
 } from "./actions";
 import {
+  cidbNameMismatchWarning,
   DATE_FIELDS,
   FIELD_LABELS,
   isFieldPersisted,
@@ -124,11 +125,13 @@ export function DocumentReviewCard({
   filename,
   principals,
   people,
+  companyLegalName,
 }: {
   result: OnboardingResult;
   filename: string;
   principals: { id: string; full_name: string }[];
   people: { id: string; name: string }[];
+  companyLegalName?: string | null;
 }) {
   const kind = result.document_kind;
   const editableFields = KIND_FIELDS[kind].filter((f) => !READ_ONLY_FIELDS.has(f) && result.fields[f]);
@@ -136,6 +139,18 @@ export function DocumentReviewCard({
   const notSavedFields = editableFields.filter((f) => !isFieldPersisted(kind, f));
   const unrouted = UNROUTED_KINDS.includes(kind);
   const manualLink = MANUAL_REVIEW_LINK[kind];
+
+  // CIDB contractor-name vs. the company's own registered name: a real
+  // compliance-mismatch signal (QA-Edge-Case-Findings.md, thirteenth run /
+  // commit 2d4c124), shown as a warning - never a blocker, the reviewer
+  // can still tick and confirm contractor_name as normal.
+  const cidbMismatch =
+    kind === "cidb_registration"
+      ? cidbNameMismatchWarning(
+          (result.fields.contractor_name?.value as string | null) ?? null,
+          companyLegalName ?? null,
+        )
+      : null;
 
   let confirmAction = confirmVaultDocument;
   if (kind === "experience_reference_letter") confirmAction = confirmExperienceReferenceLetter;
@@ -166,6 +181,14 @@ export function DocumentReviewCard({
       {result.warnings.length > 0 && (
         <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 12px", margin: "12px 0 0", fontSize: 12, color: "#92400E" }}>
           {result.warnings.map((w, i) => <div key={i}>{w}</div>)}
+        </div>
+      )}
+      {cidbMismatch && (
+        <div
+          role="alert"
+          style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "9px 12px", margin: "12px 0 0", fontSize: 12, color: "#991B1B" }}
+        >
+          <strong>Name mismatch:</strong> {cidbMismatch}
         </div>
       )}
 
