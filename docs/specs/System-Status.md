@@ -223,15 +223,42 @@ found **two distinct, unrelated root causes**, both genuine, neither previously 
    environment directly (e.g. by adding a debug step that prints `soffice --version`/`pdftotext -v`
    to a CI run and comparing against this sandbox's versions above).
 
+**Finding 22 (fixed, equally structural): one failing step was hiding ~20 other test files from
+ever running at all, not just failing - a second, compounding reason the red streak went
+unnoticed.** Pushed the Finding-21 fix and checked the real run on GitHub rather than assuming it
+went green (`mcp__github__actions_list`/`get_job_logs`, run id `39237891716`): still
+`conclusion: failure` - but this time because `test_extract_cv_fields.py` (cause 2 above, already
+known and unfixed) failed, confirming cause 1's own fix is sound. The real discovery was in the
+job's step list: `bridge-worker-ci.yml`'s 23 test steps run sequentially in ONE job with no
+`continue-on-error`/`if` guards - GitHub Actions' own default is to stop a job dead at its first
+failing step and mark every step after it `skipped`. Since the CV-extraction step (step 6 of 23)
+has been failing nearly every run since it was added, steps 7 through 26 - the polling-loop test,
+taxonomy, award outcomes/prices, both discovery-fanout tests, the daily digest, tender updates,
+gov sources, cross-tenant isolation, system alerts, the form-field audit, and more - **have never
+actually executed in CI, not failed, never even run**, this entire project's history. Confirmed
+directly in this run's own step list: step 7 ("Polling-loop smoke test", the step containing my
+own Finding-21 fix) reads `"status":"completed","conclusion":"skipped"` - meaning even this pass's
+own verified fix has still never been confirmed by a real GitHub Actions run, only by 20 local
+runs in this sandbox.
+
+**Fixed:** added `if: ${{ !cancelled() }}` to every test step in the job (not the checkout/
+setup-python/base-install steps, which genuinely must block everything if they themselves fail) -
+the standard GitHub Actions idiom for "run this step regardless of an earlier step's failure,
+but still let the job's overall conclusion reflect every step's own result." Nothing about any
+test itself changed; this only stops one failure from masking twenty others. Documented directly
+in the workflow file's own header comment for whoever next reads it. YAML validated
+(`python3 -c "import yaml; yaml.safe_load(...)"`) before committing.
+
 **What this means going forward:** CI for the Python engine side of this project has not been a
-reliable pass/fail signal for most of its life - a real new regression could have been (and may
-still be) landing in the same red-badge noise as these two known issues, indistinguishable from
-them without actually reading the job logs, which is exactly how found-Finding-21 happened. The
-fix for cause 1 should make most future runs genuinely green; cause 2 will keep causing occasional
-red runs until someone with GitHub Actions runner access root-causes the exact LibreOffice/poppler
-version difference. Recommend: once a few runs after this fix come back green, treat **any** further
-`bridge-worker-ci.yml` failure as real and worth reading the job log for, rather than assuming
-"probably the known flake" - that assumption is exactly what let this go unnoticed for this long.
+reliable pass/fail signal for most of its life, for two compounding reasons: a known, unfixed
+LibreOffice-rendering difference (cause 2) failing early, and that failure hiding every later
+test's real status behind "skipped" rather than ever actually running them. A real new regression
+in any of those ~20 previously-hidden test files could have been (and may still be) landing
+completely unconfirmed. The next run after this fix will, for the first time in this project's
+history, show every one of the 23 test steps' own real, individual pass/fail - still expected to
+show `test_extract_cv_fields.py` red (cause 2, still open) but everything else should now be
+visible and, if cause 1's fix holds as it did locally, green. Recommend: read that next run's full
+step list once it lands, not just the job's overall red/green conclusion.
 
 ## This pass (2026-10-19, standing QA/robustness review - twenty-first run): `run_bridges.py`'s
 own documented usage example silently stopped every real bridge from running
