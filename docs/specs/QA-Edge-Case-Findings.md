@@ -1494,3 +1494,10 @@ its conclusion before treating this as closed, not just this write-up's own conf
 `container-build` job and the `app-ci.yml` workflow were not re-checked this run (both showed
 green in the twenty-second/twenty-first-run write-ups); only `smoke-test`'s one known-red step was
 in scope here.
+
+**Confirmed (same run):** checked the real run (`mcp__github__actions_get`, run id `39255442921`,
+commit `ec7e49b`) rather than stopping at local confidence - `"status":"completed","conclusion":
+"success"`. This is `bridge-worker-ci.yml`'s **first fully green run in the project's history**
+(run #56; the prior 52 of 53 were all `failure`). Both `smoke-test` and `container-build` jobs
+passed. Messaged the parent session - this is exactly the kind of result worth surfacing, not a
+quiet close-out.

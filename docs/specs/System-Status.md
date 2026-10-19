@@ -193,9 +193,11 @@ benign wrap (tolerated), and a wrong-but-similar number (rejected) before trusti
 
 **Verification:** `python3 engine/cv/test_extract_cv_fields.py` - `ALL PASSED` locally (installed
 the missing `anthropic` package first; unrelated to this fix). `test_poll_loop.py` unaffected,
-still 5/5. The real verification is the next `bridge-worker-ci.yml` run on GitHub - check its
-conclusion, not just this local pass, before calling CI green. Full detail:
-`QA-Edge-Case-Findings.md`, "twenty-fourth run" (Finding 23).
+still 5/5. **Confirmed on the real run** (`mcp__github__actions_get`, run id `39255442921`,
+commit `ec7e49b`): `"conclusion":"success"` - `bridge-worker-ci.yml`'s first fully green run in
+the project's history (run #56; the prior 52 of 53 were all `failure`). Both its `smoke-test` and
+`container-build` jobs passed. Full detail: `QA-Edge-Case-Findings.md`, "twenty-fourth run"
+(Finding 23).
 
 ## This pass (2026-10-19, standing QA/robustness review - twenty-third run): two well-built, independently re-verified commits - no issues found
 
