@@ -169,6 +169,56 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-eighth run): migration `0072` would have failed to apply to any fresh/real database - caught by replaying it, not by reading it
+
+Orientation: four new commits since the last pass - a company-profile jump-nav (`26d808d`, trivial,
+correct, confirmed all 9 anchors exist incl. the two pre-existing ones), wiring
+`seed_supabase_opportunities.seed()` into `watch_new_tenders.py` so a scheduled watch run actually
+populates `/discovery` instead of leaving matches sitting unseen (`ffd476b` - confirmed live: 1,974
+scored company x release rows with nothing ever seeding `discovered_opportunities`), automatic
+permanent document storage for every discovered tender except SANRAL (`99485ce`, migration `0071`),
+and a super-admin review screen for discovered opportunities with real requirements extraction and
+a reviewable confidence level (`ff37b66`, migration `0072`). All four are Sarel's own explicitly
+requested features ("a full repository of all tenders... documents already downloaded", "review
+what came in and if our engines understand... and can compile each one").
+
+**Finding 25 (fixed, severe - would have blocked any fresh deployment or full replay):** migration
+`0072`'s `platform_admin_discovered_opportunities()` function (written first in the file, as the
+conceptual centrepiece) SELECTs from `discovered_opportunity_requirements` (created later in the
+same file, as "Part 2") and reads `confidence_override`/`confidence_override_note`/
+`confidence_overridden_at` (added to `discovered_opportunities` later still, as "Part 3"). A
+`language sql` function is planned at `CREATE FUNCTION` time, not first call (unlike `plpgsql`,
+which only checks syntax) - so this function's own `CREATE OR REPLACE FUNCTION` statement failed
+outright on a fresh database: `ERROR: relation "discovered_opportunity_requirements" does not
+exist`. Caught by actually replaying `0001`→`0072` on scratch Postgres, not by reading the file -
+the ordering bug is invisible on a read-through since each "Part" is internally consistent and
+well-commented; it only surfaces when the file is executed top to bottom. **Fixed** (migration
+not yet live - Known-gaps item 9 - so edited in place, per this project's standing rule that an
+edit is only unsafe once a migration has plausibly reached the real database): reordered the file
+so Part 2 (the table) and Part 3 (the new columns + override RPC) come first, with Part 1 (the
+read function, which depends on both) moved to the end - added a short note explaining the
+file's physical order no longer matches the numbering, which still describes each part's
+conceptual role. Re-replayed `0001`→`0072` clean from scratch after the fix.
+
+**Also independently verified, not just read:** the admin gating on both new `0072` functions,
+directly - a non-admin authenticated user gets 0 rows from `platform_admin_discovered_opportunities()`
+and is refused (`42501`) by `platform_admin_override_opportunity_confidence()`; a user added to
+`platform_admins` gets correctly-joined rows (confirmed `requirements_status`/`requirements_route`/
+`requirements_signal` actually reflect a `discovered_opportunity_requirements` row I inserted
+myself) and can set/read back a confidence override; the 0-100 bounds check rejects 150. (One early
+"bug" I chased turned out to be my own test mistake, not a real one: a raw `select ... from
+discovered_opportunities` as the test admin returned nothing after a successful override call -
+correctly blocked by that table's own per-company RLS, since the test admin wasn't a member of the
+test company; re-reading through the actual admin RPC showed the override had in fact persisted
+correctly all along.) Ran both new engine test files directly: `test_download_discovered_documents.py`
+and `test_opportunity_requirements.py` - all checks passed. Ran `app/lib/compileReadiness.test.ts`
+directly - 14/14. Spot-checked `overrideOpportunityConfidence()` (the server action) and the admin
+page's own data fetch - both go through the gated RPC/function, no direct table bypass. Confirmed
+`seed()` (now called automatically) upserts on `(company_id, ocid)`, so a repeated scheduled call
+is idempotent; `test_discovery_fanout.py`/`test_discovery_downgrades.py` (Part 1, the function this
+wiring calls into) still clean. Whole-tree `npm run typecheck`/`lint`/`build` from a fresh `.next`
+state, and all `*.test.ts` files in `app/`, all clean.
+
 ## This pass (2026-10-19, standing QA/robustness review - twenty-seventh run): narrowed the twenty-sixth run's own accepted trade-off from a whole day's collision window to one minute's
 
 Orientation: one new commit since the last pass (`480a976`, Finding 24 above - the oscillating

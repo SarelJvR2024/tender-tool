@@ -32,7 +32,7 @@
 -- complete, build and compile each one and indicate the confidence level, I
 -- then need to review and help improve the confidence levels."
 --
--- Part 2 below (discovered_opportunity_requirements) is the real requirements
+-- Part 2 (discovered_opportunity_requirements) is the real requirements
 -- extraction this asks for, wired to the permanent document store the
 -- separate document-download task just added (discovered_opportunity_documents,
 -- migration 0071 under this repo's current numbering - see that migration's
@@ -51,71 +51,17 @@
 -- on THAT review, never silently overwritten by a later re-classification -
 -- the computed confidence lives in a different table (part 2) and the
 -- override lives here, so one can never clobber the other.
+--
+-- File order note: Part 1 (platform_admin_discovered_opportunities(), the
+-- read function) is written and documented FIRST above because it is the
+-- conceptual centrepiece of this migration, but it SELECTs from Part 2's
+-- table and Part 3's new columns, both of which must exist before a `language
+-- sql` function body can reference them (unlike plpgsql, a sql function is
+-- planned at CREATE time, not first call). So Part 2 and Part 3 are placed
+-- BELOW, and Part 1's own CREATE FUNCTION statement is placed LAST in the
+-- file, after both - the numbering here describes each part's role, not its
+-- physical top-to-bottom position.
 -- ---------------------------------------------------------------------------
-create or replace function platform_admin_discovered_opportunities()
-returns table (
-  id uuid,
-  company_id uuid,
-  company_name text,
-  contract_number text,
-  buyer text,
-  title text,
-  closing_date timestamptz,
-  categories text[],
-  document_depth text,
-  verdict text,
-  reasons text[],
-  source text,
-  tender_type text,
-  province text,
-  listing_status text,
-  document_urls jsonb,
-  score_outlook jsonb,
-  downgraded_from text,
-  first_seen timestamptz,
-  tender_id uuid,
-  requirements_status text,
-  requirements_route text,
-  requirements_family text,
-  requirements_signal text,
-  requirements_documents jsonb,
-  requirements_missing text[],
-  requirements_fingerprint_status text,
-  requirements_unreadable text[],
-  requirements_failed_downloads int,
-  requirements_document_count int,
-  confidence_override smallint,
-  confidence_override_note text,
-  confidence_overridden_at timestamptz
-)
-language sql
-stable
-security definer
-set search_path = public, pg_temp
-as $$
-  select
-    o.id, o.company_id,
-    coalesce(c.csd_trading_name, c.legal_name),
-    o.contract_number, o.buyer, o.title, o.closing_date,
-    o.categories, o.document_depth, o.verdict, o.reasons,
-    o.source, o.tender_type, o.province, o.listing_status,
-    o.document_urls, o.score_outlook, o.downgraded_from,
-    o.first_seen, o.tender_id,
-    case when r.release_key is null then 'not_downloaded' else 'extracted' end,
-    r.route, r.family, r.signal, r.required_documents, r.missing,
-    r.fingerprint_status, r.unreadable_documents, r.failed_downloads, r.document_count,
-    o.confidence_override, o.confidence_override_note, o.confidence_overridden_at
-  from discovered_opportunities o
-  join companies c on c.id = o.company_id
-  left join discovered_opportunity_requirements r
-    on r.release_key = coalesce(o.ocid, o.contract_number)
-  where is_platform_admin()
-  order by o.first_seen desc;
-$$;
-comment on function platform_admin_discovered_opportunities() is
-  'Every company''s discovered_opportunities row (0004), left-joined to its release''s real requirements extraction (discovered_opportunity_requirements, written by engine/discovery/opportunity_requirements.py) when one exists, for the super admin review screen (/admin/discovered-opportunities). Returns nothing unless the caller is a platform admin (0043). requirements_status=''not_downloaded'' means no row exists yet - lib/compileReadiness.ts is the single place that turns all of this into a status/confidence number; this function does no classification itself.';
-revoke all on function platform_admin_discovered_opportunities() from public;
-grant execute on function platform_admin_discovered_opportunities() to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- Part 2: discovered_opportunity_requirements - one row per RELEASE
@@ -201,3 +147,73 @@ comment on function platform_admin_override_opportunity_confidence(uuid, smallin
   'Sarel''s correction to one discovered opportunity''s compile-confidence (/admin/discovered-opportunities). p_override_level=null clears the override, reverting the page to the computed value. Platform-admin only (0043).';
 revoke all on function platform_admin_override_opportunity_confidence(uuid, smallint, text) from public;
 grant execute on function platform_admin_override_opportunity_confidence(uuid, smallint, text) to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Part 1: the super-admin read function itself - placed last because it
+-- SELECTs from Part 2's table and Part 3's new columns (see the file-order
+-- note in the header above).
+-- ---------------------------------------------------------------------------
+create or replace function platform_admin_discovered_opportunities()
+returns table (
+  id uuid,
+  company_id uuid,
+  company_name text,
+  contract_number text,
+  buyer text,
+  title text,
+  closing_date timestamptz,
+  categories text[],
+  document_depth text,
+  verdict text,
+  reasons text[],
+  source text,
+  tender_type text,
+  province text,
+  listing_status text,
+  document_urls jsonb,
+  score_outlook jsonb,
+  downgraded_from text,
+  first_seen timestamptz,
+  tender_id uuid,
+  requirements_status text,
+  requirements_route text,
+  requirements_family text,
+  requirements_signal text,
+  requirements_documents jsonb,
+  requirements_missing text[],
+  requirements_fingerprint_status text,
+  requirements_unreadable text[],
+  requirements_failed_downloads int,
+  requirements_document_count int,
+  confidence_override smallint,
+  confidence_override_note text,
+  confidence_overridden_at timestamptz
+)
+language sql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+  select
+    o.id, o.company_id,
+    coalesce(c.csd_trading_name, c.legal_name),
+    o.contract_number, o.buyer, o.title, o.closing_date,
+    o.categories, o.document_depth, o.verdict, o.reasons,
+    o.source, o.tender_type, o.province, o.listing_status,
+    o.document_urls, o.score_outlook, o.downgraded_from,
+    o.first_seen, o.tender_id,
+    case when r.release_key is null then 'not_downloaded' else 'extracted' end,
+    r.route, r.family, r.signal, r.required_documents, r.missing,
+    r.fingerprint_status, r.unreadable_documents, r.failed_downloads, r.document_count,
+    o.confidence_override, o.confidence_override_note, o.confidence_overridden_at
+  from discovered_opportunities o
+  join companies c on c.id = o.company_id
+  left join discovered_opportunity_requirements r
+    on r.release_key = coalesce(o.ocid, o.contract_number)
+  where is_platform_admin()
+  order by o.first_seen desc;
+$$;
+comment on function platform_admin_discovered_opportunities() is
+  'Every company''s discovered_opportunities row (0004), left-joined to its release''s real requirements extraction (discovered_opportunity_requirements, written by engine/discovery/opportunity_requirements.py) when one exists, for the super admin review screen (/admin/discovered-opportunities). Returns nothing unless the caller is a platform admin (0043). requirements_status=''not_downloaded'' means no row exists yet - lib/compileReadiness.ts is the single place that turns all of this into a status/confidence number; this function does no classification itself.';
+revoke all on function platform_admin_discovered_opportunities() from public;
+grant execute on function platform_admin_discovered_opportunities() to authenticated;
