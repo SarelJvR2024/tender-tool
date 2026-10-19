@@ -66,6 +66,7 @@ const FREE_TOOLS = [
   { href: "/tools/deadline-calculator", title: "Working-day deadline calculator", blurb: "Add or count working days excluding weekends and SA public holidays." },
   { href: "/tools/cidb-grade", title: "CIDB grade calculator", blurb: "Check the CIDB grade a tender's value requires, or whether yours is enough." },
   { href: "/tools/bee-preference-points", title: "B-BBEE preference points calculator", blurb: "The actual 80/20 or 90/10 points for a price and B-BBEE level, per the 2022 regulations." },
+  { href: "/tools/b6-estimator", title: "SANRAL B6 functionality score estimator", blurb: "Estimate a key position's SANRAL functionality score from the real published Book 1 scoring matrices." },
 ];
 
 const PRICING_TIERS = [

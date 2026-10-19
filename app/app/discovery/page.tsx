@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../_components/SiteNav";
+import { ScrollFade } from "../_components/ScrollFade";
 import { loadDisciplineTaxonomy, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { pursueOpportunity } from "./actions";
 import {
@@ -190,13 +191,6 @@ export default async function DiscoveryPage({
         @media (max-width: 600px) {
           .disco-right { flex: 1 1 100% !important; text-align: left !important; }
         }
-        /* Same unmarked-horizontal-scroll issue as the pipeline board: once
-           the filter chips overflow (any viewport narrower than they are),
-           nothing hints there's more to the right - hide the fade once
-           everything fits. */
-        @media (min-width: 900px) {
-          .disco-filter-fade { display: none; }
-        }
       `}</style>
       <SiteNav active="discovery" />
 
@@ -309,19 +303,11 @@ export default async function DiscoveryPage({
             );
           })}
         </div>
-        <div
-          className="disco-filter-fade"
-          aria-hidden
-          style={{
-            position: "absolute",
-            top: 0,
-            right: 0,
-            bottom: 4,
-            width: 32,
-            pointerEvents: "none",
-            background: "linear-gradient(to right, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.95))",
-          }}
-        />
+        {/* Same unmarked-horizontal-scroll issue as the pipeline board: once
+            the filter chips overflow (any viewport narrower than they are),
+            nothing hints there's more to the right. White fade matches this
+            page's (body-inherited) white background. */}
+        <ScrollFade fadeColor="255, 255, 255" minWidthToHide={900} />
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 import { loadB7State } from "./b7-data";
 import { requestSubmissionPack } from "./actions";
-import { PackAutoRefresh } from "./pack-auto-refresh";
+import { AutoRefresh } from "../../_components/AutoRefresh";
 import { PackChecklist, checklistOf, type ChecklistRow } from "./pack-checklist";
 import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
 
@@ -129,7 +129,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
 
   return (
     <div id="submission-pack" style={card}>
-      <PackAutoRefresh active={active} />
+      <AutoRefresh active={active} />
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Submission pack</div>
       <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
         Two PDFs, one per sealed envelope, each in submission order with a contents page and page numbers. The

@@ -22,9 +22,11 @@ export default function SignUpPage() {
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   // null = still checking. Defaults open (true) on a failed check rather
-  // than locking every visitor out over a transient RPC error - the Server
-  // Action behind signUp has no gate of its own, so this is advisory, not
-  // the real enforcement point; platform_admin_set_setting (0064) is.
+  // than locking every visitor out over a transient RPC error. This only
+  // blocks the visible sign-up form; it does not block a direct call to
+  // Supabase's own auth API. Real enforcement would need a Supabase Auth
+  // Hook (server-side, configured in the Supabase dashboard) - not yet
+  // built. Treat this toggle as a UI-level pause, not a hard lock.
   const [signupsEnabled, setSignupsEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
