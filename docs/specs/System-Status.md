@@ -166,6 +166,226 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - nineteenth run): `--no-fetch-documents`
+promised "much faster" and quietly wasn't
+
+Picked up the sibling QA pass's own CI work (`app-ci.yml`, built directly off my sixteenth-run
+finding about `node --test`'s bracketed-path quirk - now every `*.test.ts` file actually runs in
+CI) and picked `engine/notify/daily_digest.py` for this run - "notify" has only had its date-crash
+fixes touched before (sixth run), never a dedicated pass, and this script is unusually
+heavily pre-tested already (`test_digest_live.py` covers cross-tenant isolation, seen-store
+transitions, role filtering), so the odds favoured a real subtle gap over a repeat.
+
+**Finding 19 (fixed, moderate):** `--no-fetch-documents`'s own help text promises "much faster,
+useful for a quick local run," but it only ever reached `score_per_company()`'s PDF-text download
+used for scoring - `fetch_releases()` called `gov_sources.releases_for_watch(names)` with no
+`with_documents` argument at all, so every source's own slow per-release document/detail-page
+read (SANRAL's ~85 detail-page fetches at 1s apart, Eskom/Transnet's per-tender document lists)
+ran in full regardless of the flag. Not a data-correctness bug - a documented behaviour that
+silently never did what it said. Fixed by threading `with_documents` through `fetch_releases()`
+into `gov_sources.releases_for_watch()`; updated `test_digest_live.py`'s own stub of
+`fetch_releases` (which would otherwise raise `TypeError` on the new keyword argument) and added a
+new check proving the flag actually reaches `gov_sources` now, with a spy rather than a read-the-
+code assumption. Also traced the role-visibility matrix and every cross-tenant isolation path in
+this file closely and found them sound - including confirming the viewer's "most urgent tender
+update" summary relies on `pending_digest_updates()`'s own pre-sort by urgency rather than an
+unsorted `items[0]`, which would have been a real bug had it not already been pre-sorted.
+
+**Verification:** `test_digest_live.py` - all existing checks plus 2 new ones, 0 failures.
+`test_gov_sources.py` unaffected, still clean. Full detail: `QA-Edge-Case-Findings.md`,
+"nineteenth run."
+
+## This pass (2026-10-19, standing QA/robustness review - eighteenth run): my own new CI job was red on GitHub from the start - a real root cause, not a flake
+
+Orientation: one new commit since the last pass (`2f3d295`, a jump-nav scroll-affordance fix -
+reused `ScrollFade` correctly, added a `hint` prop, scoped its new `position: relative` wrapper to
+only the inner scrolling row so the sticky bar's own containing block is untouched). Independently
+verified rather than trusted: read the full diff, confirmed the shared-classname media-query logic
+in `ScrollFade.tsx` still works correctly with `hint={false}` (both the fade div and the optional
+hint div share one class, so the `display: none` rule still hides whichever of them render), ran
+`npm run typecheck`/`lint`/`build` and all 82 TS test cases myself - all clean. No issues, no
+action needed on that commit itself.
+
+**Finding 18 (fixed, severe - my own CI job from the prior pass has been red since the moment it
+existed).** I don't just report on other sessions' work - I check my own. `app-ci.yml` (added last
+pass, seventeenth run) had already run twice on GitHub by this pass (triggered by `64a486e` and
+`2f3d295`) and **both runs failed**, not the green I assumed. Pulled the actual job logs
+(`mcp__github__get_job_logs`) rather than guessing: both failed identically at the `Typecheck`
+step with `app/layout.tsx(20,50): error TS2304: Cannot find name 'LayoutProps'.` - the exact error
+commit `0a4921b` had called "a pre-existing unrelated LayoutProps error... aside" and every session
+since has waved off as noise, never root-caused.
+
+**Root cause, reproduced locally:** Next.js 16's typed-routes feature code-generates the ambient
+`LayoutProps`/`PageProps` helper types into `.next/types` only during `next build` or `next dev` -
+`tsc --noEmit` depends on that file existing but does nothing to create it. My local "clean
+typecheck" claims earlier this session (and, it turns out, everyone else's "pre-existing, aside"
+dismissals before this) were against a `.next` directory already populated by an earlier `npm run
+build` in that same long-lived sandbox - never a genuinely fresh checkout. Confirmed by `rm -rf
+.next && npm run typecheck` locally: reproduced the identical `TS2304` error. A fresh GitHub
+Actions checkout has no such leftover `.next`, so my new CI job was red from its very first run,
+on both commits it ever saw - exactly the kind of thing this standing review exists to catch,
+including in its own output.
+
+**Fix:** `app/package.json`'s `typecheck` script is now `next typegen && tsc --noEmit` - Next.js
+ships a dedicated `next typegen` command (`next typegen [directory] [options]`: "Generate
+TypeScript definitions for routes, pages, and layouts without running a full build") built for
+exactly this, lighter than a full build. This fixes the root cause everywhere `npm run typecheck`
+is invoked - local dev, `app-ci.yml`, and `npm run verify` - not just a patch to the CI workflow's
+own step order. **The "pre-existing unrelated LayoutProps error" was never actually unrelated or
+safe to wave off - it was this fix, undiscovered, the whole time.**
+
+**Verification:** `rm -rf .next && npm run typecheck` - clean, no error (confirmed the fix from the
+exact fresh state that reproduced the bug, not from a warm sandbox). Then the full sequence from
+the same clean `.next` state: typecheck, lint, `npm run build` (all 3 exit 0), and every one of the
+8 `*.test.ts` files run directly (82/82 pass). Pushed (`fcb1b85`) and confirmed on GitHub's own
+infrastructure, not just locally: `app-ci.yml` run #3 (`mcp__github__actions_get`,
+run id `39209252689`) - `"status":"completed","conclusion":"success"`. The first real green run
+this job has ever had, after two straight failures (`64a486e`, `2f3d295`) that I had wrongly
+assumed were passing until I actually checked.
+
+## This pass (2026-10-19, standing QA/robustness review - seventeenth run): the app/ half of the codebase had no CI at all
+
+Orientation: one new commit since the last pass (`455d057`, the sixteenth run's own
+`staleSyncedProjectRows()` fix). Independently re-verified it before moving on: read
+`won-project-sync-logic.ts` and its wiring into `syncWonProjectToTeam()` in full, ran
+`won-project-sync-logic.test.ts` directly myself (6/6 pass, not just trusted from the commit
+message), confirmed the delete is correctly scoped (the `existingSynced` query it deletes from is
+already filtered to this `company_id` + `source_tender_pack_id`, and RLS would block a cross-tenant
+delete even if it weren't), and confirmed both the reassigned-away and newly-confirmed person's
+`/people/[id]` pages get revalidated. `npm run typecheck`/`lint` clean. No duplication, no overlap,
+no gap with my own fifteenth-run work - the sibling pass picked a genuinely different area
+(TypeScript action code) and its own write-up correctly cites and confirms the fifteenth run's
+`0066` fix rather than re-doing it.
+
+**Finding 17 (fixed): the entire `app/` half of this codebase has never had a CI job.** Checked
+directly - `.github/workflows/` holds exactly one workflow, `bridge-worker-ci.yml`, scoped to
+`engine/**` only (its own `paths:` filter). Nothing anywhere runs `npm run typecheck`, `npm run
+lint`, `npm run build`, or any of the 8 `*.test.ts` files (82 cases total, confirmed by running
+every one directly: `pack-review-logic.test.ts` 19, `signatory-logic.test.ts` 10, `won-project-
+sync-logic.test.ts` 6, `cidbGrading.test.ts` 5, `preferencePoints.test.ts` 10, `marketTrendLogic.
+test.ts` 9, `publicHolidays.test.ts` 11, `onboardingScan.test.ts` 12) anywhere automated - every
+"clean" claim in this file for the `app/` side has only ever been a session's own local run.
+Compounding this: the sixteenth run's own finding (this environment's Node silently finds 0 tests
+for a glob under a `[id]` bracketed directory via `node --test`) means that if anyone ever wired
+this up the documented way, 3 of these 8 files - including today's two most recent regression
+tests - would silently never run while the job still reported green.
+
+Fixed with a new workflow, `.github/workflows/app-ci.yml`, triggered on push to `main` touching
+`app/**`: `npm ci`, typecheck, lint, `npm run build` (confirmed needs no Supabase env vars - same
+as every session's own local verification all along), then every `*.test.ts` file found via
+`find` (literal paths, not `node --test`'s glob) and run directly with `node
+--experimental-strip-types`, failing the job if any one of them fails. No secrets required.
+**Verified the job logic itself actually catches a real failure**, not just that it's green by
+default: temporarily appended a deliberately-failing test to `cidbGrading.test.ts`, ran the exact
+loop the workflow uses, confirmed it printed `FAILED: ./lib/cidbGrading.test.ts` and exited 1, then
+restored the file (confirmed via `git status`/`git diff --stat` - no residue). YAML validated with
+`python3 -c "import yaml; yaml.safe_load(...)"`.
+
+**Not done (flagged for Sarel):** this only runs on push to `main`, matching the project's
+current no-PR-review workflow - it catches a regression after it's already on `main`, not before.
+Worth revisiting if/when PR review comes back into the workflow.
+
+## This pass (2026-10-19, standing QA/robustness review - sixteenth run): a reassigned key person
+kept a stale "won project" on their CV record forever
+
+Picked up migration `0065` (submission/opening reminders + won-project CV sync) and the sibling
+QA pass's own same-day `0066` fix (re-read and confirmed sound - a real, severe RECORD-field bug
+in the shared `tt_check_same_company()` trigger, reproduced and fixed with solid Postgres-backed
+verification; nothing more needed there). Picked `syncWonProjectToTeam()`
+(`app/app/tenders/[id]/actions.ts`) for this run instead - new, writes real CV-feeding history,
+and TypeScript/Supabase action code gets far less adversarial coverage than the Python engine
+side in this standing review, precisely because there's no live Supabase to run it against.
+
+**Finding 16 (fixed, severe):** the key-person picker (`position-person-select.tsx`) has no
+`pipeline_stage` gate - a position can be reassigned to a different person, or un-confirmed
+entirely, even after a tender is Won and its project has already been synced to the team's CV
+history once. Because the sync's upsert conflict key includes `person_id`, reassigning a position
+never updates the old person's row - it only ever adds the new person's row, leaving the old
+person's `projects` entry claiming they worked a project they were reassigned off, forever, with
+no later re-sync ever correcting it. Fixed by extracting `staleSyncedProjectRows()` into a new
+pure-logic file (`won-project-sync-logic.ts`, same testable-sibling pattern as `pack-review-
+logic.ts`/`signatory-logic.ts`) and deleting the stale rows before every re-sync.
+
+**Verification:** `won-project-sync-logic.test.ts` - 6/6 new tests pass (first sync, unchanged
+re-sync, the real reassignment bug, un-confirming a position, multi-position isolation, a
+defensive multi-row case). Also surfaced and documented a tooling quirk: this environment's Node
+(v22.22.0) silently returns "0 tests found" for `node --test "path/with/[id]/brackets/..."` - not
+a regression, confirmed by re-running the two pre-existing bracketed test files
+(`pack-review-logic.test.ts`, `signatory-logic.test.ts`) the same way and getting the same silent
+0-tests result; running the file directly without `--test` works on this Node version and all
+three suites (19 + 10 + 6) pass. Full detail: `QA-Edge-Case-Findings.md`, "sixteenth run."
+
+## This pass (2026-10-19, standing QA/robustness review - fifteenth run): super admin portal, won-project sync, 12-commit demo-prep batch
+
+Picked up the 12-commit batch landed since the fourteenth run (`f2f8925..7da446f`): super admin
+customer/settings console (`0064`), submission/opening reminders + won-project CV sync (`0065`),
+auth-page hero copy rewrite, five rounds of UI-trust/polish fixes from whole-app review passes, a
+privacy notice, and a "Start free" path on every free tool. 44 files, 2444 insertions / 771
+deletions. `npm run build`/`typecheck`/`lint` all clean before and after my own fix below.
+
+**Finding 15 (fixed, severe - a bad migration would have broken nearly every tenant write in the
+app):** `0065`'s edit to the shared `tt_check_same_company()` trigger function (originally `0043`)
+added `if tg_table_name = 'projects' and new.source_tender_pack_id is not null then` - a combined
+condition reading a `projects`-only column off `NEW`. This trigger function is attached, via
+separate `CREATE TRIGGER` statements, to a dozen *other* tables with no `source_tender_pack_id`
+column at all (`cv_uploads`, `tender_tasks`, `tender_answers`, `financial_captures`,
+`generated_documents`, `pack_generation_jobs`, `tender_comments`, `tender_private_documents`,
+`generated_cvs`, `cv_extraction_results`, `person_role_eligibility`, `tender_pack_assignments`).
+`NEW` is a dynamically-typed `RECORD` there, and Postgres resolves `new.source_tender_pack_id`
+against the row's real composite type while validating the combined expression - it does **not**
+short-circuit on the false left-hand clause. Reproduced directly: replaying `0001`→`0065` on a
+scratch Postgres and running `engine/security/test_tenant_isolation.py` Part 2 crashed on the very
+first INSERT into a non-`projects` table sharing the trigger, with `ERROR: record "new" has no
+field "source_tender_pack_id"`. This would have broken almost every tenant write path in
+production the moment `0065` was applied to the live Supabase project - not a cosmetic bug.
+
+Fixed with a new migration, `0066_fix_tt_check_same_company_record_bug.sql` - a `CREATE OR REPLACE
+FUNCTION` restoring the exact same logic as a **nested IF** (`if tg_table_name = 'projects' then
+if new.source_tender_pack_id is not null then ... end if; end if;`), the same safe pattern this
+very function already uses for every other table-specific field check a few lines below it. A new
+migration rather than editing `0065` in place, per this project's own rule against editing an
+already-possibly-deployed migration file - `0065`'s DDL itself applied cleanly; only this
+function's runtime behaviour was broken.
+
+**Verification:** applied `0066` to the same scratch Postgres, re-ran `test_tenant_isolation.py`
+Part 2 end to end - `ALL PASSED`, no crash. Then manually drove the actual security property
+(not just "doesn't crash") directly in SQL: a `projects` insert with another company's
+`source_tender_pack_id` is still correctly rejected (`23514`, same error message as before); the
+same insert with the caller's own company's pack succeeds; an insert into a non-`projects` table
+sharing the trigger (`tender_tasks`) no longer throws the RECORD error. `test_gov_sources.py`
+re-run clean for safety (unrelated to this fix, confirms the scratch DB wasn't otherwise disturbed).
+
+**Finding 16 (fixed, marketing-policy violation, survived 3 dedicated review passes):** commit
+`2572ce6` rewrote the `AuthShell` hero headline (shown on `/login`, `/signup`,
+`/forgot-password`, `/reset-password`) to "Find government tenders, build **winning**
+submissions, never miss a deadline." `Marketing-Pricing-Strategy.md` §6.3 states explicitly:
+"**Don't promise 'win more tenders'**. Promise fewer avoidable losses." Commit `0a4921b` ("Final
+polish pass... marketing review findings") touched the very same `AuthShell.tsx` file for a
+different line (the proof points) and still left this headline in place, as did the two UI-review
+passes before it (`126b2ae`, `f697c08`) - three separate review passes on this exact file, none
+of which caught it. Fixed by changing "winning" to "complete" (`build complete submissions`),
+matching the house voice the landing page's own hero already uses ("nothing missing, nothing
+expired, nothing silently left blank") and the §6.3-suggested framing. Swept the rest of the
+batch's public-facing pages (`page.tsx`, `AuthShell.tsx`, all 4 `tools/*`, `privacy/page.tsx`) for
+the same and other banned phrases ("win more tenders", "AI writes your bid/methodology") -
+nothing else found. `npm run typecheck`/`lint` re-run clean after the one-word fix.
+
+**Everything else in the batch, read in full, no issues found:** `0064`'s admin-portal functions
+(every one gated by `is_platform_admin()` or restricted to the one deliberately-ungated
+`signups_enabled()` read) - manually verified myself against a replayed scratch DB: non-admin
+gets 0 rows / explicit refusal, same user after being added to `platform_admins` gets real data,
+removed again reverts to 0 rows. The UI-trust fixes (`126b2ae`: stop leaking raw Supabase errors
+and internal pipeline names to customers, add confirm-before-delete on every destructive button;
+`f697c08`/`0a4921b`: scroll-fade affordances, de-duplicated polling component now shared as
+`AutoRefresh.tsx`) are straightforward, low-risk UI polish - read the diffs, nothing incorrect.
+`ff66abc`'s SEO split (`page.tsx` + `*Client.tsx` per free tool) keeps the same client logic
+unchanged, confirmed by diff. `c8d6dd5`'s privacy notice states only what `POPIA-Security-Audit.md`
+already verified, and is explicit about what's still open (Information Officer, retention period,
+hosting region) rather than overclaiming - this narrows Known-gaps item (d) below, not closes it.
+`1785f33`'s "Start free" cross-links are inert UI additions, no logic.
+
+Tore down the scratch Postgres database and temp files afterward.
+
 ## This pass (2026-10-19, standing QA/robustness review - fourteenth run): 3 new discovery sources
 could silently merge an unrelated buyer's tender into theirs
 

@@ -5,6 +5,7 @@ import { daysUntil } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { NEXT_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { SiteNav } from "../_components/SiteNav";
+import { ScrollFade } from "../_components/ScrollFade";
 import { moveTenderStage } from "./actions";
 import { derivedSector, ECONOMICS_COLUMNS, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
 import { loadDisciplineTaxonomy, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
@@ -186,11 +187,6 @@ export default async function PipelinePage({
             Nothing used to hint that Won/Lost sit off-screen, so a right-edge
             fade (hidden once the board actually fits, i.e. desktop widths) +
             a small text cue give the scroll somewhere to point at. */}
-        <style>{`
-          @media (min-width: 1180px) {
-            .pipeline-scroll-fade { display: none; }
-          }
-        `}</style>
         <div style={{ position: "relative" }}>
           <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 8 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(220px, 1fr))", gap: 12, alignItems: "start" }}>
@@ -230,22 +226,7 @@ export default async function PipelinePage({
           </div>
           {/* Right-edge fade: the only hint, on narrower viewports, that
               Won/Lost sit off-screen to the right. */}
-          <div
-            className="pipeline-scroll-fade"
-            aria-hidden
-            style={{
-              position: "absolute",
-              top: 0,
-              right: 0,
-              bottom: 8,
-              width: 36,
-              pointerEvents: "none",
-              background: "linear-gradient(to right, rgba(246, 245, 241, 0), rgba(246, 245, 241, 0.95))",
-            }}
-          />
-        </div>
-        <div className="pipeline-scroll-fade" style={{ fontSize: 11, color: "#9A9684", textAlign: "right", marginTop: 4 }}>
-          Scroll for more →
+          <ScrollFade fadeColor="246, 245, 241" minWidthToHide={1180} />
         </div>
       </div>
     </div>

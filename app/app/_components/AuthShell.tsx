@@ -1,7 +1,7 @@
 import { Logo } from "./Logo";
 
 const PROOF_POINTS = [
-  "Finds tenders you qualify for, automatically",
+  "Checks every contents entry against its real page number before the pack is built",
   "Builds your full SANRAL submission pack - forms, financials and CVs",
   "Flags every expired, missing or mismatched document before you submit",
 ];
@@ -59,7 +59,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <h1 style={{ fontSize: 28, fontWeight: 700, color: "#F6F5F1", margin: "0 0 16px", lineHeight: 1.3, maxWidth: 420 }}>
-            Find government tenders, build winning submissions, never miss a deadline.
+            Find government tenders, build complete submissions, never miss a deadline.
           </h1>
 
           <ul style={{ listStyle: "none", margin: "32px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 14 }}>

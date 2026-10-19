@@ -4,11 +4,11 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * While a submission pack is requested/generating, re-fetch the page every
- * 15 s so the status moves to ready (with its download link) or failed
- * without a manual reload. Renders nothing; stops once nothing is active.
+ * While some background job is still running, re-fetch the current page
+ * every 15s so the server-rendered state (status, results, counts) catches
+ * up without a manual reload. Renders nothing; stops once nothing is active.
  */
-export function PackAutoRefresh({ active }: { active: boolean }) {
+export function AutoRefresh({ active }: { active: boolean }) {
   const router = useRouter();
   useEffect(() => {
     if (!active) return;

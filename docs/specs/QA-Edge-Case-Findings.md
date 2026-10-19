@@ -1254,3 +1254,114 @@ own parsing logic (date formats, malformed HTML, the cidb JSON feed's field name
 adversarially re-tested this run beyond what `test_new_sources()` (added alongside them) already
 covers - worth a dedicated pass if this area is picked again. `tender_changes.py` still has no
 dedicated test file (flagged since the eleventh/twelfth run, still open).
+
+## 2026-10-19 (sixteenth run): a reassigned key person's "won project" stays on their CV record
+forever, with no later sync ever correcting it
+
+**Context:** synced with `origin/main` and picked up migration `0065` (submission/opening
+reminders + won-project-to-CV sync, PR #19) plus `0066` (another session's own same-day fix of a
+severe RECORD-field bug it introduced in `tt_check_same_company()` - confirmed that fix is sound,
+re-read its reasoning and the real Postgres-backed test it cites; nothing more to do there).
+Picked `syncWonProjectToTeam()` (`app/app/tenders/[id]/actions.ts`) for this run: brand new,
+writes real CV-feeding history (`projects` table) once a tender is won, and the project's own
+"no live Supabase" gap means this kind of TypeScript/Supabase logic gets far less adversarial
+attention than the Python engine side - exactly the kind of under-covered area this rotation
+exists to reach.
+
+**Finding 16 (CONFIRMED, FIXED, severe - stale data with no way to self-correct):**
+`syncWonProjectToTeam()`'s own comment calls its upsert (`onConflict: "person_id,source_tender_
+pack_id,position_code"`) an "idempotent re-sync" - true only while nobody changes who is
+confirmed for a position. `position-person-select.tsx` (the Workspace's key-person picker) has
+**no `pipeline_stage` gate at all** - a key person can be reassigned off a position, or a position
+un-confirmed entirely, at any time, including after the tender is already Won and already synced
+once. Because the upsert's conflict key includes `person_id`, reassigning the position to someone
+else doesn't update the old person's row - it inserts a brand-new row for the new person and
+leaves the old person's row untouched. Every later re-sync repeats the same thing: the old
+person's `projects` row is never touched again, so their People-page CV history permanently
+claims they worked a project they were reassigned off, with no action anywhere in the product
+that ever corrects it.
+
+**Fix:** extracted the stale-row detection into a pure function, `staleSyncedProjectRows()`
+(new file `app/app/tenders/[id]/won-project-sync-logic.ts`, same "pure logic beside actions.ts"
+pattern `pack-review-logic.ts`/`signatory-logic.ts` already use, specifically so this is
+unit-testable without a live Supabase client). `syncWonProjectToTeam()` now fetches the pack's
+existing synced rows (`projects` where `source_tender_pack_id` = this pack), computes which no
+longer match the currently-confirmed person for their position (reassigned, or un-confirmed), and
+deletes those before the upsert - scoped to rows this same sync action created, never another
+pack's or another tenant's history. The reassigned-away person's People page is now also
+revalidated, not just the newly-confirmed person's.
+
+**Verification:** `node --experimental-strip-types "app/app/tenders/[id]/won-project-sync-logic.
+test.ts"` - 6/6 new tests pass: first-ever sync (nothing stale), unchanged re-sync (nothing
+stale), the real bug (reassigned position flags the old person's row), a position un-confirmed
+entirely (its old row flags too), multiple positions (only the changed one flags, not the whole
+pack), and a defensive case (never assumes at most one existing row per position). Methodology
+note: `node --experimental-strip-types --test "app/app/tenders/[id]/<file>.test.ts"` (the
+documented invocation two earlier sessions used successfully for `pack-review-logic.test.ts`/
+`signatory-logic.test.ts`) resolves to **0 tests found, no error** in this environment's Node
+(v22.22.0) - confirmed this is a pre-existing environment/tooling quirk, not a regression I
+introduced, by running those same two older test files the identical way and getting the same
+silent 0-tests result. The working form in this environment drops `--test` and runs the file
+directly (`node --experimental-strip-types "path/with/[id]/file.test.ts"` - `node:test`'s own
+`test()` calls execute immediately either way); re-ran `pack-review-logic.test.ts` and
+`signatory-logic.test.ts` that way too, 19/19 and 10/10 still pass, so nothing is actually broken
+by this - only the glob-based file-discovery path through `--test` can't resolve a `[id]`
+bracketed directory on this Node version. Worth a one-line callout for whichever session next
+touches test infra in this project, since every future session trying the documented invocation
+on this same Node version will hit the identical silent false-negative.
+
+**Not done (flagged):** `position-person-select.tsx` still has no `pipeline_stage` gate -
+reassignment after Won stays possible by design (this fix makes re-syncing honest about it
+afterwards, it doesn't prevent the reassignment itself, which may be exactly the point - a
+genuine staffing correction after completion is a legitimate use case, not a bug). Whether
+reassignment should be blocked, warned about, or left open once a tender is Won is a product
+call, not something this pass should pick unilaterally.
+
+## 2026-10-19 (nineteenth run): `--no-fetch-documents` promised "much faster" and quietly wasn't
+
+**Context:** synced with `origin/main` and picked up the sibling QA pass's own "seventeenth run"
+(a real, useful outcome of my sixteenth-run finding: `app-ci.yml`, real CI for `app/` that runs
+every `*.test.ts` file directly rather than through `node --test`'s glob, exactly working around
+the bracketed-path quirk I flagged). Picked `engine/notify/daily_digest.py` for this run -
+"notify" is a standing rotation area that has only ever had its date-crash fixes touched
+(sixth run) rather than a dedicated pass, and this script is unusually heavily pre-tested
+(`test_digest_live.py` already covers cross-tenant isolation, seen-store transitions, role
+filtering) - good odds that what's left to find is a real-but-subtle gap rather than a repeat.
+
+**Finding 19 (CONFIRMED, FIXED, moderate - a flag silently doesn't do what its own help text
+promises):** `main()`'s `--no-fetch-documents` argument is documented as "metadata-only scoring
+(no per-release document download) - much faster, useful for a quick local run." It only ever
+threaded through to `score_per_company(..., fetch_documents=not args.no_fetch_documents)` -
+`fan_out()`'s own PDF-text download used FOR SCORING. `fetch_releases()` (called earlier in
+`main()`, to get the releases in the first place) called `gov_sources.releases_for_watch(names)`
+with no `with_documents` argument at all, defaulting to `True` regardless of the flag - so every
+source's own slow per-release document/detail-page read (SANRAL's ~85 detail-page fetches at 1s
+apart, Eskom/Transnet's per-tender document-list reads) ran in full every time, flag or no flag.
+A "quick local run" was never actually quick - not a data-correctness bug, but a documented
+behaviour that silently never did what it said, confirmed by reading `fetch_releases()`'s own
+call to `gov_sources.releases_for_watch` rather than assuming the flag's help text matched reality.
+
+**Fix:** `fetch_releases()` gained a `with_documents` parameter, threaded through to
+`gov_sources.releases_for_watch(names, with_documents=with_documents)`; `main()` now calls
+`fetch_releases(args.days, args.sources, with_documents=not args.no_fetch_documents)`.
+`test_digest_live.py`'s own monkeypatch of `daily_digest.fetch_releases` (a lambda with no
+`with_documents` parameter) would have raised `TypeError` on the next `main()` run under the new
+keyword-argument call site - updated it to accept and ignore the new parameter, same as every
+other caller that doesn't care about it.
+
+**Verification:** added a new check to `test_digest_live.py` that saves the real `fetch_releases`
+before the file's own later monkeypatch replaces it, then spies on `gov_sources.releases_for_watch`
+directly - proves `with_documents=False` and `with_documents=True` both actually reach it, rather
+than trusting the code path looks right. Full suite: `test_digest_live.py` (all existing checks
+plus the 2 new ones, 0 failures), `test_gov_sources.py` (unaffected, still clean).
+`python3 -m py_compile engine/notify/daily_digest.py engine/notify/test_digest_live.py` clean.
+
+**Not yet tested / flagged:** the rest of `daily_digest.py`'s role-visibility matrix
+(`SECTION_VISIBILITY`, the `CV_KEYWORDS`/`FINANCE_KEYWORDS` heuristic classifiers, the
+`reassessed_tenders` pursuing/not-pursuing split) was read closely this run and found sound -
+every cross-tenant isolation path (`own()`, `listing_change_signals()`'s per-company ocid
+matching) traced correctly, and the "most urgent tender update" viewer summary was confirmed to
+rely on `pending_digest_updates()`'s own pre-sort by urgency (not an unsorted `items[0]`, which
+would have been a real bug) rather than assumed safe. No further issues found in this file this
+run; `tender_changes.py` still has no dedicated test file (flagged since the eleventh/twelfth
+run, still open).

@@ -1,0 +1,72 @@
+# CI for the Next.js app (app/). Nothing here existed before this pass -
+# bridge-worker-ci.yml only ever covered engine/, so a regression like the
+# one this same pass's sibling commit (455d057) just fixed - a real bug in
+# syncWonProjectToTeam(), caught only by a new *.test.ts file nobody runs
+# anywhere automated - could land on main with every check green.
+#
+# Runs typecheck, lint, a production build, and every app/*.test.ts file -
+# all of it secret-free (pure logic / Node's test runner / a build with no
+# Supabase env vars, same as this sandbox's own verification all session).
+#
+# Deliberately does NOT use `node --test` with a glob: this environment's
+# Node (confirmed this pass, QA-Edge-Case-Findings.md "sixteenth run")
+# silently finds 0 tests for any path containing a "[id]" bracketed
+# directory - 3 of this repo's 8 test files live under one. `find` lists
+# literal paths instead, so every file actually gets run and a real
+# failure actually fails the job, rather than silently reporting green.
+name: app-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/app-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build (no Supabase env vars needed - same as local verification)
+        run: npm run build
+
+      - name: Run every *.test.ts file directly (not via node --test's glob - see header)
+        run: |
+          set -e
+          status=0
+          while IFS= read -r f; do
+            echo "=== $f ==="
+            if ! node --experimental-strip-types "$f"; then
+              status=1
+            fi
+          done < <(find . -name "*.test.ts" -not -path "*/node_modules/*")
+          exit $status
