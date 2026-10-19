@@ -169,6 +169,34 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-fourth run): the one remaining
+"GitHub-runner-only" CI failure was a brittle test assertion, not an environment difference
+
+Picked up the sibling pass's "twenty-second run" (Findings 21/22: a real race condition and a CI
+config bug that hid ~20 test files behind "skipped" - `bridge-worker-ci.yml` had been red on 52 of
+its last 53 runs, unnoticed all along) and its one still-open item: `test_extract_cv_fields.py`'s
+`naledi_cv.pdf via pdftotext -layout` check, left diagnosed-but-unfixed as "a GitHub Actions
+runner-specific difference I can't reproduce here."
+
+**Finding 23 (fixed, moderate):** pulled the actual job log for the failing check rather than
+re-trusting the "can't reproduce" write-up. The check was a bare `"TMRA/2019/04" in t` substring
+test with NO whitespace normalisation, despite its own neighbouring comment claiming quotes "are
+also matched with whitespace removed." `extract_cv_fields.py` already has the real matcher this
+comment was describing - `evidence_in_text()`, explicitly built to tolerate exactly this ("a quote
+wrapped mid-token by a narrow table column") - just never applied to this one smoke-test
+assertion. A different LibreOffice point release on GitHub's runner wrapping the same table cell
+a few pixels differently was never an unreproducible environment quirk; it was a test checking
+something more exact than production itself requires. Fixed by routing the check through
+`evidence_in_text()` instead of a bare `in`. Confirmed this doesn't just paper over real
+corruption first: tested the matcher against genuinely-missing text (rejected), the documented
+benign wrap (tolerated), and a wrong-but-similar number (rejected) before trusting it.
+
+**Verification:** `python3 engine/cv/test_extract_cv_fields.py` - `ALL PASSED` locally (installed
+the missing `anthropic` package first; unrelated to this fix). `test_poll_loop.py` unaffected,
+still 5/5. The real verification is the next `bridge-worker-ci.yml` run on GitHub - check its
+conclusion, not just this local pass, before calling CI green. Full detail:
+`QA-Edge-Case-Findings.md`, "twenty-fourth run" (Finding 23).
+
 ## This pass (2026-10-19, standing QA/robustness review - twenty-third run): two well-built, independently re-verified commits - no issues found
 
 Orientation: two new commits since the last pass, both from the sibling session that's been

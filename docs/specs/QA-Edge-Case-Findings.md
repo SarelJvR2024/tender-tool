@@ -1444,3 +1444,53 @@ fields go through the existing ticked/quote-verification gate unchanged - no new
 change to `confirmVaultDocument`'s generic field-writing loop. Full detail and column names:
 `System-Status.md`'s new "Onboarding document scan: the six previously-orphaned fields..." row.
 `node --experimental-strip-types --test app/lib/onboardingScan.test.ts` - 18/18 pass.
+
+## 2026-10-19 (twenty-fourth run): the "unreproducible GitHub-runner difference" blocking CI green
+was a brittle test assertion all along
+
+**Context:** synced with `origin/main` and picked up the sibling pass's "twenty-second run" -
+a genuinely major discovery: `bridge-worker-ci.yml` had been red on **52 of its last 53 runs**,
+undetected for the project's entire history because every session (this one included, across 22
+prior runs) only ever trusted its own local "all tests pass" result, never the real GitHub Actions
+conclusion. That pass found and fixed a real race condition (Finding 21) and a CI config bug
+hiding ~20 test files behind "skipped" (Finding 22), but left one failure open: `test_extract_
+cv_fields.py`'s `naledi_cv.pdf via pdftotext -layout` check, diagnosed as "passes reliably in this
+sandbox... looks like a GitHub Actions runner-specific difference I can't reproduce or iterate on
+here." This run picked that up directly, now that CI run history and job logs are a tool away
+(`mcp__github__actions_list`/`get_job_logs`) rather than something to only reason about secondhand.
+
+**Finding 23 (CONFIRMED, FIXED, moderate - a false "environment difference," not a real one):**
+pulled the actual failing job's log for the latest run (`39238384524`, job `118012945285`) rather
+than re-trusting the "can't reproduce" diagnosis. The failing check itself:
+`check("20169999" in t and "University of Cape Town" in t and "TMRA/2019/04" in t, ...)` - a bare,
+unnormalised substring check. Its own neighbouring comment claims *"LibreOffice's PDF wraps the
+narrow table column mid-token ('TMRA/2019/04' / '4')... which is why quotes are also matched with
+whitespace removed"* - but the code never actually did that; it was a plain `in` check with no
+normalisation at all, exactly as fragile to a different LibreOffice point release wrapping the
+same table cell a few pixels differently as the comment claimed it wasn't. `extract_cv_fields.py`
+already has the real, production-tested, wrap-tolerant matcher this comment was describing -
+`evidence_in_text()` (exact match after `_norm()`, then a squeezed letters+digits fallback
+explicitly built for "a quote wrapped mid-token by a narrow table column ('TMRA/2019/04' + '4')")
+- every real CV extraction already verifies its quotes against this, just not this one smoke-test
+assertion. Confirmed the fix doesn't just paper over real corruption: tested `evidence_in_text()`
+directly against three cases - text with the registration number genuinely absent (correctly
+rejected), the exact benign mid-token wrap this comment describes (correctly tolerated), and a
+different, wrong registration number (correctly NOT matched) - before trusting it as the fix.
+
+**Fix:** `test_text_extraction()` now normalises with `x._norm(t)` and checks all three expected
+values through `x.evidence_in_text()` instead of a bare `in` check - reusing the same matcher
+production CV extraction already relies on, rather than a second, less tolerant one invented just
+for this test.
+
+**Verification:** `python3 engine/cv/test_extract_cv_fields.py` - `ALL PASSED` (installed the
+`anthropic` package locally first, confirmed missing and unrelated to this fix - every other
+check in this file already ran clean without it; Tesseract-dependent OCR checks skip gracefully,
+same as every prior run). `python3 -m py_compile` clean. `engine/worker/test_poll_loop.py` (reads
+`run_bridges.py`/`poll_loop.py`, unaffected) still 5/5. Pushed to `main`; the next `bridge-worker-
+ci.yml` run on GitHub is the real verification this fix needed and couldn't get locally - check
+its conclusion before treating this as closed, not just this write-up's own confidence.
+
+**Not yet verified:** whether this is genuinely the LAST failing step - `bridge-worker-ci.yml`'s
+`container-build` job and the `app-ci.yml` workflow were not re-checked this run (both showed
+green in the twenty-second/twenty-first-run write-ups); only `smoke-test`'s one known-red step was
+in scope here.
