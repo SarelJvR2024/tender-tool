@@ -61,6 +61,16 @@ const ACTION_LABEL: Record<PipelineStage, string> = {
   lost: "Lost",
 };
 
+// Fit, specific to what each stage means (STAGE_META's hint) rather than one
+// generic "Nothing here" repeated five times - flagged in the whole-app UI review.
+const EMPTY_COPY: Record<PipelineStage, string> = {
+  found: "Nothing found yet - tenders you decide to pursue from Discovery land here.",
+  bidding: "Nothing being prepared right now - move a tender here once you start bidding.",
+  submitted: "Nothing handed in yet - submitted bids wait here for an outcome.",
+  won: "No wins logged yet - they'll show up here.",
+  lost: "Nothing here - long may it stay that way.",
+};
+
 // Exact-time check (a tender closing at 12:00 today is closed by 12:01),
 // unlike daysUntil()'s whole-day count.
 function isPast(d: string | null): boolean {
@@ -172,9 +182,18 @@ export default async function PipelinePage({
           <StatCard label="Lost" value={byStage.lost.length} color="#B91C1C" />
         </div>
 
-        {/* The board scrolls sideways on its own on a phone; the page itself never does. */}
-        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 8 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(220px, 1fr))", gap: 12, alignItems: "start" }}>
+        {/* The board scrolls sideways on its own on a phone; the page itself never does.
+            Nothing used to hint that Won/Lost sit off-screen, so a right-edge
+            fade (hidden once the board actually fits, i.e. desktop widths) +
+            a small text cue give the scroll somewhere to point at. */}
+        <style>{`
+          @media (min-width: 1180px) {
+            .pipeline-scroll-fade { display: none; }
+          }
+        `}</style>
+        <div style={{ position: "relative" }}>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(220px, 1fr))", gap: 12, alignItems: "start" }}>
             {PIPELINE_STAGES.map((stage) => {
               const meta = STAGE_META[stage];
               const column = byStage[stage];
@@ -191,7 +210,7 @@ export default async function PipelinePage({
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {column.length === 0 && (
                       <div style={{ fontSize: 12, color: "#9A9684", padding: "14px 8px", textAlign: "center", border: "1px dashed #E5E1D5", borderRadius: 9 }}>
-                        Nothing here
+                        {EMPTY_COPY[stage]}
                       </div>
                     )}
                     {column.map((c) => (
@@ -207,7 +226,26 @@ export default async function PipelinePage({
                 </section>
               );
             })}
+            </div>
           </div>
+          {/* Right-edge fade: the only hint, on narrower viewports, that
+              Won/Lost sit off-screen to the right. */}
+          <div
+            className="pipeline-scroll-fade"
+            aria-hidden
+            style={{
+              position: "absolute",
+              top: 0,
+              right: 0,
+              bottom: 8,
+              width: 36,
+              pointerEvents: "none",
+              background: "linear-gradient(to right, rgba(246, 245, 241, 0), rgba(246, 245, 241, 0.95))",
+            }}
+          />
+        </div>
+        <div className="pipeline-scroll-fade" style={{ fontSize: 11, color: "#9A9684", textAlign: "right", marginTop: 4 }}>
+          Scroll for more →
         </div>
       </div>
     </div>

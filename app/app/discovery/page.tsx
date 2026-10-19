@@ -190,6 +190,13 @@ export default async function DiscoveryPage({
         @media (max-width: 600px) {
           .disco-right { flex: 1 1 100% !important; text-align: left !important; }
         }
+        /* Same unmarked-horizontal-scroll issue as the pipeline board: once
+           the filter chips overflow (any viewport narrower than they are),
+           nothing hints there's more to the right - hide the fade once
+           everything fits. */
+        @media (min-width: 900px) {
+          .disco-filter-fade { display: none; }
+        }
       `}</style>
       <SiteNav active="discovery" />
 
@@ -249,11 +256,11 @@ export default async function DiscoveryPage({
           </div>
         )}
 
+        <div style={{ position: "relative", marginBottom: 20 }}>
         <div
           style={{
             display: "flex",
             gap: 8,
-            marginBottom: 20,
             overflowX: "auto",
             paddingBottom: 4,
             WebkitOverflowScrolling: "touch",
@@ -301,6 +308,20 @@ export default async function DiscoveryPage({
               </a>
             );
           })}
+        </div>
+        <div
+          className="disco-filter-fade"
+          aria-hidden
+          style={{
+            position: "absolute",
+            top: 0,
+            right: 0,
+            bottom: 4,
+            width: 32,
+            pointerEvents: "none",
+            background: "linear-gradient(to right, rgba(255, 255, 255, 0), rgba(255, 255, 255, 0.95))",
+          }}
+        />
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -382,6 +403,22 @@ export default async function DiscoveryPage({
                       >
                         was {verdictLabel(o.downgraded_from)}
                       </span>
+                    )}
+                    {/* On a phone, the matching button in the right rail sits
+                        below badges, a title, reasons and a "how it's
+                        scored" box - a lot to scroll past for the one action
+                        that matters. A compact copy up here, next to the
+                        verdict chip, keeps it reachable without scrolling. */}
+                    {o.verdict !== "closed" && !changes.some((c) => c.change_type === "cancelled") && (
+                      <form action={pursueOpportunity} style={{ marginLeft: "auto" }}>
+                        <input type="hidden" name="opportunity_id" value={o.id} />
+                        <button
+                          type="submit"
+                          style={{ minHeight: 28, padding: "0 10px", borderRadius: 100, background: "#16233B", color: "#FFFFFF", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                        >
+                          {o.tender_id ? "Open in workspace" : "Prepare this tender"}
+                        </button>
+                      </form>
                     )}
                   </div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 2 }}>
