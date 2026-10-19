@@ -1,5 +1,6 @@
 import { createCompany } from "./actions";
 import { Logo } from "../_components/Logo";
+import { AuthShell } from "../_components/AuthShell";
 
 // Depends on the signed-in user's session, same reason as dashboard/page.tsx.
 export const instant = false;
@@ -12,7 +13,12 @@ export default async function OnboardingPage({
   const { error } = await searchParams;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F5F1", padding: 16 }}>
+    // Same split-screen shell as /login and /signup (AuthShell) - this is
+    // the very next screen after either, and a plain white card here broke
+    // the brand/promise carried through from signup. The card below is the
+    // same width and shape those two use, so it drops straight into
+    // AuthShell's right panel without needing a wider layout.
+    <AuthShell>
       <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ marginBottom: 20 }}>
           <Logo size={40} />
@@ -46,6 +52,6 @@ export default async function OnboardingPage({
           </button>
         </form>
       </div>
-    </div>
+    </AuthShell>
   );
 }
