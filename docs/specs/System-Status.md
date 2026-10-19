@@ -166,6 +166,52 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - eighteenth run): my own new CI job was red on GitHub from the start - a real root cause, not a flake
+
+Orientation: one new commit since the last pass (`2f3d295`, a jump-nav scroll-affordance fix -
+reused `ScrollFade` correctly, added a `hint` prop, scoped its new `position: relative` wrapper to
+only the inner scrolling row so the sticky bar's own containing block is untouched). Independently
+verified rather than trusted: read the full diff, confirmed the shared-classname media-query logic
+in `ScrollFade.tsx` still works correctly with `hint={false}` (both the fade div and the optional
+hint div share one class, so the `display: none` rule still hides whichever of them render), ran
+`npm run typecheck`/`lint`/`build` and all 82 TS test cases myself - all clean. No issues, no
+action needed on that commit itself.
+
+**Finding 18 (fixed, severe - my own CI job from the prior pass has been red since the moment it
+existed).** I don't just report on other sessions' work - I check my own. `app-ci.yml` (added last
+pass, seventeenth run) had already run twice on GitHub by this pass (triggered by `64a486e` and
+`2f3d295`) and **both runs failed**, not the green I assumed. Pulled the actual job logs
+(`mcp__github__get_job_logs`) rather than guessing: both failed identically at the `Typecheck`
+step with `app/layout.tsx(20,50): error TS2304: Cannot find name 'LayoutProps'.` - the exact error
+commit `0a4921b` had called "a pre-existing unrelated LayoutProps error... aside" and every session
+since has waved off as noise, never root-caused.
+
+**Root cause, reproduced locally:** Next.js 16's typed-routes feature code-generates the ambient
+`LayoutProps`/`PageProps` helper types into `.next/types` only during `next build` or `next dev` -
+`tsc --noEmit` depends on that file existing but does nothing to create it. My local "clean
+typecheck" claims earlier this session (and, it turns out, everyone else's "pre-existing, aside"
+dismissals before this) were against a `.next` directory already populated by an earlier `npm run
+build` in that same long-lived sandbox - never a genuinely fresh checkout. Confirmed by `rm -rf
+.next && npm run typecheck` locally: reproduced the identical `TS2304` error. A fresh GitHub
+Actions checkout has no such leftover `.next`, so my new CI job was red from its very first run,
+on both commits it ever saw - exactly the kind of thing this standing review exists to catch,
+including in its own output.
+
+**Fix:** `app/package.json`'s `typecheck` script is now `next typegen && tsc --noEmit` - Next.js
+ships a dedicated `next typegen` command (`next typegen [directory] [options]`: "Generate
+TypeScript definitions for routes, pages, and layouts without running a full build") built for
+exactly this, lighter than a full build. This fixes the root cause everywhere `npm run typecheck`
+is invoked - local dev, `app-ci.yml`, and `npm run verify` - not just a patch to the CI workflow's
+own step order. **The "pre-existing unrelated LayoutProps error" was never actually unrelated or
+safe to wave off - it was this fix, undiscovered, the whole time.**
+
+**Verification:** `rm -rf .next && npm run typecheck` - clean, no error (confirmed the fix from the
+exact fresh state that reproduced the bug, not from a warm sandbox). Then the full sequence from
+the same clean `.next` state: typecheck, lint, `npm run build` (all 3 exit 0), and every one of the
+8 `*.test.ts` files run directly (82/82 pass). Pushing this fix and watching `app-ci.yml`'s next
+run go green on GitHub's own infrastructure is the real confirmation - noted as still pending below
+since a push hadn't landed as of writing this entry.
+
 ## This pass (2026-10-19, standing QA/robustness review - seventeenth run): the app/ half of the codebase had no CI at all
 
 Orientation: one new commit since the last pass (`455d057`, the sixteenth run's own
