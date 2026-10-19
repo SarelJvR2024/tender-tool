@@ -38,7 +38,7 @@ as $$
     (select count(*) from tender_packs tp where tp.company_id = c.id),
     greatest(
       c.updated_at,
-      (select max(tp.updated_at) from tender_packs tp where tp.company_id = c.id)
+      (select max(tp.created_at) from tender_packs tp where tp.company_id = c.id)
     )
   from companies c
   where is_platform_admin()
