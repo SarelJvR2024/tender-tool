@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Logo } from "../_components/Logo";
+import { AuthShell } from "../_components/AuthShell";
 
 const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
 const LABEL: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4, textAlign: "left" };
@@ -62,7 +62,7 @@ export default function SignUpPage() {
 
   if (submitted) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F5F1", padding: 16, boxSizing: "border-box" }}>
+      <AuthShell>
         <div style={CARD}>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Check your email</h1>
           <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
@@ -72,17 +72,14 @@ export default function SignUpPage() {
             &larr; Back to sign in
           </Link>
         </div>
-      </div>
+      </AuthShell>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F5F1", padding: 16, boxSizing: "border-box" }}>
+    <AuthShell>
       <div style={CARD}>
-        <div style={{ margin: "0 auto 20px" }}>
-          <Logo size={40} />
-        </div>
-        <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Create your account</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Create your account</h1>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 28px" }}>Start tracking and preparing tenders</p>
 
         <form onSubmit={handleSubmit}>
@@ -107,6 +104,6 @@ export default function SignUpPage() {
           <Link href="/login" style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Sign in</Link>
         </p>
       </div>
-    </div>
+    </AuthShell>
   );
 }

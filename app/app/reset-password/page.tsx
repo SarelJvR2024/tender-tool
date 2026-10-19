@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Logo } from "../_components/Logo";
+import { AuthShell } from "../_components/AuthShell";
 
 const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
 const LABEL: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4, textAlign: "left" };
@@ -54,12 +54,9 @@ export default function ResetPasswordPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F5F1", padding: 16, boxSizing: "border-box" }}>
+    <AuthShell>
       <div style={CARD}>
-        <div style={{ margin: "0 auto 20px" }}>
-          <Logo size={40} />
-        </div>
-        <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Set a new password</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Set a new password</h1>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 28px" }}>Choose something you haven&apos;t used before</p>
 
         <form onSubmit={handleSubmit}>
@@ -83,6 +80,6 @@ export default function ResetPasswordPage() {
           </button>
         </form>
       </div>
-    </div>
+    </AuthShell>
   );
 }

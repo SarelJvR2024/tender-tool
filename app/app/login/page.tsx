@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { Logo } from "../_components/Logo";
+import { AuthShell } from "../_components/AuthShell";
 
 /**
  * Google and Microsoft OAuth, plus email/password for anyone who'd rather
@@ -66,12 +66,9 @@ export default function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#F6F5F1", padding: 16, boxSizing: "border-box" }}>
+    <AuthShell>
       <div style={CARD}>
-        <div style={{ margin: "0 auto 20px" }}>
-          <Logo size={40} />
-        </div>
-        <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Tender Tool</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Welcome back</h1>
         <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 28px" }}>Sign in to continue</p>
 
         <button onClick={() => signInWith("google")} style={OAUTH_BUTTON}>
@@ -108,6 +105,6 @@ export default function LoginPage() {
           <Link href="/signup" style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Create an account</Link>
         </div>
       </div>
-    </div>
+    </AuthShell>
   );
 }
