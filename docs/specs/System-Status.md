@@ -171,6 +171,34 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - thirty-first run): a tender-specific
+CV's own internal audit trail said a real person was "not present in None candidates list"
+
+Picked up the sibling pass's "thirtieth run" (a threading fix + a pre-existing temp-file leak in
+`assess_tender.py`, both independently reproduced and confirmed) and deliberately rotated away
+from discovery - it's absorbed most of this review's recent cycles - to `engine/cv/generate_cv.py`.
+CV had only been verified once before (eighth run, a non-bug) and has no dedicated test file at
+all; `process_cv_jobs.py --self-test` smoke-tests the standard CV path but never exercises
+`--tender`/`--position`, so the cover-page logic had zero coverage.
+
+**Finding 28 (fixed, minor-but-real):** `add_cover_page()`'s "candidate not matched" branch
+records a provenance `missing()` reason that interpolated `tender_ctx['candidate']!r` - but that
+value is structurally always `None` inside this exact branch (it's the same `cand` the branch is
+guarded on). Every occurrence, for every person never matched to a position, rendered as the
+nonsensical "`<name> not present in None candidates list for position <code>...`". Not a buyer-
+facing bug (this reason lives only in the internal `.provenance.json`, never the printed page -
+the page itself shows a correct, generic sentence regardless) - but a real, confirmed defect in
+the one mechanism this whole project relies on for "never guess, say what you don't know and
+why," exactly the kind of thing an internal reviewer would trust and be misled by. Fixed to name
+the actual person_id and position code instead.
+
+**Verification:** new `engine/cv/test_generate_cv.py` - 3 tests, 8 checks (the exact bug fixed;
+a matched-candidate case proving the internal rationale text never reaches the buyer-facing page;
+a specialism-warning case proving the warning is both printed and logged with a reason). Full
+regression: `process_cv_jobs.py --self-test` unchanged (`Self-test OK`, same provenance summary),
+`test_extract_cv_fields.py` - `ALL PASSED`. Full detail: `QA-Edge-Case-Findings.md`,
+"thirty-first run" (Finding 28).
+
 ## This pass (2026-10-19, standing QA/robustness review - thirtieth run): a genuinely hard-to-get-right threading fix, independently reproduced and confirmed correct - plus one real leak it (and its predecessor) left behind
 
 Orientation: one new commit since the twenty-ninth run - `de4541b`, "Fix a document fetch that can

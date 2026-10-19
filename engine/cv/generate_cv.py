@@ -155,9 +155,14 @@ def add_cover_page(d, person, person_id, tender_ctx, log):
     if cand is None:
         # Nothing buyer-appropriate to add without a stored match for this position -
         # the generic sentence above already covers it. Full detail stays internal.
+        # `cand` (= tender_ctx["candidate"]) is None in this branch by definition - the
+        # reason used to interpolate `tender_ctx['candidate']!r` here, which is always
+        # literally "None", rendering as the nonsensical "not present in None candidates
+        # list" on every single occurrence (QA-Edge-Case-Findings.md, 2026-10-19).
         log.missing("cv_cover.position_match",
-                    reason=f"{person['name']} not present in {tender_ctx['candidate']!r} candidates "
-                           f"list for position {pos['code']} at the time pack_suggestions.json was generated.")
+                    reason=f"{person['name']} ({person_id}) was not among the candidates "
+                           f"suggest_pack.py scored for position {pos['code']} when "
+                           "pack_suggestions.json was last generated.")
         d.add_paragraph()
         d.add_page_break()
         return

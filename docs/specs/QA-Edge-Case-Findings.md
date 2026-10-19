@@ -1706,3 +1706,51 @@ delete its own temp file once it finishes rather than queue a path nobody will e
 before, identical repro). Re-ran all 4 reproduction cases above - unchanged, all still correct.
 Re-ran `test_discovery_fanout.py` end to end - `0 failure(s)`, verdicts unchanged. `python3 -m
 py_compile engine/discovery/assess_tender.py` clean.
+
+## 2026-10-19 (thirty-first run): a tender-specific CV's own internal audit trail said a real
+person was "not present in None candidates list"
+
+**Context:** synced with `origin/main` and picked up two sibling passes (thirtieth run: a
+threading fix in `assess_tender.py`'s document-fetch timeout, plus a pre-existing temp-file leak
+found while reading it - both independently reproduced and confirmed correct) and a dark-mode
+palette fix. Discovery has absorbed most of this review's recent cycles given how much new code
+has landed there; rotated deliberately to `engine/cv/generate_cv.py` instead - "CV" had only been
+verified once before (eighth run, confirming a non-bug in SANRAL scoring), never given a focused
+adversarial pass of its own, and has **no dedicated test file at all** (the standard,
+non-tender-specific CV path is smoke-tested by `process_cv_jobs.py --self-test`, but that self-
+test never exercises `--tender`/`--position`, so the cover-page logic had zero coverage).
+
+**Finding 28 (CONFIRMED, FIXED, minor-but-real - a broken internal audit trail, not a buyer-
+facing document bug):** `add_cover_page()`'s "candidate not matched" branch
+(`if cand is None: ...`) records a `ProvenanceLog.missing()` entry whose `reason` interpolated
+`tender_ctx['candidate']!r` - but `cand = tender_ctx["candidate"]`, and this code only runs
+*inside the `if cand is None:` branch*, so `tender_ctx['candidate']` is **always, unconditionally,
+literally `None`** at that point. Every single occurrence of this reason, for every person never
+matched to a position, rendered as the nonsensical "`<name> not present in None candidates list
+for position <code> at the time pack_suggestions.json was generated.`" Reproduced directly by
+calling `add_cover_page()` with a `cand=None` context and reading the stored provenance entry.
+Not a bug a buyer ever sees (this reason lives only in the internal `.provenance.json` file -
+the buyer-facing page prints a generic, correct sentence above it regardless) - but a real,
+confirmed defect in the one mechanism this entire project relies on for "never guess, say what
+you don't know and why," which is exactly the kind of thing an internal reviewer or a future
+debugging session would trust and be misled by.
+
+**Fix:** the reason now names the actual `person_id` and position code (`pos['code']`), both
+already in scope and accurate, instead of referencing the structurally-always-`None` value.
+
+**Verification:** new dedicated test file `engine/cv/test_generate_cv.py` (closes the "no
+dedicated test file" gap for this module) - 3 tests, 8 checks: the exact bug (reason no longer
+says "None candidates", now correctly names the person/position), a matched-candidate case
+(match score confirmed in provenance, the internal rationale text is confirmed to never appear on
+the buyer-facing page, no spurious specialism warning), and a specialism-warning case (the
+warning paragraph is genuinely printed, and logged as `assumed_default` with a reason, not
+silently applied). All pass. Full regression: `process_cv_jobs.py --self-test` - `Self-test OK`,
+unchanged provenance summary (`{'confirmed': 20, 'computed': 4, 'missing': 7}`);
+`test_extract_cv_fields.py` - `ALL PASSED`. `python3 -m py_compile generate_cv.py
+test_generate_cv.py` clean.
+
+**Not yet tested / flagged:** the rest of `generate_cv.py` (both document builders' full field-by-
+field content, `generate_as_is()`, PDF conversion failure handling) still relies on
+`process_cv_jobs.py`'s own self-test rather than a dedicated adversarial pass of its own - worth
+a deeper look if CV comes up again in rotation. `process_cv_jobs.py` and `extract_cv_fields.py`
+were not re-examined this run beyond what already passed.
