@@ -1,8 +1,10 @@
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { Card, SubPage } from "../_components/ui";
 import { UploadForm } from "./upload-form";
 import { DocumentReviewCard, type OnboardingResult } from "./review";
+import { QueuePoller } from "./QueuePoller";
 
 // Bulk onboarding document scan (0063): drop in a folder/zip of whatever
 // compliance documents the company already has instead of uploading and
@@ -11,7 +13,7 @@ import { DocumentReviewCard, type OnboardingResult } from "./review";
 export const instant = false;
 
 const SAVED: Record<string, string> = {
-  uploaded: "Uploaded - each document is being read and classified. Refresh in a minute if it isn't listed below yet.",
+  uploaded: "Uploaded - each document is being read and classified; this page updates itself as results come in.",
   filed: "Document filed.",
   "handed-off": "Handed off to the CV pipeline - find it on that person's People page.",
   skipped: "Marked as needing manual review.",
@@ -43,6 +45,25 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
       .in("status", ["classification_requested", "classifying"]),
   ]);
 
+  // "handed-off" means confirmCvHandoff just inserted a cv_uploads row for
+  // this company (actions.ts) and redirected back here - its person_id is
+  // the person the banner below should link to. Read it back from the most
+  // recent row rather than a query param, so this page is the only file
+  // that needs to change for the banner to carry a real link.
+  let handoffPerson: { id: string; name: string } | null = null;
+  if (saved === "handed-off") {
+    const { data: latestCvUpload } = await supabase
+      .from("cv_uploads")
+      .select("person_id, created_at")
+      .eq("company_id", companyId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const personId = latestCvUpload?.person_id as string | undefined;
+    const person = personId ? (people ?? []).find((p) => p.id === personId) ?? null : null;
+    if (person) handoffPerson = { id: person.id, name: person.name };
+  }
+
   return (
     <>
       {/* Same mobile collapse as people/[id]/page.tsx's .cvx-row - this
@@ -66,15 +87,27 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
         </>
       }
       error={error}
-      saved={saved ? SAVED[saved] ?? saved : null}
+      saved={saved === "handed-off" && handoffPerson ? null : saved ? SAVED[saved] ?? saved : null}
     >
+      <QueuePoller queuedCount={queuedCount ?? 0} />
+
+      {saved === "handed-off" && handoffPerson && (
+        <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+          Handed off to the CV pipeline - find it on{" "}
+          <Link href={`/people/${handoffPerson.id}`} style={{ color: "#15803D", fontWeight: 700, textDecoration: "underline" }}>
+            {handoffPerson.name}&apos;s People page
+          </Link>
+          .
+        </div>
+      )}
+
       <Card title="Upload">
         <UploadForm companyId={companyId} />
       </Card>
 
       {!!queuedCount && (
         <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 9, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#1E3A8A" }}>
-          {queuedCount} document{queuedCount === 1 ? "" : "s"} still being read - this runs in the background (a worker, not this page); refresh to check.
+          {queuedCount} document{queuedCount === 1 ? "" : "s"} still being read - this runs in the background (a worker, not this page) and will appear below automatically.
         </div>
       )}
 

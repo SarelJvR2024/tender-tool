@@ -36,3 +36,48 @@ export function ToolsHeader() {
     </header>
   );
 }
+
+// The four free tools, for the cross-link footer below - same titles as the
+// /tools index. Kept here (not duplicated per page) so adding a fifth tool
+// only means editing one list.
+export const OTHER_TOOLS = [
+  { href: "/tools/deadline-calculator", label: "Working-day deadline calculator" },
+  { href: "/tools/cidb-grade", label: "CIDB grade calculator" },
+  { href: "/tools/bee-preference-points", label: "B-BBEE preference points calculator" },
+  { href: "/tools/b6-estimator", label: "SANRAL B6 functionality score estimator" },
+] as const;
+
+// Small "Other free tools" footer, linking each tool page to the other
+// three - before this, each of the four pages was a dead end unless you
+// went back through /tools (or /signup). `except` is the current page's
+// own href, so it never links to itself.
+export function OtherTools({ except }: { except: string }) {
+  const others = OTHER_TOOLS.filter((t) => t.href !== except);
+  return (
+    <div style={{ marginTop: 32 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", marginBottom: 10 }}>Other free tools</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {others.map((t) => (
+          <Link
+            key={t.href}
+            href={t.href}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "7px 14px",
+              borderRadius: 100,
+              background: "#FFFFFF",
+              border: "1px solid #E5E1D5",
+              color: "#16233B",
+              fontSize: 12,
+              fontWeight: 600,
+              textDecoration: "none",
+            }}
+          >
+            {t.label}
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}

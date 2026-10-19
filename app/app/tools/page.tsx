@@ -14,27 +14,40 @@ const TOOLS = [
     href: "/tools/deadline-calculator",
     title: "Working-day deadline calculator",
     blurb: "Add or count working days excluding weekends and South African public holidays - for tender closing dates, briefing notices and query deadlines.",
+    badge: "DL",
+    accent: "#16233B",
   },
   {
     href: "/tools/cidb-grade",
     title: "CIDB grade calculator",
     blurb: "Look up the CIDB contractor grade a tender's value requires, or check whether the grade you hold is enough to bid.",
+    badge: "CIDB",
+    accent: "#D97706",
   },
   {
     href: "/tools/bee-preference-points",
     title: "B-BBEE preference points calculator",
     blurb: "Work out the actual 80/20 or 90/10 preference points (PPPFA Preferential Procurement Regulations, 2022) for a price and B-BBEE level.",
+    badge: "%",
+    accent: "#16233B",
   },
   {
     href: "/tools/b6-estimator",
     title: "SANRAL B6 functionality score estimator",
     blurb: "Estimate a key position's SANRAL functionality score from the real published Book 1 scoring matrices - no SANRAL competitor covers this at all.",
+    badge: "B6",
+    accent: "#D97706",
   },
 ];
 
 export default function ToolsIndexPage() {
   return (
     <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
+      <style>{`
+        .tool-card { transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease; }
+        .tool-card:hover { border-color: #D97706; box-shadow: 0 4px 14px rgba(217, 119, 6, 0.14); transform: translateY(-1px); }
+      `}</style>
+
       <header style={{ background: "#16233B", color: "#FFFFFF", padding: "16px 20px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "#FFFFFF", width: "fit-content" }}>
@@ -76,18 +89,41 @@ export default function ToolsIndexPage() {
             <Link
               key={tool.href}
               href={tool.href}
+              className="tool-card"
               style={{
-                display: "block",
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 14,
                 background: "#FFFFFF",
                 border: "1px solid #E5E1D5",
+                borderLeft: `4px solid ${tool.accent}`,
                 borderRadius: 12,
                 padding: "20px 22px",
                 textDecoration: "none",
                 boxSizing: "border-box",
               }}
             >
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#16233B", marginBottom: 6 }}>{tool.title}</div>
-              <div style={{ fontSize: 13, color: "#6B6758", lineHeight: 1.5 }}>{tool.blurb}</div>
+              <div
+                style={{
+                  flexShrink: 0,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 8,
+                  background: tool.accent,
+                  color: "#FFFFFF",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 12,
+                  fontWeight: 700,
+                }}
+              >
+                {tool.badge}
+              </div>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#16233B", marginBottom: 6 }}>{tool.title}</div>
+                <div style={{ fontSize: 13, color: "#6B6758", lineHeight: 1.5 }}>{tool.blurb}</div>
+              </div>
             </Link>
           ))}
         </div>
