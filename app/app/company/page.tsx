@@ -18,6 +18,7 @@ import {
   type VaultDocumentKind,
 } from "@/lib/vaultDocuments";
 import { SiteNav } from "../_components/SiteNav";
+import { ScrollFade } from "../_components/ScrollFade";
 import { OfficeLocations } from "./OfficeLocations";
 
 // Depends on the signed-in user's session/company row on every request
@@ -199,6 +200,36 @@ export default async function CompanyPage({
           </div>
         )}
 
+        {/* Jump nav - this page runs identity -> size/offices -> how we work
+            -> compliance documents -> BEE/CIDB -> bank details -> registers
+            -> letters -> offices, the same long-single-scroll shape the
+            Tender Workspace and Person pages already got a sticky anchor row
+            for. Read-only view only (EditForm's one long form doesn't need
+            wayfinding the same way a read page does - left for a future
+            pass if it turns out to). 9 pills don't fit this page's own
+            900px-capped column at any viewport width, same situation as the
+            Tender Workspace's own jump-nav - see ScrollFade's hint={false}
+            there for why the "Scroll for more" text is skipped on a sticky
+            bar. */}
+        {row && !editing && (
+          <div style={{ position: "sticky", top: 0, zIndex: 5, background: "#FFFFFF", padding: "8px 2px", marginBottom: 12 }}>
+            <div style={{ position: "relative" }}>
+              <div style={{ display: "flex", gap: 6, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                <CompanyJumpLink href="#compliance-documents" label="Documents" />
+                <CompanyJumpLink href="#company-identity" label="Identity" />
+                <CompanyJumpLink href="#size-offices" label="Size & offices" />
+                <CompanyJumpLink href="#how-we-work" label="How we work" />
+                <CompanyJumpLink href="#bee-cidb" label="BEE & CIDB" />
+                <CompanyJumpLink href="#bank-details" label="Bank details" />
+                <CompanyJumpLink href="#registers" label="Registers" />
+                <CompanyJumpLink href="#letters" label="Letters" />
+                <CompanyJumpLink href="#offices" label="Offices" />
+              </div>
+              <ScrollFade fadeColor="255, 255, 255" minWidthToHide={99999} hint={false} />
+            </div>
+          </div>
+        )}
+
         {row && (editing ? <EditForm company={row} /> : <ReadOnlyView company={row} docUrls={docUrls} />)}
 
         {row && !editing && <RegisterLinks counts={registerCounts} />}
@@ -217,9 +248,34 @@ export default async function CompanyPage({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function CompanyJumpLink({ href, label }: { href: string; label: string }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
+    <a
+      href={href}
+      style={{
+        flexShrink: 0,
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 32,
+        padding: "0 12px",
+        borderRadius: 100,
+        fontSize: 12,
+        fontWeight: 600,
+        textDecoration: "none",
+        background: "#FFFFFF",
+        color: "#16233B",
+        border: "1px solid #E3E6EA",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {label}
+    </a>
+  );
+}
+
+function Section({ id, title, children }: { id?: string; title: string; children: React.ReactNode }) {
+  return (
+    <div id={id} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
       <h2 style={{ fontSize: 13, fontWeight: 600, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 12px" }}>{title}</h2>
       {children}
     </div>
@@ -305,7 +361,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
         {allGood && <SummaryChip count={docStatuses.length} label="documents current" bg="#DCFCE7" color="#15803D" />}
       </div>
 
-      <Section title="Company identity">
+      <Section id="company-identity" title="Company identity">
         <div style={fieldGrid}>
           <Field label="Legal name" value={company.legal_name} />
           <Field label="CSD trading name" value={company.csd_trading_name} />
@@ -319,7 +375,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
         </div>
       </Section>
 
-      <Section title="Size &amp; offices (SANRAL Form B3)">
+      <Section id="size-offices" title="Size &amp; offices (SANRAL Form B3)">
         <div style={fieldGrid}>
           <Field label="Head office (city/town)" value={company.head_office} />
           <Field label="Other offices (number)" value={company.other_offices} />
@@ -333,7 +389,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
         </div>
       </Section>
 
-      <Section title="How we work">
+      <Section id="how-we-work" title="How we work">
         {company.how_we_work ? (
           <div style={{ fontSize: 14, color: "#16233B", lineHeight: 1.55, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
             {company.how_we_work}
@@ -352,7 +408,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
         </div>
       </Section>
 
-      <Section title="Compliance documents">
+      <Section id="compliance-documents" title="Compliance documents">
         <div style={{ display: "flex", flexDirection: "column" }}>
           <DocumentRow
             companyId={company.id}
@@ -444,7 +500,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
         </div>
       </Section>
 
-      <Section title="BEE &amp; CIDB">
+      <Section id="bee-cidb" title="BEE &amp; CIDB">
         <div style={fieldGrid}>
           <Field label="BEE level" value={company.bee_level} />
           <Field label="Black ownership %" value={company.black_ownership_pct} />
@@ -453,7 +509,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
         </div>
       </Section>
 
-      <Section title="Bank details">
+      <Section id="bank-details" title="Bank details">
         <div style={fieldGrid}>
           <Field label="Bank name" value={company.bank_name} />
           <Field label="Branch code" value={company.bank_branch_code} />
@@ -495,7 +551,7 @@ function RegisterLinks({ counts }: { counts: { principals: number; registrations
     },
   ];
   return (
-    <Section title="Directors, registrations &amp; property">
+    <Section id="registers" title="Directors, registrations &amp; property">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
         {items.map((i) => (
           <a
