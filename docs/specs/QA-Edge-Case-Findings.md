@@ -1754,3 +1754,25 @@ field content, `generate_as_is()`, PDF conversion failure handling) still relies
 `process_cv_jobs.py`'s own self-test rather than a dedicated adversarial pass of its own - worth
 a deeper look if CV comes up again in rotation. `process_cv_jobs.py` and `extract_cv_fields.py`
 were not re-examined this run beyond what already passed.
+
+## 2026-10-19 (thirty-second run): two sibling commits independently re-verified, no new findings
+
+Reviewed both commits landed since the thirty-first run: this run's own `b71dc5d` (Finding 28,
+above) and `01a15de` ("Fix dark-mode illegibility on Dashboard, Discovery and 4 admin pages"),
+which had no entry here yet (different concurrent sibling session). Deliberately checked both
+rather than skip the one that already had a write-up, since an author's own verification claim
+and this log's independent one are not the same thing.
+
+`b71dc5d`: re-ran `test_generate_cv.py` myself (not just read it) - `0 failure(s)`, all 8 checks.
+Confirmed the root-cause claim directly: `cand` is the literal value the branch is guarded on
+being `None`, so the old reason's `{tender_ctx['candidate']!r}` could only ever substitute the
+string `'None'` - a plain, unconditional bug, not an edge case.
+
+`01a15de`: the commit's message names 6 fixed pages: checked whether that was actually all of
+them. Scanned every `page.tsx` in `app/app` (33 files) for the `minHeight: "100vh"` wrapper and
+confirmed every one now also sets `background: "#FFFFFF"` - zero left behind. Also independently
+confirmed the stated root cause (`app/app/globals.css`'s `@media (prefers-color-scheme: dark)`
+body background, no `color-scheme` override anywhere) rather than taking it on faith.
+
+No new findings. Both commits: `completed`/`success` on real GitHub Actions, confirmed via the
+API (`39330520763`, `39320580253`).

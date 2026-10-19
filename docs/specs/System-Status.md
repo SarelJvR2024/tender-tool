@@ -6,7 +6,13 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-19, ~00:30 UTC — demo-prep sprint verified: landing page (`4fc2e19`),
+Last full pass: 2026-10-19, ~22:15 UTC — two commits reviewed and independently verified clean, no
+code issues found: a nonsensical internal provenance-log sentence on the CV cover page fixed and
+given its first dedicated test file (`b71dc5d`), and a dark-mode illegibility fix across 6 pages
+including Dashboard and Discovery (`01a15de`) - confirmed complete by scanning all 33 `page.tsx`
+files for the wrapper-background convention, not just trusting the commit's own file list. Both
+green on real CI. Known-gaps item 9 (committed-but-not-live migrations) unchanged this pass - still
+Sarel's own call, still 8 real files deep. ~00:30 UTC — demo-prep sprint verified: landing page (`4fc2e19`),
 SANRAL B6 estimator + real logo (`ffbba14`), auth-pages redesign (`d64e652`), 3 new discovery
 sources (`cace3f7`), a real bug caught by live Playwright E2E testing against production
 (`9061deb`), demo-blocking copy fixes (`95bce9f`) - all now authored directly by Sarel with
@@ -170,6 +176,40 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-19, standing QA/robustness review - thirty-second run): two sibling commits, both independently confirmed correct and complete - no code issues found
+
+Orientation: two new commits since the thirty-first run, from two different concurrent sibling
+sessions (different `Claude-Session` trailers) - `b71dc5d` (the thirty-first run's own entry above,
+Finding 28: the CV cover-page provenance-reason fix) and `01a15de` ("Fix dark-mode illegibility on
+Dashboard, Discovery and 4 admin pages"), which had no pass-history entry of its own yet. Reviewed
+both rather than just the undocumented one, since "already has a pass-history entry" isn't the same
+as "independently verified by this review."
+
+**`b71dc5d` (Finding 28, CV cover-page provenance reason):** re-read the diff and the new
+`engine/cv/test_generate_cv.py` cold, confirmed the root cause claim directly (`cand` is literally
+the same value `tender_ctx["candidate"]` that the branch is guarded on being `None`, so the old
+f-string's `{tender_ctx['candidate']!r}` could only ever render the literal string `'None'` - not a
+judgment call, a plain substitution bug). Ran the new test file myself: `0 failure(s)`, all 8 checks
+pass (the exact bug, the person_id/position code now present, status unchanged, the matched-
+candidate and specialism-warning paths unaffected). Confirms the thirty-first run's own self-
+reported verification rather than just trusting it.
+
+**`01a15de` (dark-mode illegibility, 6 pages):** the commit's own message lists exactly which 6
+pages it touched and asserts the fix makes the app's dark-mode wrapper-background convention
+consistent - checked that claim rather than taking the file list at face value. Scanned **every**
+`page.tsx` in the app (33 files, not just the 6 named) for the `minHeight: "100vh"` wrapper pattern
+and confirmed each one now also sets `background: "#FFFFFF"` - zero pages left behind. Also
+independently re-derived the root cause claim: confirmed `app/app/globals.css` does set a real
+`@media (prefers-color-scheme: dark)` body background with no `color-scheme` override anywhere in
+the app, so an un-backgrounded full-height wrapper genuinely does let it show through. A one-line,
+mechanical, low-risk fix, correctly and completely applied - no issues found.
+
+Both commits: `completed`/`success` on real GitHub Actions (`39320580253` for `01a15de`,
+`39330520763` for `b71dc5d`), confirmed via the API, not assumed from the push.
+
+No code changes this pass - both commits already correct. Updated the running top-of-file summary
+and Known-gaps item 9's standing note (unchanged count - no new migrations landed this pass).
 
 ## This pass (2026-10-19, standing QA/robustness review - thirty-first run): a tender-specific
 CV's own internal audit trail said a real person was "not present in None candidates list"
