@@ -37,7 +37,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
         </div>
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>System settings</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
           Platform-wide switches, applied the moment you flip them - no deploy needed.
         </p>
 
@@ -47,16 +47,16 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
           </div>
         )}
 
-        <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
+        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
           {settings.length === 0 && !error && (
-            <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>No settings recorded.</div>
+            <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>No settings recorded.</div>
           )}
           {settings.map((s) => (
-            <div key={s.key} style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", alignItems: "center", padding: "16px 18px", borderTop: "1px solid #F0EEE6" }}>
+            <div key={s.key} style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", alignItems: "center", padding: "16px 18px", borderTop: "1px solid #ECEEF1" }}>
               <div style={{ flex: "1 1 320px", minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: "#16233B" }}>{SETTING_LABEL[s.key] ?? s.key}</div>
-                <div style={{ fontSize: 12, color: "#6B6758", marginTop: 2 }}>{s.description}</div>
-                <div style={{ fontSize: 11, color: "#9A9684", marginTop: 4 }}>Last changed {new Date(s.updated_at).toLocaleString()}</div>
+                <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2 }}>{s.description}</div>
+                <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 4 }}>Last changed {new Date(s.updated_at).toLocaleString()}</div>
               </div>
               <form action={setPlatformSetting}>
                 <input type="hidden" name="key" value={s.key} />
@@ -65,7 +65,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
                   type="submit"
                   style={{
                     fontSize: 12, fontWeight: 600, padding: "8px 14px", minHeight: 40, borderRadius: 7, border: "none", cursor: "pointer",
-                    background: s.value ? "#16233B" : "#E5E1D5", color: s.value ? "#FFFFFF" : "#6B6758",
+                    background: s.value ? "#16233B" : "#E3E6EA", color: s.value ? "#FFFFFF" : "#5B6472",
                   }}
                 >
                   {s.value ? "On - click to turn off" : "Off - click to turn on"}

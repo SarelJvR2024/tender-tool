@@ -204,7 +204,7 @@ function DocumentLine({ p, kind, urls, title }: { p: PrincipalRow; kind: "certif
   const path = kind === "certified_id" ? p.certified_id_path : p.disability_proof_path;
   const name = (kind === "certified_id" ? p.certified_id_filename : p.disability_proof_filename) ?? filenameFromPath(path);
   return (
-    <div style={{ borderTop: "1px solid #F0EEE6", paddingTop: 10 }}>
+    <div style={{ borderTop: "1px solid #ECEEF1", paddingTop: 10 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: NAVY }}>{title}</div>
       <div style={{ fontSize: 12, marginTop: 2 }}>
         {path ? (

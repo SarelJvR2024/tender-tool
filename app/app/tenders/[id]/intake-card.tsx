@@ -15,7 +15,7 @@ import { AddTenderDocumentsForm } from "../new/manual-tender-form";
  * (discovered_opportunities - the same row Discovery shows).
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 const chip = (bg: string, color: string): React.CSSProperties => ({ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color, whiteSpace: "nowrap" });
 
 const VERDICT: Record<string, { label: string; bg: string; color: string }> = {
@@ -76,7 +76,7 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>How this tender was read</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <span style={chip("#F0EEE6", "#16233B")}>{isManual ? "Loaded manually" : source === "etenders_ocds" ? "From Discovery (eTenders)" : "SANRAL list"}</span>
+          <span style={chip("#ECEEF1", "#16233B")}>{isManual ? "Loaded manually" : source === "etenders_ocds" ? "From Discovery (eTenders)" : "SANRAL list"}</span>
           {jobStyle && <span style={chip(jobStyle.bg, jobStyle.color)}>Analysis: {jobStyle.label}</span>}
         </div>
       </div>
@@ -98,7 +98,7 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
       {intake && (
         <>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
-            <span style={chip(intake.route === "sanral" ? "#16233B" : "#F0EEE6", intake.route === "sanral" ? "#FFFFFF" : "#16233B")}>
+            <span style={chip(intake.route === "sanral" ? "#16233B" : "#ECEEF1", intake.route === "sanral" ? "#FFFFFF" : "#16233B")}>
               {intake.route === "sanral" ? `SANRAL pack flow - ${intake.family}` : "General (non-SANRAL) flow"}
             </span>
             {intake.fingerprint && (
@@ -117,7 +117,7 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
               <div style={{ fontWeight: 600, color: "#16233B", marginBottom: 2 }}>SANRAL templates found</div>
               <ul style={{ margin: 0, paddingLeft: 18 }}>
                 {intake.sanral_documents.map((d) => (
-                  <li key={d.doc_type}>{d.label}: <span style={{ color: "#6B6758" }}>{d.document}</span></li>
+                  <li key={d.doc_type}>{d.label}: <span style={{ color: "#5B6472" }}>{d.document}</span></li>
                 ))}
               </ul>
             </div>
@@ -150,24 +150,24 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
         </div>
       )}
       {opp && (
-        <div style={{ marginTop: 6, padding: "10px 12px", background: "#F6F5F1", border: "1px solid #E5E1D5", borderRadius: 9 }}>
+        <div style={{ marginTop: 6, padding: "10px 12px", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: "#16233B" }}>Fit for your company</span>
             <span style={chip((VERDICT[opp.verdict] ?? VERDICT.closed).bg, (VERDICT[opp.verdict] ?? VERDICT.closed).color)}>{(VERDICT[opp.verdict] ?? { label: opp.verdict }).label}</span>
             {isDowngraded(opp) && (
-              <span style={{ ...chip("#F6F5F1", "#6B6758"), border: "1px solid #E5E1D5", textDecoration: "line-through" }}>was {verdictLabel(opp.downgraded_from)}</span>
+              <span style={{ ...chip("#FFFFFF", "#5B6472"), border: "1px solid #E3E6EA", textDecoration: "line-through" }}>was {verdictLabel(opp.downgraded_from)}</span>
             )}
           </div>
           <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#4B5563" }}>
             {(opp.reasons ?? []).map((r, i) => <li key={i}>{r}</li>)}
-            {(opp.score_outlook?.summary ?? []).map((r, i) => <li key={`s${i}`} style={{ color: "#6B6758" }}>{r}</li>)}
+            {(opp.score_outlook?.summary ?? []).map((r, i) => <li key={`s${i}`} style={{ color: "#5B6472" }}>{r}</li>)}
           </ul>
         </div>
       )}
 
       {isManual && ownerId && !active && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEE6" }}>
-          <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 6 }}>
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #ECEEF1" }}>
+          <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 6 }}>
             Missing something (an addendum, the SANRAL workbook, a readable copy of a scanned page)? Add it and the tender is read again.
           </div>
           <AddTenderDocumentsForm companyId={ownerId} tenderId={tenderId} />

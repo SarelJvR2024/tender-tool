@@ -39,7 +39,7 @@ export default function HarnessRunRow(props: Props) {
   const doc = documents[docIndex] ?? null;
 
   return (
-    <div style={{ borderTop: "1px solid #F0EEE6" }}>
+    <div style={{ borderTop: "1px solid #ECEEF1" }}>
       <button
         onClick={() => setOpen((v) => !v)}
         style={{
@@ -49,7 +49,7 @@ export default function HarnessRunRow(props: Props) {
           gap: "6px 12px",
           alignItems: "center",
           padding: "11px 18px",
-          background: open ? "#F6F5F1" : "transparent",
+          background: open ? "#FFFFFF" : "transparent",
           border: "none",
           textAlign: "left",
           cursor: "pointer",
@@ -63,19 +63,19 @@ export default function HarnessRunRow(props: Props) {
         <span style={{ fontSize: 13, color: "#16233B", fontWeight: 600 }}>{testCompany}</span>
         <span style={{ flex: "1 1 220px", minWidth: 0 }}>
           <span style={{ fontSize: 12, fontFamily: "monospace", color: "#4B5563" }}>{tenderRef}</span>
-          <span style={{ fontSize: 11, color: "#9A9684", marginLeft: 6 }}>{KIND_LABEL[kind]}</span>
+          <span style={{ fontSize: 11, color: "#8A93A0", marginLeft: 6 }}>{KIND_LABEL[kind]}</span>
         </span>
         <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: review.bg, color: review.color }}>
           {review.label}
         </span>
-        <span style={{ fontSize: 11, color: "#9A9684" }}>
+        <span style={{ fontSize: 11, color: "#8A93A0" }}>
           {new Date(runAt).toLocaleString()}
           <span style={{ marginLeft: 6, color: "#D97706" }}>{open ? "hide ▲" : "open ▼"}</span>
         </span>
       </button>
 
       {open && (
-        <div style={{ padding: "4px 18px 18px 18px", background: "#F6F5F1" }}>
+        <div style={{ padding: "4px 18px 18px 18px", background: "#FFFFFF" }}>
           {details && (
             <div style={{ fontSize: 12, color: "#4B5563", whiteSpace: "pre-wrap", fontFamily: "monospace", marginBottom: 10 }}>
               {details}
@@ -84,7 +84,7 @@ export default function HarnessRunRow(props: Props) {
           {counts && Object.keys(counts).length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
               {Object.entries(counts).map(([k, n]) => (
-                <span key={k} style={{ fontSize: 11, padding: "2px 9px", borderRadius: 100, border: "1px solid #E5E1D5", background: "#FFFFFF", color: k === "missing" ? "#B91C1C" : k === "assumed_default" ? "#B45309" : "#4B5563" }}>
+                <span key={k} style={{ fontSize: 11, padding: "2px 9px", borderRadius: 100, border: "1px solid #E3E6EA", background: "#FFFFFF", color: k === "missing" ? "#B91C1C" : k === "assumed_default" ? "#B45309" : "#4B5563" }}>
                   {n} {COUNT_LABEL[k] ?? k}
                 </span>
               ))}
@@ -93,7 +93,7 @@ export default function HarnessRunRow(props: Props) {
 
           {/* Generated documents, rendered inline */}
           {documents.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
               No generated document stored for this run{status !== "ok" ? " (the run was refused or failed - see above)" : ""}.
             </div>
           ) : (
@@ -105,7 +105,7 @@ export default function HarnessRunRow(props: Props) {
                     onClick={() => setDocIndex(i)}
                     style={{
                       font: "inherit", fontSize: 12, padding: "5px 11px", borderRadius: 7, cursor: "pointer",
-                      border: i === docIndex ? "1px solid #16233B" : "1px solid #E5E1D5",
+                      border: i === docIndex ? "1px solid #16233B" : "1px solid #E3E6EA",
                       background: i === docIndex ? "#16233B" : "#FFFFFF",
                       color: i === docIndex ? "#FFFFFF" : "#16233B",
                     }}
@@ -126,10 +126,10 @@ export default function HarnessRunRow(props: Props) {
                   key={doc.url}
                   src={doc.url}
                   title={`${testCompany} - ${tenderRef} - ${doc.label}`}
-                  style={{ width: "100%", height: "75vh", border: "1px solid #E5E1D5", borderRadius: 9, background: "#FFFFFF" }}
+                  style={{ width: "100%", height: "75vh", border: "1px solid #E3E6EA", borderRadius: 9, background: "#FFFFFF" }}
                 />
               ) : (
-                <div style={{ fontSize: 12, color: "#6B6758" }}>
+                <div style={{ fontSize: 12, color: "#5B6472" }}>
                   Stored as .docx (LibreOffice wasn&apos;t available to make a PDF preview) - download to read it.
                 </div>
               )}
@@ -137,7 +137,7 @@ export default function HarnessRunRow(props: Props) {
           )}
 
           {/* Review */}
-          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "12px 14px" }}>
+          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "12px 14px" }}>
             {reviewedAt ? (
               <form action={clearHarnessRunReview} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
                 <input type="hidden" name="run_id" value={runId} />
@@ -145,7 +145,7 @@ export default function HarnessRunRow(props: Props) {
                   Reviewed {new Date(reviewedAt).toLocaleString()}
                   {reviewNote && <div style={{ color: "#4B5563", marginTop: 4, whiteSpace: "pre-wrap" }}>{reviewNote}</div>}
                 </div>
-                <button type="submit" style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #E5E1D5", background: "#FFFFFF", color: "#16233B", cursor: "pointer" }}>
+                <button type="submit" style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #E3E6EA", background: "#FFFFFF", color: "#16233B", cursor: "pointer" }}>
                   Undo review
                 </button>
               </form>
@@ -156,14 +156,14 @@ export default function HarnessRunRow(props: Props) {
                   name="note"
                   rows={2}
                   placeholder="Note (optional) - e.g. what you checked"
-                  style={{ flex: 1, font: "inherit", fontSize: 12, padding: "7px 9px", border: "1px solid #E5E1D5", borderRadius: 7, resize: "vertical" }}
+                  style={{ flex: 1, font: "inherit", fontSize: 12, padding: "7px 9px", border: "1px solid #E3E6EA", borderRadius: 7, resize: "vertical" }}
                 />
                 <button type="submit" style={{ fontSize: 12, fontWeight: 600, padding: "8px 14px", borderRadius: 7, border: "none", background: "#D97706", color: "#FFFFFF", cursor: "pointer" }}>
                   Mark reviewed
                 </button>
               </form>
             )}
-            <div style={{ fontSize: 11, color: "#9A9684", marginTop: 6 }}>
+            <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 6 }}>
               A review stays while later runs produce the same result; a changed result clears it automatically.
             </div>
           </div>

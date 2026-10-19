@@ -312,7 +312,7 @@ export default async function TenderWorkspacePage({
   const isGeneralFamily = tenderFacts?.family === GENERAL_FAMILY;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <SiteNav active="dashboard" />
 
       <div style={{ flex: 1, padding: "20px 16px", maxWidth: 820, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
@@ -329,11 +329,11 @@ export default async function TenderWorkspacePage({
         {tenderFacts && (
           <>
             {/* Tender facts */}
-            <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
                 <div>
                   <div style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: "#16233B" }}>{tenderFacts.contract_no ?? "No contract number"}</div>
-                  <div style={{ fontSize: 11, color: "#9A9684" }}>{tenderFacts.nra_reference ?? "No NRA reference"}</div>
+                  <div style={{ fontSize: 11, color: "#8A93A0" }}>{tenderFacts.nra_reference ?? "No NRA reference"}</div>
                 </div>
                 {packStatus && (
                   <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: packStatus.bg, color: packStatus.color, whiteSpace: "nowrap" }}>
@@ -344,20 +344,20 @@ export default async function TenderWorkspacePage({
               <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px", lineHeight: 1.35 }}>
                 {tenderFacts.description ?? "Untitled tender"}
               </h1>
-              <div style={{ fontSize: 13, color: "#6B6758" }}>
+              <div style={{ fontSize: 13, color: "#5B6472" }}>
                 Closes{" "}
                 {tenderFacts.closing_date ? new Date(tenderFacts.closing_date).toLocaleDateString() : "- no closing date on file"}
                 {countdown && (
-                  <span style={{ marginLeft: 8, fontWeight: 600, color: countdown.urgent ? "#B45309" : "#9A9684" }}>
+                  <span style={{ marginLeft: 8, fontWeight: 600, color: countdown.urgent ? "#B45309" : "#8A93A0" }}>
                     ({countdown.text})
                   </span>
                 )}
               </div>
               {tenderFacts.briefing_date && (
-                <div style={{ fontSize: 13, color: "#6B6758", marginTop: 2 }}>
+                <div style={{ fontSize: 13, color: "#5B6472", marginTop: 2 }}>
                   Briefing {formatDay(tenderFacts.briefing_date)}
                   {tenderFacts.briefing_time ? ` at ${tenderFacts.briefing_time}` : ""}
-                  <span style={{ color: "#9A9684" }}> - from the buyer&apos;s addendum (see below)</span>
+                  <span style={{ color: "#8A93A0" }}> - from the buyer&apos;s addendum (see below)</span>
                 </div>
               )}
 
@@ -372,7 +372,7 @@ export default async function TenderWorkspacePage({
               )}
 
               {tenderPack && provenance.length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEE6" }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid #ECEEF1" }}>
                   {confirmedRows.length > 0 && (
                     <SummaryChip count={confirmedRows.length} label="confirmed" bg="#DCFCE7" color="#15803D" />
                   )}
@@ -419,7 +419,7 @@ export default async function TenderWorkspacePage({
                   position: "sticky",
                   top: 0,
                   zIndex: 5,
-                  background: "#F6F5F1",
+                  background: "#FFFFFF",
                   padding: "8px 2px",
                   marginBottom: 12,
                 }}
@@ -454,7 +454,7 @@ export default async function TenderWorkspacePage({
             {packError && <ErrorBanner message={`Could not load this company's pack for this tender: ${packError.message}`} />}
 
             {!tenderPack && !packError && (
-              <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#6B6758", marginBottom: 16 }}>
+              <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
                 No tender pack exists yet for this tender at your company - nothing to review until one is created.
                 {isSanralPackFamily && (
                   <form action={startTenderPack} style={{ marginTop: 12 }}>
@@ -475,7 +475,7 @@ export default async function TenderWorkspacePage({
                 {provenanceError && <ErrorBanner message={`Could not load the readiness report: ${provenanceError.message}`} />}
 
                 {provenance.length === 0 && !provenanceError && (
-                  <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#6B6758" }}>
+                  <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#5B6472" }}>
                     No readiness data recorded yet for this pack.
                   </div>
                 )}
@@ -490,7 +490,7 @@ export default async function TenderWorkspacePage({
                       emptyText="Nothing confirmed yet."
                     >
                       {confirmedRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #F0EEE6" }}>
+                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
                           <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
                         </div>
@@ -505,7 +505,7 @@ export default async function TenderWorkspacePage({
                       emptyText="Nothing waiting on review."
                     >
                       {reviewRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid #F0EEE6" }}>
+                        <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid #ECEEF1" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
                             <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
                             <ReviewButton fieldKey={row.field_key} />
@@ -526,7 +526,7 @@ export default async function TenderWorkspacePage({
                       emptyText="Nothing missing."
                     >
                       {missingRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #F0EEE6" }}>
+                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
                           {row.reason && (
                             <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 2 }}>{row.reason}</div>
@@ -582,7 +582,7 @@ export default async function TenderWorkspacePage({
             <ActivityLog tenderId={id} showAll={activity === "all"} />
 
             {tenderPack && (positions.length > 0 || isSanralPackFamily) && (
-              <div id="key-positions" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+              <div id="key-positions" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Key positions</div>
                   {positions.length > 0 && (() => {
@@ -594,7 +594,7 @@ export default async function TenderWorkspacePage({
                     );
                   })()}
                 </div>
-                <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
                   Choose who fills each position on this tender - the submission pack is built with exactly these
                   people and won&apos;t generate until every position has one. Tender Tool suggests the best match among
                   the people tagged on their People page as fitting the role (scored on their qualifications, projects
@@ -604,7 +604,7 @@ export default async function TenderWorkspacePage({
                   records a request, not an instant result.
                 </div>
                 {positions.length === 0 && (
-                  <div style={{ fontSize: 12, color: "#9A9684", borderTop: "1px solid #F0EEE6", paddingTop: 10 }}>
+                  <div style={{ fontSize: 12, color: "#8A93A0", borderTop: "1px solid #ECEEF1", paddingTop: 10 }}>
                     No positions listed yet. They are read from this tender&apos;s own Technical Submission workbook (its
                     SETUP sheet) - upload it under Blank tender templates below, and they appear here once the pack
                     builder has read it.
@@ -632,12 +632,12 @@ export default async function TenderWorkspacePage({
                   });
                   const positionJobs = generatedCvs.filter((g) => g.position_code === code);
                   return (
-                    <div key={code} style={{ borderTop: "1px solid #F0EEE6", padding: "12px 0" }}>
+                    <div key={code} style={{ borderTop: "1px solid #ECEEF1", padding: "12px 0" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
                         <div style={{ minWidth: 0, flex: "1 1 200px" }}>
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{code}</div>
                           {req?.position_description && (
-                            <div style={{ fontSize: 12, color: "#6B6758", marginTop: 1 }}>{req.position_description}</div>
+                            <div style={{ fontSize: 12, color: "#5B6472", marginTop: 1 }}>{req.position_description}</div>
                           )}
                           <div style={{ fontSize: 12, color: confirmedId ? "#15803D" : "#B45309", marginTop: 2, fontWeight: 600 }}>
                             {confirmedId
@@ -645,7 +645,7 @@ export default async function TenderWorkspacePage({
                               : "Not confirmed yet"}
                           </div>
                           {roleCode && tagged.length === 0 && (
-                            <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>
+                            <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 2 }}>
                               No one is tagged as fitting {roleTitles.get(roleCode) ?? code} yet (People page).
                             </div>
                           )}
@@ -668,11 +668,11 @@ export default async function TenderWorkspacePage({
                             <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
                             <input type="hidden" name="position_code" value={code} />
                             <input type="hidden" name="person_id" value={confirmedId} />
-                            <select name="format" defaultValue="sanral_keyperson" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px" }}>
+                            <select name="format" defaultValue="sanral_keyperson" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 8px" }}>
                               <option value="sanral_keyperson">SANRAL key-person</option>
                               <option value="world_bank">World Bank format</option>
                             </select>
-                            <select name="detail" defaultValue="summary" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px" }}>
+                            <select name="detail" defaultValue="summary" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 8px" }}>
                               <option value="summary">Summary</option>
                               <option value="detailed">Detailed</option>
                             </select>
@@ -688,9 +688,9 @@ export default async function TenderWorkspacePage({
                       {positionJobs.length > 0 && (
                         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                           {positionJobs.map((g) => {
-                            const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#F0EEE6", color: "#6B6758" };
+                            const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#ECEEF1", color: "#5B6472" };
                             return (
-                              <div key={g.id} style={{ fontSize: 11, color: "#6B6758", display: "flex", alignItems: "center", gap: 8 }}>
+                              <div key={g.id} style={{ fontSize: 11, color: "#5B6472", display: "flex", alignItems: "center", gap: 8 }}>
                                 <span>{g.format} / {g.detail}</span>
                                 <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: st.bg, color: st.color }}>
                                   {st.label}
@@ -767,9 +767,9 @@ function TaskTimeline({
   const addTaskWithId = addTenderTask;
 
   return (
-    <div id="tasks-milestones" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+    <div id="tasks-milestones" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Tasks &amp; milestones</div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
         Closing date is seeded automatically, and so is the briefing date once a buyer&apos;s addendum states
         it. The original tender&apos;s briefing, clarification and submission dates aren&apos;t extracted
         automatically yet - add them here when known. Add anything else specific to this
@@ -780,7 +780,7 @@ function TaskTimeline({
       {error && <ErrorBanner message={`Could not load tasks: ${error.message}`} />}
 
       {!error && tasks.length === 0 && (
-        <div style={{ fontSize: 12, color: "#9A9684", padding: "6px 0 12px" }}>No tasks yet.</div>
+        <div style={{ fontSize: 12, color: "#8A93A0", padding: "6px 0 12px" }}>No tasks yet.</div>
       )}
 
       {!error && tasks.length > 0 && (
@@ -791,18 +791,18 @@ function TaskTimeline({
             return (
               <div
                 key={t.id}
-                style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: "10px 0", borderTop: "1px solid #F0EEE6" }}
+                style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: "10px 0", borderTop: "1px solid #ECEEF1" }}
               >
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{t.description}</span>
                     {t.kind && (
-                      <span style={{ fontSize: 10, fontWeight: 600, color: "#16233B", background: "#F0EEE6", borderRadius: 100, padding: "2px 8px" }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: "#16233B", background: "#ECEEF1", borderRadius: 100, padding: "2px 8px" }}>
                         {KIND_TAG[t.kind] ?? t.kind}
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: overdue ? "#B91C1C" : "#6B6758", marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: overdue ? "#B91C1C" : "#5B6472", marginTop: 2 }}>
                     {t.due_date ? `Due ${new Date(t.due_date).toLocaleDateString()}` : "No due date set"}
                     {left !== null && t.status !== "done" && (
                       <span style={{ marginLeft: 6, fontWeight: 600 }}>
@@ -827,7 +827,7 @@ function TaskTimeline({
           shape is an explicit spec decision, see 0009's header comment). A
           SA public bid often has a separate, scheduled public bid-opening
           event, sometimes days after closing, worth its own reminder. */}
-      <div style={{ borderTop: tasks.length > 0 ? "1px solid #F0EEE6" : undefined, paddingTop: tasks.length > 0 ? 14 : 0, marginBottom: 14 }}>
+      <div style={{ borderTop: tasks.length > 0 ? "1px solid #ECEEF1" : undefined, paddingTop: tasks.length > 0 ? 14 : 0, marginBottom: 14 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", marginBottom: 8 }}>Submission &amp; opening</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <ReminderForm
@@ -847,7 +847,7 @@ function TaskTimeline({
         </div>
       </div>
 
-      <form action={addTaskWithId} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #F0EEE6", paddingTop: 14 }}>
+      <form action={addTaskWithId} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #ECEEF1", paddingTop: 14 }}>
         <input type="hidden" name="tender_id" value={tenderId} />
         <div style={{ flex: "1 1 220px", minWidth: 180 }}>
           <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Add a task</label>
@@ -856,7 +856,7 @@ function TaskTimeline({
             name="description"
             placeholder="e.g. Confirm subcontractor for electrical works"
             required
-            style={{ width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit" }}
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit" }}
           />
         </div>
         <div>
@@ -864,7 +864,7 @@ function TaskTimeline({
           <input
             type="date"
             name="due_date"
-            style={{ minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit" }}
+            style={{ minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit" }}
           />
         </div>
         <div>
@@ -872,7 +872,7 @@ function TaskTimeline({
           <select
             name="assigned_to"
             defaultValue=""
-            style={{ minHeight: 40, padding: "0 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" }}
+            style={{ minHeight: 40, padding: "0 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" }}
           >
             <option value="">Unassigned</option>
             {people.map((p) => (
@@ -924,7 +924,7 @@ function ReminderForm({
           name="description"
           defaultValue={existing?.description ?? defaultDescription}
           required
-          style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit" }}
+          style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit" }}
         />
       </div>
       <div>
@@ -934,7 +934,7 @@ function ReminderForm({
           name="due_date"
           defaultValue={existing?.due_date ?? ""}
           required
-          style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit" }}
+          style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit" }}
         />
       </div>
       <button
@@ -947,7 +947,7 @@ function ReminderForm({
           color: existing ? "#16233B" : "#FFFFFF",
           fontSize: 12,
           fontWeight: 600,
-          border: existing ? "1px solid #E5E1D5" : "none",
+          border: existing ? "1px solid #E3E6EA" : "none",
           cursor: "pointer",
           whiteSpace: "nowrap",
         }}
@@ -995,9 +995,9 @@ function WonProjectCard({
         : "";
 
   return (
-    <div id="won-project" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+    <div id="won-project" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Won - record the completed project</div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
         This updates each confirmed team member&apos;s own project history, so it&apos;s ready the next time you build their CV.
       </div>
 
@@ -1008,15 +1008,15 @@ function WonProjectCard({
         </div>
       )}
       {completed && tenderPack.project_completion_note && (
-        <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>{tenderPack.project_completion_note}</div>
+        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>{tenderPack.project_completion_note}</div>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", margin: completed ? "10px 0 12px" : "0 0 12px" }}>
         {rows.length === 0 && (
-          <div style={{ fontSize: 12, color: "#9A9684", padding: "6px 0" }}>No key positions on this pack yet.</div>
+          <div style={{ fontSize: 12, color: "#8A93A0", padding: "6px 0" }}>No key positions on this pack yet.</div>
         )}
         {rows.map(({ code, name }) => (
-          <div key={code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "6px 0", borderTop: "1px solid #F0EEE6" }}>
+          <div key={code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "6px 0", borderTop: "1px solid #ECEEF1" }}>
             <span style={{ color: "#16233B", fontWeight: 600 }}>{code}</span>
             <span style={{ color: name ? "#15803D" : "#B45309", fontWeight: name ? 400 : 600 }}>{name ?? "Not confirmed"}</span>
           </div>
@@ -1025,7 +1025,7 @@ function WonProjectCard({
 
       <form
         action={syncWonProjectToTeam}
-        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #F0EEE6", paddingTop: 12 }}
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #ECEEF1", paddingTop: 12 }}
       >
         <input type="hidden" name="tender_id" value={tenderId} />
         <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
@@ -1036,7 +1036,7 @@ function WonProjectCard({
             name="project_completed_at"
             defaultValue={tenderPack.project_completed_at ?? ""}
             required
-            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit" }}
+            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit" }}
           />
         </div>
         <div>
@@ -1047,7 +1047,7 @@ function WonProjectCard({
             min="0"
             name="project_completion_value_rm"
             defaultValue={defaultValueRm}
-            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit", width: 120 }}
+            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit", width: 120 }}
           />
         </div>
         <div style={{ flex: "1 1 220px", minWidth: 180 }}>
@@ -1057,7 +1057,7 @@ function WonProjectCard({
             name="project_completion_note"
             defaultValue={tenderPack.project_completion_note ?? ""}
             placeholder="e.g. scope change, variation order, handover detail"
-            style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit" }}
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit" }}
           />
         </div>
         <button
@@ -1103,7 +1103,7 @@ function JumpLink({ href, label, variant = "default" }: { href: string; label: s
         whiteSpace: "nowrap",
         background: variant === "primary" ? "#D97706" : "#FFFFFF",
         color: variant === "primary" ? "#FFFFFF" : "#16233B",
-        border: variant === "primary" ? "1px solid #D97706" : "1px solid #E5E1D5",
+        border: variant === "primary" ? "1px solid #D97706" : "1px solid #E3E6EA",
       }}
     >
       {label}
@@ -1135,7 +1135,7 @@ function ReportCard({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", minWidth: 0 }}>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{title}</div>
         <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 20, height: 20, padding: "0 6px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: bg, color: accent }}>
@@ -1143,7 +1143,7 @@ function ReportCard({
         </span>
       </div>
       {count === 0 ? (
-        <div style={{ fontSize: 12, color: "#9A9684", paddingTop: 6 }}>{emptyText}</div>
+        <div style={{ fontSize: 12, color: "#8A93A0", paddingTop: 6 }}>{emptyText}</div>
       ) : (
         <div>{children}</div>
       )}

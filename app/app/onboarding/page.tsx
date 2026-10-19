@@ -19,12 +19,12 @@ export default async function OnboardingPage({
     // same width and shape those two use, so it drops straight into
     // AuthShell's right panel without needing a wider layout.
     <AuthShell>
-      <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+      <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ marginBottom: 20 }}>
           <Logo size={40} />
         </div>
         <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Set up your company</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 24px" }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 24px" }}>
           One field to start - registration numbers, BEE, CIDB and the rest get added later in the company profile.
         </p>
 
@@ -42,7 +42,7 @@ export default async function OnboardingPage({
             name="legal_name"
             required
             placeholder="Registered name, as on your CIPC certificate"
-            style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px", marginBottom: 18, borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit" }}
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px", marginBottom: 18, borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "inherit" }}
           />
           <button
             type="submit"

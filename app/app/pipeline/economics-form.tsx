@@ -5,14 +5,14 @@ import { saveTenderEconomics } from "./actions";
 
 export type CreditPerson = { id: string; name: string };
 
-const label: CSSProperties = { display: "block", fontSize: 11, fontWeight: 600, color: "#6B6758", margin: "8px 0 3px" };
+const label: CSSProperties = { display: "block", fontSize: 11, fontWeight: 600, color: "#5B6472", margin: "8px 0 3px" };
 const input: CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
   minHeight: 36,
   padding: "0 8px",
   borderRadius: 7,
-  border: "1px solid #E5E1D5",
+  border: "1px solid #E3E6EA",
   background: "#FFFFFF",
   fontSize: 13,
   color: "#16233B",
@@ -73,7 +73,7 @@ export function EconomicsForm({
           listStyle: "revert",
           fontSize: 12,
           fontWeight: 600,
-          color: summary ? "#16233B" : prompt ? "#D97706" : "#6B6758",
+          color: summary ? "#16233B" : prompt ? "#D97706" : "#5B6472",
           minHeight: 28,
           lineHeight: "28px",
         }}
@@ -81,7 +81,7 @@ export function EconomicsForm({
         {toggleLabel ?? summary ?? (prompt ? "Record the submitted price" : "Price & credit")}
       </summary>
       {!toggleLabel && (commission || economics?.commission_note) && (
-        <div style={{ fontSize: 11, color: "#6B6758", margin: "2px 0 0" }}>
+        <div style={{ fontSize: 11, color: "#5B6472", margin: "2px 0 0" }}>
           Commission: {commission ?? "-"}
           {economics?.commission_note ? ` · ${economics.commission_note}` : ""}
         </div>
@@ -147,7 +147,7 @@ export function EconomicsForm({
           ))}
         </select>
         {!economics?.price_sector && defaultSector && (
-          <div style={{ fontSize: 10, color: "#9A9684", marginTop: 2 }}>Suggested: {sectorLabel(defaultSector, taxonomy)} (from Discovery / tender family)</div>
+          <div style={{ fontSize: 10, color: "#8A93A0", marginTop: 2 }}>Suggested: {sectorLabel(defaultSector, taxonomy)} (from Discovery / tender family)</div>
         )}
 
         <label style={label} htmlFor={`note-${tenderId}`}>Pricing note</label>
@@ -159,7 +159,7 @@ export function EconomicsForm({
         >
           Save price & credit
         </button>
-        <div style={{ fontSize: 10, color: "#9A9684", marginTop: 4 }}>Internal only - never goes into a submission pack.</div>
+        <div style={{ fontSize: 10, color: "#8A93A0", marginTop: 4 }}>Internal only - never goes into a submission pack.</div>
       </form>
     </details>
   );

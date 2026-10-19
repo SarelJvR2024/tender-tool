@@ -56,7 +56,7 @@ export function PackChecklist({ rows, title = "What's in this pack" }: { rows: C
   if (rows.length === 0) return null;
   const n = (s: ChecklistRow["status"]) => rows.filter((r) => r.status === s).length;
   return (
-    <details open={n("included_warning") + n("not_included") > 0} style={{ marginTop: 8, border: "1px solid #E5E1D5", borderRadius: 9, background: "#F6F5F1" }}>
+    <details open={n("included_warning") + n("not_included") > 0} style={{ marginTop: 8, border: "1px solid #E3E6EA", borderRadius: 9, background: "#FFFFFF" }}>
       <summary style={{ cursor: "pointer", padding: "8px 12px", fontSize: 12, fontWeight: 700, color: "#16233B", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         <span>{title}: {rows.length} documents</span>
         <Chip {...STYLE.included} label={`${n("included")} included`} />
@@ -65,7 +65,7 @@ export function PackChecklist({ rows, title = "What's in this pack" }: { rows: C
       </summary>
       <div style={{ padding: "0 12px 10px" }}>
         {(n("included_warning") > 0 || n("not_included") > 0) && (
-          <div style={{ fontSize: 11, color: "#6B6758", marginBottom: 6 }}>
+          <div style={{ fontSize: 11, color: "#5B6472", marginBottom: 6 }}>
             Deal with every warning and every missing document before you submit. The same checklist is on the pack&apos;s
             contents page.
           </div>
@@ -75,15 +75,15 @@ export function PackChecklist({ rows, title = "What's in this pack" }: { rows: C
           const st = STYLE[r.status];
           return (
             <div key={`${r.envelope}-${r.no}-${r.title}`}>
-              {head && <div style={{ fontSize: 10, fontWeight: 700, color: "#6B6758", letterSpacing: 0.3, marginTop: 8, textTransform: "uppercase" }}>{head}</div>}
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "5px 0", borderTop: "1px solid #E5E1D5", fontSize: 12 }}>
+              {head && <div style={{ fontSize: 10, fontWeight: 700, color: "#5B6472", letterSpacing: 0.3, marginTop: 8, textTransform: "uppercase" }}>{head}</div>}
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "5px 0", borderTop: "1px solid #E3E6EA", fontSize: 12 }}>
                 <span style={{ flex: "0 0 auto", marginTop: 1 }}>
                   <Chip {...st} />
                 </span>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ color: "#16233B", fontWeight: 600, wordBreak: "break-word" }}>
                     {r.title}
-                    {r.pages && <span style={{ color: "#9A9684", fontWeight: 400 }}> · p{r.pages}</span>}
+                    {r.pages && <span style={{ color: "#8A93A0", fontWeight: 400 }}> · p{r.pages}</span>}
                   </div>
                   {r.note && <div style={{ color: st.color, wordBreak: "break-word" }}>{r.note}</div>}
                 </div>

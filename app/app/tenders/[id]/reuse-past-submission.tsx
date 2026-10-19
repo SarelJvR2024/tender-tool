@@ -12,10 +12,10 @@ import { applyPastSubmission } from "./reuse-actions";
  * click. What is reusable at all is decided in app/lib/pastSubmissionReuse.ts.
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 const button: React.CSSProperties = { minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" };
 const quiet: React.CSSProperties = { ...button, background: "#FFFFFF", color: "#16233B", border: "1px solid #D6D1C2" };
-const row: React.CSSProperties = { padding: "7px 0", borderTop: "1px solid #F0EEE6", fontSize: 12 };
+const row: React.CSSProperties = { padding: "7px 0", borderTop: "1px solid #ECEEF1", fontSize: 12 };
 
 function displayValue(value: string, key: string, people: Map<string, string>) {
   if (key === "signatory_person_id") return people.get(value) ?? "person on file";
@@ -61,7 +61,7 @@ export async function ReusePastSubmission({
   return (
     <div id="reuse-past" style={card}>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 4 }}>Start from a previous submission</div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
         Carry over the answers you gave last time that don&apos;t change between tenders
         {flowOf(t.family as string | null) === "sanral" ? " - here, who filled each key position" : " - signatory and the standard declarations"}.
         Your vault documents, experience and CVs are already used on every tender, so there&apos;s nothing to copy for those.
@@ -112,7 +112,7 @@ export async function ReusePastSubmission({
                 <div key={a.key} style={row}>
                   <div style={{ color: "#16233B" }}>{a.label}</div>
                   <div style={{ fontWeight: 600, color: "#16233B" }}>{displayValue(a.value, a.key, people)}</div>
-                  <div style={{ fontSize: 11, color: "#9A9684" }}>{a.why}</div>
+                  <div style={{ fontSize: 11, color: "#8A93A0" }}>{a.why}</div>
                 </div>
               ))}
               {plan.positions.copy.map((p) => (
@@ -135,16 +135,16 @@ export async function ReusePastSubmission({
           )}
 
           {nothingToCopy && plan.notes.length === 0 && (
-            <div style={{ fontSize: 12, color: "#6B6758" }}>Nothing from that tender to carry over to this one.</div>
+            <div style={{ fontSize: 12, color: "#5B6472" }}>Nothing from that tender to carry over to this one.</div>
           )}
 
           {skipped.length > 0 && (
             <details style={{ marginTop: 12 }}>
-              <summary style={{ fontSize: 12, color: "#6B6758", cursor: "pointer" }}>Not carried over ({skipped.length})</summary>
+              <summary style={{ fontSize: 12, color: "#5B6472", cursor: "pointer" }}>Not carried over ({skipped.length})</summary>
               {skipped.map((s) => (
                 <div key={s.key} style={row}>
                   <div style={{ color: "#16233B" }}>{s.label}</div>
-                  <div style={{ fontSize: 11, color: "#9A9684" }}>{s.reason}</div>
+                  <div style={{ fontSize: 11, color: "#8A93A0" }}>{s.reason}</div>
                 </div>
               ))}
             </details>

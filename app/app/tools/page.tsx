@@ -44,7 +44,7 @@ const ACCENT = "#16233B";
 
 export default function ToolsIndexPage() {
   return (
-    <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#FFFFFF", fontFamily: "system-ui, sans-serif" }}>
       <style>{`
         .tool-card { transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease; }
         .tool-card:hover { border-color: #D97706; box-shadow: 0 4px 14px rgba(217, 119, 6, 0.14); transform: translateY(-1px); }
@@ -54,7 +54,7 @@ export default function ToolsIndexPage() {
 
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 16px 64px", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>Free tender tools</h1>
-        <p style={{ fontSize: 14, color: "#6B6758", margin: "0 0 32px", lineHeight: 1.5 }}>
+        <p style={{ fontSize: 14, color: "#5B6472", margin: "0 0 32px", lineHeight: 1.5 }}>
           No sign-up required. Each tool is correct against the actual South African regulation or public data table
           it&apos;s built on, not a guess - sources are cited on each page.
         </p>
@@ -70,7 +70,7 @@ export default function ToolsIndexPage() {
                 alignItems: "flex-start",
                 gap: 14,
                 background: "#FFFFFF",
-                border: "1px solid #E5E1D5",
+                border: "1px solid #E3E6EA",
                 borderLeft: `4px solid ${ACCENT}`,
                 borderRadius: 12,
                 padding: "20px 22px",
@@ -97,13 +97,13 @@ export default function ToolsIndexPage() {
               </div>
               <div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: "#16233B", marginBottom: 6 }}>{tool.title}</div>
-                <div style={{ fontSize: 13, color: "#6B6758", lineHeight: 1.5 }}>{tool.blurb}</div>
+                <div style={{ fontSize: 13, color: "#5B6472", lineHeight: 1.5 }}>{tool.blurb}</div>
               </div>
             </Link>
           ))}
         </div>
 
-        <p style={{ fontSize: 12, color: "#6B6758", marginTop: 40, lineHeight: 1.5 }}>
+        <p style={{ fontSize: 12, color: "#5B6472", marginTop: 40, lineHeight: 1.5 }}>
           Built by <Link href="/" style={{ color: "#16233B", fontWeight: 600 }}>Tender Tool</Link> - correct, not
           AI-guessed. These calculators are free and standalone; Tender Tool itself helps SA engineering/construction
           firms find, track and prepare public-sector tender submissions.

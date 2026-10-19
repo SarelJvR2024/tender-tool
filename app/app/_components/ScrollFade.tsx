@@ -50,7 +50,7 @@ export function ScrollFade({
         }}
       />
       {hint && (
-        <div className={cls} style={{ fontSize: 11, color: "#9A9684", textAlign: "right", marginTop: 4 }}>
+        <div className={cls} style={{ fontSize: 11, color: "#8A93A0", textAlign: "right", marginTop: 4 }}>
           Scroll for more &rarr;
         </div>
       )}

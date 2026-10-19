@@ -20,9 +20,9 @@ export const metadata = {
 
 const NAVY = "#16233B";
 const AMBER = "#D97706";
-const CREAM = "#F6F5F1";
-const INK_MUTED = "#6B6758";
-const BORDER = "#E5E1D5";
+const CREAM = "#FFFFFF";
+const INK_MUTED = "#5B6472";
+const BORDER = "#E3E6EA";
 
 const CARD: React.CSSProperties = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "24px 22px", boxSizing: "border-box" };
 const SECTION: React.CSSProperties = { maxWidth: 1040, margin: "0 auto", padding: "64px 20px", boxSizing: "border-box" };

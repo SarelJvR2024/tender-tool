@@ -16,14 +16,14 @@ export const instant = false;
 
 const field: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px",
-  borderRadius: 9, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "system-ui, sans-serif",
+  borderRadius: 9, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "system-ui, sans-serif",
   color: "#16233B", background: "#FFFFFF",
 };
-const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#6B6758", marginBottom: 4, display: "block" };
+const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#5B6472", marginBottom: 4, display: "block" };
 
 const GREEN = { bg: "#DCFCE7", color: "#15803D" };
 const AMBER = { bg: "#FEF3C7", color: "#B45309" };
-const GREY = { bg: "#F0EEE6", color: "#6B6758" };
+const GREY = { bg: "#ECEEF1", color: "#5B6472" };
 
 function Chip({ text, tone }: { text: string; tone: { bg: string; color: string } }) {
   return (
@@ -97,7 +97,7 @@ export default async function ExperiencePage({
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <style>{`
         @media (max-width: 600px) {
           .exp-grid-2 { grid-template-columns: 1fr !important; }
@@ -108,7 +108,7 @@ export default async function ExperiencePage({
 
       <div style={{ flex: 1, padding: "24px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>Company experience</h1>
-        <div style={{ fontSize: 13, color: "#6B6758", marginTop: 2, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: "#5B6472", marginTop: 2, marginBottom: 16 }}>
           Reference letters, performance reports, completion certificates, close-out reports and award
           letters that prove what the company has delivered. Upload the document, then tag what it shows
           so tenders can be matched against it.
@@ -121,12 +121,12 @@ export default async function ExperiencePage({
         )}
 
         {/* Readiness against the one experience requirement seen in real tenders */}
-        <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ maxWidth: 520 }}>
             <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B" }}>
               Past-performance evidence: {b6Ready} of 3
             </div>
-            <div style={{ fontSize: 12, color: "#6B6758", marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2 }}>
               SANRAL Form B6 (15 of 100 functionality points) asks for 3 completed projects of similar
               scope in the last 10 years, each with a signed reference letter or CIDB performance report.
               Fewer means a sworn affidavit and a default &quot;Adequate&quot; score.
@@ -141,9 +141,9 @@ export default async function ExperiencePage({
         {/* Step 1: capture */}
         <form
           action={captureExperience}
-          style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", marginBottom: 20 }}
+          style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginBottom: 20 }}
         >
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>
             Add experience
           </div>
           <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -185,13 +185,13 @@ export default async function ExperiencePage({
           ))}
         </div>
         {activeDiscipline && (
-          <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
             Tagged items matching {labelOf(activeDiscipline)}{taxonomyGroups(taxonomy).some((g) => g.group.slug === activeDiscipline) ? " (any discipline in this group)" : ""} - the same query a tender check uses. Untagged uploads never count.
           </div>
         )}
 
         {shown.length === 0 && (
-          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", fontSize: 13, color: "#6B6758" }}>
+          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", fontSize: 13, color: "#5B6472" }}>
             {activeDiscipline
               ? "No tagged experience in this discipline yet."
               : "No experience on file yet. Start with the reference letters and completion certificates you already have."}
@@ -214,7 +214,7 @@ function FilterLink({ href, active, text }: { href: string; active: boolean; tex
         display: "inline-flex", alignItems: "center", minHeight: 32, padding: "0 12px", borderRadius: 100,
         fontSize: 12, fontWeight: 600, textDecoration: "none",
         background: active ? "#16233B" : "#FFFFFF", color: active ? "#FFFFFF" : "#16233B",
-        border: active ? "1px solid #16233B" : "1px solid #E5E1D5",
+        border: active ? "1px solid #16233B" : "1px solid #E3E6EA",
       }}
     >
       {text}
@@ -232,7 +232,7 @@ function ExperienceRow({ item: e, url, labelOf }: { item: ExperienceItem; url?: 
   ].filter(Boolean);
 
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "12px 16px", marginBottom: 10 }}>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "12px 16px", marginBottom: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div style={{ minWidth: 0, flex: "1 1 320px" }}>
           <Link href={`/experience/${e.id}`} style={{ fontSize: 14, fontWeight: 700, color: "#16233B", textDecoration: "none" }}>

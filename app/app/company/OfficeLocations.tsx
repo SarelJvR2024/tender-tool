@@ -16,7 +16,7 @@ import { deleteCompanyOffice, saveCompanyOffice } from "./officeActions";
 
 const input: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", minHeight: 44, padding: "10px 12px", borderRadius: 8,
-  border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit", color: "#16233B", background: "#FFFFFF",
+  border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "inherit", color: "#16233B", background: "#FFFFFF",
 };
 const lbl: React.CSSProperties = { display: "block", fontSize: 11.5, fontWeight: 600, color: "#16233B", marginBottom: 5 };
 const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 };
@@ -82,9 +82,9 @@ export async function OfficeLocations() {
   const offices = (data ?? []) as CompanyOffice[];
 
   return (
-    <div id="offices" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
-      <h2 style={{ fontSize: 13, fontWeight: 600, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 6px" }}>Office locations</h2>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+    <div id="offices" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
+      <h2 style={{ fontSize: 13, fontWeight: 600, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 6px" }}>Office locations</h2>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
         Some tenders award points (or require) an office in their province, district or municipality - e.g. &ldquo;Within
         Eastern Cape 4&rdquo;, &ldquo;within the boundaries of the Cape Winelands District&rdquo;. Add every office; any one
         can count. Buyers verify with a municipal account (usually under 3 months old), lease, bank letter or the CIPC
@@ -104,14 +104,14 @@ export async function OfficeLocations() {
       )}
 
       {offices.map((o) => (
-        <details key={o.id} style={{ borderTop: "1px solid #F0EEE6", padding: "10px 0" }}>
+        <details key={o.id} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0" }}>
           <summary style={{ cursor: "pointer", listStyle: "none" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
               <div style={{ minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B" }}>
                   {o.label || labelOf(OFFICE_KINDS, o.office_kind)}
                 </div>
-                <div style={{ fontSize: 12, color: "#6B6758", marginTop: 2 }}>
+                <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2 }}>
                   {[o.town, o.local_municipality, o.district_municipality, o.province].filter(Boolean).join(" · ")}
                 </div>
               </div>
@@ -140,7 +140,7 @@ export async function OfficeLocations() {
       ))}
 
       {!error && (
-        <details style={{ borderTop: offices.length ? "1px solid #F0EEE6" : "none", paddingTop: 10 }} open={offices.length === 0}>
+        <details style={{ borderTop: offices.length ? "1px solid #ECEEF1" : "none", paddingTop: 10 }} open={offices.length === 0}>
           <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#D97706", padding: "4px 0" }}>+ Add an office</summary>
           <form action={saveCompanyOffice} style={{ marginTop: 10 }}>
             <OfficeFields office={null} />

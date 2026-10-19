@@ -36,7 +36,7 @@ export function TaskAssigneeSelect({
         minHeight: 30,
         padding: "0 8px",
         borderRadius: 7,
-        border: "1px solid #E5E1D5",
+        border: "1px solid #E3E6EA",
         background: "#FFFFFF",
         color: "#16233B",
         fontSize: 11,

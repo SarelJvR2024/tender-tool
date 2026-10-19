@@ -13,7 +13,7 @@
 // shipped (PR #6) and filled in now that there's a second real use for it.
 export function Logo({ size = 40, variant = "default" }: { size?: number; variant?: "default" | "light" }) {
   const light = variant === "light";
-  const stroke = light ? "#F6F5F1" : "#16233B";
+  const stroke = light ? "#FFFFFF" : "#16233B";
   const fill = light ? "rgba(246, 245, 241, 0.08)" : "#FFFFFF";
 
   return (

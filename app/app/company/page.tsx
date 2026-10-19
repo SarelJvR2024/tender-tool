@@ -153,7 +153,7 @@ export default async function CompanyPage({
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <SiteNav active="company" />
 
       <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
@@ -219,8 +219,8 @@ export default async function CompanyPage({
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
-      <h2 style={{ fontSize: 13, fontWeight: 600, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 12px" }}>{title}</h2>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
+      <h2 style={{ fontSize: 13, fontWeight: 600, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 12px" }}>{title}</h2>
       {children}
     </div>
   );
@@ -235,7 +235,7 @@ const fieldGrid: React.CSSProperties = {
 function Field({ label, value }: { label: string; value: string | number | null }) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: "#9A9684", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 11, color: "#8A93A0", marginBottom: 2 }}>{label}</div>
       <div style={{ fontSize: 14, color: "#16233B", fontWeight: 500 }}>
         {value === null || value === undefined || value === "" ? (
           <span style={{ color: "#C7C3B5" }}>Not on file</span>
@@ -266,7 +266,7 @@ function SummaryChip({ count, label, bg, color }: { count: number; label: string
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
 
 function NotStated({ label }: { label: string }): StatusChip {
-  return { label, bg: "#F0EEE6", color: "#6B6758" };
+  return { label, bg: "#ECEEF1", color: "#5B6472" };
 }
 
 function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocUrls }) {
@@ -293,7 +293,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
   ];
   const expiredCount = docStatuses.filter((s) => s.color === "#B91C1C").length;
   const renewSoonCount = docStatuses.filter((s) => s.color === "#B45309").length;
-  const notOnFileCount = docStatuses.filter((s) => s.color === "#6B6758").length;
+  const notOnFileCount = docStatuses.filter((s) => s.color === "#5B6472").length;
   const allGood = expiredCount === 0 && renewSoonCount === 0 && notOnFileCount === 0;
 
   return (
@@ -301,7 +301,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         {expiredCount > 0 && <SummaryChip count={expiredCount} label={expiredCount === 1 ? "document expired" : "documents expired"} bg="#FEE2E2" color="#B91C1C" />}
         {renewSoonCount > 0 && <SummaryChip count={renewSoonCount} label="renewing soon" bg="#FEF3C7" color="#B45309" />}
-        {notOnFileCount > 0 && <SummaryChip count={notOnFileCount} label="not on file" bg="#F0EEE6" color="#6B6758" />}
+        {notOnFileCount > 0 && <SummaryChip count={notOnFileCount} label="not on file" bg="#ECEEF1" color="#5B6472" />}
         {allGood && <SummaryChip count={docStatuses.length} label="documents current" bg="#DCFCE7" color="#15803D" />}
       </div>
 
@@ -328,7 +328,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
           <Field label="Total employees" value={company.total_employees} />
           <Field label="% share of JV agreement (usual)" value={company.typical_jv_share_pct} />
         </div>
-        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
+        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 10 }}>
           Written into SANRAL&apos;s Form B3. Blank means not recorded - the pack leaves it blank and lists it, never a 0.
         </div>
       </Section>
@@ -339,7 +339,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
             {company.how_we_work}
           </div>
         ) : (
-          <div style={{ fontSize: 13, color: "#6B6758", lineHeight: 1.5 }}>
+          <div style={{ fontSize: 13, color: "#5B6472", lineHeight: 1.5 }}>
             Not written yet. Describe who you are and how you actually approach a tender or project, in your own
             words - your real methodology, not a template.{" "}
             <a href="/company?edit=1" style={{ color: "#D97706", fontWeight: 600, textDecoration: "none" }}>
@@ -347,7 +347,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
             </a>
           </div>
         )}
-        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
+        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 10 }}>
           Kept for any part of a tender that needs your own description - used word-for-word, never rewritten by AI.
         </div>
       </Section>
@@ -437,7 +437,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
             url={docUrls.bee_proof}
           />
         </div>
-        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
+        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 10 }}>
           Uploads up to 4.4 MB each (PDF, Word or image). A QSE or EME sworn affidavit is recorded as B-BBEE proof, but check
           each tender&apos;s own rule: SANRAL&apos;s Form A12 asks for a SANAS verification certificate and accepts an affidavit
           only from an EME with annual revenue under R1.8 million.
@@ -458,7 +458,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
           <Field label="Bank name" value={company.bank_name} />
           <Field label="Branch code" value={company.bank_branch_code} />
         </div>
-        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
+        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 10 }}>
           The account number itself is kept on the restricted{" "}
           <a href="/company/bank-accounts" style={{ color: "#D97706", fontWeight: 600, textDecoration: "none" }}>
             Bank accounts
@@ -501,10 +501,10 @@ function RegisterLinks({ counts }: { counts: { principals: number; registrations
           <a
             key={i.href}
             href={i.href}
-            style={{ display: "block", border: "1px solid #E5E1D5", borderRadius: 9, padding: "10px 12px", textDecoration: "none", minHeight: 44, boxSizing: "border-box" }}
+            style={{ display: "block", border: "1px solid #E3E6EA", borderRadius: 9, padding: "10px 12px", textDecoration: "none", minHeight: 44, boxSizing: "border-box" }}
           >
             <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B" }}>{i.title} →</div>
-            <div style={{ fontSize: 12, color: "#6B6758", marginTop: 3, lineHeight: 1.4 }}>{i.detail}</div>
+            <div style={{ fontSize: 12, color: "#5B6472", marginTop: 3, lineHeight: 1.4 }}>{i.detail}</div>
           </a>
         ))}
       </div>
@@ -540,14 +540,14 @@ function EditForm({ company }: { company: CompanyRow }) {
           <NumberInput name="total_employees" label="Total employees" defaultValue={company.total_employees} step="1" />
           <NumberInput name="typical_jv_share_pct" label="% share of JV agreement (usual; 100 when bidding alone)" defaultValue={company.typical_jv_share_pct} step="0.1" />
         </div>
-        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>Leave blank if you don&apos;t know - blank is never written as 0.</div>
+        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 10 }}>Leave blank if you don&apos;t know - blank is never written as 0.</div>
       </Section>
 
       <Section title="How we work">
         <label htmlFor="how_we_work" style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: "#16233B", marginBottom: 5 }}>
           Who you are and how you approach a tender, in your own words
         </label>
-        <div style={{ fontSize: 12, color: "#6B6758", lineHeight: 1.5, marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: "#5B6472", lineHeight: 1.5, marginBottom: 8 }}>
           Your real methodology, what you are known for, how you run a project - written the way you would say it.
           Tender Tool reproduces this exactly as written; it never rewrites or pads it.
         </div>
@@ -557,9 +557,9 @@ function EditForm({ company }: { company: CompanyRow }) {
           defaultValue={company.how_we_work ?? ""}
           rows={10}
           maxLength={10000}
-          style={{ width: "100%", boxSizing: "border-box", minHeight: 180, padding: "10px 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit", lineHeight: 1.5, resize: "vertical" }}
+          style={{ width: "100%", boxSizing: "border-box", minHeight: 180, padding: "10px 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "inherit", lineHeight: 1.5, resize: "vertical" }}
         />
-        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 6 }}>Up to 10 000 characters.</div>
+        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 6 }}>Up to 10 000 characters.</div>
       </Section>
 
       <Section title="Compliance documents">
@@ -610,7 +610,7 @@ function EditForm({ company }: { company: CompanyRow }) {
           <TextInput name="bank_name" label="Bank name" defaultValue={company.bank_name} />
           <TextInput name="bank_branch_code" label="Branch code" defaultValue={company.bank_branch_code} />
         </div>
-        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 10 }}>
+        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 10 }}>
           Account numbers are not collected here - they go on the restricted Bank accounts page (owners and admins only).
         </div>
       </Section>
@@ -624,7 +624,7 @@ function EditForm({ company }: { company: CompanyRow }) {
         </button>
         <a
           href="/company"
-          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 44, padding: "0 20px", borderRadius: 9, background: "#FFFFFF", border: "1px solid #E5E1D5", color: "#16233B", fontSize: 14, fontWeight: 600, textDecoration: "none", boxSizing: "border-box" }}
+          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 44, padding: "0 20px", borderRadius: 9, background: "#FFFFFF", border: "1px solid #E3E6EA", color: "#16233B", fontSize: 14, fontWeight: 600, textDecoration: "none", boxSizing: "border-box" }}
         >
           Cancel
         </a>
@@ -652,7 +652,7 @@ function TextInput({
     minHeight: 44,
     padding: "10px 12px",
     borderRadius: 8,
-    border: "1px solid #E5E1D5",
+    border: "1px solid #E3E6EA",
     fontSize: 14,
     fontFamily: "inherit",
   };
@@ -676,7 +676,7 @@ function DateInput({ name, label, defaultValue }: { name: string; label: string;
         type="date"
         name={name}
         defaultValue={defaultValue ?? ""}
-        style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "10px 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit" }}
+        style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "10px 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "inherit" }}
       />
     </div>
   );
@@ -701,7 +701,7 @@ function NumberInput({
         step={step ?? "1"}
         name={name}
         defaultValue={defaultValue ?? ""}
-        style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "10px 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit" }}
+        style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "10px 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "inherit" }}
       />
     </div>
   );
@@ -724,7 +724,7 @@ function SelectInput({
       <select
         name={name}
         defaultValue={defaultValue}
-        style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "10px 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "inherit", background: "#FFFFFF" }}
+        style={{ width: "100%", boxSizing: "border-box", minHeight: 44, padding: "10px 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "inherit", background: "#FFFFFF" }}
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>
@@ -758,12 +758,12 @@ function DocumentRow({
   const upload = uploadVaultDocument.bind(null, companyId);
   const filename = filenameFromPath(path);
   return (
-    <div style={{ borderTop: "1px solid #F0EEE6", padding: "12px 0" }}>
+    <div style={{ borderTop: "1px solid #ECEEF1", padding: "12px 0" }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B", marginBottom: 3 }}>{title}</div>
           {lines.map((l, i) => (
-            <div key={i} style={{ fontSize: 12, color: "#6B6758", marginTop: i ? 2 : 0, wordBreak: "break-word" }}>
+            <div key={i} style={{ fontSize: 12, color: "#5B6472", marginTop: i ? 2 : 0, wordBreak: "break-word" }}>
               {l}
             </div>
           ))}
@@ -774,7 +774,7 @@ function DocumentRow({
                   {filename}
                 </a>
               ) : (
-                <span style={{ color: "#6B6758" }}>{filename}</span>
+                <span style={{ color: "#5B6472" }}>{filename}</span>
               )
             ) : (
               <span style={{ color: "#C7C3B5" }}>No copy uploaded</span>
@@ -795,7 +795,7 @@ function DocumentRow({
         />
         <button
           type="submit"
-          style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E5E1D5", color: "#16233B", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+          style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E3E6EA", color: "#16233B", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
         >
           {filename ? "Replace" : "Upload"}
         </button>
@@ -822,7 +822,7 @@ function LettersSection({
   return (
     <div id="letters">
       <Section title="Letters &amp; documents">
-        <div style={{ fontSize: 13, color: "#6B6758", lineHeight: 1.5, marginBottom: 4 }}>
+        <div style={{ fontSize: 13, color: "#5B6472", lineHeight: 1.5, marginBottom: 4 }}>
           Letters a tender needs from your company. For each one, upload your own (it is used exactly as uploaded,
           every time) or write the guideline it should be generated from - your own wording, with{" "}
           <code style={{ fontSize: 12 }}>{"{{fields}}"}</code> where the tender&apos;s details go. Tender Tool fills
@@ -860,18 +860,18 @@ function LetterCard({
     boxSizing: "border-box",
     padding: "10px 12px",
     borderRadius: 8,
-    border: "1px solid #E5E1D5",
+    border: "1px solid #E3E6EA",
     fontSize: 13,
     fontFamily: "inherit",
     lineHeight: 1.5,
     resize: "vertical",
   };
   return (
-    <div style={{ borderTop: "1px solid #F0EEE6", padding: "14px 0 6px", marginTop: 10 }}>
+    <div style={{ borderTop: "1px solid #ECEEF1", padding: "14px 0 6px", marginTop: 10 }}>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div style={{ minWidth: 0, maxWidth: 600 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B", marginBottom: 3 }}>{type.label}</div>
-          <div style={{ fontSize: 12, color: "#6B6758" }}>{type.usedFor}</div>
+          <div style={{ fontSize: 12, color: "#5B6472" }}>{type.usedFor}</div>
           {row?.mode === "uploaded" && row.original_filename && (
             <div style={{ fontSize: 12, marginTop: 4 }}>
               {url ? (
@@ -879,7 +879,7 @@ function LetterCard({
                   {row.original_filename}
                 </a>
               ) : (
-                <span style={{ color: "#6B6758" }}>{row.original_filename}</span>
+                <span style={{ color: "#5B6472" }}>{row.original_filename}</span>
               )}
             </div>
           )}
@@ -943,7 +943,7 @@ function LetterCard({
           placeholder={`Your own wording, e.g. ${type.example}`}
           style={fieldStyle}
         />
-        <div style={{ fontSize: 11, color: "#9A9684", margin: "6px 0 12px", lineHeight: 1.6 }}>
+        <div style={{ fontSize: 11, color: "#8A93A0", margin: "6px 0 12px", lineHeight: 1.6 }}>
           Fields you can mark:{" "}
           {type.fields.map((f, i) => (
             <span key={f.key}>

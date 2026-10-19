@@ -19,17 +19,17 @@ export const instant = false;
 
 const field: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px",
-  borderRadius: 9, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "system-ui, sans-serif",
+  borderRadius: 9, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "system-ui, sans-serif",
   color: "#16233B", background: "#FFFFFF",
 };
-const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#6B6758", marginBottom: 4, display: "block" };
-const hint: React.CSSProperties = { fontSize: 11, color: "#9A9684", marginTop: 3 };
+const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#5B6472", marginBottom: 4, display: "block" };
+const hint: React.CSSProperties = { fontSize: 11, color: "#8A93A0", marginTop: 3 };
 const sectionTitle: React.CSSProperties = {
-  fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px",
+  fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px",
 };
 const checkLabel: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 8, minHeight: 36, padding: "0 12px", borderRadius: 9,
-  border: "1px solid #E5E1D5", fontSize: 13, color: "#16233B", background: "#FFFFFF", cursor: "pointer",
+  border: "1px solid #E3E6EA", fontSize: 13, color: "#16233B", background: "#FFFFFF", cursor: "pointer",
 };
 
 function Field({ children }: { children: React.ReactNode }) {
@@ -76,7 +76,7 @@ export default async function ExperienceDetailPage({
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <style>{`
         @media (max-width: 600px) {
           .exp-grid-2 { grid-template-columns: 1fr !important; }
@@ -86,9 +86,9 @@ export default async function ExperienceDetailPage({
       <SiteNav active="experience" />
 
       <div style={{ flex: 1, padding: "24px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <Link href="/experience" style={{ fontSize: 13, color: "#6B6758", textDecoration: "none" }}>← Company experience</Link>
+        <Link href="/experience" style={{ fontSize: 13, color: "#5B6472", textDecoration: "none" }}>← Company experience</Link>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "8px 0 4px" }}>{item.project_name}</h1>
-        <div style={{ fontSize: 13, color: "#6B6758", marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
           {item.original_filename ? (
             <>
               {item.original_filename}
@@ -125,7 +125,7 @@ export default async function ExperienceDetailPage({
           </div>
         )}
 
-        <form action={saveExperienceTags} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "18px 16px", marginBottom: 16 }}>
+        <form action={saveExperienceTags} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "18px 16px", marginBottom: 16 }}>
           <input type="hidden" name="id" value={item.id} />
 
           <div style={{ ...sectionTitle, marginTop: 0 }}>The document</div>
@@ -178,7 +178,7 @@ export default async function ExperienceDetailPage({
             {taxonomyGroups(taxonomy).map(({ group, children }) => {
               const ticked = [group, ...children].filter((c) => item.disciplines.includes(c.slug)).length;
               return (
-                <details key={group.slug} open={ticked > 0} style={{ borderTop: "1px solid #F0EEE6", padding: "6px 0" }}>
+                <details key={group.slug} open={ticked > 0} style={{ borderTop: "1px solid #ECEEF1", padding: "6px 0" }}>
                   <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#16233B", minHeight: 32, display: "flex", alignItems: "center", gap: 8 }}>
                     {group.label}
                     {ticked > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#DCFCE7", borderRadius: 100, padding: "2px 8px" }}>{ticked} ticked</span>}
@@ -192,7 +192,7 @@ export default async function ExperienceDetailPage({
                       <label key={c.slug} style={checkLabel}>
                         <input type="checkbox" name="disciplines" value={c.slug} defaultChecked={item.disciplines.includes(c.slug)} />
                         {c.label}
-                        {c.matched_by_group_tag === false && <span style={{ fontSize: 11, color: "#9A9684" }}>(tick on its own)</span>}
+                        {c.matched_by_group_tag === false && <span style={{ fontSize: 11, color: "#8A93A0" }}>(tick on its own)</span>}
                       </label>
                     ))}
                   </div>
@@ -200,8 +200,8 @@ export default async function ExperienceDetailPage({
               );
             })}
             {customTags.length > 0 && (
-              <div style={{ borderTop: "1px solid #F0EEE6", paddingTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: "#6B6758", alignSelf: "center" }}>Your own tags:</span>
+              <div style={{ borderTop: "1px solid #ECEEF1", paddingTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: "#5B6472", alignSelf: "center" }}>Your own tags:</span>
                 {customTags.map((v) => (
                   <label key={v} style={checkLabel}>
                     <input type="checkbox" name="disciplines" value={v} defaultChecked />
@@ -273,9 +273,9 @@ export default async function ExperienceDetailPage({
         </form>
 
         {customTags.length > 0 && (
-          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 16px", marginBottom: 16 }}>
+          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 16px", marginBottom: 16 }}>
             <div style={{ ...sectionTitle, marginTop: 0 }}>Your own tags and the shared list</div>
-            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
+            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
               These tags aren&apos;t on Tender Tool&apos;s shared discipline list, so Discovery doesn&apos;t sort tenders into them. If
               other companies would use one too, suggest it: Tender Tool reviews every suggestion before anything is added. The
               reviewer sees your company name, the tag, your note and this project&apos;s name.
@@ -283,10 +283,10 @@ export default async function ExperienceDetailPage({
             {customTags.map((t) => {
               const sug = suggestionFor(t);
               return (
-                <div key={t} style={{ borderTop: "1px solid #F0EEE6", padding: "10px 0" }}>
+                <div key={t} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0" }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <span style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{disciplineLabel(t)}</span>
-                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "#9A9684" }}>{t}</span>
+                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "#8A93A0" }}>{t}</span>
                     {sug && (
                       <span
                         style={{
@@ -304,7 +304,7 @@ export default async function ExperienceDetailPage({
                     <form action={withdrawSuggestion} style={{ marginTop: 6 }}>
                       <input type="hidden" name="id" value={sug.id} />
                       <input type="hidden" name="item_id" value={item.id} />
-                      <button type="submit" style={{ minHeight: 36, padding: "0 12px", borderRadius: 9, background: "#FFFFFF", color: "#6B6758", fontWeight: 600, fontSize: 12, border: "1px solid #E5E1D5", cursor: "pointer" }}>
+                      <button type="submit" style={{ minHeight: 36, padding: "0 12px", borderRadius: 9, background: "#FFFFFF", color: "#5B6472", fontWeight: 600, fontSize: 12, border: "1px solid #E3E6EA", cursor: "pointer" }}>
                         Withdraw the suggestion
                       </button>
                     </form>

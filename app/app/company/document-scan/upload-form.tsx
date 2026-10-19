@@ -15,8 +15,8 @@ import { registerOnboardingBatch } from "./actions";
 
 const NAVY = "#16233B";
 const AMBER = "#D97706";
-const BORDER = "#E5E1D5";
-const MUTED = "#6B6758";
+const BORDER = "#E3E6EA";
+const MUTED = "#5B6472";
 
 function checkFiles(files: File[]): string | null {
   if (files.length === 0) return "Choose at least one document, or drop a whole folder's worth at once.";
@@ -133,7 +133,7 @@ export function UploadForm({ companyId }: { companyId: string }) {
         <ul style={{ margin: "10px 0", paddingLeft: 18, fontSize: 12, color: "#4B5563" }}>
           {files.map((f, i) => (
             <li key={f.name + f.size + i} style={{ display: "flex", justifyContent: "space-between", maxWidth: 480 }}>
-              <span>{f.name} <span style={{ color: "#9A9684" }}>({(f.size / 1024).toFixed(0)} KB)</span></span>
+              <span>{f.name} <span style={{ color: "#8A93A0" }}>({(f.size / 1024).toFixed(0)} KB)</span></span>
               <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} style={{ border: "none", background: "none", color: "#B91C1C", cursor: "pointer", fontSize: 12 }}>
                 remove
               </button>
@@ -165,7 +165,7 @@ export function UploadForm({ companyId }: { companyId: string }) {
       >
         {pending ? "Uploading…" : `Upload ${files.length || ""} document${files.length === 1 ? "" : "s"} for AI review`}
       </button>
-      <div style={{ fontSize: 11, color: "#9A9684", marginTop: 6 }}>
+      <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 6 }}>
         Nothing is filed into your company profile yet - each document is read and classified, then you confirm or correct it below
         before anything is saved.
       </div>

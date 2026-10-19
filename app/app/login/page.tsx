@@ -20,10 +20,10 @@ import { AuthShell } from "../_components/AuthShell";
 // this flag exists to stop a real visitor from hitting again).
 const MICROSOFT_AUTH_READY = false;
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
-const OAUTH_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", marginBottom: 10, borderRadius: 8, border: "1px solid #E5E1D5", background: "#FFFFFF", fontSize: 14, fontWeight: 600, color: "#16233B", cursor: "pointer", boxSizing: "border-box" };
+const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
+const OAUTH_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", marginBottom: 10, borderRadius: 8, border: "1px solid #E3E6EA", background: "#FFFFFF", fontSize: 14, fontWeight: 600, color: "#16233B", cursor: "pointer", boxSizing: "border-box" };
 const LABEL: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4, textAlign: "left" };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, boxSizing: "border-box", marginBottom: 14 };
+const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box", marginBottom: 14 };
 const PRIMARY_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", borderRadius: 8, border: "none", background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, cursor: "pointer", boxSizing: "border-box" };
 
 export default function LoginPage() {
@@ -69,7 +69,7 @@ export default function LoginPage() {
     <AuthShell>
       <div style={CARD}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Welcome back</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 28px" }}>Sign in to continue</p>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 28px" }}>Sign in to continue</p>
 
         <button onClick={() => signInWith("google")} style={OAUTH_BUTTON}>
           Continue with Google
@@ -81,9 +81,9 @@ export default function LoginPage() {
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "20px 0" }}>
-          <div style={{ flex: 1, height: 1, background: "#E5E1D5" }} />
-          <span style={{ fontSize: 11, color: "#6B6758" }}>or</span>
-          <div style={{ flex: 1, height: 1, background: "#E5E1D5" }} />
+          <div style={{ flex: 1, height: 1, background: "#E3E6EA" }} />
+          <span style={{ fontSize: 11, color: "#5B6472" }}>or</span>
+          <div style={{ flex: 1, height: 1, background: "#E3E6EA" }} />
         </div>
 
         <form onSubmit={handlePasswordSignIn}>
@@ -101,7 +101,7 @@ export default function LoginPage() {
         </form>
 
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, fontSize: 12 }}>
-          <Link href="/forgot-password" style={{ color: "#6B6758", textDecoration: "none" }}>Forgot password?</Link>
+          <Link href="/forgot-password" style={{ color: "#5B6472", textDecoration: "none" }}>Forgot password?</Link>
           <Link href="/signup" style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Create an account</Link>
         </div>
       </div>
