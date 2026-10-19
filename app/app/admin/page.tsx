@@ -17,6 +17,15 @@ const RESOLVED_SHOWN = 20;
 const ALERT_COLUMNS =
   "id, source, severity, message, detail, context, occurrences, first_seen_at, last_seen_at, reported_at, resolved_at, resolution_note";
 
+type CvDocumentStats = {
+  cv_uploads_total: number;
+  generated_cvs_total: number;
+  generated_cvs_ready: number;
+  open_tender_cvs_count: number;
+  open_tender_cvs_docs_downloaded: number;
+  open_tender_cvs_docs_missing: number;
+};
+
 type RunRow = {
   id: string;
   run_at: string;
@@ -48,12 +57,18 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   // System alerts (migration 0042): every open alert, plus the most recently
   // resolved ones for reference. Owner-only by RLS, same as the harness runs.
-  const [{ data: openAlerts, error: alertsError }, { data: resolvedAlerts }] = await Promise.all([
+  // CV / document stats (migration 0066): Sarel's daily "how many open CVs
+  // / did we get the tender documents" check, computed server-side rather
+  // than left as a one-off query - see that migration's header for exactly
+  // what each number counts.
+  const [{ data: openAlerts, error: alertsError }, { data: resolvedAlerts }, { data: cvStatsRows, error: cvStatsError }] = await Promise.all([
     supabase.from("system_alerts").select(ALERT_COLUMNS).is("resolved_at", null)
       .order("last_seen_at", { ascending: false }),
     supabase.from("system_alerts").select(ALERT_COLUMNS).not("resolved_at", "is", null)
       .order("resolved_at", { ascending: false }).limit(RESOLVED_SHOWN),
+    supabase.rpc("platform_admin_cv_document_stats"),
   ]);
+  const cvStats = cvStatsRows?.[0] as CvDocumentStats | undefined;
   const open = (openAlerts ?? []) as SystemAlert[];
   const resolved = (resolvedAlerts ?? []) as SystemAlert[];
   const newCount = open.filter((a) => !a.reported_at).length;
@@ -81,6 +96,30 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <Link href="/admin/settings" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Settings</Link>
           <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
         </div>
+        <section id="cv-document-stats" style={{ marginBottom: 36 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>CVs &amp; tender documents</h1>
+          <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+            Daily check: how many CVs we have on file, and - of the tender-specific CVs being worked for
+            currently-open tenders - how many of those tenders we actually have the blank templates downloaded for.
+            See migration 0066 for exactly what each number counts.
+          </p>
+          {cvStatsError && (
+            <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+              Could not load CV/document stats: {cvStatsError.message}
+            </div>
+          )}
+          {cvStats && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+              <StatCard label="CVs uploaded (source files on file)" value={cvStats.cv_uploads_total} color="#16233B" />
+              <StatCard label="Generated CVs on file (ready)" value={cvStats.generated_cvs_ready} color="#16233B" />
+              <StatCard label="Generated CVs requested in total" value={cvStats.generated_cvs_total} color="#6B6758" />
+              <StatCard label="Open tenders with a CV being worked" value={cvStats.open_tender_cvs_count} color="#6B6758" />
+              <StatCard label="Tenders with documents downloaded" value={cvStats.open_tender_cvs_docs_downloaded} color="#15803D" />
+              <StatCard label="Tenders missing documents" value={cvStats.open_tender_cvs_docs_missing} color="#B45309" />
+            </div>
+          )}
+        </section>
+
         <section id="system-alerts" style={{ marginBottom: 36 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>System alerts</h1>
           <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
@@ -159,6 +198,15 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "13px 16px" }}>
+      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   );
 }
