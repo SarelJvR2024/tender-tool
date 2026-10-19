@@ -6,7 +6,16 @@
 // Deliberately NOT: motion lines, gradients, neural-net dots, sparkles -
 // those would contradict the "complete, correct, yours - not fast, not AI"
 // positioning this mark exists to carry.
-export function Logo({ size = 40 }: { size?: number }) {
+// "light" is the same mark, redrawn for a dark (navy) background: a
+// translucent page with cream strokes instead of navy-on-white. Needed
+// anywhere the mark sits on a navy panel (the /tools header bar, the new
+// auth-page hero panel) - flagged as a gap when the default mark first
+// shipped (PR #6) and filled in now that there's a second real use for it.
+export function Logo({ size = 40, variant = "default" }: { size?: number; variant?: "default" | "light" }) {
+  const light = variant === "light";
+  const stroke = light ? "#F6F5F1" : "#16233B";
+  const fill = light ? "rgba(246, 245, 241, 0.08)" : "#FFFFFF";
+
   return (
     <svg
       width={size}
@@ -17,10 +26,10 @@ export function Logo({ size = 40 }: { size?: number }) {
       role="img"
       aria-label="Tender Tool"
     >
-      <rect x="7" y="5" width="22" height="30" rx="4" fill="#FFFFFF" stroke="#16233B" strokeWidth="2.2" />
-      <line x1="12" y1="15" x2="23" y2="15" stroke="#16233B" strokeWidth="1.6" strokeLinecap="round" />
-      <line x1="12" y1="20" x2="23" y2="20" stroke="#16233B" strokeWidth="1.6" strokeLinecap="round" />
-      <line x1="12" y1="25" x2="19" y2="25" stroke="#16233B" strokeWidth="1.6" strokeLinecap="round" />
+      <rect x="7" y="5" width="22" height="30" rx="4" fill={fill} stroke={stroke} strokeWidth="2.2" />
+      <line x1="12" y1="15" x2="23" y2="15" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" />
+      <line x1="12" y1="20" x2="23" y2="20" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" />
+      <line x1="12" y1="25" x2="19" y2="25" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" />
       <path
         d="M20 11 L25.5 16.5 L35.5 4.5"
         stroke="#D97706"
