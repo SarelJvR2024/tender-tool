@@ -1,7 +1,7 @@
 import { Logo } from "./Logo";
 
 const PROOF_POINTS = [
-  "Finds tenders you qualify for, automatically",
+  "Checks every contents entry against its real page number before the pack is built",
   "Builds your full SANRAL submission pack - forms, financials and CVs",
   "Flags every expired, missing or mismatched document before you submit",
 ];

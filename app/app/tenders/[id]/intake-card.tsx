@@ -3,7 +3,7 @@ import { ACTIVE_PURSUIT_STAGES, DOWNGRADE_COLUMNS, isDowngraded, isOpenDowngrade
 import { createClient } from "@/lib/supabase/server";
 import { JOB_STATUS_STYLE, type EngineJob } from "@/lib/generalTender";
 import type { TenderIntake } from "@/lib/manualTender";
-import { PackAutoRefresh } from "./pack-auto-refresh";
+import { AutoRefresh } from "../../_components/AutoRefresh";
 import { AddTenderDocumentsForm } from "../new/manual-tender-form";
 
 /**
@@ -72,7 +72,7 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
 
   return (
     <div id="intake" style={card}>
-      <PackAutoRefresh active={active} />
+      <AutoRefresh active={active} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>How this tender was read</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

@@ -14,7 +14,7 @@ const BORDER = "#E5E1D5";
 
 const CARD: React.CSSProperties = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 11, padding: "22px 24px", marginBottom: 18 };
 const H2: React.CSSProperties = { fontSize: 17, fontWeight: 700, color: INK, margin: "0 0 10px" };
-const P: React.CSSProperties = { fontSize: 14, color: "#3A3730", lineHeight: 1.7, margin: "0 0 10px" };
+const P: React.CSSProperties = { fontSize: 14, color: "#6B6758", lineHeight: 1.7, margin: "0 0 10px" };
 
 /**
  * A real POPIA privacy notice was one of the biggest gaps a prospective-customer
@@ -35,8 +35,11 @@ export default function PrivacyPage() {
     <div style={{ minHeight: "100vh", background: CREAM, fontFamily: "system-ui, sans-serif" }}>
       <div style={{ background: NAVY, padding: "16px 20px" }}>
         <div style={{ maxWidth: 760, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <Link href="/" style={{ color: "#FFFFFF", fontWeight: 700, fontSize: 15, textDecoration: "none" }}>
-            Tender Tool
+          <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "#FFFFFF" }}>
+            <div style={{ width: 28, height: 28, borderRadius: 6, background: AMBER, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, color: NAVY, flexShrink: 0 }}>
+              T
+            </div>
+            <div style={{ fontWeight: 600, fontSize: 16 }}>Tender Tool</div>
           </Link>
           <Link href="/signup" style={{ color: AMBER, fontWeight: 600, fontSize: 13, textDecoration: "none" }}>
             Start free &rarr;

@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { Card, SubPage } from "../_components/ui";
 import { UploadForm } from "./upload-form";
 import { DocumentReviewCard, type OnboardingResult } from "./review";
-import { QueuePoller } from "./QueuePoller";
+import { AutoRefresh } from "../../_components/AutoRefresh";
 
 // Bulk onboarding document scan (0063): drop in a folder/zip of whatever
 // compliance documents the company already has instead of uploading and
@@ -89,7 +89,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
       error={error}
       saved={saved === "handed-off" && handoffPerson ? null : saved ? SAVED[saved] ?? saved : null}
     >
-      <QueuePoller queuedCount={queuedCount ?? 0} />
+      <AutoRefresh active={(queuedCount ?? 0) > 0} />
 
       {saved === "handed-off" && handoffPerson && (
         <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>

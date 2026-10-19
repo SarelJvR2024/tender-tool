@@ -7,13 +7,26 @@ import Link from "next/link";
 // direct visit (search, a shared link) to actually signing up, even though
 // these tools exist specifically as the lead magnets the landing page's
 // "Try a free tool first" button sends people to.
-export function ToolsHeader() {
+// `showBackLink` (default true, matching the four tool pages) renders the
+// "<- Free tools" link on the left. The index page itself has nowhere to
+// go back to, so it passes false to get the logo + wordmark instead - the
+// same amber-badge "T" mark the rest of the public site uses.
+export function ToolsHeader({ showBackLink = true }: { showBackLink?: boolean } = {}) {
   return (
     <header style={{ background: "#16233B", color: "#FFFFFF", padding: "16px 20px" }}>
       <div style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-        <Link href="/tools" style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, textDecoration: "none" }}>
-          &larr; Free tools
-        </Link>
+        {showBackLink ? (
+          <Link href="/tools" style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, textDecoration: "none" }}>
+            &larr; Free tools
+          </Link>
+        ) : (
+          <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "#FFFFFF", width: "fit-content" }}>
+            <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>
+              T
+            </div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
+          </Link>
+        )}
         <Link
           href="/signup"
           style={{

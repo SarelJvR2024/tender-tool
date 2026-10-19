@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ToolsHeader } from "./_components/ToolsHeader";
 
 // Free standalone tools - lead magnets, no sign-in, no company/tender
 // context required. Deliberately separate from the signed-in app's
@@ -15,30 +16,31 @@ const TOOLS = [
     title: "Working-day deadline calculator",
     blurb: "Add or count working days excluding weekends and South African public holidays - for tender closing dates, briefing notices and query deadlines.",
     badge: "DL",
-    accent: "#16233B",
   },
   {
     href: "/tools/cidb-grade",
     title: "CIDB grade calculator",
     blurb: "Look up the CIDB contractor grade a tender's value requires, or check whether the grade you hold is enough to bid.",
     badge: "CIDB",
-    accent: "#D97706",
   },
   {
     href: "/tools/bee-preference-points",
     title: "B-BBEE preference points calculator",
     blurb: "Work out the actual 80/20 or 90/10 preference points (PPPFA Preferential Procurement Regulations, 2022) for a price and B-BBEE level.",
     badge: "%",
-    accent: "#16233B",
   },
   {
     href: "/tools/b6-estimator",
     title: "SANRAL B6 functionality score estimator",
     blurb: "Estimate a key position's SANRAL functionality score from the real published Book 1 scoring matrices - no SANRAL competitor covers this at all.",
     badge: "B6",
-    accent: "#D97706",
   },
 ];
+
+// All four individual tool pages are navy/cream only, no amber accents -
+// the index cards' badges should match what the destination pages actually
+// look like instead of arbitrarily alternating amber/navy.
+const ACCENT = "#16233B";
 
 export default function ToolsIndexPage() {
   return (
@@ -48,34 +50,7 @@ export default function ToolsIndexPage() {
         .tool-card:hover { border-color: #D97706; box-shadow: 0 4px 14px rgba(217, 119, 6, 0.14); transform: translateY(-1px); }
       `}</style>
 
-      <header style={{ background: "#16233B", color: "#FFFFFF", padding: "16px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "#FFFFFF", width: "fit-content" }}>
-            <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>
-              T
-            </div>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
-          </Link>
-          <Link
-            href="/signup"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              minHeight: 36,
-              padding: "0 16px",
-              borderRadius: 8,
-              background: "#D97706",
-              color: "#FFFFFF",
-              fontSize: 13,
-              fontWeight: 700,
-              textDecoration: "none",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Start free
-          </Link>
-        </div>
-      </header>
+      <ToolsHeader showBackLink={false} />
 
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 16px 64px", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 24, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>Free tender tools</h1>
@@ -96,7 +71,7 @@ export default function ToolsIndexPage() {
                 gap: 14,
                 background: "#FFFFFF",
                 border: "1px solid #E5E1D5",
-                borderLeft: `4px solid ${tool.accent}`,
+                borderLeft: `4px solid ${ACCENT}`,
                 borderRadius: 12,
                 padding: "20px 22px",
                 textDecoration: "none",
@@ -109,7 +84,7 @@ export default function ToolsIndexPage() {
                   width: 36,
                   height: 36,
                   borderRadius: 8,
-                  background: tool.accent,
+                  background: ACCENT,
                   color: "#FFFFFF",
                   display: "flex",
                   alignItems: "center",
