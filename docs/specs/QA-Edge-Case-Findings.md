@@ -1501,3 +1501,57 @@ commit `ec7e49b`) rather than stopping at local confidence - `"status":"complete
 (run #56; the prior 52 of 53 were all `failure`). Both `smoke-test` and `container-build` jobs
 passed. Messaged the parent session - this is exactly the kind of result worth surfacing, not a
 quiet close-out.
+
+## 2026-10-19 (twenty-sixth run): a tender's closing date oscillating between two values could
+silently stop being reported after the first two changes
+
+**Context:** synced with `origin/main` and picked up the sibling pass's "twenty-fifth run"
+(independently re-confirmed the CI-green result and a small navigability fix - no new findings).
+Finally picked up the oldest standing open item on this review's own list, flagged repeatedly
+since the eleventh run: `tender_changes.py` had no dedicated test file. Read the module in full
+before writing one, specifically looking for real bugs to test against rather than just adding
+coverage for its own sake.
+
+**Finding 24 (CONFIRMED, FIXED, severe - a silent "gate": real data, dropped with total
+confidence, no error):** `_event()`'s fallback `dedupe_key` (used by `closing_date_changed`,
+`briefing_changed`, `title_changed`, and the `closing_date`-field branch of `sources_disagree`,
+every call site that doesn't pass its own `key_extra`) was built from `json.dumps(new, ...)`
+alone - the NEW value only, with no notion of time. The module's own docstring states the intent
+plainly: *"Every change has a dedupe_key ... so a re-run never records the same change twice."*
+But a listing's closing date (or briefing date, or title) can genuinely **revisit** an earlier
+value - extended from A to B, reverted back to A, then genuinely extended to B again, weeks
+later - three separate, real events a bid team needs to know about, not one. Because the second
+B only differs from the first B by *when* it happened, and the key carried no time information at
+all, the third event's dedupe_key was byte-for-byte identical to the first's - `store.save()`
+found it already in `known` and silently dropped it. No error, no warning, nothing in the digest:
+the daily digest and the tender-updates feed would simply never mention that the tender's date
+moved again. Reproduced directly: a synthetic release cycled A (day 1) -> B (day 5, reported) ->
+A (day 10, reported) -> B (day 15) - the day-15 event, identical in every way to day 5's except
+the date it actually happened, was silently swallowed before the fix.
+
+**Why this matters more than it looks:** this isn't a rare shape. SA public-sector tenders
+routinely get extended, sometimes walked back by a day or two on an admin correction, then
+extended again to settle on the same final date discussed earlier - exactly the oscillation this
+bug ate.
+
+**Fix:** `_event()`'s fallback key now buckets by the day the change was detected
+(`datetime.datetime.now(sh.SAST).date().isoformat()`) before the JSON-encoded value. This still
+correctly dedupes the one case the mechanism is actually there for - two `detect()`/`save()` calls
+racing against the same stale, not-yet-persisted snapshot (necessarily within the same day) -
+without collapsing two genuinely separate occurrences of the same value that are days or weeks
+apart, which is how real extensions/reversions are spaced in practice. Verified the trade-off is
+sound and deliberate: a literal same-day, same-value flip-flop would still dedupe (accepted - rare,
+and the alternative of a correctly-timestamped dedupe key that never merges same-day legitimate
+retries would need per-event history lookups in both `LocalStore` and `SupabaseStore`, a larger
+change for a narrower, lower-probability gap than the one this fixes).
+
+**Verification:** new dedicated test file `engine/discovery/test_tender_changes.py` (closes the
+long-standing "no dedicated test file" gap) - 4 tests, 8 checks: the exact oscillation bug across
+simulated days 1/5/10/15 (all four states - including the previously-dropped fourth - now
+reported); a same-day retry against an already-advanced snapshot correctly reports nothing extra;
+two different tenders changing to the identical new value the same day are never merged into one;
+the `sources_disagree` branch gets the same fix and re-verified independently. All pass. Full
+regression: `test_gov_sources.py` (`tender_changes` section + everything else) - `ALL PASSED`,
+unchanged. `engine/notify/test_digest_live.py` (reads `tender_changes.py` via `daily_digest.py`'s
+listing-changes section) - `0 failure(s)`. `python3 -m py_compile tender_changes.py
+test_tender_changes.py` clean.

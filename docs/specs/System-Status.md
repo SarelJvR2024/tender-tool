@@ -169,6 +169,39 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-sixth run): a tender's closing
+date oscillating between two values could silently stop being reported
+
+Picked up the sibling pass's "twenty-fifth run" (independent re-confirmation of the CI-green
+result, no new findings) and finally closed this review's own oldest standing open item: `tender_
+changes.py` had no dedicated test file, flagged repeatedly since the eleventh run. Read the whole
+module first, specifically hunting for a real bug to anchor the new test file on rather than
+writing coverage for its own sake.
+
+**Finding 24 (fixed, severe):** `_event()`'s fallback `dedupe_key` (used by `closing_date_changed`,
+`briefing_changed`, `title_changed`, and the closing-date branch of `sources_disagree`) was keyed
+on the NEW value alone, with no time component - contradicting the module's own docstring promise
+("a re-run never records the same change twice") in the one way that actually loses real data: a
+closing date extended A->B, reverted B->A, then genuinely extended A->B again weeks later produced
+an identical dedupe_key for the third event as the first, so `store.save()` silently dropped it.
+No error, nothing in the digest - the tender's date moved again and nobody would ever be told.
+Reproduced directly across simulated days 1/5/10/15. Not a rare shape either: SA tenders routinely
+get extended, walked back on an admin correction, then re-extended to the same final date.
+
+**Fix:** the fallback key now buckets by the day the change was detected, before the value. Still
+correctly dedupes the one real scenario the mechanism exists for (two runs racing against the same
+stale, not-yet-persisted snapshot, necessarily same-day) without collapsing two genuinely separate
+occurrences of the same value that are days or weeks apart. A literal same-day flip-flop to the
+exact same value would still dedupe - an accepted, narrower trade-off against the larger fix a
+proper per-event history lookup in both stores would need.
+
+**Verification:** new `engine/discovery/test_tender_changes.py` - 4 tests, 8 checks, all passing:
+the exact oscillation bug (day 15's previously-dropped event now reported), a same-day retry
+still reporting nothing extra, two different tenders never colliding on the same new value, and
+the `sources_disagree` branch independently re-verified with the same fix. Full regression:
+`test_gov_sources.py` and `test_digest_live.py` both clean, unchanged. Full detail:
+`QA-Edge-Case-Findings.md`, "twenty-sixth run" (Finding 24).
+
 ## This pass (2026-10-19, standing QA/robustness review - twenty-fourth run): the one remaining
 "GitHub-runner-only" CI failure was a brittle test assertion, not an environment difference
 

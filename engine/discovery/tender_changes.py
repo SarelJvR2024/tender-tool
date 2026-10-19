@@ -99,8 +99,27 @@ def snapshot_of(r):
 
 def _event(r, change_type, summary, old=None, new=None, when=None, evidence=None, key_extra=None):
     key = r.get("ocid") or f"{r.get('source')}:{r.get('contract_number')}"
+    if key_extra is None:
+        # A mutable field (closing/briefing date, title, a cross-source
+        # disagreement) can genuinely revisit an earlier value: extended
+        # B, reverted to A, extended to B again - three separate, real,
+        # newsworthy changes. Keying only on `new` made the third one
+        # collide with the first's dedupe_key and silently dropped it as
+        # "already reported" (QA-Edge-Case-Findings.md, 2026-10-19 -
+        # reproduced directly: a tender's closing date going A->B->A->B
+        # across 4 runs only ever reported the first two changes, not the
+        # fourth, identical-looking-but-genuinely-new extension). Bucketing
+        # by the day this run saw it still dedupes the one case this
+        # mechanism actually exists for - calling detect()/save() again
+        # before the first call's save() persisted, so the next call still
+        # diffs against the same stale snapshot and would otherwise re-add
+        # the exact same event within the same run/retry window - without
+        # collapsing two genuinely separate occurrences of the same value
+        # that are days or weeks apart.
+        today = datetime.datetime.now(sh.SAST).date().isoformat()
+        key_extra = f"{today}:{json.dumps(new, sort_keys=True, default=str)}"
     return {
-        "dedupe_key": f"{key}|{change_type}|{key_extra if key_extra is not None else json.dumps(new, sort_keys=True, default=str)}"[:600],
+        "dedupe_key": f"{key}|{change_type}|{key_extra}"[:600],
         "release_key": key, "ocid": r.get("ocid"), "source": r.get("source") or "unknown",
         "contract_number": r.get("contract_number"), "buyer": r.get("buyer"), "title": r.get("title"),
         "change_type": change_type, "summary": summary, "old_value": old, "new_value": new,
