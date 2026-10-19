@@ -17,6 +17,7 @@ import {
   type TenderTaskStatus,
 } from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
+import { ScrollFade } from "../../_components/ScrollFade";
 import { SubmissionPack } from "./submission-pack";
 import { PackReview } from "./pack-review";
 import { IntakeCard } from "./intake-card";
@@ -399,41 +400,54 @@ export default async function TenderWorkspacePage({
                 wayfinding strip, not more scrolling, when a screen gets long).
                 The pack link (the page's actual deliverable) leads the row in
                 its "primary" color, so it's never scrolled out of view on a
-                narrow screen behind the report links ahead of it. */}
+                narrow screen behind the report links ahead of it.
+                A full SANRAL pack row can carry 13+ pills - more than this
+                page's 820px reading-width column fits at ANY viewport size,
+                not just on mobile, so there was nothing marking that the row
+                scrolls - the same stranded-content problem the pipeline board
+                and Discovery's right rail were fixed for. The fade-only
+                ScrollFade (no text hint - this bar is sticky, so a permanent
+                hint line would add height to something pinned on screen for
+                the whole page scroll) gives the same edge cue without that
+                cost. minWidthToHide is set unreachably high because the
+                overflow here doesn't depend on viewport width the way
+                Pipeline's board does - the column is capped at 820px, so it
+                never actually fits. */}
             {(tenderPack || isSanralFamily) && (
               <div
                 style={{
                   position: "sticky",
                   top: 0,
                   zIndex: 5,
-                  display: "flex",
-                  gap: 6,
-                  overflowX: "auto",
-                  WebkitOverflowScrolling: "touch",
                   background: "#F6F5F1",
                   padding: "8px 2px",
                   marginBottom: 12,
                 }}
               >
-                {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
-                {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" variant="primary" />}
-                {tenderFacts.source !== "sanral" && <JumpLink href="#intake" label="Intake" />}
-                {tenderPack && provenance.length > 0 && <JumpLink href="#readiness-report" label="Readiness" />}
-                {isSanralFamily && <JumpLink href="#compliance-check" label="Documents" />}
-                {isSanralFamily && <JumpLink href="#key-people" label="Key people" />}
-                {isSanralFamily && <JumpLink href="#company-experience" label="Experience" />}
-                {isSanralFamily && <JumpLink href="#score-estimate" label="Score" />}
-                {isGeneralFamily && <JumpLink href="#general-preparation" label="Needs" />}
-                {isGeneralFamily && <JumpLink href="#general-documents" label="Documents" />}
-                {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
-                <JumpLink href="#market" label="Market" />
-                <JumpLink href="#tasks-milestones" label="Tasks" />
-                {tenderPack && tenderPack.pipeline_stage === "won" && <JumpLink href="#won-project" label="Won project" />}
-                <JumpLink href="#activity" label="Notes & activity" />
-                {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
-                {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
-                {showSubmissionPack && <JumpLink href="#form-b7" label="Form B7" />}
-                {showSubmissionPack && <JumpLink href="#pack-review" label="Pack review" />}
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", gap: 6, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                    {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
+                    {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" variant="primary" />}
+                    {tenderFacts.source !== "sanral" && <JumpLink href="#intake" label="Intake" />}
+                    {tenderPack && provenance.length > 0 && <JumpLink href="#readiness-report" label="Readiness" />}
+                    {isSanralFamily && <JumpLink href="#compliance-check" label="Documents" />}
+                    {isSanralFamily && <JumpLink href="#key-people" label="Key people" />}
+                    {isSanralFamily && <JumpLink href="#company-experience" label="Experience" />}
+                    {isSanralFamily && <JumpLink href="#score-estimate" label="Score" />}
+                    {isGeneralFamily && <JumpLink href="#general-preparation" label="Needs" />}
+                    {isGeneralFamily && <JumpLink href="#general-documents" label="Documents" />}
+                    {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
+                    <JumpLink href="#market" label="Market" />
+                    <JumpLink href="#tasks-milestones" label="Tasks" />
+                    {tenderPack && tenderPack.pipeline_stage === "won" && <JumpLink href="#won-project" label="Won project" />}
+                    <JumpLink href="#activity" label="Notes & activity" />
+                    {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
+                    {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
+                    {showSubmissionPack && <JumpLink href="#form-b7" label="Form B7" />}
+                    {showSubmissionPack && <JumpLink href="#pack-review" label="Pack review" />}
+                  </div>
+                  <ScrollFade fadeColor="246, 245, 241" minWidthToHide={99999} hint={false} />
+                </div>
               </div>
             )}
 

@@ -12,8 +12,22 @@ import { useId } from "react";
  * `fadeColor` is an rgb triplet (e.g. "246, 245, 241") matching whatever
  * background the fade sits on top of, so the gradient reads as a fade to
  * that background rather than a mismatched box.
+ *
+ * `hint` (default true) also renders the "Scroll for more" text line below
+ * the fade. Pass false when the wrapper has no room to grow - e.g. inside a
+ * sticky bar, where adding a permanent text row would add height to
+ * something pinned on screen for the whole page scroll; the fade alone
+ * still gives the edge-overlay cue.
  */
-export function ScrollFade({ fadeColor, minWidthToHide }: { fadeColor: string; minWidthToHide: number }) {
+export function ScrollFade({
+  fadeColor,
+  minWidthToHide,
+  hint = true,
+}: {
+  fadeColor: string;
+  minWidthToHide: number;
+  hint?: boolean;
+}) {
   const cls = `scroll-fade-${useId().replace(/[^a-zA-Z0-9]/g, "")}`;
   return (
     <>
@@ -35,9 +49,11 @@ export function ScrollFade({ fadeColor, minWidthToHide }: { fadeColor: string; m
           background: `linear-gradient(to right, rgba(${fadeColor}, 0), rgba(${fadeColor}, 0.95))`,
         }}
       />
-      <div className={cls} style={{ fontSize: 11, color: "#9A9684", textAlign: "right", marginTop: 4 }}>
-        Scroll for more &rarr;
-      </div>
+      {hint && (
+        <div className={cls} style={{ fontSize: 11, color: "#9A9684", textAlign: "right", marginTop: 4 }}>
+          Scroll for more &rarr;
+        </div>
+      )}
     </>
   );
 }
