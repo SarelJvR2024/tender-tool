@@ -15,8 +15,11 @@ was scored against config/klipcorp_profile.json and every result attached to
 (assess_tender.read_release) and that reading is scored separately for each
 company (assess_tender.score_release), so the same tender can be a strong fit
 for one company and not a fit for another. Each company's report-worthy
-verdict becomes its own discovered_opportunities row
-(seed_supabase_opportunities.py).
+verdict becomes its own discovered_opportunities row: main() calls
+seed_supabase_opportunities.seed() itself in Supabase mode (unless --no-seed),
+so a scheduled run of this script alone is enough to populate /discovery -
+see --no-seed's help for the one case where you'd still run
+seed_supabase_opportunities.py by hand against --out instead.
 
 Why this exists: Sarel cannot auto-download SANRAL's own tender documents
 (gated behind a name/company/email form plus a CAPTCHA - see
@@ -104,6 +107,7 @@ import gov_sources
 import assess_tender
 import company_profiles
 import discovery_downgrades
+import seed_supabase_opportunities
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
 import system_alerts  # noqa: E402
 
@@ -370,6 +374,10 @@ def main():
                      help="also report needs_review verdicts, not just strong_fit/possible - noisy on the "
                           "unfiltered national feed (confirmed: 72 of 74 on a real run were irrelevant "
                           "categories), use for a manual sweep, not the automated daily alert")
+    ap.add_argument("--no-seed", action="store_true",
+                     help="don't write the report-worthy releases to discovered_opportunities (Supabase mode "
+                          "only - this is the step that actually makes them show up on /discovery; skip it "
+                          "only for a dry run or when you'll seed --out separately with seed_supabase_opportunities.py)")
     args = ap.parse_args()
 
     report_worthy = REPORT_WORTHY_VERDICTS_WIDE if args.include_needs_review else REPORT_WORTHY_VERDICTS
@@ -454,6 +462,22 @@ def main():
         with open(args.out, "w") as f:
             json.dump(new_releases, f, indent=2)
         print(f"\nWrote {args.out}")
+
+    if client is not None and not args.no_seed:
+        # This is the step that actually puts a release on /discovery - a
+        # watch run that scores and reports but never calls this leaves
+        # every report-worthy match sitting unseen in company_results,
+        # never a discovered_opportunities row (Sarel, 2026-10-19: "why is
+        # nothing being pulled into our system"). Previously a human had to
+        # run seed_supabase_opportunities.py by hand against --out; doing it
+        # here means a scheduled watch run alone is enough.
+        written = seed_supabase_opportunities.seed(client, new_releases)
+        total = sum(written.values())
+        print(f"\nSeeded {total} discovered_opportunities row(s) across {len(written)} compan"
+              f"{'y' if len(written) == 1 else 'ies'}: " + ", ".join(f"{k}: {v}" for k, v in written.items()))
+    elif client is None and new_releases and not args.no_seed:
+        print("\n(Local --profile run - no Supabase company to seed discovered_opportunities for. "
+              "Run without --profile, or seed --out with seed_supabase_opportunities.py separately.)")
 
     return new_releases
 
