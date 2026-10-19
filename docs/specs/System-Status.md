@@ -169,6 +169,47 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-third run): two well-built, independently re-verified commits - no issues found
+
+Orientation: two new commits since the last pass, both from the sibling session that's been
+working the `01PAw7oeNsQgNdYpS5qH2b1R` thread (`0f7b0ee` - real columns + a CIDB name-mismatch
+warning for the six previously-orphaned onboarding-scan fields, migration `0069`; `dce0fc4` -
+confirm-before-compile Pack Review for general/non-SANRAL tenders, reusing the SANRAL pattern and
+`pack_review_confirmations` (`0059`) with no new table). Both already carry thorough,
+well-evidenced write-ups of their own in this file and in `QA-Edge-Case-Findings.md` - this entry
+is my own independent re-verification, not a restatement.
+
+**Migration `0069`:** set up scratch Postgres, replayed all 69 migrations clean. Read the full
+file - purely additive `companies` columns, correctly reasoned RLS exemption (already covered by
+the existing "members can select/update" policy, `0001`), correctly reasoned decision to keep
+bank fields off `bank_accounts` (`0050`) rather than the more-restricted table the original
+finding suggested, since `account_number` there is `NOT NULL` and the scan never extracts one.
+Read `onboardingScan.ts`'s `VAULT_FIELD_COLUMNS` wiring and `cidbNameMismatchWarning()` in full -
+simple, bounded, correctly non-blocking - and confirmed `review.tsx`/`page.tsx` actually thread
+`companyLegalName` through to it, not just call it with a stray argument. Ran
+`onboardingScan.test.ts` directly: 18/18 pass.
+
+**`dce0fc4` (general-tender Pack Review):** read all six new/changed files in full. Confirmed
+`general-pack-review-logic.ts`'s classifiers are pure and correctly mirror the SANRAL precedent
+where the two are genuinely alike (and correctly diverge where general tenders really are
+different - no provenance/default-signer machinery). Specifically checked the gate itself
+(`general-actions.ts`'s `requestJob()`): only applies to `kind === "generate_pack"`, not to
+requirements extraction, and correctly scoped by both `tender_id` and `company_id` against
+`pack_review_confirmations`. Checked `general-pack-review-data.ts`'s one query that filters only
+by `tender_id` (the "reviewed so far" read) isn't a cross-tenant gap: RLS's own
+`is_company_member(company_id)` policy on `pack_review_confirmations` is the actual enforcement
+boundary regardless of the query's own filters, same as everywhere else in this codebase - a
+non-issue, not flagged further. Ran `general-pack-review-logic.test.ts` directly: 16/16 pass.
+
+**Whole-tree verification:** `npm run typecheck`/`lint`/`build` clean from a fresh `.next` state;
+every one of the 10 `*.test.ts` files in `app/` run directly, all clean. Confirmed on GitHub's own
+infrastructure, not assumed: both commits' `app-ci.yml` runs (ids `39244779779`, `39244948058`)
+read `conclusion: success`. `bridge-worker-ci.yml` correctly did not trigger for either (neither
+touches `engine/**`) - its last run stays the one already-known, already-flagged
+`test_extract_cv_fields.py` failure from the twenty-second run, unchanged by this pass.
+
+No issues found in either commit. No action needed.
+
 ## This pass (2026-10-19, standing QA/robustness review - twenty-second run): `bridge-worker-ci.yml` has been red on GitHub since nearly the start of this project, unnoticed
 
 Orientation: two new commits since the last pass (`6aa0e00`, finishing the cool-white palette
