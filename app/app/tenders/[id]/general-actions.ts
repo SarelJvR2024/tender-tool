@@ -126,11 +126,31 @@ export async function uploadTenderDocument(formData: FormData) {
 
 /** Queue a job for engine/general/process_general_jobs.py: a pack_generation_jobs
  * row with engine 'general' - the one queue every engine shares (0026). RLS:
- * insert only, status 'requested'. */
+ * insert only, status 'requested'.
+ *
+ * generate_pack additionally requires a pack_review_confirmations row
+ * (migration 0059, reused as-is - general-pack-review.tsx / -actions.ts) -
+ * the same confirm-before-compile gate requestSubmissionPack() (actions.ts)
+ * already applies to SANRAL packs, extended here per the standing QA
+ * finding that general tenders had no equivalent review step. Additive to
+ * every existing check above (missing documents/answers still just produce
+ * a draft with blanks, by design) - this only blocks an UNREVIEWED compile.
+ */
 async function requestJob(formData: FormData, kind: "extract_requirements" | "generate_pack") {
   const { supabase, userId, companyId } = await requireMember();
   const tenderId = formData.get("tender_id") as string | null;
   if (!tenderId) redirect("/dashboard");
+  if (kind === "generate_pack") {
+    const { data: reviewRow } = await supabase
+      .from("pack_review_confirmations")
+      .select("reviewed_at")
+      .eq("tender_id", tenderId)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (!reviewRow?.reviewed_at) {
+      redirect(back(tenderId, `?error=${encodeURIComponent("Review the full Pack Review list above and click \"I've reviewed this\" before generating a pack.")}`));
+    }
+  }
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).maybeSingle();
   const { error } = await supabase.from(JOBS_TABLE).insert({
     engine: GENERAL_ENGINE,

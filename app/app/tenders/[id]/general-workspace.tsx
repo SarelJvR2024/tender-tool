@@ -26,6 +26,7 @@ import { requestGeneralPack, requestRequirementsExtraction, saveGeneralAnswers, 
 import { OcrNotice, OCR_TAG } from "./ocr-notice";
 import { PackChecklist, checklistOf } from "./pack-checklist";
 import { PrivateDocuments, type PrivateDoc } from "./private-documents";
+import { GeneralPackReview } from "./general-pack-review";
 
 /**
  * Non-SANRAL tender preparation (Sarel, 2026-10-16: "keep working on
@@ -520,6 +521,10 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           )}
         </div>
       )}
+
+      {/* Pack review: confirm everything above before compiling (the
+          general-tender equivalent of SANRAL's pack-review.tsx, 0059). */}
+      <GeneralPackReview tenderId={tenderId} />
 
       {/* 5. Generate the pack */}
       <div id="general-pack" style={card}>

@@ -2669,3 +2669,76 @@ input). `npm run typecheck` and `npm run lint` clean across the whole `app/` tre
 compiles and type-checks cleanly, then fails at the same pre-existing `/login` prerender (no
 Supabase credentials in this sandbox) - unrelated to this change, same standing gap as every other
 entry in this file. Nothing verified against a live Supabase project or a live Anthropic API call.
+
+### Pack Review for general (non-SANRAL) tenders (2026-10-19)
+
+A standing QA finding noted that SANRAL's Pack Review (`0059`, 2026-10-18 above) had no
+equivalent for general tenders - those route through `engine/general/`,
+`general-workspace.tsx` and `requestGeneralPack()`/`generate_pack`, with no confirm-before-compile
+step before that button's job gets queued. This task built that equivalent, reusing the SANRAL
+pattern rather than duplicating it.
+
+**What's actually different about a general tender (confirmed by reading the real code, not
+assumed):** no Form B7, no two-envelope structure. People are matched to roles via
+`person_role_eligibility` tags (`0016`/`0031` - any number of people per role) rather than
+SANRAL's one-person-per-position `tender_pack_assignments`; CVs for a tagged role come from the
+same `generated_cvs`(`status='ready'`)/`cv_uploads` lookup `engine/general/process_general_jobs.py`'s
+own `gather_pack_inputs()` does when it actually builds the pack, kept in sync so the review
+screen never promises a CV the pack itself can't find. What this tender's forms/documents/
+questions actually are is read per-tender from `tenders.document_requirements`
+(`engine/general/requirements.py`'s manifest), not from a fixed SANRAL-style list - so "form
+answers" here means the manifest's own `questions`/`company_fields`, and the signatory is just
+another `type: "person"` question (same `signatory_person_id` field-key convention as SANRAL,
+no region/industry/discipline default-signer suggestion - that's SANRAL's `signatory_scopes`,
+`0061` - so there is no fallback to pre-select, only chosen-or-not).
+
+**Built:** `general-pack-review-logic.ts` - pure classifiers for what's different
+(`answerStatus`, `roleStatus`, `signatureAnswerStatus`, `localityStatus`), importing only the
+`ReviewStatus`/`ChecklistStatus` *types* from `pack-review-logic.ts` (fully erased, no runtime
+coupling) rather than re-exporting its runtime helpers - `docItemStatus`/`fieldStatus` are
+imported directly from `pack-review-logic.ts` by callers instead, since a runtime
+`export ... from` here breaks Node's own module resolution when the test file is run directly
+(`node --experimental-strip-types`, no bundler) even though it works fine under Next's bundler -
+found by actually running the new test, not assumed. `general-pack-review-data.ts`
+(`loadGeneralPackReviewSnapshot`, React `cache()`) assembles the live snapshot: company
+details/tender questions/signature, supporting documents (reusing `checkReturnable()` from
+`lib/generalTender.ts` - the exact function `general-workspace.tsx` itself uses, not re-derived),
+roles & CVs (`person_role_eligibility`), company experience evidence (`findMatchingExperience()` +
+`evaluateEvidence()`, same as `general-workspace.tsx`), and office location (`matchLocality()`).
+Same per-item try/catch error isolation as `pack-review-data.ts` - one bad section renders
+"couldn't load this section" instead of crashing the card. `general-pack-review.tsx` renders it
+as its own card (`#general-pack-review`), mounted inside `GeneralTenderWorkspace`
+(`general-workspace.tsx`) directly above its "Generate the pack" section - same
+`<details>`-per-section, status-pill, "Change"-link-to-anchor, "I've reviewed this" shape as
+SANRAL's `pack-review.tsx`, reusing `PackChecklist`/`ChecklistRow` (`pack-checklist.tsx`, already
+generic, not SANRAL-specific) unmodified.
+
+**Data model: no new table.** `pack_review_confirmations` (`0059`) is schema-generic - just
+`(company_id, tender_id, reviewed_at, reviewed_by)` - so it's reused as-is for general tenders;
+no migration added by this task. `general-pack-review-actions.ts`'s `confirmGeneralPackReview()`
+upserts the same row `pack-review-actions.ts`'s `confirmPackReview()` does for SANRAL (kept as a
+separate action only because the redirect anchor differs, `#general-pack-review` vs
+`#pack-review`, and that file is SANRAL-only by repo convention).
+
+**Wiring:** `requestGeneralPack()` (`general-actions.ts`, via the shared `requestJob()` it and
+`requestRequirementsExtraction()` both call) now requires a `pack_review_confirmations` row to
+exist before it will insert a `generate_pack` job - additive to every existing check in that
+function (a tender with unanswered questions or missing documents still generates a draft with
+blanks, by design; this only blocks an *unreviewed* compile, the same scope SANRAL's own gate
+has).
+
+**Verified:** `general-pack-review-logic.test.ts` (same `node --experimental-strip-types --test`
+pattern, run from a bracket-free temp copy since Node's own `--test` glob matcher cannot handle
+the literal `[id]` path segment - confirmed by reproducing the same 0-tests-collected result on
+the untouched SANRAL `pack-review-logic.test.ts` run the same way, so it's a Node/shell quirk, not
+a regression) - 16 cases including the two required scenarios (everything confirmed = all green;
+missing signatory / nobody tagged for a role / no local office = the right mixed statuses), all
+passing; the existing `pack-review-logic.test.ts` still passes unchanged (35/35 across both files
+together). `npm run typecheck` (`tsc --noEmit`) and `npx eslint` clean on every new/changed file
+and the whole `app/` tree. Nothing verified against a live Supabase project.
+
+**Not done / open for Sarel:** per-person professional registrations (SACNASP/SAGC/catalog bodies)
+that `general-workspace.tsx` shows are not repeated as separate review items here (same rationale
+SANRAL's own review uses for ECSA/SACPCMP counts: those are company-aggregate facts, already
+implicitly covered, not a separate confirm-or-change decision). The SANRAL Pack Review screen and
+its logic/data/actions/test files (`pack-review*.ts(x)`) were not touched at all by this task.
