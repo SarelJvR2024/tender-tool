@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
@@ -21,6 +21,21 @@ export default function SignUpPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  // null = still checking. Defaults open (true) on a failed check rather
+  // than locking every visitor out over a transient RPC error - the Server
+  // Action behind signUp has no gate of its own, so this is advisory, not
+  // the real enforcement point; platform_admin_set_setting (0064) is.
+  const [signupsEnabled, setSignupsEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    createClient().rpc("signups_enabled").then(({ data, error }) => {
+      if (!cancelled) setSignupsEnabled(error ? true : data !== false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -67,6 +82,22 @@ export default function SignUpPage() {
           <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Check your email</h1>
           <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
             We&apos;ve sent a confirmation link to <strong>{email}</strong>. Click it to activate your account and sign in.
+          </p>
+          <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
+            &larr; Back to sign in
+          </Link>
+        </div>
+      </AuthShell>
+    );
+  }
+
+  if (signupsEnabled === false) {
+    return (
+      <AuthShell>
+        <div style={CARD}>
+          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Sign-ups are paused</h1>
+          <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
+            Tender Tool isn&apos;t taking new accounts right now. Already have one?
           </p>
           <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
             &larr; Back to sign in
