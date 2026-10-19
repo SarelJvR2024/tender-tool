@@ -6,7 +6,12 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-18, ~23:00 UTC — verified email/password auth (Sarel's own second
+Last full pass: 2026-10-19, ~00:30 UTC — demo-prep sprint verified: landing page (`4fc2e19`),
+SANRAL B6 estimator + real logo (`ffbba14`), auth-pages redesign (`d64e652`), 3 new discovery
+sources (`cace3f7`), a real bug caught by live Playwright E2E testing against production
+(`9061deb`), demo-blocking copy fixes (`95bce9f`) - all now authored directly by Sarel with
+Claude as co-author, ahead of "tomorrow's customer demo." All clean - below. ~23:00 UTC —
+verified email/password auth (Sarel's own second
 human-authored commit `d721965`: /signup, /forgot-password, /reset-password alongside the
 existing OAuth), the onboarding-scan silent-field-loss fix, and a mobile CSS fix - all clean,
 full production build still 32/32 pages - below. ~21:00 UTC — **milestone: a live Supabase project and a green Vercel
@@ -1075,6 +1080,49 @@ Two commits, both small and already well-verified; one had no System-Status entr
   and `test_award_prices.py` myself: 0 failures both, confirming the fix.
 
 Nothing further needed this pass.
+
+## This pass (2026-10-19, ~00:30 UTC): demo-prep sprint verified - landing page, SANRAL B6 estimator, auth redesign, 3 new discovery sources, a live-E2E-caught bug
+
+8 commits, all authored directly by Sarel with Claude as co-author (a workflow shift from every
+earlier commit this session, which the agent authored directly) - explicitly driving toward
+"tomorrow's customer demo." None touched `System-Status.md`; filling that in now.
+
+- **Landing page** (`4fc2e19`, `app/app/page.tsx`, the single biggest content gap this whole
+  session's own UX research had named - `/` was a bare redirect with zero marketing content).
+  Checked it against `Marketing-Pricing-Strategy.md` §6.3's constraints line by line, not just
+  read the commit's own description: no "AI-powered"/"win more tenders"/time-saving claims, no
+  scope overreach beyond SANRAL + standard SBD/MBD forms - zero hits on any of the prohibited
+  phrasings. Its "proof points" section is handled with real integrity: explicitly "No customers
+  yet. Here's what to check instead of a testimonial" rather than any fabricated social proof.
+- **SANRAL B6 estimator** (`ffbba14`, `/tools/b6-estimator`, a new free public lead-magnet
+  tool) + a real logo replacing the navy-square placeholder. Confirmed by reading the imports
+  directly: it calls the real `estimateSanralConventional()`/`sanralMatrices.ts` the live app
+  itself uses, not a second, divergent implementation - "same numbers the live app produces" is
+  accurate, not just claimed.
+- **Auth pages redesign** (`d64e652`, `AuthShell.tsx` - a shared split-screen shell with a dark
+  left panel across all 4 auth pages) - pure UI, no logic touched.
+- **3 new discovery sources** (`cace3f7`: SARS, cidb's own procurement feed, DBSA) - ran
+  `test_gov_sources.py` myself: ALL PASSED, including the specific new-source cases (cidb's
+  misleading `status` field correctly ignored in favour of `realstatus`; DBSA's own typo'd
+  month in a closing date correctly left unset rather than crashing).
+- **A real bug caught by live Playwright E2E testing against the production deployment**
+  (`9061deb`) - worth naming as a methodology point: `signUp()` returns a session immediately
+  when the live project's email-confirmation setting is off, but the UI told the user to check
+  their inbox regardless, since nothing checked whether a session actually came back. **This is
+  a project-level Supabase Auth setting, not part of the schema** - no amount of scratch-Postgres
+  replay in any pass this session, including my own review of this same auth flow last pass,
+  could ever have caught it. Only real E2E testing against the live deployment surfaced it. Worth
+  remembering as a limit of this file's own usual verification method, not a gap in how carefully
+  it was applied.
+- **Demo-blocking copy fixes** (`95bce9f`) - raw internal filenames (`run supabase/seed_tenders.sql`)
+  were showing up in the Dashboard/Discovery empty states a brand-new signup actually sees first;
+  replaced with real customer-facing copy. Also fixed the "T" logo missing on 2 of 4 auth pages.
+- Two `.gitignore` additions (`570576d`, `9ec8536`) for local tooling directories
+  (`.claude/worktrees/`, `supabase/.temp/`) - no project content affected.
+
+Re-ran everything myself rather than trusting "verified clean build/lint/typecheck" in each
+commit message: `npm run build` (33/33 pages, both new tool routes prerender clean), `npm run
+typecheck`/`lint`, `test_gov_sources.py` - all clean.
 
 ## This pass (2026-10-18, ~23:00 UTC): email/password auth verified (Sarel's own commit); onboarding-scan field-loss fix and a mobile CSS fix confirmed clean
 
