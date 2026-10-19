@@ -95,6 +95,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <Link href="/admin/customers" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Customers</Link>
           <Link href="/admin/settings" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Settings</Link>
           <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
+          <Link href="/admin/discovered-opportunities" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discovered opportunities</Link>
         </div>
         <section id="cv-document-stats" style={{ marginBottom: 36 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>CVs &amp; tender documents</h1>

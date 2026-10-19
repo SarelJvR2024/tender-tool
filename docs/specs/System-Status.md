@@ -2924,3 +2924,106 @@ that `general-workspace.tsx` shows are not repeated as separate review items her
 SANRAL's own review uses for ECSA/SACPCMP counts: those are company-aggregate facts, already
 implicitly covered, not a separate confirm-or-change decision). The SANRAL Pack Review screen and
 its logic/data/actions/test files (`pack-review*.ts(x)`) were not touched at all by this task.
+
+### Admin review of discovered opportunities + real requirements extraction + confidence (2026-10-19)
+
+Sarel, same day, two messages: (1) "In the admin panel I need to be able to review what came in
+and if our engines understand and interpret and can compile each one"; (2), relayed mid-build,
+"run our engines to unpack the specs and requirements and make the list of everything that is
+needed and make sure we have an engine that perfectly understands how to complete, build and
+compile each one and indicate the confidence level, I then need to review and help improve the
+confidence levels." A separate concurrent task was building a permanent document-download engine
+for discovered tenders (`discovered_opportunity_documents`, migration `0071`) - this task reused
+that store rather than duplicating it, and deliberately touched none of `engine/discovery/*.py`'s
+own download logic.
+
+**What "can our engine understand and interpret and compile this" honestly means pre-pursue:** a
+discovered opportunity has no uploaded/opened documents until a company "pursues" it
+(`pursue_discovered_opportunity`, `0024`/`0051`) and goes through intake
+(`engine/intake/classify_tender.py`). Before that, nothing here fakes a real compile check -
+`lib/compileReadiness.ts`'s `assessCompileReadiness()` looks only at what Discovery already
+recorded (document_urls, categories, reasons, score_outlook, source) and returns one of three
+honest states: `flagged` (no documents listed / SANRAL source / unrecognised category / no
+scoring signal at all), `needs_documents` (nothing wrong, but genuinely unknown), or `looks_ready`
+(a document title matches a known SANRAL workbook naming pattern - explicitly a filename guess,
+never a real open-and-check).
+
+**Real requirements extraction, once documents exist:** `engine/discovery/opportunity_requirements.py`
+runs the SAME classifier a real intake uses (`classify_tender.classify_documents()` /
+`check_fingerprint()`) against whatever `discovered_opportunity_documents` actually has downloaded
+for a release, and writes one shared row per `release_key` into the new
+`discovered_opportunity_requirements` table (migration `0072`) - route, family, the real
+fingerprint status against the stored baseline, which required SANRAL documents are missing, and
+any unreadable workbook. A general (non-SANRAL) release gets a shallow, honest answer only (route
+classified, no fabricated itemised list - the real general-tender requirement list needs
+`engine/general/requirements.py`'s LLM-backed pass, deliberately not run speculatively for every
+discovered release). SANRAL releases never get a row (SANRAL's reCAPTCHA v3 wall means nothing is
+ever auto-downloaded for them - confirmed in the document-download task's own migration).
+
+**Confidence (not binary):** `assessCompileConfidence()` (same file) computes a 0-100 number from
+named, weighted signals - base 20; +10 documents listed; +10 category recognised; +10 scoring
+signal present; then, only once requirements were actually extracted (capped at 40 otherwise):
++35 SANRAL family matched / +15 general route classified; +20 fingerprint matches the baseline or
+-40 if it mismatches/errors; -10 per missing required document (capped at -30); -25 an unreadable
+document; -15 a failed download. Every weight is named in the function's own comment so Sarel can
+sanity-check the logic line by line, not just trust a number. `effectiveConfidence()` lets Sarel's
+own correction always win over the computed value.
+
+**Sarel's review/override:** `platform_admin_override_opportunity_confidence(opportunity_id,
+override_level, note)` (migration `0072`, `is_platform_admin()` + `SECURITY DEFINER`, same pattern
+as every other platform-admin RPC since `0064`) writes `confidence_override`/
+`confidence_override_note` directly on the `discovered_opportunities` row - a plain correction +
+note, not a training/feedback pipeline, and never silently recomputed over (the computed number
+lives in a different table entirely).
+
+**Built:** `/admin/discovered-opportunities` (`app/app/admin/discovered-opportunities/page.tsx`,
+`OpportunityTable.tsx`, `OpportunityRow.tsx`, `actions.ts`) - every company's
+`discovered_opportunities` row via `platform_admin_discovered_opportunities()` (migration `0072`,
+left-joined to `discovered_opportunity_requirements`), with basic client-side filter/sort (status,
+source, company, sort by newest/closing-soonest/lowest-confidence) using the same
+expand-to-detail row pattern as `CustomerRow.tsx`/`SystemAlertRow.tsx` - no new filter convention
+invented for a dataset this size. Nav links added to `/admin`, `/admin/customers`,
+`/admin/settings`. `lib/compileReadiness.ts` holds every pure classifier (readiness, confidence,
+override-merge) and is the single place that turns raw fields into a status/number - the page and
+the SQL function do no classification of their own.
+
+**Data model:** migration `0072` - `platform_admin_discovered_opportunities()` (extended to carry
+the requirements-extraction and confidence-override fields), the new
+`discovered_opportunity_requirements` table (one shared row per `release_key`, readable by any
+authenticated user, written only by `opportunity_requirements.py` via the service role - same
+shared/public shape as `discovered_opportunity_documents`), and
+`confidence_override`/`confidence_override_note`/`confidence_overridden_at`/
+`confidence_overridden_by` columns + the override RPC on `discovered_opportunities` itself.
+Numbered `0072` after two live collisions with a concurrent background task's own migration
+(`0070`, then `0071`) in this shared working directory - re-checked against the actual files on
+disk each time, not just a `git fetch` (confirmed stale/cached in this environment during this
+same task - a fresh clone to a scratch directory was needed to see the real `origin/main`).
+
+**Verified:** `python3 engine/discovery/test_opportunity_requirements.py` - all checks pass
+against real committed sample documents (`templates/samples/R.396-010-2025.1F_ran.xlsm` +
+its Financial Submission workbook + the three A-Forms `.docx` under `templates/forms/`, and
+`templates/general_samples/treasury_rt83`), run through an in-memory fake of the Supabase
+PostgREST + Storage API (same `Fake` shape as `test_download_discovered_documents.py`): no
+documents at all -> no row written (absence is the "not_downloaded" state, never a fabricated
+row); every download failed -> a row is written with route/family left null; a real SANRAL R.396
+set with everything present -> route/family/fingerprint all genuinely computed, nothing missing;
+the same set with two forms removed -> `missing` lists exactly those two; a real general-tender
+document set and a PDF-only release both classify without raising and without fabricating a
+route. `node --experimental-strip-types --test app/lib/compileReadiness.test.ts` - 14/14 pass
+(every flagged/needs_documents/looks_ready branch, the 40-point cap before requirements exist, a
+matched SANRAL family + ok fingerprint scoring high, a fingerprint mismatch dragging the score
+down hard even with a matched family, the missing-document penalty and its -30 cap, general
+scoring lower than a matched SANRAL route, and the override always winning over the computed
+value). `npx tsc --noEmit` and `npx eslint` clean on every new/changed file. Nothing verified
+against a live Supabase project, a live Next.js render of the new page, or a live Anthropic API
+call (same standing gap as every other entry in this file).
+
+**Not done / open for Sarel:** `opportunity_requirements.py` is a standalone script, not wired
+into any scheduled run (unlike `download_discovered_documents.py`, which the concurrent task
+wired into `watch_new_tenders.py`) - it needs to be run by hand or added to that same schedule
+before "requirements extraction" fills in automatically for new releases; this task deliberately
+did not touch `engine/discovery/watch_new_tenders.py` itself (owned by the concurrent
+document-download task) to avoid colliding on that file. The general-route requirement list stays
+shallow by design (see above) - if Sarel wants a real itemised general-tender requirement list at
+discovery time, that needs `engine/general/requirements.py`'s LLM pass run speculatively, which
+has its own cost/design tradeoffs not decided here.
