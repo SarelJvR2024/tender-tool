@@ -46,6 +46,8 @@ import tempfile
 import argparse
 import urllib.request
 import urllib.error
+import queue
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from score_outlook import estimate_score_outlook, PROVINCES  # noqa: E402
@@ -78,19 +80,54 @@ JV_RE = re.compile(r"joint\s*venture", re.IGNORECASE)
 BRIEFING_RE = re.compile(r"compulsory\s*(?:clarification\s*)?brief", re.IGNORECASE)
 
 
-def fetch_pdf_text(url, timeout=30):
-    """Returns (text, fetch_error). A failed download or a non-PDF/corrupt file
-    degrades to ("", <reason>) rather than raising - one bad document link on a
-    public buyer's own site must not take out the whole assessment run, only
-    that release's document-confirmed signals."""
+def _download_to_tempfile(url, timeout, result_q):
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 tmp.write(r.read())
-            path = tmp.name
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
-        return "", f"could not download document: {e}"
+            result_q.put(("ok", tmp.name))
+    except Exception as e:
+        result_q.put(("error", e))
+
+
+def fetch_pdf_text(url, timeout=30):
+    """Returns (text, fetch_error). A failed download or a non-PDF/corrupt file
+    degrades to ("", <reason>) rather than raising - one bad document link on a
+    public buyer's own site must not take out the whole assessment run, only
+    that release's document-confirmed signals.
+
+    Confirmed live 2026-10-19: urlopen's own `timeout` only bounds each
+    individual socket read, not the download as a whole - a server that
+    trickles data in just under that interval per read (or hangs after
+    headers without ever closing the connection) can make r.read() block
+    indefinitely with no exception ever raised, hanging this single-threaded
+    pipeline forever on one bad host (confirmed: a live run sat on one open
+    socket for over 90 minutes with zero progress). The download itself runs
+    in a worker thread with a hard wall-clock deadline (timeout + 15s grace)
+    enforced by .result(timeout=...), which is the only way to bound total
+    time regardless of how the far side behaves."""
+    # A plain daemon thread, not ThreadPoolExecutor/concurrent.futures: a
+    # Future's worker thread is NOT daemonic, so an abandoned one (still
+    # stuck reading from the same bad host) would keep the whole
+    # watch_new_tenders.py process alive at exit, waiting to join it -
+    # trading "hangs mid-run" for "hangs at the very end" instead of fixing
+    # it. daemon=True means the interpreter can exit with this thread still
+    # running; its one leaked socket is reclaimed by the OS when the
+    # process actually exits.
+    deadline = timeout + 15
+    result_q = queue.Queue(maxsize=1)
+    t = threading.Thread(target=_download_to_tempfile, args=(url, timeout, result_q), daemon=True)
+    t.start()
+    try:
+        status, value = result_q.get(timeout=deadline)
+    except queue.Empty:
+        return "", f"could not download document: stalled past {deadline}s (no response, or a trickling/hung connection)"
+    if status == "error":
+        if isinstance(value, (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError)):
+            return "", f"could not download document: {value}"
+        raise value
+    path = value
     try:
         out = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True,
                               timeout=30, text=True)
