@@ -447,6 +447,7 @@ export default async function TenderWorkspacePage({
                     {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
                     {showSubmissionPack && <JumpLink href="#form-b7" label="Form B7" />}
                     {showSubmissionPack && <JumpLink href="#pack-review" label="Pack review" />}
+                    {isGeneralFamily && <JumpLink href="#general-pack-review" label="Pack review" />}
                   </div>
                   <ScrollFade fadeColor="255, 255, 255" minWidthToHide={99999} hint={false} />
                 </div>
