@@ -208,9 +208,11 @@ safe to wave off - it was this fix, undiscovered, the whole time.**
 **Verification:** `rm -rf .next && npm run typecheck` - clean, no error (confirmed the fix from the
 exact fresh state that reproduced the bug, not from a warm sandbox). Then the full sequence from
 the same clean `.next` state: typecheck, lint, `npm run build` (all 3 exit 0), and every one of the
-8 `*.test.ts` files run directly (82/82 pass). Pushing this fix and watching `app-ci.yml`'s next
-run go green on GitHub's own infrastructure is the real confirmation - noted as still pending below
-since a push hadn't landed as of writing this entry.
+8 `*.test.ts` files run directly (82/82 pass). Pushed (`fcb1b85`) and confirmed on GitHub's own
+infrastructure, not just locally: `app-ci.yml` run #3 (`mcp__github__actions_get`,
+run id `39209252689`) - `"status":"completed","conclusion":"success"`. The first real green run
+this job has ever had, after two straight failures (`64a486e`, `2f3d295`) that I had wrongly
+assumed were passing until I actually checked.
 
 ## This pass (2026-10-19, standing QA/robustness review - seventeenth run): the app/ half of the codebase had no CI at all
 
