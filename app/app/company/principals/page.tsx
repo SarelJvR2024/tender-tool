@@ -193,7 +193,7 @@ function PrincipalCard({
         <PrincipalForm p={p} people={people} />
         <form action={deletePrincipal} style={{ marginTop: 12 }}>
           <input type="hidden" name="principal_id" value={p.id} />
-          <DangerButton>Remove {p.full_name} from the register</DangerButton>
+          <DangerButton confirmMessage={`Remove ${p.full_name} from the register? Their uploaded documents will also be removed. This can't be undone.`}>Remove {p.full_name} from the register</DangerButton>
         </form>
       </Disclosure>
     </Card>

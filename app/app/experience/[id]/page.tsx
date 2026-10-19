@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../../_components/SiteNav";
+import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { isTaxonomySlug, loadDisciplineTaxonomy, taxonomyGroups } from "@/lib/disciplineTaxonomy";
 import { saveExperienceTags, deleteExperience, suggestSharedCategory, withdrawSuggestion } from "../actions";
 import {
@@ -347,12 +348,12 @@ export default async function ExperienceDetailPage({
 
         <form action={deleteExperience}>
           <input type="hidden" name="id" value={item.id} />
-          <button
-            type="submit"
+          <ConfirmSubmitButton
+            confirmMessage="Remove this experience item? This can't be undone."
             style={{ minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#FEE2E2", color: "#B91C1C", fontWeight: 600, fontSize: 13, border: "1px solid #FCA5A5", cursor: "pointer" }}
           >
             Remove this item
-          </button>
+          </ConfirmSubmitButton>
         </form>
       </div>
     </div>

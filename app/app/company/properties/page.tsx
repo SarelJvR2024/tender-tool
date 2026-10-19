@@ -147,7 +147,7 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
         <PropertyForm p={p} />
         <form action={deleteProperty} style={{ marginTop: 10 }}>
           <input type="hidden" name="property_id" value={p.id} />
-          <DangerButton>Remove this building</DangerButton>
+          <DangerButton confirmMessage="Remove this building? This can't be undone.">Remove this building</DangerButton>
         </form>
       </Disclosure>
     </Card>

@@ -225,7 +225,7 @@ function HeldRow({
         <HeldForm h={h} holders={holders} types={types} />
         <form action={deleteHeldRegistration} style={{ marginTop: 10 }}>
           <input type="hidden" name="held_id" value={h.id} />
-          <DangerButton>Remove</DangerButton>
+          <DangerButton confirmMessage="Remove this registration? The uploaded certificate copy will also be removed. This can't be undone.">Remove</DangerButton>
         </form>
       </Disclosure>
     </div>

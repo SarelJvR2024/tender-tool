@@ -53,7 +53,7 @@ const OUTPUT_LABEL: Record<string, string> = {
   financial_pdf: "Envelope 2 - Financial Submission PDF",
   technical_xlsm: "Technical workbook (.xlsm)",
   financial_xlsm: "Financial workbook (.xlsm)",
-  actions_to_sign: "What to sign (ACTIONS_TO_SIGN.md)",
+  actions_to_sign: "What to sign (summary)",
 };
 
 const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };

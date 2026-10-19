@@ -3,6 +3,7 @@
 // the same values app/app/company/page.tsx uses.
 import type { StatusChip } from "@/lib/dates";
 import { SiteNav } from "../../_components/SiteNav";
+import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 
 export const NAVY = "#16233B";
 export const AMBER = "#D97706";
@@ -199,14 +200,14 @@ export function Submit({ children, secondary }: { children: React.ReactNode; sec
   );
 }
 
-export function DangerButton({ children }: { children: React.ReactNode }) {
+export function DangerButton({ children, confirmMessage }: { children: React.ReactNode; confirmMessage: string }) {
   return (
-    <button
-      type="submit"
+    <ConfirmSubmitButton
+      confirmMessage={confirmMessage}
       style={{ minHeight: 40, padding: "0 14px", borderRadius: 9, background: "#FFFFFF", border: "1px solid #FCA5A5", color: "#B91C1C", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
     >
       {children}
-    </button>
+    </ConfirmSubmitButton>
   );
 }
 
