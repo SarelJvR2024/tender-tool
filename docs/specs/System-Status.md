@@ -249,16 +249,29 @@ test itself changed; this only stops one failure from masking twenty others. Doc
 in the workflow file's own header comment for whoever next reads it. YAML validated
 (`python3 -c "import yaml; yaml.safe_load(...)"`) before committing.
 
-**What this means going forward:** CI for the Python engine side of this project has not been a
-reliable pass/fail signal for most of its life, for two compounding reasons: a known, unfixed
-LibreOffice-rendering difference (cause 2) failing early, and that failure hiding every later
-test's real status behind "skipped" rather than ever actually running them. A real new regression
-in any of those ~20 previously-hidden test files could have been (and may still be) landing
-completely unconfirmed. The next run after this fix will, for the first time in this project's
-history, show every one of the 23 test steps' own real, individual pass/fail - still expected to
-show `test_extract_cv_fields.py` red (cause 2, still open) but everything else should now be
-visible and, if cause 1's fix holds as it did locally, green. Recommend: read that next run's full
-step list once it lands, not just the job's overall red/green conclusion.
+**Confirmed on the actual next run (`mcp__github__actions_list`/`list_workflow_jobs`, run id
+`39238384524`), not assumed:** for the first time in this project's history, every one of the 23
+test steps' own individual result is now visible. Exactly as predicted - step 6
+(`test_extract_cv_fields.py`, cause 2) is the only one still red - and, critically, **steps 7
+through 26 (the 20 previously-hidden test files, including step 7's own `test_poll_loop.py` - this
+pass's own Finding-21 fix) all read `conclusion: success`.** This is the first real confirmation,
+ever, that taxonomy, award outcomes/prices, the general engine (both its own test files),
+discovery fan-out, discovery downgrades, the daily digest, tender updates, gov sources, company
+letters, SANRAL Form B7, cross-tenant isolation, reminder seen-stores, system alerts and the
+form-field audit all actually pass on real GitHub Actions infrastructure - not just in whichever
+session's own local sandbox last ran them. `container-build` (the separate job) was already
+green and still is.
+
+**What this means going forward:** CI for the Python engine side of this project was not a
+reliable pass/fail signal for most of its life, for two compounding reasons that are now both
+addressed: a real race condition (cause 1, fixed and now GitHub-confirmed) and a CI job structure
+that hid every other test's result behind one known failure's "skipped" status (also fixed). One
+genuine gap remains open: `test_extract_cv_fields.py`'s LibreOffice-rendering difference (cause 2)
+- still unreproducible in this sandbox, still needs someone with direct GitHub Actions runner
+access to root-cause. From here on, `bridge-worker-ci.yml`'s step list is a real signal again:
+treat a red step 6 as the known, already-written-up issue, and treat a red ANY OTHER step as a
+genuine new regression worth investigating immediately, since that is no longer physically
+impossible for GitHub Actions to have shown you.
 
 ## This pass (2026-10-19, standing QA/robustness review - twenty-first run): `run_bridges.py`'s
 own documented usage example silently stopped every real bridge from running
