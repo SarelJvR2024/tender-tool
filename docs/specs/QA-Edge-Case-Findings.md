@@ -1642,3 +1642,67 @@ downloads, the run never raises) - full suite `All checks passed`. `test_gov_sou
 suite - `ALL PASSED`, including `test_opportunity_requirements.py` (reads the same discovered-
 documents shape) - `All checks passed`. `python3 -m py_compile` clean on all four touched/tested
 files.
+
+## 2026-10-19 (thirtieth run): a genuinely tricky threading/timeout fix held up under independent
+reproduction - but the temp-file cleanup around it has leaked on every failed download all along
+
+**Context:** one new commit since the twenty-ninth run - `de4541b`, "Fix a document fetch that can
+hang the entire discovery run forever" (`engine/discovery/assess_tender.py`'s `fetch_pdf_text()`,
+used by `read_release()` for every discovered tender's own document). Flagged for scrutiny on sight
+rather than read-and-trust: threading-based timeout fixes are a well-known class of change that
+reads correct and compiles clean while still being subtly wrong, and this session's own standing
+rule is to never accept a commit's "Confirmed live" claim without reproducing it.
+
+**What the commit fixed:** `urlopen(req, timeout=N)` only bounds each individual socket
+read/connect, not the download's total wall-clock time - a server that trickles a few bytes in
+just under that interval per read, or that accepts the connection and sends headers then goes
+silent without ever closing it, can make `r.read()` block forever with no exception ever raised
+(the commit's own docstring: a live run sat on one open socket for 90+ minutes with zero progress).
+The fix runs the download in a plain `daemon=True` thread and enforces a true wall-clock deadline
+(`timeout + 15s` grace) via `queue.Queue.get(timeout=...)` - deliberately not
+`ThreadPoolExecutor`/`concurrent.futures.Future`, since a `Future`'s worker thread is not daemonic
+and an abandoned one would keep the whole process alive at exit waiting to join it.
+
+**Independent verification (not a read-through):** built 3 disposable local HTTP servers
+(`verify_fetch_pdf_text.py`/`2.py`, scratch-only, not committed) to reproduce the actual failure
+modes rather than trust the docstring:
+1. **The exact bug class described** - a server sending 10 bytes every 0.5s forever, no
+   `Content-Length`, under a 1s per-read timeout. No individual `read()` call can ever time out
+   here (each one succeeds, just slowly) - only a true wall-clock deadline catches it. Confirmed:
+   `fetch_pdf_text` returned `("", "...stalled past 16s...")` at the ~16s deadline, not hung.
+2. **A flat hang** (server sends nothing after headers, ever) - confirmed this was already caught
+   by the plain per-read socket timeout even before reaching the wall-clock deadline (fires in
+   ~1s, not 16s) - the fix doesn't regress or slow down this simpler, more common case.
+3. **A normal fast server** - confirmed it returns immediately, never waits out the deadline.
+4. **Connection refused** - confirmed a fast, graceful `("", err)` tuple.
+Also confirmed the abandoned background thread genuinely does not block process exit: the whole
+test process exits cleanly right at the 16s deadline in case 1, never hanging afterward - the "one
+leaked socket, reclaimed by the OS at exit" tradeoff the commit's comment claims is real, not just
+asserted. Ran the real production path too: `test_discovery_fanout.py` (`fetch_pdf_text` over two
+genuine PDFs via `file://`, the same code path a live eTenders document link takes) -
+`0 failure(s)`, verdicts unchanged. **Verdict: `de4541b` is correct and properly scoped.**
+
+**Finding 27 (CONFIRMED, FIXED, moderate - pre-existing, not introduced by `de4541b`):** every
+failed document download leaks its temp `.pdf` file into `/tmp` permanently.
+`tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)` creates the file on disk the instant it
+is opened - before `urlopen` is even attempted - and the surrounding `except` clause (in both the
+pre-`de4541b` synchronous code and the new threaded version) never calls `os.unlink` on that path;
+only the success path's own `finally` block does. Confirmed directly: `glob`'d `/tmp` before and
+after a single `fetch_pdf_text()` call against a refused connection - exactly one orphaned
+`tmp*.pdf` file was left behind. This is not a rare edge case: `0071`'s own migration header
+explicitly treats dead links, 404s and timeouts as routine, expected traffic for this pipeline
+("never silently dropped and never retried forever") - meaning every ordinary bad link on a real
+buyer's site has been quietly filling `/tmp` with empty/partial files, unbounded, for as long as
+this function has existed, not something `de4541b` made worse.
+
+**Fix:** `_download_to_tempfile` now unlinks its own temp file in the `except` branch - covers the
+common case (dead link, 404, connection refused, a genuine per-read socket timeout). Added one more
+case the threading fix itself makes newly possible: a download abandoned at the wall-clock deadline
+that completes (success or failure) afterward, unwatched, in the background thread - a plain
+`threading.Event` (`abandoned`), set by `fetch_pdf_text` when it stops waiting, tells that thread to
+delete its own temp file once it finishes rather than queue a path nobody will ever read or clean up.
+
+**Verification of the fix:** re-ran the leak check - 0 leaked files after a failed download (was 1
+before, identical repro). Re-ran all 4 reproduction cases above - unchanged, all still correct.
+Re-ran `test_discovery_fanout.py` end to end - `0 failure(s)`, verdicts unchanged. `python3 -m
+py_compile engine/discovery/assess_tender.py` clean.

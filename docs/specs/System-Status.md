@@ -147,6 +147,8 @@ bridged by `engine/general/process_general_jobs.py`.
 9. **Narrowed 2026-10-18 (`a232e77`, Sarel's own commit — the first human-authored commit in this whole project): a live Supabase project and a Vercel deployment now exist.** Sarel applied every migration through `0062` to the real project and got a green Vercel build, after fixing three build-breaking issues the sandbox's own `next build` had never caught (no Supabase env vars here means those prerender failures never surfaced locally): `/login` instantiating the Supabase client at component-body top level (fails prerender when env vars aren't visible at build time), `/tools/deadline-calculator` reading `new Date()` during render (Next 16 rejects non-deterministic prerender output), and no `engines.node` pin in `package.json`. All three independently re-verified this pass: `npm run build` now completes cleanly end to end in this sandbox too (29/29 static pages, `/login` and all 3 `/tools/*` routes now genuinely static) — the "`/login`'s pre-existing prerender gap" caveat that every single pass's own build verification has carried all session is gone. **What this changes:** nothing built so far has been tested against real Supabase rows, and this pass still has no live credentials to do that itself — scratch-Postgres replay (now through `0063`) stays the verification method here. What it means going forward: the next person with real project access can actually click through the app, and any gap or bug that was "unverified against live rows" throughout this file can start being closed for real rather than only in a replayed schema. Decide, when there's time: should every pass's own verification note explicitly say "schema-replay only, not live" vs. "confirmed on the live project" now that the distinction is real and not purely theoretical.
 
     **Narrowed further 2026-10-19 (twentieth run): 5 migrations are committed but not yet applied live, and this just caused a real user-facing error.** `0063`–`0066`/`0068` (5 files - `0063` onboarding document scan, `0064` super admin console, `0065` submission/opening reminders + won-project sync, `0066` this session's own trigger-bug fix, `0068` CV/document stats; `0067` was never created, a benign gap) were added after Sarel's `0062` cutoff above and have not been confirmed applied to the live project. Direct evidence, not inference: commit `8146259`'s own message says tonight's live E2E walkthrough hit a raw Postgres error on the Tender Workspace, `column tender_packs.project_completed_at does not exist` - that column only exists from `0065` onward, so the live database is still on `0062` or close to it. The commit fixed the symptom (no longer leaks the raw SQL error to the user - now a generic message + server-side log) but **not the cause**: the won-project CV-sync feature, the super-admin customer/CV-stats console, and the opening-reminder task kind are all still live-broken (or entirely inert) until these migrations are actually run against the real Supabase project. This needs Sarel's own Supabase SQL editor / migration access - no session in this sandbox has live credentials to do it. Nothing here is new schema risk (`0066` already fixes the one bug that would have shipped broken; everything else replays clean on `0001`→`0068` in this pass's own scratch-Postgres verification) - purely an apply-it-live step.
+
+    **The gap has kept growing and nothing has narrowed it since (2026-10-19, thirtieth run): 8 real migrations now committed since the confirmed `0062` cutoff, still unconfirmed live.** `0063`–`0072` (`0067`/`0070` never created, both confirmed benign numbering gaps - 8 real files, not 10) now covers onboarding document scan, the super admin console, submission/opening reminders + won-project sync, this session's own `0066` trigger-bug fix, CV/document stats (`0068`), the onboarding-scan orphaned-field fix (`0069`), automatic permanent document storage for every discovered tender except SANRAL (`0071`), and the discovered-opportunities admin review screen + real requirements extraction (`0072`). Every one of these replays clean on scratch Postgres through `0001`→`0072` (re-confirmed this pass) - the risk here is purely "not yet run against the real project," never schema correctness. Still nothing any sandbox session can do about this directly: it needs Sarel's own Supabase SQL editor or migration access. Flagging again, in case it has slipped off the radar as "just the usual note" - 8 real, user-visible features are sitting live-inert right now.
 10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
 11. ~~A hard-killed worker leaves a CV job stuck in `generating`~~ — **fixed this pass.** Migration `0019_generated_cvs_claimed_at.sql` adds `generated_cvs.claimed_at` (set the moment a worker claims a row), and `process_cv_jobs.py` gained `fail_stale_jobs()`, same shape and 60-minute threshold as `process_pack_jobs.py`'s own, called at the top of every `poll_once()`. Verified: migration replays cleanly as part of the full `0001`→`0019` chain; `python3 engine/cv/process_cv_jobs.py --self-test` still passes unchanged; a direct functional test (monkeypatched `supabase_request`, no live Supabase needed) confirmed `fail_stale_jobs()` fails only a job claimed >60 minutes ago and leaves a 5-minute-old job and an unclaimed job alone.
@@ -168,6 +170,68 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-19, standing QA/robustness review - thirtieth run): a genuinely hard-to-get-right threading fix, independently reproduced and confirmed correct - plus one real leak it (and its predecessor) left behind
+
+Orientation: one new commit since the twenty-ninth run - `de4541b`, "Fix a document fetch that can
+hang the entire discovery run forever" (`engine/discovery/assess_tender.py`'s `fetch_pdf_text()`).
+Flagged for careful scrutiny on sight: threading-based timeout fixes are exactly the kind of change
+that reads correct and isn't. Did not take the commit's own "Confirmed live 2026-10-19" docstring
+claim at face value - built independent reproductions of the actual failure mode instead.
+
+**What `de4541b` fixed (verified correct):** `urlopen(..., timeout=N)` only bounds each individual
+socket read, not the download as a whole - a server that trickles a few bytes just under that
+interval, or hangs after sending headers without ever closing the connection, can make `r.read()`
+block indefinitely with no exception ever raised. The fix moves the download into a plain
+`daemon=True` thread and enforces a true wall-clock deadline (`timeout + 15s`) via
+`queue.Queue.get(timeout=...)` - deliberately not `ThreadPoolExecutor`/`concurrent.futures`, since a
+`Future`'s worker thread is not daemonic and an abandoned one would block process exit instead of
+just leaking one socket the OS reclaims.
+
+**Independent verification, not just a read-through:** wrote 3 throwaway local HTTP servers
+(`verify_fetch_pdf_text.py`/`2.py`, not committed) to reproduce each case directly rather than trust
+the docstring: (1) a server that trickles 10 bytes every 0.5s forever with no `Content-Length`,
+under a 1s per-read timeout - this is the *exact* bug class described, and no per-read timeout can
+ever fire for it; confirmed `fetch_pdf_text` still returns cleanly at the ~16s wall-clock deadline
+instead of hanging, (2) a server that accepts the connection then goes fully silent (already caught
+by the plain per-read socket timeout, confirms the common case still works), (3) a normal fast
+server (no regression - returns well under the deadline), (4) connection-refused (graceful, fast).
+Also confirmed the abandoned background thread does not block process exit (the whole test process
+exits cleanly right after the 16s deadline, not hung waiting to join it) - the "one leaked socket,
+reclaimed by the OS at exit" tradeoff the commit claims is real, not asserted. Also ran the real
+production path end to end: `test_discovery_fanout.py` (`fetch_pdf_text` over genuine PDF files via
+`file://`, the same code path a live eTenders document link takes) - `0 failure(s)`, unchanged
+verdicts. Verdict on `de4541b` itself: correct, well-reasoned, properly scoped. No note was found in
+`QA-Edge-Case-Findings.md` for it before this pass - added one.
+
+**Finding 27 (fixed, pre-existing - not introduced by `de4541b`, but found while reading the code it
+touched):** every failed document download leaks its temp `.pdf` file into `/tmp` forever.
+`tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)` creates the file on disk the moment it is
+opened, before `urlopen` is even attempted - and the surrounding `except` clause (in both the old
+synchronous code and `de4541b`'s new threaded version) never calls `os.unlink` on that path. Confirmed
+directly: one `fetch_pdf_text()` call against a refused connection left exactly one orphaned
+`tmp*.pdf` file behind (checked `glob` before/after). This is the common case, not the rare one -
+`0071`'s own migration header calls dead links, 404s and timeouts routine, expected traffic for this
+pipeline, not edge cases - so every ordinary bad link on a real buyer's site was already quietly
+filling `/tmp` with empty/partial files, unbounded, for as long as this function has existed.
+
+**Fix:** `_download_to_tempfile` now unlinks its own temp file in the `except` branch (covers the
+common case - dead link, 404, connection refused, a genuine per-read socket timeout). Added a second,
+narrower case the threading fix itself makes newly possible: a download that is abandoned at the
+wall-clock deadline but completes (success or failure) afterward in the now-unwatched background
+thread - a plain `threading.Event` (`abandoned`), set by `fetch_pdf_text` when it gives up waiting,
+tells that thread to clean up its own temp file itself once it finishes, rather than queueing a path
+nobody will ever read or delete.
+
+**Verification of the fix:** re-ran all 4 reproduction cases above clean, plus re-ran the specific
+leak check - 0 leaked files after a failed download (was 1 before the fix, same repro). Re-ran
+`test_discovery_fanout.py` end to end again after the edit - `0 failure(s)`, unchanged. `python3 -m
+py_compile` clean.
+
+**Known-gaps item 9 updated** (see above) - the committed-but-not-live migration gap has grown from
+5 to 8 real files (`0063`–`0072`, excluding the two benign never-created numbers) since it was last
+narrowed in the twentieth run, with nothing in any sandbox session able to close it. Full detail on
+both findings: `QA-Edge-Case-Findings.md`, "thirtieth run" (Finding 27).
 
 ## This pass (2026-10-19, standing QA/robustness review - twenty-ninth run): a relative document
 link crashed the entire new auto-download pass, taking every other tender down with it

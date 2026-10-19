@@ -80,15 +80,37 @@ JV_RE = re.compile(r"joint\s*venture", re.IGNORECASE)
 BRIEFING_RE = re.compile(r"compulsory\s*(?:clarification\s*)?brief", re.IGNORECASE)
 
 
-def _download_to_tempfile(url, timeout, result_q):
+def _download_to_tempfile(url, timeout, result_q, abandoned):
+    """abandoned: set by fetch_pdf_text once it has given up waiting (past the
+    wall-clock deadline) - this thread keeps running regardless (it is not
+    cancellable), so it must clean up its own temp file itself in that case
+    rather than queueing a path nobody will ever read and ask to delete."""
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_path = tmp.name
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 tmp.write(r.read())
-            result_q.put(("ok", tmp.name))
+        if abandoned.is_set():
+            os.unlink(tmp_path)
+            return
+        result_q.put(("ok", tmp_path))
     except Exception as e:
-        result_q.put(("error", e))
+        # A failed download (dead link, 404, connection refused, a genuine
+        # per-read socket timeout) still created the temp file on disk before
+        # urlopen ever ran - confirmed live: every such failure leaked one
+        # empty/partial file into /tmp forever, never cleaned up. Across a
+        # discovery pipeline that treats dead links as routine (0071's own
+        # header: "dead link, timeout, corrupt file, 404 ... never silently
+        # dropped and never retried"), that is a slow, unbounded disk leak.
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        if not abandoned.is_set():
+            result_q.put(("error", e))
 
 
 def fetch_pdf_text(url, timeout=30):
@@ -117,11 +139,13 @@ def fetch_pdf_text(url, timeout=30):
     # process actually exits.
     deadline = timeout + 15
     result_q = queue.Queue(maxsize=1)
-    t = threading.Thread(target=_download_to_tempfile, args=(url, timeout, result_q), daemon=True)
+    abandoned = threading.Event()
+    t = threading.Thread(target=_download_to_tempfile, args=(url, timeout, result_q, abandoned), daemon=True)
     t.start()
     try:
         status, value = result_q.get(timeout=deadline)
     except queue.Empty:
+        abandoned.set()
         return "", f"could not download document: stalled past {deadline}s (no response, or a trickling/hung connection)"
     if status == "error":
         if isinstance(value, (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError)):
