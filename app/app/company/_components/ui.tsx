@@ -7,10 +7,10 @@ import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 
 export const NAVY = "#16233B";
 export const AMBER = "#D97706";
-export const CREAM = "#F6F5F1";
-export const BORDER = "#E5E1D5";
-export const MUTED = "#6B6758";
-export const FAINT = "#9A9684";
+export const CREAM = "#FFFFFF";
+export const BORDER = "#E3E6EA";
+export const MUTED = "#5B6472";
+export const FAINT = "#8A93A0";
 
 export function SubPage({
   title,

@@ -54,7 +54,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
         </div>
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Customers</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
           Every company signed up to Tender Tool, with how many people they&apos;ve added and tenders they&apos;ve started.{" "}
           {customers.length} compan{customers.length === 1 ? "y" : "ies"}
           {testCount > 0 ? ` (${testCount} marked as test)` : ""}.
@@ -66,9 +66,9 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
           </div>
         )}
 
-        <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
+        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
           {customers.length === 0 && !error && (
-            <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>No companies have signed up yet.</div>
+            <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>No companies have signed up yet.</div>
           )}
           {customers.map((c) => (
             <CustomerRow key={c.id} customer={c} />

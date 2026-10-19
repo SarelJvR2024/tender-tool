@@ -113,7 +113,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
 
       <Card title={`To review (${pending?.length ?? 0})`}>
         {(pending ?? []).length === 0 ? (
-          <div style={{ fontSize: 13, color: "#6B6758" }}>Nothing waiting for review right now.</div>
+          <div style={{ fontSize: 13, color: "#5B6472" }}>Nothing waiting for review right now.</div>
         ) : (
           (pending ?? []).map((row) => {
             const upload = row.onboarding_uploads as unknown as { original_filename: string } | null;

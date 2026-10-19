@@ -15,7 +15,7 @@ import { removePrivateTenderDocument } from "./general-actions";
 
 export type PrivateDoc = { id: string; title: string; storage_path: string; created_at: string };
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
 export async function PrivateDocuments({
   tenderId,
@@ -40,11 +40,11 @@ export async function PrivateDocuments({
     <div id="private-documents" style={card}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Your private documents</div>
-        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "#F0EEE6", color: "#16233B" }}>
+        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "#ECEEF1", color: "#16233B" }}>
           Only your company can see these
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
         This tender is shared: other companies can pursue it from Discovery too. Documents you add here - for example the
         full bid document the buyer e-mailed you - stay private to your company. They are read together with the published
         documents, and what is found in them is kept with your copy of the tender, not shown to anyone else.
@@ -52,19 +52,19 @@ export async function PrivateDocuments({
       {docs.length > 0 && (
         <div style={{ marginBottom: 10 }}>
           {docs.map((d) => (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", borderTop: "1px solid #F0EEE6", padding: "7px 0", fontSize: 12 }}>
+            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", borderTop: "1px solid #ECEEF1", padding: "7px 0", fontSize: 12 }}>
               <div style={{ minWidth: 0, wordBreak: "break-word" }}>
                 {signed[d.storage_path] ? (
                   <a href={signed[d.storage_path]} style={{ color: "#D97706", fontWeight: 600 }}>{d.title}</a>
                 ) : (
                   <span style={{ color: "#16233B", fontWeight: 600 }}>{d.title}</span>
                 )}
-                <span style={{ color: "#9A9684" }}> · added {new Date(d.created_at).toLocaleDateString()}</span>
+                <span style={{ color: "#8A93A0" }}> · added {new Date(d.created_at).toLocaleDateString()}</span>
               </div>
               <form action={removePrivateTenderDocument}>
                 <input type="hidden" name="tender_id" value={tenderId} />
                 <input type="hidden" name="document_id" value={d.id} />
-                <button type="submit" style={{ minHeight: 32, padding: "0 10px", borderRadius: 7, background: "#FFFFFF", border: "1px solid #E5E1D5", color: "#B91C1C", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                <button type="submit" style={{ minHeight: 32, padding: "0 10px", borderRadius: 7, background: "#FFFFFF", border: "1px solid #E3E6EA", color: "#B91C1C", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
                   Remove
                 </button>
               </form>

@@ -5,10 +5,10 @@ import { estimateSanralConventional, type Range, type SanralPositionInput, type 
 import { CLIENT_POINTS, PROJECT_TYPE_MATRICES, SANRAL_POSITION_CODES, baseCode, matrixForPosition } from "@/lib/sanralMatrices";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
+const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
 const LABEL: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#16233B", display: "block", marginBottom: 6 };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, boxSizing: "border-box" };
-const SUBCARD: React.CSSProperties = { background: "#F6F5F1", borderRadius: 10, padding: "14px 16px", marginBottom: 12 };
+const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box" };
+const SUBCARD: React.CSSProperties = { background: "#FFFFFF", borderRadius: 10, padding: "14px 16px", marginBottom: 12 };
 
 const CLIENT_TYPES = Object.keys(CLIENT_POINTS);
 const MAX_PROJECTS = 3;
@@ -65,12 +65,12 @@ export default function B6EstimatorClient() {
   }, [closingDate, projects, positionCode, specialism, managerial, isDesignSpecialist, qualitySystem]);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#FFFFFF", fontFamily: "system-ui, sans-serif" }}>
       <ToolsHeader />
 
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "32px 16px 64px", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>SANRAL B6 functionality score estimator</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 24px", lineHeight: 1.5 }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 24px", lineHeight: 1.5 }}>
           Estimates your likely functionality score for one SANRAL Conventional Consultant key position, using the
           real published scoring matrices (Book 1 Annexure A) - the same logic Tender Tool runs on a live tender.
           Nothing here is guessed: every component you don&apos;t give evidence for is shown as an honest range, not
@@ -109,7 +109,7 @@ export default function B6EstimatorClient() {
           <div style={{ marginBottom: 16 }}>
             <label style={LABEL} htmlFor="closing">Tender closing date</label>
             <input id="closing" type="date" value={closingDate} onChange={(e) => setClosingDate(e.target.value)} style={INPUT} />
-            <p style={{ fontSize: 11, color: "#6B6758", marginTop: 6 }}>Needed to work out how recent each project is (Book 1&apos;s 10/15-year relevance rule).</p>
+            <p style={{ fontSize: 11, color: "#5B6472", marginTop: 6 }}>Needed to work out how recent each project is (Book 1&apos;s 10/15-year relevance rule).</p>
           </div>
 
           <div style={{ marginBottom: 4 }}>
@@ -126,7 +126,7 @@ export default function B6EstimatorClient() {
 
         <div style={{ ...CARD, marginBottom: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B", marginBottom: 4 }}>This person&apos;s most relevant past projects</div>
-          <p style={{ fontSize: 12, color: "#6B6758", marginBottom: 14 }}>Form B1 counts up to 5; add up to {MAX_PROJECTS} here for a quick estimate.</p>
+          <p style={{ fontSize: 12, color: "#5B6472", marginBottom: 14 }}>Form B1 counts up to 5; add up to {MAX_PROJECTS} here for a quick estimate.</p>
 
           {projects.map((p, i) => (
             <div key={i} style={SUBCARD}>
@@ -182,25 +182,25 @@ export default function B6EstimatorClient() {
 
         {!closingDate ? (
           <div style={CARD}>
-            <p style={{ fontSize: 13, color: "#6B6758", margin: 0 }}>Pick a tender closing date above to see your estimate.</p>
+            <p style={{ fontSize: 13, color: "#5B6472", margin: 0 }}>Pick a tender closing date above to see your estimate.</p>
           </div>
         ) : estimate ? (
           <div style={CARD}>
             <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B", marginBottom: 14 }}>Estimated functionality score</div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #F0EEE6" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #ECEEF1" }}>
               <span>Technical (key person)</span>
               <span style={{ fontWeight: 700 }}>{rangeLabel(estimate.technical)} / 30</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #F0EEE6" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #ECEEF1" }}>
               <span>Management (key person)</span>
               <span style={{ fontWeight: 700 }}>{rangeLabel(estimate.management)} / 15</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #F0EEE6" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #ECEEF1" }}>
               <span>Quality system (Form B4)</span>
               <span style={{ fontWeight: 700 }}>{rangeLabel(estimate.qualitySystem)} / 10</span>
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #F0EEE6" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #ECEEF1" }}>
               <span>Past performance (Form B6)</span>
               <span style={{ fontWeight: 700 }}>{rangeLabel(estimate.pastPerformance)} / 15</span>
             </div>
@@ -209,7 +209,7 @@ export default function B6EstimatorClient() {
               <span style={{ fontWeight: 700 }}>{rangeLabel(estimate.workplan)} / 30</span>
             </div>
 
-            <div style={{ background: "#F6F5F1", borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
+            <div style={{ background: "#FFFFFF", borderRadius: 8, padding: "14px 16px", marginTop: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16 }}>
                 <span style={{ fontWeight: 700, color: "#16233B" }}>Total</span>
                 <span style={{ fontWeight: 700, color: "#16233B" }}>{rangeLabel(estimate.total)} / 100</span>
@@ -227,7 +227,7 @@ export default function B6EstimatorClient() {
             </div>
 
             {estimate.notes.length > 0 && (
-              <ul style={{ margin: "14px 0 0", padding: "0 0 0 18px", fontSize: 12, color: "#6B6758", lineHeight: 1.6 }}>
+              <ul style={{ margin: "14px 0 0", padding: "0 0 0 18px", fontSize: 12, color: "#5B6472", lineHeight: 1.6 }}>
                 {estimate.notes.map((n, i) => (
                   <li key={i}>{n}</li>
                 ))}
@@ -238,7 +238,7 @@ export default function B6EstimatorClient() {
 
         <OtherTools except="/tools/b6-estimator" />
 
-        <p style={{ fontSize: 11, color: "#6B6758", marginTop: 24, lineHeight: 1.5 }}>
+        <p style={{ fontSize: 11, color: "#5B6472", marginTop: 24, lineHeight: 1.5 }}>
           Source: SANRAL R.396-010-2025/1F Book 1, Tender Data C.3.11 Stage 3 and Annexure A (the published consultant
           tender evaluation scoring for Conventional projects) - the one SANRAL evaluation method detailed enough to
           estimate before closing. This estimates ONE key position; a real tender scores every key position and

@@ -56,7 +56,7 @@ const OUTPUT_LABEL: Record<string, string> = {
   actions_to_sign: "What to sign (summary)",
 };
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
 export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: string; tenderPackId: string }) {
   const supabase = await createClient();
@@ -131,7 +131,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     <div id="submission-pack" style={card}>
       <AutoRefresh active={active} />
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Submission pack</div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
         Two PDFs, one per sealed envelope, each in submission order with a contents page and page numbers. The
         submission pack: outer cover, then Envelope 1 (Technical) - authority letter, A-Forms, your vault documents,
         Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B5, and Form B7 from your own
@@ -161,7 +161,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
           </div>
           {gaps.slice(0, 8).map((g) => (
             <div key={g.text} style={{ color: g.tone === "red" ? "#B91C1C" : "#92400E" }}>
-              - {g.text} <span style={{ color: "#9A9684" }}>({g.note})</span>
+              - {g.text} <span style={{ color: "#8A93A0" }}>({g.note})</span>
             </div>
           ))}
           {gaps.length > 8 && <div>…and {gaps.length - 8} more (see the compliance check)</div>}
@@ -196,7 +196,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
             <label id="signatory-select" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B", flexWrap: "wrap" }}>
               Who signs this bid
               <select name="signatory_person_id" defaultValue={signers.some((p) => p.id === chosenSigner) ? chosenSigner : ""}
-                style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px", maxWidth: "100%" }}>
+                style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 8px", maxWidth: "100%" }}>
                 <option value="">
                   Not chosen - {suggested?.name ?? signers[0].name} (suggested for this tender; the pack will say so)
                 </option>
@@ -210,7 +210,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
             type="submit"
             disabled={!reviewed}
             title={reviewed ? undefined : "Confirm the Pack review above first"}
-            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: reviewed ? "#16233B" : "#9A9684", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: reviewed ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: reviewed ? "#16233B" : "#8A93A0", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: reviewed ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
           >
             Generate submission pack
           </button>
@@ -220,17 +220,17 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       {jobs.length > 0 && (
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column" }}>
           {jobs.map((j) => {
-            const st = STATUS[j.status] ?? { label: j.status, bg: "#F0EEE6", color: "#6B6758" };
+            const st = STATUS[j.status] ?? { label: j.status, bg: "#ECEEF1", color: "#5B6472" };
             const warnings = j.manifest?.warnings ?? [];
             const techRows = checklistOf(j.manifest);
             const finRows = checklistOf(j.manifest?.financial);
             return (
-              <div key={j.id} style={{ borderTop: "1px solid #F0EEE6", padding: "10px 0", fontSize: 12, color: "#4B5563" }}>
+              <div key={j.id} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0", fontSize: 12, color: "#4B5563" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
                     {st.label}
                   </span>
-                  <span style={{ color: "#9A9684" }}>
+                  <span style={{ color: "#8A93A0" }}>
                     requested {new Date(j.requested_at).toLocaleString()}
                     {j.acknowledged_gaps ? " · draft, with known gaps" : ""}
                   </span>

@@ -55,10 +55,10 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
         <div style={{ position: "relative", zIndex: 1, fontFamily: "system-ui, sans-serif" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 40 }}>
             <Logo size={36} variant="light" />
-            <span style={{ fontSize: 17, fontWeight: 700, color: "#F6F5F1" }}>Tender Tool</span>
+            <span style={{ fontSize: 17, fontWeight: 700, color: "#FFFFFF" }}>Tender Tool</span>
           </div>
 
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: "#F6F5F1", margin: "0 0 16px", lineHeight: 1.3, maxWidth: 420 }}>
+          <h1 style={{ fontSize: 28, fontWeight: 700, color: "#FFFFFF", margin: "0 0 16px", lineHeight: 1.3, maxWidth: 420 }}>
             Find government tenders, build complete submissions, never miss a deadline.
           </h1>
 
@@ -80,7 +80,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          background: "#F6F5F1",
+          background: "#FFFFFF",
           padding: 16,
           boxSizing: "border-box",
         }}

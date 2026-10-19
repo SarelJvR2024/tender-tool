@@ -30,9 +30,9 @@ import {
 // only the ticked fields are used (see each action in actions.ts).
 
 const NAVY = "#16233B";
-const MUTED = "#6B6758";
-const FAINT = "#9A9684";
-const BORDER = "#E5E1D5";
+const MUTED = "#5B6472";
+const FAINT = "#8A93A0";
+const BORDER = "#E3E6EA";
 
 const input: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", minHeight: 40, padding: "0 10px",
@@ -43,7 +43,7 @@ const chip = (bg: string, color: string): React.CSSProperties => ({
   display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color,
 });
 const btnPrimary: React.CSSProperties = { minHeight: 44, padding: "0 18px", borderRadius: 10, background: NAVY, color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" };
-const btnGhost: React.CSSProperties = { minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#FFFFFF", color: "#6B6758", fontWeight: 600, fontSize: 13, border: `1px solid ${BORDER}`, cursor: "pointer" };
+const btnGhost: React.CSSProperties = { minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#FFFFFF", color: "#5B6472", fontWeight: 600, fontSize: 13, border: `1px solid ${BORDER}`, cursor: "pointer" };
 const btnDanger: React.CSSProperties = { minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#FFFFFF", color: "#B91C1C", fontWeight: 600, fontSize: 13, border: "1px solid #FCA5A5", cursor: "pointer" };
 
 export type OnboardingResult = {
@@ -63,7 +63,7 @@ function FieldRow({ field, item }: { field: string; item: OnboardingFields[strin
   const isNumber = NUMBER_FIELDS.has(field);
   const defaultTick = item.verified;
   return (
-    <div className="obx-row" style={{ display: "grid", gridTemplateColumns: "28px 150px 1fr", gap: 8, alignItems: "start", padding: "8px 0", borderTop: "1px solid #F0EEE6" }}>
+    <div className="obx-row" style={{ display: "grid", gridTemplateColumns: "28px 150px 1fr", gap: 8, alignItems: "start", padding: "8px 0", borderTop: "1px solid #ECEEF1" }}>
       <input type="checkbox" name={`use_${field}`} defaultChecked={defaultTick} aria-label={`Use ${label}`} style={{ width: 18, height: 18, marginTop: 10 }} />
       <div style={{ fontSize: 13, fontWeight: 600, color: NAVY, paddingTop: 10 }}>{label}</div>
       <div>
@@ -92,7 +92,7 @@ function ReadOnlyFields({ kind, fields }: { kind: DocumentKind; fields: Onboardi
   const names = KIND_FIELDS[kind].filter((f) => READ_ONLY_FIELDS.has(f) && fields[f]);
   if (names.length === 0) return null;
   return (
-    <div style={{ background: "#F6F5F1", borderRadius: 9, padding: "9px 12px", margin: "8px 0", fontSize: 12, color: MUTED }}>
+    <div style={{ background: "#FFFFFF", borderRadius: 9, padding: "9px 12px", margin: "8px 0", fontSize: 12, color: MUTED }}>
       {names.map((f) => (
         <div key={f}><strong style={{ color: NAVY }}>{FIELD_LABELS[f] ?? f}:</strong> {String(fields[f].value)}</div>
       ))}
@@ -107,7 +107,7 @@ function ReadOnlyFields({ kind, fields }: { kind: DocumentKind; fields: Onboardi
 function NotSavedFields({ fields, names }: { fields: OnboardingFields; names: string[] }) {
   if (names.length === 0) return null;
   return (
-    <div style={{ background: "#F6F5F1", borderRadius: 9, padding: "9px 12px", margin: "8px 0", fontSize: 12, color: MUTED }}>
+    <div style={{ background: "#FFFFFF", borderRadius: 9, padding: "9px 12px", margin: "8px 0", fontSize: 12, color: MUTED }}>
       <div style={{ fontWeight: 600, color: NAVY, marginBottom: 4 }}>Also read from this document (not saved anywhere - for your own check only):</div>
       {names.map((f) => (
         <div key={f} style={{ marginTop: 3 }}>
@@ -143,7 +143,7 @@ export function DocumentReviewCard({
   if (kind === "cv") confirmAction = confirmCvHandoff;
 
   return (
-    <div style={{ background: "#FFFFFF", border: `2px solid ${unrouted ? "#9A9684" : "#D97706"}`, borderRadius: 12, padding: "16px 16px 14px", marginBottom: 16 }}>
+    <div style={{ background: "#FFFFFF", border: `2px solid ${unrouted ? "#8A93A0" : "#D97706"}`, borderRadius: 12, padding: "16px 16px 14px", marginBottom: 16 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
         <div>
           <h3 style={{ fontSize: 15, fontWeight: 700, color: NAVY, margin: "0 0 2px" }}>{filename}</h3>
@@ -153,7 +153,7 @@ export function DocumentReviewCard({
             {result.model ? ` by ${result.model}` : ""}.
           </div>
         </div>
-        <span style={chip(unrouted ? "#F0EEE6" : "#FEF3C7", unrouted ? MUTED : "#B45309")}>
+        <span style={chip(unrouted ? "#ECEEF1" : "#FEF3C7", unrouted ? MUTED : "#B45309")}>
           {unrouted ? "Needs manual review" : "Waiting for your check"}
         </span>
       </div>

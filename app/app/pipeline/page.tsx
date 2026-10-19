@@ -156,7 +156,7 @@ export default async function PipelinePage({
   const submittedToDate = cards.filter((c) => c.submittedAt).length;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <SiteNav active="pipeline" />
 
       <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
@@ -166,7 +166,7 @@ export default async function PipelinePage({
             Pricing history →
           </Link>
         </div>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
           Every tender you&apos;re tracking, by stage. Open a card for its workspace; move it on when something changes.
         </p>
 
@@ -194,18 +194,18 @@ export default async function PipelinePage({
               const meta = STAGE_META[stage];
               const column = byStage[stage];
               return (
-                <section key={stage} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: 10 }}>
+                <section key={stage} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: 10 }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "2px 4px 0" }}>
                     <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: meta.bg, color: meta.color }}>
                       {meta.label}
                     </span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#6B6758" }}>{column.length}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#5B6472" }}>{column.length}</span>
                   </div>
-                  <div style={{ fontSize: 11, color: "#9A9684", padding: "6px 4px 10px" }}>{meta.hint}</div>
+                  <div style={{ fontSize: 11, color: "#8A93A0", padding: "6px 4px 10px" }}>{meta.hint}</div>
 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {column.length === 0 && (
-                      <div style={{ fontSize: 12, color: "#9A9684", padding: "14px 8px", textAlign: "center", border: "1px dashed #E5E1D5", borderRadius: 9 }}>
+                      <div style={{ fontSize: 12, color: "#8A93A0", padding: "14px 8px", textAlign: "center", border: "1px dashed #E3E6EA", borderRadius: 9 }}>
                         {EMPTY_COPY[stage]}
                       </div>
                     )}
@@ -244,19 +244,19 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
     const when = card.stage === "submitted" ? card.submittedAt : card.stageChangedAt;
     dateLine = {
       text: `${card.stage === "submitted" ? "Submitted" : STAGE_META[card.stage].label} ${shortDate(when)}`,
-      color: "#6B6758",
+      color: "#5B6472",
     };
   } else if (left === null) {
-    dateLine = { text: "No closing date", color: "#9A9684" };
+    dateLine = { text: "No closing date", color: "#8A93A0" };
   } else if (isPast(card.closingDate)) {
     // Usually means it was handed in and just needs moving to Submitted.
     dateLine = { text: `Closed ${shortDate(card.closingDate)}`, color: "#B91C1C" };
   } else {
-    dateLine = { text: `Closes ${shortDate(card.closingDate)} · ${left} day${left === 1 ? "" : "s"} left`, color: left <= 7 ? "#B45309" : "#6B6758" };
+    dateLine = { text: `Closes ${shortDate(card.closingDate)} · ${left} day${left === 1 ? "" : "s"} left`, color: left <= 7 ? "#B45309" : "#5B6472" };
   }
 
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "10px 12px" }}>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "10px 12px" }}>
       <Link href={`/tenders/${card.id}`} style={{ display: "block", textDecoration: "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
           {card.contractNo && (
@@ -268,7 +268,7 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
           {card.wasVerdict && (
             <span
               title="Re-assessed: the Discovery verdict got worse since this tender was found - see its Discovery entry"
-              style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 700, background: card.downgradeOpen ? "#FEE2E2" : "#F6F5F1", color: card.downgradeOpen ? "#B91C1C" : "#6B6758" }}
+              style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 700, background: card.downgradeOpen ? "#FEE2E2" : "#FFFFFF", color: card.downgradeOpen ? "#B91C1C" : "#5B6472" }}
             >
               {card.downgradeOpen ? "\u26A0 " : ""}Re-assessed · was {VERDICT_CHIP[card.wasVerdict]?.label ?? card.wasVerdict}
             </span>
@@ -282,7 +282,7 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
       </Link>
 
       {(NEXT_STAGES[card.stage].length > 0 || back) && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 10, paddingTop: 8, borderTop: "1px solid #F0EEE6" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 10, paddingTop: 8, borderTop: "1px solid #ECEEF1" }}>
           {NEXT_STAGES[card.stage].map((next) => (
             <StageButton key={next} tenderId={card.id} stage={next} primary />
           ))}
@@ -324,7 +324,7 @@ function StageButton({ tenderId, stage, primary = false }: { tenderId: string; s
         background: stage === "won" ? "#DCFCE7" : stage === "lost" ? "#FEE2E2" : "#16233B",
         color: stage === "won" ? "#15803D" : stage === "lost" ? "#B91C1C" : "#FFFFFF",
       }
-    : { minHeight: 32, padding: "0 6px", border: "none", background: "transparent", fontSize: 12, color: "#9A9684", cursor: "pointer" };
+    : { minHeight: 32, padding: "0 6px", border: "none", background: "transparent", fontSize: 12, color: "#8A93A0", cursor: "pointer" };
   return (
     <form action={moveTenderStage}>
       <input type="hidden" name="tender_id" value={tenderId} />
@@ -338,8 +338,8 @@ function StageButton({ tenderId, stage, primary = false }: { tenderId: string; s
 
 function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "13px 16px" }}>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 3 }}>{label}</div>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "13px 16px" }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 3 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   );

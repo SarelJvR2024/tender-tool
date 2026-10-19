@@ -80,7 +80,7 @@ export function OtherTools({ except }: { except: string }) {
               padding: "7px 14px",
               borderRadius: 100,
               background: "#FFFFFF",
-              border: "1px solid #E5E1D5",
+              border: "1px solid #E3E6EA",
               color: "#16233B",
               fontSize: 12,
               fontWeight: 600,

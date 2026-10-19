@@ -90,7 +90,7 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
       {types.map((t) => {
         const d = docs.find((x) => x.document_type === t.key);
         const status = !d?.storage_path
-          ? { label: "Not on file", bg: "#F0EEE6", color: "#6B6758" }
+          ? { label: "Not on file", bg: "#ECEEF1", color: "#5B6472" }
           : d.valid_until
             ? expiryStatus(d.valid_until)
             : { label: "On file", bg: "#DCFCE7", color: "#15803D" };

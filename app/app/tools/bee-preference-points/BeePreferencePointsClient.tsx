@@ -4,9 +4,9 @@ import { useMemo, useState } from "react";
 import { PPR_2022_THRESHOLD_ZAR, calculatePreferencePoints, systemForValue, type BeeLevel } from "@/lib/preferencePoints";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
+const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
 const LABEL: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#16233B", display: "block", marginBottom: 6 };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, boxSizing: "border-box" };
+const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box" };
 
 const LEVEL_OPTIONS: { value: string; label: string }[] = [
   { value: "1", label: "Level 1" },
@@ -52,12 +52,12 @@ export default function BeePreferencePointsClient() {
   const defaultSystem = Number.isFinite(Number(contractValue)) ? systemForValue(Number(contractValue)) : null;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#FFFFFF", fontFamily: "system-ui, sans-serif" }}>
       <ToolsHeader />
 
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "32px 16px 64px", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>B-BBEE preference points calculator</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 24px", lineHeight: 1.5 }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 24px", lineHeight: 1.5 }}>
           Implements the actual 80/20 and 90/10 price-points formulas from the Preferential Procurement Regulations,
           2022 (regs 4-5), plus the standard B-BBEE status-level specific-goals table most organs of state publish
           (Treasury&apos;s SBD 6.1).
@@ -68,7 +68,7 @@ export default function BeePreferencePointsClient() {
             <label style={LABEL} htmlFor="cv">Contract/tender value (Rand, incl. VAT)</label>
             <input id="cv" type="number" min={0} value={contractValue} onChange={(e) => setContractValue(e.target.value)} style={INPUT} />
             {defaultSystem && (
-              <p style={{ fontSize: 11, color: "#6B6758", marginTop: 6 }}>
+              <p style={{ fontSize: 11, color: "#5B6472", marginTop: 6 }}>
                 {`R50 million threshold -> defaults to the ${defaultSystem} system for this value.`}
               </p>
             )}
@@ -81,7 +81,7 @@ export default function BeePreferencePointsClient() {
               <option value="80/20">80/20 (force)</option>
               <option value="90/10">90/10 (force)</option>
             </select>
-            <p style={{ fontSize: 11, color: "#6B6758", marginTop: 6 }}>
+            <p style={{ fontSize: 11, color: "#5B6472", marginTop: 6 }}>
               A buyer must state the system on the tender itself (reg 3(1)) - override here when the document says so,
               rather than relying on the R{PPR_2022_THRESHOLD_ZAR.toLocaleString("en-ZA")} default.
             </p>
@@ -112,7 +112,7 @@ export default function BeePreferencePointsClient() {
             <p style={{ color: "#B91C1C", fontSize: 13 }}>{result.error}</p>
           ) : (
             result.data && (
-              <div style={{ background: "#F6F5F1", borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ background: "#FFFFFF", borderRadius: 8, padding: "14px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "4px 0" }}>
                   <span>Price points (Ps)</span>
                   <span style={{ fontWeight: 700 }}>{result.data.pricePoints} / {result.data.maxPricePoints}</span>
@@ -121,7 +121,7 @@ export default function BeePreferencePointsClient() {
                   <span>B-BBEE specific-goals points</span>
                   <span style={{ fontWeight: 700 }}>{result.data.beeGoalsPoints} / {result.data.maxGoalsPoints}</span>
                 </div>
-                <div style={{ borderTop: "1px solid #E5E1D5", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 16, color: "#16233B" }}>
+                <div style={{ borderTop: "1px solid #E3E6EA", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 16, color: "#16233B" }}>
                   <span style={{ fontWeight: 700 }}>Total ({result.data.system})</span>
                   <span style={{ fontWeight: 700 }}>{result.data.totalPoints} / 100</span>
                 </div>
@@ -134,7 +134,7 @@ export default function BeePreferencePointsClient() {
           <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B", marginBottom: 10 }}>B-BBEE status-level points table</div>
           <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ textAlign: "left", color: "#6B6758" }}>
+              <tr style={{ textAlign: "left", color: "#5B6472" }}>
                 <th style={{ padding: "4px 0" }}>Level</th>
                 <th style={{ padding: "4px 0" }}>80/20 points</th>
                 <th style={{ padding: "4px 0" }}>90/10 points</th>
@@ -144,13 +144,13 @@ export default function BeePreferencePointsClient() {
               {[
                 [1, 20, 10], [2, 18, 9], [3, 14, 7], [4, 12, 5], [5, 8, 4], [6, 6, 3], [7, 4, 2], [8, 2, 1],
               ].map(([lvl, p80, p90]) => (
-                <tr key={lvl} style={{ borderTop: "1px solid #F0EEE6" }}>
+                <tr key={lvl} style={{ borderTop: "1px solid #ECEEF1" }}>
                   <td style={{ padding: "6px 0" }}>Level {lvl}</td>
                   <td style={{ padding: "6px 0" }}>{p80}</td>
                   <td style={{ padding: "6px 0" }}>{p90}</td>
                 </tr>
               ))}
-              <tr style={{ borderTop: "1px solid #F0EEE6" }}>
+              <tr style={{ borderTop: "1px solid #ECEEF1" }}>
                 <td style={{ padding: "6px 0" }}>Non-compliant</td>
                 <td style={{ padding: "6px 0" }}>0</td>
                 <td style={{ padding: "6px 0" }}>0</td>
@@ -161,7 +161,7 @@ export default function BeePreferencePointsClient() {
 
         <OtherTools except="/tools/bee-preference-points" />
 
-        <p style={{ fontSize: 11, color: "#6B6758", marginTop: 24, lineHeight: 1.5 }}>
+        <p style={{ fontSize: 11, color: "#5B6472", marginTop: 24, lineHeight: 1.5 }}>
           Source: Preferential Procurement Regulations, 2022 (GG 47452, Notice 2721 of 4 Nov 2022) regs 4-5 for the
           price-points formula and the R50 million threshold. The PPR 2022 itself sets no fixed B-BBEE points table -
           each organ of state defines its own specific goals (reg 3(1)) - so the level table above is the common

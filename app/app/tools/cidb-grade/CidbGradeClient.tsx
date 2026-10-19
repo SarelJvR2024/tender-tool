@@ -4,9 +4,9 @@ import { useMemo, useState } from "react";
 import { CIDB_CLASSES_OF_WORK, CIDB_GRADING_TABLE, requiredGradeForValue } from "@/lib/cidbGrading";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
+const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
 const LABEL: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#16233B", display: "block", marginBottom: 6 };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, boxSizing: "border-box" };
+const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box" };
 
 function formatZar(n: number): string {
   return "R" + n.toLocaleString("en-ZA");
@@ -26,12 +26,12 @@ export default function CidbGradeClient() {
   const sufficient = heldGradeNum !== null && required !== null ? heldGradeNum >= required : null;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#FFFFFF", fontFamily: "system-ui, sans-serif" }}>
       <ToolsHeader />
 
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "32px 16px 64px", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>CIDB grade calculator</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 24px", lineHeight: 1.5 }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 24px", lineHeight: 1.5 }}>
           Looks up the CIDB (Construction Industry Development Board) contractor grade a tender&apos;s value requires. The
           grade-to-value bands are the same for every class of construction work (GB, CE, EB, EP, ME, SB, SC) - only
           the grade you actually hold in a given class differs.
@@ -69,8 +69,8 @@ export default function CidbGradeClient() {
           {required === null ? (
             <p style={{ color: "#B91C1C", fontSize: 13 }}>Enter a valid, non-negative contract value.</p>
           ) : (
-            <div style={{ background: "#F6F5F1", borderRadius: 8, padding: "14px 16px" }}>
-              <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 4 }}>Minimum grade required</div>
+            <div style={{ background: "#FFFFFF", borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 4 }}>Minimum grade required</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: "#16233B" }}>
                 Grade {required}{classOfWork}
               </div>
@@ -89,7 +89,7 @@ export default function CidbGradeClient() {
           <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B", marginBottom: 10 }}>CIDB grading table</div>
           <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
             <thead>
-              <tr style={{ textAlign: "left", color: "#6B6758" }}>
+              <tr style={{ textAlign: "left", color: "#5B6472" }}>
                 <th style={{ padding: "4px 0" }}>Grade</th>
                 <th style={{ padding: "4px 0" }}>Tender value range</th>
               </tr>
@@ -98,7 +98,7 @@ export default function CidbGradeClient() {
               {CIDB_GRADING_TABLE.map((b) => {
                 const isRequired = required === b.grade;
                 return (
-                  <tr key={b.grade} style={{ borderTop: "1px solid #F0EEE6", fontWeight: isRequired ? 700 : 400, color: isRequired ? "#D97706" : "#16233B" }}>
+                  <tr key={b.grade} style={{ borderTop: "1px solid #ECEEF1", fontWeight: isRequired ? 700 : 400, color: isRequired ? "#D97706" : "#16233B" }}>
                     <td style={{ padding: "6px 0" }}>{b.grade}</td>
                     <td style={{ padding: "6px 0" }}>
                       {formatZar(b.minValue)} {b.maxValue === null ? "and above" : `- ${formatZar(b.maxValue)}`}
@@ -112,7 +112,7 @@ export default function CidbGradeClient() {
 
         <OtherTools except="/tools/cidb-grade" />
 
-        <p style={{ fontSize: 11, color: "#6B6758", marginTop: 24, lineHeight: 1.5 }}>
+        <p style={{ fontSize: 11, color: "#5B6472", marginTop: 24, lineHeight: 1.5 }}>
           Source: cidb Standard for Contractor Grading Designation (Construction Industry Development Board Act 38 of
           2000, Regulations) - the published Register of Contractors grading-vs-value table. This tool answers
           &quot;what grade does a contract of this value require&quot;; it does not calculate what grade your own

@@ -4,7 +4,7 @@ import { useTransition } from "react";
 import { advanceTaskStatus, type TenderTaskStatus } from "./actions";
 
 const STATUS_LABEL: Record<TenderTaskStatus, { label: string; bg: string; color: string }> = {
-  not_started: { label: "Not started", bg: "#F0EEE6", color: "#6B6758" },
+  not_started: { label: "Not started", bg: "#ECEEF1", color: "#5B6472" },
   in_progress: { label: "In progress", bg: "#FEF3C7", color: "#B45309" },
   done: { label: "Done", bg: "#DCFCE7", color: "#15803D" },
 };
@@ -62,7 +62,7 @@ export function TaskStatusButton({
           style={{
             padding: "4px 10px",
             borderRadius: 7,
-            border: "1px solid #E5E1D5",
+            border: "1px solid #E3E6EA",
             background: "#FFFFFF",
             color: "#16233B",
             fontSize: 11,

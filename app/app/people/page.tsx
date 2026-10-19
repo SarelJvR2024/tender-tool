@@ -63,7 +63,7 @@ export default async function PeoplePage({
   const noDateCount = allExpiries.filter((c) => !c.expiry).length;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <style>{`
         @media (max-width: 600px) {
           .people-grid { grid-template-columns: 1fr !important; }
@@ -77,7 +77,7 @@ export default async function PeoplePage({
         <div className="people-header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>People / CV Library</h1>
-            <div style={{ fontSize: 13, color: "#6B6758", marginTop: 2 }}>
+            <div style={{ fontSize: 13, color: "#5B6472", marginTop: 2 }}>
               Staff on file for key-position matching against SANRAL tenders.
             </div>
           </div>
@@ -109,13 +109,13 @@ export default async function PeoplePage({
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
             {expiredCount > 0 && <SummaryChip text={`${expiredCount} registration${expiredCount === 1 ? "" : "s"} expired`} bg="#FEE2E2" color="#B91C1C" />}
             {renewSoonCount > 0 && <SummaryChip text={`${renewSoonCount} renewing within 60 days`} bg="#FEF3C7" color="#B45309" />}
-            {noDateCount > 0 && <SummaryChip text={`${noDateCount} without a renewal date`} bg="#F0EEE6" color="#6B6758" />}
+            {noDateCount > 0 && <SummaryChip text={`${noDateCount} without a renewal date`} bg="#ECEEF1" color="#5B6472" />}
             {expiredCount === 0 && renewSoonCount === 0 && noDateCount === 0 && <SummaryChip text="Registrations current" bg="#DCFCE7" color="#15803D" />}
           </div>
         )}
 
         {rows.length === 0 && !error && (
-          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
+          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>
             No one on file yet. Add the first person to make them available for tender pack matching.
           </div>
         )}
@@ -128,7 +128,7 @@ export default async function PeoplePage({
                 key={p.id}
                 href={`/people/${p.id}`}
                 style={{
-                  display: "block", background: "#FFFFFF", border: "1px solid #E5E1D5",
+                  display: "block", background: "#FFFFFF", border: "1px solid #E3E6EA",
                   borderRadius: 11, padding: "14px 16px", textDecoration: "none", minHeight: 44,
                 }}
               >
@@ -137,7 +137,7 @@ export default async function PeoplePage({
                   {p.role || p.description || "Role not set"}
                 </div>
                 {p.highest_description && (
-                  <div style={{ fontSize: 11, color: "#9A9684", marginTop: 4 }}>{p.highest_description}</div>
+                  <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 4 }}>{p.highest_description}</div>
                 )}
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
                   {tags.map((t) => (

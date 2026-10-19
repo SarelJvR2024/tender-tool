@@ -4,9 +4,9 @@ import { useMemo, useState, useSyncExternalStore } from "react";
 import { addBusinessDays, businessDaysBetween, holidaysForYear, isPublicHoliday, isWeekend } from "@/lib/publicHolidays";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
+const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
 const LABEL: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#16233B", display: "block", marginBottom: 6 };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, boxSizing: "border-box" };
+const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box" };
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -60,12 +60,12 @@ export default function DeadlineCalculatorClient() {
   }, [startDate]);
 
   return (
-    <div style={{ minHeight: "100vh", background: "#F6F5F1", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", background: "#FFFFFF", fontFamily: "system-ui, sans-serif" }}>
       <ToolsHeader />
 
       <main style={{ maxWidth: 640, margin: "0 auto", padding: "32px 16px 64px", boxSizing: "border-box" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>Working-day deadline calculator</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 24px", lineHeight: 1.5 }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 24px", lineHeight: 1.5 }}>
           Excludes Saturdays, Sundays and South African public holidays (Public Holidays Act 36 of 1994, including the
           Easter-derived Good Friday and Family Day). Use it for &quot;N working days from the briefing&quot; or
           &quot;how many working days until closing&quot; tender clauses.
@@ -74,13 +74,13 @@ export default function DeadlineCalculatorClient() {
         <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
           <button
             onClick={() => setMode("add")}
-            style={{ flex: 1, minHeight: 40, borderRadius: 8, border: "1px solid #E5E1D5", background: mode === "add" ? "#16233B" : "#FFFFFF", color: mode === "add" ? "#FFFFFF" : "#16233B", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
+            style={{ flex: 1, minHeight: 40, borderRadius: 8, border: "1px solid #E3E6EA", background: mode === "add" ? "#16233B" : "#FFFFFF", color: mode === "add" ? "#FFFFFF" : "#16233B", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
           >
             Add working days
           </button>
           <button
             onClick={() => setMode("count")}
-            style={{ flex: 1, minHeight: 40, borderRadius: 8, border: "1px solid #E5E1D5", background: mode === "count" ? "#16233B" : "#FFFFFF", color: mode === "count" ? "#FFFFFF" : "#16233B", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
+            style={{ flex: 1, minHeight: 40, borderRadius: 8, border: "1px solid #E3E6EA", background: mode === "count" ? "#16233B" : "#FFFFFF", color: mode === "count" ? "#FFFFFF" : "#16233B", fontWeight: 600, fontSize: 13, cursor: "pointer" }}
           >
             Count working days between dates
           </button>
@@ -101,8 +101,8 @@ export default function DeadlineCalculatorClient() {
               {addResult.error ? (
                 <p style={{ color: "#B91C1C", fontSize: 13 }}>{addResult.error}</p>
               ) : (
-                <div style={{ background: "#F6F5F1", borderRadius: 8, padding: "14px 16px" }}>
-                  <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 4 }}>Deadline</div>
+                <div style={{ background: "#FFFFFF", borderRadius: 8, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 4 }}>Deadline</div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: "#16233B" }}>{addResult.value}</div>
                 </div>
               )}
@@ -116,8 +116,8 @@ export default function DeadlineCalculatorClient() {
               {countResult.error ? (
                 <p style={{ color: "#B91C1C", fontSize: 13 }}>{countResult.error}</p>
               ) : (
-                <div style={{ background: "#F6F5F1", borderRadius: 8, padding: "14px 16px" }}>
-                  <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 4 }}>Working days</div>
+                <div style={{ background: "#FFFFFF", borderRadius: 8, padding: "14px 16px" }}>
+                  <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 4 }}>Working days</div>
                   <div style={{ fontSize: 20, fontWeight: 700, color: "#16233B" }}>{countResult.value}</div>
                 </div>
               )}
@@ -134,13 +134,13 @@ export default function DeadlineCalculatorClient() {
         <div style={CARD}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B", marginBottom: 10 }}>Upcoming public holidays</div>
           {upcomingHolidays.length === 0 ? (
-            <p style={{ fontSize: 13, color: "#6B6758" }}>None found.</p>
+            <p style={{ fontSize: 13, color: "#5B6472" }}>None found.</p>
           ) : (
             <ul style={{ margin: 0, padding: 0, listStyle: "none" }}>
               {upcomingHolidays.map((h) => (
-                <li key={h.date} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #F0EEE6" }}>
+                <li key={h.date} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "6px 0", borderBottom: "1px solid #ECEEF1" }}>
                   <span>{h.name}</span>
-                  <span style={{ color: "#6B6758" }}>{h.date}</span>
+                  <span style={{ color: "#5B6472" }}>{h.date}</span>
                 </li>
               ))}
             </ul>
@@ -149,7 +149,7 @@ export default function DeadlineCalculatorClient() {
 
         <OtherTools except="/tools/deadline-calculator" />
 
-        <p style={{ fontSize: 11, color: "#6B6758", marginTop: 24, lineHeight: 1.5 }}>
+        <p style={{ fontSize: 11, color: "#5B6472", marginTop: 24, lineHeight: 1.5 }}>
           Source: Public Holidays Act 36 of 1994, Schedule 1. Fixed-date holidays landing on a Sunday move the
           following Monday to a public holiday (s2A). A one-off holiday gazetted by the President (s2(2))
           isn&apos;t predictable in advance and may not yet be reflected here.

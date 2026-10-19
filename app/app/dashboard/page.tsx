@@ -78,9 +78,9 @@ export default async function DashboardPage() {
             Each tender is its own flex-wrap card instead, same idea as
             discovery/page.tsx's opportunity cards: it reflows by itself
             instead of needing a breakpoint override. */}
-        <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
+        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
           {rows.length === 0 && !error && (
-            <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
+            <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>
               No tenders yet. Check the <Link href="/discovery" style={{ color: "#16233B", fontWeight: 600 }}>Discovery</Link> feed for open SANRAL tenders, or{" "}
               <Link href="/tenders/new" style={{ color: "#16233B", fontWeight: 600 }}>load one manually</Link> if you already have the documents.
             </div>
@@ -99,7 +99,7 @@ export default async function DashboardPage() {
                   gap: 12,
                   flexWrap: "wrap",
                   padding: "12px 18px",
-                  borderTop: i > 0 ? "1px solid #F0EEE6" : undefined,
+                  borderTop: i > 0 ? "1px solid #ECEEF1" : undefined,
                   textDecoration: "none",
                   color: "inherit",
                 }}
@@ -110,12 +110,12 @@ export default async function DashboardPage() {
                       {t.contract_no ?? "(no reference)"}
                     </span>
                     {t.source === "manual" && (
-                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#ECEEF1", color: "#16233B" }}>
                         {t.family ? "Loaded manually" : "Loaded manually - analysing"}
                       </span>
                     )}
                   </div>
-                  {t.nra_reference && <div style={{ fontSize: 11, color: "#9A9684", marginTop: 1 }}>{t.nra_reference}</div>}
+                  {t.nra_reference && <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 1 }}>{t.nra_reference}</div>}
                   <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3 }}>{t.description}</div>
                 </div>
                 <div style={{ flexShrink: 0, textAlign: "right" }}>
@@ -125,7 +125,7 @@ export default async function DashboardPage() {
                   <div style={{ fontSize: 12, color: "#16233B", marginTop: 6 }}>
                     {t.closing_date ? new Date(t.closing_date).toLocaleDateString() : "-"}
                   </div>
-                  {left !== null && <div style={{ fontSize: 10, color: left <= 7 ? "#B45309" : "#9A9684" }}>{left} days left</div>}
+                  {left !== null && <div style={{ fontSize: 10, color: left <= 7 ? "#B45309" : "#8A93A0" }}>{left} days left</div>}
                 </div>
               </a>
             );
@@ -138,8 +138,8 @@ export default async function DashboardPage() {
 
 function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "13px 16px" }}>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 3 }}>{label}</div>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "13px 16px" }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 3 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   );

@@ -7,14 +7,14 @@ export const metadata = {
 
 const NAVY = "#16233B";
 const AMBER = "#D97706";
-const CREAM = "#F6F5F1";
+const CREAM = "#FFFFFF";
 const INK = "#16233B";
-const INK_MUTED = "#6B6758";
-const BORDER = "#E5E1D5";
+const INK_MUTED = "#5B6472";
+const BORDER = "#E3E6EA";
 
 const CARD: React.CSSProperties = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 11, padding: "22px 24px", marginBottom: 18 };
 const H2: React.CSSProperties = { fontSize: 17, fontWeight: 700, color: INK, margin: "0 0 10px" };
-const P: React.CSSProperties = { fontSize: 14, color: "#6B6758", lineHeight: 1.7, margin: "0 0 10px" };
+const P: React.CSSProperties = { fontSize: 14, color: "#5B6472", lineHeight: 1.7, margin: "0 0 10px" };
 
 /**
  * A real POPIA privacy notice was one of the biggest gaps a prospective-customer

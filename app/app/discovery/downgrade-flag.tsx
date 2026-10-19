@@ -32,7 +32,7 @@ export function DowngradeFlag({
 
   if (!isOpenDowngrade(downgrade)) {
     return (
-      <div style={{ marginTop: 8, fontSize: 11, color: "#6B6758" }}>
+      <div style={{ marginTop: 8, fontSize: 11, color: "#5B6472" }}>
         <span style={{ fontWeight: 700, color: "#B45309" }}>Re-assessed</span> {when}: was {was}, now {now}
         {downgrade.downgrade_acknowledged_at
           ? ` · marked as seen${acknowledgedByLabel ? ` by ${acknowledgedByLabel}` : ""} on ${formatActivityTime(downgrade.downgrade_acknowledged_at)}`
@@ -58,7 +58,7 @@ export function DowngradeFlag({
       {(downgrade.reasons_before ?? []).length > 0 && (
         <details style={{ marginTop: 6 }}>
           <summary style={{ fontSize: 12, fontWeight: 600, color: "#16233B", cursor: "pointer" }}>Why it matched before</summary>
-          <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 12, color: "#6B6758" }}>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 12, color: "#5B6472" }}>
             {(downgrade.reasons_before ?? []).map((r, i) => (
               <li key={i} style={{ marginBottom: 2 }}>{r}</li>
             ))}

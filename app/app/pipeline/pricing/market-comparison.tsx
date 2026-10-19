@@ -15,8 +15,8 @@ import { bestOutcome, firmsMet, loadOutcomesForTenders, ownPosition, sampleStren
 
 export type PricedTender = { tenderId: string; contractNo: string | null; title: string; price: number | null };
 
-const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#6B6758", padding: "8px 10px", borderBottom: "1px solid #E5E1D5", whiteSpace: "nowrap" };
-const td: CSSProperties = { fontSize: 13, color: "#16233B", padding: "8px 10px", borderBottom: "1px solid #F0EEE6", verticalAlign: "top" };
+const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#5B6472", padding: "8px 10px", borderBottom: "1px solid #E3E6EA", whiteSpace: "nowrap" };
+const td: CSSProperties = { fontSize: 13, color: "#16233B", padding: "8px 10px", borderBottom: "1px solid #ECEEF1", verticalAlign: "top" };
 const num: CSSProperties = { ...td, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" };
 
 export async function MarketComparison({ tenders }: { tenders: PricedTender[] }) {
@@ -42,19 +42,19 @@ export async function MarketComparison({ tenders }: { tenders: PricedTender[] })
   return (
     <div id="market" style={{ marginTop: 24 }}>
       <h2 style={{ fontSize: 15, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>How your prices compared with the published results</h2>
-      <p style={{ fontSize: 12, color: "#6B6758", margin: "0 0 10px" }}>
+      <p style={{ fontSize: 12, color: "#5B6472", margin: "0 0 10px" }}>
         Matched to SANRAL&apos;s opening registers / award notices and the eTenders Awarded tab. Most buyers publish only the
         winner, or nothing, so expect only some of your tenders here.
       </p>
       {error && <p style={{ fontSize: 12, color: "#B91C1C" }}>Could not read published results: {error}</p>}
 
       {matched.length === 0 ? (
-        <div style={{ background: "#FFFFFF", border: "1px dashed #E5E1D5", borderRadius: 11, padding: 18, fontSize: 13, color: "#6B6758" }}>
+        <div style={{ background: "#FFFFFF", border: "1px dashed #E3E6EA", borderRadius: 11, padding: 18, fontSize: 13, color: "#5B6472" }}>
           None of your {tenders.length} priced tender{tenders.length === 1 ? "" : "s"} has a published bidders list or award yet.
         </div>
       ) : (
         <>
-          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "12px 16px", marginBottom: 12, fontSize: 13, color: "#16233B", lineHeight: 1.6 }}>
+          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "12px 16px", marginBottom: 12, fontSize: 13, color: "#16233B", lineHeight: 1.6 }}>
             <strong>{matched.length}</strong> of your {tenders.length} priced tenders have a published result; you are on the register of{" "}
             <strong>{placed.length}</strong> ({confirmed.length} by name and price, {placed.length - confirmed.length} by name or price only - check those).
             {placed.length > 0 && (
@@ -69,7 +69,7 @@ export async function MarketComparison({ tenders }: { tenders: PricedTender[] })
             )}
           </div>
 
-          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, marginBottom: 16 }}>
+          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, marginBottom: 16 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
               <thead>
                 <tr>
@@ -93,9 +93,9 @@ export async function MarketComparison({ tenders }: { tenders: PricedTender[] })
                     </td>
                     <td style={num}>{formatRand(p.price)}</td>
                     <td style={td}>
-                      {p.entry && p.rank !== null ? `${p.rank} of ${p.of}` : <span style={{ color: "#9A9684" }}>not on register</span>}
+                      {p.entry && p.rank !== null ? `${p.rank} of ${p.of}` : <span style={{ color: "#8A93A0" }}>not on register</span>}
                       {p.found === "name" || p.found === "price" || p.found === "similar_name" ? <div style={{ fontSize: 10, color: "#B45309" }}>by {p.found === "similar_name" ? "similar name" : p.found} only - check</div> : null}
-                      {outcome.register_columns > 1 && <div style={{ fontSize: 10, color: "#9A9684" }}>batch: {p.field.label}</div>}
+                      {outcome.register_columns > 1 && <div style={{ fontSize: 10, color: "#8A93A0" }}>batch: {p.field.label}</div>}
                     </td>
                     <td style={num}>{p.rank === 1 ? "lowest" : signedPct(p.vsLowPct)}</td>
                     <td style={num}>{signedPct(p.vsMedianPct)}</td>
@@ -110,13 +110,13 @@ export async function MarketComparison({ tenders }: { tenders: PricedTender[] })
           </div>
 
           <h3 style={{ fontSize: 14, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Firms you have bid against most</h3>
-          <p style={{ fontSize: 12, color: "#6B6758", margin: "0 0 8px" }}>
+          <p style={{ fontSize: 12, color: "#5B6472", margin: "0 0 8px" }}>
             From the published registers of tenders you bid on, only. Names as the buyer typed them, so one firm can appear under two spellings.
           </p>
           {firms.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#6B6758" }}>No firm appears on more than one of your published registers yet.</div>
+            <div style={{ fontSize: 12, color: "#5B6472" }}>No firm appears on more than one of your published registers yet.</div>
           ) : (
-            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11 }}>
+            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
                 <thead>
                   <tr>

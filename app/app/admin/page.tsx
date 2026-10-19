@@ -83,7 +83,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </div>
         <section id="system-alerts" style={{ marginBottom: 36 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>System alerts</h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+          <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
             Every failure the engines and the bridge worker hit (a job that crashed, a scoring error, OCR that
             couldn&apos;t run, a worker pass that broke) - one row per problem, counted each time it happens again.
             New alerts are e-mailed by the scheduled check-in (engine/alerts/check_system_alerts.py); mark one resolved
@@ -95,7 +95,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
               Could not load system alerts: {alertsError.message}
             </div>
           )}
-          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
+          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
             {open.length === 0 && !alertsError && (
               <div style={{ padding: "18px", fontSize: 13, color: "#15803D" }}>No open system alerts.</div>
             )}
@@ -103,10 +103,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           </div>
           {resolved.length > 0 && (
             <details style={{ marginTop: 12 }}>
-              <summary style={{ fontSize: 13, color: "#6B6758", cursor: "pointer", padding: "6px 0" }}>
+              <summary style={{ fontSize: 13, color: "#5B6472", cursor: "pointer", padding: "6px 0" }}>
                 Recently resolved ({resolved.length})
               </summary>
-              <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden", marginTop: 8 }}>
+              <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden", marginTop: 8 }}>
                 {resolved.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
               </div>
             </details>
@@ -114,7 +114,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </section>
 
         <h2 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Admin harness results</h2>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
           Results of running every test company through the real tender-filling pipeline (engine/admin_harness.py),
           checked against the stored baseline for each. Open a run to read the documents it generated, then mark it
           reviewed once they are right - that is the record that this tender template is trusted for real customers.{" "}
@@ -128,9 +128,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           </div>
         )}
 
-        <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
+        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
           {rows.length === 0 && !error && (
-            <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
+            <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>
               No harness runs recorded yet - run <code>python3 engine/write_admin_harness_results.py --pack</code> to populate this.
             </div>
           )}

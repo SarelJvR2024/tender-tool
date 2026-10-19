@@ -38,12 +38,12 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
   const context = Object.entries(alert.context ?? {});
 
   return (
-    <div style={{ borderTop: "1px solid #F0EEE6" }}>
+    <div style={{ borderTop: "1px solid #ECEEF1" }}>
       <button
         onClick={() => setOpen((v) => !v)}
         style={{
           width: "100%", display: "flex", flexWrap: "wrap", gap: "6px 12px", alignItems: "center",
-          padding: "11px 18px", background: open ? "#F6F5F1" : "transparent", border: "none",
+          padding: "11px 18px", background: open ? "#FFFFFF" : "transparent", border: "none",
           textAlign: "left", cursor: "pointer", font: "inherit", boxSizing: "border-box",
         }}
       >
@@ -55,7 +55,7 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
         <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: status.bg, color: status.color }}>
           {status.label}
         </span>
-        <span style={{ fontSize: 11, color: "#9A9684" }}>
+        <span style={{ fontSize: 11, color: "#8A93A0" }}>
           {alert.occurrences > 1 ? `${alert.occurrences}x, last ` : ""}
           {new Date(alert.last_seen_at).toLocaleString()}
           <span style={{ marginLeft: 6, color: "#D97706" }}>{open ? "hide ▲" : "open ▼"}</span>
@@ -63,7 +63,7 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
       </button>
 
       {open && (
-        <div style={{ padding: "4px 18px 18px 18px", background: "#F6F5F1" }}>
+        <div style={{ padding: "4px 18px 18px 18px", background: "#FFFFFF" }}>
           <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 8 }}>
             First seen {new Date(alert.first_seen_at).toLocaleString()}
             {alert.occurrences > 1 && ` - happened ${alert.occurrences} times`}
@@ -72,19 +72,19 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
           {context.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
               {context.map(([k, v]) => (
-                <span key={k} style={{ fontSize: 11, padding: "2px 9px", borderRadius: 100, border: "1px solid #E5E1D5", background: "#FFFFFF", color: "#4B5563", fontFamily: "monospace", overflowWrap: "anywhere" }}>
+                <span key={k} style={{ fontSize: 11, padding: "2px 9px", borderRadius: 100, border: "1px solid #E3E6EA", background: "#FFFFFF", color: "#4B5563", fontFamily: "monospace", overflowWrap: "anywhere" }}>
                   {k}: {typeof v === "string" ? v : JSON.stringify(v)}
                 </span>
               ))}
             </div>
           )}
           {alert.detail && (
-            <pre style={{ fontSize: 11, color: "#4B5563", whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "10px 12px", maxHeight: 320, overflow: "auto", margin: "0 0 12px" }}>
+            <pre style={{ fontSize: 11, color: "#4B5563", whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "10px 12px", maxHeight: 320, overflow: "auto", margin: "0 0 12px" }}>
               {alert.detail}
             </pre>
           )}
 
-          <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "12px 14px" }}>
+          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "12px 14px" }}>
             {alert.resolved_at ? (
               <form action={reopenSystemAlert} style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-start" }}>
                 <input type="hidden" name="alert_id" value={alert.id} />
@@ -92,7 +92,7 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
                   Resolved {new Date(alert.resolved_at).toLocaleString()}
                   {alert.resolution_note && <div style={{ color: "#4B5563", marginTop: 4, whiteSpace: "pre-wrap" }}>{alert.resolution_note}</div>}
                 </div>
-                <button type="submit" style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #E5E1D5", background: "#FFFFFF", color: "#16233B", cursor: "pointer" }}>
+                <button type="submit" style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #E3E6EA", background: "#FFFFFF", color: "#16233B", cursor: "pointer" }}>
                   Reopen
                 </button>
               </form>
@@ -103,14 +103,14 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
                   name="note"
                   rows={2}
                   placeholder="Note (optional) - e.g. what was fixed, or why it is not a bug"
-                  style={{ flex: "1 1 240px", font: "inherit", fontSize: 12, padding: "7px 9px", border: "1px solid #E5E1D5", borderRadius: 7, resize: "vertical" }}
+                  style={{ flex: "1 1 240px", font: "inherit", fontSize: 12, padding: "7px 9px", border: "1px solid #E3E6EA", borderRadius: 7, resize: "vertical" }}
                 />
                 <button type="submit" style={{ fontSize: 12, fontWeight: 600, padding: "8px 14px", minHeight: 44, borderRadius: 7, border: "none", background: "#D97706", color: "#FFFFFF", cursor: "pointer" }}>
                   Mark resolved
                 </button>
               </form>
             )}
-            <div style={{ fontSize: 11, color: "#9A9684", marginTop: 6 }}>
+            <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 6 }}>
               A resolved alert is never e-mailed again. If the same failure happens later it comes back as a new alert.
             </div>
           </div>

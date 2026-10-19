@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "../_components/AuthShell";
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
+const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
 const LABEL: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4, textAlign: "left" };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, boxSizing: "border-box", marginBottom: 14 };
+const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box", marginBottom: 14 };
 const PRIMARY_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", borderRadius: 8, border: "none", background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, cursor: "pointer", boxSizing: "border-box" };
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -82,7 +82,7 @@ export default function SignUpPage() {
       <AuthShell>
         <div style={CARD}>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Check your email</h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
+          <p style={{ fontSize: 13, color: "#5B6472", margin: 0, lineHeight: 1.6 }}>
             We&apos;ve sent a confirmation link to <strong>{email}</strong>. Click it to activate your account and sign in.
           </p>
           <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
@@ -98,7 +98,7 @@ export default function SignUpPage() {
       <AuthShell>
         <div style={CARD}>
           <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Sign-ups are paused</h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
+          <p style={{ fontSize: 13, color: "#5B6472", margin: 0, lineHeight: 1.6 }}>
             Tender Tool isn&apos;t taking new accounts right now. Already have one?
           </p>
           <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
@@ -113,7 +113,7 @@ export default function SignUpPage() {
     <AuthShell>
       <div style={CARD}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Create your account</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 28px" }}>Start tracking and preparing tenders</p>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 28px" }}>Start tracking and preparing tenders</p>
 
         <form onSubmit={handleSubmit}>
           <label style={LABEL} htmlFor="email">Email</label>
@@ -132,12 +132,12 @@ export default function SignUpPage() {
           </button>
         </form>
 
-        <p style={{ marginTop: 16, fontSize: 11, color: "#9A9684" }}>
+        <p style={{ marginTop: 16, fontSize: 11, color: "#8A93A0" }}>
           By creating an account you agree to our{" "}
-          <Link href="/privacy" style={{ color: "#6B6758", textDecoration: "underline" }}>privacy notice</Link>.
+          <Link href="/privacy" style={{ color: "#5B6472", textDecoration: "underline" }}>privacy notice</Link>.
         </p>
 
-        <p style={{ marginTop: 12, fontSize: 12, color: "#6B6758" }}>
+        <p style={{ marginTop: 12, fontSize: 12, color: "#5B6472" }}>
           Already have an account?{" "}
           <Link href="/login" style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Sign in</Link>
         </p>
