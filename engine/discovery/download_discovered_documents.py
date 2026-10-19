@@ -151,8 +151,27 @@ def download_for_releases(releases, client, timeout=DOWNLOAD_TIMEOUT, log=print)
     skipped_existing, skipped_no_url, failed} counts, plus `failures` (a list
     of {release_key, buyer, document_url, error} for the run's own logging/
     alerting - never raised)."""
-    summary = {"downloaded": 0, "skipped_existing": 0, "skipped_no_url": 0, "failed": 0, "failures": []}
-    seen = existing_urls(client, (release_key(r) for r in releases))
+    summary = {"downloaded": 0, "skipped_existing": 0, "skipped_no_url": 0, "failed": 0, "failures": [],
+               "skipped_not_migrated": False}
+    try:
+        seen = existing_urls(client, (release_key(r) for r in releases))
+    except RuntimeError as e:
+        # Confirmed live 2026-10-19: this crashed the ENTIRE watch_new_tenders.py
+        # run (seeding had already succeeded) when migration 0071 (the
+        # discovered_opportunity_documents table/bucket) hadn't been applied
+        # yet - the exact state right after this feature first shipped, and a
+        # state a run can land in again any time the table/bucket is briefly
+        # unreachable. One missing table must degrade this one step, not take
+        # down a run whose scoring/seeding already succeeded.
+        summary["skipped_not_migrated"] = True
+        log(f"  SKIPPED document download/storage entirely this run: {e} "
+            "(migration 0071 not applied yet, or the table/bucket is unreachable - "
+            "the tenders themselves were already seeded above and are unaffected)")
+        system_alerts.record(
+            "discovery",
+            "Document download skipped this run: discovered_opportunity_documents unreachable",
+            "warning", detail=str(e))
+        return summary
     for r in releases:
         key = release_key(r)
         docs = r.get("documents") or []

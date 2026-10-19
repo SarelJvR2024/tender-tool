@@ -261,6 +261,38 @@ def main():
     check("case 6: the relative URL got a failed row with a reason, not a crash",
           rel_row["status"] == "failed" and bool(rel_row.get("error")))
 
+    # --- migration 0071 not applied yet (table/bucket don't exist): the
+    # whole run must degrade, never crash watch_new_tenders.py - confirmed
+    # live 2026-10-19, this exact scenario took down a run whose scoring and
+    # seeding had already succeeded.
+    class NotMigratedHandler(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def do_GET(self):
+            body = json.dumps({"code": "PGRST205", "message": "Could not find the table "
+                                "'public.discovered_opportunity_documents' in the schema cache"}).encode()
+            self.send_response(400)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    not_migrated_srv = ThreadingHTTPServer(("127.0.0.1", 0), NotMigratedHandler)
+    threading.Thread(target=not_migrated_srv.serve_forever, daemon=True).start()
+    client4 = company_profiles.RestClient(f"http://127.0.0.1:{not_migrated_srv.server_address[1]}", "test-key")
+    ALERTS.clear()
+    summary5 = ddd.download_for_releases(
+        [{"ocid": "ocds-release-1", "contract_number": "RFQ-01/2026", "buyer": "City of Cape Town",
+          "title": "Supply of office furniture", "source": "capetown_procurement",
+          "documents": [{"url": url_a, "title": "Notice.pdf"}]}],
+        client4)
+    check("case 7: run does not raise when the documents table/bucket isn't migrated yet",
+          summary5.get("skipped_not_migrated") is True, summary5)
+    check("case 7: nothing reported as downloaded/failed - it never even tried", summary5["downloaded"] == 0 and summary5["failed"] == 0)
+    check("case 7: exactly one summary alert raised, not a crash", len(ALERTS) == 1, ALERTS)
+    not_migrated_srv.shutdown()
+    not_migrated_srv.server_close()
+
     fake.stop()
     fake2.stop()
     fake3.stop()
