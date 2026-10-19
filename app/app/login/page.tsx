@@ -6,6 +6,15 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "../_components/AuthShell";
 
+// Read directly off window.location rather than useSearchParams(), which
+// would force this already-"use client" page behind a Suspense boundary
+// just to avoid a build-time prerender error - not worth it for one param.
+function nextParam(): string {
+  if (typeof window === "undefined") return "/dashboard";
+  const v = new URLSearchParams(window.location.search).get("next");
+  return v && v.startsWith("/") ? v : "/dashboard";
+}
+
 /**
  * Google and Microsoft OAuth, plus email/password for anyone who'd rather
  * not use either (Facebook was explicitly ruled out earlier - not a fit
@@ -32,6 +41,11 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  // Lazy initializer, not an effect: it needs to run during the first
+  // client render (so OAuth/password sign-in redirect to the right place
+  // immediately), and a plain useEffect calling setState here just causes
+  // an extra render for no benefit.
+  const [next] = useState(nextParam);
 
   const signInWith = async (provider: "google" | "azure") => {
     // Created here, not at the top of the component: this page is
@@ -42,7 +56,7 @@ export default function LoginPage() {
     await supabase.auth.signInWithOAuth({
       provider,
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
       },
     });
   };
@@ -59,9 +73,10 @@ export default function LoginPage() {
       return;
     }
     // Middleware (proxy.ts) sends a signed-in user without a company to
-    // /onboarding and everyone else to /dashboard - safe to always target
-    // /dashboard here and let it redirect.
-    router.push("/dashboard");
+    // /onboarding - safe to still target `next` (e.g. an /invite link),
+    // since that route isn't guarded by proxy.ts and the invite page's own
+    // logic handles a user who hasn't joined a company yet.
+    router.push(next);
     router.refresh();
   }
 
@@ -102,7 +117,7 @@ export default function LoginPage() {
 
         <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, fontSize: 12 }}>
           <Link href="/forgot-password" style={{ color: "#6B6758", textDecoration: "none" }}>Forgot password?</Link>
-          <Link href="/signup" style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Create an account</Link>
+          <Link href={next === "/dashboard" ? "/signup" : `/signup?next=${encodeURIComponent(next)}`} style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Create an account</Link>
         </div>
       </div>
     </AuthShell>

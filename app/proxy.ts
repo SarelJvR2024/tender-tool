@@ -44,7 +44,8 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/company") ||
     path.startsWith("/people") ||
     path.startsWith("/experience") ||
-    path.startsWith("/admin");
+    path.startsWith("/admin") ||
+    path.startsWith("/my-cv");
 
   if (!user && guarded) {
     const url = request.nextUrl.clone();
@@ -85,5 +86,6 @@ export const config = {
     "/people/:path*",
     "/experience/:path*",
     "/admin/:path*",
+    "/my-cv/:path*",
   ],
 };

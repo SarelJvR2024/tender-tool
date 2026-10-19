@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 
-type NavKey = "dashboard" | "pipeline" | "discovery" | "company" | "people" | "experience" | "admin";
+type NavKey = "dashboard" | "pipeline" | "discovery" | "company" | "people" | "experience" | "admin" | "my-cv";
 
 const NAV_ITEMS: { key: NavKey; href: string; label: string }[] = [
   { key: "dashboard", href: "/dashboard", label: "Tenders" },
@@ -10,6 +10,17 @@ const NAV_ITEMS: { key: NavKey; href: string; label: string }[] = [
   { key: "company", href: "/company", label: "Company" },
   { key: "people", href: "/people", label: "People" },
   { key: "experience", href: "/experience", label: "Experience" },
+];
+
+// An 'employee' (0065) only ever gets this - their own CV and documents,
+// nothing about the company's tenders, pricing or other people. Matches
+// the RESTRICTIVE RLS policies on people/projects/cv_uploads/generated_cvs
+// (supabase/migrations/0065_company_invites_and_employee_role.sql); this
+// nav swap is cosmetic (a link to a page RLS already blocks is harmless),
+// but showing it would be confusing, so it's left off entirely.
+const EMPLOYEE_NAV_ITEMS: { key: NavKey; href: string; label: string }[] = [
+  { key: "dashboard", href: "/dashboard", label: "Dashboard" },
+  { key: "my-cv", href: "/my-cv", label: "My CV" },
 ];
 
 // Shared top bar for every signed-in page. Before this, each page (dashboard,
@@ -25,9 +36,14 @@ export async function SiteNav({ active }: { active: NavKey }) {
   } = await supabase.auth.getUser();
 
   let isPlatformAdmin = false;
+  let isEmployee = false;
   if (user) {
-    const { data } = await supabase.rpc("is_platform_admin");
-    isPlatformAdmin = data === true;
+    const [{ data: adminData }, { data: membership }] = await Promise.all([
+      supabase.rpc("is_platform_admin"),
+      supabase.from("company_members").select("role").eq("user_id", user.id).maybeSingle(),
+    ]);
+    isPlatformAdmin = adminData === true;
+    isEmployee = membership?.role === "employee";
   }
 
   // Admin is Tender Tool's own internal diagnostic (test-company harness
@@ -35,9 +51,11 @@ export async function SiteNav({ active }: { active: NavKey }) {
   // "an owner of any company" - i.e. to every customer, since everyone who
   // onboards owns their own company. Now only platform_admins (0043) see it;
   // RLS enforces the same rule on the data itself.
-  const items: { key: NavKey; href: string; label: string }[] = isPlatformAdmin
-    ? [...NAV_ITEMS, { key: "admin", href: "/admin", label: "Admin" }]
-    : NAV_ITEMS;
+  const items: { key: NavKey; href: string; label: string }[] = isEmployee
+    ? EMPLOYEE_NAV_ITEMS
+    : isPlatformAdmin
+      ? [...NAV_ITEMS, { key: "admin", href: "/admin", label: "Admin" }]
+      : NAV_ITEMS;
 
   return (
     <div style={{ background: "#16233B", color: "#FFFFFF" }}>
