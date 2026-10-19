@@ -283,7 +283,10 @@ export default async function Home() {
 
       {/* Footer */}
       <footer style={{ padding: "24px 20px", textAlign: "center" }}>
-        <p style={{ fontSize: 12, color: INK_MUTED }}>Tender Tool - built for South African construction and engineering firms bidding public-sector tenders.</p>
+        <p style={{ fontSize: 12, color: INK_MUTED, margin: "0 0 8px" }}>Tender Tool - built for South African construction and engineering firms bidding public-sector tenders.</p>
+        <Link href="/privacy" style={{ fontSize: 12, color: INK_MUTED, textDecoration: "underline" }}>
+          Privacy notice
+        </Link>
       </footer>
     </div>
   );

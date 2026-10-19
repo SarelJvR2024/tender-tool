@@ -130,7 +130,12 @@ export default function SignUpPage() {
           </button>
         </form>
 
-        <p style={{ marginTop: 20, fontSize: 12, color: "#6B6758" }}>
+        <p style={{ marginTop: 16, fontSize: 11, color: "#9A9684" }}>
+          By creating an account you agree to our{" "}
+          <Link href="/privacy" style={{ color: "#6B6758", textDecoration: "underline" }}>privacy notice</Link>.
+        </p>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: "#6B6758" }}>
           Already have an account?{" "}
           <Link href="/login" style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Sign in</Link>
         </p>
