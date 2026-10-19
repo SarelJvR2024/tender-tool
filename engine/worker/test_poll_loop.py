@@ -189,7 +189,18 @@ def test_runner_drives_bridges_and_stops_on_sigterm():
         with open(broken, "w") as f:
             f.write("import sys\nprint('cannot reach queue')\nsys.exit(2)\n")
 
-        p = subprocess.Popen([sys.executable, RUNNER, "--loop", "--interval", "60", "--script", broken],
+        # --bridge onboarding (not cv): since --script is additive (2026-10-19 fix,
+        # resolve_bridge_names below) a bare --script with no --bridge now also runs
+        # every registered bridge, including the real "cv" one - which would race
+        # p_cv's own dedicated --bridge cv cycle for the SAME job r1 against the
+        # same fake instance. Caught directly: before this line was added, this test
+        # failed intermittently (p's own concurrent cv-bridge pass sometimes claimed
+        # r1 first, so p_cv's pass found nothing and never logged "cv: [ready] r1",
+        # even though status_of(fake, "r1") still read "ready" - r1 WAS built, just
+        # not by the process this assertion checks). Scoping p to a bridge that
+        # never touches generated_cvs removes the race entirely.
+        p = subprocess.Popen([sys.executable, RUNNER, "--loop", "--interval", "60",
+                             "--bridge", "onboarding", "--script", broken],
                              env=env_for(fake), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         # The pack/general/cv_extract bridges have all landed since this test was written, so the
         # "bridge not present yet" path is exercised with a deliberately missing --script instead.

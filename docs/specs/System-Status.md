@@ -168,6 +168,71 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-second run): `bridge-worker-ci.yml` has been red on GitHub since nearly the start of this project, unnoticed
+
+Orientation: two new commits since the last pass (`6aa0e00`, finishing the cool-white palette
+rollout on `/admin`'s CV/document stats cards - independently swept the whole `app/app` tree for
+every old hex value afterward, confirmed clean; `2351570`, the `run_bridges.py --script` fix
+above). Read both in full, re-ran the relevant test files myself. No issues in either on their own.
+
+**Finding 21 (severe, structural - the single biggest finding of this standing-review rotation
+so far): checked `bridge-worker-ci.yml`'s actual run history on GitHub for the first time, rather
+than trusting each commit's own "CI clean" claim.** Of the last 15 runs (`mcp__github__actions_list`),
+**all 15 showed `conclusion: failure`.** Paged back through the workflow's full history (53 runs):
+**52 of 53 failed** - every run from run #2 onward, with the sole exception of run #1 (the very
+first commit that created this CI job) and one cancelled run. Every single "CI clean" or "all
+tests pass" claim in every commit message and every prior pass entry in this file, for the entire
+life of this project's Python engine, was describing a session's own **local** run - the actual
+GitHub Actions badge has been red almost the entire time, and nobody - no session, including me
+across twenty-one prior passes - had ever actually looked.
+
+Pulled job logs (`mcp__github__get_job_logs`) for failures spread across the whole history and
+found **two distinct, unrelated root causes**, both genuine, neither previously diagnosed:
+
+1. **`test_poll_loop.py::test_runner_drives_bridges_and_stops_on_sigterm` - a real race condition,
+   fixed and verified.** This test starts two `run_bridges.py` subprocesses against the same fake
+   Supabase stub: `p` (a long-interval loop meant only to prove a bridge that exits non-zero is
+   logged and survives, started with no `--bridge`) and `p_cv` (a short, tight-window loop with
+   `--bridge cv` meant to prove the CV bridge fulfils job `r1`). Before the sibling pass's own
+   `resolve_bridge_names` fix (twenty-first run, above) a bare `--script` with no `--bridge`
+   resolved to `names=[]` - so `p` ran ONLY the broken script. That fix correctly makes `--script`
+   additive, matching this file's own documented contract - but as a direct, unavoidable
+   consequence, `p` now ALSO runs every registered bridge on its own first cycle, including the
+   real "cv" bridge, racing `p_cv`'s own dedicated cycle for the SAME job `r1` against the SAME
+   fake instance. Whichever process's cv-bridge subprocess wins the atomic claim builds it; the
+   loser finds nothing and never logs `"cv: [ready] r1"` - the exact assertion this test makes -
+   even though `status_of(fake, "r1") == "ready"` (an earlier assertion) still passes, since `r1`
+   really was built, just not by the process this test is checking. **Reproduced directly: ~40-57%
+   failure rate across 12 local runs before the fix** (confirmed NOT a timing/slowness issue first -
+   widening the interval from 2s/2-cycles to 5s/3-cycles made no difference at all, still failing
+   with "0 bridge pass(es) with activity" every time, which is what actually pointed at a structural
+   race rather than a slow LibreOffice startup). **Fixed** by scoping `p` to `--bridge onboarding`
+   (a registered bridge unrelated to CV job state) instead of no `--bridge` at all, so `p`'s own
+   cycle never touches `generated_cvs`. **Verified: 20/20 clean runs, 0 failures**, across two
+   separate batches, after the fix - versus the measured 40-57% failure rate before it.
+2. **`test_extract_cv_fields.py`'s `naledi_cv.pdf via pdftotext -layout` check - diagnosed, NOT
+   fixed, flagged honestly.** Separately responsible for several of the 52 failures (seen directly
+   in job logs from both the most recent run and one from 2026-10-18, identical failure both
+   times). The check asserts specific substrings ("20169999", "University of Cape Town",
+   "TMRA/2019/04") survive a DOCX -> LibreOffice -> PDF -> `pdftotext -layout` round trip - **passes
+   reliably every time I ran it in this sandbox** (same LibreOffice 24.2.7.2 / poppler 24.02.0),
+   so this looks like a difference specific to GitHub's own `ubuntu-24.04` runner image (font
+   substitution, a different LibreOffice point release from whatever its own apt mirror resolves
+   to that day, or similar) that this sandbox cannot reproduce or iterate against. Not fixed this
+   pass - flagged for whoever next has reason to dig into the actual GitHub Actions runner
+   environment directly (e.g. by adding a debug step that prints `soffice --version`/`pdftotext -v`
+   to a CI run and comparing against this sandbox's versions above).
+
+**What this means going forward:** CI for the Python engine side of this project has not been a
+reliable pass/fail signal for most of its life - a real new regression could have been (and may
+still be) landing in the same red-badge noise as these two known issues, indistinguishable from
+them without actually reading the job logs, which is exactly how found-Finding-21 happened. The
+fix for cause 1 should make most future runs genuinely green; cause 2 will keep causing occasional
+red runs until someone with GitHub Actions runner access root-causes the exact LibreOffice/poppler
+version difference. Recommend: once a few runs after this fix come back green, treat **any** further
+`bridge-worker-ci.yml` failure as real and worth reading the job log for, rather than assuming
+"probably the known flake" - that assumption is exactly what let this go unnoticed for this long.
+
 ## This pass (2026-10-19, standing QA/robustness review - twenty-first run): `run_bridges.py`'s
 own documented usage example silently stopped every real bridge from running
 
