@@ -166,6 +166,48 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - seventeenth run): the app/ half of the codebase had no CI at all
+
+Orientation: one new commit since the last pass (`455d057`, the sixteenth run's own
+`staleSyncedProjectRows()` fix). Independently re-verified it before moving on: read
+`won-project-sync-logic.ts` and its wiring into `syncWonProjectToTeam()` in full, ran
+`won-project-sync-logic.test.ts` directly myself (6/6 pass, not just trusted from the commit
+message), confirmed the delete is correctly scoped (the `existingSynced` query it deletes from is
+already filtered to this `company_id` + `source_tender_pack_id`, and RLS would block a cross-tenant
+delete even if it weren't), and confirmed both the reassigned-away and newly-confirmed person's
+`/people/[id]` pages get revalidated. `npm run typecheck`/`lint` clean. No duplication, no overlap,
+no gap with my own fifteenth-run work - the sibling pass picked a genuinely different area
+(TypeScript action code) and its own write-up correctly cites and confirms the fifteenth run's
+`0066` fix rather than re-doing it.
+
+**Finding 17 (fixed): the entire `app/` half of this codebase has never had a CI job.** Checked
+directly - `.github/workflows/` holds exactly one workflow, `bridge-worker-ci.yml`, scoped to
+`engine/**` only (its own `paths:` filter). Nothing anywhere runs `npm run typecheck`, `npm run
+lint`, `npm run build`, or any of the 8 `*.test.ts` files (82 cases total, confirmed by running
+every one directly: `pack-review-logic.test.ts` 19, `signatory-logic.test.ts` 10, `won-project-
+sync-logic.test.ts` 6, `cidbGrading.test.ts` 5, `preferencePoints.test.ts` 10, `marketTrendLogic.
+test.ts` 9, `publicHolidays.test.ts` 11, `onboardingScan.test.ts` 12) anywhere automated - every
+"clean" claim in this file for the `app/` side has only ever been a session's own local run.
+Compounding this: the sixteenth run's own finding (this environment's Node silently finds 0 tests
+for a glob under a `[id]` bracketed directory via `node --test`) means that if anyone ever wired
+this up the documented way, 3 of these 8 files - including today's two most recent regression
+tests - would silently never run while the job still reported green.
+
+Fixed with a new workflow, `.github/workflows/app-ci.yml`, triggered on push to `main` touching
+`app/**`: `npm ci`, typecheck, lint, `npm run build` (confirmed needs no Supabase env vars - same
+as every session's own local verification all along), then every `*.test.ts` file found via
+`find` (literal paths, not `node --test`'s glob) and run directly with `node
+--experimental-strip-types`, failing the job if any one of them fails. No secrets required.
+**Verified the job logic itself actually catches a real failure**, not just that it's green by
+default: temporarily appended a deliberately-failing test to `cidbGrading.test.ts`, ran the exact
+loop the workflow uses, confirmed it printed `FAILED: ./lib/cidbGrading.test.ts` and exited 1, then
+restored the file (confirmed via `git status`/`git diff --stat` - no residue). YAML validated with
+`python3 -c "import yaml; yaml.safe_load(...)"`.
+
+**Not done (flagged for Sarel):** this only runs on push to `main`, matching the project's
+current no-PR-review workflow - it catches a regression after it's already on `main`, not before.
+Worth revisiting if/when PR review comes back into the workflow.
+
 ## This pass (2026-10-19, standing QA/robustness review - sixteenth run): a reassigned key person
 kept a stale "won project" on their CV record forever
 
