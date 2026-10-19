@@ -7,7 +7,15 @@ import { ComplianceReport } from "./compliance-report";
 import { GeneralTenderWorkspace } from "./general-workspace";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
-import { requestTenderCv, addTenderTask, ensureBriefingMilestone, ensureClosingMilestone, type TenderTaskStatus } from "./actions";
+import {
+  requestTenderCv,
+  addTenderTask,
+  ensureBriefingMilestone,
+  ensureClosingMilestone,
+  setTenderReminder,
+  syncWonProjectToTeam,
+  type TenderTaskStatus,
+} from "./actions";
 import { SiteNav } from "../../_components/SiteNav";
 import { SubmissionPack } from "./submission-pack";
 import { PackReview } from "./pack-review";
@@ -44,6 +52,15 @@ type TenderFacts = {
 type TenderPack = {
   id: string;
   status: string;
+  // Pipeline board fields (0021/0034) and the Won-project facts (0065) -
+  // read here only to surface "Submitted on ..." and the Won card, never to
+  // move the stage itself (that stays /pipeline's own job, moveTenderStage).
+  pipeline_stage: string;
+  submitted_at: string | null;
+  submitted_price_zar: number | string | null;
+  project_completed_at: string | null;
+  project_completion_value_rm: number | string | null;
+  project_completion_note: string | null;
 };
 
 type ProvenanceRow = {
@@ -200,7 +217,9 @@ export default async function TenderWorkspacePage({
   // 0001_init_schema.sql, so .maybeSingle() is correct, not a shortcut.
   const { data: pack, error: packError } = await supabase
     .from("tender_packs")
-    .select("id, status")
+    .select(
+      "id, status, pipeline_stage, submitted_at, submitted_price_zar, project_completed_at, project_completion_value_rm, project_completion_note",
+    )
     .eq("tender_id", id)
     .maybeSingle();
 
@@ -341,6 +360,16 @@ export default async function TenderWorkspacePage({
                 </div>
               )}
 
+              {/* The actual record of submission (0021's trigger stamps this
+                  the moment pipeline_stage first reaches submitted/won/lost)
+                  - separate from the submission-deadline reminder below,
+                  which is "remind us before it's due". */}
+              {tenderPack && ["submitted", "won", "lost"].includes(tenderPack.pipeline_stage) && tenderPack.submitted_at && (
+                <div style={{ fontSize: 13, color: "#15803D", fontWeight: 600, marginTop: 6 }}>
+                  Submitted on {new Date(tenderPack.submitted_at).toLocaleDateString()}
+                </div>
+              )}
+
               {tenderPack && provenance.length > 0 && (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid #F0EEE6" }}>
                   {confirmedRows.length > 0 && (
@@ -399,6 +428,7 @@ export default async function TenderWorkspacePage({
                 {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
                 <JumpLink href="#market" label="Market" />
                 <JumpLink href="#tasks-milestones" label="Tasks" />
+                {tenderPack && tenderPack.pipeline_stage === "won" && <JumpLink href="#won-project" label="Won project" />}
                 <JumpLink href="#activity" label="Notes & activity" />
                 {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
                 {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
@@ -519,6 +549,20 @@ export default async function TenderWorkspacePage({
             <MarketContext tender={{ id, buyer: tenderFacts.buyer, family: tenderFacts.family }} />
 
             <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
+
+            {/* Won & completed projects (0065, feature 2): once the pipeline
+                board has this tender at 'won', record the actual completed
+                project and sync it into each confirmed team member's own
+                CV-feeding project history. */}
+            {tenderPack && tenderPack.pipeline_stage === "won" && (
+              <WonProjectCard
+                tenderId={id}
+                tenderPack={tenderPack}
+                positions={positions}
+                assignments={assignments}
+                peopleName={peopleName}
+              />
+            )}
 
             {/* Notes + one chronological history of this tender (item 15; tender_comments, 0033). */}
             <ActivityLog tenderId={id} showAll={activity === "all"} />
@@ -678,6 +722,7 @@ const KIND_TAG: Record<string, string> = {
   briefing: "Briefing",
   clarification: "Clarification",
   submission: "Submission",
+  opening: "Opening",
 };
 
 function taskDaysLeft(dueDate: string | null): number | null {
@@ -762,7 +807,33 @@ function TaskTimeline({
         </div>
       )}
 
-      <form action={addTaskWithId} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: tasks.length > 0 ? "1px solid #F0EEE6" : undefined, paddingTop: tasks.length > 0 ? 14 : 0 }}>
+      {/* Submission deadline + bid opening reminders (0065, feature 1) - two
+          small, dedicated forms, deliberately NOT a kind dropdown bolted
+          onto the generic "Add a task" form below (that form's free-text
+          shape is an explicit spec decision, see 0009's header comment). A
+          SA public bid often has a separate, scheduled public bid-opening
+          event, sometimes days after closing, worth its own reminder. */}
+      <div style={{ borderTop: tasks.length > 0 ? "1px solid #F0EEE6" : undefined, paddingTop: tasks.length > 0 ? 14 : 0, marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", marginBottom: 8 }}>Submission &amp; opening</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <ReminderForm
+            tenderId={tenderId}
+            kind="submission"
+            label="Submission deadline reminder"
+            defaultDescription="Submit the tender"
+            existing={tasks.find((t) => t.kind === "submission") ?? null}
+          />
+          <ReminderForm
+            tenderId={tenderId}
+            kind="opening"
+            label="Bid opening reminder"
+            defaultDescription="Tender opening"
+            existing={tasks.find((t) => t.kind === "opening") ?? null}
+          />
+        </div>
+      </div>
+
+      <form action={addTaskWithId} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #F0EEE6", paddingTop: 14 }}>
         <input type="hidden" name="tender_id" value={tenderId} />
         <div style={{ flex: "1 1 220px", minWidth: 180 }}>
           <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Add a task</label>
@@ -802,6 +873,184 @@ function TaskTimeline({
           style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
         >
           Add task
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * One compact row of the "Submission & opening" mini-section (0065) - a
+ * description (editable, prefilled with a sensible default) + a date,
+ * upserted on (company_id, tender_id, kind) by setTenderReminder. Prefills
+ * from the existing tender_tasks row of that kind, if one is already set, so
+ * re-submitting corrects it rather than starting blank.
+ */
+function ReminderForm({
+  tenderId,
+  kind,
+  label,
+  defaultDescription,
+  existing,
+}: {
+  tenderId: string;
+  kind: "submission" | "opening";
+  label: string;
+  defaultDescription: string;
+  existing: TenderTask | null;
+}) {
+  return (
+    <form action={setTenderReminder} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+      <input type="hidden" name="tender_id" value={tenderId} />
+      <input type="hidden" name="kind" value={kind} />
+      <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+        <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>{label}</label>
+        <input
+          type="text"
+          name="description"
+          defaultValue={existing?.description ?? defaultDescription}
+          required
+          style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit" }}
+        />
+      </div>
+      <div>
+        <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Date</label>
+        <input
+          type="date"
+          name="due_date"
+          defaultValue={existing?.due_date ?? ""}
+          required
+          style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit" }}
+        />
+      </div>
+      <button
+        type="submit"
+        style={{
+          minHeight: 38,
+          padding: "0 14px",
+          borderRadius: 8,
+          background: existing ? "#FFFFFF" : "#16233B",
+          color: existing ? "#16233B" : "#FFFFFF",
+          fontSize: 12,
+          fontWeight: 600,
+          border: existing ? "1px solid #E5E1D5" : "none",
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {existing ? "Update" : "Set reminder"}
+      </button>
+    </form>
+  );
+}
+
+/**
+ * "Won - record the completed project" (0065, feature 2). Shown only once
+ * pipeline_stage reaches 'won' (/pipeline's moveTenderStage). Lists the
+ * confirmed key positions read-only first - so it's clear exactly whose
+ * project history this will touch before submitting - with any unconfirmed
+ * position shown as "Not confirmed" rather than silently left out, then the
+ * record/edit form, which calls syncWonProjectToTeam.
+ */
+function WonProjectCard({
+  tenderId,
+  tenderPack,
+  positions,
+  assignments,
+  peopleName,
+}: {
+  tenderId: string;
+  tenderPack: TenderPack;
+  positions: string[];
+  assignments: Assignment[];
+  peopleName: Map<string, string>;
+}) {
+  const completed = !!tenderPack.project_completed_at;
+  const rows = positions.map((code) => {
+    const a = assignments.find((x) => x.position_code === code) ?? null;
+    const personId = a?.confirmed_person_id ?? null;
+    return { code, name: personId ? a?.people?.name ?? peopleName.get(personId) ?? "Person on file" : null };
+  });
+  const completionValue = tenderPack.project_completion_value_rm;
+  const submittedPrice = tenderPack.submitted_price_zar;
+  const defaultValueRm =
+    completionValue != null
+      ? String(completionValue)
+      : submittedPrice != null
+        ? (Number(submittedPrice) / 1_000_000).toFixed(2)
+        : "";
+
+  return (
+    <div id="won-project" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Won - record the completed project</div>
+      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+        This updates each confirmed team member&apos;s own project history, so it&apos;s ready the next time you build their CV.
+      </div>
+
+      {completed && (
+        <div style={{ fontSize: 13, color: "#15803D", fontWeight: 600, marginBottom: 2 }}>
+          Completed {new Date(tenderPack.project_completed_at!).toLocaleDateString()}
+          {completionValue != null && `, valued at R${Number(completionValue).toLocaleString("en-ZA")}m`}
+        </div>
+      )}
+      {completed && tenderPack.project_completion_note && (
+        <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>{tenderPack.project_completion_note}</div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", margin: completed ? "10px 0 12px" : "0 0 12px" }}>
+        {rows.length === 0 && (
+          <div style={{ fontSize: 12, color: "#9A9684", padding: "6px 0" }}>No key positions on this pack yet.</div>
+        )}
+        {rows.map(({ code, name }) => (
+          <div key={code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "6px 0", borderTop: "1px solid #F0EEE6" }}>
+            <span style={{ color: "#16233B", fontWeight: 600 }}>{code}</span>
+            <span style={{ color: name ? "#15803D" : "#B45309", fontWeight: name ? 400 : 600 }}>{name ?? "Not confirmed"}</span>
+          </div>
+        ))}
+      </div>
+
+      <form
+        action={syncWonProjectToTeam}
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #F0EEE6", paddingTop: 12 }}
+      >
+        <input type="hidden" name="tender_id" value={tenderId} />
+        <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Completion date</label>
+          <input
+            type="date"
+            name="project_completed_at"
+            defaultValue={tenderPack.project_completed_at ?? ""}
+            required
+            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit" }}
+          />
+        </div>
+        <div>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Value (R million)</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            name="project_completion_value_rm"
+            defaultValue={defaultValueRm}
+            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit", width: 120 }}
+          />
+        </div>
+        <div style={{ flex: "1 1 220px", minWidth: 180 }}>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Note (optional)</label>
+          <input
+            type="text"
+            name="project_completion_note"
+            defaultValue={tenderPack.project_completion_note ?? ""}
+            placeholder="e.g. scope change, variation order, handover detail"
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 12, fontFamily: "inherit" }}
+          />
+        </div>
+        <button
+          type="submit"
+          style={{ minHeight: 38, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          {completed ? "Update & re-sync" : "Record & sync to team"}
         </button>
       </form>
     </div>
