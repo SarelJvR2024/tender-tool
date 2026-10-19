@@ -166,6 +166,77 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - fifteenth run): super admin portal, won-project sync, 12-commit demo-prep batch
+
+Picked up the 12-commit batch landed since the fourteenth run (`f2f8925..7da446f`): super admin
+customer/settings console (`0064`), submission/opening reminders + won-project CV sync (`0065`),
+auth-page hero copy rewrite, five rounds of UI-trust/polish fixes from whole-app review passes, a
+privacy notice, and a "Start free" path on every free tool. 44 files, 2444 insertions / 771
+deletions. `npm run build`/`typecheck`/`lint` all clean before and after my own fix below.
+
+**Finding 15 (fixed, severe - a bad migration would have broken nearly every tenant write in the
+app):** `0065`'s edit to the shared `tt_check_same_company()` trigger function (originally `0043`)
+added `if tg_table_name = 'projects' and new.source_tender_pack_id is not null then` - a combined
+condition reading a `projects`-only column off `NEW`. This trigger function is attached, via
+separate `CREATE TRIGGER` statements, to a dozen *other* tables with no `source_tender_pack_id`
+column at all (`cv_uploads`, `tender_tasks`, `tender_answers`, `financial_captures`,
+`generated_documents`, `pack_generation_jobs`, `tender_comments`, `tender_private_documents`,
+`generated_cvs`, `cv_extraction_results`, `person_role_eligibility`, `tender_pack_assignments`).
+`NEW` is a dynamically-typed `RECORD` there, and Postgres resolves `new.source_tender_pack_id`
+against the row's real composite type while validating the combined expression - it does **not**
+short-circuit on the false left-hand clause. Reproduced directly: replaying `0001`→`0065` on a
+scratch Postgres and running `engine/security/test_tenant_isolation.py` Part 2 crashed on the very
+first INSERT into a non-`projects` table sharing the trigger, with `ERROR: record "new" has no
+field "source_tender_pack_id"`. This would have broken almost every tenant write path in
+production the moment `0065` was applied to the live Supabase project - not a cosmetic bug.
+
+Fixed with a new migration, `0066_fix_tt_check_same_company_record_bug.sql` - a `CREATE OR REPLACE
+FUNCTION` restoring the exact same logic as a **nested IF** (`if tg_table_name = 'projects' then
+if new.source_tender_pack_id is not null then ... end if; end if;`), the same safe pattern this
+very function already uses for every other table-specific field check a few lines below it. A new
+migration rather than editing `0065` in place, per this project's own rule against editing an
+already-possibly-deployed migration file - `0065`'s DDL itself applied cleanly; only this
+function's runtime behaviour was broken.
+
+**Verification:** applied `0066` to the same scratch Postgres, re-ran `test_tenant_isolation.py`
+Part 2 end to end - `ALL PASSED`, no crash. Then manually drove the actual security property
+(not just "doesn't crash") directly in SQL: a `projects` insert with another company's
+`source_tender_pack_id` is still correctly rejected (`23514`, same error message as before); the
+same insert with the caller's own company's pack succeeds; an insert into a non-`projects` table
+sharing the trigger (`tender_tasks`) no longer throws the RECORD error. `test_gov_sources.py`
+re-run clean for safety (unrelated to this fix, confirms the scratch DB wasn't otherwise disturbed).
+
+**Finding 16 (fixed, marketing-policy violation, survived 3 dedicated review passes):** commit
+`2572ce6` rewrote the `AuthShell` hero headline (shown on `/login`, `/signup`,
+`/forgot-password`, `/reset-password`) to "Find government tenders, build **winning**
+submissions, never miss a deadline." `Marketing-Pricing-Strategy.md` §6.3 states explicitly:
+"**Don't promise 'win more tenders'**. Promise fewer avoidable losses." Commit `0a4921b` ("Final
+polish pass... marketing review findings") touched the very same `AuthShell.tsx` file for a
+different line (the proof points) and still left this headline in place, as did the two UI-review
+passes before it (`126b2ae`, `f697c08`) - three separate review passes on this exact file, none
+of which caught it. Fixed by changing "winning" to "complete" (`build complete submissions`),
+matching the house voice the landing page's own hero already uses ("nothing missing, nothing
+expired, nothing silently left blank") and the §6.3-suggested framing. Swept the rest of the
+batch's public-facing pages (`page.tsx`, `AuthShell.tsx`, all 4 `tools/*`, `privacy/page.tsx`) for
+the same and other banned phrases ("win more tenders", "AI writes your bid/methodology") -
+nothing else found. `npm run typecheck`/`lint` re-run clean after the one-word fix.
+
+**Everything else in the batch, read in full, no issues found:** `0064`'s admin-portal functions
+(every one gated by `is_platform_admin()` or restricted to the one deliberately-ungated
+`signups_enabled()` read) - manually verified myself against a replayed scratch DB: non-admin
+gets 0 rows / explicit refusal, same user after being added to `platform_admins` gets real data,
+removed again reverts to 0 rows. The UI-trust fixes (`126b2ae`: stop leaking raw Supabase errors
+and internal pipeline names to customers, add confirm-before-delete on every destructive button;
+`f697c08`/`0a4921b`: scroll-fade affordances, de-duplicated polling component now shared as
+`AutoRefresh.tsx`) are straightforward, low-risk UI polish - read the diffs, nothing incorrect.
+`ff66abc`'s SEO split (`page.tsx` + `*Client.tsx` per free tool) keeps the same client logic
+unchanged, confirmed by diff. `c8d6dd5`'s privacy notice states only what `POPIA-Security-Audit.md`
+already verified, and is explicit about what's still open (Information Officer, retention period,
+hosting region) rather than overclaiming - this narrows Known-gaps item (d) below, not closes it.
+`1785f33`'s "Start free" cross-links are inert UI additions, no logic.
+
+Tore down the scratch Postgres database and temp files afterward.
+
 ## This pass (2026-10-19, standing QA/robustness review - fourteenth run): 3 new discovery sources
 could silently merge an unrelated buyer's tender into theirs
 
