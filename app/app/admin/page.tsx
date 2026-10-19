@@ -98,7 +98,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </div>
         <section id="cv-document-stats" style={{ marginBottom: 36 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>CVs &amp; tender documents</h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+          <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
             Daily check: how many CVs we have on file, and - of the tender-specific CVs being worked for
             currently-open tenders - how many of those tenders we actually have the blank templates downloaded for.
             See migration 0068 for exactly what each number counts.
@@ -112,8 +112,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
               <StatCard label="CVs uploaded (source files on file)" value={cvStats.cv_uploads_total} color="#16233B" />
               <StatCard label="Generated CVs on file (ready)" value={cvStats.generated_cvs_ready} color="#16233B" />
-              <StatCard label="Generated CVs requested in total" value={cvStats.generated_cvs_total} color="#6B6758" />
-              <StatCard label="Open tenders with a CV being worked" value={cvStats.open_tender_cvs_count} color="#6B6758" />
+              <StatCard label="Generated CVs requested in total" value={cvStats.generated_cvs_total} color="#5B6472" />
+              <StatCard label="Open tenders with a CV being worked" value={cvStats.open_tender_cvs_count} color="#5B6472" />
               <StatCard label="Tenders with documents downloaded" value={cvStats.open_tender_cvs_docs_downloaded} color="#15803D" />
               <StatCard label="Tenders missing documents" value={cvStats.open_tender_cvs_docs_missing} color="#B45309" />
             </div>
@@ -204,8 +204,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
 function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "13px 16px" }}>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 3 }}>{label}</div>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "13px 16px" }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 3 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   );
