@@ -65,9 +65,15 @@ class _FrozenDay(real_datetime.datetime):
 
 def _run_on(store, day, release):
     """One detect()+save() cycle for `release`, as if it happened on 2026-10-<day>."""
+    return _run_at(store, day, 9, release)
+
+
+def _run_at(store, day, hour, release):
+    """Same as _run_on, but at a specific hour on 2026-10-<day> - lets a test place two
+    runs within the same calendar day (distinct hours) or the same minute (same hour)."""
     real_dt = tc.datetime.datetime
     tc.datetime.datetime = _FrozenDay
-    _FrozenDay._now = real_datetime.datetime(2026, 10, day, 9, 0, tzinfo=sh.SAST)
+    _FrozenDay._now = real_datetime.datetime(2026, 10, day, hour, 0, tzinfo=sh.SAST)
     try:
         snaps = store.load_snapshots([release["ocid"] or release["source"]])
         events, new_snaps = tc.detect([release], snaps)
@@ -171,11 +177,34 @@ def test_disagreement_dedupe_also_time_bucketed():
         shutil.rmtree(tmp)
 
 
+def test_same_day_multiple_real_oscillations_all_reported():
+    print("a closing date flipping A->B->A->B three real times within ONE calendar day "
+          "(not just weeks apart) - every occurrence still reported, not just the first two "
+          "(standing QA review, twenty-seventh run: day-level bucketing alone still collided "
+          "on this narrower, same-day version of the original bug)")
+    tmp = tempfile.mkdtemp()
+    try:
+        store = tc.LocalStore(os.path.join(tmp, "snaps.json"), os.path.join(tmp, "changes.json"))
+        A, B = "2026-11-01T12:00:00+02:00", "2026-11-15T12:00:00+02:00"
+        new0 = _run_at(store, 5, 8, _release(closing_date=A))
+        check("hour 8: first sighting reports nothing yet", new0 == [])
+        new1 = _run_at(store, 5, 9, _release(closing_date=B))
+        check("hour 9: A->B reported", len(new1) == 1 and new1[0]["new_value"] == B)
+        new2 = _run_at(store, 5, 10, _release(closing_date=A))
+        check("hour 10: B->A reported", len(new2) == 1 and new2[0]["new_value"] == A)
+        new3 = _run_at(store, 5, 11, _release(closing_date=B))
+        check("hour 11: A->B again, same day as hour 9's identical new_value - still reported, "
+              "not silently dropped", len(new3) == 1 and new3[0]["new_value"] == B)
+    finally:
+        shutil.rmtree(tmp)
+
+
 def main():
     test_oscillating_closing_date_every_occurrence_reported()
     test_same_day_retry_still_deduplicates()
     test_different_listings_never_collide_on_dedupe_key()
     test_disagreement_dedupe_also_time_bucketed()
+    test_same_day_multiple_real_oscillations_all_reported()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

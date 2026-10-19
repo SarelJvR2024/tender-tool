@@ -169,6 +169,44 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-seventh run): narrowed the twenty-sixth run's own accepted trade-off from a whole day's collision window to one minute's
+
+Orientation: one new commit since the last pass (`480a976`, Finding 24 above - the oscillating
+closing-date dedupe-key fix, plus the new `test_tender_changes.py`). Read the fix in full before
+accepting it, not just the diff: the author's own write-up was explicit and honest about a
+remaining trade-off - "a literal same-day flip-flop to the exact same value would still dedupe -
+an accepted, narrower trade-off against the larger fix a proper per-event history lookup in both
+stores would need." That honesty is exactly what made this worth checking further rather than
+filing it as closed.
+
+**Reproduced the accepted trade-off directly, not just reasoned about it:** a closing date flipping
+A→B→A→B three genuine times within ONE calendar day (hours 9/10/11, not days apart) still silently
+dropped the third occurrence under day-level bucketing - confirmed with a standalone repro script
+before touching anything, using the test file's own `_FrozenDay` pattern at hourly granularity.
+
+**Found the trade-off was narrower than it needed to be, not fundamental:** the day-bucket's whole
+justification is deduping two `detect()`/`save()` calls racing the same stale snapshot - but
+`watch_new_tenders.py` and `daily_digest.py` each call `tender_changes.run()` exactly once per
+scheduled run (no retry loop wraps either call site, confirmed by reading both), and this project's
+own established cadence is once-daily. So the only realistic way two calls ever race the same
+stale snapshot is an operator or an infra-level retry re-running the same script by hand - which
+happens within seconds to a couple of minutes, never requiring a whole calendar day's width to
+catch. Narrowed the bucket from the day to the minute: the real protection (two near-simultaneous
+calls still collapse to one event) is unchanged, while a genuine third same-day occurrence now
+only collides if it repeats within the same single minute as an earlier one - not a true fix for
+every conceivable case, but it turns "once per calendar day" into "once per minute," closing the
+practical gap rather than documenting around it.
+
+**Verified:** re-ran the existing `test_tender_changes.py` unchanged - all 4 original tests, 8
+checks, still pass under minute-bucketing (the "same-day retry" test's two calls are pinned to the
+exact same frozen minute, so it still correctly dedupes). Added a 5th test,
+`test_same_day_multiple_real_oscillations_all_reported`, reproducing the exact hour-9/10/11
+same-day triple-flip and asserting the third occurrence is now reported - confirmed failing
+against the pre-fix day-bucket logic (by temporarily reverting the one-line change and re-running),
+then passing after. Full regression: `test_gov_sources.py` and `test_digest_live.py` (the two
+other files importing this module) both still `ALL PASSED` / `0 failure(s)`, unchanged behaviour
+on every case neither of those files' own tests target this fix.
+
 ## This pass (2026-10-19, standing QA/robustness review - twenty-sixth run): a tender's closing
 date oscillating between two values could silently stop being reported
 

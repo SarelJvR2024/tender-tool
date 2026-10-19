@@ -109,15 +109,24 @@ def _event(r, change_type, summary, old=None, new=None, when=None, evidence=None
         # reproduced directly: a tender's closing date going A->B->A->B
         # across 4 runs only ever reported the first two changes, not the
         # fourth, identical-looking-but-genuinely-new extension). Bucketing
-        # by the day this run saw it still dedupes the one case this
+        # by the minute this run saw it still dedupes the one case this
         # mechanism actually exists for - calling detect()/save() again
-        # before the first call's save() persisted, so the next call still
-        # diffs against the same stale snapshot and would otherwise re-add
-        # the exact same event within the same run/retry window - without
-        # collapsing two genuinely separate occurrences of the same value
-        # that are days or weeks apart.
-        today = datetime.datetime.now(sh.SAST).date().isoformat()
-        key_extra = f"{today}:{json.dumps(new, sort_keys=True, default=str)}"
+        # before the first call's save() persisted (watch_new_tenders.py/
+        # daily_digest.py both call tender_changes.run() once per scheduled
+        # run, so a second call racing the same stale snapshot means an
+        # operator or a retry-on-failure wrapper re-ran the same script
+        # within seconds to a couple of minutes, never literally a whole
+        # calendar day later) - without needing a whole day's width, which
+        # would itself collide on a genuine third occurrence of the same
+        # value reverted/re-set more than once within one calendar day
+        # (confirmed by reproducing it: day-bucketing silently dropped a
+        # third same-day A->B->A->B flip the exact same way the original
+        # bug dropped a weeks-apart one). Minute-width keeps the real
+        # protection this exists for while making that residual collision
+        # need two genuinely separate occurrences within the same single
+        # minute, rather than the same calendar day, to still happen.
+        minute = datetime.datetime.now(sh.SAST).strftime("%Y-%m-%dT%H:%M")
+        key_extra = f"{minute}:{json.dumps(new, sort_keys=True, default=str)}"
     return {
         "dedupe_key": f"{key}|{change_type}|{key_extra}"[:600],
         "release_key": key, "ocid": r.get("ocid"), "source": r.get("source") or "unknown",

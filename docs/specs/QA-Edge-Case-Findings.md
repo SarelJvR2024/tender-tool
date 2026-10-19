@@ -1555,3 +1555,29 @@ regression: `test_gov_sources.py` (`tender_changes` section + everything else) -
 unchanged. `engine/notify/test_digest_live.py` (reads `tender_changes.py` via `daily_digest.py`'s
 listing-changes section) - `0 failure(s)`. `python3 -m py_compile tender_changes.py
 test_tender_changes.py` clean.
+
+## 2026-10-19 (twenty-seventh run): narrowing Finding 24's own accepted trade-off from a day to a minute
+
+Finding 24's own write-up was explicit about a remaining gap: "a literal same-day, same-value
+flip-flop would still dedupe (accepted - rare...)." Reproduced it directly before accepting that
+framing - a closing date flipping A->B->A->B three genuine times within one calendar day (hours
+9/10/11, not days apart) still silently dropped the third occurrence under day-level bucketing,
+the same failure mode Finding 24 fixed, just narrower in scope.
+
+Checked whether the day-wide bucket was actually necessary for the protection it exists for:
+`watch_new_tenders.py` and `daily_digest.py` each call `tender_changes.run()` exactly once per
+scheduled run, with no retry loop at either call site, and this project's own cadence is once
+daily - so the only realistic way two calls race the same stale snapshot is a manual or
+infra-level retry of the same script, which happens within seconds to a couple of minutes, never
+a whole calendar day later. Narrowed the bucket from the day to the minute: the real protection
+(two near-simultaneous calls still collapse to one event) is unchanged, the residual collision
+risk now needs two genuinely separate occurrences within the same single minute rather than the
+same calendar day - closing the practical gap rather than documenting around it.
+
+**Verification:** added `test_same_day_multiple_real_oscillations_all_reported` to
+`test_tender_changes.py` (now 5 tests, 10 checks) - reproduces the exact hour-9/10/11 same-day
+triple-flip. Confirmed it actually catches the regression: temporarily reverted the one-line
+bucket-width change back to day-level and re-ran - the new test's third assertion failed exactly
+as expected (`FAIL hour 11: ...`); restored the fix and re-ran clean. All 4 pre-existing tests
+still pass unchanged under minute-bucketing. Full regression: `test_gov_sources.py` -
+`ALL PASSED`; `engine/notify/test_digest_live.py` - `0 failure(s)`.
