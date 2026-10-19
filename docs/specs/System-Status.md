@@ -144,6 +144,8 @@ bridged by `engine/general/process_general_jobs.py`.
 7. **`tender_requirements`' SETUP facts (managerial flag, tender project type, DS specialism description) are unseeded**, except for tenders whose templates went through the intake (manual load, 2026-10-17), which now get SETUP positions, descriptions and the Man/Non-Man flag written to `tender_requirements` from the uploaded workbook; so the SANRAL score estimate is wider than it needs to be, and every DS1 shows role fit as "Confirm by hand" (a DS role can't be matched to a tag without its specialism). `tenders.evaluation_rules` is also unseeded until `engine/seed_tender_evaluation_rules.py --write` runs against a live project. The vault-field half of this gap (TCS PIN, insurance, ISO, bank-letter date, B-BBEE proof) is **closed** by `0014`. Two related items remain: Klipcorp's ISO 9001 certificate number and expiry are still unknown, and CSD registration validity has no column.
 8. **Uploads are capped at ~4.4 MB** (Server Action body `4.5mb`, which is Vercel's hard 413 limit) for CVs, experience and the vault. **Narrowed this pass**: the pattern to fix it now exists and is proven — `app/app/tenders/new/manual-tender-form.tsx` uploads straight from the browser to the `tender-documents` bucket via the Supabase client (`supabase.storage.from(...).upload(...)`, RLS-gated by `manualPrefix()`), never touching a Server Action body at all. That's a real answer to "is it worth building" (the open item below) for one path; the other three (CVs, experience, vault) still go through a capped Server Action and haven't been migrated to this pattern yet.
 9. **Narrowed 2026-10-18 (`a232e77`, Sarel's own commit — the first human-authored commit in this whole project): a live Supabase project and a Vercel deployment now exist.** Sarel applied every migration through `0062` to the real project and got a green Vercel build, after fixing three build-breaking issues the sandbox's own `next build` had never caught (no Supabase env vars here means those prerender failures never surfaced locally): `/login` instantiating the Supabase client at component-body top level (fails prerender when env vars aren't visible at build time), `/tools/deadline-calculator` reading `new Date()` during render (Next 16 rejects non-deterministic prerender output), and no `engines.node` pin in `package.json`. All three independently re-verified this pass: `npm run build` now completes cleanly end to end in this sandbox too (29/29 static pages, `/login` and all 3 `/tools/*` routes now genuinely static) — the "`/login`'s pre-existing prerender gap" caveat that every single pass's own build verification has carried all session is gone. **What this changes:** nothing built so far has been tested against real Supabase rows, and this pass still has no live credentials to do that itself — scratch-Postgres replay (now through `0063`) stays the verification method here. What it means going forward: the next person with real project access can actually click through the app, and any gap or bug that was "unverified against live rows" throughout this file can start being closed for real rather than only in a replayed schema. Decide, when there's time: should every pass's own verification note explicitly say "schema-replay only, not live" vs. "confirmed on the live project" now that the distinction is real and not purely theoretical.
+
+    **Narrowed further 2026-10-19 (twentieth run): 5 migrations are committed but not yet applied live, and this just caused a real user-facing error.** `0063`–`0066`/`0068` (5 files - `0063` onboarding document scan, `0064` super admin console, `0065` submission/opening reminders + won-project sync, `0066` this session's own trigger-bug fix, `0068` CV/document stats; `0067` was never created, a benign gap) were added after Sarel's `0062` cutoff above and have not been confirmed applied to the live project. Direct evidence, not inference: commit `8146259`'s own message says tonight's live E2E walkthrough hit a raw Postgres error on the Tender Workspace, `column tender_packs.project_completed_at does not exist` - that column only exists from `0065` onward, so the live database is still on `0062` or close to it. The commit fixed the symptom (no longer leaks the raw SQL error to the user - now a generic message + server-side log) but **not the cause**: the won-project CV-sync feature, the super-admin customer/CV-stats console, and the opening-reminder task kind are all still live-broken (or entirely inert) until these migrations are actually run against the real Supabase project. This needs Sarel's own Supabase SQL editor / migration access - no session in this sandbox has live credentials to do it. Nothing here is new schema risk (`0066` already fixes the one bug that would have shipped broken; everything else replays clean on `0001`→`0068` in this pass's own scratch-Postgres verification) - purely an apply-it-live step.
 10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
 11. ~~A hard-killed worker leaves a CV job stuck in `generating`~~ — **fixed this pass.** Migration `0019_generated_cvs_claimed_at.sql` adds `generated_cvs.claimed_at` (set the moment a worker claims a row), and `process_cv_jobs.py` gained `fail_stale_jobs()`, same shape and 60-minute threshold as `process_pack_jobs.py`'s own, called at the top of every `poll_once()`. Verified: migration replays cleanly as part of the full `0001`→`0019` chain; `python3 engine/cv/process_cv_jobs.py --self-test` still passes unchanged; a direct functional test (monkeypatched `supabase_request`, no live Supabase needed) confirmed `fail_stale_jobs()` fails only a job claimed >60 minutes ago and leaves a 5-minute-old job and an unclaimed job alone.
@@ -165,6 +167,50 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-19, standing QA/robustness review - twentieth run): migration 0068 verified, a stale migration-number reference fixed, and a confirmed live/committed schema gap
+
+Orientation: 4 new commits since the last pass (`fd7b9c4` the `--no-fetch-documents` fix,
+`edaa9cd` CV/document stats migration `0068` + admin UI, `0f47c70` the full cream→white palette
+rewrite across 64 files, `8146259` sign-out + raw-SQL-error-leak fix + 2 leftover cream
+`ScrollFade` colors). Independently re-verified `fd7b9c4` rather than trusted: confirmed
+`gov_sources.releases_for_watch()` already had a `with_documents` kwarg the digest just never
+passed, ran `engine/notify/test_digest_live.py` directly - `0 failure(s)`.
+
+**`0068` (CV/document stats) - set up scratch Postgres, replayed all 68 migrations clean, then
+tested the function directly rather than trusting "confirmed no logical overlap" from the commit
+message:** a non-admin authenticated user gets no row (correctly gated by `is_platform_admin()`,
+same pattern as `0064`); a user added to `platform_admins` gets a row with hand-verified correct
+counts (1 CV upload, 2 generated CVs both ready, 2 open tenders with a tender-specific CV, 1 with
+`tender_documents` on file, 1 without). No security or correctness issue found in the SQL itself.
+
+**Finding 19 (fixed, minor): stale migration-number reference in `app/app/admin/page.tsx`.**
+`edaa9cd`'s own message explains the function was renamed from the originally-authored `0066` to
+`0068` mid-PR (another migration had already claimed `0066` on `main` by the time it landed) - but
+the renumber only touched the SQL file. The admin page's own code comment and, more importantly,
+its **user-facing text on `/admin` itself** ("See migration 0068 for exactly what each number
+counts") still said `0066` - which is actually this session's own, unrelated trigger-bug fix.
+Anyone who followed that pointer, Sarel included, would land on the wrong file. Fixed both
+occurrences; swept the rest of the batch for the same mistake (`grep` for `0066` across
+`app/app`), found none.
+
+**Finding 20 (not a code bug - a real operational gap, needs Sarel): migrations `0063`-`0068` are
+committed but evidence says not yet applied to the live Supabase project.** `8146259`'s own commit
+message reports tonight's live E2E walkthrough hit a raw Postgres error on the Tender Workspace -
+`column tender_packs.project_completed_at does not exist`. That column only exists from `0065`
+onward; its absence on the live database is direct, first-hand evidence the live project is still
+at or near `0062` (the cutoff Sarel confirmed applying, per Known-gaps item 9 above), five
+migrations behind what's on `main`. The commit fixed the symptom (no more raw SQL leaked to the
+user - generic message + server-side log) but not the cause: the won-project CV-sync feature, the
+super-admin customer/CV-stats console, and the opening-reminder task kind are still live-broken or
+inert until these are actually run against the real project. Written up in Known-gaps item 9
+(narrowed) rather than as a new numbered gap, since it's the same "committed vs. actually live"
+distinction that gap already tracks - this is the first concrete, dated confirmation of it since
+`0062`. Nothing here is new schema risk on this end (`0066` already fixes the one bug that would
+have shipped broken; `0001`→`0068` replays clean) - purely Sarel's own apply-it-live step, which
+no session in this sandbox can do without his live credentials.
+
+Full detail of `fd7b9c4`'s own fix: `QA-Edge-Case-Findings.md`, "nineteenth run," entry below.
 
 ## This pass (2026-10-19, standing QA/robustness review - nineteenth run): `--no-fetch-documents`
 promised "much faster" and quietly wasn't

@@ -57,7 +57,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   // System alerts (migration 0042): every open alert, plus the most recently
   // resolved ones for reference. Owner-only by RLS, same as the harness runs.
-  // CV / document stats (migration 0066): Sarel's daily "how many open CVs
+  // CV / document stats (migration 0068): Sarel's daily "how many open CVs
   // / did we get the tender documents" check, computed server-side rather
   // than left as a one-off query - see that migration's header for exactly
   // what each number counts.
@@ -101,7 +101,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
             Daily check: how many CVs we have on file, and - of the tender-specific CVs being worked for
             currently-open tenders - how many of those tenders we actually have the blank templates downloaded for.
-            See migration 0066 for exactly what each number counts.
+            See migration 0068 for exactly what each number counts.
           </p>
           {cvStatsError && (
             <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
