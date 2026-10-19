@@ -360,3 +360,166 @@ export async function ensureBriefingMilestone(tenderId: string, briefingDate: st
     { onConflict: "company_id,tender_id,kind", ignoreDuplicates: true }
   );
 }
+
+const REMINDER_KINDS = ["submission", "opening"] as const;
+export type TenderReminderKind = (typeof REMINDER_KINDS)[number];
+function isReminderKind(v: unknown): v is TenderReminderKind {
+  return typeof v === "string" && (REMINDER_KINDS as readonly string[]).includes(v);
+}
+
+/**
+ * Submission deadline + bid opening reminders (migration 0065). Deliberately
+ * NOT a kind dropdown on the generic "Add a task" form above (that form's
+ * own free-text shape is an explicit spec decision, see 0009's header
+ * comment) - this is its own compact "Submission & opening" mini-section
+ * with two small forms, one per kind. Unlike the auto-seed helpers above
+ * (ignoreDuplicates, never overwrite a human edit), this upsert always
+ * overwrites: the person is explicitly setting or correcting their own
+ * reminder, on the same (company_id, tender_id, kind) unique index (0009/
+ * 0048) 'closing'/'briefing' already use.
+ *
+ * tender_tasks.due_date is a plain date column with no time field - a time
+ * or venue detail (e.g. "at 10:00, Head Office") is folded into the
+ * free-text, editable description, same pattern ensureBriefingMilestone
+ * above already uses for the briefing time.
+ */
+export async function setTenderReminder(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+
+  const tenderId = formData.get("tender_id") as string | null;
+  const kindRaw = formData.get("kind") as string | null;
+  const description = (formData.get("description") as string | null)?.trim();
+  const dueDate = (formData.get("due_date") as string | null) || null;
+
+  if (!tenderId) redirect("/tenders");
+  if (!isReminderKind(kindRaw)) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Unknown reminder type.")}#tasks-milestones`);
+  }
+  if (!description) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("A reminder needs a description.")}#tasks-milestones`);
+  }
+  if (!dueDate) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("A reminder needs a date.")}#tasks-milestones`);
+  }
+
+  const { error } = await supabase.from("tender_tasks").upsert(
+    {
+      company_id: companyId,
+      tender_id: tenderId,
+      description,
+      due_date: dueDate,
+      kind: kindRaw as TenderReminderKind,
+      is_standard: true,
+    },
+    { onConflict: "company_id,tender_id,kind" },
+  );
+  if (error) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}#tasks-milestones`);
+  }
+
+  revalidatePath(`/tenders/${tenderId}`);
+  redirect(`/tenders/${tenderId}#tasks-milestones`);
+}
+
+/**
+ * "Won - record the completed project" (migration 0065, feature 2). Once a
+ * tender's pipeline_stage reaches 'won' (0021, set from /pipeline), this
+ * records what the actually-completed project looked like on the won
+ * tender_pack row (project_completed_at/value/note) and syncs it into each
+ * confirmed key person's own project history - the same `projects` table
+ * (0001) the People page's CV generation already reads - so the next CV
+ * built for them includes it without anyone retyping it there.
+ *
+ * Re-running after a correction (a later, truer completion value) upserts on
+ * (person_id, source_tender_pack_id, position_code) - 0065's own partial
+ * unique index - so it updates the same synced rows instead of duplicating
+ * them. A confirmed position with nobody assigned is simply skipped (there
+ * is no person to sync to); the UI lists it as "Not confirmed" so that is
+ * never a silent gap.
+ */
+export async function syncWonProjectToTeam(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+
+  const tenderId = formData.get("tender_id") as string | null;
+  const tenderPackId = formData.get("tender_pack_id") as string | null;
+  if (!tenderId) redirect("/tenders");
+  const fail = (msg: string) => redirect(`/tenders/${tenderId}?error=${encodeURIComponent(msg)}#won-project`);
+  if (!tenderPackId) fail("Tender pack not found.");
+
+  const completedAt = (formData.get("project_completed_at") as string | null) || null;
+  if (!completedAt) fail("A completion date is required.");
+
+  const valueRaw = (formData.get("project_completion_value_rm") as string | null)?.trim();
+  let value: number | null = null;
+  if (valueRaw) {
+    value = Number(valueRaw);
+    if (!Number.isFinite(value) || value < 0) fail("Completion value must be a positive number (R millions).");
+  }
+  const note = (formData.get("project_completion_note") as string | null)?.trim() || null;
+
+  // Re-derive the gate from the DB, not the submitted fields - same
+  // reasoning requestSubmissionPack above uses for its own hard stops.
+  const { data: packRow, error: packErr } = await supabase
+    .from("tender_packs")
+    .select("id, tender_id, pipeline_stage")
+    .eq("id", tenderPackId!)
+    .eq("company_id", companyId)
+    .maybeSingle();
+  if (packErr) fail(packErr.message);
+  if (!packRow || packRow.tender_id !== tenderId) fail("Tender pack not found.");
+  if (packRow!.pipeline_stage !== "won") fail("This tender hasn't been marked Won on the pipeline board yet.");
+
+  const { error: updErr } = await supabase
+    .from("tender_packs")
+    .update({
+      project_completed_at: completedAt,
+      project_completion_value_rm: value,
+      project_completion_note: note,
+    })
+    .eq("id", tenderPackId!)
+    .eq("company_id", companyId);
+  if (updErr) fail(updErr.message);
+
+  const [{ data: assignmentRows }, { data: tenderRow }, { data: reqRows }] = await Promise.all([
+    supabase.from("tender_pack_assignments").select("position_code, confirmed_person_id").eq("tender_pack_id", tenderPackId!),
+    supabase.from("tenders").select("contract_no, title").eq("id", tenderId!).maybeSingle(),
+    supabase.from("tender_requirements").select("position_code, position_description").eq("tender_id", tenderId!),
+  ]);
+
+  const clientAndNumber = tenderRow?.contract_no || tenderRow?.title || "Tender";
+  const descByCode = new Map(
+    (reqRows ?? []).map((r) => [r.position_code as string, r.position_description as string | null]),
+  );
+
+  const confirmed = (assignmentRows ?? []).filter(
+    (a): a is { position_code: string; confirmed_person_id: string } => !!a.confirmed_person_id,
+  );
+  if (confirmed.length > 0) {
+    const rows = confirmed.map((a) => ({
+      company_id: companyId,
+      person_id: a.confirmed_person_id,
+      client_and_number: clientAndNumber,
+      position_code: a.position_code,
+      position_held: descByCode.get(a.position_code) || a.position_code,
+      value_rm: value,
+      end_date: completedAt,
+      source_tender_pack_id: tenderPackId,
+    }));
+    const { error: syncErr } = await supabase
+      .from("projects")
+      .upsert(rows, { onConflict: "person_id,source_tender_pack_id,position_code" });
+    if (syncErr) fail(syncErr.message);
+
+    // CV-feeding history lives on each person's own People page -
+    // revalidate every synced person's page, same precedent as
+    // app/app/people/actions.ts's saveProject revalidating "/people/<id>".
+    for (const a of confirmed) revalidatePath(`/people/${a.confirmed_person_id}`);
+  }
+
+  revalidatePath("/people");
+  revalidatePath(`/tenders/${tenderId}`);
+  revalidatePath("/pipeline");
+  redirect(`/tenders/${tenderId}#won-project`);
+}
