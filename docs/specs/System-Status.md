@@ -199,6 +199,46 @@ the project's history (run #56; the prior 52 of 53 were all `failure`). Both its
 `container-build` jobs passed. Full detail: `QA-Edge-Case-Findings.md`, "twenty-fourth run"
 (Finding 23).
 
+## This pass (2026-10-19, standing QA/robustness review - twenty-fifth run): the last known CI gap is closed, independently re-confirmed - and a trivial navigability fix
+
+Orientation: three new commits since the last pass. `c22ef0c` (one-line jump-nav link for the new
+general-tender Pack Review, gated the same way the existing "Pack" link already is) - trivial,
+correct, confirmed by reading the diff and re-running typecheck/lint/build. `ec7e49b` and `27ec5c2`
+together close out the one remaining item from my own twenty-second-run write-up: the
+`test_extract_cv_fields.py` check I had diagnosed as "passes reliably in this sandbox... a GitHub
+Actions runner-specific difference I can't reproduce."
+
+**Root cause, now correctly identified by the sibling session:** the check was never actually
+environment-specific - it was a bare `"TMRA/2019/04" in t` substring test with no whitespace
+normalisation at all, despite its own adjacent comment claiming otherwise. `extract_cv_fields.py`
+already has the real, production-used tolerant matcher this comment described -
+`evidence_in_text()`, the same function real CV-extraction quote-verification runs on every
+AI-proposed field - just never applied to this one test assertion. A different LibreOffice point
+release on GitHub's runner wrapping the same table cell a few pixels differently was a real
+difference, but the test was checking something stricter than production itself ever requires of
+real data.
+
+**Independently re-verified, not trusted:** read `evidence_in_text()`/`_norm()` in
+`extract_cv_fields.py` in full - a genuine three-tier matcher (exact normalised match, then a
+letters+digits-squeezed match gated at ≥8 characters to avoid trivial over-matching, then a
+4+-character-chunk match) - not a weakening invented just to make this test pass. Ran my own three
+cases directly against it, independent of the commit's own claimed verification: a genuinely
+unrelated text block is correctly rejected; the documented benign table-wrap is correctly
+tolerated; a wrong-but-similar reference number (`TMRA/2019/99` vs `TMRA/2019/04`) is correctly
+rejected, not loosely accepted. Ran `engine/cv/test_extract_cv_fields.py` directly myself -
+`ALL PASSED` (after restoring this sandbox's own `anthropic` package, which had gone missing from
+this environment since an earlier pass - unrelated to this fix, a purely local gap).
+
+**Confirmed the real-GitHub-green claim myself, not just read it:** pulled run id `39255442921`
+directly (`mcp__github__actions_get` + `list_workflow_jobs`) - `smoke-test` and `container-build`
+both `conclusion: success`, and checked every one of the 26 individual steps in `smoke-test`
+(not just the job's own rolled-up conclusion): all 26 read `success`. This is a complete,
+step-by-step confirmation, not just a green badge - `bridge-worker-ci.yml` is now a real signal
+for the first time in this project's history. `c22ef0c`'s own `app-ci.yml` run (id `39253082886`)
+is also confirmed green.
+
+No issues found in any of the three commits. No action needed.
+
 ## This pass (2026-10-19, standing QA/robustness review - twenty-third run): two well-built, independently re-verified commits - no issues found
 
 Orientation: two new commits since the last pass, both from the sibling session that's been
