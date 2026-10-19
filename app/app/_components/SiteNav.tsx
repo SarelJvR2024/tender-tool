@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
+import { signOut } from "./actions";
 
 type NavKey = "dashboard" | "pipeline" | "discovery" | "company" | "people" | "experience" | "admin";
 
@@ -75,17 +76,37 @@ export async function SiteNav({ active }: { active: NavKey }) {
           <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
         </Link>
         {user?.email && (
-          <div
-            style={{
-              fontSize: 13,
-              color: "rgba(255,255,255,0.65)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              maxWidth: 220,
-            }}
-          >
-            {user.email}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 13,
+                color: "rgba(255,255,255,0.65)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                maxWidth: 220,
+              }}
+            >
+              {user.email}
+            </div>
+            <form action={signOut}>
+              <button
+                type="submit"
+                style={{
+                  fontSize: 12,
+                  fontWeight: 600,
+                  color: "rgba(255,255,255,0.75)",
+                  background: "transparent",
+                  border: "1px solid rgba(255,255,255,0.25)",
+                  borderRadius: 7,
+                  padding: "6px 11px",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                Sign out
+              </button>
+            </form>
           </div>
         )}
       </div>

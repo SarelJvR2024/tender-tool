@@ -226,7 +226,7 @@ export default async function PipelinePage({
           </div>
           {/* Right-edge fade: the only hint, on narrower viewports, that
               Won/Lost sit off-screen to the right. */}
-          <ScrollFade fadeColor="246, 245, 241" minWidthToHide={1180} />
+          <ScrollFade fadeColor="255, 255, 255" minWidthToHide={1180} />
         </div>
       </div>
     </div>

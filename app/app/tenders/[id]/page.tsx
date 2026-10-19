@@ -224,6 +224,8 @@ export default async function TenderWorkspacePage({
     .eq("tender_id", id)
     .maybeSingle();
 
+  if (packError) console.error("tender_packs select failed for tender", id, packError);
+
   const tenderPack = pack as TenderPack | null;
 
   let provenance: ProvenanceRow[] = [];
@@ -446,12 +448,12 @@ export default async function TenderWorkspacePage({
                     {showSubmissionPack && <JumpLink href="#form-b7" label="Form B7" />}
                     {showSubmissionPack && <JumpLink href="#pack-review" label="Pack review" />}
                   </div>
-                  <ScrollFade fadeColor="246, 245, 241" minWidthToHide={99999} hint={false} />
+                  <ScrollFade fadeColor="255, 255, 255" minWidthToHide={99999} hint={false} />
                 </div>
               </div>
             )}
 
-            {packError && <ErrorBanner message={`Could not load this company's pack for this tender: ${packError.message}`} />}
+            {packError && <ErrorBanner message="Couldn't load this tender's pack - try refreshing. If it keeps happening, let us know." />}
 
             {!tenderPack && !packError && (
               <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
