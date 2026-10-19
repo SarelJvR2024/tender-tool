@@ -166,6 +166,35 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-19, standing QA/robustness review - nineteenth run): `--no-fetch-documents`
+promised "much faster" and quietly wasn't
+
+Picked up the sibling QA pass's own CI work (`app-ci.yml`, built directly off my sixteenth-run
+finding about `node --test`'s bracketed-path quirk - now every `*.test.ts` file actually runs in
+CI) and picked `engine/notify/daily_digest.py` for this run - "notify" has only had its date-crash
+fixes touched before (sixth run), never a dedicated pass, and this script is unusually
+heavily pre-tested already (`test_digest_live.py` covers cross-tenant isolation, seen-store
+transitions, role filtering), so the odds favoured a real subtle gap over a repeat.
+
+**Finding 19 (fixed, moderate):** `--no-fetch-documents`'s own help text promises "much faster,
+useful for a quick local run," but it only ever reached `score_per_company()`'s PDF-text download
+used for scoring - `fetch_releases()` called `gov_sources.releases_for_watch(names)` with no
+`with_documents` argument at all, so every source's own slow per-release document/detail-page
+read (SANRAL's ~85 detail-page fetches at 1s apart, Eskom/Transnet's per-tender document lists)
+ran in full regardless of the flag. Not a data-correctness bug - a documented behaviour that
+silently never did what it said. Fixed by threading `with_documents` through `fetch_releases()`
+into `gov_sources.releases_for_watch()`; updated `test_digest_live.py`'s own stub of
+`fetch_releases` (which would otherwise raise `TypeError` on the new keyword argument) and added a
+new check proving the flag actually reaches `gov_sources` now, with a spy rather than a read-the-
+code assumption. Also traced the role-visibility matrix and every cross-tenant isolation path in
+this file closely and found them sound - including confirming the viewer's "most urgent tender
+update" summary relies on `pending_digest_updates()`'s own pre-sort by urgency rather than an
+unsorted `items[0]`, which would have been a real bug had it not already been pre-sorted.
+
+**Verification:** `test_digest_live.py` - all existing checks plus 2 new ones, 0 failures.
+`test_gov_sources.py` unaffected, still clean. Full detail: `QA-Edge-Case-Findings.md`,
+"nineteenth run."
+
 ## This pass (2026-10-19, standing QA/robustness review - eighteenth run): my own new CI job was red on GitHub from the start - a real root cause, not a flake
 
 Orientation: one new commit since the last pass (`2f3d295`, a jump-nav scroll-affordance fix -

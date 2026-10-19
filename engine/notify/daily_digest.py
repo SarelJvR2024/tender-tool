@@ -214,17 +214,29 @@ def save_readiness_seen_db(client, seen, loaded, owners):
 # for both signals so the OCDS feed is only ever fetched once per run.
 # ---------------------------------------------------------------------------
 
-def fetch_releases(days=14, sources="all"):
+def fetch_releases(days=14, sources="all", with_documents=True):
     """The same government sources Discovery reads (gov_sources.py; the
     OCDS-only read with sources='ocds'), published in the last `days` days.
-    Returns (releases, gov_sources result or None)."""
+    Returns (releases, gov_sources result or None).
+
+    with_documents threads through to gov_sources.releases_for_watch()'s own
+    per-release document/detail-page reads (SANRAL's ~85 detail pages at 1s
+    apart, Eskom/Transnet's per-tender document lists, etc.) - the SLOW part
+    of a run, separate from and in addition to score_per_company()'s own
+    fan_out(fetch_document=...) (the PDF text download used for scoring
+    itself). Before this was threaded through, --no-fetch-documents (whose
+    own help text promises "much faster, useful for a quick local run") only
+    ever skipped the second of those two document reads - every gov_sources
+    detail-page fetch still ran in full regardless of the flag, so a "quick"
+    local run was never actually quick. QA-Edge-Case-Findings.md, 2026-10-19
+    (nineteenth run)."""
     today = datetime.date.today()
     date_from = (today - datetime.timedelta(days=days)).isoformat()
     if sources == "ocds":
         raw = etenders_national.fetch_releases(date_from, today.isoformat())
         return [etenders_national.normalize(r) for r in raw], None
     names = gov_sources.ALL_SOURCES if sources == "all" else [x.strip() for x in sources.split(",")]
-    releases, res = gov_sources.releases_for_watch(names)
+    releases, res = gov_sources.releases_for_watch(names, with_documents=with_documents)
     return gov_sources.published_since(releases, date_from), res
 
 
@@ -617,7 +629,7 @@ def main():
 
     print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
           f"{'y' if len(companies) == 1 else 'ies'}, each from its own profile...")
-    releases, gov_res = fetch_releases(args.days, args.sources)
+    releases, gov_res = fetch_releases(args.days, args.sources, with_documents=not args.no_fetch_documents)
     scored_by_company = score_per_company(releases, companies,
                                           fetch_documents=not args.no_fetch_documents)
     # Listing changes on the same read: recorded in the change store (Supabase

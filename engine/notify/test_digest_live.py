@@ -38,6 +38,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "engine", "discovery"))
 sys.path.insert(0, os.path.join(ROOT, "engine", "compliance"))
 import daily_digest  # noqa: E402
+REAL_FETCH_RELEASES = daily_digest.fetch_releases  # saved before the test below replaces it with a stub
 import company_profiles  # noqa: E402
 import watch_deadlines  # noqa: E402
 import test_watch_deadlines_urgency as pgrest  # noqa: E402  (its in-memory fake_request)
@@ -158,7 +159,8 @@ def main():
         return real_one(client, company_id, company)
     company_profiles.all_company_profiles = spy_all
     company_profiles.profile_from_company_rows = spy_one
-    daily_digest.fetch_releases = lambda days=14, sources="all": ([dict(r) for r in fanout.RELEASES], None)
+    daily_digest.fetch_releases = lambda days=14, sources="all", with_documents=True: (
+        [dict(r) for r in fanout.RELEASES], None)
 
     tmp = tempfile.mkdtemp()
     out_path = os.path.join(tmp, "digest.json")
@@ -238,6 +240,32 @@ def main():
     check([(c["previous_status"], c["status"]) for c in digests3["pieter@architects.example"]["readiness_changes"]] == [("missing", "confirmed")]
           and [r["status"] for r in ROWS["digest_readiness_seen"]] == ["confirmed"],
           "a status change is reported once (missing -> confirmed) and the stored status updated")
+
+    print("--no-fetch-documents actually reaches gov_sources (QA-Edge-Case-Findings.md, nineteenth run)")
+    # Before this fix, --no-fetch-documents's own help text promised "much
+    # faster, useful for a quick local run", but fetch_releases() never
+    # passed it on to gov_sources.releases_for_watch() - every source's own
+    # slow per-release document/detail-page read (SANRAL's ~85 detail pages
+    # at 1s apart, Eskom/Transnet's per-tender document lists) still ran in
+    # full regardless of the flag. Captures what releases_for_watch() is
+    # actually called with, rather than trusting the call looks right.
+    real_releases_for_watch = daily_digest.gov_sources.releases_for_watch
+    seen_with_documents = {}
+
+    def spy_releases_for_watch(sources, with_documents=True, **kw):
+        seen_with_documents["value"] = with_documents
+        return [], {"sources": {}, "errors": {}}
+    daily_digest.gov_sources.releases_for_watch = spy_releases_for_watch
+    try:
+        REAL_FETCH_RELEASES(days=14, sources="all", with_documents=False)
+        check(seen_with_documents.get("value") is False,
+              f"with_documents=False reaches gov_sources.releases_for_watch (saw {seen_with_documents.get('value')!r})")
+        seen_with_documents.clear()
+        REAL_FETCH_RELEASES(days=14, sources="all", with_documents=True)
+        check(seen_with_documents.get("value") is True,
+              f"with_documents=True (the default, --no-fetch-documents not set) also reaches it (saw {seen_with_documents.get('value')!r})")
+    finally:
+        daily_digest.gov_sources.releases_for_watch = real_releases_for_watch
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
