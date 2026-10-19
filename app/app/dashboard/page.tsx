@@ -44,7 +44,7 @@ export default async function DashboardPage() {
   const needsInputCount = rows.length - completeCount;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <SiteNav active="dashboard" />
 
       <div style={{ flex: 1, padding: "24px 32px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>

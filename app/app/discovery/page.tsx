@@ -180,7 +180,7 @@ export default async function DiscoveryPage({
   );
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       {/* The right-hand "Closes / action / docs" rail is a fixed flex-basis
           with flex-shrink: 0 so it keeps its width on desktop - but that same
           fixed width means that once a card wraps it to its own line on a

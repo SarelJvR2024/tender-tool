@@ -25,7 +25,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
   const settings = (data ?? []) as Setting[];
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <SiteNav active="admin" />
 
       <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>

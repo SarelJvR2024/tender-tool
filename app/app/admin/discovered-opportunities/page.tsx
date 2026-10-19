@@ -87,7 +87,7 @@ export default async function AdminDiscoveredOpportunitiesPage({ searchParams }:
   const extractedCount = rows.filter((r) => r.requirements_status === "extracted").length;
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
       <SiteNav active="admin" />
 
       <div style={{ padding: "24px 32px", maxWidth: 1200, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
