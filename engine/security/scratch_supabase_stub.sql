@@ -32,6 +32,20 @@
 -- Roles (Supabase's standard four; CI connects as the ordinary superuser
 -- role of the postgres:16 service image, which can SET ROLE to any of these
 -- with no prior membership grant needed).
+--
+-- Roles are CLUSTER-global, not per-database - a fresh CI container only
+-- ever sees this run once, but any local/CI reuse of a persistent Postgres
+-- instance across more than one scratch database hits this: the second
+-- database's own replay would find service_role already exists (created
+-- against the FIRST database) and skip `create role ... bypassrls`
+-- entirely, since that only runs inside `if not exists`. Found during this
+-- session's enterprise-readiness audit - not exploitable in the real CI job
+-- (fresh container every run) or the real Supabase project (the platform
+-- sets these natively), but worth hardening so a false-safe test result
+-- can't happen from stale cluster-level role state. The ALTER ROLE lines
+-- below run unconditionally, every time this stub is applied, so the
+-- properties these tests actually rely on are correct regardless of
+-- whether the role was just created here or already existed.
 -- ---------------------------------------------------------------------------
 do $$
 begin
@@ -46,6 +60,9 @@ begin
   end if;
 end
 $$;
+alter role anon nologin noinherit;
+alter role authenticated nologin noinherit;
+alter role service_role nologin noinherit bypassrls;
 
 -- ---------------------------------------------------------------------------
 -- auth schema: just enough for the migrations' own FKs/trigger functions
