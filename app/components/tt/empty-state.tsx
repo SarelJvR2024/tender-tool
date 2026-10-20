@@ -24,7 +24,7 @@ export function EmptyState({
   return (
     <div className={cn("flex flex-col items-center gap-3 px-6 py-12 text-center", className)}>
       <div className="flex size-11 items-center justify-center rounded-full bg-accent/10">
-        <Icon className="size-5 text-accent-foreground" aria-hidden />
+        <Icon className="size-5 text-accent" aria-hidden />
       </div>
       <div className="space-y-1">
         <h3 className="font-display text-lg font-medium text-foreground">{title}</h3>

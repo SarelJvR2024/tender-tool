@@ -22,7 +22,7 @@ export function Stepper({ steps, current, className }: { steps: Step[]; current:
                 className={cn(
                   "flex size-7 shrink-0 items-center justify-center rounded-full border text-xs font-medium",
                   state === "complete" && "border-primary bg-primary text-primary-foreground",
-                  state === "current" && "border-accent bg-accent/10 text-accent-foreground ring-2 ring-accent/30",
+                  state === "current" && "border-accent bg-accent/10 text-accent ring-2 ring-accent/30",
                   state === "upcoming" && "border-border bg-background text-muted-foreground",
                 )}
               >
