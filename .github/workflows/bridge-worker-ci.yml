@@ -30,6 +30,19 @@
 # this project's history. The job's overall conclusion still reports failure
 # if any one step fails; only the "stop everything after the first failure"
 # behaviour is turned off, so every test's own real pass/fail is now visible.
+#
+# tenant-isolation-db (2026-10-20): engine/security/test_tenant_isolation.py
+# has a Part 2 that replays every migration against a real Postgres and
+# checks RLS + the tt_check_same_company trigger under actual enforcement -
+# the layer that caught 0065/0066's trigger bug - but it only ran when a
+# human set TENANT_PSQL by hand, so it had never once run in CI. This job
+# gives it a real `services: postgres` container, replays app/supabase/
+# migrations/*.sql on top of the minimal Supabase auth/storage stand-in in
+# engine/security/scratch_supabase_stub.sql (engine/security/replay_schema.sh
+# does both, in order, on a fresh database), points TENANT_PSQL at it, and
+# runs the real script - so Part 2 now genuinely executes, and fails the job
+# if it reports any failure, on every push that touches the engine or a
+# migration.
 name: bridge-worker-ci
 
 on:
@@ -41,6 +54,7 @@ on:
       - "templates/general_samples/**"
       - "fingerprints/**"
       - "config/discipline_taxonomy.json"
+      - "app/supabase/migrations/**"
       - ".dockerignore"
       - ".github/workflows/bridge-worker-ci.yml"
   workflow_dispatch:
@@ -164,6 +178,53 @@ jobs:
       - name: Form-field audit - no Klipcorp-shaped default on any SANRAL/general form field (real templates, un-Klipcorp-like company)
         if: ${{ !cancelled() }}
         run: python3 engine/test_form_field_audit.py
+
+  tenant-isolation-db:
+    # Part 2 of engine/security/test_tenant_isolation.py: real RLS + the
+    # tt_check_same_company trigger, enforced by an actual Postgres with
+    # every migration replayed - not the in-memory Part 1 above. See the
+    # header comment at the top of this file.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd=pg_isready
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Postgres client + engine Python deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          pip install -r engine/worker/requirements.txt
+
+      - name: Create a fresh scratch database
+        run: psql -h 127.0.0.1 -U postgres -d postgres -c "create database tenant_iso;"
+
+      - name: Replay every migration (0001..latest) onto the minimal Supabase auth/storage stand-in
+        run: engine/security/replay_schema.sh -h 127.0.0.1 -U postgres -d tenant_iso
+
+      - name: Cross-tenant isolation Part 2 - real RLS + tt_check_same_company on the replayed schema
+        env:
+          TENANT_PSQL: "psql -h 127.0.0.1 -U postgres -d tenant_iso"
+        run: python3 engine/security/test_tenant_isolation.py
 
   container-build:
     runs-on: ubuntu-24.04
