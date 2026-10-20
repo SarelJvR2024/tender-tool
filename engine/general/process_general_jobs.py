@@ -358,6 +358,28 @@ def own_pack(client, job):
     return rows[0] if rows else None
 
 
+def recent_corrections(client, limit=5):
+    """Up to `limit` of the most recent admin corrections/false-positives
+    (requirement_extraction_reviews, migration 0074) - the input to
+    requirements.extract_requirements()'s past_corrections honesty check (see
+    that function's own module comment for exactly what this can and can't
+    do: "most recent N corrections globally" is the simple, cheap heuristic
+    used here, not a buyer- or form-specific lookup - requirements.py's own
+    matching on item identity still narrows it to something relevant).
+    Best-effort: a lookup failure must never block a real extraction."""
+    try:
+        out = client._req("GET", "/rest/v1/requirement_extraction_reviews"
+                           "?select=item_snapshot,verdict,corrected_value"
+                           "&verdict=in.(corrected,false_positive)"
+                           f"&order=created_at.desc&limit={int(limit)}")
+        rows = json.loads(out) if out else []
+    except Exception:
+        return []
+    return [{"item_type": (r.get("item_snapshot") or {}).get("item_type"),
+             "item_snapshot": r.get("item_snapshot") or {},
+             "verdict": r.get("verdict"), "corrected_value": r.get("corrected_value")} for r in rows]
+
+
 def run_extraction(client, job, work_root, fetch=None):
     """The intake + requirements step every tender's documents go through,
     however the tender arrived (Discovery, or a manual load - 0024).
@@ -387,7 +409,7 @@ def run_extraction(client, job, work_root, fetch=None):
         raise JobRefusal("No tender documents could be downloaded" + (": " + "; ".join(notes) if notes else " - no document links on file."))
     shutil.rmtree(scratch, ignore_errors=True)
     manifest = req.extract_requirements(dirs, work_dir=scratch, source_label=tender.get("ocid") or tender.get("slug"),
-                                        keep_text=True)
+                                        keep_text=True, past_corrections=recent_corrections(client))
     all_text = manifest.get("_all_text") or ""
     decision = intake.classify_documents(manifest["documents"], tender.get("buyer"), all_text)
     readable = [d for d in manifest["documents"] if d["chars"] > 0 and not d["unreadable"]]
