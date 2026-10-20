@@ -6,7 +6,16 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~10:25 UTC — two sibling commits independently re-verified, both
+Last full pass: 2026-10-20, ~12:50 UTC — `engine/onboarding/process_onboarding_jobs.py`'s
+storage-path guard (defence against a forged row pointing outside its own company's folder) used
+a blind `".." in sp` substring check; the upload form's own `safeFileName()` keeps dots in a
+filename unchanged, so an ordinary file like "Report..final.pdf" produced a path containing ".."
+and was rejected as if it were a path-traversal attempt, with a message ("isn't in your company's
+own storage folder") that pointed nowhere near the real cause (Finding 35). Fixed to check for a
+genuine `..` path SEGMENT instead of the bare substring; a real traversal attempt, a wrong-company
+prefix, and a double slash are all still rejected. Added this module's first test file (6 checks),
+verified to actually catch the regression (reverted the fix, confirmed it fails, restored it).
+~10:25 UTC — two sibling commits independently re-verified, both
 correct: Discovery's undersized touch target on its own "Prepare this tender"/"Open in workspace"
 button (confirmed the 44px convention it cites is real, pre-existing); and Finding 34's digest
 alerting fix, where I personally reproduced the commit's own "reverted the fix, confirmed the
@@ -253,6 +262,37 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - forty-third run): a legitimate filename with two consecutive dots was rejected by the onboarding worker as if it were a path-traversal attempt - fixed
+
+Orientation: `engine/worker/` (`poll_loop.py`/`run_bridges.py`) hadn't had a dedicated pass since
+the twenty-first run. Both already heavily hardened and tested; widened the pass to the bridge
+SCRIPTS `run_bridges.py` drives, since "worker/job-queue" includes whether each one correctly
+implements the claim/process contract. `engine/onboarding/process_onboarding_jobs.py` (newest of
+the 5 registered bridges) had no dedicated test coverage of its own.
+
+**Finding 35 (fixed, moderate - a false-positive security gate):** `process_upload()`'s
+defence-in-depth guard against a forged `storage_path` pointing outside a company's own folder
+used a blind `".." in sp` substring check. Traced how `storage_path` is actually built
+(`upload-form.tsx` + `onboardingScan.ts`'s `safeFileName()`, which keeps dots in a filename
+unchanged) - any original filename with two consecutive dots anywhere (an ordinary, harmless
+shape) produces a path containing `".."`, rejected identically to a real traversal attempt.
+Reproduced directly: a file correctly stored under its own company's folder, named
+"Report..final.pdf", was rejected with "isn't in your company's own storage folder" - wrong and
+unhelpful, since it WAS in the right folder and would fail the same way on every re-upload.
+
+**Fix:** changed the check to a path-SEGMENT match (`".." in sp.split("/")`) so only a genuine
+`..` segment is rejected; a `".."` inside a filename component no longer matches. The `//` and
+company-prefix checks are untouched (no demonstrated false-positive risk from either).
+
+**Verification:** new `engine/onboarding/test_process_onboarding_jobs.py` (first test file for
+this module) runs the real `process_upload()` end to end against 4 cases - 6 checks, all pass.
+**Proved the test catches the regression** (reverted the fix, confirmed the double-dot case fails
+with the real rejection message, restored it, confirmed clean). Existing
+`test_classify_documents.py` and `test_poll_loop.py` suites still pass unchanged.
+`python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "forty-third run" (Finding 35).
 
 ## This pass (2026-10-20, standing QA/robustness review - forty-second run): two sibling commits, both correct - one trivial touch-target fix, one alerting fix with its own regression-proof personally reproduced
 

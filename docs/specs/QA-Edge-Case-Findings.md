@@ -2162,3 +2162,57 @@ confirmed clean), re-ran green. Ran all 5 `engine/compliance/test_*.py` files to
 
 No new findings. `npm run typecheck`/`lint` clean. Both commits green on real CI (`39394434821`,
 `39403672742`).
+
+## 2026-10-20 (forty-third run): Worker/job-queue - a legitimate filename with two consecutive dots was rejected as if it were a path-traversal attempt
+
+**Why this area:** `engine/worker/` (`poll_loop.py`, `run_bridges.py`) hadn't had a dedicated pass
+since the twenty-first run - the longest-neglected rotation area remaining. Read `poll_loop.py`
+and `run_bridges.py` in full first (both already heavily hardened and tested - `test_poll_loop.py`
+covers signal handling, atomic claims, the `--script`-is-additive fix, a bridge exiting non-zero,
+a bridge timing out). Found nothing new there; widened the pass to the bridge SCRIPTS themselves
+(the actual queue-processing logic `run_bridges.py` drives), since "worker/job-queue" naturally
+includes whether each bridge correctly implements the claim/process contract - and
+`engine/onboarding/process_onboarding_jobs.py` (the newest of the five registered bridges, 0063)
+had ZERO dedicated test coverage of its own queue logic.
+
+### Finding 35 (CONFIRMED, FIXED, moderate - a false-positive security gate rejecting good input)
+
+**Where:** `engine/onboarding/process_onboarding_jobs.py`, `process_upload()`.
+
+**What was tested:** `process_upload()` has a defence-in-depth guard checking that a claimed
+row's `storage_path` really sits under that upload's own company folder (protects against a
+corrupted/forged row pointing at another tenant's files): `if not sp.startswith(f"{company_id}/")
+or ".." in sp or "//" in sp: raise ClassificationFailed(...)`. Traced where `storage_path` is
+actually built client-side (`app/app/company/document-scan/upload-form.tsx`'s `uploadAll()`:
+`${uploadPrefix(companyId)}${uuid8}-${safeFileName(f.name)}`) and read `safeFileName()`
+(`app/lib/onboardingScan.ts`): `name.replace(/[^a-zA-Z0-9._ ()-]/g, "_")` - periods are in the
+ALLOWED set, passed through unchanged. So any original filename with two consecutive dots
+anywhere (a common, entirely ordinary shape - a version marker, an export tool's naming, a simple
+typo like "Report..pdf") produces a `storage_path` containing the substring `".."`, which the
+backend guard's blind `".." in sp` check treats identically to a real path-traversal attempt.
+Reproduced directly: `storage_path = "co-1/a1b2c3d4-Report..final.pdf"` (correctly under the
+upload's own company folder) still got rejected with "This upload's file isn't in your company's
+own storage folder, so it wasn't read. Upload it again." - a confusing, actively wrong message,
+since the file WAS in the right folder; the only real "problem" is two dots in its name. The user
+would hit the identical rejection on every re-upload of the same file, with the message pointing
+them nowhere near the real cause.
+
+**Fix:** changed the check from a substring match to a path-SEGMENT match - `".." in sp.split("/")`
+- so only a genuine `..` segment (the actual traversal shape, e.g. `"co1/../co2/x.pdf"`) is
+rejected; `".."` occurring inside a longer filename component no longer matches. The `//` check
+and the company-prefix check are untouched (no demonstrated false-positive risk from either -
+consistent with this review's own standing rule to fix only what's actually reproduced, not
+every theoretical tightening available).
+
+**Verification:** ran the real `process_upload()` end to end (not a standalone reimplementation
+of the check) against 4 cases via a new dedicated test file, `engine/onboarding/
+test_process_onboarding_jobs.py` (the module had no test file at all before this): a legitimate
+double-dot filename (now correctly accepted - reaches past the guard), a genuine `..`-segment
+traversal attempt (still rejected), a path under a different company's prefix entirely (still
+rejected), and a double slash (still rejected) - 6 checks, all pass. **Proved the new test
+actually catches the regression**, not just that it passes: temporarily reverted the fix back to
+the bare substring check, re-ran - the double-dot-filename checks failed exactly as predicted
+(the real rejection message came back); restored the fix and confirmed clean again. Ran the
+existing `engine/onboarding/test_classify_documents.py` and `engine/worker/test_poll_loop.py`
+suites for regression safety (neither touches this guard, both still pass unchanged).
+`python3 -m py_compile` clean on both changed files.
