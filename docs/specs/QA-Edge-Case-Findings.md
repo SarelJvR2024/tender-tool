@@ -2085,3 +2085,21 @@ every one still passes, including the bank-letter case (30-day override, left=45
 still caught as a genuine "lapses before closing" item since 45 > its own 30-day window - confirms
 the per-field `lead_override` path, not just the default 60-day one, is exercised and correct).
 `python3 -m py_compile` clean on both changed files.
+
+## 2026-10-20 (fortieth run): Finding 33 independently re-verified, no new findings
+
+One new commit since the thirty-ninth run: `3255b00` (Finding 33, above), from a different
+concurrent sibling session. Re-verified rather than trust its own write-up, including its own
+"proved the regression test catches the bug" claim.
+
+Confirmed `TRACKED_EXPIRY_FIELDS`'s third tuple element is really the per-field lead-time
+override and that the new guard's `lead_override if lead_override is not None else lead_days`
+expression is identical to the one `find_due_documents()` already uses - not an approximation of
+it. Traced `_expiry_window()`'s own boundary (`left > lead_days` -> no hit) to confirm the new
+guard's `<=` lines up exactly, no off-by-one. Ran `test_watch_deadlines_urgency.py` - clean. Then
+independently reproduced the commit's own regression-proof: removed the new guard line from a
+working copy of `watch_deadlines.py`, re-ran the test, watched the exact new check fail, restored
+the file (`git diff` confirmed zero remaining changes), re-ran clean. Ran all 5
+`engine/compliance/test_*.py` files - all pass. `python3 -m py_compile` clean.
+
+No new findings. Green on real CI (`39382894500`).

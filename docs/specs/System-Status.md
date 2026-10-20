@@ -6,7 +6,12 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~07:00 UTC — `find_documents_lapsing_before_closing()`'s own docstring
+Last full pass: 2026-10-20, ~08:15 UTC — independently re-verified Finding 33 (`3255b00`, the
+duplicate-reminder compliance fix): confirmed the new guard's lead-time expression matches
+`find_due_documents()`'s own exactly, traced the `_expiry_window()` boundary for an off-by-one,
+and personally reproduced the commit's own "reverted the fix, confirmed the new test fails"
+claim rather than trust it. All 5 `engine/compliance/test_*.py` files pass. No issues found, no
+code changes needed - green on real CI. ~07:00 UTC — `find_documents_lapsing_before_closing()`'s own docstring
 promised it only fires for a document OUTSIDE the normal reminder window, but the code never
 enforced that: a document already inside the ordinary 60-day window (or a field's own shorter
 override, e.g. the bank letter's 30 days) that also happened to expire before some open, pursued
@@ -236,6 +241,28 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - fortieth run): one commit, independently re-verified correct - its own "proved the regression test catches the bug" claim reproduced, not just trusted
+
+Orientation: one new commit since the thirty-ninth run - `3255b00` (Finding 33, above), from a
+different concurrent sibling session.
+
+**Independently verified, not just read:** confirmed `TRACKED_EXPIRY_FIELDS`' third tuple element
+really is the per-field lead-time override (`None` for most fields, `30` for the bank letter) and
+that the new guard's `lead_override if lead_override is not None else lead_days` expression is
+character-for-character the same one `find_due_documents()` itself already uses - so "already
+inside the normal window" means exactly the same thing in both functions, not an approximation.
+Traced `_expiry_window()`'s own boundary (`left > lead_days -> None`, i.e. a hit on `left <=
+lead_days`) to confirm the new guard's `<=` has no off-by-one against the window
+`find_due_documents()` actually enforces. Ran the full `test_watch_deadlines_urgency.py` myself -
+clean. Then independently reproduced the commit's own "proved it actually catches the regression"
+claim rather than take it on trust: removed the new guard line from a working copy, re-ran the
+test, watched the exact new check fail, restored the file, confirmed `git diff` showed zero
+remaining changes and the suite clean again. Ran all 5 `engine/compliance/test_*.py` files - all
+pass. `python3 -m py_compile` clean on both touched files.
+
+Green on real CI (`39382894500`, `bridge-worker-ci.yml`). No code changes needed this pass - the
+fix is correct and complete as committed.
 
 ## This pass (2026-10-20, standing QA/robustness review - thirty-ninth run): a reminder a document is already renewing on schedule got a second, misleadingly-framed copy pointing at an unrelated tender - fixed
 
