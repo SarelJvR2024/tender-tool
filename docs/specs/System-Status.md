@@ -6,6 +6,18 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Resolved, confirmed by hard evidence (2026-10-20, ~22:35 UTC): the real daily-digest GitHub
+Actions test run (`39492435787`) timed out at exactly 120 minutes** (20:29:48 UTC → 22:30:01 UTC,
+GitHub Actions' own cancellation at the `timeout-minutes: 120` boundary set two passes ago - not a
+guess, the job's own recorded start/end times). The architecture question flagged as "not yet
+resolved" in the fifty-second run's own entry below is now a confirmed, not speculative, problem:
+`daily_digest.py` rebuilding the entire national tender feed from scratch, every single run, does
+not reliably finish inside two hours. Simply raising the timeout again is not a real fix - the
+right fix is almost certainly having the digest read Discovery's own already-scored
+`discovered_opportunities` table instead of redoing the whole fetch+score independently, which is
+a real architectural change (not a quick patch) that needs Sarel's own call before anyone rewrites
+it - flagged to him directly, not decided here.
+
 Last full pass: 2026-10-20, ~22:11 UTC — fifty-second standing QA run: independently verified two
 substantial batches of sibling work rather than trusting either's own claims. First, the UI/UX
 redesign's first 3 real prompts landed (`ee60823`/`f5e5a6f`/`6787cf3` - shadcn/ui + oklch design-token
