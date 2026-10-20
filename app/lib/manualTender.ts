@@ -31,7 +31,7 @@ export function privatePrefix(companyId: string, tenderId: string): string {
   return `private/${companyId}/${tenderId}/`;
 }
 
-export { safeFileName } from "./safeFileName";
+export { safeFileName } from "./safeFileName.ts";
 
 export function hasAcceptedExtension(name: string): boolean {
   const lower = name.toLowerCase();
