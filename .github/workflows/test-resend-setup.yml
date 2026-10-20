@@ -1,0 +1,57 @@
+# Manual, one-off check that RESEND_API_KEY/DIGEST_FROM_ADDRESS are correctly
+# configured - independent of daily-digest.yml's own full pipeline, which
+# only calls Resend at all when at least one real person is opted in and has
+# content to report (2026-10-20: it builds digests for a live roster, finds
+# nobody opted in, and never reaches the send step at all - so that workflow
+# alone cannot confirm Resend itself works). This sends exactly one plain
+# test email to whatever address you give it, using the real Resend send
+# path (send_digest_emails.py's own send_one(), not a reimplementation), so
+# a pass here means the domain + API key + from-address are genuinely good.
+#
+# Never runs on a schedule - workflow_dispatch only, a human triggers it on
+# purpose. Takes a single input (the test recipient) rather than hardcoding
+# one, since who's testing this will change over time.
+
+name: test-resend-setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      to_email:
+        description: "Send the test email to this address"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  send-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build a one-entry digest JSON for the given address
+        run: |
+          python3 - "${{ inputs.to_email }}" <<'PY'
+          import json, sys, datetime
+          to = sys.argv[1]
+          now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+          digest = {
+              "person": {"name": "Resend setup test", "email": to},
+              "company_name": "Tender Tool setup check",
+              "tender_tasks": [{"field": f"This is a one-off test email confirming Resend is wired up correctly, sent {now}. No action needed."}],
+          }
+          json.dump([digest], open("test_digest.json", "w"))
+          PY
+
+      - name: Send via Resend (real send path, send_digest_emails.py's own send_one())
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DIGEST_FROM_ADDRESS: ${{ secrets.DIGEST_FROM_ADDRESS }}
+        run: python3 engine/notify/send_digest_emails.py test_digest.json
