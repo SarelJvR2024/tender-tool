@@ -49,8 +49,9 @@ async function uploadAll(
     const path = `${prefix}${crypto.randomUUID().slice(0, 8)}-${safeFileName(f.name)}`;
     const { error } = await supabase.storage.from(TENDER_DOCS_BUCKET).upload(path, f, { contentType: f.type || "application/octet-stream" });
     if (error) {
+      console.error("tender document upload failed", f.name, error);
       if (done.length > 0) await supabase.storage.from(TENDER_DOCS_BUCKET).remove(done.map((d) => d.storage_path));
-      return { error: `Could not upload ${f.name}: ${error.message}` };
+      return { error: `Could not upload ${f.name} - try again. If it keeps happening, let us know.` };
     }
     done.push({ title: f.name, storage_path: path });
   }

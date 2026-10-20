@@ -28,6 +28,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
   const supabase = await createClient();
 
   const { data: companies, error } = await supabase.rpc("platform_admin_companies");
+  if (error) console.error("platform_admin_companies rpc failed", error);
   const rows = (companies ?? []) as CompanyOverviewRow[];
 
   const memberLists = await Promise.all(
@@ -63,7 +64,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
 
         {(error || actionError) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load customers: ${error.message}` : actionError}
+            {error ? "Couldn't load customers - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 

@@ -22,6 +22,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("platform_admin_settings");
+  if (error) console.error("platform_admin_settings rpc failed", error);
   const settings = (data ?? []) as Setting[];
 
   return (
@@ -44,7 +45,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
 
         {(error || actionError) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load settings: ${error.message}` : actionError}
+            {error ? "Couldn't load settings - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 

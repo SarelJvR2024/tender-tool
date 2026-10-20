@@ -51,6 +51,7 @@ export default async function AdminDiscoveredOpportunitiesPage({ searchParams }:
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("platform_admin_discovered_opportunities");
+  if (error) console.error("platform_admin_discovered_opportunities rpc failed", error);
   const rpcRows = (data ?? []) as Rpc[];
 
   const rows: OpportunityRowData[] = rpcRows.map((r) => {
@@ -114,7 +115,7 @@ export default async function AdminDiscoveredOpportunitiesPage({ searchParams }:
 
         {(error || actionError) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load discovered opportunities: ${error.message}` : actionError}
+            {error ? "Couldn't load discovered opportunities - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 

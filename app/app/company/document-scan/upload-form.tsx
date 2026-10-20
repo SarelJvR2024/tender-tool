@@ -48,8 +48,9 @@ async function uploadAll(
     const path = `${uploadPrefix(companyId)}${crypto.randomUUID().slice(0, 8)}-${safeFileName(f.name)}`;
     const { error } = await supabase.storage.from(ONBOARDING_BUCKET).upload(path, f, { contentType: f.type || "application/octet-stream" });
     if (error) {
+      console.error("onboarding document upload failed", f.name, error);
       if (done.length > 0) await supabase.storage.from(ONBOARDING_BUCKET).remove(done.map((d) => d.storagePath));
-      return { error: `Could not upload ${f.name}: ${error.message}` };
+      return { error: `Could not upload ${f.name} - try again. If it keeps happening, let us know.` };
     }
     done.push({ storagePath: path, originalFilename: f.name });
   }

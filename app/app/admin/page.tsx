@@ -73,6 +73,10 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const resolved = (resolvedAlerts ?? []) as SystemAlert[];
   const newCount = open.filter((a) => !a.reported_at).length;
 
+  if (error) console.error("admin_harness_runs select failed", error);
+  if (alertsError) console.error("system_alerts select failed", alertsError);
+  if (cvStatsError) console.error("platform_admin_cv_document_stats rpc failed", cvStatsError);
+
   const rows = (runs ?? []) as RunRow[];
   const flaggedCount = rows.filter((r) => r.status === "flagged").length;
   const unreviewedCount = rows.filter((r) => !r.reviewed_at).length;
@@ -106,7 +110,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           </p>
           {cvStatsError && (
             <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
-              Could not load CV/document stats: {cvStatsError.message}
+              {"Couldn't load CV/document stats - try refreshing. If it keeps happening, let us know."}
             </div>
           )}
           {cvStats && (
@@ -132,7 +136,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           </p>
           {alertsError && (
             <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
-              Could not load system alerts: {alertsError.message}
+              {"Couldn't load system alerts - try refreshing. If it keeps happening, let us know."}
             </div>
           )}
           <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
@@ -164,7 +168,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
         {(error || actionError) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load harness results: ${error.message}` : actionError}
+            {error ? "Couldn't load harness results - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 

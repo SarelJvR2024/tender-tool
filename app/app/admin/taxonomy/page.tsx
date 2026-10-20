@@ -135,6 +135,9 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
       .select("id, slug, label, suggested_parent_slug, note, company_name, example_project_name, status, review_note, reviewed_at, created_at")
       .order("created_at", { ascending: false }),
   ]);
+  if (catError) console.error("discipline_categories select failed", catError);
+  if (sugError) console.error("discipline_category_suggestions select failed", sugError);
+
   const canEdit = isAdmin === true;
   const cats = (catRows ?? []) as DisciplineCategoryFull[];
   const groups = cats.filter((c) => !c.parent_slug);
@@ -162,7 +165,9 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
 
         {(actionError || catError || sugError) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
-            {actionError ?? (catError ? `Could not load the list: ${catError.message}` : `Could not load suggestions: ${sugError?.message}`)}
+            {actionError ?? (catError
+              ? "Couldn't load the list - try refreshing. If it keeps happening, let us know."
+              : "Couldn't load suggestions - try refreshing. If it keeps happening, let us know.")}
           </div>
         )}
         {saved && (
