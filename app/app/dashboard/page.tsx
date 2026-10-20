@@ -2,12 +2,14 @@ import Link from "next/link";
 import { FolderOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
+import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { SiteNav } from "../_components/SiteNav";
 import { PageHeader } from "@/components/tt/page-header";
 import { StatCard } from "@/components/tt/stat-card";
 import { StatusBadge, type TenderStatus } from "@/components/tt/status-badge";
 import { DeadlineChip } from "@/components/tt/deadline-chip";
 import { EmptyState } from "@/components/tt/empty-state";
+import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 
@@ -48,10 +50,13 @@ export default async function DashboardPage() {
 
   // tender_packs only comes back for the signed-in user's own company, via RLS -
   // this query shape works the same regardless of which company is asking.
-  const { data: tenders, error } = await supabase
-    .from("tenders")
-    .select("id, contract_no, nra_reference, description, closing_date, source, family, tender_packs(status)")
-    .order("closing_date", { ascending: true });
+  const [{ data: tenders, error }, readiness] = await Promise.all([
+    supabase
+      .from("tenders")
+      .select("id, contract_no, nra_reference, description, closing_date, source, family, tender_packs(status)")
+      .order("closing_date", { ascending: true }),
+    fetchCompanyReadiness(supabase),
+  ]);
 
   if (error) console.error("tenders select failed for dashboard", error);
 
@@ -79,6 +84,8 @@ export default async function DashboardPage() {
             Couldn&apos;t load tenders - try refreshing. If it keeps happening, let us know.
           </div>
         )}
+
+        <BidReadinessCard result={readiness} className="mb-5" />
 
         <div className="mb-5 grid grid-cols-3 gap-3">
           <StatCard label="Tenders tracked" value={rows.length} />

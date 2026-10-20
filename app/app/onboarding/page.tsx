@@ -1,13 +1,16 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
+import { COMPANY_OFFICE_COLUMNS, type CompanyOffice } from "@/lib/locality";
+import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
+import { buttonVariants } from "@/components/ui/button";
 import { AuthShell } from "../_components/AuthShell";
 import { Step1 } from "./_components/Step1";
 import { Step2 } from "./_components/Step2";
 import { Step3 } from "./_components/Step3";
 import { Step4 } from "./_components/Step4";
 import { Step5 } from "./_components/Step5";
-import { EndScreen } from "./_components/EndScreen";
-import { COMPANY_OFFICE_COLUMNS, type CompanyOffice } from "@/lib/locality";
 
 // Depends on the signed-in user's session, same reason as dashboard/page.tsx.
 export const instant = false;
@@ -19,10 +22,16 @@ export default async function OnboardingPage({
 }) {
   const { step: stepParam, error } = await searchParams;
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: membership } = await supabase.from("company_members").select("company_id, daily_digest_opt_in").eq("user_id", user.id).maybeSingle();
+  const { data: membership } = await supabase
+    .from("company_members")
+    .select("company_id, daily_digest_opt_in")
+    .eq("user_id", user.id)
+    .maybeSingle();
 
   // Nothing else can happen before a company exists - step 1 regardless of
   // the URL's own step param.
@@ -82,22 +91,24 @@ export default async function OnboardingPage({
   }
 
   // step === "done": the bid-readiness end screen, also the default landing
-  // spot for a member who just visits /onboarding with no step param.
-  const [{ data: company }, { count: officeCount }, { count: peopleCount }] = await Promise.all([
-    supabase.from("companies").select("csd_supplier_number, sars_tcs_pin, bee_level, cidb_grading").eq("id", companyId).single(),
-    supabase.from("company_offices").select("id", { count: "exact", head: true }).eq("company_id", companyId),
-    supabase.from("people").select("id", { count: "exact", head: true }).eq("company_id", companyId),
-  ]);
+  // spot for a member who just visits /onboarding with no step param. Same
+  // score (lib/readiness.ts, via lib/companyReadinessData.ts) the dashboard
+  // and Company vault header show - never computed separately here.
+  const readiness = await fetchCompanyReadiness(supabase);
 
   return (
     <AuthShell>
-      <EndScreen
-        hasCompliance={!!(company?.csd_supplier_number || company?.sars_tcs_pin || company?.bee_level)}
-        hasCidb={!!company?.cidb_grading}
-        officeCount={officeCount ?? 0}
-        peopleCount={peopleCount ?? 0}
-        digestOptIn={membership.daily_digest_opt_in === true}
-      />
+      <div className="w-full max-w-xl">
+        <BidReadinessCard result={readiness} />
+        <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
+          <Link href="/discovery" className={buttonVariants({ variant: "accent", className: "h-11 flex-1" })}>
+            See matching opportunities
+          </Link>
+          <Link href="/tenders/new" className={buttonVariants({ variant: "outline", className: "h-11 flex-1" })}>
+            Load a tender I already have
+          </Link>
+        </div>
+      </div>
     </AuthShell>
   );
 }
