@@ -60,6 +60,19 @@ connection outright (Dihlabeng) - different from a site's 503, a DNS failure, or
 TLS-chain error. A fifth municipality sweep (North West/Northern Cape/remaining Limpopo-Mpumalanga-
 Gauteng) was still running in the background as of this entry - not yet incorporated here.
 
+**A sixth pass (Eastern Cape + Western Cape, `Government-Buyer-Catalog-Municipalities-Round3-EC-WC.md`,
+committed `e67c1ab`) initially reported Overstrand and Knysna as "the strongest new candidates since
+Vaal Central Water Board itself" - verified independently against the real saved HTML before
+trusting that claim, and it was wrong for Overstrand (no closing date anywhere on the page or in any
+document title - the Mbombela/Polokwane trap again) and overstated for Knysna (its own "Current
+Tenders" section is actually cancellation notices; the real open tenders sit under an accordion
+mislabelled "Archived Tenders - 2027" - some, not all, entries do embed a real closing date as free
+text, a genuine edge over Mbombela/Polokwane, but each tender is split across 2-4 separate document
+rows needing reference-based grouping, and the page spans 6 years of archives with no reliable
+section-label signal for current-vs-expired).** Both remain confirmed real eTenders gaps (re-checked
+independently: Overstrand 1 of many duplicated, Knysna 0 duplicated) but neither was built this
+round - a correction is recorded directly in that file rather than left standing uncorrected.
+
 Last full pass: 2026-10-20, ~22:11 UTC — fifty-second standing QA run: independently verified two
 substantial batches of sibling work rather than trusting either's own claims. First, the UI/UX
 redesign's first 3 real prompts landed (`ee60823`/`f5e5a6f`/`6787cf3` - shadcn/ui + oklch design-token
