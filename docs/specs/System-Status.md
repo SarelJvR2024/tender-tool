@@ -6,7 +6,17 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~19:15 UTC — forty-ninth standing QA run: `etenders_portal.py`'s own
+Last full pass: 2026-10-20, ~20:11 UTC — fiftieth standing QA run: the digest cron workflow shipped
+two passes ago (`3dc4bdf`) had its own `timeout-minutes: 30` proven wrong by a real timed dry-run
+against the live project - the run was still going at 31+ minutes (never reached its own final
+"Wrote ..." line) because `daily_digest.py` scores the ENTIRE national feed fresh every run rather
+than reading Discovery's own already-scored `discovered_opportunities` table - confirmed by reading
+the code, not assumed. Fixed `timeout-minutes` to 120 with the real measured evidence documented in
+the workflow's own comments, rather than picking a safer-sounding round number. The deeper question -
+should the digest read Discovery's own table instead of redoing the whole feed? - is flagged for
+Sarel below, not decided unilaterally. Independently re-verified the forty-ninth run's own fix
+(`d64a97`) before building on top of it: reran its new `test_etenders_portal.py` myself (7 checks,
+0 failures). ~19:15 UTC — forty-ninth standing QA run: `etenders_portal.py`'s own
 `dedupe_rows()` docstring names two causes of a duplicate portal row - a repeat cancellation, or a
 multi-lot award - but only merged the cancellation across duplicates; a multi-lot award's later
 lots' bidders were silently dropped (whichever duplicate row happened to be first "won"), feeding
@@ -411,6 +421,18 @@ Sarel's own explicit request: "make sure it is designed and build to catch all a
 **Verification discipline held throughout:** every fix in round 2 was reproduced against the original bug first (not assumed real from round 1's own report), fixed, re-verified, and checked for regression against each engine's own existing test suite (all green) - `general_harness.py --no-pack` (`77 clean, 0 flagged, 0 failed`), both real LibreOffice export paths smoke-tested end to end against real sample workbooks, and the new LibreOffice timeout mechanics directly tested (a hung operation times out at the real deadline and force-kills, a fast operation returns immediately with no kill, a genuine non-timeout exception still propagates normally). Final confirmation: the real, full `admin_harness.py --pack` run (all 7 test companies, the exact pipeline a real customer's pack goes through) - `Submission-pack check: 7 clean, 0 flagged for review, 0 run failures`, with the SANRAL pack engine's two fixes (LibreOffice timeout, key-position logging) both exercised live, not just in isolation.
 
 **Commits this pass:** `8aad3bb` (CV), `4141a75` (discovery), `80afc14` (intake), `cdff2ae` (compliance/notify), `9bc3474` (general pack), `d396979` (SANRAL pack).
+
+## This pass (2026-10-20, standing QA/robustness review - fiftieth run): a self-introduced bug in last pass's own GitHub Actions cron workflow, caught by actually running the real thing rather than trusting the design
+
+**What happened:** Sarel asked for the daily-digest build+send to be wired into a GitHub Actions cron schedule (previous pass, `3dc4bdf`). That workflow set `timeout-minutes: 30` - a reasonable-sounding guess, never actually measured against the real script's real behavior. Before trusting it, ran `python3 engine/notify/daily_digest.py --mode live --out digest_report.json` for real, against Sarel's real Supabase project (read-only - confirmed via `watch_deadlines.supabase_request`: GET only, before running anything).
+
+**What the real run showed:** still going at 31+ minutes (never reached its own final `"Wrote ..."` line - the true full duration is unconfirmed, only known to be more than half an hour), with warnings along the way: a few SANRAL detail-page connection resets (`ConnectionResetError`), one eTenders portal page failing whole with an HTTP 500 and recovering via chunked re-reads - and, root cause, `daily_digest.py` scores the **entire national tender feed from scratch every single run**, including a paginated 3,000-row read of the closed-tenders portal (110,228 total, for market-trend history) and a per-release document fetch for every report-worthy tender across its 14-day window. It does **not** read Discovery's own already-scored `discovered_opportunities` table - confirmed by reading the code (`fetch_releases()`/`score_per_company()` call the same national-feed-scoring path `watch_new_tenders.py` uses, independently, not a read of Discovery's stored results).
+
+**Fixed:** `timeout-minutes` raised to 120, with the real measured evidence (not a guess) documented directly in the workflow's own comments, including an honest note that the true duration is still unconfirmed and should be tightened once the first real scheduled run reports its actual wall-clock time in the Actions log.
+
+**Deliberately NOT fixed, flagged for Sarel instead:** whether the digest should eventually read Discovery's own `discovered_opportunities` table instead of redoing the whole national-feed fetch+score independently every day. That's a real architectural question (the two paths might deliberately want independently-fresh data - Discovery's own cron could be hours stale by digest time) and a meaningfully larger change than "fix a wrong timeout" - not something to decide unilaterally while wiring up a cron schedule.
+
+**Also this pass:** independently re-verified the forty-ninth run's own fix (`d64a987`, a sibling session's multi-lot-award bidder-loss fix in `etenders_portal.py`) before building anything on top of it - reran its new `test_etenders_portal.py` myself (7 checks, 0 failures) rather than trusting the commit message.
 
 ## This pass (2026-10-20, standing QA/robustness review - forty-eighth run): the oldest, biggest "known gap" in this file finally closed (migrations `0063`-`0075` confirmed live), plus a substantial sibling feature independently verified clean
 

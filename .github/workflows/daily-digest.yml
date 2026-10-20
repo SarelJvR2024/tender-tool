@@ -45,6 +45,26 @@
 # (a GitHub Actions platform behaviour, not something this workflow can
 # override) - not a practical concern while this repo is under active
 # development, but worth remembering if things go quiet later.
+#
+# timeout-minutes is 120, not a round guess: a real --mode live dry-run
+# against the real project (2026-10-20, this same pass) was stopped at 31+
+# minutes STILL mid-run (no "Wrote ..." line yet, i.e. before the final
+# output write) - so the true full duration is unconfirmed, only known to be
+# more than 31 minutes. daily_digest.py scores the ENTIRE national feed fresh
+# every run (it does not read Discovery's own discovered_opportunities
+# table), including a paginated 3000-row read of the closed-tenders portal
+# (110,228 total) for market-trend history, plus a per-release document fetch
+# for every report-worthy tender across a 14-day window. That's this script's
+# own existing design (its docstring already says a real scheduled run should
+# fetch documents, accepting the cost) - not something changed here. 120
+# gives real headroom above the one partial measurement, which itself hit
+# several transient "Connection reset by peer" / portal-500 retries that a
+# cleaner run wouldn't. Worth tightening once the first REAL scheduled run
+# (after secrets are set) reports its actual wall-clock time in the Actions
+# log. Flagged for Sarel separately (System-Status.md) whether the digest
+# should eventually read Discovery's own already-scored table instead of
+# redoing the whole feed - a real design question, not a quick fix to make
+# unilaterally.
 
 name: daily-digest
 
@@ -67,7 +87,7 @@ concurrency:
 jobs:
   send:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
