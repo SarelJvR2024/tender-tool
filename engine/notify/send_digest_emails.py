@@ -54,6 +54,7 @@ Usage:
 import os
 import sys
 import json
+import time
 import argparse
 import urllib.request
 import urllib.error
@@ -62,6 +63,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import system_alerts  # noqa: E402
 
 RESEND_ENDPOINT = "https://api.resend.com/emails"
+
+# Same cap and reasoning as engine/discovery/source_http.py's own 429 retry
+# (confirmed live 2026-10-19/20: treating a rate limit identically to a
+# permanent 4xx meant one source/recipient hitting it lost that item for the
+# whole run with zero retry) - one bounded retry per recipient, not an
+# unbounded backoff loop, since this runs inside a loop over potentially many
+# recipients and a stuck retry here would delay everyone after it.
+MAX_RETRY_AFTER = 30
 
 # A generic sender only works if/until Resend's shared pool is used, which
 # Resend itself may restrict for volume/deliverability. DIGEST_FROM_ADDRESS
@@ -150,15 +159,24 @@ def send_one(api_key, from_addr, digest, dry_run=False):
         RESEND_ENDPOINT, data=payload, method="POST",
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
     )
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            resp.read()
-        return "sent", email
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:300]
-        return "failed", f"Resend rejected the send to {email!r}: HTTP {e.code} {detail}"
-    except Exception as e:
-        return "failed", f"Could not send to {email!r}: {type(e).__name__}: {e}"
+    for attempt in range(2):  # the original attempt, plus one retry on a 429 only
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                resp.read()
+            return "sent", email
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt == 0:
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                try:
+                    wait = min(float(retry_after), MAX_RETRY_AFTER) if retry_after else 2.0
+                except ValueError:
+                    wait = 2.0  # Retry-After can be an HTTP-date, not just seconds
+                time.sleep(max(wait, 0))
+                continue
+            detail = e.read().decode("utf-8", "replace")[:300]
+            return "failed", f"Resend rejected the send to {email!r}: HTTP {e.code} {detail}"
+        except Exception as e:
+            return "failed", f"Could not send to {email!r}: {type(e).__name__}: {e}"
 
 
 def main():
