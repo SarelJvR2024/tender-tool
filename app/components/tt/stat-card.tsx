@@ -3,24 +3,35 @@ import { TrendingDown, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 
+const TONE_CLASS = {
+  default: "text-foreground",
+  success: "text-success",
+  warning: "text-warning",
+  destructive: "text-destructive",
+} as const;
+
 /**
  * A single number worth drawing attention to (a count, a total, a rate) -
  * the small, scannable tile a dashboard row of 3-5 of these forms. `trend`
  * is optional and purely cosmetic framing (up = success-tinted, down =
  * destructive-tinted); it never implies which direction is "good" for a
- * given metric, so pass the label/sign yourself.
+ * given metric, so pass the label/sign yourself. `tone` colors the big
+ * value itself instead - for when the number's own color is the point (a
+ * count of things still needing attention), not a separate trend arrow.
  */
 export function StatCard({
   label,
   value,
   icon: Icon,
   trend,
+  tone = "default",
   className,
 }: {
   label: string;
   value: React.ReactNode;
   icon?: LucideIcon;
   trend?: { value: string; direction: "up" | "down" };
+  tone?: keyof typeof TONE_CLASS;
   className?: string;
 }) {
   return (
@@ -30,7 +41,7 @@ export function StatCard({
         {Icon && <Icon className="size-4 text-muted-foreground" aria-hidden />}
       </div>
       <div className="flex items-end justify-between gap-2">
-        <span className="font-display text-3xl font-medium tracking-tight text-foreground">{value}</span>
+        <span className={cn("font-display text-3xl font-medium tracking-tight", TONE_CLASS[tone])}>{value}</span>
         {trend && (
           <span
             className={cn(
