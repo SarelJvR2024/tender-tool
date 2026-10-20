@@ -59,7 +59,10 @@ export async function saveCompanyOffice(formData: FormData) {
   const { error } = id
     ? await supabase.from("company_offices").update(row).eq("id", id)
     : await supabase.from("company_offices").insert(row);
-  if (error) fail(error.message);
+  if (error) {
+    console.error("company_offices write failed", error);
+    fail("Could not save this office - try again. If it keeps happening, let us know.");
+  }
 
   revalidatePath("/company");
   redirect("/company?saved=office#offices");
@@ -71,7 +74,10 @@ export async function deleteCompanyOffice(formData: FormData) {
   const id = str(formData, "office_id");
   if (!id) redirect("/company");
   const { error } = await supabase.from("company_offices").delete().eq("id", id);
-  if (error) fail(error.message);
+  if (error) {
+    console.error("company_offices delete failed", error);
+    fail("Could not delete this office - try again. If it keeps happening, let us know.");
+  }
   revalidatePath("/company");
   redirect("/company?saved=office#offices");
 }

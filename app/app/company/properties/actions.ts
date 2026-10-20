@@ -96,7 +96,10 @@ export async function deleteProperty(formData: FormData) {
   if (!id) redirect(BACK);
   const { data: docs } = await supabase.from("property_documents").select("storage_path").eq("property_id", id);
   const { error } = await supabase.from("company_properties").delete().eq("id", id);
-  if (error) fail(error.message);
+  if (error) {
+    console.error("company_properties delete failed", error);
+    fail("Could not delete this building - try again. If it keeps happening, let us know.");
+  }
   const paths = (docs ?? []).map((d) => d.storage_path).filter(Boolean) as string[];
   if (paths.length) await supabase.storage.from(VAULT_BUCKET).remove(paths);
   revalidatePath(BACK);
@@ -135,7 +138,10 @@ export async function savePropertyDocument(formData: FormData) {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     newPath = `${companyId}/properties/${propertyId}/${type}/${randomUUID()}-${safeName}`;
     const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(newPath, file, { contentType: file.type || "application/octet-stream" });
-    if (upErr) fail(`Could not upload file: ${upErr.message}`, anchor);
+    if (upErr) {
+      console.error("property document upload failed", file.name, upErr);
+      fail(`Could not upload ${file.name} - try again. If it keeps happening, let us know.`, anchor);
+    }
     row.storage_path = newPath;
     row.original_filename = file.name;
   }

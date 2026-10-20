@@ -72,7 +72,10 @@ export async function saveHeldRegistration(formData: FormData) {
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
     const path = `${companyId}/registrations/${heldId}/${randomUUID()}-${safeName}`;
     const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream" });
-    if (upErr) fail(`Saved, but the file could not be uploaded: ${upErr.message}`, `#r-${heldId}`);
+    if (upErr) {
+      console.error("held registration certificate upload failed", file.name, upErr);
+      fail(`Saved, but ${file.name} could not be uploaded - try again. If it keeps happening, let us know.`, `#r-${heldId}`);
+    }
     const { error } = await supabase.from("held_registrations").update({ storage_path: path, original_filename: file.name }).eq("id", heldId);
     if (error) {
       await supabase.storage.from(VAULT_BUCKET).remove([path]);
@@ -92,7 +95,10 @@ export async function deleteHeldRegistration(formData: FormData) {
   if (!id) redirect(BACK);
   const { data: existing } = await supabase.from("held_registrations").select("storage_path").eq("id", id).maybeSingle();
   const { error } = await supabase.from("held_registrations").delete().eq("id", id);
-  if (error) fail(error.message);
+  if (error) {
+    console.error("held_registrations delete failed", error);
+    fail("Could not delete this registration - try again. If it keeps happening, let us know.");
+  }
   if (existing?.storage_path) await supabase.storage.from(VAULT_BUCKET).remove([existing.storage_path]);
   revalidatePath(BACK);
   redirect(`${BACK}?saved=removed`);
@@ -128,7 +134,12 @@ export async function addRegistrationType(formData: FormData) {
     owner_company_id: companyId,
     asked_for_by: str(formData, "asked_for_by"),
   });
-  if (error) fail(error.message.includes("registration_types_company_slug") ? "You already added a registration with that name." : error.message, "#catalog");
+  if (error) {
+    if (!error.message.includes("registration_types_company_slug")) console.error("registration_types insert failed", error);
+    fail(error.message.includes("registration_types_company_slug")
+      ? "You already added a registration with that name."
+      : "Could not add this registration type - try again. If it keeps happening, let us know.", "#catalog");
+  }
   revalidatePath(BACK);
   redirect(`${BACK}?saved=type#add`);
 }

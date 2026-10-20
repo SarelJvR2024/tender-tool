@@ -23,7 +23,8 @@ export async function setDailyDigestOptIn(formData: FormData) {
 
   const { error } = await supabase.rpc("set_my_daily_digest_opt_in", { p_opt_in: optIn });
   if (error) {
-    redirect(`/company?error=${encodeURIComponent(`Could not update your email preference: ${error.message}`)}#notifications`);
+    console.error("set_my_daily_digest_opt_in rpc failed", error);
+    redirect(`/company?error=${encodeURIComponent("Could not update your email preference - try again. If it keeps happening, let us know.")}#notifications`);
   }
 
   revalidatePath("/company");

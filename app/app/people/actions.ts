@@ -92,11 +92,17 @@ export async function savePerson(formData: FormData) {
   let personId = id;
   if (!id || id === "new") {
     const { data, error } = await supabase.from("people").insert(row).select("id").single();
-    if (error) redirect(`/people/new?error=${encodeURIComponent(error.message)}`);
+    if (error) {
+      console.error("people insert failed", error);
+      redirect(`/people/new?error=${encodeURIComponent("Could not save this person - try again. If it keeps happening, let us know.")}`);
+    }
     personId = data!.id;
   } else {
     const { error } = await supabase.from("people").update(row).eq("id", id);
-    if (error) redirect(`/people/${id}?error=${encodeURIComponent(error.message)}`);
+    if (error) {
+      console.error("people update failed", error);
+      redirect(`/people/${id}?error=${encodeURIComponent("Could not save this person - try again. If it keeps happening, let us know.")}`);
+    }
   }
 
   revalidatePath("/people");
@@ -140,7 +146,10 @@ export async function deletePerson(formData: FormData) {
   const own = [...paths].filter((p) => p.startsWith(`${companyId}/`));
   if (own.length > 0) {
     const { error: rmErr } = await supabase.storage.from("cv-documents").remove(own);
-    if (rmErr) redirect(`/people/${id}?error=${encodeURIComponent(`Could not remove this person's CV files: ${rmErr.message}`)}`);
+    if (rmErr) {
+      console.error("cv-documents remove failed for person delete", id, rmErr);
+      redirect(`/people/${id}?error=${encodeURIComponent("Could not remove this person's CV files - try again. If it keeps happening, let us know.")}`);
+    }
   }
 
   // Registration certificates this person held (0050 held_registrations,
@@ -151,7 +160,10 @@ export async function deletePerson(formData: FormData) {
   if (regPaths.length > 0) await supabase.storage.from("company-documents").remove(regPaths);
 
   const { error } = await supabase.from("people").delete().eq("id", id).eq("company_id", companyId);
-  if (error) redirect(`/people/${id}?error=${encodeURIComponent(`Could not delete this person: ${error.message}`)}`);
+  if (error) {
+    console.error("people delete failed", error);
+    redirect(`/people/${id}?error=${encodeURIComponent("Could not delete this person - try again. If it keeps happening, let us know.")}`);
+  }
   revalidatePath("/people");
   redirect("/people");
 }
@@ -191,7 +203,10 @@ export async function saveProject(formData: FormData) {
   };
 
   const { error } = await supabase.from("projects").insert(row);
-  if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("projects insert failed", error);
+    redirect(`/people/${personId}?error=${encodeURIComponent("Could not save this project - try again. If it keeps happening, let us know.")}`);
+  }
 
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}`);
@@ -262,7 +277,8 @@ export async function uploadCv(formData: FormData) {
     .from("cv-documents")
     .upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
   if (uploadError) {
-    redirect(`/people/${personId}?error=${encodeURIComponent(`Could not upload file: ${uploadError.message}`)}`);
+    console.error("cv upload failed", file.name, uploadError);
+    redirect(`/people/${personId}?error=${encodeURIComponent(`Could not upload ${file.name} - try again. If it keeps happening, let us know.`)}`);
   }
 
   const { error: insertError } = await supabase.from("cv_uploads").insert({
@@ -275,7 +291,8 @@ export async function uploadCv(formData: FormData) {
     uploaded_by: user?.id ?? null,
   });
   if (insertError) {
-    redirect(`/people/${personId}?error=${encodeURIComponent(insertError.message)}`);
+    console.error("cv_uploads insert failed", insertError);
+    redirect(`/people/${personId}?error=${encodeURIComponent("Could not save this CV - try again. If it keeps happening, let us know.")}`);
   }
 
   revalidatePath(`/people/${personId}`);
@@ -285,7 +302,7 @@ export async function uploadCv(formData: FormData) {
 /**
  * Queue the four standard CV formats for one person, unless a set is already
  * waiting to be built (re-confirming twice shouldn't stack duplicate jobs).
- * Returns an error message or null.
+ * Returns true on failure, null on success.
  */
 async function queueStandardCvs(supabase: Awaited<ReturnType<typeof createClient>>, companyId: string, personId: string, userId: string | null) {
   const { data: pending } = await supabase
@@ -307,7 +324,8 @@ async function queueStandardCvs(supabase: Awaited<ReturnType<typeof createClient
     }))
   );
   const { error } = await supabase.from("generated_cvs").insert(standardJobs);
-  return error ? error.message : null;
+  if (error) console.error("generated_cvs insert failed for standard CV queue", error);
+  return error ? true : null;
 }
 
 /**
@@ -335,7 +353,10 @@ export async function applyCvExtraction(formData: FormData) {
     .select("id, person_id, review_status, proposed, cv_upload_id, cv_uploads(original_filename)")
     .eq("id", extractionId)
     .maybeSingle();
-  if (readError) back(readError.message);
+  if (readError) {
+    console.error("cv_extraction_results select failed", readError);
+    back("Could not load this extraction - try again. If it keeps happening, let us know.");
+  }
   if (!row || row.person_id !== personId) back("That extraction result wasn't found for this person.");
   if (row!.review_status !== "pending_review") back("These extracted fields were already saved or discarded.");
   const proposal = row!.proposed as Proposal;
@@ -391,11 +412,17 @@ export async function applyCvExtraction(formData: FormData) {
 
   if (Object.keys(personUpdate).length > 0) {
     const { error } = await supabase.from("people").update({ ...personUpdate, updated_at: new Date().toISOString() }).eq("id", personId);
-    if (error) back(`Could not save the person's fields: ${error.message}`);
+    if (error) {
+      console.error("people update failed for CV extraction", error);
+      back("Could not save the person's fields - try again. If it keeps happening, let us know.");
+    }
   }
   if (projectRows.length > 0) {
     const { error } = await supabase.from("projects").insert(projectRows);
-    if (error) back(`Person fields saved, but the projects could not be added: ${error.message}`);
+    if (error) {
+      console.error("projects insert failed for CV extraction", error);
+      back("Person fields saved, but the projects could not be added - try again. If it keeps happening, let us know.");
+    }
   }
 
   const { error: markError } = await supabase
@@ -407,11 +434,14 @@ export async function applyCvExtraction(formData: FormData) {
       applied: { person_fields: Object.keys(personUpdate), edited_fields: edited, projects_added: projectRows.length },
     })
     .eq("id", extractionId);
-  if (markError) back(`Saved, but the extraction couldn't be marked as reviewed: ${markError.message}`);
+  if (markError) {
+    console.error("cv_extraction_results update failed", markError);
+    back("Saved, but the extraction couldn't be marked as reviewed - try again. If it keeps happening, let us know.");
+  }
 
   const queueError = await queueStandardCvs(supabase, companyId, personId!, user?.id ?? null);
   revalidatePath(`/people/${personId}`);
-  if (queueError) back(`Fields saved, but the standard CV formats could not be queued: ${queueError}`);
+  if (queueError) back("Fields saved, but the standard CV formats could not be queued - try again. If it keeps happening, let us know.");
   redirect(`/people/${personId}?cv_applied=${Object.keys(personUpdate).length}-${projectRows.length}`);
 }
 
@@ -430,7 +460,10 @@ export async function discardCvExtraction(formData: FormData) {
     .eq("id", extractionId)
     .eq("person_id", personId)
     .eq("review_status", "pending_review");
-  if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("cv_extraction_results discard update failed", error);
+    redirect(`/people/${personId}?error=${encodeURIComponent("Could not discard this extraction - try again. If it keeps happening, let us know.")}`);
+  }
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}`);
 }
@@ -455,7 +488,10 @@ export async function saveRoleEligibility(formData: FormData) {
     .from("person_role_eligibility")
     .select("role_code")
     .eq("person_id", personId);
-  if (readError) redirect(`/people/${personId}?error=${encodeURIComponent(readError.message)}`);
+  if (readError) {
+    console.error("person_role_eligibility select failed", readError);
+    redirect(`/people/${personId}?error=${encodeURIComponent("Could not load this person's role tags - try again. If it keeps happening, let us know.")}`);
+  }
   const have = new Set((current ?? []).map((r) => r.role_code as string));
 
   const toRemove = [...have].filter((c) => !wanted.has(c));
@@ -463,13 +499,19 @@ export async function saveRoleEligibility(formData: FormData) {
 
   if (toRemove.length > 0) {
     const { error } = await supabase.from("person_role_eligibility").delete().eq("person_id", personId).in("role_code", toRemove);
-    if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}`);
+    if (error) {
+      console.error("person_role_eligibility delete failed", error);
+      redirect(`/people/${personId}?error=${encodeURIComponent("Could not save these role tags - try again. If it keeps happening, let us know.")}`);
+    }
   }
   if (toAdd.length > 0) {
     const { error } = await supabase.from("person_role_eligibility").insert(
       toAdd.map((role_code) => ({ company_id: companyId, person_id: personId, role_code, tagged_by: user?.id ?? null }))
     );
-    if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}`);
+    if (error) {
+      console.error("person_role_eligibility insert failed", error);
+      redirect(`/people/${personId}?error=${encodeURIComponent("Could not save these role tags - try again. If it keeps happening, let us know.")}`);
+    }
   }
 
   revalidatePath(`/people/${personId}`);
@@ -541,7 +583,10 @@ export async function addSignatoryScope(formData: FormData) {
     industry_tag: industryTag,
     discipline_tag: disciplineTag,
   });
-  if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}#signatory-scope`);
+  if (error) {
+    console.error("signatory_scopes insert failed", error);
+    redirect(`/people/${personId}?error=${encodeURIComponent("Could not save this scope - try again. If it keeps happening, let us know.")}#signatory-scope`);
+  }
   revalidatePath(`/people/${personId}`);
   redirect(back);
 }
@@ -554,7 +599,10 @@ export async function deleteSignatoryScope(formData: FormData) {
   if (!personId || !scopeId) redirect("/people");
 
   const { error } = await supabase.from("signatory_scopes").delete().eq("id", scopeId).eq("company_id", companyId);
-  if (error) redirect(`/people/${personId}?error=${encodeURIComponent(error.message)}#signatory-scope`);
+  if (error) {
+    console.error("signatory_scopes delete failed", error);
+    redirect(`/people/${personId}?error=${encodeURIComponent("Could not delete this scope - try again. If it keeps happening, let us know.")}#signatory-scope`);
+  }
   revalidatePath(`/people/${personId}`);
   redirect(`/people/${personId}#signatory-scope`);
 }

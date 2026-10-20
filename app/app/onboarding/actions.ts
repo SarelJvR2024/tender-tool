@@ -24,7 +24,8 @@ export async function createCompany(formData: FormData) {
 
   const { error } = await supabase.rpc("create_company_and_join", { p_legal_name: legalName });
   if (error) {
-    redirect(`/onboarding?error=${encodeURIComponent(error.message)}`);
+    console.error("create_company_and_join rpc failed", error);
+    redirect(`/onboarding?error=${encodeURIComponent("Could not create your company - try again. If it keeps happening, let us know.")}`);
   }
 
   redirect("/dashboard");

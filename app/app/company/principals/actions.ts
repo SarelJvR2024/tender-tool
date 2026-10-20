@@ -40,13 +40,22 @@ function triState(formData: FormData, key: string): boolean | null {
 }
 
 // Trigger messages are written for people (0050); Postgres' own constraint
-// messages are not, so map the known ones.
+// messages are not, so map the known ones. Anything else (a genuine
+// unexpected error, not one of this trigger's own deliberate messages) is
+// never shown raw - the trigger's own text never echoes a submitted value
+// either way (this file's own POPIA rule above), but an unrelated Postgres
+// error could still name an internal column/table.
 function friendly(message: string): string {
   if (message.includes("more than 100")) return message.replace(/^.*?company_principals: /, "");
   if (message.includes("company_principals_check")) return "A director with no shares can't have a shareholding - choose \"Director and shareholder\".";
   if (message.includes("id_number")) return "The ID number must be 13 digits.";
   if (message.includes("ownership_pct")) return "Shareholding must be between 0 and 100 %.";
-  return message;
+  // Not logging `message` itself here - this file's own POPIA rule above is
+  // that a submitted value must never end up in a log line, and an
+  // unrecognised Postgres error is exactly the case this function can't
+  // already prove is safe to echo.
+  console.error("company_principals write failed with an unrecognised error (message withheld, see POPIA rule above)");
+  return "Could not save this person - try again. If it keeps happening, let us know.";
 }
 
 export async function savePrincipal(formData: FormData) {
@@ -123,7 +132,10 @@ export async function deletePrincipal(formData: FormData) {
     .eq("id", id)
     .maybeSingle();
   const { error } = await supabase.from("company_principals").delete().eq("id", id);
-  if (error) fail(friendly(error.message));
+  if (error) {
+    console.error("company_principals delete failed");
+    fail("Could not delete this person - try again. If it keeps happening, let us know.");
+  }
   // Personal documents go with the person (POPIA: don't keep what has no purpose).
   const paths = [existing?.certified_id_path, existing?.disability_proof_path].filter(Boolean) as string[];
   if (paths.length) await supabase.storage.from(VAULT_BUCKET).remove(paths);
@@ -151,7 +163,10 @@ export async function uploadPrincipalDocument(formData: FormData) {
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
   const path = `${companyId}/principals/${id}/${kind}/${randomUUID()}-${safeName}`;
   const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream" });
-  if (upErr) fail(`Could not upload file: ${upErr.message}`, anchor);
+  if (upErr) {
+    console.error("principal document upload failed", file.name);
+    fail(`Could not upload ${file.name} - try again. If it keeps happening, let us know.`, anchor);
+  }
 
   const update: Record<string, string | null> = { [spec.pathColumn]: path, [spec.nameColumn]: file.name };
   if (kind === "certified_id") update.certified_id_on = str(formData, "certified_id_on");
