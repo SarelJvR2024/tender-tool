@@ -6,7 +6,24 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~21:30 UTC — fifty-first standing QA run: `fill_a_forms.py`/
+Last full pass: 2026-10-20, ~22:11 UTC — fifty-second standing QA run: independently verified two
+substantial batches of sibling work rather than trusting either's own claims. First, the UI/UX
+redesign's first 3 real prompts landed (`ee60823`/`f5e5a6f`/`6787cf3` - shadcn/ui + oklch design-token
+foundations, `/dashboard` migrated, a gold-to-blue accent swap) - confirmed zero files outside `app/`
+touched, zero Supabase/query lines changed in the migrated dashboard page, `npm run verify` genuinely
+passes (a stale `node_modules` in this sandbox made it look broken at first - a clean `npm ci`
+resolved it, no real bug on `main`), and `app/AGENTS.md` carries real, detailed design-decision notes
+exactly as Sarel's own rules for this redesign require. One low-priority finding, not fixed
+unilaterally: `npm audit` flags 9 high-severity advisories, all tracing to one `braces`/`fast-glob`
+chain pulled in only by the `shadcn` CLI's own tooling (confirmed `shadcn` is never imported by real
+app code - dev/build-time only, not a runtime risk); fixing it needs a breaking `shadcn` major-version
+bump, not something to force mid-redesign. Second, independently re-verified `db0cefc` (the
+Edge-Case QA session's own `fill_a_forms.py`/`fill_sbd_docx.py` timezone fix, below) by re-running its
+new test myself - clean. Also checked on the real daily-digest GitHub Actions test run from two passes
+ago (`39492435787`): still in progress at over 1h40m, well past both the local dry-run's 31+ minutes
+and comfortably eating into the 120-minute timeout raised just for this - a real, still-developing
+question of whether 120 minutes is actually enough, not yet resolved as this entry is written.
+~21:30 UTC — fifty-first standing QA run: `fill_a_forms.py`/
 `fill_sbd_docx.py`'s `_today_iso()` used a naive `datetime.date.today()` - the same bug class the
 enterprise audit fixed in 4 other files, but missed here. During the 00:00-01:59 SAST window this
 could flip a SANRAL A-Forms declaration's A12 (B-BBEE)/A20 (COID) compliance verdict from EXPIRED
