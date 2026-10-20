@@ -6,7 +6,14 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~08:15 UTC — independently re-verified Finding 33 (`3255b00`, the
+Last full pass: 2026-10-20, ~09:50 UTC — `daily_digest.py`'s listing-changes tracker was the odd
+one out of 3 near-identical "optional extra signal, a failure must not cost the rest of the
+digest" try/excepts: the other two call `system_alerts.record(...)` on failure, this one only
+printed a stdout warning - invisible on an unattended scheduled run (Finding 34). Added the
+matching alert call and a new `test_digest_live.py` check, verified to actually catch the
+regression (reverted the fix, confirmed the check fails with zero alert calls, restored it). Full
+`test_digest_live.py` and all 5 `engine/compliance/test_*.py` files still green. ~08:15 UTC —
+independently re-verified Finding 33 (`3255b00`, the
 duplicate-reminder compliance fix): confirmed the new guard's lead-time expression matches
 `find_due_documents()`'s own exactly, traced the `_expiry_window()` boundary for an off-by-one,
 and personally reproduced the commit's own "reverted the fix, confirmed the new test fails"
@@ -241,6 +248,30 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - forty-first run): a broken listing-changes tracker degraded silently instead of raising a system alert - fixed
+
+Orientation: `engine/notify/` (`daily_digest.py`) hadn't had a dedicated pass since the
+nineteenth run - the next-most-neglected area after compliance/reminders (just covered).
+
+**Finding 34 (fixed, minor-but-real - a missing alert, not wrong data):** `main()` has three
+near-identical try/except blocks guarding optional extra signals (tender updates, re-assessed
+tenders, listing changes) so one failure doesn't cost anyone the rest of their digest. The first
+two call `system_alerts.record(...)` on failure; listing changes only printed a `WARNING` to
+stdout - invisible on an unattended scheduled run. Confirmed with a real adversarial case (forced
+`tender_changes.run()` to raise via the existing `test_digest_live.py` harness, captured every
+`system_alerts.record` call) - zero were made for this path.
+
+**Fix:** added the matching `system_alerts.record(...)` call, mirroring the two blocks right
+above it in the same function. No behavior change otherwise - the digest still goes out without
+listing changes on this kind of failure, it's just no longer silent to Sarel.
+
+**Verification:** extended `test_digest_live.py` with a new check; **proved it actually catches
+the regression** (temporarily reverted the fix, confirmed the new check fails with zero alert
+calls recorded, restored it, confirmed clean). Full `test_digest_live.py` and all 5
+`engine/compliance/test_*.py` files still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "forty-first run" (Finding 34).
 
 ## This pass (2026-10-20, standing QA/robustness review - fortieth run): one commit, independently re-verified correct - its own "proved the regression test catches the bug" claim reproduced, not just trusted
 

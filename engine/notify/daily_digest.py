@@ -650,6 +650,8 @@ def main():
             listing_changes = store.recent_changes(feed_ocids, since)
         except Exception as e:
             print(f"WARNING: listing changes could not be tracked ({e}) - digest goes out without them.")
+            system_alerts.record("digest", f"The daily digest could not track listing changes: {type(e).__name__}: {e}",
+                                 "error", exc=e)
 
     if mode == "live":
         n = (watch_deadlines.save_seen_db(client, seen, seen_loaded, DIGEST_CONSUMER)

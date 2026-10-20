@@ -2103,3 +2103,43 @@ the file (`git diff` confirmed zero remaining changes), re-ran clean. Ran all 5
 `engine/compliance/test_*.py` files - all pass. `python3 -m py_compile` clean.
 
 No new findings. Green on real CI (`39382894500`).
+
+## 2026-10-20 (forty-first run): Notify - a broken listing-changes tracker degraded silently instead of raising a system alert
+
+**Why this area:** `engine/notify/` (`daily_digest.py`) hadn't had a dedicated pass since the
+nineteenth run - the next-most-neglected area after compliance/reminders was just covered.
+
+### Finding 34 (CONFIRMED, FIXED, minor-but-real - a missing alert, not wrong data)
+
+**Where:** `engine/notify/daily_digest.py`, `main()`'s listing-changes block.
+
+**What was tested:** `main()` has three structurally identical try/except blocks, each guarding
+one "track something extra; a failure must not cost anyone the rest of their digest" step:
+tender updates (`watch_tender_updates.pending_digest_updates`), re-assessed tenders
+(`discovery_downgrades.pending_digest_downgrades`), and listing changes
+(`tender_changes.run` + `store.recent_changes`). Read all three side by side rather than trust
+they're consistent just because they look alike: the first two call `system_alerts.record(...)`
+on failure (matching this script's own established "a database error here fails loudly" rule
+stated elsewhere in this same file); the third - listing changes - only printed a `WARNING` to
+stdout. A scheduled, unattended run's stdout isn't read by anyone; `system_alerts` is the actual
+mechanism Sarel relies on to learn something broke. Confirmed with a real adversarial case: using
+the existing `test_digest_live.py` harness (in-memory Supabase fake, two real sample tenders),
+forced `tender_changes.run()` to raise, and captured every `system_alerts.record` call made during
+the run - zero calls were made for the listing-changes failure, while the exact same simulated
+failure on the tender-updates path (checked separately, pre-existing behaviour) does call it.
+
+**Fix:** added the matching `system_alerts.record("digest", ..., "error", exc=e)` call to the
+listing-changes except block - the identical pattern already used two blocks above it in the same
+function. No other logic touched; the digest still goes out without listing changes on this kind
+of failure, exactly as the comment above the block already promises - it's just no longer silent
+to Sarel.
+
+**Verification:** extended `engine/notify/test_digest_live.py` with a new check - monkeypatches
+`daily_digest.fetch_releases` to return a non-None `gov_res` (so the listing-changes tracker
+actually runs) and `tender_changes.run` to raise, then asserts `system_alerts.record` was called
+with "digest"/"listing changes" in the message. **Proved the test actually catches the
+regression**, not just that it passes: temporarily reverted the fix, re-ran - the new check failed
+exactly as predicted (`FAIL ... ([])` - zero alert calls recorded); restored the fix and confirmed
+clean again. Ran the full `engine/notify/test_digest_live.py` and all 5
+`engine/compliance/test_*.py` files (no network, in-memory fakes throughout) - all pass.
+`python3 -m py_compile` clean on both changed files.

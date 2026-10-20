@@ -267,6 +267,32 @@ def main():
     finally:
         daily_digest.gov_sources.releases_for_watch = real_releases_for_watch
 
+    print("a broken listing-changes tracker is alerted, not just printed (Finding 34)")
+    # Of the digest's 3 structurally identical "track something extra, a
+    # failure must not cost anyone the rest of their digest" try/excepts
+    # (tender updates, re-assessed tenders, listing changes), the first two
+    # call system_alerts.record() on failure; listing changes only printed a
+    # WARNING to stdout - invisible on an unattended scheduled run, the
+    # exact silent-degradation this project's alerting exists to prevent.
+    real_fetch_releases, real_run = daily_digest.fetch_releases, daily_digest.tender_changes.run
+    real_record = daily_digest.system_alerts.record
+    recorded = []
+    daily_digest.system_alerts.record = lambda *a, **kw: recorded.append((a, kw))
+    daily_digest.fetch_releases = lambda days=14, sources="all", with_documents=True: (
+        [dict(r) for r in fanout.RELEASES], {"sources": {}, "errors": {}})  # non-None gov_res, so the tracker runs
+
+    def broken_run(gov_res, store):
+        raise RuntimeError("listing-changes store unreachable (simulated)")
+    daily_digest.tender_changes.run = broken_run
+    try:
+        run()
+        check(any(c[0][0] == "digest" and "listing changes" in c[0][1] for c in recorded),
+              f"a broken listing-changes tracker calls system_alerts.record, not just a print ({recorded})")
+    finally:
+        daily_digest.fetch_releases = real_fetch_releases
+        daily_digest.tender_changes.run = real_run
+        daily_digest.system_alerts.record = real_record
+
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
