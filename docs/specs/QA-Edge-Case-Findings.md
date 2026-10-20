@@ -2337,3 +2337,44 @@ app-wide rate limiting, no custom `error.tsx`/`not-found.tsx`).
 **Still deliberately deferred, unchanged from round 2:** a general-pack regression-corpus coverage gap (no Transnet/Cape Town samples - needs real document acquisition, not a code fix); client-side-only file upload type validation; no app-wide rate limiting beyond the CV-request fix above.
 
 **Commits:** `a68b342`, `abcd91f`, `25e8a20`, `af1e25b`, `a36ef61`, `095a89a` (the CI hotfix).
+
+## 2026-10-20 (forty-sixth run): the enterprise-readiness audit's round 3 independently re-verified - no issues found
+
+**Context:** picked up this cycle expecting to continue the engine rotation, but a parallel
+"enterprise-readiness audit" session had just landed 14 commits (`8aad3bb` through `c3a6185`)
+covering every single engine area in one sweep (CV, discovery, intake, compliance, notify,
+general pack, SANRAL pack, worker-adjacent dead-code removal, RLS/search_path hardening, a
+shared filename-sanitization consolidation, and a real CI regression it introduced and then
+caught and fixed within the same round). Rather than duplicate that effort by hunting for new
+findings across the same ground, spent this cycle independently re-verifying the two items
+closest to this review's own recent work (compliance/notify's timezone fix directly touches
+`watch_deadlines.py`'s `main()`, which Finding 33 also touched - needed to confirm no collision)
+rather than trusting the commits' own verification claims.
+
+**Checked independently, not just read:**
+- **Timezone bug (`cdff2ae`):** the claim is that `watch_deadlines.py`/`daily_digest.py` computed
+  "today" via naive `datetime.date.today()` in a UTC-default worker container, one calendar day
+  behind real SAST for the 00:00-01:59 SAST window every day. Reproduced the exact mismatch by
+  hand (simulated UTC 2026-10-20 23:30 -> naive "today" = Oct 20, real SAST "today" = Oct 21,
+  confirmed mismatched) rather than taking the commit's word for it. The new `SAST` constant and
+  its three call sites in `watch_deadlines.py`/`daily_digest.py` only touch where "today" comes
+  from - confirmed by diff that Finding 33's own `find_documents_lapsing_before_closing()` guard
+  (the `lead_days` parameter and its per-field comparison) is untouched and still correct.
+- **Per-item batch isolation (`cdff2ae`):** the per-roster-entry `try/except` added around
+  `daily_digest.py`'s digest-building loop is the same "one bad item must not abort the batch"
+  pattern this review has applied repeatedly all session (Findings 2, 8, 21, 26, 32) - sound,
+  consistent, and does not touch or duplicate Finding 34's separate listing-changes alert fix a
+  few lines below it in the same function.
+- **CI state:** confirmed via the real GitHub Actions API (not assumed) that app-ci's run for
+  `a36ef61` (the CV-rate-limiting commit) shows `"conclusion":"failure"` - but traced this to the
+  STILL-OPEN `25e8a20` regression at that point in history, fixed two commits later by `095a89a`
+  (run 32, `"conclusion":"success"`). Current `main` (`c3a6185`, docs-only) sits on top of the
+  fixed commit, so the repo is genuinely green, not just claimed green.
+- **No regressions:** ran all 5 `engine/compliance/test_*.py` files, `engine/notify/
+  test_digest_live.py`, `test_digest_opt_in.py`, `engine/intake/test_classify_tender.py`,
+  `engine/general/test_process_general_jobs.py`, and `engine/test_fill_docx_forms.py` - every
+  one passes on the merged state (the one pre-existing, already-documented failure,
+  `test_manual_intake.py`, needs Postgres and isn't in CI - unrelated to this round).
+
+No new findings - everything checked held up under independent reproduction, not just trust in
+the commits' own stated verification.

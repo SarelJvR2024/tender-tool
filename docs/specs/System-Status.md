@@ -6,7 +6,14 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~15:28 UTC — round 3 of the enterprise-readiness audit, at Sarel's own
+Last full pass: 2026-10-20, ~16:00 UTC — independently re-verified round 3 of the enterprise-
+readiness audit (forty-sixth standing QA run) rather than duplicate it: reproduced the SAST
+timezone mismatch by hand (not just read the claim), confirmed by diff that Finding 33's own
+`find_documents_lapsing_before_closing()` guard is untouched by the new `SAST` constant, confirmed
+via the real GitHub Actions API that `main` is genuinely green (traced the one failing run on
+`a36ef61` to the already-fixed `25e8a20` regression, two commits behind current `main`), and
+re-ran 7 test suites across compliance/notify/intake/general with no regressions. No new findings.
+~15:28 UTC — round 3 of the enterprise-readiness audit, at Sarel's own
 explicit follow-up ("continue the next audit round on the deferred items"): every item round 2 had
 named as deliberately deferred is now closed - 2 more timezone-bug instances, the identical
 qualifications-null crash the CV engine had already been fixed for, 2 SECURITY DEFINER functions
