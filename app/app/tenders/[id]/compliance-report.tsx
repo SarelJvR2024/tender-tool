@@ -196,7 +196,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
               {p.person && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
                   {p.cv ? (
-                    <Chip label={`CV on file (${p.cv.mode === "as_is" ? "use as-is" : "AI extract"})`} bg="#DCFCE7" color="#15803D" />
+                    <Chip label={`CV on file (${p.cv.mode === "as_is" ? "Use as-is" : "AI-extract"})`} bg="#DCFCE7" color="#15803D" />
                   ) : (
                     <Chip label="No CV uploaded" bg="#FEE2E2" color="#B91C1C" />
                   )}
