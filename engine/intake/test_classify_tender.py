@@ -24,6 +24,12 @@ import docx  # noqa: E402
 
 FAILS = []
 
+# A real Technical Submission workbook, so classify_documents() actually
+# routes "sanral" (the route the .docx tests below need to exercise
+# sanral_files/sanral_documents - those are deliberately {}/[] on the
+# general route, by design, when no workbook is present at all).
+TECH_WORKBOOK = os.path.join(os.path.dirname(HERE), "..", "templates", "samples", "R.352-020-2025.1F_ran.xlsm")
+
 
 def check(name, cond, detail=""):
     print(("  ok   " if cond else "  FAIL ") + name + (f"  ({detail})" if detail and not cond else ""))
@@ -62,6 +68,56 @@ def test_valid_docx_is_classified_with_no_spurious_note(tmp_path="/tmp"):
     os.remove(path)
 
 
+def test_period_after_the_form_letter_is_also_recognized(tmp_path="/tmp"):
+    print("classify_documents: a real C.1.1.1 Form of Offer whose IN-DOCUMENT heading has a "
+          "period after the letter (\"C.1.1.1\", not \"C1.1.1\")")
+    # QA audit 2026-10-20 ("enterprise readiness" pass): the two tests above
+    # both use "C.1.1.1" in the FILENAME but "C1.1.1" (no period) in the
+    # in-document heading text - the exact mismatch that let the period-in-
+    # heading case go untested while SANRAL_DOCX's regexes silently failed
+    # on it. This test exercises the heading text itself, not just the name.
+    path = os.path.join(tmp_path, "Form of Offer - period heading.docx")
+    d = docx.Document()
+    d.add_paragraph("C.1.1.1 FORM OF OFFER (Incorporating SBD7)")
+    d.save(path)
+    entries = [_doc_entry("Form of Offer - period heading.docx", path),
+               _doc_entry("Technical Submission.xlsm", TECH_WORKBOOK, fmt="xlsm")]
+    decision = ct.classify_documents(entries, buyer="SANRAL", all_text="SANRAL tender")
+    check("route is sanral (the workbook alone already guarantees this)", decision["route"] == "sanral", decision)
+    check("a period after the form letter in the heading text is still recognized",
+          "c111_form_of_offer" in decision["sanral_files"], decision)
+    # Other notes are expected here (C.1.2.3/A-Forms/Financial workbook
+    # genuinely weren't supplied in this fixture) - the only thing this
+    # check cares about is that the period-heading document ITSELF isn't
+    # flagged as unread/ambiguous/corrupt.
+    check("the period-heading document itself is never named in a note (a clean match, not flagged)",
+          not any("period heading" in n or "could not be opened" in n or "AMBIGUOUS" in n for n in decision["notes"]),
+          decision["notes"])
+    os.remove(path)
+
+
+def test_duplicate_candidates_prefer_the_more_recently_modified_file(tmp_path="/tmp"):
+    print("classify_documents: two files both match c111_form_of_offer - the more recently "
+          "modified one should win, not whichever sorts first alphabetically")
+    import time
+    old_path = os.path.join(tmp_path, "Old_Draft_Form_Offer.docx")
+    new_path = os.path.join(tmp_path, "Zfinal_Form_Offer.docx")
+    d1 = docx.Document(); d1.add_paragraph("C1.1.1 FORM OF OFFER (Incorporating SBD7) - DRAFT")
+    d1.save(old_path)
+    time.sleep(1.1)
+    d2 = docx.Document(); d2.add_paragraph("C1.1.1 FORM OF OFFER (Incorporating SBD7) - FINAL")
+    d2.save(new_path)
+    entries = [_doc_entry("Old_Draft_Form_Offer.docx", old_path), _doc_entry("Zfinal_Form_Offer.docx", new_path),
+               _doc_entry("Technical Submission.xlsm", TECH_WORKBOOK, fmt="xlsm")]
+    decision = ct.classify_documents(entries, buyer="SANRAL", all_text="SANRAL tender")
+    check("the more recently modified file (Zfinal, alphabetically LAST) is the one actually used",
+          decision["sanral_files"].get("c111_form_of_offer") == new_path, decision)
+    check("the note names it as AMBIGUOUS and tells a person to check, not a soft 'remove the others if wrong'",
+          any(n.startswith("AMBIGUOUS") and "must check" in n for n in decision["notes"]), decision["notes"])
+    os.remove(old_path)
+    os.remove(new_path)
+
+
 def test_docx_already_marked_unreadable_is_skipped_without_a_note():
     print("classify_documents: a doc_entry already flagged unreadable upstream")
     entry = _doc_entry("whatever.docx", "/tmp/does-not-matter.docx")
@@ -74,6 +130,8 @@ def test_docx_already_marked_unreadable_is_skipped_without_a_note():
 def main():
     test_corrupt_docx_is_noted_not_silently_dropped()
     test_valid_docx_is_classified_with_no_spurious_note()
+    test_period_after_the_form_letter_is_also_recognized()
+    test_duplicate_candidates_prefer_the_more_recently_modified_file()
     test_docx_already_marked_unreadable_is_skipped_without_a_note()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
