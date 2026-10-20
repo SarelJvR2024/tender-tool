@@ -326,7 +326,10 @@ def process_job(url, key, job, out_dir):
         doc = builder(profile, person, person_id, job["detail"], tender_ctx, None, log)
 
         mode = "customized" if tender_ctx else "standard"
-        base_name = f"{person['name'].replace(' ', '_')}_{job['format']}_{job['detail']}_{mode}_{job['id']}"
+        # person["name"] is free text - generate_cv._safe_name() strips
+        # anything that could escape out_dir via os.path.join (CWE-22,
+        # confirmed live 2026-10-20: "../../../../tmp/x" wrote outside it).
+        base_name = f"{generate_cv._safe_name(person['name'])}_{job['format']}_{job['detail']}_{mode}_{job['id']}"
         docx_local = os.path.join(out_dir, base_name + ".docx")
         os.makedirs(out_dir, exist_ok=True)
         doc.save(docx_local)
@@ -360,8 +363,16 @@ def process_job(url, key, job, out_dir):
                              context={"job_id": job["id"], "company_id": job.get("company_id"),
                                       "person_id": job.get("person_id"), "format": job.get("format")})
         try:
+            # The real str(e) is already logged above via system_alerts.record
+            # (exc=e) for debugging - error_message is read straight through
+            # by the Tender Workspace page and shown to the customer verbatim,
+            # so it must never be a raw Python/library exception (confirmed:
+            # a stray control character in a profile field raises
+            # "All strings must be XML compatible: ..." naming python-docx
+            # internals, with no indication which field was the problem).
             supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}", {
-                "status": "failed", "error_message": str(e),
+                "status": "failed",
+                "error_message": "Could not generate this CV - try again. If it keeps happening, let us know.",
             })
         except Exception as e2:
             system_alerts.record("cv", f"Could not mark a failed CV job as failed: {type(e2).__name__}: {e2}",

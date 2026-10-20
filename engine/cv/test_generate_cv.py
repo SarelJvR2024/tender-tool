@@ -88,10 +88,53 @@ def test_specialism_warning_shown_and_logged():
               for e in log.entries))
 
 
+def test_person_name_cannot_escape_out_dir_via_path_traversal():
+    print("output filename: a person name containing path-traversal characters")
+    import tempfile
+    out_dir = tempfile.mkdtemp(prefix="test_cv_out_")
+    base_name = gc._safe_name("../../../../tmp/pwned_poc_cv")
+    docx_path = os.path.join(out_dir, base_name + ".docx")
+    real_out, real_docx = os.path.realpath(out_dir), os.path.realpath(docx_path)
+    check("the resolved output path stays inside out_dir (no CWE-22 path traversal)",
+          real_docx.startswith(real_out + os.sep), real_docx)
+
+
+def test_null_projects_and_qualifications_degrade_instead_of_crashing():
+    print("a person row with explicit null projects/qualifications (not just missing)")
+    person = {"name": "Jane Doe", "projects": None, "qualifications": None}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    try:
+        gc.build_world_bank(profile, person, "person_1", "summary", None, None, log)
+        check("build_world_bank does not crash on projects=None/qualifications=None", True)
+    except Exception as e:
+        check("build_world_bank does not crash on projects=None/qualifications=None", False, f"{type(e).__name__}: {e}")
+
+
+def test_control_characters_are_stripped_not_crashed_on():
+    print("a control character (realistic OCR artifact) in name/project text")
+    person = {"name": "Jane\x0bDoe", "qualifications": {},
+              "projects": [{"client_and_number": "Proj\x01A", "value_rm": 5, "position_held": "Engineer",
+                             "start": "2020", "end": "2021", "contact": "Bob", "contact_phone": "012"}]}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    import tempfile
+    try:
+        doc = gc.build_world_bank(profile, person, "person_1", "summary", None, None, log)
+        with tempfile.TemporaryDirectory() as d:
+            doc.save(os.path.join(d, "test_control_char.docx"))
+        check("a control character in profile text does not crash docx generation", True)
+    except Exception as e:
+        check("a control character in profile text does not crash docx generation", False, f"{type(e).__name__}: {e}")
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
     test_specialism_warning_shown_and_logged()
+    test_person_name_cannot_escape_out_dir_via_path_traversal()
+    test_null_projects_and_qualifications_degrade_instead_of_crashing()
+    test_control_characters_are_stripped_not_crashed_on()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

@@ -39,6 +39,7 @@ Usage:
 """
 import sys
 import os
+import re
 import json
 import shutil
 import argparse
@@ -56,6 +57,30 @@ from provenance import ProvenanceLog  # noqa: E402
 from suggest_pack import score_candidate, years_experience_at  # noqa: E402
 
 SANRAL_MAX_PROJECTS_SUMMARY = 3  # matches Form B1.1's own stated cap exactly
+
+
+_XML_INVALID_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
+
+def _safe_text(value):
+    """python-docx (via lxml) raises ValueError("All strings must be XML
+    compatible...") on a control character/NULL byte - confirmed reachable
+    from a realistic source: OCR'd profile text (this project's own OCR
+    warnings already flag OCR as capable of misreading characters) or a
+    paste with embedded control bytes. Strips them rather than letting one
+    bad character fail the whole document; never called on None (every call
+    site already has its own "" fallback for that)."""
+    return _XML_INVALID_RE.sub("", value)
+
+
+def _safe_name(raw):
+    """A person's name is free text any company member can set - used almost
+    raw in an output filename, `/`, `..` etc pass straight through into an
+    os.path.join(out_dir, ...) call. Confirmed live 2026-10-20: a name like
+    "../../../../tmp/x" writes outside out_dir entirely (CWE-22). Same
+    sanitizer convention already used for uploaded filenames elsewhere in
+    this project (e.g. the app's own upload actions)."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", raw.replace(" ", "_"))
 
 
 # ============================================================================
@@ -93,9 +118,9 @@ def _kv_table(d, rows):
     t.autofit = True
     for i, (label, value) in enumerate(rows):
         c0, c1 = t.rows[i].cells
-        c0.text = label
+        c0.text = _safe_text(label)
         c0.paragraphs[0].runs[0].bold = True
-        c1.text = "" if value is None else str(value)
+        c1.text = "" if value is None else _safe_text(str(value))
     return t
 
 
@@ -147,10 +172,10 @@ def add_cover_page(d, person, person_id, tender_ctx, log):
 
     d.add_paragraph()
     _sub_heading(d, "Relevant experience for this position")
-    d.add_paragraph(
+    d.add_paragraph(_safe_text(
         f"This CV highlights {person['name']}'s qualifications and project experience "
         f"relevant to the {pos['code']} - {pos['description']} position."
-    )
+    ))
 
     if cand is None:
         # Nothing buyer-appropriate to add without a stored match for this position -
@@ -224,7 +249,12 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         log.missing("cv.b11.id_number", reason="No id_number on file for this person.")
 
     d.add_paragraph()
-    projects = person.get("projects", [])
+    # `person.get(key, default)` only substitutes default when the key is
+    # ABSENT - a row with an explicit `"projects": null` (a real possible
+    # shape, not just missing) sails through and crashes `sorted()` below.
+    # `or` treats null the same as missing, matching this engine's own
+    # "never guess, degrade honestly" rule rather than crashing on it.
+    projects = person.get("projects") or []
     sorted_projects = sorted(projects, key=lambda p: p.get("end", "") or "", reverse=True)
     shown = sorted_projects[:SANRAL_MAX_PROJECTS_SUMMARY] if detail == "summary" else sorted_projects
     log.computed(
@@ -244,13 +274,13 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         hdr[i].paragraphs[0].runs[0].bold = True
     for proj in shown:
         row = t.add_row().cells
-        row[0].text = proj.get("client_and_number", "")
-        row[1].text = str(proj.get("value_rm", "")) if proj.get("value_rm") is not None else ""
-        row[2].text = proj.get("position_held", "")
-        row[3].text = proj.get("start", "") or ""
-        row[4].text = proj.get("end", "") or ""
-        row[5].text = proj.get("contact", "") or ""
-        row[6].text = proj.get("contact_phone", "") or ""
+        row[0].text = _safe_text(proj.get("client_and_number", ""))
+        row[1].text = _safe_text(str(proj.get("value_rm", "")) if proj.get("value_rm") is not None else "")
+        row[2].text = _safe_text(proj.get("position_held", ""))
+        row[3].text = _safe_text(proj.get("start", "") or "")
+        row[4].text = _safe_text(proj.get("end", "") or "")
+        row[5].text = _safe_text(proj.get("contact", "") or "")
+        row[6].text = _safe_text(proj.get("contact_phone", "") or "")
         # contact_match_confidence on file is free text in this profile (e.g. "CORRECTED
         # 2026-10-15 ...", "PARTIALLY CONFIRMED (updated ...) ..."), not just the DB's four
         # enum values - treat anything starting with "confirmed" (case-insensitive) as
@@ -269,7 +299,7 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
 
     d.add_paragraph()
     _sub_heading(d, "FORM B2.1 - Candidate's Qualification and Registration Record")
-    q = person.get("qualifications", {})
+    q = person.get("qualifications") or {}  # None (not just missing) degrades the same way
     # A tender with no closing date on file (build_tender_ctx_from_assignment
     # passes None) or an unreadable one raised TypeError/ValueError here and
     # failed the whole CV; count experience to today instead, like a
@@ -358,7 +388,7 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
 
     d.add_paragraph()
     _sub_heading(d, "6. Membership of Professional Associations")
-    q = person.get("qualifications", {})
+    q = person.get("qualifications") or {}  # None (not just missing) degrades the same way
     assoc_lines = []
     if q.get("ecsa_level"):
         assoc_lines.append(f"Engineering Council of South Africa (ECSA) - {q['ecsa_level']}, "
@@ -375,7 +405,7 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
         assoc_lines.append("MISSING")
         log.missing("cv.wb.professional_associations", reason="No ECSA/SACPCMP/SACNASP/SAGC or other "
                     "professional-body registration on file for this person.")
-    d.add_paragraph("\n".join(assoc_lines))
+    d.add_paragraph(_safe_text("\n".join(assoc_lines)))
 
     d.add_paragraph()
     _sub_heading(d, "7. Other Training")
@@ -408,9 +438,9 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
             hdr[i].paragraphs[0].runs[0].bold = True
         for desc, inst, date in edu_rows:
             row = t.add_row().cells
-            row[0].text = desc or ""
-            row[1].text = inst or ""
-            row[2].text = date or ""
+            row[0].text = _safe_text(desc or "")
+            row[1].text = _safe_text(inst or "")
+            row[2].text = _safe_text(date or "")
             log.confirmed(f"cv.wb.education.{desc}", f"{inst}, {date}")
     else:
         d.add_paragraph("MISSING")
@@ -420,18 +450,23 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
 
     d.add_paragraph()
     _sub_heading(d, "11. Employment Record (most recent first; relevant work only)")
-    projects = person.get("projects", [])
+    # `person.get(key, default)` only substitutes default when the key is
+    # ABSENT - a row with an explicit `"projects": null` (a real possible
+    # shape, not just missing) sails through and crashes `sorted()` below.
+    # `or` treats null the same as missing, matching this engine's own
+    # "never guess, degrade honestly" rule rather than crashing on it.
+    projects = person.get("projects") or []
     sorted_projects = sorted(projects, key=lambda p: p.get("end", "") or "", reverse=True)
     shown = sorted_projects[:SANRAL_MAX_PROJECTS_SUMMARY] if detail == "summary" else sorted_projects
     log.computed("cv.wb.employment_record_count", len(shown),
                  reason=f"detail={detail}: {'capped at 3 most relevant entries' if detail == 'summary' else 'all entries on file shown'}")
     if shown:
         for proj in shown:
-            d.add_paragraph(
+            d.add_paragraph(_safe_text(
                 f"{proj.get('start', '?')} to {proj.get('end', '?')}  —  {proj.get('client_and_number', '')}\n"
                 f"Position: {proj.get('position_held', '')}    Value: R{proj.get('value_rm', '?')}m\n"
                 f"Referee: {proj.get('contact', 'MISSING')}  {proj.get('contact_phone', '')}"
-            )
+            ))
     else:
         d.add_paragraph("MISSING")
         log.missing("cv.wb.employment_record", reason="No project/employment history on file.")
@@ -476,7 +511,7 @@ def generate(profile_path, person_index, out_dir, fmt, detail, tender_path=None,
     doc = builder(profile, person, person_id, detail, tender_ctx, logo_path, log)
 
     mode = "customized" if tender_ctx else "standard"
-    base_name = f"{person['name'].replace(' ', '_')}_{fmt}_{detail}_{mode}"
+    base_name = f"{_safe_name(person['name'])}_{fmt}_{detail}_{mode}"
     docx_path = os.path.join(out_dir, base_name + ".docx")
     doc.save(docx_path)
 
@@ -513,7 +548,7 @@ def generate_as_is(source_path, out_dir, person_name):
     if not os.path.exists(source_path):
         raise FileNotFoundError(f"as-is source file does not exist: {source_path}")
 
-    base_name = f"{person_name.replace(' ', '_')}_as_is{os.path.splitext(source_path)[1]}"
+    base_name = f"{_safe_name(person_name)}_as_is{os.path.splitext(source_path)[1]}"
     copied_path = os.path.join(out_dir, base_name)
     shutil.copyfile(source_path, copied_path)
 
