@@ -111,6 +111,7 @@ export async function SiteNav({ active }: { active: NavKey }) {
         )}
       </div>
       <nav
+        aria-label="Primary"
         style={{
           display: "flex",
           gap: 2,
@@ -126,6 +127,7 @@ export async function SiteNav({ active }: { active: NavKey }) {
             <Link
               key={item.key}
               href={item.href}
+              aria-current={isActive ? "page" : undefined}
               style={{
                 flexShrink: 0,
                 display: "flex",
