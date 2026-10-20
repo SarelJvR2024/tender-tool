@@ -54,6 +54,8 @@ export default async function PeoplePage({
     .select(`id, name, role, description, ${PERSON_CREDENTIAL_COLUMNS}, highest_description`)
     .order("name", { ascending: true });
 
+  if (error) console.error("people select failed", error);
+
   const rows = (people ?? []) as PersonRow[];
 
   // At-a-glance registration health, same idea as the Document Vault's chip row.
@@ -101,7 +103,7 @@ export default async function PeoplePage({
 
         {error && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
-            Could not load people: {error.message}
+            {"Couldn't load people - try refreshing. If it keeps happening, let us know."}
           </div>
         )}
 

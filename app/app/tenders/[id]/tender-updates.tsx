@@ -70,9 +70,10 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
   const briefingOnFile = (tender?.briefing_date as string | null) ?? null;
 
   if (error) {
+    console.error("tender_watched_documents select failed", tenderId, error);
     return (
       <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 12, color: "#B91C1C" }}>
-        Could not check this tender for addenda and updates: {error.message}
+        Couldn&apos;t check this tender for addenda and updates - try refreshing. If it keeps happening, let us know.
       </div>
     );
   }

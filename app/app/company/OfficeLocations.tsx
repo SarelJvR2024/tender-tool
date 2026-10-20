@@ -79,6 +79,7 @@ function OfficeFields({ office }: { office: CompanyOffice | null }) {
 export async function OfficeLocations() {
   const supabase = await createClient();
   const { data, error } = await supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS).order("created_at");
+  if (error) console.error("company_offices select failed", error);
   const offices = (data ?? []) as CompanyOffice[];
 
   return (
@@ -93,7 +94,7 @@ export async function OfficeLocations() {
 
       {error && (
         <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 14px", marginBottom: 12, fontSize: 12, color: "#92400E" }}>
-          Couldn&apos;t load office locations ({error.message}) - migration 0015 may not be applied yet.
+          Couldn&apos;t load office locations - try refreshing. If it keeps happening, let us know.
         </div>
       )}
 

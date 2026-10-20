@@ -23,6 +23,7 @@ const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E
 export async function TenderTemplates({ tenderId, saved }: { tenderId: string; saved: boolean }) {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("tender_document_uploads", { p_tender_id: tenderId });
+  if (error) console.error("tender_document_uploads rpc failed", tenderId, error);
   const rows = new Map(((data ?? []) as DocRow[]).map((r) => [r.doc_type, r]));
   const missingRequired = TENDER_TEMPLATE_ORDER.filter((t) => TENDER_TEMPLATES[t].required && !rows.has(t));
 
@@ -46,7 +47,7 @@ export async function TenderTemplates({ tenderId, saved }: { tenderId: string; s
         uses what you upload here - other companies preparing this tender upload their own copy.
       </div>
 
-      {error && <div style={{ fontSize: 12, color: "#B91C1C", marginBottom: 8 }}>Could not load the templates on file: {error.message}</div>}
+      {error && <div style={{ fontSize: 12, color: "#B91C1C", marginBottom: 8 }}>Couldn&apos;t load the templates on file - try refreshing. If it keeps happening, let us know.</div>}
       {saved && <div style={{ fontSize: 12, color: "#15803D", marginBottom: 8, fontWeight: 600 }}>Template uploaded.</div>}
 
       {TENDER_TEMPLATE_ORDER.map((type) => {

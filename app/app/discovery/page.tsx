@@ -133,6 +133,7 @@ export default async function DiscoveryPage({
     supabase.from("tender_packs").select("tender_id, pipeline_stage"),
     supabase.rpc("company_member_labels"),
   ]);
+  if (error) console.error("discovered_opportunities select failed", error);
   const { data: { user } } = await supabase.auth.getUser();
   const stageByTender = new Map<string, string>();
   for (const p of (packRows ?? []) as { tender_id: string; pipeline_stage: string | null }[]) {
@@ -218,7 +219,7 @@ export default async function DiscoveryPage({
 
         {error && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            Could not load discovered opportunities: {error.message}
+            {"Couldn't load discovered opportunities - try refreshing. If it keeps happening, let us know."}
           </div>
         )}
         {actionError && (

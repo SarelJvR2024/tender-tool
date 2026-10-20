@@ -1859,3 +1859,61 @@ assumed from the isolated-function verification above.
 **Not yet tested / flagged:** `fill_flat_pdf.py`'s PDF-label-placement geometry and
 `fill_sbd_docx.py`'s docx-filling logic were read but not adversarially tested this run - both
 are large, intricate files that would benefit from a dedicated pass of their own.
+
+## 2026-10-20 (thirty-fifth run): two otherwise-correct sibling fixes, each with a real gap left open - both closed
+
+**Context:** 3 new commits since the thirty-third run - `b66dc44` (raw Postgres-error leak fix, 4
+pages), `4a2d20f` (Finding 29 above), `25ad827` (doc-only confirmation of Finding 29's regression
+run). Reviewed all three independently rather than treat the ones with their own write-ups as
+already settled.
+
+**Finding 30 (CONFIRMED, FIXED, moderate - the fix's own stated scope wasn't actually complete):**
+`b66dc44` explicitly reasons that ANY customer-facing Supabase query can hit the exact bug class
+that caused the confirmed `tender_packs.project_completed_at` production incident, then fixes only
+4 of the pages that pattern applies to. Grepped the whole `app/app` tree for the same
+`{error.message}` JSX shape after reading the commit, rather than trust its own file list: found 6
+more untouched customer-facing sites - `dashboard/page.tsx` (the first screen after login),
+`people/page.tsx`, `discovery/page.tsx`, `company/OfficeLocations.tsx`, and two Tender Workspace
+sub-components (`tender-templates.tsx`, `tender-updates.tsx`). `OfficeLocations.tsx` was the worst
+of the six: its error banner read `"Couldn't load office locations ({error.message}) - migration
+0015 may not be applied yet."` - internal schema-version language shown directly to a paying
+customer, not merely a raw driver error.
+
+**Fix:** applied the exact pattern `b66dc44` already established (nothing new invented) - a
+server-side `console.error(...)` with enough context to debug from logs, and a generic "try
+refreshing... let us know" message in place of the raw error - to all 6 sites. Re-grepped
+afterward to confirm completeness: zero customer-facing `{error.message}` leaks remain anywhere
+under `app/app`, only the 5 admin-only pages (Sarel's own debugging surface, correctly left as-is)
+and the 2 upload-form sites (`manual-tender-form.tsx`, `document-scan/upload-form.tsx` - a
+different, more actionable "which file failed" kind of message, also correctly left as-is per
+`b66dc44`'s own stated reasoning).
+
+**Verification:** `npm run typecheck` clean, `npm run lint` clean (one straight-apostrophe JSX-
+text violation caught by `react/no-unescaped-entities` on the first pass, fixed by wrapping in a
+string literal - the exact form the original `b66dc44` fix already used elsewhere, confirming
+which convention this codebase's lint actually enforces). Full `npm run build` - exit 0, same
+route list as before, no new prerender issues.
+
+**Finding 31 (CONFIRMED, FIXED, process gap - not a code bug):** Finding 29's own fix (`4a2d20f`)
+was verified carefully by hand (6 cases against the live CLI, plus a full harness regression) but
+shipped with zero persisted test coverage - the commit touches only `requirements.py` plus two
+docs files, no test file. The commit itself already states the existing 9-sample
+`general_harness.py` corpus doesn't exercise this mixed-suite shape, meaning every one of those 6
+verified cases could regress silently and nothing would catch it.
+
+**Fix:** added `engine/general/test_requirements.py` - 6 checks, reusing Finding 29's own
+adversarial fixture (10 real MBD mentions + 1 stray boilerplate SBD cross-reference) plus the
+other 5 cases (SBD-dominant mirror case, MBD-only, SBD-only, neither, a genuine tie), each run
+through the real `extract_requirements()` CLI path via real `.txt` documents (no LibreOffice
+needed - confirmed `.txt` is already a supported format elsewhere in this module).
+
+**Verification of the new test, not just that it passes:** temporarily reverted
+`engine/general/requirements.py` to its exact pre-`4a2d20f` state (`git show 4a2d20f~1:...`) and
+re-ran the new test - the adversarial case failed exactly as predicted (`FAIL ... -> MBD`, the
+bug reproduced), while the other 5 cases still passed (confirming they were never about this
+specific bug). Restored the fixed version and confirmed all 6 pass again. This is the same
+"prove the test actually catches the regression, don't just trust a green run" discipline this
+review has applied to its own fixes all session, now applied to a sibling's untested one. Also
+re-ran `general_harness.py --no-pack` (9 samples x 7 companies) as a full-corpus regression -
+`77 clean, 0 flagged, 0 failed`, matching `25ad827`'s own independent confirmation exactly.
+`python3 -m py_compile` clean on the new test file.

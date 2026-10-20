@@ -39,6 +39,8 @@ export default async function DashboardPage() {
     .select("id, contract_no, nra_reference, description, closing_date, source, family, tender_packs(status)")
     .order("closing_date", { ascending: true });
 
+  if (error) console.error("tenders select failed for dashboard", error);
+
   const rows = (tenders ?? []) as unknown as TenderRow[];
   const completeCount = rows.filter((t) => statusFor(t).label === "Complete").length;
   const needsInputCount = rows.length - completeCount;
@@ -62,7 +64,7 @@ export default async function DashboardPage() {
 
         {error && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            Could not load tenders: {error.message}
+            {"Couldn't load tenders - try refreshing. If it keeps happening, let us know."}
           </div>
         )}
 

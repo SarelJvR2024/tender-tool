@@ -6,7 +6,16 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~00:25 UTC — reviewed and independently verified `b82210a`: a live
+Last full pass: 2026-10-20, ~02:25 UTC — closed two real gaps this pass, both left by otherwise-
+correct sibling fixes: `b66dc44`'s raw-error-leak fix covered 4 customer-facing pages but missed 6
+more (Dashboard, People, Discovery, `OfficeLocations.tsx` - which literally told a customer
+"migration 0015 may not be applied yet" - and 2 Tender Workspace sub-components), all now fixed
+with the same established pattern and confirmed by a repo-wide grep that none remain; and `4a2d20f`'s
+new MBD/SBD suite-misclassification fix (Finding 29) had real, careful ad-hoc verification but zero
+persisted test coverage, closed with a new `test_requirements.py` whose regression-catching power
+was itself verified (temporarily reverted the fix, confirmed the new test fails, restored it).
+`npm run typecheck`/`lint`/`build` all clean, `general_harness.py --no-pack` still `77 clean, 0
+flagged, 0 failed`. ~00:25 UTC — reviewed and independently verified `b82210a`: a live
 discovery-watch run crashed after successfully scoring and seeding 4,034 real opportunities,
 because the document-download step's one unguarded Supabase read hit migration `0071`'s
 not-yet-live `discovered_opportunity_documents` table (`PGRST205`). Confirmed the fix is correctly
@@ -196,6 +205,49 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-fifth run): a raw-error-leak fix left 6 customer-facing pages behind, and a genuinely new adversarial finding had zero persisted test coverage - both closed
+
+Orientation: 3 new commits since the thirty-third run - `b66dc44` ("Stop leaking raw Postgres/
+Supabase errors on 4 customer-facing pages"), `4a2d20f` (Finding 29: the MBD/SBD suite-
+misclassification fix), and `25ad827` (a doc-only follow-up confirming `general_harness.py`'s
+regression run is clean). Reviewed all three rather than skip the ones with their own write-ups
+already - an author's own verification claim isn't this review's independent one.
+
+**Finding 30 (fixed, moderate): `b66dc44`'s own fix was incomplete relative to its own stated
+purpose.** The commit explicitly reasons that any customer-facing page querying Supabase can hit
+the same class of raw-error leak that caused the original, confirmed `tender_packs.project_completed_at`
+production bug - and fixes exactly 4 pages. A repo-wide grep for the same `{error.message}` pattern
+turned up 6 more customer-facing call sites the commit didn't touch: Dashboard (`dashboard/page.tsx`
+- "the very first thing a user sees after logging in", per the thirty-second run's own words) and
+People, Discovery, `OfficeLocations.tsx` (Company page), and two Tender Workspace sub-components
+(`tender-templates.tsx`, `tender-updates.tsx`). One of these was a worse instance of the exact bug
+class this fix exists to prevent: `OfficeLocations.tsx` literally printed "...migration 0015 may
+not be applied yet" straight to a customer - internal schema-state language, not even disguised.
+Fixed all 6 with the identical established pattern (`console.error` server-side, a generic "try
+refreshing" message to the customer) - no new pattern invented, just applied consistently.
+Confirmed no further customer-facing pages were missed: grepped every `page.tsx`/component under
+`app/app` for the same leak shape after the fix - none remain outside admin-only screens and the
+two upload-form sites the original commit deliberately and correctly left alone.
+
+**Finding 31 (fixed, process gap, not a code bug): Finding 29's own fix (`4a2d20f`) had zero
+persisted test coverage.** The commit's message describes real, careful verification - 6 cases
+run by hand against the live CLI, plus a full `general_harness.py` regression - but added no test
+file, so none of that verification survives the next change to this function. The commit itself
+already states the existing 9-sample harness corpus doesn't exercise this shape, meaning a future
+regression here would currently go undetected. Added `engine/general/test_requirements.py`, which
+runs the exact adversarial fixture from Finding 29 (10 real MBD mentions + 1 stray SBD reference)
+plus the other 5 cases the commit verified by hand, through the real `extract_requirements()` CLI
+path (`.txt` documents, no LibreOffice needed). **Verified the test actually catches the
+regression**, not just that it passes: temporarily reverted `requirements.py` to its pre-`4a2d20f`
+state and re-ran - the adversarial case failed exactly as expected (`FAIL ... -> MBD`), confirming
+the test is a real regression guard, then restored the fix and confirmed clean again.
+
+**Verification:** `npm run typecheck` and `npm run lint` clean; full `npm run build` exits 0, all
+routes unchanged. `python3 engine/general/test_requirements.py` - 6/6 checks pass (and the
+revert-to-confirm-it-catches-the-bug check above). Full `general_harness.py --no-pack` regression -
+`77 clean, 0 flagged, 0 failed`, matching the sibling's own `25ad827` confirmation exactly.
+`python3 -m py_compile` clean on the new test file.
 
 ## This pass (2026-10-20, standing QA/robustness review - thirty-fourth run): a single stray
 cross-reference to the wrong form suite could relabel an entire municipal tender's pack
