@@ -401,7 +401,7 @@ export default async function DiscoveryPage({
                         <input type="hidden" name="opportunity_id" value={o.id} />
                         <button
                           type="submit"
-                          style={{ minHeight: 28, padding: "0 10px", borderRadius: 100, background: "#16233B", color: "#FFFFFF", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                          style={{ minHeight: 32, padding: "0 10px", borderRadius: 100, background: "#16233B", color: "#FFFFFF", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
                         >
                           {o.tender_id ? "Open in workspace" : "Prepare this tender"}
                         </button>
@@ -544,7 +544,7 @@ export default async function DiscoveryPage({
                       <input type="hidden" name="opportunity_id" value={o.id} />
                       <button
                         type="submit"
-                        style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                        style={{ minHeight: 44, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
                       >
                         {o.tender_id ? "Open in workspace" : "Prepare this tender"}
                       </button>
