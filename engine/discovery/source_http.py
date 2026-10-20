@@ -90,17 +90,22 @@ _MONTH_ABBR = {m: i for i, m in enumerate(
 # from a real saved page, 2026-10-20) - day, English month abbreviation, year,
 # 24-hour time. Distinct from the three formats already handled above: no
 # slashes, month is a name not a number, so it can't collide with _US_DT or
-# the ISO/`/`-normalised path below.
-_DMY_DT = re.compile(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$")
+# the ISO/`/`-normalised path below. The month group also accepts a full name
+# ("11 September 2026", "08 SEPTEMBER 2026" - Vaal Central Water's own
+# "Date uploaded"/"Closing date" fields, confirmed from a real saved page,
+# 2026-10-20, mixing full-name and abbreviated months on the same listing) -
+# only the first 3 letters are looked up, so both forms resolve the same way.
+_DMY_DT = re.compile(r"^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$")
 
 
 def parse_sast(value):
     """A listing's date/time -> aware datetime in SAST, or None. Accepts ISO
     ('2026-11-16T12:00:00', with or without fraction/offset), US-style
     ('11/30/2026 3:00:00 PM', Transnet), '2026/10/28' (Cape Town) and
-    '23 Oct 2026 16:00' (Rand Water). A naive value is SAST (every SA
-    government listing states local time). Year 1 (the portal's
-    '0001-01-01' placeholder) is None."""
+    '23 Oct 2026 16:00' (Rand Water) and '11 September 2026' / '08 SEPTEMBER
+    2026' (Vaal Central Water, full month name, either case). A naive value
+    is SAST (every SA government listing states local time). Year 1 (the
+    portal's '0001-01-01' placeholder) is None."""
     if not value:
         return None
     s = str(value).strip()
@@ -109,7 +114,7 @@ def parse_sast(value):
     us = _US_DT.match(s) if not dmy else None
     if dmy:
         d, mon, y, hh, mm = dmy.groups()
-        month = _MONTH_ABBR.get(mon.lower())
+        month = _MONTH_ABBR.get(mon[:3].lower())
         if month is None:
             return None  # an unrecognised month name - unreadable, same as a malformed ISO value
         try:
