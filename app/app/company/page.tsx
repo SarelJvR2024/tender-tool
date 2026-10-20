@@ -17,7 +17,7 @@ import {
   filenameFromPath,
   type VaultDocumentKind,
 } from "@/lib/vaultDocuments";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { OfficeLocations } from "./OfficeLocations";
 import { Notifications } from "./Notifications";
@@ -165,10 +165,8 @@ export default async function CompanyPage({
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="company" />
-
-      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: 0 }}>Company profile &amp; document vault</h1>
           {row && !editing && (
@@ -263,7 +261,7 @@ export default async function CompanyPage({
         )}
         {row && !editing && <OfficeLocations />}
       </div>
-    </div>
+    </AppShell>
   );
 }
 

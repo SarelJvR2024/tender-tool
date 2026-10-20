@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { ManualTenderForm } from "./manual-tender-form";
 
 // Reads the signed-in user's company on every request - can't be prerendered
@@ -25,9 +25,8 @@ export default async function NewTenderPage() {
   if (!membership) redirect("/onboarding");
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="dashboard" />
-      <div style={{ flex: 1, padding: "20px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ flex: 1, padding: "20px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <Link href="/dashboard" style={{ fontSize: 12, color: "#D97706", fontWeight: 600, textDecoration: "none" }}>← Tenders</Link>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "8px 0 4px" }}>Load a tender manually</h1>
         <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px", lineHeight: 1.5 }}>
@@ -44,6 +43,6 @@ export default async function NewTenderPage() {
           running. The tender page shows its progress.
         </p>
       </div>
-    </div>
+    </AppShell>
   );
 }

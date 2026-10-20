@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { isTaxonomySlug, loadDisciplineTaxonomy, taxonomyGroups } from "@/lib/disciplineTaxonomy";
 import { saveExperienceTags, deleteExperience, suggestSharedCategory, withdrawSuggestion } from "../actions";
@@ -76,16 +76,14 @@ export default async function ExperienceDetailPage({
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
+    <AppShell>
       <style>{`
         @media (max-width: 600px) {
           .exp-grid-2 { grid-template-columns: 1fr !important; }
         }
       `}</style>
 
-      <SiteNav active="experience" />
-
-      <div style={{ flex: 1, padding: "24px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ flex: 1, padding: "24px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <Link href="/experience" style={{ fontSize: 13, color: "#5B6472", textDecoration: "none" }}>← Company experience</Link>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "8px 0 4px" }}>{item.project_name}</h1>
         <div style={{ fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
@@ -356,6 +354,6 @@ export default async function ExperienceDetailPage({
           </ConfirmSubmitButton>
         </form>
       </div>
-    </div>
+    </AppShell>
   );
 }

@@ -4,7 +4,7 @@ import Link from "next/link";
  * Root not-found page (enterprise-readiness audit, 2026-10-20) - renders for
  * an explicit notFound() call in any route segment AND any unmatched URL
  * project-wide (Next.js 16's own convention: the root app/not-found.tsx
- * handles both). Deliberately self-contained, no SiteNav/data fetch - this
+ * handles both). Deliberately self-contained, no app shell/data fetch - this
  * can render before auth is known to be valid, so it must not depend on
  * anything that could itself fail.
  */

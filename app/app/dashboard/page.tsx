@@ -2,7 +2,7 @@ import Link from "next/link";
 import { FolderOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { PageHeader } from "@/components/tt/page-header";
 import { StatCard } from "@/components/tt/stat-card";
 import { StatusBadge, type TenderStatus } from "@/components/tt/status-badge";
@@ -60,9 +60,7 @@ export default async function DashboardPage() {
   const needsInputCount = rows.length - completeCount;
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <SiteNav active="dashboard" />
-
+    <AppShell>
       <div className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-6">
         <PageHeader
           className="mb-5"
@@ -138,6 +136,6 @@ export default async function DashboardPage() {
           })}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

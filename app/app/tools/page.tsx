@@ -2,9 +2,11 @@ import Link from "next/link";
 import { ToolsHeader } from "./_components/ToolsHeader";
 
 // Free standalone tools - lead magnets, no sign-in, no company/tender
-// context required. Deliberately separate from the signed-in app's
-// SiteNav (these must work for someone who has never heard of Tender
-// Tool yet, same positioning as TenderFlow's own free tools).
+// context required. Deliberately separate from the signed-in app shell
+// (these must work for someone who has never heard of Tender Tool yet,
+// same positioning as TenderFlow's own free tools) - the app shell's own
+// "Tools" sidebar item links here too, so a signed-in visitor briefly
+// leaves the shell; see app/AGENTS.md ("App shell").
 export const metadata = {
   title: "Free tender tools - Tender Tool",
   description: "Free South African public-sector tender calculators: working-day deadlines, CIDB grading, B-BBEE preference points.",

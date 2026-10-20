@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { AdminNav } from "../AdminNav";
 import CustomerRow, { type Customer, type CustomerMember } from "./CustomerRow";
 
@@ -43,10 +43,8 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
   const testCount = customers.filter((c) => c.is_test_company).length;
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="admin" />
-
-      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <AdminNav active="customers" />
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Customers</h1>
@@ -71,6 +69,6 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
           ))}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

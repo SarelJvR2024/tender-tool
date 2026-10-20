@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { loadDisciplineTaxonomy, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { pursueOpportunity } from "./actions";
@@ -181,7 +181,7 @@ export default async function DiscoveryPage({
   );
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
+    <AppShell>
       {/* The right-hand "Closes / action / docs" rail is a fixed flex-basis
           with flex-shrink: 0 so it keeps its width on desktop - but that same
           fixed width means that once a card wraps it to its own line on a
@@ -193,9 +193,8 @@ export default async function DiscoveryPage({
           .disco-right { flex: 1 1 100% !important; text-align: left !important; }
         }
       `}</style>
-      <SiteNav active="discovery" />
 
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", margin: "0 0 16px" }}>
           <div style={{ flex: "1 1 320px" }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovery</h1>
@@ -577,6 +576,6 @@ export default async function DiscoveryPage({
           })}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

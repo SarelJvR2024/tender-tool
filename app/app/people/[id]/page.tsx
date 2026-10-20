@@ -3,7 +3,7 @@ import { expiryStatus } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
 import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
@@ -349,7 +349,7 @@ export default async function PersonDetailPage({
   const expiryByBody = Object.fromEntries(credentialExpiries(person ?? {}).map((c) => [c.body, c.status]));
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
+    <AppShell>
       <style>{`
         @media (max-width: 600px) {
           .person-grid-2 { grid-template-columns: 1fr !important; }
@@ -359,9 +359,7 @@ export default async function PersonDetailPage({
         }
       `}</style>
 
-      <SiteNav active="people" />
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
           {isNew ? "Add person" : person!.name}
         </h1>
@@ -945,6 +943,6 @@ export default async function PersonDetailPage({
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }
