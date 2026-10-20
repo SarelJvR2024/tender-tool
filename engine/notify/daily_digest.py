@@ -31,6 +31,13 @@ This is a pure function (no network), unit-tested on its own in
 test_digest_opt_in.py; the live/local roster loaders below just populate
 the "email_opt_in" field it reads.
 
+Every "today" in this file is watch_deadlines.SAST-anchored (enterprise-
+readiness audit round 1, 2026-10-20), not a naive datetime.date.today() -
+the worker container has no TZ set and runs in UTC by default, so a naive
+call is one calendar day behind the real SAST date for the whole 00:00-
+01:59 SAST window every day. See watch_deadlines.py's own SAST constant
+comment for the full reasoning.
+
 What this script reuses rather than reimplements, concretely:
   - New-tender fit: the Discovery feed's own per-company scoring -
     watch_new_tenders.fan_out() (each tender's documents read once,
@@ -242,7 +249,7 @@ def fetch_releases(days=14, sources="all", with_documents=True):
     detail-page fetch still ran in full regardless of the flag, so a "quick"
     local run was never actually quick. QA-Edge-Case-Findings.md, 2026-10-19
     (nineteenth run)."""
-    today = datetime.date.today()
+    today = datetime.datetime.now(watch_deadlines.SAST).date()
     date_from = (today - datetime.timedelta(days=days)).isoformat()
     if sources == "ocds":
         raw = etenders_national.fetch_releases(date_from, today.isoformat())
@@ -321,7 +328,7 @@ def submission_due_signals(scored, lead_days=14):
     new_tender_signals' default), since 'something you might be bidding on
     closes soon' is a different, more inclusive question than 'should you
     look at this at all'."""
-    today = datetime.date.today()
+    today = datetime.datetime.now(watch_deadlines.SAST).date()
     out = []
     for r in scored:
         if r.get("verdict") not in watch_new_tenders.REPORT_WORTHY_VERDICTS_WIDE:
@@ -606,7 +613,7 @@ def main():
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     mode = args.mode or ("live" if url and key else "local")
 
-    today = datetime.date.today()
+    today = datetime.datetime.now(watch_deadlines.SAST).date()
 
     if mode == "local":
         if not args.profile:
@@ -675,6 +682,16 @@ def main():
     print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
           f"{'y' if len(companies) == 1 else 'ies'}, each from its own profile...")
     releases, gov_res = fetch_releases(args.days, args.sources, with_documents=not args.no_fetch_documents)
+    if gov_res is not None and gov_res.get("errors"):
+        # Same gap as watch_new_tenders.py's own equivalent call site:
+        # gov_sources.fetch_all() isolates one source's own failure from the
+        # rest, but nothing ever surfaced that to Sarel - a source silently
+        # missing from a whole digest run, invisible outside stdout.
+        failed = ", ".join(sorted(gov_res["errors"]))
+        system_alerts.record(
+            "digest",
+            f"{len(gov_res['errors'])} government source(s) failed this run and were skipped: {failed}",
+            "warning", detail=str(gov_res["errors"]))
     scored_by_company = score_per_company(releases, companies,
                                           fetch_documents=not args.no_fetch_documents)
     # Listing changes on the same read: recorded in the change store (Supabase
@@ -705,16 +722,29 @@ def main():
 
     digests, totals, delivered_downgrades = [], {}, set()
     for p in roster:
-        ckey = LOCAL_COMPANY_KEY if mode == "local" else p["company_id"]
-        signals = company_signals(ckey, scored_by_company, document_expiry, tender_tasks, readiness_changes,
-                                  args.submission_lead_days, company_id=None if mode == "local" else p["company_id"],
-                                  tender_updates=tender_updates, listing_changes=listing_changes,
-                                  reassessed_tenders=reassessed)
-        for k, v in signals.items():
-            totals.setdefault(k, {})[ckey] = len(v)
-        d = build_digest_for_person(p, signals)
-        delivered_downgrades.update(d.pop("_delivered_downgrades", []))
-        digests.append(d)
+        # One bad roster entry (a malformed/corrupted row - missing a key
+        # signals() or build_digest_for_person() assumes) must not cost
+        # everyone else their digest. Enterprise-readiness audit round 2,
+        # 2026-10-20: this loop previously had no isolation at all - one
+        # bad entry raised uncaught and aborted every digest after it in
+        # roster order, with no alert, silently.
+        try:
+            ckey = LOCAL_COMPANY_KEY if mode == "local" else p["company_id"]
+            signals = company_signals(ckey, scored_by_company, document_expiry, tender_tasks, readiness_changes,
+                                      args.submission_lead_days, company_id=None if mode == "local" else p["company_id"],
+                                      tender_updates=tender_updates, listing_changes=listing_changes,
+                                      reassessed_tenders=reassessed)
+            for k, v in signals.items():
+                totals.setdefault(k, {})[ckey] = len(v)
+            d = build_digest_for_person(p, signals)
+            delivered_downgrades.update(d.pop("_delivered_downgrades", []))
+            digests.append(d)
+        except Exception as e:
+            label = p.get("email") or p.get("user_id") or "(unidentified roster entry)"
+            print(f"  WARNING: could not build a digest for {label} ({type(e).__name__}: {e}) - skipping this one, "
+                  "the rest of the run continues.")
+            system_alerts.record("digest", f"Could not build a digest for one roster entry ({label}): "
+                                 f"{type(e).__name__}: {e}", "error", exc=e)
 
     def total(k):
         return sum((totals.get(k) or {}).values())

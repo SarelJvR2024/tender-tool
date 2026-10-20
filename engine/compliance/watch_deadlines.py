@@ -133,6 +133,17 @@ import registration_reminders  # noqa: E402  (0050: catalog registrations + prop
 SEEN_TABLE = "deadline_reminders_seen"  # 0041
 CONSUMER = "watch_deadlines"
 
+# Same constant/pattern as engine/discovery/watch_tender_updates.py's own SAST -
+# this worker's container has no TZ set (engine/worker/Dockerfile is a plain
+# python:3.13-slim image), so it runs in UTC by default. A naive
+# datetime.date.today() is then one calendar day behind the real SAST date for
+# the whole 00:00-01:59 SAST window every single day - every "is this document
+# due" / "is this tender closing soon" decision in main() was silently
+# evaluated against the wrong "today" in that window. daily_digest.py imports
+# this module already, so it reuses watch_deadlines.SAST rather than
+# redefining its own copy.
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
 # See module docstring part 1 - only columns that really exist on `companies`
 # (0001 + 0014) go here. (field_column, human_label, lead_days_override);
 # None = use --doc-lead-days.
@@ -469,7 +480,7 @@ def main():
               "(see app/.env.local.example) before running this.")
         sys.exit(1)
 
-    today = datetime.date.today()
+    today = datetime.datetime.now(SAST).date()
     client = company_profiles.RestClient(url, key)
     try:
         seen, loaded = load_seen_db(client)

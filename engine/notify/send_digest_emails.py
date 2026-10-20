@@ -193,12 +193,22 @@ def main():
     results = {"sent": 0, "skipped_empty": 0, "skipped_no_email": 0, "failed": 0, "dry_run": 0}
     failures = []
     for d in digests:
-        status, detail = send_one(api_key, from_addr, d, dry_run=args.dry_run)
-        results[status] += 1
-        label = d["person"].get("name") or d["person"].get("email") or "(unnamed)"
-        print(f"  {status:<16} {label:<28} {detail}")
-        if status == "failed":
-            failures.append(detail)
+        # send_one()'s own try/except only guards the actual Resend call -
+        # a malformed entry (e.g. no "person" key at all, from a partial/
+        # corrupted --out write) raises a bare KeyError before that, which
+        # used to abort every subsequent digest in the batch uncaught, with
+        # no alert. Enterprise-readiness audit round 2, 2026-10-20.
+        try:
+            status, detail = send_one(api_key, from_addr, d, dry_run=args.dry_run)
+            results[status] += 1
+            label = d["person"].get("name") or d["person"].get("email") or "(unnamed)"
+            print(f"  {status:<16} {label:<28} {detail}")
+            if status == "failed":
+                failures.append(detail)
+        except Exception as e:
+            results["failed"] += 1
+            print(f"  failed           (unreadable digest entry)      {type(e).__name__}: {e}")
+            failures.append(f"Could not process one digest entry: {type(e).__name__}: {e}")
 
     print(f"\n{results['sent']} sent, {results['skipped_empty']} skipped (nothing to report), "
           f"{results['skipped_no_email']} skipped (no e-mail on file), {results['failed']} failed"
