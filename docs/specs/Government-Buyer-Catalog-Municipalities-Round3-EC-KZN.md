@@ -27,9 +27,10 @@ confirmed NOT gaps). Where this pass's finds slot in:
    not JS-rendered, not a flat undated document archive (the Mbombela/Polokwane trap). But it's a
    status register, not a bidder+price award register, so it ranks below the existing Swartland/
    Saldanha Bay/Stellenbosch-tier pilots on value, and the real duplicate-reference issue needs
-   deliberate handling (same discipline as every reader this session, not assumed away). Not yet
-   cross-checked against eTenders - that's the next step before building anything, same as every
-   other candidate in this whole scan.
+   deliberate handling (same discipline as every reader this session, not assumed away).
+   **eTenders-overlap check done this pass: zero results for `--buyer "ulundi"` - a confirmed real
+   gap**, ready for a reader build, pending a decision on how to handle the duplicate-bid-number
+   issue and the lack of inline bidder/price data (status-only, not a price register).
 2. **King Sabata Dalindyebo** - worth a real-browser recheck specifically because its site
    structure (separate Awarded Tenders page) suggests real award data might exist behind the
    JS rendering - genuinely unresolved, not ruled out.
