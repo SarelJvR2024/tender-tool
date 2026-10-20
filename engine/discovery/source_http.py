@@ -84,20 +84,40 @@ def http_json(url, **kw):
 
 _US_DT = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?)?$", re.I)
 
+_MONTH_ABBR = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+# "23 Oct 2026 16:00" (Rand Water's own ASPxNewsControl date format, confirmed
+# from a real saved page, 2026-10-20) - day, English month abbreviation, year,
+# 24-hour time. Distinct from the three formats already handled above: no
+# slashes, month is a name not a number, so it can't collide with _US_DT or
+# the ISO/`/`-normalised path below.
+_DMY_DT = re.compile(r"^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$")
+
 
 def parse_sast(value):
     """A listing's date/time -> aware datetime in SAST, or None. Accepts ISO
     ('2026-11-16T12:00:00', with or without fraction/offset), US-style
-    ('11/30/2026 3:00:00 PM', Transnet) and '2026/10/28' (Cape Town). A naive
-    value is SAST (every SA government listing states local time). Year 1
-    (the portal's '0001-01-01' placeholder) is None."""
+    ('11/30/2026 3:00:00 PM', Transnet), '2026/10/28' (Cape Town) and
+    '23 Oct 2026 16:00' (Rand Water). A naive value is SAST (every SA
+    government listing states local time). Year 1 (the portal's
+    '0001-01-01' placeholder) is None."""
     if not value:
         return None
     s = str(value).strip()
     dt = None
-    m = _US_DT.match(s)
-    if m:
-        mo, d, y, hh, mm, ss, ap = m.groups()
+    dmy = _DMY_DT.match(s)
+    us = _US_DT.match(s) if not dmy else None
+    if dmy:
+        d, mon, y, hh, mm = dmy.groups()
+        month = _MONTH_ABBR.get(mon.lower())
+        if month is None:
+            return None  # an unrecognised month name - unreadable, same as a malformed ISO value
+        try:
+            dt = datetime.datetime(int(y), month, int(d), int(hh or 0), int(mm or 0))
+        except ValueError:
+            return None
+    elif us:
+        mo, d, y, hh, mm, ss, ap = us.groups()
         hh = int(hh or 0)
         if ap:
             hh = hh % 12 + (12 if ap.upper() == "PM" else 0)
