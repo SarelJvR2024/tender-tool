@@ -5,8 +5,9 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Tender Tool design system - "confident & premium" direction (2026-10-20).
- * Deep navy ink, warm gold accent, editorial (Fraunces) headings over a
+ * Tender Tool design system - "confident & premium" direction (2026-10-20),
+ * color scheme updated 2026-10-21: deep navy ink, blue accent, neutral grey
+ * canvas (no cream/beige anywhere), editorial (Fraunces) headings over a
  * quiet UI sans (Inter Tight). Tokens below are the only place these
  * colors are defined - every component should read them through Tailwind's
  * generated utilities (bg-background, text-foreground, bg-accent, ...)
@@ -78,14 +79,16 @@
      dangling reference to a font nobody loads. */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 
-  /* Warm off-white page background, deep navy ink - the "confident &
-     premium" pairing this whole system is built around. */
-  --background: oklch(0.9796 0.0057 84.6); /* #FAF8F4 */
-  --foreground: oklch(0.2522 0.0562 264.0); /* #14213D navy ink */
+  /* Neutral soft grey page background, deep navy ink (2026-10-21 color
+     update: the earlier warm off-white/gold pairing is gone - no cream or
+     beige anywhere in the neutral/surface colors, and the one accent is
+     blue, not gold). */
+  --background: oklch(0.97 0.0029 264.5); /* #F4F5F7 - no blue tint, just neutral grey */
+  --foreground: oklch(0.2393 0.0581 256.7); /* #0B1F3A navy ink */
 
-  /* Cards sit a shade brighter than the page itself (pure white against a
-     warm-tinted background) - the layering cue that makes a dense screen
-     read as stacked surfaces rather than a flat table. */
+  /* Cards stay pure white against the grey page - the layering cue that
+     makes a dense screen read as stacked surfaces rather than a flat
+     table. */
   --card: oklch(1 0 0);
   --card-foreground: var(--foreground);
   --popover: oklch(1 0 0);
@@ -94,33 +97,37 @@
   --primary: var(--foreground);
   --primary-foreground: oklch(1 0 0);
 
-  --secondary: oklch(0.9385 0.0132 82.4); /* #EFEAE1 */
+  --secondary: oklch(0.9371 0.0042 271.4); /* #E9EAED - neutral grey, not the old cream wash */
   --secondary-foreground: var(--foreground);
 
-  --muted: oklch(0.9385 0.0132 82.4); /* #EFEAE1 */
+  --muted: oklch(0.9371 0.0042 271.4); /* #E9EAED */
   --muted-foreground: oklch(0.4999 0.0285 267.7); /* #5C6374 */
 
-  /* Gold is the one accent color in this system - reserved for the single
+  /* Blue is the one accent color in this system - reserved for the single
      most important action or highlight on a screen, not a general-purpose
-     "secondary blue" the way many palettes use it. Dark ink on gold (not
-     white) keeps it confident rather than candy-bright. */
-  --accent: oklch(0.7042 0.1315 81.2); /* #C9962B */
-  --accent-foreground: var(--foreground);
+     decoration. White text on solid blue (not dark ink) is what reads as
+     confident here - blue is dark/saturated enough that dark-on-blue loses
+     contrast the way dark-on-gold never did. Soft-tint usages (a badge, an
+     icon roundel) should read `text-accent` directly instead of
+     `accent-foreground` - that pairing is for a SOLID accent fill only;
+     white text on a 10%-opacity accent wash is invisible. */
+  --accent: oklch(0.4882 0.2172 264.4); /* #1D4ED8 */
+  --accent-foreground: oklch(1 0 0);
 
-  --success: oklch(0.5164 0.1057 159.7); /* #1E7A52 */
+  --success: oklch(0.6271 0.1699 149.2); /* #16A34A */
   --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.5664 0.1414 51.6); /* #B5590E - deliberately distinct from the gold accent so a warning never reads as "the brand color" */
+  --warning: oklch(0.5664 0.1414 51.6); /* #B5590E - a warm amber is still correct here: this is a semantic status color, not a neutral/surface tone, so "no cream or beige" doesn't apply to it */
   --warning-foreground: oklch(1 0 0);
   --destructive: oklch(0.5013 0.1783 28.7); /* #B3261E */
   --destructive-foreground: oklch(1 0 0);
   --info: oklch(0.4949 0.1244 253.2); /* #2563A6 */
   --info-foreground: oklch(1 0 0);
 
-  --border: oklch(0.9020 0.0174 84.6); /* #E4DED2 */
+  --border: oklch(0.9053 0.0052 247.9); /* #DDE0E3 - neutral grey, not the old cream border */
   --input: var(--border);
-  --ring: var(--accent); /* focus rings use the brand gold, not a generic blue */
+  --ring: var(--accent); /* focus rings use the brand blue */
 
-  /* A five-color categorical set for charts: navy, gold, then three
+  /* A five-color categorical set for charts: navy, blue, then three
      supporting hues chosen at matched lightness/chroma so no single series
      visually dominates the way a stray saturated primary would. */
   --chart-1: var(--foreground);
@@ -131,19 +138,20 @@
 
   --radius: 0.5rem;
 
-  /* Soft, navy-tinted shadows (not pure black) - everything in this system
-     casts a shadow the color of the ink, at low opacity, so elevation reads
-     as "lifted off the warm page" rather than "generic UI-kit drop shadow". */
-  --shadow-sm: 0 1px 2px 0 oklch(0.2522 0.0562 264.0 / 6%);
-  --shadow-md: 0 4px 10px -2px oklch(0.2522 0.0562 264.0 / 10%), 0 2px 4px -2px oklch(0.2522 0.0562 264.0 / 6%);
-  --shadow-lg: 0 16px 32px -8px oklch(0.2522 0.0562 264.0 / 16%), 0 4px 10px -4px oklch(0.2522 0.0562 264.0 / 8%);
+  /* Soft, navy-tinted shadows (not pure black, and not blue-tinted either) -
+     everything in this system casts a shadow the color of the ink, at low
+     opacity, so elevation reads as "lifted off the grey page" rather than
+     "generic UI-kit drop shadow". */
+  --shadow-sm: 0 1px 2px 0 oklch(0.2393 0.0581 256.7 / 6%);
+  --shadow-md: 0 4px 10px -2px oklch(0.2393 0.0581 256.7 / 10%), 0 2px 4px -2px oklch(0.2393 0.0581 256.7 / 6%);
+  --shadow-lg: 0 16px 32px -8px oklch(0.2393 0.0581 256.7 / 16%), 0 4px 10px -4px oklch(0.2393 0.0581 256.7 / 8%);
 
-  /* Subtle hero backdrop: mostly ink, with a whisper of the gold accent in
+  /* Subtle hero backdrop: mostly ink, with a whisper of the blue accent in
      one corner - for a page-top banner or empty-state panel, never a loud
      multi-stop rainbow. */
-  --gradient-hero: linear-gradient(135deg, oklch(0.22 0.05 264) 0%, oklch(0.16 0.045 264) 60%, oklch(0.26 0.09 81) 100%);
+  --gradient-hero: linear-gradient(135deg, oklch(0.22 0.05 257) 0%, oklch(0.16 0.045 257) 60%, oklch(0.32 0.14 264) 100%);
 
-  --sidebar: oklch(0.9796 0.0057 84.6);
+  --sidebar: var(--background);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--foreground);
   --sidebar-primary-foreground: oklch(1 0 0);
@@ -165,8 +173,11 @@
   /* Navy itself is the dark background's own hue family, so it can't serve
      as "primary" here the way it does on the light page - primary flips to
      a light, high-contrast surface instead (shadcn's own dark-mode
-     convention), and gold stays the one constant accent across both
-     themes. */
+     convention). This block was NOT updated by the 2026-10-21 light-mode
+     color change (background/navy/accent/success) - dark mode is still
+     dormant (no toggle exists, see the file header), so its accent is
+     still gold, not blue. Update this block too whenever dark mode
+     actually ships. */
   --primary: var(--foreground);
   --primary-foreground: var(--background);
 

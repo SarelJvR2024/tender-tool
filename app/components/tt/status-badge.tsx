@@ -31,7 +31,7 @@ const statusBadgeVariants = cva(
         "needs-docs": "border-warning/20 bg-warning/10 text-warning",
         "in-progress": "border-info/20 bg-info/10 text-info",
         ready: "border-success/20 bg-success/10 text-success",
-        submitted: "border-accent/30 bg-accent/10 text-accent-foreground",
+        submitted: "border-accent/30 bg-accent/10 text-accent",
         won: "border-success/30 bg-success/15 text-success",
         lost: "border-destructive/20 bg-destructive/10 text-destructive",
         expired: "border-dashed border-muted-foreground/30 bg-transparent text-muted-foreground",
