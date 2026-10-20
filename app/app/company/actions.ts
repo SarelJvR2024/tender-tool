@@ -131,7 +131,8 @@ export async function updateCompanyProfile(companyId: string, formData: FormData
   const { error } = await supabase.from("companies").update(update).eq("id", companyId);
 
   if (error) {
-    redirect(`/company?error=${encodeURIComponent(error.message)}`);
+    console.error("companies update failed", error);
+    redirect(`/company?error=${encodeURIComponent("Could not save your company profile - try again. If it keeps happening, let us know.")}`);
   }
 
   revalidatePath("/company");
@@ -166,12 +167,16 @@ export async function uploadVaultDocument(companyId: string, formData: FormData)
   const { error: upErr } = await supabase.storage
     .from(VAULT_BUCKET)
     .upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
-  if (upErr) redirect(`/company?error=${encodeURIComponent(`Could not upload file: ${upErr.message}`)}`);
+  if (upErr) {
+    console.error("vault document upload failed", file.name, upErr);
+    redirect(`/company?error=${encodeURIComponent(`Could not upload ${file.name} - try again. If it keeps happening, let us know.`)}`);
+  }
 
   const { error } = await supabase.from("companies").update({ [column]: storagePath }).eq("id", companyId);
   if (error) {
+    console.error("companies update failed for vault document", error);
     await supabase.storage.from(VAULT_BUCKET).remove([storagePath]);
-    redirect(`/company?error=${encodeURIComponent(error.message)}`);
+    redirect(`/company?error=${encodeURIComponent("Could not save this document - try again. If it keeps happening, let us know.")}`);
   }
   if (previousPath) await supabase.storage.from(VAULT_BUCKET).remove([previousPath]);
 
@@ -235,7 +240,10 @@ export async function saveDocumentTemplate(companyId: string, formData: FormData
       const { error: upErr } = await supabase.storage
         .from(VAULT_BUCKET)
         .upload(uploadedPath, file, { contentType: file.type || "application/octet-stream" });
-      if (upErr) back(`Could not upload file: ${upErr.message}`);
+      if (upErr) {
+        console.error("company document template upload failed", file.name, upErr);
+        back(`Could not upload ${file.name} - try again. If it keeps happening, let us know.`);
+      }
       row.storage_path = uploadedPath;
       row.original_filename = file.name;
     } else if (!existing?.storage_path) {
@@ -250,8 +258,9 @@ export async function saveDocumentTemplate(companyId: string, formData: FormData
 
   const { error } = await supabase.from("company_document_templates").upsert(row, { onConflict: "company_id,document_type" });
   if (error) {
+    console.error("company_document_templates upsert failed", error);
     if (uploadedPath) await supabase.storage.from(VAULT_BUCKET).remove([uploadedPath]);
-    back(error.message);
+    back("Could not save this template - try again. If it keeps happening, let us know.");
   }
   if (uploadedPath && existing?.storage_path) await supabase.storage.from(VAULT_BUCKET).remove([existing.storage_path]);
 

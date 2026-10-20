@@ -37,7 +37,10 @@ export async function moveTenderStage(formData: FormData) {
       { company_id: membership.company_id as string, tender_id: tenderId, pipeline_stage: stage },
       { onConflict: "company_id,tender_id" }
     );
-  if (error) redirect(`/pipeline?error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("tender_packs upsert failed for pipeline stage", error);
+    redirect(`/pipeline?error=${encodeURIComponent("Could not move this tender - try again. If it keeps happening, let us know.")}`);
+  }
 
   revalidatePath("/pipeline");
   revalidatePath(`/tenders/${tenderId}`);
@@ -110,7 +113,10 @@ export async function saveTenderEconomics(formData: FormData) {
     .eq("company_id", membership.company_id as string)
     .eq("tender_id", tenderId as string)
     .select("id");
-  if (error) fail(error.message);
+  if (error) {
+    console.error("tender_packs update failed for tender economics", error);
+    fail("Could not save this pricing - try again. If it keeps happening, let us know.");
+  }
   if (!data || data.length === 0) fail("This tender isn't on your pipeline yet - start bidding on it first.");
 
   revalidatePath("/pipeline");

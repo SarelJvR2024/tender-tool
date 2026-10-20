@@ -23,7 +23,10 @@ async function requireAdmin() {
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
   const { data: isAdmin, error } = await supabase.rpc("is_platform_admin");
-  if (error) back(`Could not check admin rights: ${error.message}`);
+  if (error) {
+    console.error("is_platform_admin rpc failed", error);
+    back("Could not check admin rights - try again. If it keeps happening, let us know.");
+  }
   if (!isAdmin) back("Only a Tender Tool platform admin can change the shared discipline list.");
   return { supabase, user };
 }
@@ -49,7 +52,10 @@ export async function addCategory(formData: FormData) {
     etenders_categories: splitKeywords(text(formData, "etenders_categories"), "\n"),
     added_from: `added in /admin/taxonomy${text(formData, "note") ? ` - ${text(formData, "note")}` : ""}`,
   });
-  if (error) back(error.code === "23505" ? `${slug} is already on the list.` : error.message);
+  if (error) {
+    if (error.code !== "23505") console.error("discipline_categories insert failed", error);
+    back(error.code === "23505" ? `${slug} is already on the list.` : "Could not add this category - try again. If it keeps happening, let us know.");
+  }
   revalidatePath(PAGE);
   back(`Added ${label} (${slug}). Discovery uses it from its next run.`, "saved");
 }
@@ -73,7 +79,10 @@ export async function updateCategory(formData: FormData) {
     })
     .eq("slug", slug)
     .select("slug");
-  if (error) back(error.message);
+  if (error) {
+    console.error("discipline_categories update failed", error);
+    back("Could not save this category - try again. If it keeps happening, let us know.");
+  }
   if (!data || data.length === 0) back(`${slug} wasn't updated - not found, or not allowed.`);
   revalidatePath(PAGE);
   back(`Saved ${label} (${slug}).`, "saved");
@@ -89,7 +98,10 @@ export async function approveSuggestion(formData: FormData) {
     p_exclude_keywords: splitKeywords(text(formData, "exclude_keywords")),
     p_review_note: text(formData, "review_note") || null,
   });
-  if (error) back(error.message);
+  if (error) {
+    console.error("approve_discipline_suggestion rpc failed", error);
+    back("Could not approve this suggestion - try again. If it keeps happening, let us know.");
+  }
   revalidatePath(PAGE);
   back(`Approved: ${data} is now on the shared list (the suggesting company's tagged items are listed under it with no change).`, "saved");
 }
@@ -103,7 +115,10 @@ export async function rejectSuggestion(formData: FormData) {
     .eq("id", text(formData, "id"))
     .eq("status", "pending")
     .select("slug");
-  if (error) back(error.message);
+  if (error) {
+    console.error("discipline_category_suggestions update failed", error);
+    back("Could not reject this suggestion - try again. If it keeps happening, let us know.");
+  }
   if (!data || data.length === 0) back("That suggestion is no longer pending.");
   revalidatePath(PAGE);
   back(`Rejected the suggestion "${data![0].slug}".`, "saved");

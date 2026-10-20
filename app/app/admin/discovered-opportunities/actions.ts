@@ -39,6 +39,9 @@ export async function overrideOpportunityConfidence(formData: FormData) {
     p_override_level: level,
     p_note: note || null,
   });
-  if (error) redirect(`${PAGE}?error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("platform_admin_override_opportunity_confidence rpc failed", error);
+    redirect(`${PAGE}?error=${encodeURIComponent("Could not save this override - try again. If it keeps happening, let us know.")}`);
+  }
   revalidatePath(PAGE);
 }

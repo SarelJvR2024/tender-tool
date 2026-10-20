@@ -41,7 +41,10 @@ export async function addTenderComment(formData: FormData) {
     author_id: userId,
     body,
   });
-  if (error) redirect(`${back}?error=${encodeURIComponent(`Could not save the note: ${error.message}`)}#activity`);
+  if (error) {
+    console.error("tender_comments insert failed", error);
+    redirect(`${back}?error=${encodeURIComponent("Could not save the note - try again. If it keeps happening, let us know.")}#activity`);
+  }
 
   revalidatePath(back);
   redirect(`${back}#activity`);
@@ -57,7 +60,10 @@ export async function deleteTenderComment(formData: FormData) {
   if (!commentId) redirect(`${back}#activity`);
 
   const { error } = await supabase.from("tender_comments").delete().eq("id", commentId).eq("author_id", userId);
-  if (error) redirect(`${back}?error=${encodeURIComponent(`Could not delete the note: ${error.message}`)}#activity`);
+  if (error) {
+    console.error("tender_comments delete failed", error);
+    redirect(`${back}?error=${encodeURIComponent("Could not delete the note - try again. If it keeps happening, let us know.")}#activity`);
+  }
 
   revalidatePath(back);
   redirect(`${back}#activity`);

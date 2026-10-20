@@ -30,7 +30,10 @@ async function writeReview(formData: FormData, reviewed: boolean) {
     )
     .eq("id", runId)
     .select("id");
-  if (error) redirect(`/admin?error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("admin_harness_runs update failed", error);
+    redirect(`/admin?error=${encodeURIComponent("Could not save this review - try again. If it keeps happening, let us know.")}`);
+  }
   // RLS filters a non-owner's update down to zero rows rather than erroring.
   if (!data || data.length === 0) {
     redirect(`/admin?error=${encodeURIComponent("Only a Tender Tool platform admin can review harness runs.")}`);
@@ -77,9 +80,10 @@ async function writeAlertResolution(formData: FormData, resolved: boolean) {
   if (error) {
     // Reopening while the same failure already has a newer open alert hits
     // the one-open-alert-per-fingerprint index - say so plainly.
+    if (error.code !== "23505") console.error("system_alerts update failed", error);
     const message = error.code === "23505"
       ? "This failure has happened again since and already has a newer open alert - review that one instead."
-      : error.message;
+      : "Could not save this resolution - try again. If it keeps happening, let us know.";
     redirect(`/admin?error=${encodeURIComponent(message)}#system-alerts`);
   }
   if (!data || data.length === 0) {
@@ -112,7 +116,10 @@ export async function setTestCompany(formData: FormData) {
   if (!companyId) redirect(`/admin/customers?error=${encodeURIComponent("Missing company.")}`);
 
   const { error } = await supabase.rpc("platform_admin_set_test_company", { p_company_id: companyId, p_is_test: isTest });
-  if (error) redirect(`/admin/customers?error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("platform_admin_set_test_company rpc failed", error);
+    redirect(`/admin/customers?error=${encodeURIComponent("Could not update this company - try again. If it keeps happening, let us know.")}`);
+  }
   revalidatePath("/admin/customers");
 }
 
@@ -126,6 +133,9 @@ export async function setPlatformSetting(formData: FormData) {
   if (!key) redirect(`/admin/settings?error=${encodeURIComponent("Missing setting.")}`);
 
   const { error } = await supabase.rpc("platform_admin_set_setting", { p_key: key, p_value: value });
-  if (error) redirect(`/admin/settings?error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("platform_admin_set_setting rpc failed", error);
+    redirect(`/admin/settings?error=${encodeURIComponent("Could not update this setting - try again. If it keeps happening, let us know.")}`);
+  }
   revalidatePath("/admin/settings");
 }

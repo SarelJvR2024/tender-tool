@@ -46,7 +46,10 @@ export async function startTenderPack(formData: FormData) {
   const { error } = await supabase
     .from("tender_packs")
     .upsert({ company_id: companyId, tender_id: tenderId }, { onConflict: "company_id,tender_id", ignoreDuplicates: true });
-  if (error) redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("tender_packs upsert failed", error);
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not start this pack - try again. If it keeps happening, let us know.")}`);
+  }
 
   revalidatePath(`/tenders/${tenderId}`);
   redirect(`/tenders/${tenderId}`);
@@ -175,7 +178,10 @@ export async function uploadTenderTemplate(formData: FormData) {
   const { error: upErr } = await supabase.storage
     .from(TENDER_TEMPLATE_BUCKET)
     .upload(storagePath, file!, { contentType: file!.type || "application/octet-stream" });
-  if (upErr) fail(`Could not upload file: ${upErr.message}`);
+  if (upErr) {
+    console.error("tender template upload failed", file!.name, upErr);
+    fail(`Could not upload ${file!.name} - try again. If it keeps happening, let us know.`);
+  }
 
   const { error } = await supabase.rpc("record_tender_document", {
     p_tender_id: tenderId,
@@ -183,7 +189,10 @@ export async function uploadTenderTemplate(formData: FormData) {
     p_storage_path: storagePath,
     p_original_filename: file!.name,
   });
-  if (error) fail(error.message);
+  if (error) {
+    console.error("record_tender_document rpc failed", error);
+    fail("Could not save this template - try again. If it keeps happening, let us know.");
+  }
 
   revalidatePath(`/tenders/${tenderId}`);
   redirect(`/tenders/${tenderId}?saved=template#tender-templates`);

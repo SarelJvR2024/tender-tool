@@ -44,7 +44,8 @@ export async function confirmPackReview(formData: FormData) {
     { onConflict: "company_id,tender_id" },
   );
   if (error) {
-    redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}#pack-review`);
+    console.error("pack_review_confirmations upsert failed", error);
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not save this review - try again. If it keeps happening, let us know.")}#pack-review`);
   }
 
   revalidatePath(`/tenders/${tenderId}`);
