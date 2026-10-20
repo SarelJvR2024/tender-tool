@@ -41,10 +41,17 @@ USER_AGENT = "Mozilla/5.0 (tender-tool discovery; public tender listings)"
 SAST = datetime.timezone(datetime.timedelta(hours=2))
 
 
+MAX_RETRY_AFTER = 30  # seconds - a cap on a 429's own Retry-After, so one
+# slow/misconfigured source can't stall a whole scheduled run on its own say-so
+
+
 def http_get(url, timeout=90, retries=3, backoff=2.0, headers=None):
     """Bytes of a GET. Retries on network errors and 5xx (government sites
-    drop connections under load - seen on etenders.gov.za and nra.co.za);
-    a 4xx is raised at once (it won't fix itself)."""
+    drop connections under load - seen on etenders.gov.za and nra.co.za)
+    and on 429 (rate-limited, not broken - confirmed live 2026-10-20 that
+    treating it identically to a permanent 4xx meant one source hitting its
+    own rate limit lost that source's listings for the whole run with zero
+    retry); any other 4xx is raised at once (it won't fix itself)."""
     h = {"User-Agent": USER_AGENT}
     h.update(headers or {})
     last = None
@@ -53,6 +60,15 @@ def http_get(url, timeout=90, retries=3, backoff=2.0, headers=None):
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
+            if e.code == 429:
+                last = e
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                try:
+                    wait = min(float(retry_after), MAX_RETRY_AFTER) if retry_after else backoff * (attempt + 1)
+                except ValueError:
+                    wait = backoff * (attempt + 1)  # Retry-After can be an HTTP-date, not just seconds
+                time.sleep(max(wait, 0))
+                continue
             if e.code < 500:
                 raise
             last = e

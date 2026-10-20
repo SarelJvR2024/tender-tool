@@ -90,6 +90,31 @@ def release_key(r):
     return r.get("ocid") or r.get("contract_number")
 
 
+MAX_DOCUMENT_BYTES = 100 * 1024 * 1024  # 100MB - same cap and same reasoning
+# as assess_tender.py's own MAX_DOCUMENT_BYTES: nothing here ever checked a
+# size before reading a whole response into memory, a real OOM risk for this
+# worker from one misconfigured/oversized buyer response.
+
+
+def _read_bounded(r, max_bytes=MAX_DOCUMENT_BYTES):
+    """Reads at most max_bytes+1 bytes from an open response, raising
+    ValueError if the real body is larger - Content-Length is checked first
+    (fails fast without reading anything) but the bounded read() is what
+    actually enforces the cap, since Content-Length can be absent or wrong."""
+    declared = r.headers.get("Content-Length")
+    if declared:
+        try:
+            declared_n = int(declared)
+        except ValueError:
+            declared_n = None
+        if declared_n is not None and declared_n > max_bytes:
+            raise ValueError(f"declared Content-Length {declared} exceeds the {max_bytes}-byte cap")
+    data = r.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError(f"response exceeds the {max_bytes}-byte cap (stopped at {len(data)} bytes)")
+    return data
+
+
 def fetch_document(url, timeout=DOWNLOAD_TIMEOUT):
     """Returns (data, content_type, error). A failed download degrades to
     (None, None, <reason>) rather than raising - one bad document link on a
@@ -114,7 +139,7 @@ def fetch_document(url, timeout=DOWNLOAD_TIMEOUT):
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            data = r.read()
+            data = _read_bounded(r)
             content_type = r.headers.get_content_type() or "application/octet-stream"
             return data, content_type, None
     except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError) as e:

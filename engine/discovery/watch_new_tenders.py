@@ -419,6 +419,19 @@ def main():
         names = gov_sources.ALL_SOURCES if args.sources == "all" else [x.strip() for x in args.sources.split(",")]
         print(f"Reading government tender sources: {', '.join(names)}...")
         normalized, res = gov_sources.releases_for_watch(names)
+        if res.get("errors"):
+            # gov_sources.fetch_all() already isolates one source's own
+            # failure from the rest (confirmed: a 5xx/timeout/429 there
+            # degrades to a WARNING print and that source's releases are
+            # simply missing from this run) - but nothing downstream of it
+            # ever reads res["errors"], so a whole source silently failing
+            # (or being rate-limited) was invisible outside this script's
+            # own stdout. One summary alert per run, not one per source.
+            failed = ", ".join(sorted(res["errors"]))
+            system_alerts.record(
+                "discovery",
+                f"{len(res['errors'])} government source(s) failed this run and were skipped: {failed}",
+                "warning", detail=str(res["errors"]))
         if not args.no_track_changes:
             # Same read, so one scheduled run covers both: what is new
             # (below) and what changed on every listing (cancellations,

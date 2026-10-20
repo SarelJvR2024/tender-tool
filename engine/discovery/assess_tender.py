@@ -80,6 +80,34 @@ JV_RE = re.compile(r"joint\s*venture", re.IGNORECASE)
 BRIEFING_RE = re.compile(r"compulsory\s*(?:clarification\s*)?brief", re.IGNORECASE)
 
 
+MAX_DOCUMENT_BYTES = 100 * 1024 * 1024  # 100MB - real tender documents are
+# single-digit MB; neither urlopen() nor this function ever checked a size
+# at all before reading a whole response into memory, so a buyer's server
+# (misconfigured, or serving something that isn't a document) returning a
+# multi-GB body within the timeout window would be read entirely before
+# anything noticed - a real OOM risk for this worker. Reject rather than
+# silently truncate: a partial file saved as if complete is worse than none.
+
+
+def _read_bounded(r, max_bytes=MAX_DOCUMENT_BYTES):
+    """Reads at most max_bytes+1 bytes from an open response, raising if the
+    real body is larger - a Content-Length header is checked first (fails
+    fast without reading anything), but the bounded read() is what actually
+    enforces the cap, since Content-Length can be absent or simply wrong."""
+    declared = r.headers.get("Content-Length")
+    if declared:
+        try:
+            declared_n = int(declared)
+        except ValueError:
+            declared_n = None  # not parseable - the bounded read below is authoritative anyway
+        if declared_n is not None and declared_n > max_bytes:
+            raise ValueError(f"declared Content-Length {declared} exceeds the {max_bytes}-byte cap")
+    data = r.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError(f"response exceeds the {max_bytes}-byte cap (stopped at {len(data)} bytes)")
+    return data
+
+
 def _download_to_tempfile(url, timeout, result_q, abandoned):
     """abandoned: set by fetch_pdf_text once it has given up waiting (past the
     wall-clock deadline) - this thread keeps running regardless (it is not
@@ -91,7 +119,7 @@ def _download_to_tempfile(url, timeout, result_q, abandoned):
             tmp_path = tmp.name
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                tmp.write(r.read())
+                tmp.write(_read_bounded(r))
         if abandoned.is_set():
             os.unlink(tmp_path)
             return
@@ -148,7 +176,10 @@ def fetch_pdf_text(url, timeout=30):
         abandoned.set()
         return "", f"could not download document: stalled past {deadline}s (no response, or a trickling/hung connection)"
     if status == "error":
-        if isinstance(value, (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError)):
+        if isinstance(value, (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError)):
+            # ValueError here is _read_bounded()'s own MAX_DOCUMENT_BYTES
+            # rejection - an oversized/lying response degrades the same way
+            # as any other failed download, never crashes the caller.
             return "", f"could not download document: {value}"
         raise value
     path = value
