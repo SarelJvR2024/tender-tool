@@ -82,6 +82,7 @@ export async function ReusePastSubmission({
       <form method="get" action={`/tenders/${tenderId}#reuse-past`} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <select
           name="reuse_from"
+          aria-label="Tender to reuse answers from"
           defaultValue={reuseFrom ?? past[0].tender_id}
           style={{ flex: "1 1 260px", minHeight: 40, minWidth: 0, maxWidth: "100%", borderRadius: 8, border: "1px solid #D6D1C2", padding: "0 10px", fontSize: 13, background: "#FFFFFF", color: "#16233B" }}
         >
