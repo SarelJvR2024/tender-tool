@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import { EXTRACTED_PERSON_FIELDS, ISO_DATE, type Proposal } from "@/lib/cvExtraction";
+import { safeFileName } from "@/lib/safeFileName";
 
 /**
  * Every write here goes through the signed-in user's own Supabase client, so
@@ -270,7 +271,7 @@ export async function uploadCv(formData: FormData) {
     redirect(`/people/${personId}?error=${encodeURIComponent("Choose a CV file to upload.")}`);
   }
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = safeFileName(file.name);
   const storagePath = `${companyId}/people/${personId}/uploads/${randomUUID()}-${safeName}`;
 
   const { error: uploadError } = await supabase.storage

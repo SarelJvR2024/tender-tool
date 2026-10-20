@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { GENDERS, PRINCIPAL_DOCUMENT_KINDS, PRINCIPAL_ROLES, RACES, isPrincipalDocumentKind, isValidSaId } from "@/lib/principals";
+import { safeFileName } from "@/lib/safeFileName";
 
 // Directors & shareholders register (0050). RLS (is_company_member) enforces
 // tenancy and the 0050 triggers refuse cross-company links and >100 %
@@ -160,7 +161,7 @@ export async function uploadPrincipalDocument(formData: FormData) {
   if (!existing) fail("That person is not in your register.", anchor);
   const previous = (existing as Record<string, string | null>)[spec.pathColumn] ?? null;
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = safeFileName(file.name);
   const path = `${companyId}/principals/${id}/${kind}/${randomUUID()}-${safeName}`;
   const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream" });
   if (upErr) {

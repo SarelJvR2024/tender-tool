@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { OWNERSHIP_BASES, SAPOA_GRADES, isPropertyDocumentType } from "@/lib/properties";
 import { PROVINCES } from "@/lib/locality";
+import { safeFileName } from "@/lib/safeFileName";
 
 // Buildings offered to lease (0050 company_properties / property_documents).
 // RLS (is_company_member) + the 0050 same-company trigger gate every write.
@@ -135,7 +136,7 @@ export async function savePropertyDocument(formData: FormData) {
   const file = formData.get("file") as File | null;
   if (file && file.size > 0) {
     if (file.size > MAX_UPLOAD_BYTES) fail("File is larger than 4.4 MB - scan it at a lower resolution or compress the PDF.", anchor);
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeName = safeFileName(file.name);
     newPath = `${companyId}/properties/${propertyId}/${type}/${randomUUID()}-${safeName}`;
     const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(newPath, file, { contentType: file.type || "application/octet-stream" });
     if (upErr) {

@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import { DOCUMENT_TYPES, SERVICE_STAGES, CLIENT_TYPES, PERFORMANCE_RATINGS, disciplineSlug } from "@/lib/experience";
+import { safeFileName } from "@/lib/safeFileName";
 
 /**
  * Company experience library (0012_experience_items.sql). Two separate steps,
@@ -48,7 +49,7 @@ const RATING_VALUES = PERFORMANCE_RATINGS.map((r) => r.value);
 
 async function uploadFile(companyId: string, file: File) {
   const supabase = await createClient();
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = safeFileName(file.name);
   const storagePath = `${companyId}/experience/${randomUUID()}-${safeName}`;
   const { error } = await supabase.storage
     .from("experience-documents")

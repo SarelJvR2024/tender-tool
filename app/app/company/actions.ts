@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { BEE_PROOF_TYPES, MAX_UPLOAD_BYTES, VAULT_BUCKET, VAULT_DOCUMENTS, isVaultDocumentKind } from "@/lib/vaultDocuments";
 import { COMPANY_DOCUMENT_TYPES, GUIDELINE_MAX_CHARS, isCompanyDocumentType, isDocumentTemplateMode } from "@/lib/companyDocuments";
+import { safeFileName } from "@/lib/safeFileName";
 
 /**
  * Fields the edit form is allowed to write. Deliberately excludes any bank
@@ -162,7 +163,7 @@ export async function uploadVaultDocument(companyId: string, formData: FormData)
   const { data: existing } = await supabase.from("companies").select(column).eq("id", companyId).maybeSingle();
   const previousPath = ((existing as Record<string, string | null> | null)?.[column] as string | null) ?? null;
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = safeFileName(file.name);
   const storagePath = `${companyId}/vault/${kind}/${randomUUID()}-${safeName}`;
   const { error: upErr } = await supabase.storage
     .from(VAULT_BUCKET)
@@ -235,7 +236,7 @@ export async function saveDocumentTemplate(companyId: string, formData: FormData
     const file = formData.get("file") as File | null;
     if (file && file.size > 0) {
       if (file.size > MAX_UPLOAD_BYTES) back("File is larger than 4.4 MB - save it at a lower resolution or compress the PDF.");
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const safeName = safeFileName(file.name);
       uploadedPath = `${companyId}/templates/${type.key}/${randomUUID()}-${safeName}`;
       const { error: upErr } = await supabase.storage
         .from(VAULT_BUCKET)

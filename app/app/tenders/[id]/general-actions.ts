@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { safeFileName } from "@/lib/safeFileName";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { GENERAL_ENGINE, JOBS_TABLE, UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
 import { advanceFoundToBidding } from "@/lib/pipeline";
@@ -110,7 +111,7 @@ export async function uploadTenderDocument(formData: FormData) {
     .eq("field_key", fieldKey)
     .maybeSingle();
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = safeFileName(file.name);
   const storagePath = `${companyId}/tenders/${tenderId}/${randomUUID()}-${safeName}`;
   const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
   if (upErr) {

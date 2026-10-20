@@ -229,9 +229,7 @@ export function cidbNameMismatchWarning(contractorName: string | null, legalName
   return `The CIDB certificate's contractor name ("${contractorName}") doesn't closely match your company's registered legal name ("${legalName}"). This could mean the certificate belongs to a different entity, or your registered name has changed since it was issued - check before confirming (a trading name is also a valid reason).`;
 }
 
-export function safeFileName(name: string): string {
-  return name.replace(/[^a-zA-Z0-9._ ()-]/g, "_").slice(0, 120) || "document";
-}
+export { safeFileName } from "./safeFileName";
 
 export function uploadPrefix(companyId: string): string {
   return `${companyId}/`;

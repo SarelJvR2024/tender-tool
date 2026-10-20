@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { KIND_LABELS, parseHolder, type RegistrationScope } from "@/lib/registrations";
+import { safeFileName } from "@/lib/safeFileName";
 
 // Held registrations (0050). The 0050 trigger is the authority on scope
 // (company / person / both), stored_in types, and same-company holders; these
@@ -69,7 +70,7 @@ export async function saveHeldRegistration(formData: FormData) {
   if (file && file.size > 0 && heldId) {
     if (file.size > MAX_UPLOAD_BYTES) fail("File is larger than 4.4 MB - scan it at a lower resolution or compress the PDF.", `#r-${heldId}`);
     const { data: existing } = await supabase.from("held_registrations").select("storage_path").eq("id", heldId).maybeSingle();
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeName = safeFileName(file.name);
     const path = `${companyId}/registrations/${heldId}/${randomUUID()}-${safeName}`;
     const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream" });
     if (upErr) {
