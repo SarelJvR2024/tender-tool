@@ -515,7 +515,7 @@ export default async function PersonDetailPage({
             type="submit"
             style={{
               marginTop: 8, minHeight: 44, padding: "0 20px", borderRadius: 10,
-              background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 14,
+              background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 14,
               border: "none", cursor: "pointer",
             }}
           >

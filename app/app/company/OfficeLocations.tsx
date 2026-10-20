@@ -127,7 +127,7 @@ export async function OfficeLocations() {
           <form action={saveCompanyOffice} style={{ marginTop: 10 }}>
             <input type="hidden" name="office_id" value={o.id} />
             <OfficeFields office={o} />
-            <button type="submit" style={{ marginTop: 12, minHeight: 44, padding: "0 18px", borderRadius: 9, background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, border: "none", cursor: "pointer" }}>
+            <button type="submit" style={{ marginTop: 12, minHeight: 44, padding: "0 18px", borderRadius: 9, background: "#D97706", color: "#FFFFFF", fontSize: 14, fontWeight: 600, border: "none", cursor: "pointer" }}>
               Save office
             </button>
           </form>
