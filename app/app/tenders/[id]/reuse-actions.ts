@@ -35,7 +35,10 @@ export async function applyPastSubmission(formData: FormData) {
       plan.answers.copy.map((a) => ({ company_id: companyId, tender_id: tenderId, field_key: a.key, value: a.value, answered_by: user.id })),
       { onConflict: "company_id,tender_id,field_key", ignoreDuplicates: true },
     );
-    if (error) redirect(back(tenderId, `?error=${encodeURIComponent(error.message)}`));
+    if (error) {
+      console.error("tender_answers upsert failed for reuse", error);
+      redirect(back(tenderId, `?error=${encodeURIComponent("Could not copy those answers - try again. If it keeps happening, let us know.")}`));
+    }
   }
 
   // Positions go through the same action the Key positions dropdown uses, so

@@ -75,6 +75,7 @@ class Fake:
     def __init__(self):
         self.tables, self.storage, self.lock = {}, {}, threading.Lock()
         self.storage_posts = 0  # counts real upload POSTs, for the idempotency check
+        self.get_requests = {}  # {table: count} - for the chunking check (Finding 35)
         fake = self
 
         def parse_filters(query):
@@ -123,6 +124,7 @@ class Fake:
                 table = u.path.split("/rest/v1/", 1)[1]
                 filters = parse_filters(u.query)
                 with fake.lock:
+                    fake.get_requests[table] = fake.get_requests.get(table, 0) + 1
                     rows = [dict(r) for r in fake.tables.get(table, []) if row_matches(r, filters)]
                 self._send(200, rows)
 
@@ -292,6 +294,31 @@ def main():
     check("case 7: exactly one summary alert raised, not a crash", len(ALERTS) == 1, ALERTS)
     not_migrated_srv.shutdown()
     not_migrated_srv.server_close()
+
+    # --- a large backfill's release-key lookup must be chunked, not built as
+    # one unbounded in.(...) query (Finding 35, 2026-10-20: confirmed live, a
+    # 3,521-key backfill got a flat 400 Bad Request - fe6cd1d's own fix had
+    # no persisted test, so this closes that gap) -----------------------
+    fake5 = Fake()
+    client5 = company_profiles.RestClient(fake5.url, "test-key")
+    n_keys = ddd.KEY_CHUNK * 2 + 37  # deliberately not a clean multiple of KEY_CHUNK
+    many_releases = []
+    for i in range(n_keys):
+        key, url = f"RFQ-{i:05d}/2026", f"{url_a}#{i}"
+        fake5.tables.setdefault(ddd.TABLE, []).append({
+            "release_key": key, "document_url": url, "status": "downloaded",
+        })
+        many_releases.append({"ocid": None, "contract_number": key, "buyer": "City of Cape Town",
+                               "title": f"Backfill release {i}", "source": "capetown_procurement",
+                               "documents": [{"url": url, "title": "Notice.pdf"}]})
+    summary6 = ddd.download_for_releases(many_releases, client5)
+    check(f"case 8: a {n_keys}-key lookup is chunked into multiple queries, not one unbounded in.(...)",
+          fake5.get_requests.get(ddd.TABLE, 0) >= 3, fake5.get_requests)
+    check("case 8: every one of the pre-existing keys was actually found across the chunks "
+          "(not silently dropped past the first chunk)",
+          summary6["skipped_existing"] == n_keys and summary6["downloaded"] == 0 and summary6["failed"] == 0,
+          summary6)
+    fake5.stop()
 
     fake.stop()
     fake2.stop()
