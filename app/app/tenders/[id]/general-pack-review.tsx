@@ -3,6 +3,7 @@ import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { confirmGeneralPackReview } from "./general-pack-review-actions";
 import { PackChecklist } from "./pack-checklist";
 import type { ReviewStatus } from "./pack-review-logic";
+import { matchStrengthStatus } from "./general-pack-review-logic";
 
 /**
  * General (non-SANRAL) tender Pack Review: the confirm-before-compile
@@ -40,6 +41,33 @@ function Pill({ status }: { status: ReviewStatus }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: s.bg, color: s.color, whiteSpace: "nowrap" }}>
       {s.label}
+    </span>
+  );
+}
+
+const STRENGTH_STYLE: Record<"strong" | "check" | "low", { bg: string; color: string }> = {
+  strong: { bg: "#F1F5F9", color: "#5B6472" },
+  check: { bg: "#FEF3C7", color: "#B45309" },
+  low: { bg: "#FEE2E2", color: "#B91C1C" },
+};
+
+/**
+ * Small, quiet note on an item's extraction match strength - never "AI
+ * confidence" (engine/general/requirements.py's score is regex/heuristic,
+ * not LLM-backed). Deliberately a small badge, not a banner: at the low end
+ * it just means "worth double-checking yourself", not that anything is
+ * broken.
+ */
+function MatchStrengthBadge({ confidence, reason }: { confidence: number | null | undefined; reason: string | null | undefined }) {
+  const strength = matchStrengthStatus(confidence);
+  if (!strength) return null;
+  const s = STRENGTH_STYLE[strength.tier];
+  return (
+    <span
+      title={reason || undefined}
+      style={{ display: "inline-flex", alignItems: "center", padding: "1px 7px", borderRadius: 100, fontSize: 10.5, fontWeight: 600, background: s.bg, color: s.color, whiteSpace: "nowrap" }}
+    >
+      {strength.label}
     </span>
   );
 }
@@ -122,8 +150,9 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
               ) : (
                 s.items.map((item) => (
                   <div key={item.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 0", borderTop: "1px solid #E3E6EA", fontSize: 12 }}>
-                    <span style={{ flex: "0 0 auto", marginTop: 1 }}>
+                    <span style={{ flex: "0 0 auto", marginTop: 1, display: "flex", gap: 5, flexWrap: "wrap" }}>
                       <Pill status={item.status} />
+                      <MatchStrengthBadge confidence={item.confidence} reason={item.confidenceReason} />
                     </span>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ color: "#16233B", fontWeight: 600, wordBreak: "break-word" }}>

@@ -11,6 +11,7 @@ import { test } from "node:test";
 import {
   answerStatus,
   localityStatus,
+  matchStrengthStatus,
   roleStatus,
   signatureAnswerStatus,
 } from "./general-pack-review-logic.ts";
@@ -95,6 +96,26 @@ test("localityStatus: no match but not mandatory is only a warning", () => {
   const r = localityStatus({ matchStatus: "no_match", mandatory: false, disqualifies: false });
   assert.equal(r.reviewStatus, "warning");
   assert.equal(r.checklistStatus, "included_warning");
+});
+
+test("matchStrengthStatus: no confidence on the item returns null (nothing to show)", () => {
+  assert.equal(matchStrengthStatus(null), null);
+  assert.equal(matchStrengthStatus(undefined), null);
+});
+
+test("matchStrengthStatus: high score is a strong match", () => {
+  assert.deepEqual(matchStrengthStatus(100), { tier: "strong", label: "Strong match" });
+  assert.deepEqual(matchStrengthStatus(75), { tier: "strong", label: "Strong match" });
+});
+
+test("matchStrengthStatus: mid score says check this", () => {
+  assert.deepEqual(matchStrengthStatus(74), { tier: "check", label: "Check this" });
+  assert.deepEqual(matchStrengthStatus(40), { tier: "check", label: "Check this" });
+});
+
+test("matchStrengthStatus: low score asks for verification, plainly", () => {
+  assert.deepEqual(matchStrengthStatus(39), { tier: "low", label: "Low confidence - please verify" });
+  assert.deepEqual(matchStrengthStatus(0), { tier: "low", label: "Low confidence - please verify" });
 });
 
 // --- Scenario coverage required by the build task -------------------------

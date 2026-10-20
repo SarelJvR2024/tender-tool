@@ -100,6 +100,27 @@ export function signatureAnswerStatus(input: {
   return { reviewStatus: "confirmed", checklistStatus: "included", value: `${input.chosenPerson.name} - ${input.chosenPerson.signatory_capacity}`, note: null };
 }
 
+/**
+ * How strong the underlying extraction match was for one manifest item
+ * (engine/general/requirements.py's 0-100 "confidence" - regex/heuristic
+ * pattern-matching against the tender's own documents, NOT an LLM call; see
+ * that module's own comment). Maps the raw number to this screen's plain,
+ * honest vocabulary: "double-check this one yourself" at the low end, not
+ * "something is broken". Deliberately called "match strength" everywhere in
+ * the UI, never "AI confidence" - there is no AI in this path.
+ *
+ * Three tiers, thresholds our call (kept simple): a clean, exact-looking
+ * match; a vaguer one worth a second look; and a weak one (often a poor OCR
+ * scan or a stray mention) that should be verified against the actual
+ * document before relying on it.
+ */
+export function matchStrengthStatus(confidence: number | null | undefined): { tier: "strong" | "check" | "low"; label: string } | null {
+  if (confidence === null || confidence === undefined) return null;
+  if (confidence >= 75) return { tier: "strong", label: "Strong match" };
+  if (confidence >= 40) return { tier: "check", label: "Check this" };
+  return { tier: "low", label: "Low confidence - please verify" };
+}
+
 /** lib/locality.ts's matchLocality() "matched"/"no_match"/"unknown" -> this screen's vocabulary. */
 export function localityStatus(input: {
   matchStatus: "matched" | "no_match" | "unknown";

@@ -139,7 +139,10 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
       const check = checkReturnable(r, company, closingDate, answers, jvAnswer === null ? null : jvAnswer === "yes");
       const { reviewStatus, checklistStatus } = docItemStatus(check.status);
       pushChecklist({ title: check.label, envelope: "Supporting documents", status: checklistStatus, pages: null, note: check.status === "have" ? null : check.detail });
-      return { key: `returnable-${check.key}`, label: check.label, value: check.status === "have" ? "On file" : null, status: reviewStatus, note: check.detail };
+      return {
+        key: `returnable-${check.key}`, label: check.label, value: check.status === "have" ? "On file" : null, status: reviewStatus, note: check.detail,
+        confidence: r.confidence ?? null, confidenceReason: r.confidence_reason ?? null,
+      };
     });
     sections.push(section("general_documents", "Supporting documents", "#general-documents", "Upload or change", items));
   } catch (err) {
@@ -171,6 +174,8 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
         value: taggedPeople.length > 0 ? taggedPeople.map((p) => p.name).join(", ") : null,
         status: reviewStatus,
         note,
+        confidence: mr.confidence ?? null,
+        confidenceReason: mr.confidence_reason ?? null,
       });
     }
     sections.push(section("general_people", "Roles & CVs", "#general-people", "Tag or change", items));

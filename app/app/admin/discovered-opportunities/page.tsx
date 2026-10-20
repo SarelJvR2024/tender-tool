@@ -98,6 +98,7 @@ export default async function AdminDiscoveredOpportunitiesPage({ searchParams }:
           <Link href="/admin/settings" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Settings</Link>
           <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
           <span style={{ color: "#16233B", fontWeight: 600 }}>Discovered opportunities</span>
+          <Link href="/admin/requirement-extractions" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Requirement extractions</Link>
         </div>
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovered opportunities</h1>

@@ -36,6 +36,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
           <span style={{ color: "#16233B", fontWeight: 600 }}>Settings</span>
           <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
           <Link href="/admin/discovered-opportunities" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discovered opportunities</Link>
+          <Link href="/admin/requirement-extractions" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Requirement extractions</Link>
         </div>
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>System settings</h1>

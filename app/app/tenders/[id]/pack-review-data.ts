@@ -36,6 +36,12 @@ export type ReviewItem = {
   value: string | null;
   status: ReviewStatus;
   note: string | null;
+  // How strong the underlying extraction match was (0-100), where the
+  // manifest item carries one (engine/general/requirements.py; SANRAL items
+  // never set this - see general-pack-review-logic.ts's matchStrengthStatus
+  // for the plain-language mapping used on screen).
+  confidence?: number | null;
+  confidenceReason?: string | null;
 };
 
 export type ReviewSection = {
