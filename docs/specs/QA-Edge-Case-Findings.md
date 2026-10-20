@@ -2216,3 +2216,100 @@ the bare substring check, re-ran - the double-dot-filename checks failed exactly
 existing `engine/onboarding/test_classify_documents.py` and `engine/worker/test_poll_loop.py`
 suites for regression safety (neither touches this guard, both still pass unchanged).
 `python3 -m py_compile` clean on both changed files.
+
+## 2026-10-20 (forty-fourth run): full enterprise-readiness audit, round 1 (find) and round 2 (fix)
+
+Sarel's own direct request, in full: "make sure it is designed and build to catch all and execute
+for all scenarios. Run multiple scenarios, consider all scenarios for each process and each engine
+and each field... before I upload and onboard one of my companies." A deliberately larger effort
+than a routine pass, run in two rounds.
+
+**Round 1** dispatched 8 parallel adversarial-audit agents, each given one engine or the app layer,
+explicitly instructed to construct real malformed/edge-case/concurrent scenarios and run them
+against the actual code rather than reason from a read-through, and to distinguish CONFIRMED
+(reproduced) from PLAUSIBLE (reasoned only) findings. Result: ~31 distinct findings across
+discovery, intake/classification, SANRAL pack engine, general pack engine, CV engine,
+compliance/notify, RLS/security, and the app layer - the large majority independently reproduced,
+not just asserted. I independently re-verified the most severe claim from each of the 8 before
+accepting any of them (direct examples: reproduced the `tender_changes.py` key collision myself;
+confirmed the SANRAL `.docx` period-heading regex gap with a direct regex test; confirmed
+`process_general_jobs.py` genuinely has zero stale-job-recovery code via grep, contrasted against
+the CV queue's real implementation; caught one fork's own false positive - it concluded session-
+refresh middleware was missing because it searched for `middleware.ts` by name, not knowing this
+project runs Next.js 16, which renamed it to `proxy.ts` - confirmed `app/proxy.ts` is a complete,
+correct implementation by reading it directly).
+
+**RLS/security audited separately and came back genuinely clean**: built a real replayed Postgres
+via `engine/security/replay_schema.sh`, ran actual adversarial queries as `anon`/`authenticated`
+(switching `auth.uid()` between two real seeded users)/`service_role`, tried path-traversal variants
+against every storage bucket added since the confirmed-live `0062` migration cutoff, and checked all
+37 `SECURITY DEFINER` functions against the live `pg_proc` catalog directly - zero confirmed
+cross-tenant leaks. The fork caught its own first-pass false positive along the way (`is_company_member()`
+looked unpinned by text search alone, but is correctly patched via a separate `ALTER FUNCTION` in a
+later migration - confirmed via the live catalog, not just the original `CREATE FUNCTION` text).
+
+**Round 2** fixed the 9 most severe confirmed findings - 5 via parallel fix-forks (each scoped to
+non-overlapping files, instructed to reproduce-fix-reproduce and prove any new test actually catches
+the regression), 3 taken on directly given their complexity/stakes:
+
+- **SANRAL pack engine, the highest-stakes fix of the round**: `print_reports.py`/`print_financial.py`
+  had zero wall-clock timeout around any UNO call. Confirmed live by killing a real
+  `admin_harness.py --pack` run and finding a genuinely orphaned `soffice.bin` at 97% CPU, untouched
+  by the parent's termination - the outer 30-minute bridge watchdog can't help here, since
+  `Office.__enter__` deliberately decouples soffice into its own process group (to stop one job's
+  kill taking out a concurrent job's), which also means an external kill of the parent never reaches
+  the orphan. Fixed with the same wall-clock-deadline pattern already proven in
+  `assess_tender.fetch_pdf_text` (daemon thread + hard deadline), with a direct force-kill of the
+  whole LibreOffice process on timeout (the polite `desk.terminate()` path would also hang on the
+  same wedged connection). Verified the timeout mechanics directly with fake blocking/raising/fast
+  functions (hung op times out at the real deadline and force-kills exactly once; fast op returns
+  immediately with zero force-kills; a genuine non-timeout exception still propagates normally), then
+  smoke-tested both real export paths against real sample workbooks (unchanged, correct output, no
+  orphan left behind), then ran the FULL real `admin_harness.py --pack` end to end (all 7 test
+  companies) - `7 clean, 0 flagged for review, 0 run failures`. Also fixed in the same engine: an
+  unrecognized key-position title in C.1.2.3 was silently skipped identically to a genuinely-optional
+  "Alternate to ..." row, with zero provenance trace - would hit a brand-new company's first tender
+  with no warning at all. Verified with a synthetic 3-case template (recognized-unassigned,
+  genuinely-optional, unrecognized) and confirmed the bug reproduces when reverted. New
+  `engine/test_fill_docx_forms.py` (first dedicated test for this module).
+- **Discovery**: `tender_changes.py`'s dedupe key collapsed to `"<source>:None"` for a release
+  missing both ocid and contract_number (confirmed reachable from 3 real source readers) - silent
+  overwrite of one release's change-tracking by an unrelated one, and possible fabricated "title
+  changed" events. Fixed to skip, matching the sibling modules' own convention. Also fixed:
+  government source failures invisible to `system_alerts`; a 429 treated as permanent with zero
+  retry; no size cap on document downloads. Bonus: `assess_tender.fetch_pdf_text`'s error
+  classification was missing `ValueError` (the identical relative-URL crash already fixed elsewhere,
+  never applied here).
+- **Intake**: SANRAL `.docx` heading regexes rejected a period after the form letter -
+  `"C.1.1.1 FORM OF OFFER"` never recognized, zero trace; the project's own test fixture had this
+  exact mismatch baked in unnoticed. Also fixed: duplicate-candidate tie-break now prefers the
+  most-recently-modified file over alphabetically-first.
+- **General pack engine**: `process_general_jobs.py` had zero stale-job recovery - the third job
+  queue on the shared `pack_generation_jobs` table, after the other two already had it. Added
+  `fail_stale_jobs()` mirroring the proven pattern exactly, scoped so it never touches a sibling
+  queue's rows. Also fixed: a stray cross-suite form-code reference still listed as "required"; one
+  control character discarding an entire form's worth of otherwise-good fields.
+- **CV engine**: path traversal (CWE-22) via `person['name']` in an output filename - reproduced
+  directly, confirmed the resolved path escaped `out_dir`. Also fixed: a raw Python exception shown
+  verbatim to the customer on a CV failure (same bug class as the earlier app-side error-leak sweep,
+  found here on the engine side); `projects`/`qualifications: null` crashing generation; a stray
+  control character (a realistic OCR artifact) permanently failing a CV job.
+- **Compliance/Notify**: `watch_deadlines.py`/`daily_digest.py` computed "today" via naive
+  `date.today()` (worker container has no `TZ`, defaults UTC) instead of SAST - a guaranteed ~2-hour
+  daily window where every due-date/digest decision was one calendar day off; the correct pattern
+  already existed elsewhere in this codebase. Also fixed: no per-item isolation in the digest
+  build/send loops - one malformed entry crashed the whole batch.
+
+**Deliberately deferred, named explicitly rather than silently dropped:** `confirm_pack.py`'s
+project-field-completeness-vs-project-type gap (needs a dedicated follow-up into `sanral_fill.py`);
+`suggest_pack.py:77`'s identical `qualifications: null` crash (found by the CV-engine fix fork,
+correctly left out of its assigned scope); `watch_new_tenders.py`'s own naive `date.today()`
+instance (same bug class as the compliance/notify fix, found by the discovery fix fork, correctly
+left out of its assigned 3 findings); dead, confirmed-buggy legacy code in `fill_sbd_docx.py`
+(`fill_sbd1`/`fill_sbd4`/`fill_sbd6_1`, zero live callers); and several lower-severity round-1 items
+(duplicated filename-sanitization regexes across ~8 app files, no Resend 429 backoff, a general-pack
+regression-corpus coverage gap, 2 functions missing `pg_temp` in search_path, a test-infra
+role-reuse fragility in `scratch_supabase_stub.sql`, client-side-only upload type validation, no
+app-wide rate limiting, no custom `error.tsx`/`not-found.tsx`).
+
+**Commits:** `8aad3bb`, `4141a75`, `80afc14`, `cdff2ae`, `9bc3474`, `d396979`.
