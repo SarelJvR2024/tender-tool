@@ -6,7 +6,16 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~18:11 UTC — forty-eighth standing QA run: two things happened this
+Last full pass: 2026-10-20, ~19:15 UTC — forty-ninth standing QA run: `etenders_portal.py`'s own
+`dedupe_rows()` docstring names two causes of a duplicate portal row - a repeat cancellation, or a
+multi-lot award - but only merged the cancellation across duplicates; a multi-lot award's later
+lots' bidders were silently dropped (whichever duplicate row happened to be first "won"), feeding
+`store_award_outcomes.py`'s real award/price data and a bidder-count-keyed change event with
+incomplete information (Finding 36). Fixed by merging `bidders` the same way `_cancellations`
+already is. Added this module's first test file (7 checks), verified to actually catch the
+regression (reverted the fix, confirmed it fails with Lot 2 missing, restored it, confirmed
+clean). `test_gov_sources.py`/`test_tender_changes.py` (real callers) unaffected. ~18:11 UTC —
+forty-eighth standing QA run: two things happened this
 cycle. First, the single biggest "known gaps" item in this file's whole history closed — migrations
 `0063`–`0075` (13 files, flagged as growing and unresolved since the twentieth run, confirmed to have
 caused two real production crashes) are now ALL confirmed applied to Sarel's real Supabase project,
@@ -342,6 +351,38 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - forty-ninth run): a multi-lot award's later lots' bidders were silently dropped by the eTenders portal reader's own dedupe step - fixed
+
+Orientation: discovery hadn't had a genuinely NEW adversarial pass from this review's own hand in
+a while (recent discovery cycles were independent re-verification of a parallel enterprise-
+readiness audit, not fresh findings). Read `key_person_minimums.py` in full first - already has
+solid real-fixture test coverage, no new finding. Moved to `etenders_portal.py` (239 lines, zero
+dedicated test file, not named in the audit's own discovery summary).
+
+**Finding 36 (fixed, moderate - feeds real award/price intelligence with silently incomplete
+data):** `dedupe_rows()`'s own docstring says the portal returns one row per joined child record
+- "a tender cancelled twice ... or with several awards comes back as several rows with the same
+id." Only `cancelled` was actually merged across duplicate rows; `bidders` (a multi-lot award's
+per-lot winner/amount) was left as whichever duplicate row happened to be dict()'d first, silently
+dropping every other lot's bidder data. Confirmed with a synthetic 2-lot fixture reproducing
+exactly the shape the docstring itself names: only Lot 1's R100,000 winner survived, Lot 2's
+R250,000 winner vanished with no trace. Not cosmetic - `store_award_outcomes.py` stores this field
+as real award data, and `tender_changes.py` emits a "bidders list published" change event keyed by
+bidder count, so a truncated list means wrong stored award data and a wrong change notification.
+
+**Fix:** merged `bidders` across duplicate rows the same way `_cancellations` already is -
+collected into a list during the same pass, deduping identical repeated entries, replacing the
+stale single-row field at the end.
+
+**Verification:** re-ran the 2-lot fixture post-fix - both lots survive through `normalize()`.
+Added `engine/discovery/test_etenders_portal.py` (first dedicated test file for this module): 4
+cases, 7 checks. **Proved the test catches the regression** (reverted the fix, confirmed the
+2-lot checks fail with Lot 2 missing, restored it, confirmed clean). `test_gov_sources.py` and
+`test_tender_changes.py` (this module's real callers) still pass unchanged. `python3 -m
+py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "forty-ninth run" (Finding 36).
 
 ## This pass (2026-10-20, standing QA/robustness review - forty-fourth run): a full enterprise-readiness audit, round 1 (find) and round 2 (fix), before Sarel onboards a real company
 

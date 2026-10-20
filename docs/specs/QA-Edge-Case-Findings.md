@@ -2378,3 +2378,55 @@ rather than trusting the commits' own verification claims.
 
 No new findings - everything checked held up under independent reproduction, not just trust in
 the commits' own stated verification.
+
+## 2026-10-20 (forty-ninth run): Discovery - a multi-lot award's later lots' bidders were silently dropped by the portal reader's own dedupe step
+
+**Why this area:** of the rotation's eight areas, discovery hadn't had a genuinely NEW adversarial
+pass from me in this visible window - the enterprise-readiness audit's own discovery findings
+(`tender_changes.py` key collision, source-failure alerting, 429 retry, download size cap) were
+independently re-verified last cycle, but that's re-checking someone else's work, not a fresh
+pass of my own. `engine/discovery/key_person_minimums.py` (a complex layout-table parser) was
+read in full first and found to already have solid, real-fixture test coverage (two real tender
+families, an `alternatives` multi-qualification case, four `not_found` cases) - no new finding
+there. Moved to `etenders_portal.py` (239 lines, zero dedicated test file, not named in the
+audit's discovery summary).
+
+### Finding 36 (CONFIRMED, FIXED, moderate - feeds real award/price intelligence with silently incomplete data)
+
+**Where:** `engine/discovery/etenders_portal.py`, `dedupe_rows()`.
+
+**What was tested:** the function's own docstring states exactly which inputs it exists to
+handle: "The portal returns one row per joined child record: a tender cancelled twice ... **or
+with several awards** comes back as several rows with the same id." The implementation only ever
+merged the `cancelled` field across duplicate rows (into `_cancellations`) - `bidders` (a
+multi-lot award's per-lot winner name and amount) was left untouched, meaning whichever duplicate
+row happened to be the first one `dict()`'d into the output "won," and every other row's bidders
+were silently dropped on the floor. Built a synthetic 2-lot fixture reproducing exactly the shape
+the docstring itself describes - two rows sharing `id: 999`, one with Lot 1's winning bidder
+(R100,000), one with Lot 2's (R250,000) - and ran the real `dedupe_rows()` + `normalize()` on it.
+
+**Confirmed the bug:** only Lot 1's bidder survived into the deduped row and the normalized
+release; Lot 2's R250,000 winner vanished with no trace, no alert, nothing. This isn't cosmetic -
+`store_award_outcomes.py` consumes this exact `bidders` field as real award/price intelligence
+data (`bidders_source: "etenders_bidders"`), and `tender_changes.py`'s `portal_bidders()` emits a
+"bidders list published" change event keyed by the bidder *count* (`key_extra=f"bidders:{len(b)}"`)
+- a truncated list here means wrong stored award data and a wrong/missing change notification,
+not just an incomplete detail.
+
+**Fix:** merged `bidders` across duplicate rows the same way `_cancellations` already is - collect
+every row's `bidders` entries into a list during the same pass, deduping identical entries (in
+case the same lot's bidder is repeated unchanged across rows), and replace the stale single-row
+`bidders` field with the merged list at the end. No other logic touched.
+
+**Verification:** re-ran the 2-lot fixture post-fix - both lots' bidders now survive into the
+deduped row AND through `normalize()` into the release. Added `engine/discovery/
+test_etenders_portal.py` (first dedicated test file for this module): 4 cases, 7 checks - the
+2-lot fix itself, an ordinary single-row tender (unaffected), the module's own worked cancellation
+example (still merges correctly, and a cancellation-only row gets an empty, not missing, bidders
+list), and the same bidder entry repeated unchanged across duplicate rows (kept once, not
+doubled). **Proved the new test actually catches the regression**, not just that it passes:
+temporarily reverted `dedupe_rows()` to the pre-fix version, re-ran - the 2-lot checks failed
+exactly as predicted (`FAIL ... ([{'biddersName': 'Lot1 Winner CC', ...}])` - Lot 2 missing);
+restored the fix and confirmed clean again. Ran `test_gov_sources.py` and `test_tender_changes.py`
+(both exercise this module's real callers) for regression safety - both still pass unchanged.
+`python3 -m py_compile` clean on both changed files.
