@@ -740,7 +740,16 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         suite = None
 
     forms = []
-    codes = sorted({c for (_, c) in mentioned} | {c for e in doc_entries for c in e["forms"]},
+    # Finding 35 (2026-10-20): a stray cross-reference to the LOSING suite's
+    # own form code (e.g. one boilerplate "this tender does not use SBD 9"
+    # sentence in an MBD-dominant bundle) used to still list that code as
+    # required - `{c for (_, c) in mentioned}` unioned mentions across BOTH
+    # suites with no suite-consistency check, the same root-cause class
+    # Finding 29 already fixed for the suite label itself. Only a mention
+    # under the WINNING suite's own prefix counts now; a genuine document
+    # EDITION found for a code (doc_entries' own "forms") is a different,
+    # suite-independent signal (a real file exists) and stays unconditional.
+    codes = sorted({c for (s, c) in mentioned if s == suite} | {c for e in doc_entries for c in e["forms"]},
                    key=lambda c: float(c))
     for code in codes:
         title, capability = FORMS[code]

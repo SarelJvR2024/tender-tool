@@ -686,6 +686,39 @@ def run_pack(client, job, work_root, fetch=None):
 # Job loop
 # ---------------------------------------------------------------------------
 
+STALE_AFTER_MINUTES = 60  # same threshold as process_cv_jobs.py / process_pack_jobs.py's
+                          # own fail_stale_jobs() - a worker killed mid-job (OOM, host
+                          # crash, container restart) otherwise leaves this row in
+                          # 'generating' forever with no retry and no trace (confirmed
+                          # this queue had no stale-job recovery at all, unlike its two
+                          # sibling queues on the same pack_generation_jobs table).
+
+
+def fail_stale_jobs(client, now=None):
+    """A worker killed mid-job leaves its row in 'generating' forever - started_at
+    (already set by process_job's own claim, no migration needed) makes that
+    detectable here, mirroring process_pack_jobs.py's own fail_stale_jobs()
+    exactly, just scoped to engine='general' on the same shared table. Deliberately
+    not re-queued: a job that crashed the worker once would crash it again in a loop,
+    same rule the other two queues already follow."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
+    for job in client.select(JOBS_TABLE, {"status": "generating", "engine": ENGINE}):
+        started = job.get("started_at")
+        if started and datetime.datetime.fromisoformat(started.replace("Z", "+00:00")) < cutoff:
+            client.update(JOBS_TABLE, {"id": job["id"], "status": "generating"}, {
+                "status": "failed", "completed_at": _now(),
+                "error_message": f"The general engine stopped mid-job (no result after {STALE_AFTER_MINUTES} "
+                                 "minutes). Nothing was produced - request it again."})
+            print(f"[failed] {job['id']}: stale 'generating' since {started}")
+            system_alerts.record("general", f"A general engine job was stuck in 'generating' for over "
+                                            f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and was "
+                                            "marked failed", "error",
+                                 context={"job_id": job["id"], "kind": job.get("kind"),
+                                          "company_id": job.get("company_id"), "tender_id": job.get("tender_id"),
+                                          "started_at": started})
+
+
 def process_job(client, job, work_root, fetch=None):
     claimed = client.update(JOBS_TABLE, {"id": job["id"], "status": "requested", "engine": ENGINE},
                             {"status": "generating", "started_at": _now()})
@@ -718,6 +751,7 @@ def process_job(client, job, work_root, fetch=None):
 
 
 def poll_once(client, work_root, fetch=None):
+    fail_stale_jobs(client)
     jobs = client.select(JOBS_TABLE, {"engine": ENGINE, "status": "requested"}, order="requested_at.asc")
     if not jobs:
         print("No pending general engine jobs.")

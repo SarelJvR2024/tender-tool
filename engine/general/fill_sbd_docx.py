@@ -59,6 +59,19 @@ import docx
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from provenance import ProvenanceLog
 
+_XML_UNSAFE_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
+
+def _xml_safe(text):
+    """Strips the narrow class of control characters python-docx's own XML
+    writer rejects outright (confirmed live: a single vertical-tab/form-feed
+    anywhere in a field value raises `ValueError: All strings must be XML
+    compatible` and - since every writer below fills one whole form per
+    call - used to discard every OTHER field that would have filled
+    correctly, not just the one bad one). Tabs, CR/LF and ordinary Unicode
+    (including emoji) are untouched - only this specific invalid range."""
+    return _XML_UNSAFE_RE.sub("", text)
+
 DOTS_RE = r"[.…\s]*"
 
 
@@ -112,7 +125,7 @@ def fill_table_label(doc, label_substr, value, log, field_key, missing_reason=No
             continue
         if text == "":
             if value:
-                cell.text = str(value)
+                cell.text = _xml_safe(str(value))
                 log.confirmed(field_key, value)
             else:
                 log.missing(field_key, missing_reason or f"No value on file for '{label_substr}'.")
@@ -136,7 +149,7 @@ def fill_dotted_paragraph(doc, label_substr, value, log, field_key, missing_reas
                 # dots, as the blank - e.g. Treasury's SBD4 'Designation ...
                 # Name of bidder' on one line) - without it the next label on
                 # the same line gets squashed directly against this value.
-                new_text = pattern.sub(f"{label_substr} {value}   ", p.text, count=1)
+                new_text = pattern.sub(f"{label_substr} {_xml_safe(str(value))}   ", p.text, count=1)
                 for r in list(p.runs):
                     r.text = ""
                 if p.runs:
@@ -336,7 +349,7 @@ def _bidder_rows(table):
 
 
 def _set_cell(cell, value):
-    cell.text = str(value)
+    cell.text = _xml_safe(str(value))
 
 
 def fill_cells(doc, label_re, value, scope="any", prefill_ok=None):
@@ -388,6 +401,7 @@ def fill_phone_cells(doc, label_re, number):
 
 
 def _replace_paragraph_text(p, new_text):
+    new_text = _xml_safe(new_text)
     for r in list(p.runs):
         r.text = ""
     if p.runs:
