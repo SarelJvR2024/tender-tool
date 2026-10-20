@@ -6,7 +6,11 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~03:15 UTC — `engine/intake/classify_tender.py`'s `classify_documents()`
+Last full pass: 2026-10-20, ~04:20 UTC — independently re-verified `49d1305` (Finding 32, the
+SANRAL `.docx` intake fix): confirmed the claimed `.xlsm`-branch precedent is real, re-ran both the
+new test file and the real regression suite (`test_opportunity_requirements.py`, 17/17), checked
+for any other code assuming an empty `notes` list. No issues found, no code changes needed - green
+on real CI. ~03:15 UTC — `engine/intake/classify_tender.py`'s `classify_documents()`
 silently dropped a corrupt/mislabeled `.docx` SANRAL form with zero trace (the parallel `.xlsm`
 branch already logged a note for an unreadable workbook; the `.docx` branch's exception handler
 didn't), then let the downstream "missing documents" message tell the user to re-upload a document
@@ -213,6 +217,20 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-seventh run): one commit, independently re-verified correct and complete - no issues found
+
+Orientation: one new commit since the thirty-sixth run - `49d1305` (Finding 32, above), from a
+different concurrent sibling session (its own `Claude-Session` trailer differs from this
+session's). Re-verified rather than take its own write-up on trust: confirmed the
+`.xlsm` branch's existing unreadable-note pattern is exactly what the fix claims to mirror (read
+`classify_documents()` directly - `info["kind"] == "unreadable" -> notes.append(...)` is right
+there in the same loop), re-ran `test_classify_tender.py` myself (3/3 pass) and
+`test_opportunity_requirements.py` (the real regression suite for the same `classify_documents()`,
+via a different caller - all 17 checks pass). Checked for any other code that might assume an
+empty `notes` list and break now that a genuinely corrupt document can add one - found none.
+`python3 -m py_compile` clean. Green on real CI (`39366639756`, `bridge-worker-ci.yml`). No code
+changes needed this pass.
 
 ## This pass (2026-10-20, standing QA/robustness review - thirty-sixth run): a corrupt SANRAL .docx form was silently dropped at intake with zero trace, then misreported as "not uploaded" - fixed
 

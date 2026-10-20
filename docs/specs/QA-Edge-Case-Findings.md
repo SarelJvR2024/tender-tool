@@ -1989,3 +1989,16 @@ note alongside it. Rewriting that message to distinguish "never uploaded" from "
 unreadable" inline would be a reasonable follow-up but is a larger, separate change than this
 finding's scope; the note added here already gives the real reason, it just doesn't replace the
 generic message.
+
+## 2026-10-20 (thirty-seventh run): Finding 32 independently re-verified, no new findings
+
+One new commit since the thirty-sixth run: `49d1305` (Finding 32, above), from a different
+concurrent sibling session. Re-verified rather than trust its own write-up: read
+`classify_documents()` directly and confirmed the `.xlsm` branch's unreadable-note pattern the fix
+claims to mirror is real and identical in shape (`info["kind"] == "unreadable" ->
+notes.append(...)`, same loop). Re-ran `test_classify_tender.py` myself - 3/3 pass. Re-ran
+`test_opportunity_requirements.py` (the real regression suite - calls the same
+`classify_documents()` through a different caller, `opportunity_requirements.py`) - all 17 checks
+still pass. Grepped for any other code that might assume `notes` is always empty and could break
+now that a genuinely corrupt document can add one - found none. `python3 -m py_compile` clean.
+Green on real CI (`39366639756`). No new findings - the fix is correct and complete as committed.
