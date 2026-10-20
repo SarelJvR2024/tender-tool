@@ -85,6 +85,8 @@ export default async function PricingHistoryPage({
   const taxonomy = await loadDisciplineTaxonomy(supabase);
   const nameById = new Map(people.map((p) => [p.id, p.name]));
 
+  if (error) console.error("tender_packs select failed for pricing history", error);
+
   const categoriesByKey = new Map<string, string[]>();
   for (const o of (opportunities ?? []) as { ocid: string | null; contract_number: string | null; tender_id: string | null; categories: string[] | null }[]) {
     if (!o.categories?.length) continue;
@@ -183,7 +185,7 @@ export default async function PricingHistoryPage({
 
         {(error || sp.error) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load pricing: ${error.message}` : sp.error}
+            {error ? "Couldn't load pricing history - try refreshing. If it keeps happening, let us know." : sp.error}
           </div>
         )}
 

@@ -104,6 +104,8 @@ export default async function CompanyPage({
     )
     .single();
 
+  if (loadError) console.error("companies select failed", loadError);
+
   const row = company as CompanyRow | null;
 
   // Short-lived signed links to the uploaded copies (private bucket), same
@@ -172,7 +174,7 @@ export default async function CompanyPage({
 
         {(loadError || !row) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", fontSize: 13, color: "#B91C1C" }}>
-            Could not load your company profile{loadError ? `: ${loadError.message}` : "."}
+            {loadError ? "Couldn't load your company profile - try refreshing. If it keeps happening, let us know." : "Could not load your company profile."}
           </div>
         )}
 

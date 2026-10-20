@@ -104,6 +104,8 @@ export default async function PipelinePage({
   const people = (peopleRows ?? []) as CreditPerson[];
   const taxonomy = await loadDisciplineTaxonomy(supabase);
 
+  if (error) console.error("tenders select failed for pipeline board", error);
+
   const verdictByKey = new Map<string, string>();
   const downgradeByKey = new Map<string, { was: string; open: boolean }>();
   const categoriesByKey = new Map<string, string[]>();
@@ -172,7 +174,7 @@ export default async function PipelinePage({
 
         {(error || actionError) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load tenders: ${error.message}` : actionError}
+            {error ? "Couldn't load tenders - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 

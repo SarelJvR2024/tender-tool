@@ -180,6 +180,8 @@ export default async function TenderWorkspacePage({
     notFound();
   }
 
+  if (tenderError) console.error("tenders select failed for tender", id, tenderError);
+
   const tenderFacts = tender as TenderFacts | null;
 
   // Tender task/deadline timeline (alongside the readiness report, not a
@@ -200,6 +202,7 @@ export default async function TenderWorkspacePage({
       .order("due_date", { ascending: true, nullsFirst: false });
     tasks = (taskRows ?? []) as unknown as TenderTask[];
     tasksError = error ? { message: error.message } : null;
+    if (error) console.error("tender_tasks select failed for tender", id, error);
   }
 
   // The company's own roster for the task-assignee dropdown (migration
@@ -238,6 +241,7 @@ export default async function TenderWorkspacePage({
       .order("field_key", { ascending: true });
     provenance = (rows ?? []) as ProvenanceRow[];
     provenanceError = error ? { message: error.message } : null;
+    if (error) console.error("field_provenance select failed for tender_pack", tenderPack.id, error);
   }
 
   const confirmedRows = provenance.filter((r) => r.status === "confirmed" || r.status === "computed");
@@ -321,7 +325,7 @@ export default async function TenderWorkspacePage({
         {actionError && <ErrorBanner message={actionError} />}
 
         {tenderError && (
-          <ErrorBanner message={`Could not load this tender: ${tenderError.message}`} />
+          <ErrorBanner message="Couldn't load this tender - try refreshing. If it keeps happening, let us know." />
         )}
 
         {!tenderFacts && !tenderError && (
@@ -475,7 +479,7 @@ export default async function TenderWorkspacePage({
 
             {tenderPack && (
               <>
-                {provenanceError && <ErrorBanner message={`Could not load the readiness report: ${provenanceError.message}`} />}
+                {provenanceError && <ErrorBanner message="Couldn't load the readiness report - try refreshing. If it keeps happening, let us know." />}
 
                 {provenance.length === 0 && !provenanceError && (
                   <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#5B6472" }}>
@@ -780,7 +784,7 @@ function TaskTimeline({
         plain task - there&apos;s no fixed list to pick from.
       </div>
 
-      {error && <ErrorBanner message={`Could not load tasks: ${error.message}`} />}
+      {error && <ErrorBanner message="Couldn't load tasks - try refreshing. If it keeps happening, let us know." />}
 
       {!error && tasks.length === 0 && (
         <div style={{ fontSize: 12, color: "#8A93A0", padding: "6px 0 12px" }}>No tasks yet.</div>
