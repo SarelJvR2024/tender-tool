@@ -81,6 +81,123 @@ NEITHER = "This is a plain cover letter with no standard bid documents named at 
 TIE = "MBD 1 - INVITATION TO BID\nSBD 1 - INVITATION TO BID\n"
 
 
+def check_confidence_scoring():
+    """score_confidence() (per-item confidence, Sarel 2026-10-20: "indicate
+    the confidence level"). Pure function, no document I/O - checked
+    directly against the signals it's documented to use."""
+    print("\nscore_confidence(): per-item confidence scoring")
+
+    hi, _ = req.score_confidence("form_edition", 1)
+    lo, _ = req.score_confidence("weak_context", 1)
+    check("a matched document file (form_edition) scores higher than a vague/weak-context mention",
+          hi > lo, f"{hi} vs {lo}")
+
+    exact, _ = req.score_confidence("form_code", 1)
+    anchored, _ = req.score_confidence("anchored_regex", 1)
+    vague, _ = req.score_confidence("weak_context", 1)
+    check("an exact form-number match (form_code) and an anchored-regex match (CIDB/briefing) "
+          "both outscore a vague context-only match",
+          exact > vague and anchored > vague, f"{exact}/{anchored} vs {vague}")
+
+    one, _ = req.score_confidence("strong_context", 1)
+    many, _ = req.score_confidence("strong_context", 5)
+    check("several consistent mentions score at least as high as a single ambiguous one",
+          many >= one, f"{many} vs {one}")
+
+    clean, _ = req.score_confidence("form_code", 1)
+    scanned, reason = req.score_confidence("form_code", 1, ocr_confidence=40)
+    check("text read from a poorly-OCR'd page (low mean_confidence) scores lower than the same clean text",
+          scanned < clean, f"{scanned} vs {clean}")
+    check("the OCR reduction is recorded in the reason string", "OCR" in reason, reason)
+
+    scanned_good, _ = req.score_confidence("form_code", 1, ocr_confidence=95)
+    scanned_bad, _ = req.score_confidence("form_code", 1, ocr_confidence=20)
+    check("a near-perfect OCR read is discounted less than a poor one",
+          scanned_good > scanned_bad, f"{scanned_good} vs {scanned_bad}")
+
+    for kind in req.CONFIDENCE_BASE:
+        s, r = req.score_confidence(kind, 1)
+        check(f"score_confidence({kind!r}) stays within 0-100", 0 <= s <= 100, str(s))
+        check(f"score_confidence({kind!r}) always returns a non-empty reason", bool(r))
+
+
+def check_manifest_items_carry_confidence():
+    """Every extracted item that carries a 'quote' also carries a 0-100
+    'confidence' and a non-empty 'confidence_reason' - run against a real,
+    varied bundle (a mix of SBD forms, returnables, roles and CIDB/briefing
+    text) through the real extract_requirements()."""
+    text = """
+MBD 1 - INVITATION TO BID
+NAME OF BIDDER: ______ VAT REGISTRATION NUMBER: ______ TCS PIN: ______
+POSTAL ADDRESS: ______
+
+The bidder must submit a valid CIDB registration, grading 6CE, and a current
+tax compliance status (TCS PIN) with this bid. A contracts manager with
+relevant experience must be appointed for this project. Attendance of the
+compulsory briefing session is mandatory - a certificate of attendance must
+be enclosed.
+"""
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "bundle.txt")
+        with open(path, "w") as f:
+            f.write(text)
+        manifest = req.extract_requirements([path], work_dir=tempfile.mkdtemp(prefix="tt_req_test_"))
+
+    checked_any = False
+    for section in ("forms", "returnables", "roles", "person_registrations", "buyer_forms"):
+        for item in manifest.get(section) or []:
+            if "quote" not in item:
+                continue
+            checked_any = True
+            check(f"{section} item {item.get('key') or item.get('code') or item.get('role_code')} "
+                  f"carries a 0-100 confidence", 0 <= item.get("confidence", -1) <= 100, str(item.get("confidence")))
+            check(f"{section} item {item.get('key') or item.get('code') or item.get('role_code')} "
+                  f"carries a confidence_reason", bool(item.get("confidence_reason")))
+    check("at least one quote-carrying item was actually checked above (the fixture produced real items)", checked_any)
+
+    for section in ("cidb", "briefing"):
+        item = manifest.get(section)
+        if item is None:
+            continue
+        checked_any = True
+        check(f"{section} carries a 0-100 confidence", 0 <= item.get("confidence", -1) <= 100, str(item.get("confidence")))
+        check(f"{section} carries a confidence_reason", bool(item.get("confidence_reason")))
+
+
+def check_past_corrections_feedback():
+    """extract_requirements(past_corrections=...) - the honest, non-LLM
+    feedback mechanism (see requirements.py's own comment above
+    _apply_past_corrections_to_manifest: this module has no LLM call, so a
+    past correction nudges a matching item's confidence down with a note;
+    it never changes what gets extracted)."""
+    print("\npast_corrections: a past admin verdict nudges a matching item's confidence")
+    text = "MBD 1 - INVITATION TO BID\nNAME OF BIDDER: ______ VAT REGISTRATION NUMBER: ______\n"
+
+    def _forms_for(past_corrections):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "bundle.txt")
+            with open(path, "w") as f:
+                f.write(text)
+            m = req.extract_requirements([path], work_dir=tempfile.mkdtemp(prefix="tt_req_test_"),
+                                         past_corrections=past_corrections)
+            return next(f for f in m["forms"] if f["code"] == "1")
+
+    baseline = _forms_for(None)
+    false_positive = _forms_for([{"item_type": "forms", "item_snapshot": {"code": "1"}, "verdict": "false_positive"}])
+    corrected = _forms_for([{"item_type": "forms", "item_snapshot": {"code": "1"}, "verdict": "corrected"}])
+    unrelated = _forms_for([{"item_type": "forms", "item_snapshot": {"code": "9"}, "verdict": "false_positive"}])
+
+    check("a past false_positive verdict on the SAME form code lowers confidence",
+          false_positive["confidence"] < baseline["confidence"],
+          f"{false_positive['confidence']} vs {baseline['confidence']}")
+    check("a past corrected verdict on the SAME form code also lowers confidence, less harshly than a false_positive",
+          corrected["confidence"] < baseline["confidence"] and corrected["confidence"] > false_positive["confidence"],
+          f"corrected={corrected['confidence']} false_positive={false_positive['confidence']} baseline={baseline['confidence']}")
+    check("a past verdict on a DIFFERENT form code does not affect this item",
+          unrelated["confidence"] == baseline["confidence"], f"{unrelated['confidence']} vs {baseline['confidence']}")
+    check("the nudge is explained in confidence_reason", "platform admin" in false_positive["confidence_reason"])
+
+
 def main():
     print("Finding 29: MBD/SBD suite decided by majority of real mentions, not mere presence")
     check("10 real MBD mentions + 1 stray SBD reference -> MBD (the bug itself: this used to come back SBD)",
@@ -91,6 +208,11 @@ def main():
     check("SBD-only bundle -> SBD", _suite_for(SBD_ONLY) == "SBD")
     check("no standard forms mentioned at all -> None", _suite_for(NEITHER) is None)
     check("a genuine tie still defaults to SBD (unchanged from the old default)", _suite_for(TIE) == "SBD")
+
+    check_confidence_scoring()
+    check_manifest_items_carry_confidence()
+    check_past_corrections_feedback()
+
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
