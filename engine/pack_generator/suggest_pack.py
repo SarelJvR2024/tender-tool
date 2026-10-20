@@ -74,7 +74,7 @@ def years_experience_at(person, closing_date):
     - called in a loop over every key person for every position
     (suggest_pack.suggest()), so ONE person's typo'd date used to crash
     suggestion-building for the WHOLE company, not just that one person."""
-    grad = person.get("qualifications", {}).get("initial_graduated")
+    grad = (person.get("qualifications") or {}).get("initial_graduated")
     if not grad:
         return None
     try:
@@ -101,7 +101,7 @@ def candidate_person_text(person):
     """Everything about a candidate worth matching keywords against: quals + every project's
     own text fields. Deliberately excludes name/contact fields - those aren't evidence of
     relevant experience."""
-    q = person.get("qualifications", {})
+    q = person.get("qualifications") or {}
     parts = [q.get("highest_description", ""), q.get("initial_description", ""),
              person.get("description", "")]
     for proj in person.get("projects", []):
@@ -126,6 +126,7 @@ def score_candidate(person_id, person, position, closing_date):
 
     score = len(specific_overlap) * 3 + (1 if overlap & generic else 0)
     years = years_experience_at(person, closing_date)
+    quals = person.get("qualifications") or {}
 
     reasons = []
     if specific_overlap:
@@ -134,8 +135,8 @@ def score_candidate(person_id, person, position, closing_date):
         reasons.append(f"NO evidence found of: {', '.join(sorted(specific_miss))}")
     if years is not None:
         reasons.append(f"{years} years' experience as of this tender's closing date "
-                        f"(computed from {person['qualifications']['initial_graduated']}, not a stored number)")
-    ecsa = person.get("qualifications", {}).get("ecsa_level")
+                        f"(computed from {quals.get('initial_graduated')}, not a stored number)")
+    ecsa = quals.get("ecsa_level")
     if ecsa:
         reasons.append(f"ECSA level on file: {ecsa}")
 

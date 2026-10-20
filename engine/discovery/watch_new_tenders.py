@@ -118,6 +118,7 @@ import company_profiles
 import discovery_downgrades
 import seed_supabase_opportunities
 import download_discovered_documents
+import source_http as sh  # SAST - see both date.today() fixes below
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
 import system_alerts  # noqa: E402
 
@@ -261,7 +262,7 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
     `seen`. A seen-store entry written before the fan-out (no "companies"
     key) was scored against one shared profile file, not any company's own
     rows, so it is scored again for every company."""
-    today = (today or datetime.date.today()).isoformat()
+    today = (today or datetime.datetime.now(sh.SAST).date()).isoformat()
     fps = {c["key"]: company_profiles.profile_fingerprint(c["profile"]) for c in companies}
     out = []
     for r in releases:
@@ -403,7 +404,7 @@ def main():
         print("  No companies to score for - nothing to do.")
         return []
 
-    today = datetime.date.today()
+    today = datetime.datetime.now(sh.SAST).date()
     date_from = (today - datetime.timedelta(days=args.days)).isoformat()
     date_to = today.isoformat()
     if args.sources == "ocds":
