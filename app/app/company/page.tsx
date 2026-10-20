@@ -51,6 +51,14 @@ type CompanyRow = {
   // 0063_onboarding_document_scan.sql (completes the CIDB vault slot - see that migration's header)
   cidb_expiry: string | null;
   cidb_document_path: string | null;
+  // 0069_onboarding_scan_orphaned_fields.sql - captured by the document scan review screen but, until
+  // now, never selected/shown on this page (the write side was fixed in 0069; this closes the read side).
+  cidb_registration_number: string | null;
+  cidb_contractor_name: string | null;
+  bee_entity_name: string | null;
+  bank_confirmation_bank_name: string | null;
+  bank_confirmation_account_holder: string | null;
+  iso_9001_certified_entity_name: string | null;
   sars_tcs_pin: string | null;
   sars_tcs_pin_expiry: string | null;
   sars_tcs_pin_document_path: string | null;
@@ -100,7 +108,7 @@ export default async function CompanyPage({
   const { data: company, error: loadError } = await supabase
     .from("companies")
     .select(
-      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, cidb_grading, cidb_expiry, cidb_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work, head_office, other_offices, ecsa_registered_staff_count, sacpcmp_registered_staff_count, total_employees, typical_jv_share_pct"
+      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, cidb_grading, cidb_expiry, cidb_document_path, cidb_registration_number, cidb_contractor_name, bee_entity_name, bank_confirmation_bank_name, bank_confirmation_account_holder, iso_9001_certified_entity_name, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work, head_office, other_offices, ecsa_registered_staff_count, sacpcmp_registered_staff_count, total_employees, typical_jv_share_pct"
     )
     .single();
 
@@ -428,7 +436,14 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
             companyId={company.id}
             kind="cidb"
             title="CIDB registration / grading"
-            lines={[`Grading ${company.cidb_grading ?? "—"}`, `Expires ${fmtDate(company.cidb_expiry)}`]}
+            lines={[
+              `Grading ${company.cidb_grading ?? "—"}`,
+              `Expires ${fmtDate(company.cidb_expiry)}`,
+              [
+                company.cidb_registration_number ? `Reg. no. ${company.cidb_registration_number}` : null,
+                company.cidb_contractor_name ? `Contractor name on certificate: ${company.cidb_contractor_name}` : null,
+              ].filter(Boolean).join(" · "),
+            ].filter(Boolean)}
             status={company.cidb_grading || company.cidb_expiry ? expiryStatus(company.cidb_expiry) : NotStated({ label: "Not on file" })}
             path={company.cidb_document_path}
             url={docUrls.cidb}
@@ -465,6 +480,7 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
                   ? "Not ISO 9001 certified (SANRAL B4: in-house QMS scores 5 of 10)"
                   : "Certification not stated yet",
               company.iso_9001_certified === true ? `Expires ${fmtDate(company.iso_9001_expiry)}` : "",
+              company.iso_9001_certified_entity_name ? `Certified entity on certificate: ${company.iso_9001_certified_entity_name}` : "",
             ].filter(Boolean)}
             status={isoStatus}
             path={company.iso_9001_document_path}
@@ -477,7 +493,11 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
             lines={[
               `Dated ${fmtDate(company.bank_confirmation_letter_date)}`,
               `Usable until ${fmtDate(company.bank_confirmation_letter_valid_until)} (3 months from its date)`,
-            ]}
+              [
+                company.bank_confirmation_bank_name ? `Bank: ${company.bank_confirmation_bank_name}` : null,
+                company.bank_confirmation_account_holder ? `Account holder: ${company.bank_confirmation_account_holder}` : null,
+              ].filter(Boolean).join(" · "),
+            ].filter(Boolean)}
             status={expiryStatus(company.bank_confirmation_letter_valid_until, BANK_LETTER_RENEW_SOON_DAYS)}
             path={company.bank_confirmation_letter_path}
             url={docUrls.bank_letter}
@@ -489,7 +509,8 @@ function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrls: DocU
             lines={[
               `${beeProofLabel(company.bee_proof_type) ?? "Proof type not recorded"} · Level ${company.bee_level ?? "—"}${company.status ? ` (${company.status})` : ""}`,
               `Expires ${fmtDate(company.bee_proof_expiry)}`,
-            ]}
+              company.bee_entity_name ? `Entity name on certificate: ${company.bee_entity_name}` : "",
+            ].filter(Boolean)}
             status={expiryStatus(company.bee_proof_expiry)}
             path={company.bee_proof_document_path}
             url={docUrls.bee_proof}
