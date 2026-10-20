@@ -130,17 +130,29 @@ def storage_path(release_key_, source, document_title, url, digest):
     return f"{_slug(source, 'unknown')}/{_slug(release_key_)}/{digest[:16]}-{name}"
 
 
+KEY_CHUNK = 100  # release keys per in.(...) read - a one-shot in.(...) over
+# thousands of keys builds a URL long enough to be rejected outright
+# (confirmed live 2026-10-20: a 3,521-key backfill got a flat 400 Bad Request,
+# not a graceful degrade - RestClient.select()'s own pagination is rows-per-
+# page, not keys-per-query, so it never chunks the 'in' list itself). Same
+# constant/pattern as watch_new_tenders.py's SEEN_CHUNK/_chunks().
+
+
+def _chunks(items, n=KEY_CHUNK):
+    for i in range(0, len(items), n):
+        yield items[i:i + n]
+
+
 def existing_urls(client, release_keys):
     """{(release_key, document_url)} already recorded - downloaded or
-    previously failed - across every given release, read in one query per
-    chunk of keys (RestClient.select already pages/batches for a long 'in'
-    list the same way watch_new_tenders.py's seen-store read does)."""
+    previously failed - across every given release, read in chunks of
+    KEY_CHUNK keys per query (see KEY_CHUNK's own comment for why a single
+    in.(...) over everything isn't safe)."""
     out = set()
     keys = sorted({k for k in release_keys if k})
-    if not keys:
-        return out
-    for row in client.select(TABLE, {"release_key": keys}):
-        out.add((row["release_key"], row["document_url"]))
+    for chunk in _chunks(keys):
+        for row in client.select(TABLE, {"release_key": chunk}):
+            out.add((row["release_key"], row["document_url"]))
     return out
 
 
