@@ -15,7 +15,7 @@ How it works (LibreOffice, driven headless through its API):
      SANRAL's own button macro and exports it to PDF.
 The tender file is never saved or modified.
 """
-import os, sys, time, shutil, signal, subprocess, tempfile, zipfile, re
+import os, sys, time, shutil, signal, subprocess, tempfile, zipfile, re, queue, threading
 import uno
 from com.sun.star.beans import PropertyValue
 from com.sun.star.awt import Point, Size
@@ -78,6 +78,55 @@ def control_anchors(path):
     return out
 
 
+class LibreOfficeTimeout(RuntimeError):
+    """A UNO call (recalculation, PDF export, ...) ran past its wall-clock
+    deadline. Confirmed live 2026-10-20: this module had NO timeout at all
+    around any UNO call - a malformed workbook (circular formula reference,
+    a pathological sheet) could hang `doc.calculateAll()` or a report's own
+    `storeToURL` forever. The outer bridge-level watchdog (run_bridges.py's
+    30-minute subprocess timeout) does not help here: Office.__enter__
+    deliberately spawns soffice with start_new_session=True (its own process
+    group, so a kill aimed at one job's soffice never reaches another
+    concurrent job's - 2026-10-17 fix) - but that same decoupling means an
+    external kill of the PARENT python process never reaches the orphaned
+    soffice either. Reproduced directly: killing a real admin_harness.py
+    --pack run left a genuinely orphaned soffice.bin running at 97% CPU,
+    untouched by the parent's termination."""
+
+
+def _run_with_deadline(office, fn, deadline_seconds, what):
+    """Runs fn() (a zero-arg callable making one or more UNO calls) in a
+    daemon thread with a hard wall-clock deadline, the same pattern already
+    proven in assess_tender.fetch_pdf_text for a different kind of blocking
+    external call. A plain daemon thread, not concurrent.futures: an
+    abandoned Future's worker thread is not daemonic and would block process
+    exit waiting to join it. On timeout, force-kills the WHOLE LibreOffice
+    process immediately rather than waiting for the thread (which may never
+    return) - the normal, polite Office.__exit__ path can't be trusted here
+    either, since the same hung UNO connection that caused the timeout would
+    also hang `desk.terminate()`."""
+    result_q = queue.Queue(maxsize=1)
+
+    def runner():
+        try:
+            result_q.put(("ok", fn()))
+        except Exception as e:
+            result_q.put(("error", e))
+
+    t = threading.Thread(target=runner, daemon=True)
+    t.start()
+    try:
+        status, value = result_q.get(timeout=deadline_seconds)
+    except queue.Empty:
+        office.force_kill()
+        raise LibreOfficeTimeout(f"{what} did not finish within {deadline_seconds}s "
+                                 "(a malformed workbook, or a pathological formula, can hang LibreOffice "
+                                 "indefinitely) - LibreOffice was force-killed; nothing further was produced.")
+    if status == "error":
+        raise value
+    return value
+
+
 class Office:
     def __enter__(self):
         self.prof = tempfile.mkdtemp()
@@ -96,20 +145,34 @@ class Office:
                 self.ctx = res.resolve(f"uno:socket,host=localhost,port={port};urp;StarOffice.ComponentContext"); break
             except Exception: time.sleep(1)
         self.desk = self.ctx.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop", self.ctx)
+        self._killed = False
         return self
 
+    def force_kill(self):
+        """The hard-kill path: used by _run_with_deadline on a timeout, where
+        the document/connection may be wedged and desk.terminate() can't be
+        trusted to return. Idempotent - __exit__ also calls this, after its
+        own polite attempt, so a prior force_kill() here is a safe no-op."""
+        if self._killed:
+            return
+        self._killed = True
+        try: os.killpg(self.proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError): pass
+        try: self.proc.wait(timeout=10)
+        except Exception: pass
+
     def __exit__(self, *a):
-        try: self.desk.terminate()
-        except Exception: pass
-        try: self.proc.wait(timeout=30)
-        except Exception: pass
+        if not self._killed:
+            try: self.desk.terminate()
+            except Exception: pass
+            try: self.proc.wait(timeout=30)
+            except Exception: pass
         # Kill only THIS instance's process group (soffice -> oosplash ->
         # soffice.bin). This used to be `pkill -9 -x soffice.bin`, which also
         # killed every other LibreOffice on the host mid-conversion - found by
         # the 2026-10-17 scenario pass when a concurrent run died with
         # "illegal object given!" / "cannot get value Control".
-        try: os.killpg(self.proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError): pass
+        self.force_kill()
         shutil.rmtree(self.prof, ignore_errors=True)
 
 
@@ -156,15 +219,27 @@ def fix_controls(sh, anchors):
     return drops, shown
 
 
+# Generous, but bounded well under run_bridges.py's 30-minute outer
+# watchdog, so a genuinely hung conversion is caught and reported on its own
+# terms rather than silently orphaning soffice until the outer kill (which,
+# per LibreOfficeTimeout's own docstring, never actually reaches it anyway).
+LOAD_AND_CALC_DEADLINE_SECONDS = 300
+EXPORT_ONE_DEADLINE_SECONDS = 120
+
+
 def export(src, outdir, names=None):
     os.makedirs(outdir, exist_ok=True)
     anchors = control_anchors(src)
     made, skipped = [], []
     with Office() as o:
-        doc = o.desk.loadComponentFromURL("file://" + os.path.abspath(src), "_blank", 0,
-                                          (pv("Hidden", True), pv("ReadOnly", True)))
+        doc = _run_with_deadline(
+            o, lambda: o.desk.loadComponentFromURL("file://" + os.path.abspath(src), "_blank", 0,
+                                                    (pv("Hidden", True), pv("ReadOnly", True))),
+            LOAD_AND_CALC_DEADLINE_SECONDS, "loading the workbook")
         try:
-            doc.calculateAll()
+            _run_with_deadline(o, doc.calculateAll, LOAD_AND_CALC_DEADLINE_SECONDS,
+                               "recalculating formulas (a circular reference or a pathological "
+                               "formula can hang this step indefinitely)")
             sh = doc.Sheets.getByName(SHEET)
             n, shown = fix_controls(sh, anchors)
             ps = doc.StyleFamilies.getByName("PageStyles").getByName(sh.PageStyle)
@@ -183,11 +258,15 @@ def export(src, outdir, names=None):
                 sh.setPrintAreas((rng.RangeAddress,))
                 fd = uno.Any("[]com.sun.star.beans.PropertyValue", ((pv("Selection", rng),)))
                 out = os.path.join(outdir, name + ".pdf")
-                uno.invoke(doc, "storeToURL", ("file://" + os.path.abspath(out),
-                           (pv("FilterName", "calc_pdf_Export"), pv("FilterData", fd))))
+                _run_with_deadline(
+                    o, lambda: uno.invoke(doc, "storeToURL", ("file://" + os.path.abspath(out),
+                               (pv("FilterName", "calc_pdf_Export"), pv("FilterData", fd)))),
+                    EXPORT_ONE_DEADLINE_SECONDS, f"exporting {name!r} to PDF")
                 made.append(out)
         finally:
-            doc.close(True)
+            if not o._killed:
+                try: doc.close(True)
+                except Exception: pass
     return made, skipped, (n, shown)
 
 

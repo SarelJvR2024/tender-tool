@@ -52,10 +52,16 @@ def export(src, out_pdf, c24_pdf=None):
     os.makedirs(os.path.dirname(os.path.abspath(out_pdf)), exist_ok=True)
     printed = []
     with print_reports.Office() as o:
-        doc = o.desk.loadComponentFromURL("file://" + os.path.abspath(src), "_blank", 0,
-                                          (print_reports.pv("Hidden", True), print_reports.pv("ReadOnly", True)))
+        doc = print_reports._run_with_deadline(
+            o, lambda: o.desk.loadComponentFromURL("file://" + os.path.abspath(src), "_blank", 0,
+                                                    (print_reports.pv("Hidden", True), print_reports.pv("ReadOnly", True))),
+            print_reports.LOAD_AND_CALC_DEADLINE_SECONDS, "loading the Financial workbook")
         try:
-            doc.calculateAll()
+            # Same wall-clock protection as print_reports.export() - a
+            # circular reference or a pathological formula can hang
+            # calculateAll()/storeToURL indefinitely with no bound otherwise.
+            print_reports._run_with_deadline(o, doc.calculateAll, print_reports.LOAD_AND_CALC_DEADLINE_SECONDS,
+                                             "recalculating the Financial workbook's formulas")
             for i in range(doc.Sheets.Count):
                 sh = doc.Sheets.getByIndex(i)
                 if sh.IsVisible:
@@ -64,9 +70,11 @@ def export(src, out_pdf, c24_pdf=None):
                     sh.setPrintAreas(())  # in memory only - the file is read-only and never saved
             if not printed:
                 raise RuntimeError("workbook has no visible sheet to print")
-            print_reports.uno.invoke(doc, "storeToURL", (
-                "file://" + os.path.abspath(out_pdf),
-                (print_reports.pv("FilterName", "calc_pdf_Export"),)))
+            print_reports._run_with_deadline(
+                o, lambda: print_reports.uno.invoke(doc, "storeToURL", (
+                    "file://" + os.path.abspath(out_pdf),
+                    (print_reports.pv("FilterName", "calc_pdf_Export"),))),
+                print_reports.EXPORT_ONE_DEADLINE_SECONDS, "exporting the Financial workbook to PDF")
             if c24_pdf and C24_SHEET in printed:
                 # Same in-memory trick, narrowed to the one sheet: every other
                 # sheet hidden, with no print range of its own.
@@ -78,11 +86,15 @@ def export(src, out_pdf, c24_pdf=None):
                         other.setPrintAreas(())
                         other.IsVisible = False
                 os.makedirs(os.path.dirname(os.path.abspath(c24_pdf)), exist_ok=True)
-                print_reports.uno.invoke(doc, "storeToURL", (
-                    "file://" + os.path.abspath(c24_pdf),
-                    (print_reports.pv("FilterName", "calc_pdf_Export"),)))
+                print_reports._run_with_deadline(
+                    o, lambda: print_reports.uno.invoke(doc, "storeToURL", (
+                        "file://" + os.path.abspath(c24_pdf),
+                        (print_reports.pv("FilterName", "calc_pdf_Export"),))),
+                    print_reports.EXPORT_ONE_DEADLINE_SECONDS, "exporting the FORM C2.4 FIN sheet to PDF")
         finally:
-            doc.close(True)
+            if not o._killed:
+                try: doc.close(True)
+                except Exception: pass
     if not os.path.exists(out_pdf) or os.path.getsize(out_pdf) == 0:
         raise RuntimeError("LibreOffice wrote no PDF for the Financial workbook")
     return printed
