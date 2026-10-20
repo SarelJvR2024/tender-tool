@@ -1,15 +1,22 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Fraunces, Inter_Tight } from "next/font/google";
+import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Design system direction (2026-10-20, "confident & premium"): Fraunces for
+// editorial display/heading type, Inter Tight for UI/body - see
+// app/AGENTS.md's design-decisions section for the rest of the token
+// choices made alongside this.
+const fraunces = Fraunces({
+  variable: "--font-display",
   subsets: ["latin"],
+  weight: "variable",
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const interTight = Inter_Tight({
+  variable: "--font-sans",
   subsets: ["latin"],
+  weight: "variable",
 });
 
 export const metadata: Metadata = {
@@ -21,9 +28,12 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${fraunces.variable} ${interTight.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {children}
+        <Toaster />
+      </body>
     </html>
   );
 }
