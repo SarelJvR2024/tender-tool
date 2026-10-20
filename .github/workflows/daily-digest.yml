@@ -1,0 +1,103 @@
+# Builds and sends the role-based daily digest email
+# (engine/notify/daily_digest.py + send_digest_emails.py) once a day.
+#
+# Why this one IS a scheduled GitHub Action, unlike the real document-
+# fulfilment worker (see bridge-worker-ci.yml's own header for why that one
+# is NOT): the worker is an always-on polling loop reacting to jobs the
+# instant they're queued, which is exactly the workload GitHub's own Actions
+# terms warn against running as a "serverless application". This is the
+# opposite shape - one short batch job, once a day, at a time nobody is
+# relying on to the minute. A delayed or occasionally-dropped run (GitHub's
+# own caveat for scheduled workflows) degrades to "today's digest arrives a
+# bit late or not at all" - not a broken product. If delivery reliability
+# ever matters more than this, move it to the bridge-worker container
+# instead; nothing about these two scripts assumes GitHub Actions specifically.
+#
+# Needs 4 repository secrets (Settings > Secrets and variables > Actions) -
+# these are separate from Vercel's and Supabase's own env vars, nothing here
+# is shared automatically:
+#   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY  - same real project
+#     credentials the app/bridge worker use. daily_digest.py's own --mode
+#     live is read-only against Supabase (confirmed by reading
+#     watch_deadlines.supabase_request: GET only) - this workflow cannot
+#     write or delete anything in the real database.
+#   RESEND_API_KEY, DIGEST_FROM_ADDRESS - see send_digest_emails.py's own
+#     docstring ("REQUIRED SETUP") for how to get these. Until both are set,
+#     this workflow still runs safely and still goes green: send_digest_emails.py
+#     detects the missing key, prints how many digests were built but not
+#     sent, records one system_alerts warning, and exits 0 - it never
+#     crashes or pretends to have sent anything.
+#
+# A per-recipient send failure (one bad address, a transient Resend error)
+# does NOT fail this job - send_digest_emails.py's own design deliberately
+# surfaces that via one system_alerts row (visible on /admin), never a
+# per-person crash, the same "don't flood Sarel" convention used across this
+# whole engine. Only a genuine run-level failure (feed down, Supabase
+# unreachable, a real bug) propagates and turns this job red - see
+# daily_digest.py's own top-level try/except.
+#
+# Default behaviour worth knowing: test companies (is_test_company) are
+# INCLUDED by default, same as the Discovery feed's own established default -
+# add --exclude-test-companies to the daily_digest.py invocation below if
+# that's ever wrong for a real run.
+#
+# Scheduled runs disable themselves after 60 days with no repository commits
+# (a GitHub Actions platform behaviour, not something this workflow can
+# override) - not a practical concern while this repo is under active
+# development, but worth remembering if things go quiet later.
+
+name: daily-digest
+
+on:
+  schedule:
+    # 03:45 UTC = 05:45 SAST (no DST in South Africa) - ready before the
+    # working day starts, a few minutes off the hour on purpose (GitHub runs
+    # a lot of on-the-hour cron jobs across every repo, which can delay a
+    # run scheduled for exactly :00/:30).
+    - cron: "45 3 * * *"
+  workflow_dispatch: {} # manual test run, e.g. right after adding the secrets above
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-digest
+  cancel-in-progress: false # let a running send finish rather than cutting it off mid-batch
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          # No pip install step: daily_digest.py's own import chain
+          # (discovery/compliance/alerts modules) and send_digest_emails.py
+          # are both pure standard library - confirmed by grepping every
+          # module they import for python-docx/PyYAML/pypdf/Pillow/
+          # anthropic/pdfplumber (engine/worker/requirements.txt's own
+          # list) before writing this workflow. Nothing to install.
+
+      - name: Build today's digests (read-only against Supabase)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/daily_digest.py --mode live --out digest_report.json
+
+      - name: Upload the built digest JSON (debugging aid, kept a week)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest_report
+          path: digest_report.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Send via Resend
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          DIGEST_FROM_ADDRESS: ${{ secrets.DIGEST_FROM_ADDRESS }}
+        run: python3 engine/notify/send_digest_emails.py digest_report.json
