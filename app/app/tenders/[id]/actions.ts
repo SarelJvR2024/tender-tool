@@ -58,6 +58,27 @@ export async function requestTenderCv(formData: FormData) {
     redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Confirm a key person for this position before generating a tender-specific CV.")}`);
   }
 
+  // Duplicate-request guard (enterprise-readiness audit, 2026-10-20): nothing
+  // stopped a user submitting this repeatedly (one click or scripted),
+  // queueing unlimited CV-generation jobs on a worker pool shared across
+  // every company. This check handles the common case with a clear message;
+  // migration 0075's partial unique index is the real backstop against the
+  // race window between this SELECT and the INSERT below.
+  const { data: pending } = await supabase
+    .from("generated_cvs")
+    .select("id")
+    .eq("person_id", personId)
+    .eq("tender_pack_id", tenderPackId)
+    .eq("position_code", positionCode)
+    .eq("format", format)
+    .eq("detail", detail)
+    .in("status", ["requested", "generating"])
+    .limit(1)
+    .maybeSingle();
+  if (pending) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("A CV for this person and position is already being generated - check back shortly.")}`);
+  }
+
   const { error } = await supabase.from("generated_cvs").insert({
     company_id: companyId,
     person_id: personId,
@@ -70,6 +91,11 @@ export async function requestTenderCv(formData: FormData) {
     requested_by: user?.id ?? null,
   });
   if (error) {
+    if (error.code === "23505") {
+      // The unique index (migration 0075) caught a genuine race the SELECT
+      // above missed - same outcome as detecting it up front.
+      redirect(`/tenders/${tenderId}?error=${encodeURIComponent("A CV for this person and position is already being generated - check back shortly.")}`);
+    }
     console.error("generated_cvs insert failed", error);
     redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not request this CV - try again. If it keeps happening, let us know.")}`);
   }
