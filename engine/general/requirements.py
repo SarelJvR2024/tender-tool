@@ -718,10 +718,23 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
             "_local": d.get("converted_docx") or d["path"],
         })
 
-    suites = {s for (s, _), n in mentioned.items()}
-    if "MBD" in suites and "SBD" not in suites:
+    # A single stray cross-reference to the other suite (a municipal buyer's
+    # boilerplate note pointing bidders at "the National Treasury SBD 4
+    # guideline" while every real form in the bundle is MBD, the OCPO-style
+    # glossary annexure) used to flip the whole tender's suite on mere
+    # presence - `if "MBD" in suites and "SBD" not in suites` required SBD
+    # to be COMPLETELY ABSENT for MBD to win, so one single, real SBD
+    # mention anywhere outweighed ten real MBD mentions. Reproduced directly
+    # with a synthetic MBD bundle (MBD 1/4/6.1/7/8/9, 10 real mentions) plus
+    # one boilerplate "SBD 4 guideline" reference in an annexure - every form
+    # label in the manifest came back "SBD 1", "SBD 4", etc. for a genuinely
+    # municipal tender (QA-Edge-Case-Findings.md, 2026-10-20). Majority of
+    # mentions decides now; a tie still defaults to SBD, same as before.
+    mbd_total = sum(n for (s, _), n in mentioned.items() if s == "MBD")
+    sbd_total = sum(n for (s, _), n in mentioned.items() if s == "SBD")
+    if mbd_total > sbd_total:
         suite = "MBD"
-    elif "SBD" in suites:
+    elif sbd_total > 0:
         suite = "SBD"
     else:
         suite = None

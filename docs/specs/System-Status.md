@@ -197,6 +197,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-20, standing QA/robustness review - thirty-fourth run): a single stray
+cross-reference to the wrong form suite could relabel an entire municipal tender's pack
+
+Rotated to `engine/general/` (the non-SANRAL pack engine) - untouched since the third run's own
+minor fix, the longest-neglected rotation area. Ran `general_harness.py` (9 real tender samples
+x 7 test companies) in the background for regression coverage while reading `requirements.py` by
+hand for a genuinely new adversarial case.
+
+**Finding 29 (fixed, severe):** `extract_requirements()`'s suite-detection required the OTHER
+suite (MBD vs. SBD - municipal vs. National Treasury forms) to be **completely absent** for a
+tender to be labelled correctly - a single stray cross-reference anywhere in the document set
+(a municipal buyer's boilerplate "see the National Treasury SBD 4 guideline" note, exactly the
+kind of template-reuse text real municipal tenders carry) was enough to flip the whole tender's
+labelling, however dominant the real suite was. Constructed a realistic adversarial fixture
+directly (`.txt` documents, no LibreOffice needed): a genuinely municipal bundle with 10 real MBD
+mentions plus one boilerplate SBD reference - the real CLI relabelled every form "SBD 1", "SBD 4"
+etc. throughout the pack, mismatched against the municipality's own actual terminology. Not a
+crash - the confident, silently-wrong-label class this review exists to catch.
+
+**Fix:** suite is now decided by majority of real mentions, not mere presence. A genuine tie
+still defaults to SBD (unchanged); MBD-only, SBD-only and neither-suite cases all verified
+unchanged.
+
+**Verification:** direct reproduction of the bug, then 6 cases against the real suite-decision
+logic (the bug case now correct, both single-suite cases, neither, a tie, and the mirror case
+proving this isn't one-sided). Re-ran the real `extract_requirements()` CLI end to end against
+the adversarial fixture - fixed through the whole pipeline. Confirmed none of the 9 real harness
+samples exercises this exact mixed-suite shape (each is unambiguously single-suite already), so
+this is a genuinely new finding the existing regression suite would never have caught. Full
+detail: `QA-Edge-Case-Findings.md`, "thirty-fourth run" (Finding 29).
+
 ## This pass (2026-10-20, standing QA/robustness review - thirty-third run): the committed-but-not-live migration gap just caused its second real production crash - caught and degraded gracefully, gap itself still open
 
 Orientation: one new commit since the thirty-second run - `b82210a`, "Stop a missing documents

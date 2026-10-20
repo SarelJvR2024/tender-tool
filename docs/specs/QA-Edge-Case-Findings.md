@@ -1800,3 +1800,60 @@ clean.
 
 No new findings of my own this run - the fix is correct and complete as committed. Green on real CI
 (`39344195863`).
+
+## 2026-10-20 (thirty-fourth run): a single stray cross-reference to the wrong form suite could
+relabel an entire municipal tender's pack as National Treasury's
+
+**Context:** synced with `origin/main` and picked up two sibling verification-only passes
+(thirty-second/thirty-third runs - a crash fix independently re-confirmed, plus a reminder that
+the committed-but-not-live migration gap has now caused two real production crashes; not
+re-flagging, already tracked). Rotated to `engine/general/` (the non-SANRAL pack engine) -
+untouched since the third run's own minor fix, the longest-neglected rotation area by far. Ran
+`general_harness.py` (the real regression suite: 9 real tender samples x 7 test companies) in the
+background while reading `requirements.py` by hand for a genuine adversarial case, rather than
+just trusting the harness's own 9 fixed samples to surface something new.
+
+**Finding 29 (CONFIRMED, FIXED, severe - a confusing, wrong label on every form in a real
+tender's pack):** `extract_requirements()`'s suite-detection (`"MBD" in suites and "SBD" not in
+suites"`) required the OTHER suite to be **completely absent** for a tender to be labelled MBD
+(municipal) rather than SBD (National Treasury) - a single stray cross-reference to the other
+suite anywhere in the document set was enough to flip the whole tender's labelling, however
+dominant the real suite was. Constructed a realistic adversarial fixture directly (fast, no
+LibreOffice needed - `.txt` documents, a supported format): a genuinely municipal bundle with 10
+real MBD mentions across MBD 1/4/6.1/7/8/9, plus ONE boilerplate glossary line ("bidders may also
+consult the National Treasury's SBD 4 guideline... for reference purposes") - exactly the kind of
+template-reuse boilerplate real municipal buyers' documents carry (confirmed plausible against
+this project's own 123-tender corpus finding that municipalities use "the MFMA twin... same
+purpose and field set, different numbering prefix"). Ran the real `extract_requirements()` CLI
+against it: `form suite: SBD` - every single form in the manifest ("MBD 1", "MBD 4", "MBD 6.1"...)
+relabelled "SBD 1", "SBD 4", "SBD 6.1" throughout the pack/workspace, mismatched against what the
+municipality's own actual documents say, for a bidder who would reasonably expect to see their
+own buyer's terminology. Not a crash - the confident, silently-wrong-label class this review
+exists to catch.
+
+**Fix:** suite is now decided by majority of real mentions (`mbd_total > sbd_total` → MBD, else
+any SBD mentions → SBD, else `None`) instead of mere presence - the `suites` set and its two-
+branch presence check are gone entirely. A genuine tie still defaults to SBD, matching the old
+default exactly; MBD-only, SBD-only and neither-suite cases are all unchanged (verified directly,
+not assumed).
+
+**Verification:** direct adversarial reproduction of the bug before fixing, then 6 cases run
+against the real suite-decision logic after: the exact bug (10 MBD + 1 stray SBD → now
+correctly `MBD`), MBD-only, SBD-only, neither, a genuine tie (unchanged default `SBD`), and the
+mirror case (10 SBD + 1 stray MBD → still correctly `SBD`, proving this isn't a one-sided fix).
+Re-ran the real `extract_requirements()` CLI end to end against the adversarial fixture:
+`form suite: MBD`, confirmed fixed through the whole pipeline, not just the isolated function.
+Also ran `general_harness.py` (9 real tender samples x 7 test companies, pre-fix) as an
+independent regression baseline - every sample's own suite is unambiguously single-suite already
+(`overberg_q12: suite=MBD`, `mthashana_tvet: suite=SBD`, etc.), confirming none of the 9 real
+samples exercises this exact mixed-suite edge case, so this was a genuinely new finding, not
+something the existing harness would ever have caught on its own. `python3 -m py_compile
+requirements.py` clean.
+
+**Not yet tested / flagged:** `general_harness.py`'s own post-fix full run (9 samples x 7
+companies, confirming the fix introduces zero regression against the real corpus) was still
+in progress when this entry was written - worth confirming its final result explicitly next
+time this area comes up, rather than assuming the targeted verification above was sufficient on
+its own. `fill_flat_pdf.py`'s PDF-label-placement geometry and `fill_sbd_docx.py`'s docx-filling
+logic were read but not adversarially tested this run - both are large, intricate files that
+would benefit from a dedicated pass of their own.
