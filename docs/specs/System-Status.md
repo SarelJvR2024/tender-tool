@@ -6,7 +6,12 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~09:50 UTC — `daily_digest.py`'s listing-changes tracker was the odd
+Last full pass: 2026-10-20, ~10:25 UTC — two sibling commits independently re-verified, both
+correct: Discovery's undersized touch target on its own "Prepare this tender"/"Open in workspace"
+button (confirmed the 44px convention it cites is real, pre-existing); and Finding 34's digest
+alerting fix, where I personally reproduced the commit's own "reverted the fix, confirmed the
+test fails" claim (removed the new alert call, watched the check fail with zero alerts recorded,
+restored it). Green on real CI, no code changes needed. ~09:50 UTC — `daily_digest.py`'s listing-changes tracker was the odd
 one out of 3 near-identical "optional extra signal, a failure must not cost the rest of the
 digest" try/excepts: the other two call `system_alerts.record(...)` on failure, this one only
 printed a stdout warning - invisible on an unattended scheduled run (Finding 34). Added the
@@ -248,6 +253,31 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - forty-second run): two sibling commits, both correct - one trivial touch-target fix, one alerting fix with its own regression-proof personally reproduced
+
+Orientation: 2 new commits since the forty-first run, from two different concurrent sibling
+sessions - `b56189b` (Discovery's undersized touch target on its real conversion action) and
+`99a8e67` (Finding 34, above).
+
+**`b56189b`:** verified the commit's claimed "44px primary / 32-40px secondary floor" convention
+is a real, pre-existing rule in this codebase, not invented to justify the diff - grepped for it
+and found it stated identically in `SiteNav.tsx` and twice already in `System-Status.md`'s own
+pass history (a pricing-board button at half the 44px minimum, fixed in an earlier pass). A
+one-line CSS bump, correctly scoped and justified.
+
+**`99a8e67`:** read all three of `main()`'s "optional extra signal" try/except blocks side by side
+to confirm the claimed asymmetry is real (the first two really do call `system_alerts.record(...)`
+on failure; the third really was a bare `print`). Ran `test_digest_live.py` myself - clean. Then
+independently reproduced the commit's own regression-proof rather than trust it: removed the new
+`system_alerts.record(...)` call from a working copy of `daily_digest.py`, re-ran the test, watched
+the new check fail with `recorded == []` exactly as predicted, restored the file (`git diff`
+confirmed zero remaining changes), re-ran clean. Ran all 5 `engine/compliance/test_*.py` files too
+(same alerting pattern, different module) - all still pass.
+
+**Verification:** `npm run typecheck`/`lint` clean. `python3 -m py_compile` clean on both touched
+engine files. Both commits green on real CI (`39394434821` app-ci.yml, `39403672742`
+bridge-worker-ci.yml). No code changes needed this pass.
 
 ## This pass (2026-10-20, standing QA/robustness review - forty-first run): a broken listing-changes tracker degraded silently instead of raising a system alert - fixed
 

@@ -2143,3 +2143,22 @@ exactly as predicted (`FAIL ... ([])` - zero alert calls recorded); restored the
 clean again. Ran the full `engine/notify/test_digest_live.py` and all 5
 `engine/compliance/test_*.py` files (no network, in-memory fakes throughout) - all pass.
 `python3 -m py_compile` clean on both changed files.
+
+## 2026-10-20 (forty-second run): two sibling commits independently re-verified, no new findings
+
+Two new commits since the forty-first run: `b56189b` (Discovery touch-target fix) and `99a8e67`
+(Finding 34, above), from two different concurrent sibling sessions.
+
+`b56189b`: checked the commit's claimed "44px primary / 32-40px secondary floor" convention is
+real and pre-existing (grepped `SiteNav.tsx` and this log's own history for the same rule) rather
+than take it as a plausible-sounding justification. It is - a one-line, correctly-scoped CSS fix.
+
+`99a8e67`: read all three of `main()`'s "optional extra signal" try/except blocks side by side to
+confirm the two that already call `system_alerts.record(...)` really do, and the third really
+didn't. Ran `test_digest_live.py` myself - clean. Then independently reproduced the commit's own
+regression-proof: removed the new alert call from a working copy of `daily_digest.py`, re-ran, the
+new check failed with zero alerts recorded exactly as predicted, restored the file (`git diff`
+confirmed clean), re-ran green. Ran all 5 `engine/compliance/test_*.py` files too - all pass.
+
+No new findings. `npm run typecheck`/`lint` clean. Both commits green on real CI (`39394434821`,
+`39403672742`).
