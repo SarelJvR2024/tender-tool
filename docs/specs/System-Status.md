@@ -6,7 +6,15 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~04:20 UTC — independently re-verified `49d1305` (Finding 32, the
+Last full pass: 2026-10-20, ~06:15 UTC — the raw-Postgres-error-leak sweep (thirty-second through
+thirty-fifth runs) is now genuinely complete: `d081793` closed out the last 5 admin pages + 2
+upload forms, confirmed by a fresh repo-wide grep (the only remaining `error.message` matches are
+intermediate objects already shown generically downstream, or legitimate Supabase Auth SDK
+messages on the login/signup/forgot-password pages - a different, safe class, correctly untouched).
+`fd73a51` also fixed a real but separate gap: 6 onboarding-scan fields (migration `0069`) were
+saved on every vault confirm and shown nowhere - now read back and displayed, column names
+verified against `0069` exactly. Both green on real CI, `npm run build` clean. No code changes
+needed this pass. ~04:20 UTC — independently re-verified `49d1305` (Finding 32, the
 SANRAL `.docx` intake fix): confirmed the claimed `.xlsm`-branch precedent is real, re-ran both the
 new test file and the real regression suite (`test_opportunity_requirements.py`, 17/17), checked
 for any other code assuming an empty `notes` list. No issues found, no code changes needed - green
@@ -217,6 +225,36 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-eighth run): two sibling commits, both correct and complete - the raw-error-leak sweep is now genuinely finished
+
+Orientation: 2 new commits since the thirty-seventh run, from two different concurrent sibling
+sessions - `d081793` ("Close out the raw-error-leak fix on the last 5 admin pages + 2 uploads" -
+the admin pages this review's own thirty-fifth run deliberately left out, plus the 2 upload
+forms) and `fd73a51` ("Show the 6 onboarding-scan fields (`0069`) that were still write-only on
+the Company vault page").
+
+**`d081793`:** verified its own closing claim directly rather than trust it - a repo-wide grep for
+`error.message` outside `console.error(...)` calls now turns up only 2 classes of match, both
+legitimate and out of scope: `tasksError`/`provenanceError` in `tenders/[id]/page.tsx`, which are
+intermediate `{message: ...}` objects already displayed as generic text downstream (confirmed by
+reading where they're consumed - `TaskTimeline`/`ErrorBanner` already show the fixed generic
+message), and the 3 auth pages (`login`, `signup`, `forgot-password`), which show Supabase Auth
+SDK messages ("Invalid login credentials" etc.) - a different, deliberately user-facing and safe
+class, never a raw Postgres/schema error, correctly never touched by any of this work. The
+raw-Postgres-error-leak sweep that started at the thirty-second run and continued through the
+thirty-fifth is now genuinely complete, not just claimed complete.
+
+**`fd73a51`:** confirmed all 6 column names (`cidb_registration_number`, `cidb_contractor_name`,
+`bee_entity_name`, `bank_confirmation_bank_name`, `bank_confirmation_account_holder`,
+`iso_9001_certified_entity_name`) against migration `0069`'s own `add column` statements - exact
+match, no typos. Checked the `[...].filter(Boolean).join(" · ")` pattern doesn't leave a stray
+empty bullet when neither optional field is set (an empty string from the inner join is still
+falsy, so the outer `.filter(Boolean)` drops it) - correct.
+
+**Verification:** `npm run typecheck`/`lint` clean, full `npm run build` from a fresh `.next` -
+exit 0, same route list. Both commits confirmed green on real CI (`39370320075`, `39377554678`,
+`app-ci.yml`). No code changes needed this pass.
 
 ## This pass (2026-10-20, standing QA/robustness review - thirty-seventh run): one commit, independently re-verified correct and complete - no issues found
 

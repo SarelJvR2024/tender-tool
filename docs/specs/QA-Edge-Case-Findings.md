@@ -2002,3 +2002,28 @@ notes.append(...)`, same loop). Re-ran `test_classify_tender.py` myself - 3/3 pa
 still pass. Grepped for any other code that might assume `notes` is always empty and could break
 now that a genuinely corrupt document can add one - found none. `python3 -m py_compile` clean.
 Green on real CI (`39366639756`). No new findings - the fix is correct and complete as committed.
+
+## 2026-10-20 (thirty-eighth run): the raw-error-leak sweep is genuinely finished; a separate write-without-read gap closed cleanly - no new findings
+
+Two new commits since the thirty-seventh run: `d081793` (closes out the raw-error-leak fix on the
+5 remaining admin pages + 2 upload forms) and `fd73a51` (6 onboarding-scan fields, migration
+`0069`, were write-only on the Company vault page - now read back and shown).
+
+`d081793`'s own commit message claims a repo-wide grep shows zero remaining `error.message`
+leaks - verified this myself rather than take the claim at face value. A fresh grep turns up 5
+matches outside `console.error(...)` calls: 2 are `tasksError`/`provenanceError` in
+`tenders/[id]/page.tsx`, intermediate `{message}` objects already displayed as generic text where
+they're actually rendered (traced both consumers to confirm); 3 are the login/signup/forgot-
+password pages' Supabase Auth SDK error messages, a different and legitimate class ("Invalid login
+credentials" etc., never a raw Postgres/schema error) that was never in scope for this work.
+Confirmed: zero real leaks remain.
+
+`fd73a51`: cross-checked all 6 column names it reads back
+(`cidb_registration_number`/`cidb_contractor_name`/`bee_entity_name`/`bank_confirmation_bank_name`/
+`bank_confirmation_account_holder`/`iso_9001_certified_entity_name`) against migration `0069`'s
+own `add column` statements - exact match. Checked the `[...].filter(Boolean).join(" · ")` display
+pattern doesn't leave a stray empty bullet when neither optional field is set - correct, since an
+empty join result is still falsy and gets dropped by the outer filter too.
+
+No new findings. `npm run typecheck`/`lint` clean, full `npm run build` - exit 0. Both commits
+green on real CI (`39370320075`, `39377554678`).
