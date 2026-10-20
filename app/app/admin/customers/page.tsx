@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../../_components/SiteNav";
+import { AdminNav } from "../AdminNav";
 import CustomerRow, { type Customer, type CustomerMember } from "./CustomerRow";
 
 // Reads per-request session/DB data (RPCs gated by is_platform_admin, 0064) -
@@ -47,14 +47,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
       <SiteNav active="admin" />
 
       <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", gap: 14, fontSize: 13, marginBottom: 12 }}>
-          <Link href="/admin" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Alerts &amp; harness results</Link>
-          <span style={{ color: "#16233B", fontWeight: 600 }}>Customers</span>
-          <Link href="/admin/settings" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Settings</Link>
-          <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
-          <Link href="/admin/discovered-opportunities" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discovered opportunities</Link>
-          <Link href="/admin/requirement-extractions" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Requirement extractions</Link>
-        </div>
+        <AdminNav active="customers" />
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Customers</h1>
         <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>

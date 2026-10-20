@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import HarnessRunRow, { type HarnessDocument } from "./HarnessRunRow";
 import SystemAlertRow, { type SystemAlert } from "./SystemAlertRow";
 import { SiteNav } from "../_components/SiteNav";
+import { AdminNav } from "./AdminNav";
 
 // Reads per-request session/DB data (admin_harness_runs, gated by RLS on the
 // signed-in user being a platform admin - migration 0043) - same escape hatch as
@@ -94,14 +94,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
       <SiteNav active="admin" />
 
       <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", gap: 14, fontSize: 13, marginBottom: 12 }}>
-          <span style={{ color: "#16233B", fontWeight: 600 }}>Alerts &amp; harness results</span>
-          <Link href="/admin/customers" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Customers</Link>
-          <Link href="/admin/settings" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Settings</Link>
-          <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
-          <Link href="/admin/discovered-opportunities" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discovered opportunities</Link>
-          <Link href="/admin/requirement-extractions" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Requirement extractions</Link>
-        </div>
+        <AdminNav active="alerts" />
         <section id="cv-document-stats" style={{ marginBottom: 36 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>CVs &amp; tender documents</h1>
           <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>

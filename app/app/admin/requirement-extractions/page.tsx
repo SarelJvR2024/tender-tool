@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SiteNav } from "../../_components/SiteNav";
+import { AdminNav } from "../AdminNav";
 import RequirementItemTable from "./RequirementItemTable";
 import type { RequirementItemRowData } from "./RequirementItemRow";
 
@@ -62,14 +62,7 @@ export default async function AdminRequirementExtractionsPage({ searchParams }: 
       <SiteNav active="admin" />
 
       <div style={{ padding: "24px 32px", maxWidth: 1200, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", gap: 14, fontSize: 13, marginBottom: 12, flexWrap: "wrap" }}>
-          <Link href="/admin" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Alerts &amp; harness results</Link>
-          <Link href="/admin/customers" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Customers</Link>
-          <Link href="/admin/settings" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Settings</Link>
-          <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
-          <Link href="/admin/discovered-opportunities" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discovered opportunities</Link>
-          <span style={{ color: "#16233B", fontWeight: 600 }}>Requirement extractions</span>
-        </div>
+        <AdminNav active="requirement-extractions" />
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Requirement extractions below {DEFAULT_THRESHOLD}/100</h1>
         <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 10px", maxWidth: 860 }}>
