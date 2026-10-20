@@ -42,6 +42,24 @@ are confirmed real gaps not yet built (Lephalale, Magalies Water - both need the
 URL re-found first), and three came back partial/mixed overlap, not ruled in or out (Musina,
 uMhlathuze, Msukaligwa).
 
+**Municipality sweep continued past that (round 3, ~23:50 UTC), per Sarel's own instruction to keep
+checking until genuinely confident nothing's left.** Three parallel passes (two background,
+`Government-Buyer-Catalog-Municipalities-Round3-EC-KZN.md` and `-Round3-KZN-FS.md`, plus this
+session's own direct checks, which converged on near-identical findings to one of the background
+passes for Eastern Cape/KZN - a harmless duplication, not a conflict) checked ~19 more municipalities,
+bringing total coverage to roughly 78-85 of 257. **One new confirmed real gap: Ulundi** - a real,
+plain-text (not JS-rendered), structured tender-status register, 83 entries, zero eTenders overlap -
+but it's status-only (no bidder name or award amount inline, a real data-quality issue with the same
+bid number recurring across years already present too), ranking below the existing pilot buyers on
+value. Everything else reachable this round had a disqualifying problem: stale-only snapshots
+(uMngeni), the same flat-undated-document-archive trap as Mbombela/Polokwane (Setsoto), or
+JS-rendered content a text fetch can't see (King Sabata Dalindyebo - Mthatha's own site has a
+promising dedicated Awarded Tenders page, genuinely unresolved, worth a real-browser recheck).
+**A fourth distinct unreachability class surfaced**: this session's own egress proxy refusing a
+connection outright (Dihlabeng) - different from a site's 503, a DNS failure, or Rand Water's own
+TLS-chain error. A fifth municipality sweep (North West/Northern Cape/remaining Limpopo-Mpumalanga-
+Gauteng) was still running in the background as of this entry - not yet incorporated here.
+
 Last full pass: 2026-10-20, ~22:11 UTC — fifty-second standing QA run: independently verified two
 substantial batches of sibling work rather than trusting either's own claims. First, the UI/UX
 redesign's first 3 real prompts landed (`ee60823`/`f5e5a6f`/`6787cf3` - shadcn/ui + oklch design-token
