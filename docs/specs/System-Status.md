@@ -18,6 +18,30 @@ right fix is almost certainly having the digest read Discovery's own already-sco
 a real architectural change (not a quick patch) that needs Sarel's own call before anyone rewrites
 it - flagged to him directly, not decided here.
 
+**New source added (2026-10-20, ~23:15 UTC): `engine/discovery/vaal_central_water.py`**, a dedicated
+reader for Vaal Central Water Board (committed `5e24ae8`) - a confirmed real gap vs eTenders (9
+construction/infrastructure tenders on its own site, zero reference overlap with the 4 small
+services/goods tenders eTenders carries for this buyer). Built and tested to the same standard as
+`randwater.py`: parsed against real saved HTML, raises rather than silently reporting zero tenders
+if the page's structure changes, has its own `BUYER_FAMILY` entry, and its offline test's
+regression-catching was independently verified (broke the parser, confirmed the test failed,
+restored, confirmed clean). Not yet in `ALL_SOURCES` - reachability from a scheduled run is
+unconfirmed. Also extended `source_http.parse_sast`'s DMY date format to accept a full month name,
+not just a 3-letter abbreviation (this site mixes "11 SEPTEMBER 2026" and "25 May 2026" on the same
+page) - verified against every existing format for zero regression.
+
+Eleven more candidates from the government/SOE/municipality catalogs were then checked against
+eTenders the same way (`docs/specs/Government-Buyer-Catalog-eTenders-Overlap-Checks.md` has the
+full evidence): four are confirmed **not** real gaps (Overberg Water, IDC, Necsa, mostly Limpopo
+Public Works - already duplicated on eTenders under their real buyer names), two are confirmed real
+gaps but **not buildable as a clean structured reader** without a materially bigger PDF-parsing
+effort (Mbombela and Polokwane's tender-documents page both turned out to be flat document archives
+with no closing date anywhere, on the listing or on an individual document's own page - a reader
+built against that shape would misreport every stale, years-old entry as permanently "open"), two
+are confirmed real gaps not yet built (Lephalale, Magalies Water - both need their real tender-page
+URL re-found first), and three came back partial/mixed overlap, not ruled in or out (Musina,
+uMhlathuze, Msukaligwa).
+
 Last full pass: 2026-10-20, ~22:11 UTC — fifty-second standing QA run: independently verified two
 substantial batches of sibling work rather than trusting either's own claims. First, the UI/UX
 redesign's first 3 real prompts landed (`ee60823`/`f5e5a6f`/`6787cf3` - shadcn/ui + oklch design-token
