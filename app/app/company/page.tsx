@@ -20,6 +20,7 @@ import {
 import { SiteNav } from "../_components/SiteNav";
 import { ScrollFade } from "../_components/ScrollFade";
 import { OfficeLocations } from "./OfficeLocations";
+import { Notifications } from "./Notifications";
 
 // Depends on the signed-in user's session/company row on every request
 // (via RLS), same reason as dashboard/page.tsx - can't be prerendered.
@@ -231,6 +232,7 @@ export default async function CompanyPage({
                 <CompanyJumpLink href="#how-we-work" label="How we work" />
                 <CompanyJumpLink href="#bee-cidb" label="BEE & CIDB" />
                 <CompanyJumpLink href="#bank-details" label="Bank details" />
+                <CompanyJumpLink href="#notifications" label="Notifications" />
                 <CompanyJumpLink href="#registers" label="Registers" />
                 <CompanyJumpLink href="#letters" label="Letters" />
                 <CompanyJumpLink href="#offices" label="Offices" />
@@ -241,6 +243,13 @@ export default async function CompanyPage({
         )}
 
         {row && (editing ? <EditForm company={row} /> : <ReadOnlyView company={row} docUrls={docUrls} />)}
+
+        {row && !editing && saved === "digest" && (
+          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+            Email preference updated.
+          </div>
+        )}
+        {row && !editing && <Notifications />}
 
         {row && !editing && <RegisterLinks counts={registerCounts} />}
 

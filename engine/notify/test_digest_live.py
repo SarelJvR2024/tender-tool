@@ -82,15 +82,26 @@ ROWS = {
         {"company_id": "co-arch", "province": "Eastern Cape", "office_kind": "head_office"},
     ],
     "company_members": [
-        {"user_id": "u-guard", "company_id": "co-guard", "tender_role": "full_cycle",
+        # daily_digest_opt_in (0073) - opt-in, not opt-out: every existing
+        # fixture member below is explicitly opted IN so this file's other
+        # assertions (about role/company content, unrelated to opt-in) keep
+        # testing what they always tested. u-arch-not-opted-in (added below)
+        # is the one row that proves the opposite - see the opt-in check
+        # further down in main().
+        {"user_id": "u-guard", "company_id": "co-guard", "tender_role": "full_cycle", "daily_digest_opt_in": True,
          "companies": {"legal_name": "Digest Guarding CC"}},
-        {"user_id": "u-arch", "company_id": "co-arch", "tender_role": "full_cycle",
+        {"user_id": "u-arch", "company_id": "co-arch", "tender_role": "full_cycle", "daily_digest_opt_in": True,
          "companies": {"legal_name": "Digest Architects Inc"}},
-        {"user_id": "u-arch-viewer", "company_id": "co-arch", "tender_role": "viewer",
+        {"user_id": "u-arch-viewer", "company_id": "co-arch", "tender_role": "viewer", "daily_digest_opt_in": True,
          "companies": {"legal_name": "Digest Architects Inc"}},
         # A member whose auth.users row has no e-mail (0048: named, never by id).
-        {"user_id": "u-guard-noemail", "company_id": "co-guard", "tender_role": "validator",
+        {"user_id": "u-guard-noemail", "company_id": "co-guard", "tender_role": "validator", "daily_digest_opt_in": True,
          "companies": {"legal_name": "Digest Guarding CC"}},
+        # Belongs to the architects company, same role as u-arch, but never
+        # opted in (daily_digest_opt_in left at its real-world default,
+        # false) - must get NO digest built at all, not just an unsent one.
+        {"user_id": "u-arch-not-opted-in", "company_id": "co-arch", "tender_role": "full_cycle", "daily_digest_opt_in": False,
+         "companies": {"legal_name": "Digest Architects Inc"}},
     ],
     # auth.users, as company_member_labels() (0033/0048) reads it for the
     # service role: user_id -> e-mail (coalesced to 'a team member').
@@ -99,6 +110,7 @@ ROWS = {
         {"user_id": "u-arch", "label": "pieter@architects.example"},
         {"user_id": "u-arch-viewer", "label": "lerato@architects.example"},
         {"user_id": "u-guard-noemail", "label": "a team member"},
+        {"user_id": "u-arch-not-opted-in", "label": "not-opted-in@architects.example"},
     ],
     "people": [],
     "tender_tasks": [
@@ -186,6 +198,9 @@ def main():
           "person.email set from the label; a member with no e-mail has email null, not a user id")
     check(not any(u in json.dumps([d["person"] for d in digests.values()]) for u in ("u-guard", "u-arch")),
           "no raw user id anywhere in the digests' person blocks")
+    check("not-opted-in@architects.example" not in digests,
+          "opt-in gate (0073): a company_members row with daily_digest_opt_in=false gets no digest built at all, "
+          "even though it's the same company/role as one that did")
     g, a, v = digests["thandi@guarding.example"], digests["pieter@architects.example"], digests["lerato@architects.example"]
     g_new = {r["contract_number"]: r["verdict"] for r in g["new_tenders"]}
     a_new = {r["contract_number"]: r["verdict"] for r in a["new_tenders"]}

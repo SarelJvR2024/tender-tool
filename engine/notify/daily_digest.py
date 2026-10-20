@@ -17,7 +17,19 @@ sendgrid, resend, nodemailer or send_email anywhere in this repo as of
 2026-10-16). This script's output is written to be read the same way:
 either by a human, or by that same scheduled check-in, which can now also
 read one well-known file per person instead of inventing email content from
-three raw reports by hand.
+three raw reports by hand. The ACTUAL sending of this JSON as an email to a
+real customer is engine/notify/send_digest_emails.py's job, not this
+script's - see that module's own docstring for the provider (Resend) and
+the env var it needs.
+
+Opt-in (2026-10-20, Sarel directly asked: "yes let's make this an optional
+email that the customer can decide if they want to receive it."):
+company_members.daily_digest_opt_in (migration 0073) defaults to false, and
+filter_opted_in() below drops every roster entry that hasn't explicitly
+opted in BEFORE any digest is built for them - not just before sending.
+This is a pure function (no network), unit-tested on its own in
+test_digest_opt_in.py; the live/local roster loaders below just populate
+the "email_opt_in" field it reads.
 
 What this script reuses rather than reimplements, concretely:
   - New-tender fit: the Discovery feed's own per-company scoring -
@@ -389,7 +401,7 @@ def load_roster_live(url, key, company_id=None, client=None):
     role since 0048). company_members has no name column, so the e-mail is the
     name shown; a member whose e-mail can't be read is "a team member (no
     e-mail found)", never a raw user id."""
-    path = "company_members?select=user_id,company_id,tender_role,companies(legal_name)"
+    path = "company_members?select=user_id,company_id,tender_role,daily_digest_opt_in,companies(legal_name)"
     if company_id:
         path += f"&company_id=eq.{company_id}"
     rows = watch_deadlines.supabase_request(url, key, path)
@@ -404,6 +416,10 @@ def load_roster_live(url, key, company_id=None, client=None):
             "company_id": r["company_id"],
             "company_name": (r.get("companies") or {}).get("legal_name"),
             "tender_role": r.get("tender_role") or DEFAULT_ROLE,
+            # Opt-in, not opt-out (0073) - missing/false/None all mean "not
+            # opted in". filter_opted_in() is what actually enforces this;
+            # this loader only reports the column truthfully.
+            "email_opt_in": r.get("daily_digest_opt_in") is True,
         })
     return roster
 
@@ -429,8 +445,26 @@ def load_roster_local(path):
             "company_id": None,
             "company_name": data.get("company_legal_name"),
             "tender_role": role,
+            # Local mode has no company_members row to read a real opt-in
+            # from - a roster entry opts in explicitly ("email_opt_in": true
+            # in the roster file), same opt-in-not-opt-out default as live
+            # mode. See config/team_roster.example.json.
+            "email_opt_in": member.get("email_opt_in") is True,
         })
     return roster
+
+
+def filter_opted_in(roster):
+    """Keep only roster entries that have actually opted in to the daily
+    digest email (company_members.daily_digest_opt_in, migration 0073, or
+    the local roster file's own "email_opt_in"). Pure, no network - this is
+    the single gate between "has a company_members/roster row" and "gets a
+    digest built at all"; main() calls it right after loading the roster, so
+    an opted-out person's digest is never built, not merely never sent.
+    Anything other than exactly True (missing key, None, False, a truthy
+    string typo) is treated as "not opted in" - this is an opt-in feature,
+    never an opt-out one, per Sarel's own instruction."""
+    return [p for p in roster if p.get("email_opt_in") is True]
 
 
 # ---------------------------------------------------------------------------
@@ -626,6 +660,17 @@ def main():
             system_alerts.record("digest", f"The daily digest could not read re-assessed tenders: {type(e).__name__}: {e}",
                                  "error", exc=e)
             reassessed = []
+
+    # Opt-in gate (0073): drop anyone who hasn't explicitly opted in BEFORE
+    # building anything for them, not just before sending. roster_total is
+    # kept only for the log line below - everything after this uses the
+    # filtered list.
+    roster_total = len(roster)
+    roster = filter_opted_in(roster)
+    print(f"Roster: {roster_total} {'person' if roster_total == 1 else 'people'}, "
+          f"{len(roster)} opted in to the daily digest email ({roster_total - len(roster)} not opted in).")
+    if not roster:
+        print("Nobody has opted in - nothing to build. (This is expected until people turn the toggle on at /company.)")
 
     print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
           f"{'y' if len(companies) == 1 else 'ies'}, each from its own profile...")
