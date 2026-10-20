@@ -6,7 +6,15 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-19, ~22:15 UTC — two commits reviewed and independently verified clean, no
+Last full pass: 2026-10-20, ~00:25 UTC — reviewed and independently verified `b82210a`: a live
+discovery-watch run crashed after successfully scoring and seeding 4,034 real opportunities,
+because the document-download step's one unguarded Supabase read hit migration `0071`'s
+not-yet-live `discovered_opportunity_documents` table (`PGRST205`). Confirmed the fix is correctly
+scoped (catches only `RuntimeError`, the one error type the REST client actually raises on an
+HTTP failure) and the new test reproduces the exact live failure against a real HTTP server, not a
+mock. Green on real CI. Known-gaps item 9 updated: this is now a confirmed second real production
+crash from the committed-but-not-live migration gap, not just a theoretical risk. ~22:15 UTC — two
+commits reviewed and independently verified clean, no
 code issues found: a nonsensical internal provenance-log sentence on the CV cover page fixed and
 given its first dedicated test file (`b71dc5d`), and a dark-mode illegibility fix across 6 pages
 including Dashboard and Discovery (`01a15de`) - confirmed complete by scanning all 33 `page.tsx`
@@ -155,6 +163,18 @@ bridged by `engine/general/process_general_jobs.py`.
     **Narrowed further 2026-10-19 (twentieth run): 5 migrations are committed but not yet applied live, and this just caused a real user-facing error.** `0063`–`0066`/`0068` (5 files - `0063` onboarding document scan, `0064` super admin console, `0065` submission/opening reminders + won-project sync, `0066` this session's own trigger-bug fix, `0068` CV/document stats; `0067` was never created, a benign gap) were added after Sarel's `0062` cutoff above and have not been confirmed applied to the live project. Direct evidence, not inference: commit `8146259`'s own message says tonight's live E2E walkthrough hit a raw Postgres error on the Tender Workspace, `column tender_packs.project_completed_at does not exist` - that column only exists from `0065` onward, so the live database is still on `0062` or close to it. The commit fixed the symptom (no longer leaks the raw SQL error to the user - now a generic message + server-side log) but **not the cause**: the won-project CV-sync feature, the super-admin customer/CV-stats console, and the opening-reminder task kind are all still live-broken (or entirely inert) until these migrations are actually run against the real Supabase project. This needs Sarel's own Supabase SQL editor / migration access - no session in this sandbox has live credentials to do it. Nothing here is new schema risk (`0066` already fixes the one bug that would have shipped broken; everything else replays clean on `0001`→`0068` in this pass's own scratch-Postgres verification) - purely an apply-it-live step.
 
     **The gap has kept growing and nothing has narrowed it since (2026-10-19, thirtieth run): 8 real migrations now committed since the confirmed `0062` cutoff, still unconfirmed live.** `0063`–`0072` (`0067`/`0070` never created, both confirmed benign numbering gaps - 8 real files, not 10) now covers onboarding document scan, the super admin console, submission/opening reminders + won-project sync, this session's own `0066` trigger-bug fix, CV/document stats (`0068`), the onboarding-scan orphaned-field fix (`0069`), automatic permanent document storage for every discovered tender except SANRAL (`0071`), and the discovered-opportunities admin review screen + real requirements extraction (`0072`). Every one of these replays clean on scratch Postgres through `0001`→`0072` (re-confirmed this pass) - the risk here is purely "not yet run against the real project," never schema correctness. Still nothing any sandbox session can do about this directly: it needs Sarel's own Supabase SQL editor or migration access. Flagging again, in case it has slipped off the radar as "just the usual note" - 8 real, user-visible features are sitting live-inert right now.
+
+    **This gap just caused a real production crash (2026-10-20, thirty-third run) - no longer purely
+    theoretical.** `b82210a`'s own commit message states directly: a live `watch_new_tenders.py` run
+    scored and seeded 4,034 real discovered opportunities successfully, then crashed uncaught at the
+    document-download step because `discovered_opportunity_documents` (migration `0071`) doesn't
+    exist on the live project yet - confirmed by the exact live error text (`PGRST205`, "Could not
+    find the table ... in the schema cache"). The commit degrades this one step gracefully instead
+    of crashing the whole run (verified this pass - see pass-history entry below) but the underlying
+    gap - the live project is still not current with `0071`/`0072` - is unchanged and this is now
+    the second time it has broken something real in production (the first: the `tender_packs.project_completed_at`
+    error from the twentieth run, above). Same remedy as always: needs Sarel's own Supabase migration
+    access, nothing a sandbox session can do.
 10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
 11. ~~A hard-killed worker leaves a CV job stuck in `generating`~~ — **fixed this pass.** Migration `0019_generated_cvs_claimed_at.sql` adds `generated_cvs.claimed_at` (set the moment a worker claims a row), and `process_cv_jobs.py` gained `fail_stale_jobs()`, same shape and 60-minute threshold as `process_pack_jobs.py`'s own, called at the top of every `poll_once()`. Verified: migration replays cleanly as part of the full `0001`→`0019` chain; `python3 engine/cv/process_cv_jobs.py --self-test` still passes unchanged; a direct functional test (monkeypatched `supabase_request`, no live Supabase needed) confirmed `fail_stale_jobs()` fails only a job claimed >60 minutes ago and leaves a 5-minute-old job and an unclaimed job alone.
@@ -176,6 +196,33 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-third run): the committed-but-not-live migration gap just caused its second real production crash - caught and degraded gracefully, gap itself still open
+
+Orientation: one new commit since the thirty-second run - `b82210a`, "Stop a missing documents
+table from crashing the whole tender watch run" (`engine/discovery/download_discovered_documents.py`).
+Direct evidence, not inference: the commit's own message states a live `watch_new_tenders.py` run
+scored and seeded 4,034 real discovered opportunities successfully, then crashed uncaught at the
+very last step (document download) because migration `0071`'s `discovered_opportunity_documents`
+table doesn't exist on the live project yet - `existing_urls()`'s read was the only unguarded
+Supabase call left in the whole download path (insert/upload already degraded per-document from
+the twenty-ninth/thirtieth runs' own work). This is Known-gaps item 9 causing real, confirmed
+damage for the second time (the first: the `tender_packs.project_completed_at` crash from the
+twentieth run) - updated that item above rather than only noting it here.
+
+**Verified, not just read:** confirmed `RestClient._req()` (`company_profiles.py`) only ever raises
+`RuntimeError`, and only on an actual `HTTPError` from PostgREST - so catching `RuntimeError`
+specifically (not a bare `except Exception`) is correctly scoped to "the table/bucket is genuinely
+unreachable," not silently swallowing some other bug. Ran the updated `test_download_discovered_documents.py`
+myself: new case 7 spins up a real local HTTP server replying with the exact live `PGRST205`
+"Could not find the table ... in the schema cache" 400 response, and confirms the run returns
+`{skipped_not_migrated: True}` with exactly one summary alert instead of raising - `All checks
+passed`. Checked the caller (`watch_new_tenders.py`): the summary dict is only printed, never
+re-raised, so this degrades cleanly all the way up - the tenders already seeded in the same run are
+genuinely unaffected either way. `python3 -m py_compile` clean on both touched files.
+
+No code changes needed this pass - the commit is correct and complete as committed. Confirmed green
+on real CI (`39344195863`, `bridge-worker-ci.yml`).
 
 ## This pass (2026-10-19, standing QA/robustness review - thirty-second run): two sibling commits, both independently confirmed correct and complete - no code issues found
 

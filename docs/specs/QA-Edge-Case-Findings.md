@@ -1776,3 +1776,27 @@ body background, no `color-scheme` override anywhere) rather than taking it on f
 
 No new findings. Both commits: `completed`/`success` on real GitHub Actions, confirmed via the
 API (`39330520763`, `39320580253`).
+
+## 2026-10-20 (thirty-third run): confirmed-live crash in document download, fixed and independently re-verified - no new findings of my own
+
+One new commit since the thirty-second run: `b82210a`, "Stop a missing documents table from
+crashing the whole tender watch run". Not something I found myself this run - the sibling commit's
+own message reports direct live evidence: a real `watch_new_tenders.py` run scored and seeded 4,034
+real discovered opportunities, then crashed uncaught at the document-download step because
+migration `0071`'s `discovered_opportunity_documents` table isn't applied to the live project yet
+(`existing_urls()`'s read hit a real `PGRST205` "table not found" response). Reviewed and
+independently re-verified rather than taken on trust.
+
+**Verified:** `RestClient._req()` (`engine/discovery/company_profiles.py`) only raises `RuntimeError`,
+and only on a genuine `HTTPError` from PostgREST - so the fix's `except RuntimeError` is correctly
+scoped (a real unreachable-table/bucket condition), not a broad catch-all that could also hide an
+unrelated bug. Ran `test_download_discovered_documents.py` myself - new case 7 reproduces the exact
+live failure against a real local HTTP server (not a mock) returning the actual `PGRST205` body and
+400 status, and confirms `download_for_releases()` returns `{skipped_not_migrated: True}` with
+exactly one summary alert instead of propagating - `All checks passed`. Traced the caller
+(`watch_new_tenders.py`): the returned summary is only ever printed, never re-raised, so the
+degrade-gracefully behavior holds all the way up to the top-level watch run. `python3 -m py_compile`
+clean.
+
+No new findings of my own this run - the fix is correct and complete as committed. Green on real CI
+(`39344195863`).
