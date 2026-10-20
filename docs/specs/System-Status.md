@@ -6,7 +6,15 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~02:25 UTC — closed two real gaps this pass, both left by otherwise-
+Last full pass: 2026-10-20, ~03:15 UTC — `engine/intake/classify_tender.py`'s `classify_documents()`
+silently dropped a corrupt/mislabeled `.docx` SANRAL form with zero trace (the parallel `.xlsm`
+branch already logged a note for an unreadable workbook; the `.docx` branch's exception handler
+didn't), then let the downstream "missing documents" message tell the user to re-upload a document
+they'd already uploaded (Finding 32). Fixed by mirroring the `.xlsm` branch's own note-logging
+pattern; added this module's first dedicated test file (`test_classify_tender.py`, 3 cases,
+including a real valid `.docx` proving no spurious note on the working path); confirmed no
+regression via `test_opportunity_requirements.py`'s 17 checks (same `classify_documents()`, a
+different caller). ~02:25 UTC — closed two real gaps this pass, both left by otherwise-
 correct sibling fixes: `b66dc44`'s raw-error-leak fix covered 4 customer-facing pages but missed 6
 more (Dashboard, People, Discovery, `OfficeLocations.tsx` - which literally told a customer
 "migration 0015 may not be applied yet" - and 2 Tender Workspace sub-components), all now fixed
@@ -205,6 +213,40 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-sixth run): a corrupt SANRAL .docx form was silently dropped at intake with zero trace, then misreported as "not uploaded" - fixed
+
+Orientation: `engine/intake/` (`classify_tender.py`, the SANRAL-vs-general routing gate) hadn't
+had a dedicated pass since the first run - the longest-neglected area after `engine/general/`
+was just covered.
+
+**Finding 32 (fixed, severe - a routing "gate"):** `classify_documents()` runs two parallel
+document-reading branches in the same loop - one for `.xlsm`/`.xlsx` workbooks, one for `.docx`
+SANRAL forms. The workbook branch already logs a note when a workbook can't be opened; the
+`.docx` branch's `except Exception: continue` logged nothing at all. Built a real adversarial
+fixture (a file named exactly `C.1.1.1 Form of Offer.docx` containing garbage bytes - the shape a
+corrupted upload or a renamed non-docx file would actually take) and confirmed the bug: `notes:
+[]`, `sanral_files: {}` - zero trace that a document named like a required SANRAL form was even
+present. In the realistic case where a tender already routes `sanral` (a separate, valid
+Technical workbook present) and this one form is the corrupt one, the same silent drop makes the
+"missing documents" message tell the user to re-upload a document they already uploaded, with no
+hint the real problem is that it couldn't be read - the "bad input cascades into confidently-
+wrong output instead of failing loudly" pattern this review targets, same class as Finding 26.
+
+**Fix:** mirrored the `.xlsm` branch's own existing pattern - log a note in the `.docx` branch's
+exception handler (naming the document and the real error) instead of silently continuing. No
+other routing/`candidates`/`sanral_files` logic touched.
+
+**Verification:** re-ran the adversarial reproduction post-fix - note now correctly reads "...
+could not be opened as a Word document (...) - re-download it and add it again.", `sanral_files`
+still correctly empty. Added `engine/intake/test_classify_tender.py` (first dedicated test file
+for this module - `test_manual_intake.py` needs Postgres, isn't in CI, happy-path only): 3 cases,
+including a real valid `.docx` built with `python-docx` to confirm the fix adds no spurious note
+on the working path. All 3 pass. Ran `engine/discovery/test_opportunity_requirements.py` (calls
+the same `classify_documents()` via `opportunity_requirements.py`) for regression safety - all 17
+checks still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "thirty-sixth run" (Finding 32).
 
 ## This pass (2026-10-20, standing QA/robustness review - thirty-fifth run): a raw-error-leak fix left 6 customer-facing pages behind, and a genuinely new adversarial finding had zero persisted test coverage - both closed
 

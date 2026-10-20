@@ -1917,3 +1917,75 @@ review has applied to its own fixes all session, now applied to a sibling's unte
 re-ran `general_harness.py --no-pack` (9 samples x 7 companies) as a full-corpus regression -
 `77 clean, 0 flagged, 0 failed`, matching `25ad827`'s own independent confirmation exactly.
 `python3 -m py_compile` clean on the new test file.
+
+## 2026-10-20 (thirty-sixth run): intake - a corrupt SANRAL .docx form was silently dropped with zero trace, then misreported as "not uploaded"
+
+**Why this area:** `engine/intake/` (`classify_tender.py`) hadn't had a dedicated pass since the
+first run - the longest-neglected engine area after `engine/general/` was just covered (thirty-
+fourth/-fifth runs). `classify_documents()` is the SANRAL-vs-general routing gate: a wrong or
+silent result here doesn't just produce a bad field, it sends the whole tender down the wrong
+pack-generation pipeline.
+
+### Finding 32 (CONFIRMED, FIXED, severe - a "gate" in exactly the sense this review watches for)
+
+**Where:** `engine/intake/classify_tender.py`, `classify_documents()`.
+
+**What was tested:** the function has two parallel document-reading branches inside the same
+loop - one for `.xlsm`/`.xlsx` workbooks, one for `.docx` SANRAL forms (C.1.1.1 Form of Offer,
+C.1.2.3 Contract Data, A-Forms). The workbook branch already logs a note when a workbook can't be
+opened (`info["kind"] == "unreadable" -> notes.append(...)`). The `.docx` branch's exception
+handler did not: `try: head = _docx_head(local) except Exception: continue` - a bare `continue`,
+no note, nothing. Built a real adversarial fixture - a file literally named
+`C.1.1.1 Form of Offer.docx` containing garbage bytes (not a real Word document, the shape a
+corrupted upload, a browser save-as-wrong-type, or a renamed non-docx file would actually take) -
+and ran it straight through `classify_documents()`.
+
+**Confirmed the bug:** `notes: []`, `sanral_files: {}`, `route: general`. Not one trace anywhere
+in the intake decision that a document named exactly like a required SANRAL form was even
+present, let alone that it failed to open. Downstream, the SANRAL-route "missing documents"
+message (`missing = [... for t in (...) if t not in files]`) would never even fire here (the
+tender routes `general`, not `sanral`, since no Technical workbook was in this fixture) - but in
+the more realistic case where a *separate, valid* Technical Submission workbook routes the tender
+to `sanral` and *this one* C.1.1.1 form is the corrupt one, the exact same silent-drop produces
+the message "Not found among the uploaded documents (the SANRAL pack needs them)... Add them with
+'Add documents'" - actively telling the user to re-upload a document they already uploaded, with
+no indication the real problem is that it couldn't be read. Exactly the "bad input cascades into
+confidently-wrong output instead of failing loudly" pattern this review exists to find - the same
+class as Finding 26 (a bad discovery link silently dropped, no trace) and the `.xlsm` branch's own
+existing `unreadable` handling, just missing on the `.docx` side of the identical loop.
+
+**Fix:** mirrored the `.xlsm` branch's own established pattern - log a note in the `.docx`
+branch's exception handler instead of silently continuing:
+```python
+elif fmt == "docx" and not d.get("unreadable"):
+    try:
+        head = _docx_head(local)
+    except Exception as e:
+        notes.append(f"{d['name']}: could not be opened as a Word document ({e}) - "
+                      "re-download it and add it again.")
+        continue
+```
+No other logic changed - `candidates`/routing/`sanral_files` behavior is identical for every
+already-working case; only the previously-silent failure path now leaves a trace.
+
+**Verification:** re-ran the exact adversarial reproduction above after the fix - `notes` now
+reads `["C.1.1.1 Form of Offer.docx: could not be opened as a Word document (Package not found at
+'...') - re-download it and add it again."]`, `sanral_files` still correctly empty. Added
+`engine/intake/test_classify_tender.py` (new file - no dedicated test for `classify_tender.py`
+existed before this; `test_manual_intake.py` needs Postgres so isn't in CI and only covers the
+happy path end to end): 3 cases - the corrupt-`.docx` case above (note is logged, not registered
+as found), a real, valid C.1.1.1 Form of Offer built with `python-docx` (classifies correctly,
+*no* spurious note - proving the fix doesn't cry wolf on the working path), and a doc_entry with
+no `_local` path at all (skipped cleanly, no note). All 3 pass. Ran the existing
+`engine/discovery/test_opportunity_requirements.py` suite for regression safety (it calls this
+exact same `classify_documents()` through `opportunity_requirements.py`) - all 17 checks still
+pass, confirming the added note doesn't disturb any existing routing/missing-document behavior.
+`python3 -m py_compile classify_tender.py` clean.
+
+**Also checked, deliberately NOT changed:** the "missing documents" message text itself
+(`"Not found among the uploaded documents... Add them with 'Add documents'"`) is left as-is for
+the *genuinely* missing case - only the unreadable-but-present case now gets an additional, honest
+note alongside it. Rewriting that message to distinguish "never uploaded" from "uploaded but
+unreadable" inline would be a reasonable follow-up but is a larger, separate change than this
+finding's scope; the note added here already gives the real reason, it just doesn't replace the
+generic message.

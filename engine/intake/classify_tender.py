@@ -234,7 +234,9 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
         elif fmt == "docx" and not d.get("unreadable"):
             try:
                 head = _docx_head(local)
-            except Exception:
+            except Exception as e:
+                notes.append(f"{d['name']}: could not be opened as a Word document ({e}) - "
+                              "re-download it and add it again.")
                 continue
             for doc_type, pat in SANRAL_DOCX:
                 if pat.search(head):
