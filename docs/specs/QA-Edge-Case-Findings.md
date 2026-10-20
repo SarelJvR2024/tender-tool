@@ -1850,10 +1850,12 @@ samples exercises this exact mixed-suite edge case, so this was a genuinely new 
 something the existing harness would ever have caught on its own. `python3 -m py_compile
 requirements.py` clean.
 
-**Not yet tested / flagged:** `general_harness.py`'s own post-fix full run (9 samples x 7
-companies, confirming the fix introduces zero regression against the real corpus) was still
-in progress when this entry was written - worth confirming its final result explicitly next
-time this area comes up, rather than assuming the targeted verification above was sufficient on
-its own. `fill_flat_pdf.py`'s PDF-label-placement geometry and `fill_sbd_docx.py`'s docx-filling
-logic were read but not adversarially tested this run - both are large, intricate files that
-would benefit from a dedicated pass of their own.
+**Confirmed (same run):** `general_harness.py`'s full run (9 samples x 7 companies, both the
+pre-fix background baseline and a fast `--no-pack` re-run against the fixed code) both finished
+`77 clean, 0 flagged, 0 failed` - every sample's own `suite` label is unchanged (each is
+unambiguously single-suite, as expected). Zero regression against the real corpus, not just
+assumed from the isolated-function verification above.
+
+**Not yet tested / flagged:** `fill_flat_pdf.py`'s PDF-label-placement geometry and
+`fill_sbd_docx.py`'s docx-filling logic were read but not adversarially tested this run - both
+are large, intricate files that would benefit from a dedicated pass of their own.
