@@ -6,7 +6,18 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~06:15 UTC — the raw-Postgres-error-leak sweep (thirty-second through
+Last full pass: 2026-10-20, ~07:00 UTC — `find_documents_lapsing_before_closing()`'s own docstring
+promised it only fires for a document OUTSIDE the normal reminder window, but the code never
+enforced that: a document already inside the ordinary 60-day window (or a field's own shorter
+override, e.g. the bank letter's 30 days) that also happened to expire before some open, pursued
+tender's closing date got reported TWICE - once correctly by `find_due_documents()`, once more
+under a misleading "lapses before closing" framing naming a tender that has nothing to do with it
+(Finding 33). Added the missing guard (same effective lead time `find_due_documents()` itself
+uses per field) and threaded a `lead_days` parameter through so `--doc-lead-days` is honoured here
+too (it was silently ignored before). Confirmed with a real adversarial fixture and a new check in
+`test_watch_deadlines_urgency.py`, verified to actually catch the regression (reverted the fix,
+confirmed the new check fails, restored it). Full `engine/compliance/test_*.py` suite (5 files)
+still green. ~06:15 UTC — the raw-Postgres-error-leak sweep (thirty-second through
 thirty-fifth runs) is now genuinely complete: `d081793` closed out the last 5 admin pages + 2
 upload forms, confirmed by a fresh repo-wide grep (the only remaining `error.message` matches are
 intermediate objects already shown generically downstream, or legitimate Supabase Auth SDK
@@ -225,6 +236,43 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-ninth run): a reminder a document is already renewing on schedule got a second, misleadingly-framed copy pointing at an unrelated tender - fixed
+
+Orientation: `engine/compliance/` (`watch_deadlines.py`) hadn't had a dedicated pass since the
+sixth run - the most-neglected engine area by a wide margin (30+ runs). This is the engine Sarel
+actually relies on for what's about to lapse, so noisy/misleading reminders carry a real cost even
+when the underlying dates are right.
+
+**Finding 33 (fixed, moderate - duplicate/misleading, not wrong data):**
+`find_documents_lapsing_before_closing()`'s own docstring says it exists for a document "outside
+the 60-day window" that will lapse before a pursued tender's closing date - the one case the
+ordinary reminder can't see. The code never actually enforced "outside the window": a document
+already inside the normal lead-time window (so `find_due_documents()` already reports it as
+"renew soon") that also happens to expire before ANY open, pursued tender's closing date got a
+SECOND reminder, framed as if that tender were the reason - when the tender has nothing to do
+with it. Confirmed with a real adversarial fixture (a COID 30 days out - inside the default
+60-day window - plus a tender closing in 100 days): the COID was reported twice, once correctly
+and once misleadingly. Worse, this risks training a reader to discount "lapses before closing"
+reminders as noise right when a genuine one (the actual case this check exists for) needs to
+stand out.
+
+**Fix:** added the missing "already inside the normal window" guard, using each field's own
+effective lead time (the per-field override where one exists, e.g. the bank letter's 30 days, or
+`--doc-lead-days` otherwise) - the same window `find_due_documents()` itself uses for that field.
+Also fixed a related, smaller gap found while doing this: the function took no `lead_days`
+parameter at all, so a `--doc-lead-days` CLI override was silently ignored by this one function
+while honoured everywhere else - threaded it through and updated `main()`'s call site.
+
+**Verification:** adversarial fixture confirms the duplicate is gone while the genuine case (a
+PIN at 90 days, outside the window, lapsing before a tender's 100-day closing) still fires -
+proving the fix isn't one-sided. Extended `test_watch_deadlines_urgency.py` with a new check;
+**proved it actually catches the regression** (temporarily removed the fix, confirmed the new
+check fails, restored it, confirmed clean). Full `engine/compliance/test_*.py` suite (5 files, all
+in-memory, no network) - all pass, including the bank letter's 30-day override path specifically
+(not just the 60-day default). `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "thirty-ninth run" (Finding 33).
 
 ## This pass (2026-10-20, standing QA/robustness review - thirty-eighth run): two sibling commits, both correct and complete - the raw-error-leak sweep is now genuinely finished
 

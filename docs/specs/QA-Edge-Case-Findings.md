@@ -2027,3 +2027,61 @@ empty join result is still falsy and gets dropped by the outer filter too.
 
 No new findings. `npm run typecheck`/`lint` clean, full `npm run build` - exit 0. Both commits
 green on real CI (`39370320075`, `39377554678`).
+
+## 2026-10-20 (thirty-ninth run): Compliance/reminders - a document inside the normal renewal window got a second, misleadingly-framed reminder
+
+**Why this area:** `engine/compliance/` (`watch_deadlines.py`/`registration_reminders.py`) hadn't
+had a dedicated pass since the sixth run - over 30 runs ago, the most-neglected engine area left.
+This is the reminder engine Sarel actually relies on to know what's about to lapse, so a noisy or
+misleading reminder has a real cost even when the underlying data is correct.
+
+### Finding 33 (CONFIRMED, FIXED, moderate - duplicate/misleading reminders, not wrong data)
+
+**Where:** `engine/compliance/watch_deadlines.py`, `find_documents_lapsing_before_closing()`.
+
+**What was tested:** the function's own docstring states its reason for existing: "A document
+that is fine today - OUTSIDE the 60-day window - but will have lapsed by the closing date of a
+tender" - i.e. it exists to catch the case the normal `find_due_documents()` 60-day window
+*can't* see. Read the implementation looking for where that "outside the window" condition is
+actually enforced - it wasn't: the loop only excludes a document that is already expired
+(`exp_day < today`) or valid through the closing date itself (`exp_day >= closing_day`); nothing
+excludes a document that is ALSO already inside the ordinary `--doc-lead-days` window. Built a
+real adversarial case: a company with `coid_letter_of_good_standing_expiry` 30 days out (squarely
+inside the default 60-day window, so `find_due_documents()` already reports it as "renew soon")
+and an open, pursued tender closing in 100 days (so `exp_day < closing_day` too) - ran both
+functions against this fixture with no network, no Supabase (same in-memory `supabase_request`
+fake as the existing `test_watch_deadlines_urgency.py`).
+
+**Confirmed the bug:** the COID shows up TWICE - once from `find_due_documents()` as
+`{"status": "renew_soon"}`, and again from `find_documents_lapsing_before_closing()` as
+`{"status": "lapses_before_closing", "tender_label": "RT83-2026"}` - framed as if the tender were
+the reason it needs attention, when the tender has nothing to do with it; the document would need
+renewing on exactly the same schedule whether or not that tender existed. Two different-looking
+reminders for one fact, which risks reading as two separate problems to chase down, or - worse -
+training a reader to tune out "lapses before closing" reminders as noise, right when a GENUINE
+one (a document only lapsing because of a specific tender's closing date, which `find_due_documents()`
+would never catch on its own) needs to stand out.
+
+**Fix:** added the missing guard the docstring already promised - skip a document whose `left`
+(days until expiry) is already `<=` its own effective lead time (the per-field override, e.g. the
+bank letter's 30 days, or the general `lead_days`/`--doc-lead-days` otherwise) - mirroring exactly
+the window `find_due_documents()` itself uses for that same field, so "already reported through
+the normal channel" means the same thing in both places. Threaded `lead_days` through as a new
+parameter (default `DEFAULT_DOC_LEAD_DAYS` for backward compatibility) and updated `main()` to
+pass `args.doc_lead_days` explicitly - the previous call site passed no lead-days argument at all,
+so a `--doc-lead-days` override on the CLI was silently ignored by this one function while
+correctly honoured everywhere else.
+
+**Verification:** re-ran the adversarial fixture post-fix - COID no longer appears in
+`before_closing` at all, while the genuine case (SARS TCS PIN at 90 days - outside the 60-day
+window, but inside tender RT83-2026's 100-day closing) still correctly fires, proving the fix
+isn't one-sided. Extended `test_watch_deadlines_urgency.py` (the existing scenario-7 test file
+already carries a COID-inside-the-window + tender-closing-after-it fixture, perfectly shaped to
+exercise this) with a new check #6. **Proved the new check actually catches the regression**, not
+just that it passes: temporarily removed the new guard line, re-ran - the new check failed exactly
+as predicted (`FAIL COID ... is NOT duplicated...`); restored the fix and confirmed clean again.
+Ran the full existing `engine/compliance/test_*.py` suite (5 files, all in-memory, no network) -
+every one still passes, including the bank-letter case (30-day override, left=45 days, correctly
+still caught as a genuine "lapses before closing" item since 45 > its own 30-day window - confirms
+the per-field `lead_override` path, not just the default 60-day one, is exercised and correct).
+`python3 -m py_compile` clean on both changed files.

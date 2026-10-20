@@ -326,15 +326,25 @@ def find_due_person_credentials(url, key, seen, today, lead_days):
     return due
 
 
-def find_documents_lapsing_before_closing(url, key, seen, today):
-    """A document that is fine today - outside the 60-day window - but will
-    have lapsed by the closing date of a tender the company is preparing
-    (has a tender_pack for, still open). The plain expiry window can't see
-    this: a PIN expiring in 90 days is "current" until day 60, yet it is
-    already useless for a tender closing on day 100. Same comparison as the
-    compliance report (app/lib/tenderCompliance.ts validityAtClosing: valid
-    ON the closing day counts). One report per (company, document, expiry,
-    tender)."""
+def find_documents_lapsing_before_closing(url, key, seen, today, lead_days=DEFAULT_DOC_LEAD_DAYS):
+    """A document that is fine today - outside the normal doc-lead-days
+    window - but will have lapsed by the closing date of a tender the
+    company is preparing (has a tender_pack for, still open). The plain
+    expiry window can't see this: a PIN expiring in 90 days is "current"
+    until day 60, yet it is already useless for a tender closing on day 100.
+    Same comparison as the compliance report (app/lib/tenderCompliance.ts
+    validityAtClosing: valid ON the closing day counts). One report per
+    (company, document, expiry, tender).
+
+    `lead_days` must be the SAME value find_due_documents() is run with
+    (main() passes args.doc_lead_days to both) - otherwise this duplicates
+    find_due_documents()'s own report under a second, misleading framing.
+    Confirmed live (2026-10-20): a document already inside the normal
+    60-day window (e.g. expiring in 30 days) was ALSO reported here against
+    any open tender closing after it, as "lapses before TENDER X closes" -
+    even though the real, and only, reason is the ordinary upcoming renewal
+    find_due_documents() already reported. Two reminders for one fact,
+    the second one naming a tender that has nothing special to do with it."""
     select_cols = "id,legal_name," + ",".join(col for col, _, _ in TRACKED_EXPIRY_FIELDS)
     companies = {c["id"]: c for c in supabase_request(url, key, f"companies?select={select_cols}")}
     packs = supabase_request(url, key, "tender_packs?select=company_id,tender_id")
@@ -365,7 +375,7 @@ def find_documents_lapsing_before_closing(url, key, seen, today):
         to_closing = (closing_day - today).days
         if to_closing < 0:
             continue
-        for col, label, _ in TRACKED_EXPIRY_FIELDS:
+        for col, label, lead_override in TRACKED_EXPIRY_FIELDS:
             expiry = company.get(col)
             if not expiry:
                 continue
@@ -375,6 +385,8 @@ def find_documents_lapsing_before_closing(url, key, seen, today):
             exp_day = today + datetime.timedelta(days=left)
             if exp_day >= closing_day or exp_day < today:
                 continue  # covers the closing date / already expired (reported by find_due_documents)
+            if left <= (lead_override if lead_override is not None else lead_days):
+                continue  # already inside the normal window - find_due_documents reports this one
             seen_key = f"doc_before_closing::{company['id']}::{col}::{expiry}::{tender['id']}"
             if seen_key in seen:
                 continue
@@ -466,7 +478,7 @@ def main():
         registrations_due = (registration_reminders.find_due_registrations(url, key, seen, today, args.doc_lead_days)
                              + registration_reminders.find_due_property_documents(url, key, seen, today, args.doc_lead_days))
         tasks_due = find_due_tasks(url, key, seen, today, args.task_lead_days)
-        before_closing = find_documents_lapsing_before_closing(url, key, seen, today)
+        before_closing = find_documents_lapsing_before_closing(url, key, seen, today, args.doc_lead_days)
         written = save_seen_db(client, seen, loaded)
     except Exception as e:
         system_alerts.record("deadlines", f"The deadline-reminder watch failed: {type(e).__name__}: {e}",
