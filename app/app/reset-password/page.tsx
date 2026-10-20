@@ -3,13 +3,12 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "../_components/AuthShell";
-
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
-const LABEL: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4, textAlign: "left" };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box", marginBottom: 14 };
-const PRIMARY_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", borderRadius: 8, border: "none", background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, cursor: "pointer", boxSizing: "border-box" };
+import { PasswordInput } from "../_components/PasswordInput";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
 
 const MIN_PASSWORD_LENGTH = 8;
 
@@ -24,21 +23,22 @@ export default function ResetPasswordPage() {
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<{ password?: string; confirmPassword?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  function validate(): boolean {
+    const next: typeof fieldErrors = {};
+    if (password.length < MIN_PASSWORD_LENGTH) next.password = `At least ${MIN_PASSWORD_LENGTH} characters.`;
+    if (password !== confirmPassword) next.confirmPassword = "Passwords don't match.";
+    setFieldErrors(next);
+    return Object.keys(next).length === 0;
+  }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords don't match.");
-      return;
-    }
+    if (!validate()) return;
 
     setPending(true);
     const supabase = createClient();
@@ -55,29 +55,50 @@ export default function ResetPasswordPage() {
 
   return (
     <AuthShell>
-      <div style={CARD}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Set a new password</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 28px" }}>Choose something you haven&apos;t used before</p>
+      <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-9 text-center shadow-sm">
+        <h1 className="mb-1 font-display text-xl font-medium text-foreground">Set a new password</h1>
+        <p className="mb-7 text-sm text-muted-foreground">Choose something you haven&apos;t used before</p>
 
-        <form onSubmit={handleSubmit}>
-          <label style={LABEL} htmlFor="password">New password</label>
-          <input id="password" type="password" required autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} value={password} onChange={(e) => setPassword(e.target.value)} style={INPUT} />
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="mb-3.5 text-left">
+            <Label htmlFor="password" className="mb-1.5">New password</Label>
+            <PasswordInput
+              id="password"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={!!fieldErrors.password}
+            />
+            {fieldErrors.password && <p className="mt-1 text-xs text-destructive">{fieldErrors.password}</p>}
+          </div>
 
-          <label style={LABEL} htmlFor="confirmPassword">Confirm new password</label>
-          <input id="confirmPassword" type="password" required autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={INPUT} />
+          <div className="mb-1 text-left">
+            <Label htmlFor="confirmPassword" className="mb-1.5">Confirm new password</Label>
+            <PasswordInput
+              id="confirmPassword"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              aria-invalid={!!fieldErrors.confirmPassword}
+            />
+            {fieldErrors.confirmPassword && <p className="mt-1 text-xs text-destructive">{fieldErrors.confirmPassword}</p>}
+          </div>
 
           {error && (
-            <p style={{ color: "#B91C1C", fontSize: 12, textAlign: "left", margin: "-6px 0 14px" }}>
+            <p className="mt-3 text-left text-xs text-destructive">
               {error}{" "}
               {error.startsWith("This link") && (
-                <Link href="/forgot-password" style={{ color: "#B91C1C", fontWeight: 600 }}>Request a new link</Link>
+                <Link href="/forgot-password" className="font-medium underline">Request a new link</Link>
               )}
             </p>
           )}
 
-          <button type="submit" disabled={pending} style={{ ...PRIMARY_BUTTON, opacity: pending ? 0.6 : 1 }}>
+          <Button type="submit" disabled={pending} className="mt-4 h-11 w-full">
+            {pending && <Loader2 className="size-4 animate-spin" />}
             {pending ? "Saving..." : "Save new password"}
-          </button>
+          </Button>
         </form>
       </div>
     </AuthShell>
