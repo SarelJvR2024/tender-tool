@@ -16,7 +16,8 @@ export function EmptyState({
 }: {
   icon: LucideIcon;
   title: string;
-  description?: string;
+  /** Usually a plain sentence, but takes a node so a link can sit inline in it. */
+  description?: React.ReactNode;
   action?: React.ReactNode;
   className?: string;
 }) {
