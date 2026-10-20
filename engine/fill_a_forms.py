@@ -56,8 +56,18 @@ import docx
 from provenance import ProvenanceLog
 
 
+# Same constant/pattern as engine/compliance/watch_deadlines.py's own SAST
+# (that file's own comment has the full reasoning): a bridge worker container
+# has no TZ set and runs in UTC by default, so a naive datetime.date.today()
+# is one calendar day behind the real SAST date for the whole 00:00-01:59
+# SAST window every day. Here that silently flips A12/A20's "is this B-BBEE
+# proof / COID letter still current" verdict from expired to current for a
+# document that expires on the real SAST today - confirmed 2026-10-20.
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
+
 def _today_iso():
-    return datetime.date.today().isoformat()
+    return datetime.datetime.now(SAST).date().isoformat()
 
 DOTS_RE = r"[.…\s]*"
 

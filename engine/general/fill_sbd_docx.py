@@ -75,8 +75,17 @@ def _xml_safe(text):
 DOTS_RE = r"[.…\s]*"
 
 
+# Same constant/pattern as engine/compliance/watch_deadlines.py's own SAST
+# (that file's own comment has the full reasoning): a bridge worker container
+# has no TZ set and runs in UTC by default, so a naive datetime.date.today()
+# is one calendar day behind the real SAST date for the whole 00:00-01:59
+# SAST window every day - confirmed 2026-10-20, same bug class as
+# engine/fill_a_forms.py's identical _today_iso().
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
+
 def _today_iso():
-    return datetime.date.today().isoformat()
+    return datetime.datetime.now(SAST).date().isoformat()
 
 
 # ---------------------------------------------------------------------------

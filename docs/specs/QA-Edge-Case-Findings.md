@@ -2430,3 +2430,73 @@ exactly as predicted (`FAIL ... ([{'biddersName': 'Lot1 Winner CC', ...}])` - Lo
 restored the fix and confirmed clean again. Ran `test_gov_sources.py` and `test_tender_changes.py`
 (both exercise this module's real callers) for regression safety - both still pass unchanged.
 `python3 -m py_compile` clean on both changed files.
+
+## 2026-10-20 (fifty-first run): SANRAL pack / general pack engines - the same naive-UTC "today" bug the enterprise audit fixed elsewhere was still open in two legal-document date checks
+
+**Why this area:** picked SANRAL pack engine (the remaining area I hadn't personally given a
+fresh adversarial pass this session - the enterprise audit covered it, but that's someone else's
+work, not a new pass of my own). Read `key_person_minimums.py` last cycle (solid, no finding);
+this cycle read `engine/fill_a_forms.py` (517 lines, zero dedicated test file) and noticed its
+`_today_iso()` used plain `datetime.date.today()` - the EXACT bug class the enterprise audit's
+round 1/round 3 found and fixed in `watch_deadlines.py`, `daily_digest.py`, `watch_new_tenders.py`
+and `confirm_pack.py` (a bridge worker container has no TZ set, runs in UTC by default, so a naive
+`date.today()` is one calendar day behind real SAST for the 00:00-01:59 SAST window every day).
+Grepped the WHOLE engine tree for every remaining naive `datetime.date.today()` call to check
+whether the audit's sweep had actually reached every instance of its own named bug class, rather
+than assume it had: found 12 remaining call sites across `engine/` - `fill_a_forms.py`,
+`general/fill_sbd_docx.py`, `cv/generate_cv.py`, `pack_generator/suggest_pack.py`,
+`company_documents.py`, `fingerprint.py`, `discovery/etenders_national.py`,
+`discovery/gov_sources.py`, `pack/harness_pack.py`, `pack/pdf_merge.py`, `pack/assemble_pack.py`,
+`pack/process_pack_jobs.py` - none of them named in the audit's own write-up.
+
+### Finding 37 (CONFIRMED, FIXED, severe - a legal tender declaration's own compliance verdict could silently flip)
+
+**Where:** `engine/fill_a_forms.py` and `engine/general/fill_sbd_docx.py`, both `_today_iso()`.
+
+**What was tested:** `fill_a_forms.py`'s `_today_iso()` feeds exactly two comparisons:
+`expiry > _today_iso()` for A12 (the company's B-BBEE proof) and A20 (the COID Letter of Good
+Standing) - whether the generated SANRAL A-Forms declaration states the proof is CURRENT (confirmed,
+attach it) or EXPIRED (missing, get a new one). Reproduced the exact mismatch by hand first
+(simulated UTC 2026-10-20 23:30 = real SAST 2026-10-21 01:30, inside the bad window): naive
+`today()` reads `2026-10-20`, real SAST reads `2026-10-21`. For a B-BBEE certificate expiring
+exactly on the real SAST today (`2026-10-21`), the naive check `"2026-10-21" > "2026-10-20"` is
+True (certificate judged CURRENT); the correct check `"2026-10-21" > "2026-10-21"` is False
+(judged EXPIRED). Then ran the REAL `fill_a_forms.main()` end to end against the real A-Forms
+template (`engine/test_form_field_audit.py`'s own `a_forms()` helper) with the system clock
+monkeypatched to that exact instant: confirmed the generated document's A12 provenance flipped to
+`"status": "confirmed", "value": "...valid to 2026-10-21"` pre-fix - a government tender
+declaration stating a proof is current when, by the real calendar, it had just expired.
+`fill_sbd_docx.py`'s identical `_today_iso()` (used as a fallback document-reference date when a
+tender's closing date is missing) carries the same bug at lower stakes.
+
+**Fix:** added a local `SAST` constant (`datetime.timezone(datetime.timedelta(hours=2))` - same
+value/pattern `watch_deadlines.py` already uses, defined locally rather than imported across
+directories, matching that file's own stated convention) to both files, and changed `_today_iso()`
+to `datetime.datetime.now(SAST).date().isoformat()`. No other logic touched.
+
+**Verification:** extended `engine/test_form_field_audit.py` (which already imports and exercises
+both modules) with a new test: (1) monkeypatches `datetime.datetime.now` to the exact bad-window
+instant and confirms both files' `_today_iso()` now return `2026-10-21`, not `2026-10-20`; (2)
+runs the REAL `fill_a_forms.main()` against the real template with a B-BBEE proof expiring on
+that exact date and confirms the generated document's A12 provenance now reads
+`"status": "missing", "reason": "...expired 2026-10-21..."`, not confirmed-current. **Proved all
+3 checks actually catch the regression**, not just that they pass: temporarily reverted both
+`_today_iso()` functions, re-ran - all 3 failed exactly as predicted (including the end-to-end
+check reproducing the exact wrong provenance entry: `"status": "confirmed", "value": "...valid to
+2026-10-21"`); restored the fix and confirmed clean again. Full `engine/test_form_field_audit.py`
+suite (which exercises A-Forms, docx forms, the technical workbook, envelope covers, intake
+readers, financial rows and the general-pack fillers together) still passes in full. `python3 -m
+py_compile` clean on all three changed files.
+
+**Flagged, not fixed this run (scope discipline - same lesson as earlier over-fix/under-fix
+lessons this review has learned):** the other 10 naive `date.today()` call sites found by the
+repo-wide grep are a real, confirmed-by-code-reading instance of the identical bug class, but
+each needs its own look at what it actually affects (several are cosmetic provenance timestamps
+or internal bookkeeping, not a compliance verdict on a legal document) before deciding whether
+fixing is worth the churn versus noise - exactly the judgment call the enterprise audit itself
+made when closing "every item deferred" in named batches rather than blindly touching everything
+matching one grep. Logged here by file and line so the next pass (mine or a sibling's) doesn't
+have to re-discover them: `cv/generate_cv.py:307`, `pack_generator/suggest_pack.py:179`,
+`company_documents.py:298`, `fingerprint.py:181`, `discovery/etenders_national.py:275`,
+`discovery/gov_sources.py:205`, `pack/harness_pack.py:93`, `pack/pdf_merge.py:118`,
+`pack/assemble_pack.py:506`, `pack/process_pack_jobs.py:862`.

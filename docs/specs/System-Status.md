@@ -6,7 +6,16 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-20, ~20:11 UTC — fiftieth standing QA run: the digest cron workflow shipped
+Last full pass: 2026-10-20, ~21:30 UTC — fifty-first standing QA run: `fill_a_forms.py`/
+`fill_sbd_docx.py`'s `_today_iso()` used a naive `datetime.date.today()` - the same bug class the
+enterprise audit fixed in 4 other files, but missed here. During the 00:00-01:59 SAST window this
+could flip a SANRAL A-Forms declaration's A12 (B-BBEE)/A20 (COID) compliance verdict from EXPIRED
+to CURRENT for a proof expiring on the real SAST today - confirmed end to end against the real
+template with the clock monkeypatched into that window (Finding 37). Fixed with a local `SAST`
+constant matching `watch_deadlines.py`'s own pattern. Added 3 checks to `test_form_field_audit.py`,
+verified to actually catch the regression. 10 more naive `date.today()` instances found by the
+same repo-wide grep, deliberately logged rather than fixed blind - each needs its own look at
+what it actually affects. ~20:11 UTC — fiftieth standing QA run: the digest cron workflow shipped
 two passes ago (`3dc4bdf`) had its own `timeout-minutes: 30` proven wrong by a real timed dry-run
 against the live project - the run was still going at 31+ minutes (never reached its own final
 "Wrote ..." line) because `daily_digest.py` scores the ENTIRE national feed fresh every run rather
@@ -361,6 +370,40 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-20, standing QA/robustness review - fifty-first run): the same naive-UTC "today" bug the enterprise audit fixed elsewhere was still open in two legal-document compliance checks - fixed
+
+Orientation: SANRAL pack engine - the remaining area not yet given a fresh pass of my own this
+session (the enterprise audit covered it, but that's independent verification, not a new finding).
+Noticed `engine/fill_a_forms.py`'s `_today_iso()` used plain `datetime.date.today()` - the exact
+bug class the audit already fixed in 4 other files. Grepped the whole `engine/` tree for every
+remaining instance rather than assume the audit's sweep was complete: found 12, none named in its
+write-up.
+
+**Finding 37 (fixed, severe - a legal tender declaration's own compliance verdict could silently
+flip):** `fill_a_forms.py`'s `_today_iso()` feeds `expiry > _today_iso()` for A12 (B-BBEE proof)
+and A20 (COID Letter of Good Standing) - whether the generated SANRAL A-Forms declaration states a
+proof is CURRENT or EXPIRED. During the 00:00-01:59 SAST daily window, a proof expiring exactly on
+the real SAST today was judged CURRENT by the naive check and EXPIRED by the correct one.
+Confirmed end to end: ran the real `fill_a_forms.main()` against the real template with the clock
+monkeypatched into that window - the generated document's A12 provenance read `"confirmed ...
+valid to 2026-10-21"` for a certificate that had, by the real calendar, just expired.
+`fill_sbd_docx.py` carries the identical bug at lower stakes (a fallback reference date).
+
+**Fix:** added a local `SAST` constant (same value/pattern as `watch_deadlines.py`) to both files;
+`_today_iso()` now reads `datetime.datetime.now(SAST).date()`.
+
+**Verification:** extended `engine/test_form_field_audit.py` with 3 checks - both files' corrected
+date, and the real end-to-end A12 provenance flip. **Proved all 3 catch the regression** (reverted
+both fixes, confirmed all 3 fail with the exact wrong pre-fix values, restored them, confirmed
+clean). Full existing suite (A-Forms, docx forms, technical workbook, covers, intake readers,
+financial rows, general-pack fillers) still passes. `python3 -m py_compile` clean.
+
+**Flagged, not fixed this run (scope discipline):** 10 more naive `date.today()` call sites found
+by the same grep, each needing its own look at what it actually affects before fixing is worth
+the churn - logged by file/line in the findings doc for the next pass.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-first run" (Finding 37).
 
 ## This pass (2026-10-20, standing QA/robustness review - forty-ninth run): a multi-lot award's later lots' bidders were silently dropped by the eTenders portal reader's own dedupe step - fixed
 
