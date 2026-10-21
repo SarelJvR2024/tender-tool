@@ -7,7 +7,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import type { AppNotification } from "@/lib/notifications";
 
-export function NotificationsBell({ notifications }: { notifications: AppNotification[] }) {
+export function NotificationsBell({
+  notifications,
+  hasError = false,
+}: {
+  notifications: AppNotification[];
+  hasError?: boolean;
+}) {
   const urgentCount = notifications.filter((n) => n.severity === "destructive").length;
 
   return (
@@ -40,7 +46,9 @@ export function NotificationsBell({ notifications }: { notifications: AppNotific
           <div className="text-xs text-muted-foreground">Expiring documents and tenders closing soon</div>
         </div>
         <div className="max-h-80 overflow-y-auto">
-          {notifications.length === 0 ? (
+          {hasError ? (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">Couldn&apos;t load notifications right now. Try reloading the page.</div>
+          ) : notifications.length === 0 ? (
             <div className="px-4 py-8 text-center text-sm text-muted-foreground">Nothing needs your attention right now.</div>
           ) : (
             notifications.map((n) => (

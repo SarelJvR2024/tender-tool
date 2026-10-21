@@ -13,7 +13,7 @@ import {
   type PropertyRow,
 } from "@/lib/properties";
 import { deleteProperty, savePropertyDocument, saveProperty } from "./actions";
-import { AMBER, Area, BORDER, Card, Chip, DangerButton, Disclosure, FAINT, MUTED, NAVY, Select, SubPage, Submit, Text, YesNo, fmtDate, grid } from "../_components/ui";
+import { Area, Card, Chip, DangerButton, Disclosure, Select, SubPage, Submit, Text, YesNo, fmtDate, grid } from "../_components/ui";
 
 export const instant = false;
 
@@ -26,10 +26,13 @@ const SAVED: Record<string, string> = {
 export default async function PropertiesPage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string }> }) {
   const { error, saved } = await searchParams;
   const supabase = await createClient();
-  const [{ data: propRows }, { data: docRows }] = await Promise.all([
+  const [{ data: propRows, error: propsError }, { data: docRows, error: docsError }] = await Promise.all([
     supabase.from("company_properties").select(PROPERTY_COLUMNS).order("label"),
     supabase.from("property_documents").select(PROPERTY_DOCUMENT_COLUMNS),
   ]);
+  if (propsError) console.error("company_properties select failed", propsError);
+  if (docsError) console.error("property_documents select failed", docsError);
+  const loadError = propsError || docsError;
   const properties = (propRows ?? []) as PropertyRow[];
   const docs = (docRows ?? []) as PropertyDocumentRow[];
 
@@ -54,6 +57,16 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
       error={error}
       saved={saved ? SAVED[saved] ?? null : null}
     >
+      {loadError && (
+        <div className="mb-3.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+          Couldn&apos;t load your buildings - try refreshing. If it keeps happening, let us know.
+        </div>
+      )}
+      {!loadError && properties.length === 0 && (
+        <div className="mb-3.5 rounded-xl border border-dashed border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground">
+          No buildings on file yet. Add one below if your company offers property to a buyer.
+        </div>
+      )}
       {properties.map((p) => (
         <PropertyCard key={p.id} p={p} docs={docs.filter((d) => d.property_id === p.id)} urls={urls} />
       ))}
@@ -70,8 +83,8 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
   const have = types.filter((t) => docs.some((d) => d.document_type === t.key && d.storage_path)).length;
   return (
     <Card id={`prop-${p.id}`}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: NAVY }}>{p.label}</div>
-      <div style={{ fontSize: 12, color: MUTED, marginTop: 2, lineHeight: 1.5 }}>
+      <div className="text-[15px] font-bold text-foreground">{p.label}</div>
+      <div className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
         {[p.physical_address, p.erf_number, p.town, p.local_municipality, p.province].filter(Boolean).join(" · ") || "Address not recorded"}
         <br />
         {p.gross_lettable_area_m2 !== null ? `${Number(p.gross_lettable_area_m2).toLocaleString("en-ZA")} m² lettable` : "Area not recorded"}
@@ -84,7 +97,7 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
         {p.registered_owner ? ` · registered owner ${p.registered_owner}` : ""}
         {p.title_deed_number ? ` · title deed ${p.title_deed_number}` : ""}
       </div>
-      <div style={{ fontSize: 12, fontWeight: 600, color: NAVY, margin: "12px 0 4px" }}>
+      <div className="mt-3 mb-1 text-xs font-semibold text-foreground">
         Building documents - {have} of {types.length} on file
       </div>
       {types.map((t) => {
@@ -97,13 +110,13 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
         const old = d ? tooOld(d) : null;
         const name = d?.original_filename ?? filenameFromPath(d?.storage_path ?? null);
         return (
-          <div key={t.key} style={{ borderTop: `1px solid ${BORDER}`, padding: "10px 0" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: NAVY }}>{t.label}</div>
-                <div style={{ fontSize: 11, color: FAINT }}>Asked for by {t.askedBy}</div>
+          <div key={t.key} className="border-t border-border py-2.5">
+            <div className="flex flex-wrap items-start justify-between gap-2.5">
+              <div className="min-w-0">
+                <div className="text-sm font-semibold text-foreground">{t.label}</div>
+                <div className="text-[11px] text-muted-foreground">Asked for by {t.askedBy}</div>
                 {d && (
-                  <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
                     {d.reference_number ? `No. ${d.reference_number} · ` : ""}
                     {d.issued_on ? `issued ${fmtDate(d.issued_on)}` : "issue date not recorded"}
                     {d.valid_until ? ` · valid until ${fmtDate(d.valid_until)}` : ""}
@@ -111,7 +124,7 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
                       <>
                         {" · "}
                         {urls[d.storage_path] ? (
-                          <a href={urls[d.storage_path]} target="_blank" rel="noopener noreferrer" style={{ color: AMBER, fontWeight: 600, textDecoration: "none", wordBreak: "break-all" }}>
+                          <a href={urls[d.storage_path]} target="_blank" rel="noopener noreferrer" className="font-semibold break-all text-accent no-underline">
                             {name}
                           </a>
                         ) : (
@@ -121,7 +134,7 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
                     )}
                   </div>
                 )}
-                {old && <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 2 }}>{old}</div>}
+                {old && <div className="mt-0.5 text-xs text-destructive">{old}</div>}
               </div>
               <Chip status={status} />
             </div>
@@ -129,13 +142,13 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
               <form action={savePropertyDocument}>
                 <input type="hidden" name="property_id" value={p.id} />
                 <input type="hidden" name="document_type" value={t.key} />
-                <div style={grid}>
+                <div className={grid}>
                   <Text name="reference_number" label="Reference / certificate number" defaultValue={d?.reference_number} />
                   <Text name="issued_on" label="Issued on" type="date" defaultValue={d?.issued_on} />
                   <Text name="valid_until" label="Valid until (if it has one)" type="date" defaultValue={d?.valid_until} />
                 </div>
-                <div style={{ margin: "10px 0" }}>
-                  <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" aria-label={`${t.label} copy`} style={{ fontSize: 12, color: NAVY, maxWidth: "100%" }} />
+                <div className="my-2.5">
+                  <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" aria-label={`${t.label} copy`} className="max-w-full text-xs text-foreground" />
                 </div>
                 <Submit secondary>Save</Submit>
               </form>
@@ -145,7 +158,7 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
       })}
       <Disclosure summary="Edit building details">
         <PropertyForm p={p} />
-        <form action={deleteProperty} style={{ marginTop: 10 }}>
+        <form action={deleteProperty} className="mt-2.5">
           <input type="hidden" name="property_id" value={p.id} />
           <DangerButton confirmMessage="Remove this building? This can't be undone.">Remove this building</DangerButton>
         </form>
@@ -158,7 +171,7 @@ function PropertyForm({ p }: { p?: PropertyRow }) {
   return (
     <form action={saveProperty}>
       {p && <input type="hidden" name="property_id" value={p.id} />}
-      <div style={grid}>
+      <div className={grid}>
         <Text name="label" label="Building name" defaultValue={p?.label} required />
         <Text name="physical_address" label="Physical address" defaultValue={p?.physical_address} />
         <Text name="erf_number" label="Erf / stand number" defaultValue={p?.erf_number} />
@@ -181,7 +194,7 @@ function PropertyForm({ p }: { p?: PropertyRow }) {
         <YesNo name="wheelchair_accessible" label="Wheelchair accessible (ramp, ablutions)?" value={p?.wheelchair_accessible} />
         <Area name="notes" label="Notes" defaultValue={p?.notes} />
       </div>
-      <div style={{ marginTop: 12 }}>
+      <div className="mt-3">
         <Submit>{p ? "Save changes" : "Add building"}</Submit>
       </div>
     </form>

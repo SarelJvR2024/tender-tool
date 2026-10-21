@@ -80,7 +80,10 @@ const PRICING_TIERS = [
     name: "Tender Pro",
     price: "R1,490",
     cadence: "/month",
-    bullets: ["Everything in Watch, plus reminders", "General pack: SBD/MBD fill, merged pack (6/month)", "Experience Library and CV library", "Pipeline, tasks and role-based digest"],
+    // "Pipeline" renamed to "Bids" here only - matching the app-wide label
+    // rename ("Bids pipeline redesign") this bullet's own wording had fallen
+    // behind; nothing else in this array touched.
+    bullets: ["Everything in Watch, plus reminders", "General pack: SBD/MBD fill, merged pack (6/month)", "Experience Library and CV library", "Bids, tasks and role-based digest"],
   },
   {
     name: "SANRAL Pro",
@@ -219,8 +222,23 @@ export default async function Home() {
             The first 10 firms get SANRAL Pro at a locked founding rate, done-with-you onboarding, and a direct line
             back to how the product gets built next.
           </p>
+          {/*
+            Fix for the audited "Founding Firms" finding: this CTA used to say
+            "Apply as a founding firm", implying a differentiated intake -
+            there is no such mechanism anywhere in this app (no founding-firm
+            field, no separate application flow, nothing but the plain /signup
+            form a "Start free" click already reaches). Checked for a real
+            contact mechanism to point this at instead - the only one that
+            exists anywhere in the app is privacy@tendertool.co.za on the
+            Privacy notice, and that's scoped to privacy/POPIA requests, not a
+            general sales inbox, so redirecting a "talk to us about founding
+            rates" click there would be just as dishonest in the other
+            direction. Softened the wording instead: "Get in touch", still
+            linking to the same /signup a visitor would reach anyway - true to
+            what actually happens on click, no new flow invented.
+          */}
           <Link href="/signup" className={buttonVariants({ variant: "accent", size: "lg", className: "min-h-11 px-6" })}>
-            Apply as a founding firm
+            Get in touch
           </Link>
         </div>
       </section>

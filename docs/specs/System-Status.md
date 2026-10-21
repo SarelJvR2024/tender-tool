@@ -987,6 +987,41 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-21, standing QA/robustness review - sixtieth run): a real, client-facing generated CV could print the literal word "None"
+
+Orientation: rotated to CV, specifically `process_cv_jobs.py` (the async bridge, never directly
+QA'd this session - only its callees `generate_cv.py`/`extract_cv_fields.py` had been). The bridge
+itself (job claiming, stale-job recovery, per-job try/except isolation, POPIA company-scoped
+reads) checked out clean; the real bug was one layer down, in a builder it calls.
+
+**Finding 49 (CONFIRMED, FIXED, moderate).** `generate_cv.build_world_bank()`'s employment-record
+rendering used `proj.get("start", "?")`/`proj.get("end", "?")`/`proj.get("value_rm", "?")`/
+`proj.get("contact", "MISSING")` - `dict.get(key, default)` only substitutes `default` when the
+key is *absent*, never when it's present with value `None`. `start_date`/`end_date`/`value_rm`/
+`contact_name`/`contact_phone` are all nullable columns on `projects` (`0001_init_schema.sql`),
+passed straight through unchanged by `process_cv_jobs.adapt_project_row()`. Reproduced against the
+real function: a person with one ongoing project (`end: None` - true for most currently-employed
+key people's latest role, not a contrived edge case) and no referee/value captured yet generated
+a CV reading `"2022-01-01 to None  —  ...\nPosition: ...    Value: RNonem\nReferee: None  None"` -
+the literal word "None", three times, in a document meant for a real buyer. The sibling builder in
+the same file, `build_sanral_keyperson()`, already guards the identical fields correctly with
+`proj.get(...) or ""` - this one just hadn't been brought in line.
+
+**Fix:** matched `build_sanral_keyperson()`'s own pattern (`or "?"`/`or "MISSING"`/`or ""`, with
+an explicit `is not None` check for `value_rm` since `0` is a real value, not a missing one).
+
+**Verified the regression test actually catches the bug:** new
+`test_world_bank_project_with_null_fields_does_not_print_the_word_none()` in
+`engine/cv/test_generate_cv.py`. Reverted the fix: both "not 'None'" checks failed with exactly
+the predicted string; restored it: `0 failure(s)`. Full `test_generate_cv.py` (now 8 functions)
+and `test_extract_cv_fields.py` stayed clean.
+
+**Also checked this pass, no bug found:** `process_cv_jobs.py`'s `job["format"]` dict-lookup
+builder dispatch has no DB `CHECK` constraint behind it, but an unexpected value already fails
+just that one job (per-job try/except), not the bridge; `claimed_at`'s unguarded
+`fromisoformat()` parse only ever reads a value this same code just wrote with `_now_iso()`,
+never a client-supplied one, so it can't actually receive a malformed string.
+
 ## This pass (2026-10-21, standing QA/robustness review - fifty-ninth run): the naive-UTC-"today" bug class, not yet swept in engine/general/, could let a general-pack experience-recency check pass stale evidence
 
 Orientation: rotated to worker/job-queue, then found the actual bug one layer down in
