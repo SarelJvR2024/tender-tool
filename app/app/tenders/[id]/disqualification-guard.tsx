@@ -1,6 +1,8 @@
 import { loadTenderCompliance } from "./compliance-data";
 import { loadSubmissionPlan } from "./submission-plan-data";
 import { classifyComplianceItem, type BidTaskStatus } from "./bid-task-status";
+import { SectionCard } from "@/components/tt/section-card";
+import { BidTaskBadge } from "@/components/tt/bid-task-badge";
 
 /**
  * "Disqualification guard" - Sarel's own 7-check list, built from existing
@@ -21,21 +23,25 @@ import { classifyComplianceItem, type BidTaskStatus } from "./bid-task-status";
  * happened on a given page. Rather than inventing a fake pass/fail for
  * those two, they're shown here as their own explicit "not tracked yet"
  * rows - visibly different from a real check, not silently omitted.
+ *
+ * Tailwind/tokens migration (design-system pass): markup/styling only -
+ * every field, label and value below is an unchanged, line-for-line
+ * translation of the previous inline-CSSProperties version, including this
+ * screen's own existing pill wording ("Would disqualify"/"You need to
+ * supply this"/"Clear"), passed as `BidTaskBadge`'s `children` override
+ * rather than its shared default label - same pattern `StatusBadge`
+ * already uses for a screen-specific word choice (see app/AGENTS.md,
+ * "Dashboard migration"). `BidTaskBadge` (new, components/tt/) is the
+ * shared Verify/Provide/Fix pill this pass introduces, reused by later
+ * tender-workspace color-migration pieces.
  */
 
 type GuardRow = { label: string; status: BidTaskStatus; detail: string };
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
-
-const STATUS_STYLE: Record<BidTaskStatus, { label: string; bg: string; color: string }> = {
-  fix: { label: "Would disqualify", bg: "#FEE2E2", color: "#B91C1C" },
-  provide: { label: "You need to supply this", bg: "#FEF3C7", color: "#B45309" },
-  verify: { label: "Clear", bg: "#DCFCE7", color: "#15803D" },
-};
-
-const NOT_TRACKED_LABEL = {
-  bg: "#ECEEF1",
-  color: "#5B6472",
+const STATUS_LABEL: Record<BidTaskStatus, string> = {
+  fix: "Would disqualify",
+  provide: "You need to supply this",
+  verify: "Clear",
 };
 
 export async function DisqualificationGuard({
@@ -104,50 +110,44 @@ export async function DisqualificationGuard({
   }
 
   return (
-    <div id="disqualification-guard" style={card}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Disqualification guard</div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
-        The checks most likely to disqualify a bid outright, read from your company vault and this tender&apos;s own
-        documents - nothing new to fill in here.
-      </div>
+    <div id="disqualification-guard" className="mb-4 scroll-mt-20">
+      <SectionCard
+        title="Disqualification guard"
+        description="The checks most likely to disqualify a bid outright, read from your company vault and this tender's own documents - nothing new to fill in here."
+      >
+        {!mapped && (
+          <div className="text-xs text-muted-foreground">
+            Not available yet - this tender&apos;s documents haven&apos;t been read, so there&apos;s nothing real to check.
+          </div>
+        )}
 
-      {!mapped && (
-        <div style={{ fontSize: 12, color: "#8A93A0" }}>
-          Not available yet - this tender&apos;s documents haven&apos;t been read, so there&apos;s nothing real to check.
-        </div>
-      )}
-
-      {mapped && (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          {rows.map((r) => {
-            const st = STATUS_STYLE[r.status];
-            return (
-              <div key={r.label} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
-                <span style={{ flex: "0 0 auto", marginTop: 1, display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color, whiteSpace: "nowrap" }}>
-                  {st.label}
-                </span>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{r.label}</div>
-                  <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word" }}>{r.detail}</div>
+        {mapped && (
+          <div className="flex flex-col">
+            {rows.map((r) => (
+              <div key={r.label} className="flex items-start gap-2 border-t border-border py-2.5 first:border-t-0">
+                <BidTaskBadge status={r.status} className="mt-0.5 shrink-0">
+                  {STATUS_LABEL[r.status]}
+                </BidTaskBadge>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold text-foreground">{r.label}</div>
+                  <div className="text-xs break-words text-muted-foreground">{r.detail}</div>
                 </div>
               </div>
-            );
-          })}
+            ))}
 
-          {/* Not tracked anywhere in this schema - shown, not silently omitted. */}
-          {[
-            "Required SBD forms present and signed (only whether they're present is tracked - a physical signature is never recorded)",
-            "Every page needing a signature is signed (only who the chosen signatory is gets tracked, never whether a page was actually countersigned)",
-          ].map((detail) => (
-            <div key={detail} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
-              <span style={{ flex: "0 0 auto", marginTop: 1, display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: NOT_TRACKED_LABEL.bg, color: NOT_TRACKED_LABEL.color, whiteSpace: "nowrap" }}>
-                Not tracked yet
-              </span>
-              <div style={{ minWidth: 0, flex: 1, fontSize: 12, color: "#8A93A0", wordBreak: "break-word" }}>{detail}</div>
-            </div>
-          ))}
-        </div>
-      )}
+            {/* Not tracked anywhere in this schema - shown, not silently omitted. */}
+            {[
+              "Required SBD forms present and signed (only whether they're present is tracked - a physical signature is never recorded)",
+              "Every page needing a signature is signed (only who the chosen signatory is gets tracked, never whether a page was actually countersigned)",
+            ].map((detail) => (
+              <div key={detail} className="flex items-start gap-2 border-t border-border py-2.5 first:border-t-0">
+                <BidTaskBadge status="not_tracked" className="mt-0.5 shrink-0" />
+                <div className="min-w-0 flex-1 text-xs break-words text-muted-foreground/70">{detail}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }
