@@ -106,7 +106,7 @@ export default function SignUpPage() {
         <AuthCard>
           <h1 className="mb-2.5 font-display text-lg font-medium text-foreground">Sign-ups are paused</h1>
           <p className="text-sm leading-relaxed text-muted-foreground">
-            Tender Tool isn&apos;t taking new accounts right now. Already have one?
+            Tender Ready isn&apos;t taking new accounts right now. Already have one?
           </p>
           <Link href="/login" className="mt-6 inline-block text-sm font-medium text-foreground hover:underline">
             &larr; Back to sign in

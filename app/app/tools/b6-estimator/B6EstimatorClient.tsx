@@ -72,7 +72,7 @@ export default function B6EstimatorClient() {
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>SANRAL B6 functionality score estimator</h1>
         <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 24px", lineHeight: 1.5 }}>
           Estimates your likely functionality score for one SANRAL Conventional Consultant key position, using the
-          real published scoring matrices (Book 1 Annexure A) - the same logic Tender Tool runs on a live tender.
+          real published scoring matrices (Book 1 Annexure A) - the same logic Tender Ready runs on a live tender.
           Nothing here is guessed: every component you don&apos;t give evidence for is shown as an honest range, not
           a single made-up number.
         </p>

@@ -3,12 +3,12 @@ import { ToolsHeader } from "./_components/ToolsHeader";
 
 // Free standalone tools - lead magnets, no sign-in, no company/tender
 // context required. Deliberately separate from the signed-in app shell
-// (these must work for someone who has never heard of Tender Tool yet,
+// (these must work for someone who has never heard of Tender Ready yet,
 // same positioning as TenderFlow's own free tools) - the app shell's own
 // "Tools" sidebar item links here too, so a signed-in visitor briefly
 // leaves the shell; see app/AGENTS.md ("App shell").
 export const metadata = {
-  title: "Free tender tools - Tender Tool",
+  title: "Free tender tools - Tender Ready",
   description: "Free South African public-sector tender calculators: working-day deadlines, CIDB grading, B-BBEE preference points.",
 };
 
@@ -106,8 +106,8 @@ export default function ToolsIndexPage() {
         </div>
 
         <p style={{ fontSize: 12, color: "#5B6472", marginTop: 40, lineHeight: 1.5 }}>
-          Built by <Link href="/" style={{ color: "#16233B", fontWeight: 600 }}>Tender Tool</Link> - correct, not
-          AI-guessed. These calculators are free and standalone; Tender Tool itself helps SA engineering/construction
+          Built by <Link href="/" style={{ color: "#16233B", fontWeight: 600 }}>Tender Ready</Link> - correct, not
+          AI-guessed. These calculators are free and standalone; Tender Ready itself helps SA engineering/construction
           firms find, track and prepare public-sector tender submissions.
         </p>
       </main>

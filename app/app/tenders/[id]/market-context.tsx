@@ -164,7 +164,7 @@ function tenderCategories(sector: string | null, discovered: string[] | null, is
   if (sector) return [sector];
   const known = (discovered ?? []).filter((c) => !c.startsWith("uncategorized") && taxonomy.categories.some((t) => t.slug === c));
   if (known.length) return known.slice(0, 2);
-  // The SANRAL families Tender Tool fills are its consultant tenders.
+  // The SANRAL families Tender Ready fills are its consultant tenders.
   return isSanral ? ["consulting_engineering"] : [];
 }
 

@@ -601,7 +601,7 @@ export default async function TenderWorkspacePage({
                 </div>
                 <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
                   Choose who fills each position on this tender - the submission pack is built with exactly these
-                  people and won&apos;t generate until every position has one. Tender Tool suggests the best match among
+                  people and won&apos;t generate until every position has one. Tender Ready suggests the best match among
                   the people tagged on their People page as fitting the role (scored on their qualifications, projects
                   and years against the position), with up to two alternatives - confirm it, or pick anyone else from the
                   list. Once confirmed, you can request the tender-customized CV

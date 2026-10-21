@@ -25,7 +25,7 @@ import { closingDayOf } from "./dates";
 
 export type ActivityActor =
   | { kind: "user"; userId: string | null } // null = a removed user
-  | { kind: "system" } // the Tender Tool itself (bridge worker, auto-seed)
+  | { kind: "system" } // the Tender Ready itself (bridge worker, auto-seed)
   | { kind: "other_company" }; // another company on a shared tender (e.g. it accepted a tender update)
 
 export type ActivityCategory = "note" | "task" | "stage" | "positions" | "template" | "pack" | "cv" | "answers" | "tender" | "update";

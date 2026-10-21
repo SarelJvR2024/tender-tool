@@ -84,7 +84,7 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
       {active && (
         <div style={{ fontSize: 13, color: "#B45309", background: "#FEF3C7", borderRadius: 9, padding: "10px 14px", marginBottom: 10 }}>
           Reading the documents: working out whether this is a SANRAL template tender or a general one, what it requires, and how
-          it fits your company. This page refreshes by itself. If it stays queued, the Tender Tool worker isn&apos;t running yet.
+          it fits your company. This page refreshes by itself. If it stays queued, the Tender Ready worker isn&apos;t running yet.
         </div>
       )}
 

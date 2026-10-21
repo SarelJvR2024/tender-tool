@@ -670,7 +670,7 @@ function EditForm({ company }: { company: CompanyRow }) {
         </label>
         <div style={{ fontSize: 12, color: "#5B6472", lineHeight: 1.5, marginBottom: 8 }}>
           Your real methodology, what you are known for, how you run a project - written the way you would say it.
-          Tender Tool reproduces this exactly as written; it never rewrites or pads it.
+          Tender Ready reproduces this exactly as written; it never rewrites or pads it.
         </div>
         <textarea
           id="how_we_work"
@@ -946,7 +946,7 @@ function LettersSection({
         <div style={{ fontSize: 13, color: "#5B6472", lineHeight: 1.5, marginBottom: 4 }}>
           Letters a tender needs from your company. For each one, upload your own (it is used exactly as uploaded,
           every time) or write the guideline it should be generated from - your own wording, with{" "}
-          <code style={{ fontSize: 12 }}>{"{{fields}}"}</code> where the tender&apos;s details go. Tender Tool fills
+          <code style={{ fontSize: 12 }}>{"{{fields}}"}</code> where the tender&apos;s details go. Tender Ready fills
           only those fields; it never adds or rewrites wording. Until you choose, the letter is left out of your
           packs and marked &quot;not set up&quot;.
         </div>

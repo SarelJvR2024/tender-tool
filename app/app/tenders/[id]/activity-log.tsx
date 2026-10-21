@@ -107,7 +107,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
   for (const r of (labelsRes.data ?? []) as { user_id: string; label: string }[]) labels.set(r.user_id, r.label);
   const actorName = (a: ActivityActor | null): string | null => {
     if (!a) return null;
-    if (a.kind === "system") return "Tender Tool";
+    if (a.kind === "system") return "Tender Ready";
     if (a.kind === "other_company") return "Another company on this tender";
     if (!a.userId) return "A former member";
     if (a.userId === user.id) return "You";

@@ -166,7 +166,7 @@ export default async function ExperienceDetailPage({
           <div style={sectionTitle}>What the work was</div>
           <label style={label}>Discipline * <span style={{ fontWeight: 400 }}>(tick all that apply - tenders are matched on this)</span></label>
           <div style={hint}>
-            Tender Tool&apos;s own discipline list, built from real tenders and growing as new kinds of tender come in. Ticking a
+            Tender Ready&apos;s own discipline list, built from real tenders and growing as new kinds of tender come in. Ticking a
             whole group (e.g. Roads, bridges &amp; civil works) matches the disciplines in it, except the ones marked
             &quot;tick on its own&quot; - a whole-group tick is too broad to call those a fit (Professional &amp; consulting
             services doesn&apos;t make a firm a property valuer). Tick one of those itself if the company does that work.
@@ -274,8 +274,8 @@ export default async function ExperienceDetailPage({
           <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 16px", marginBottom: 16 }}>
             <div style={{ ...sectionTitle, marginTop: 0 }}>Your own tags and the shared list</div>
             <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
-              These tags aren&apos;t on Tender Tool&apos;s shared discipline list, so Discovery doesn&apos;t sort tenders into them. If
-              other companies would use one too, suggest it: Tender Tool reviews every suggestion before anything is added. The
+              These tags aren&apos;t on Tender Ready&apos;s shared discipline list, so Discovery doesn&apos;t sort tenders into them. If
+              other companies would use one too, suggest it: Tender Ready reviews every suggestion before anything is added. The
               reviewer sees your company name, the tag, your note and this project&apos;s name.
             </div>
             {customTags.map((t) => {

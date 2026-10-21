@@ -64,7 +64,7 @@ export function DesignSystemShowcase() {
   return (
     <div className="mx-auto max-w-5xl space-y-12 px-6 py-10 sm:px-10">
       <PageHeader
-        title="Tender Tool design system"
+        title="Tender Ready design system"
         description="Dev-only reference for every token and shared component - not linked from the app's own navigation. Nothing on this page reads or writes real data."
         actions={<Badge variant="outline">dev only</Badge>}
       />

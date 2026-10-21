@@ -108,7 +108,7 @@ export async function deleteHeldRegistration(formData: FormData) {
 /**
  * A company adds a registration type the shared catalog doesn't have yet.
  * It is private to the company (owner_company_id); the shared catalog is
- * maintained by Tender Tool (service role), like discipline_categories.
+ * maintained by Tender Ready (service role), like discipline_categories.
  */
 export async function addRegistrationType(formData: FormData) {
   const companyId = await requireCompanyId();

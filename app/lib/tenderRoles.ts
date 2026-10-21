@@ -2,7 +2,7 @@
 // (migration 0016: tender_roles, person_role_eligibility).
 //
 // Sarel, 2026-10-16: "companies need to specify which sanral roles a persons
-// cv fits." So role fit comes from the human tag, not from Tender Tool
+// cv fits." So role fit comes from the human tag, not from Tender Ready
 // guessing from years since graduating or the ECSA level text. Those
 // heuristics (tenderCompliance.ts checkMinimumRequirement) are still run,
 // but only shown NEXT TO the tag as a cross-check - and when they contradict
