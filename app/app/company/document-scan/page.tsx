@@ -29,7 +29,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
   if (!membership) redirect("/onboarding");
   const companyId = membership.company_id as string;
 
-  const [{ data: pending }, { data: principals }, { data: people }, { count: queuedCount }, { data: company }] = await Promise.all([
+  const [{ data: pending, error: pendingError }, { data: principals }, { data: people }, { count: queuedCount }, { data: company }] = await Promise.all([
     supabase
       .from("onboarding_document_results")
       .select("id, document_kind, document_kind_reason, fields, warnings, text_method, model, created_at, onboarding_uploads(original_filename)")
@@ -65,18 +65,9 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
     if (person) handoffPerson = { id: person.id, name: person.name };
   }
 
+  if (pendingError) console.error("onboarding_document_results select failed", pendingError);
+
   return (
-    <>
-      {/* Same mobile collapse as people/[id]/page.tsx's .cvx-row - this
-          card's field grid (checkbox / 150px label / value) is the same
-          fixed-label-column shape, squeezed the same way on a phone. */}
-      <style>{`
-        @media (max-width: 600px) {
-          .obx-row { grid-template-columns: 28px 1fr !important; }
-          .obx-row > div:nth-child(2),
-          .obx-row > div:nth-child(3) { grid-column: 2; }
-        }
-      `}</style>
     <SubPage
       title="Bulk document scan"
       intro={
@@ -93,9 +84,9 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
       <AutoRefresh active={(queuedCount ?? 0) > 0} />
 
       {saved === "handed-off" && handoffPerson && (
-        <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+        <div className="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">
           Handed off to the CV pipeline - find it on{" "}
-          <Link href={`/people/${handoffPerson.id}`} style={{ color: "#15803D", fontWeight: 700, textDecoration: "underline" }}>
+          <Link href={`/people/${handoffPerson.id}`} className="font-bold text-success underline">
             {handoffPerson.name}&apos;s People page
           </Link>
           .
@@ -107,14 +98,20 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
       </Card>
 
       {!!queuedCount && (
-        <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 9, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#1E3A8A" }}>
+        <div className="mb-3.5 rounded-lg border border-info/30 bg-info/10 px-3.5 py-2.5 text-sm text-info">
           {queuedCount} document{queuedCount === 1 ? "" : "s"} still being read - this runs in the background (a worker, not this page) and will appear below automatically.
         </div>
       )}
 
+      {pendingError && (
+        <div className="mb-3.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+          Couldn&apos;t load documents waiting for review - try refreshing. If it keeps happening, let us know.
+        </div>
+      )}
+
       <Card title={`To review (${pending?.length ?? 0})`}>
-        {(pending ?? []).length === 0 ? (
-          <div style={{ fontSize: 13, color: "#5B6472" }}>Nothing waiting for review right now.</div>
+        {!pendingError && (pending ?? []).length === 0 ? (
+          <div className="text-sm text-muted-foreground">Nothing waiting for review right now.</div>
         ) : (
           (pending ?? []).map((row) => {
             const upload = row.onboarding_uploads as unknown as { original_filename: string } | null;
@@ -132,6 +129,5 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
         )}
       </Card>
     </SubPage>
-    </>
   );
 }
