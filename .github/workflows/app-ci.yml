@@ -4,9 +4,13 @@
 # syncWonProjectToTeam(), caught only by a new *.test.ts file nobody runs
 # anywhere automated - could land on main with every check green.
 #
-# Runs typecheck, lint, a production build, and every app/*.test.ts file -
-# all of it secret-free (pure logic / Node's test runner / a build with no
-# Supabase env vars, same as this sandbox's own verification all session).
+# Runs typecheck, lint, a production build, every app/*.test.ts file, and
+# every app/*.spec.ts file (vitest - a second, deliberately separate test
+# convention: *.test.ts is node:test, run via `node --test`-equivalent below;
+# *.spec.ts is vitest, run via `npm run test:unit` - see vitest.config.ts's
+# own comment on why these don't share a runner). All of it secret-free (pure
+# logic / a build with no Supabase env vars, same as this sandbox's own
+# verification all session).
 #
 # Deliberately does NOT use `node --test` with a glob: this environment's
 # Node (confirmed this pass, QA-Edge-Case-Findings.md "sixteenth run")
@@ -58,6 +62,9 @@ jobs:
 
       - name: Production build (no Supabase env vars needed - same as local verification)
         run: npm run build
+
+      - name: Run every *.spec.ts file (vitest)
+        run: npm run test:unit
 
       - name: Run every *.test.ts file directly (not via node --test's glob - see header)
         run: |
