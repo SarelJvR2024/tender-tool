@@ -6,6 +6,29 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Submission plan now visible in the app, 2026-10-21 ~21:12 UTC** (`app/app/tenders/[id]/
+submission-plan-view.tsx`, `5434bd1`) - the assessment engine Sarel asked for is no longer backend-
+only. Shows the FULL step list (every form/buyer_form/returnable/role/question/CIDB-grading/
+briefing/gap from `loadSubmissionPlan()`), grouped Fix/Provide/Verify, plus the compulsory-briefing/
+submission-deadline timeline warning via `DeadlineChip` - complementing, not duplicating,
+`disqualification-guard.tsx`'s curated 7-check subset (same data source, same day, a different
+Claude session's own work, read and reused as-is). Mounted on `page.tsx` right after the
+Disqualification guard, general-family tenders only (SANRAL has no requirements.py-shaped manifest),
+with a matching "Plan" JumpLink.
+
+`page.tsx` has had 7 real commits today from the UI/UX redesign session (#35-#42) by the time this
+landed - re-fetched and re-read the file fresh immediately before editing it (not relying on an
+earlier read in this pass), confirmed the insertion point was still exactly where expected, and
+re-ran every validation check after merging. Full validation, not just typecheck: `npx vitest run`
+(53/53, up from 44 - picked up the #42 document-expiry sibling's own new spec file too),
+`typecheck`, `lint`, and a REAL `rm -rf .next && npm run build` (not skipped, since this mounts into
+a live page route) - all passed clean on the first attempt, no retries needed.
+
+With this, the assessment engine's full loop is closed: built (Python) -> ported (TypeScript,
+reusing every existing classifier rather than re-deriving) -> verified (phase 2 sampling, 101
+tenders) -> visible (this entry). The only remaining open item from Sarel's own 4 decisions is
+nothing - all 4 are implemented, not just decided.
+
 **Submission-plan TypeScript port built, 2026-10-21 ~19:55 UTC** (`app/app/tenders/[id]/
 submission-plan-logic.ts` + its 24-check `.spec.ts`, `submission-plan-data.ts`) - the TS port
 flagged as the next concrete step in the entry just below. New files only, nothing touched on the
