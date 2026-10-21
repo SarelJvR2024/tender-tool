@@ -6,6 +6,22 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~16:15 UTC**: orientation via `git log` found one sibling-session
+commit since the last pass - Finding 46 (`83595ba`, `suggest_pack.py`), a genuine order-dependent
+key-person suggestion bug (an unbroken score-tie fell back to profile-JSON file order instead of
+`process_pack_jobs.py`'s own documented years-then-name tie-break, so the "SUGGESTED" person a human
+sees first could silently disagree with the live Tender Workspace's own ranking). Independently
+re-verified, not trusted at face value: reran its new test clean, then reverted the fix myself,
+confirmed the test genuinely fails (an `AttributeError` - the test calls the real extracted
+`rank_candidates()`, not a reimplementation, so it can't rubber-stamp itself), restored, confirmed
+clean again. No overlap with this session's own work - different module, no sign of contention with
+the sibling session (`session_01UMAzowxArab6cV4KurgXNE`), which is now 2-for-2 on real, carefully-
+verified bug finds (Findings 45, 46) in areas this session hasn't touched (award outcomes, pack
+suggestions).
+
+Widened this pass's own QA sweep to literally every `test_*.py` in the repo (not just a curated
+list) - all clean. `app/` typecheck/lint also clean. Nothing new to fix this pass.
+
 **Standing review pass, 2026-10-21 ~14:15 UTC**: orientation via `git log` found one sibling-session
 commit since the last pass - Finding 45 (`2a5fb24`, `store_award_outcomes.py`), a genuine fix for a
 first-word-only name match being stored as a tender winner on real award data. Independently
