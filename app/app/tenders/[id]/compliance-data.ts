@@ -270,12 +270,18 @@ export type PackReadiness = {
   unfilledPositions: string[];
 };
 
+/** Shared "FORM label" text for one doc item, incl. the expired-copy note - used
+ * both by packReadiness() below and by submission-pack.tsx's own Fix/Provide
+ * gaps banner, so the two never drift to different wording for the same item. */
+export function complianceItemLabel(i: { form: string; label: string; expiredCopy?: boolean }): string {
+  return `${i.form} ${i.label}${i.expiredCopy ? " - expired copy on file: it goes in the pack with a warning, replace it before submitting" : ""}`;
+}
+
 export function packReadiness(data: TenderComplianceData | null): PackReadiness {
   if (!data || !data.mapped) {
     return { checked: false, mandatoryMissing: [], missing: [], toConfirm: [], unfilledPositions: [] };
   }
-  const label = (i: { form: string; label: string; expiredCopy?: boolean }) =>
-    `${i.form} ${i.label}${i.expiredCopy ? " - expired copy on file: it goes in the pack with a warning, replace it before submitting" : ""}`;
+  const label = complianceItemLabel;
   return {
     checked: true,
     mandatoryMissing: data.docItems.filter((i) => i.mandatory && i.status === "missing").map(label),

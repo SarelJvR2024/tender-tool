@@ -453,7 +453,13 @@ function LocalitySection({ rules, offices }: { rules: EvaluationRules | null; of
             const kindRows = rows.filter((r) => r.kind === kind);
             if (kindRows.length === 0) return null;
             const m = matchLocality(kindRows, offices);
-            const st = m.status === "matched" ? STATUS_STYLE.have : m.status === "no_match" ? STATUS_STYLE.missing : STATUS_STYLE.check;
+            // "no_match" here is 0 points on a scoring row, not a compliance
+            // failure (the one genuinely disqualifying locality case - a
+            // missing MANDATORY local office - is its own separate row just
+            // below, still correctly red). Painting a lost-points note the
+            // same red as "would disqualify you" overstates it, so it gets
+            // the same softer amber as "unconfirmed" rather than a new tone.
+            const st = m.status === "matched" ? STATUS_STYLE.have : STATUS_STYLE.check;
             return (
               <div key={kind} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
