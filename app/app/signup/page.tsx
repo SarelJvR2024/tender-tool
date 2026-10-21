@@ -18,6 +18,14 @@ function AuthCard({ children }: { children: React.ReactNode }) {
   return <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-9 text-center shadow-sm">{children}</div>;
 }
 
+// Same reasoning as app/app/login/page.tsx: read `next` off window.location
+// rather than useSearchParams(), to avoid a Suspense-boundary requirement.
+function nextParam(): string {
+  if (typeof window === "undefined") return "/dashboard";
+  const v = new URLSearchParams(window.location.search).get("next");
+  return v && v.startsWith("/") ? v : "/dashboard";
+}
+
 export default function SignUpPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -27,6 +35,9 @@ export default function SignUpPage() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  // Lazy initializer, not an effect - see app/app/login/page.tsx's own copy
+  // of this same pattern.
+  const [next] = useState(nextParam);
   // null = still checking. Defaults open (true) on a failed check rather
   // than locking every visitor out over a transient RPC error. This only
   // blocks the visible sign-up form; it does not block a direct call to
@@ -64,7 +75,7 @@ export default function SignUpPage() {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}` },
     });
     setPending(false);
 
@@ -77,7 +88,7 @@ export default function SignUpPage() {
     // some Supabase configs) - don't tell someone who's already signed
     // in to go check their inbox for a link that was never sent.
     if (data.session) {
-      router.push("/dashboard");
+      router.push(next);
       router.refresh();
       return;
     }
@@ -178,7 +189,7 @@ export default function SignUpPage() {
 
         <p className="mt-3 text-xs text-muted-foreground">
           Already have an account?{" "}
-          <Link href="/login" className="font-medium text-foreground hover:underline">Sign in</Link>
+          <Link href={next === "/dashboard" ? "/login" : `/login?next=${encodeURIComponent(next)}`} className="font-medium text-foreground hover:underline">Sign in</Link>
         </p>
       </AuthCard>
     </AuthShell>

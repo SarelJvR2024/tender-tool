@@ -6,8 +6,10 @@ import { cn } from "@/lib/utils";
  * The "this failed to load" panel - same shape as EmptyState (icon in a
  * soft tinted roundel, short title, one line of explanation, optional
  * action) but in the destructive tone, so a real failure never reads as
- * "nothing here yet". Pair with a Retry action (e.g. RetryButton) rather
- * than leaving the reader stuck.
+ * "nothing here yet". Pair with a Retry action - either RetryButton (a
+ * client re-render via router.refresh()) or a plain Link back to the same
+ * page (no client JS required) both work - rather than leaving the reader
+ * stuck looking at a dead page.
  */
 export function ErrorState({
   icon: Icon = AlertTriangle,

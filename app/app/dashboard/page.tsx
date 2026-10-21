@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { FolderOpen } from "lucide-react";
+import { Clock, FolderOpen, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { AppShell } from "../_components/AppShell";
@@ -7,13 +7,16 @@ import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { getNotifications } from "@/lib/notifications";
 import { nextStepFor } from "@/lib/tenderNextStep";
 import { ACTIVE_PURSUIT_STAGES } from "@/lib/discoveryReassessment";
+import { loadDocumentExpiryOverview } from "@/lib/documentExpiry";
 import { PageHeader } from "@/components/tt/page-header";
 import { StatCard } from "@/components/tt/stat-card";
 import { StatusBadge, type TenderStatus } from "@/components/tt/status-badge";
 import { DeadlineChip } from "@/components/tt/deadline-chip";
 import { EmptyState } from "@/components/tt/empty-state";
+import { ErrorState } from "@/components/tt/error-state";
 import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
 import { NextBestActionCard, type NextBestAction } from "@/components/tt/next-best-action-card";
+import { SetupChecklistCard, type SetupChecklistItem } from "@/components/tt/setup-checklist-card";
 import { buttonVariants } from "@/components/ui/button";
 
 // This page depends on the signed-in user's session (via RLS) on every
@@ -59,6 +62,19 @@ const VERDICT_TONE: Record<string, string> = {
  * original wording in every case (StatusBadge's own default label for
  * each variant differs: "ready" defaults to "Ready", "in-progress" to
  * "In progress") so the migration doesn't quietly change user-facing copy.
+ *
+ * Deliberately NOT reclassified into Verify/Provide/Fix (product-promise
+ * audit, see app/AGENTS.md "Home cockpit: StatusBadge vocabulary is
+ * intentional, not a gap") - this is a whole-tender PACK-COMPLETION status
+ * (no pack / still being worked / complete), not a single task's type. A
+ * tender can genuinely have both open Fix items and open Provide items on
+ * its own pack at once (computeTenderReadiness's own per-tender fix/provide
+ * arrays prove this); collapsing that down to one V/P/F badge per row would
+ * either lose information or arbitrarily pick one. The badge's TEXT already
+ * carries the real next action (nextStepFor()'s short Fix/Provide-shaped
+ * phrase) once a pack exists - only the three-state colour/variant here is
+ * a different, valid vocabulary, same pattern as the Bids board's own
+ * stage machine.
  */
 function statusFor(tender: TenderRow): { variant: TenderStatus; label: string } {
   const pack = tender.tender_packs?.[0];
@@ -85,6 +101,35 @@ function greetingFor(date: Date): string {
 export default async function DashboardPage() {
   const supabase = await createClient();
 
+  // Every read below is a real Supabase round-trip that can genuinely fail
+  // (network blip, RLS/session hiccup) - a thrown error here used to crash
+  // the whole page with no way back. Caught once, at the top, rather than
+  // per-query: the "tenders" query's own {error} field (checked separately
+  // below, unchanged) is a softer, partial failure the rest of the page can
+  // still render around; a thrown exception from any OTHER read means there
+  // is nothing honest left to show, so the whole page falls back to a
+  // friendly retry instead of Next's generic error boundary.
+  try {
+    return await renderDashboard(supabase);
+  } catch (e) {
+    console.error("dashboard failed to load", e);
+    return (
+      <AppShell>
+        <div className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-6">
+          <ErrorState
+            action={
+              <Link href="/dashboard" className={buttonVariants({ variant: "outline", className: "min-h-11" })}>
+                Retry
+              </Link>
+            }
+          />
+        </div>
+      </AppShell>
+    );
+  }
+}
+
+async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>>) {
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
@@ -169,6 +214,35 @@ export default async function DashboardPage() {
 
   const companyName = companyRow?.csd_trading_name ?? companyRow?.legal_name ?? null;
 
+  // Empty-state setup checklist: a brand-new company (nothing tracked yet,
+  // AND a readiness score low enough that it clearly hasn't finished the
+  // basics - 50 is the same "accent vs warning" boundary BidReadinessCard's
+  // own ring color already uses) gets a fast, 5-item "get set up" checklist
+  // instead of a sparse "Closing soon" section with nothing in it. Composed
+  // entirely from facts this app already computes - nothing new invented:
+  // company_basics/csd/bee are existing readiness.criteria; the tax PIN
+  // check reuses lib/documentExpiry.ts's own COMPANY_EXPIRY_FIELDS scan
+  // (only "on file or not", same as the other 4 items - its 30-day
+  // expiring-soon window doesn't apply here); the CV check reuses
+  // ReadinessResult's own peopleWithCvCount count, just against a lower bar
+  // (>=1) than the 10-point criterion's own >=2.
+  const isNewCompany = rows.length === 0 && readiness.percent < 50;
+  let setupChecklistItems: SetupChecklistItem[] = [];
+  if (isNewCompany) {
+    const documentExpiryRows = await loadDocumentExpiryOverview(supabase);
+    const taxRow = documentExpiryRows.find((r) => r.label === "SARS Tax Compliance PIN");
+    const basics = readiness.criteria.find((c) => c.key === "company_basics");
+    const csd = readiness.criteria.find((c) => c.key === "csd");
+    const bee = readiness.criteria.find((c) => c.key === "bee");
+    setupChecklistItems = [
+      { key: "company_basics", label: "Company profile completed", done: basics?.satisfied ?? false, href: basics?.href ?? "/onboarding?step=1" },
+      { key: "csd", label: "CSD number on file", done: csd?.satisfied ?? false, href: csd?.href ?? "/onboarding?step=2" },
+      { key: "bee", label: "B-BBEE certificate on file", done: bee?.satisfied ?? false, href: bee?.href ?? "/onboarding?step=2" },
+      { key: "tax_pin", label: "Tax clearance (SARS TCS PIN) on file", done: !!taxRow && taxRow.status !== "missing", href: "/company#compliance-documents" },
+      { key: "people_cvs", label: "At least one person with a CV uploaded", done: readiness.peopleWithCvCount >= 1, href: "/onboarding?step=4" },
+    ];
+  }
+
   return (
     <AppShell>
       <div className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-6">
@@ -184,8 +258,11 @@ export default async function DashboardPage() {
         />
 
         {error && (
-          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-            Couldn&apos;t load tenders - try refreshing. If it keeps happening, let us know.
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            <span>Couldn&apos;t load tenders - try refreshing. If it keeps happening, let us know.</span>
+            <Link href="/dashboard" className={buttonVariants({ variant: "outline", size: "sm", className: "min-h-11 shrink-0 border-destructive/30 text-destructive hover:bg-destructive/10 sm:min-h-9" })}>
+              Retry
+            </Link>
           </div>
         )}
 
@@ -201,7 +278,25 @@ export default async function DashboardPage() {
           <StatCard label="Documents expiring" value={documentsExpiringCount} tone={documentsExpiringCount > 0 ? "destructive" : "default"} />
         </div>
 
-        {rows.length === 0 && !error ? (
+        {isNewCompany ? (
+          // New-company setup checklist (app/AGENTS.md "Home cockpit"): takes
+          // over this whole section - the unmissable, actionable version of
+          // "nothing here yet" for a company with essentially no data on
+          // file, replacing the generic empty-state-plus-top-3-blockers below
+          // (same facts, one focused checklist instead of two overlapping
+          // "things to fix" lists).
+          <div className="mb-5 flex flex-col gap-3">
+            <SetupChecklistCard items={setupChecklistItems} />
+            <div className="flex flex-col gap-2 sm:flex-row">
+              <Link href="/discovery" className={buttonVariants({ variant: "accent", className: "min-h-11 flex-1" })}>
+                Browse opportunities
+              </Link>
+              <Link href="/tenders/new" className={buttonVariants({ variant: "outline", className: "min-h-11 flex-1" })}>
+                Load a tender I already have
+              </Link>
+            </div>
+          </div>
+        ) : rows.length === 0 && !error ? (
           <div className="mb-5 overflow-hidden rounded-lg border border-border bg-card">
             <EmptyState
               icon={FolderOpen}
@@ -238,7 +333,7 @@ export default async function DashboardPage() {
             <h2 className="mb-2 font-display text-lg font-medium text-foreground">Closing soon</h2>
             <div className="overflow-hidden rounded-lg border border-border bg-card">
               {closingSoon.length === 0 && (
-                <div className="px-5 py-6 text-sm text-muted-foreground">Nothing closing in the next {CLOSING_SOON_WINDOW_DAYS} days.</div>
+                <EmptyState icon={Clock} title="Nothing closing soon" description={`Nothing closing in the next ${CLOSING_SOON_WINDOW_DAYS} days.`} />
               )}
               {closingSoon.map((t, i) => {
                 const left = daysUntil(t.closing_date)!;
@@ -274,7 +369,7 @@ export default async function DashboardPage() {
           <h2 className="mb-2 font-display text-lg font-medium text-foreground">New opportunities for you</h2>
           <div className="overflow-hidden rounded-lg border border-border bg-card">
             {opportunityRows.length === 0 && (
-              <div className="px-5 py-6 text-sm text-muted-foreground">No new matching opportunities right now - check back soon.</div>
+              <EmptyState icon={Search} title="No new opportunities yet" description="No new matching opportunities right now - check back soon." />
             )}
             {opportunityRows.map((o, i) => {
               const left = daysUntil(o.closing_date);
