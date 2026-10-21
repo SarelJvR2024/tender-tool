@@ -40,11 +40,16 @@ export function AppSidebar({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
                 <SidebarMenuButton
                   render={<Link href={item.href} />}
                   isActive={active}
-                  tooltip={item.label}
+                  tooltip={item.badge ? `${item.label} (${item.badge})` : item.label}
                   className="min-h-11 md:min-h-9"
                 >
                   <item.icon />
                   <span>{item.label}</span>
+                  {item.badge && (
+                    <span className="ml-auto shrink-0 rounded-full bg-sidebar-primary/10 px-2 py-0.5 text-[10px] font-semibold text-sidebar-primary group-data-[collapsible=icon]:hidden">
+                      {item.badge}
+                    </span>
+                  )}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             );
