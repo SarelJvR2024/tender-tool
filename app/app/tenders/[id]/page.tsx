@@ -36,6 +36,7 @@ import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { computeTenderReadiness } from "./tender-readiness";
 import { DisqualificationGuard } from "./disqualification-guard";
+import { SubmissionPlanView } from "./submission-plan-view";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -458,6 +459,13 @@ export default async function TenderWorkspacePage({
               <DisqualificationGuard tenderId={id} isSanralFamily={isSanralFamily} isGeneralFamily={isGeneralFamily} />
             )}
 
+            {/* Submission plan - the full assessment-engine step list (every
+                form/returnable/role/question/gap), not just the Guard's
+                curated disqualification-risk subset above. General-family
+                only: SANRAL has no requirements.py-shaped manifest to build
+                this from. */}
+            {isGeneralFamily && <SubmissionPlanView tenderId={id} />}
+
             {/* Jump nav - this page stacks up to 9 report/management cards once
                 a pack exists, so a sticky row of anchors beats blind-scrolling
                 to find one (same idea as Stripe's data-dense dashboards: a
@@ -493,6 +501,7 @@ export default async function TenderWorkspacePage({
                     {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
                     {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" variant="primary" />}
                     {(isSanralFamily || isGeneralFamily) && <JumpLink href="#disqualification-guard" label="Guard" />}
+                    {isGeneralFamily && <JumpLink href="#submission-plan" label="Plan" />}
                     {tenderFacts.source !== "sanral" && <JumpLink href="#intake" label="Intake" />}
                     {tenderPack && provenance.length > 0 && <JumpLink href="#readiness-report" label="Readiness" />}
                     {isSanralFamily && <JumpLink href="#compliance-check" label="Documents" />}
