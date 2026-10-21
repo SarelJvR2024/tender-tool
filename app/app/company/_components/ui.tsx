@@ -1,16 +1,42 @@
 // Small shared building blocks for the Company sub-pages (0050: principals,
-// registrations, properties, bank accounts). Civic Navy, inline styles only -
-// the same values app/app/company/page.tsx uses.
+// registrations, properties, bank accounts). Migrated to the design
+// system's tokens/Tailwind (Company vault sub-PR 2 - see app/AGENTS.md):
+// these were the one place still hardcoding the stale pre-color-update
+// Civic Navy/gold values (NAVY #16233B, AMBER #D97706) that the shell
+// sub-PR's own token migration didn't reach, since this file lives outside
+// `/company`'s own page.tsx. Component names/signatures are kept exactly as
+// they were so the 4 consumer pages (bank-accounts/principals/properties/
+// registrations) need no structural changes - only this file's
+// implementation changed.
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { PageHeader } from "@/components/tt/page-header";
 import type { StatusChip } from "@/lib/dates";
+import { ChipBadge, Banner } from "./shared";
 import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 
-export const NAVY = "#16233B";
-export const AMBER = "#D97706";
-export const CREAM = "#FFFFFF";
-export const BORDER = "#E3E6EA";
-export const MUTED = "#5B6472";
-export const FAINT = "#8A93A0";
+// Kept as exported token-based values (not literal hex) rather than deleted
+// outright - every consumer page still reads these directly for one-off
+// inline styles (e.g. `style={{ color: NAVY }}`) in spots that aren't one
+// of this file's own components. Pointing them at the real CSS custom
+// properties (app/globals.css) rather than rewriting every call site is
+// the "token-based values" option named in this migration's own brief, and
+// keeps the 4 consumer pages themselves out of scope for this file's edit.
+// MUTED/FAINT collapse onto the one `--muted-foreground` token (the design
+// system has no second, fainter muted tone elsewhere either - shared.tsx's
+// own `Field` "Not on file" caption uses `text-muted-foreground/70` for
+// that, an opacity modifier Tailwind classes can express but a plain CSS
+// string can't, so FAINT stays the same base token as MUTED here).
+export const NAVY = "var(--foreground)";
+export const AMBER = "var(--accent)";
+export const CREAM = "var(--card)";
+export const BORDER = "var(--border)";
+export const MUTED = "var(--muted-foreground)";
+export const FAINT = "var(--muted-foreground)";
 
 export function SubPage({
   title,
@@ -27,20 +53,19 @@ export function SubPage({
 }) {
   return (
     <AppShell>
-      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif", background: CREAM }}>
-        <a href="/company" style={{ fontSize: 13, color: AMBER, fontWeight: 600, textDecoration: "none" }}>
+      <div className="mx-auto w-full max-w-[900px] flex-1 px-4 py-5 pb-10">
+        <a href="/company" className="text-[13px] font-semibold text-accent no-underline">
           ← Company profile
         </a>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: NAVY, margin: "8px 0 6px" }}>{title}</h1>
-        <div style={{ fontSize: 13, color: MUTED, lineHeight: 1.55, marginBottom: 16, maxWidth: 720 }}>{intro}</div>
+        <PageHeader className="mt-2 mb-4" title={title} description={<span className="max-w-[720px]">{intro}</span>} />
         {saved && (
-          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
-            {saved}
+          <div className="mb-4">
+            <Banner tone="success">{saved}</Banner>
           </div>
         )}
         {error && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
-            Could not save: {error}
+          <div className="mb-4">
+            <Banner tone="destructive">Could not save: {error}</Banner>
           </div>
         )}
         {children}
@@ -51,42 +76,27 @@ export function SubPage({
 
 export function Card({ title, id, children }: { title?: string; id?: string; children: React.ReactNode }) {
   return (
-    <div id={id} style={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
+    <div id={id} className="mb-3.5 rounded-xl border border-border bg-card p-4 shadow-sm sm:px-[18px]">
       {title && (
-        <h2 style={{ fontSize: 13, fontWeight: 600, color: FAINT, textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 12px" }}>{title}</h2>
+        <h2 className="mb-3 text-[13px] font-semibold tracking-[0.04em] text-muted-foreground uppercase">{title}</h2>
       )}
       {children}
     </div>
   );
 }
 
+/** A StatusChip (lib/dates.ts's expiryStatus - or an ad hoc {label,bg,color} of the same shape) rendered as a soft-tint token badge. */
 export function Chip({ status }: { status: StatusChip }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: status.bg, color: status.color, whiteSpace: "nowrap" }}>
-      {status.label}
-    </span>
-  );
+  return <ChipBadge status={status} />;
 }
 
-export const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 };
+export const grid = "grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3";
 
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  minHeight: 44,
-  padding: "10px 12px",
-  borderRadius: 8,
-  border: `1px solid ${BORDER}`,
-  fontSize: 14,
-  fontFamily: "inherit",
-  background: "#FFFFFF",
-};
-
-function Label({ text, htmlFor }: { text: string; htmlFor?: string }) {
+function FieldLabel({ text, htmlFor }: { text: string; htmlFor?: string }) {
   return (
-    <label htmlFor={htmlFor} style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: NAVY, marginBottom: 5 }}>
+    <Label htmlFor={htmlFor} className="mb-1.5 block text-[11.5px] font-semibold text-foreground">
       {text}
-    </label>
+    </Label>
   );
 }
 
@@ -111,8 +121,9 @@ export function Text({
 }) {
   return (
     <div>
-      <Label text={label} />
-      <input
+      <FieldLabel text={label} htmlFor={name} />
+      <Input
+        id={name}
         name={name}
         type={type}
         step={type === "number" ? "any" : undefined}
@@ -121,11 +132,14 @@ export function Text({
         placeholder={placeholder}
         autoComplete={autoComplete}
         inputMode={inputMode}
-        style={inputStyle}
+        className="min-h-11 text-sm"
       />
     </div>
   );
 }
+
+const nativeSelectClass =
+  "h-11 w-full rounded-lg border border-input bg-card px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 export function Select({
   name,
@@ -142,8 +156,8 @@ export function Select({
 }) {
   return (
     <div>
-      <Label text={label} />
-      <select name={name} defaultValue={defaultValue ?? ""} required={required} style={inputStyle}>
+      <FieldLabel text={label} htmlFor={name} />
+      <select id={name} name={name} defaultValue={defaultValue ?? ""} required={required} className={nativeSelectClass}>
         {options.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -172,30 +186,17 @@ export function YesNo({ name, label, value }: { name: string; label: string; val
 export function Area({ name, label, defaultValue }: { name: string; label: string; defaultValue?: string | null }) {
   return (
     <div>
-      <Label text={label} />
-      <textarea name={name} defaultValue={defaultValue ?? ""} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+      <FieldLabel text={label} htmlFor={name} />
+      <Textarea id={name} name={name} defaultValue={defaultValue ?? ""} rows={2} className="min-h-11 resize-y text-sm" />
     </div>
   );
 }
 
 export function Submit({ children, secondary }: { children: React.ReactNode; secondary?: boolean }) {
   return (
-    <button
-      type="submit"
-      style={{
-        minHeight: 44,
-        padding: "0 18px",
-        borderRadius: 9,
-        background: secondary ? "#FFFFFF" : AMBER,
-        border: secondary ? `1px solid ${BORDER}` : "none",
-        color: secondary ? NAVY : "#FFFFFF",
-        fontSize: 14,
-        fontWeight: 600,
-        cursor: "pointer",
-      }}
-    >
+    <Button type="submit" variant={secondary ? "outline" : "accent"} size="lg" className="min-h-11 px-[18px]">
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -203,7 +204,10 @@ export function DangerButton({ children, confirmMessage }: { children: React.Rea
   return (
     <ConfirmSubmitButton
       confirmMessage={confirmMessage}
-      style={{ minHeight: 40, padding: "0 14px", borderRadius: 9, background: "#FFFFFF", border: "1px solid #FCA5A5", color: "#B91C1C", fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+      className={cn(
+        "inline-flex min-h-10 cursor-pointer items-center justify-center rounded-lg border border-destructive/30 bg-card px-3.5 text-[13px] font-semibold text-destructive",
+        "hover:bg-destructive/10",
+      )}
     >
       {children}
     </ConfirmSubmitButton>
@@ -218,16 +222,16 @@ export function FileUpload({ label, required = true }: { label: string; required
       required={required}
       accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
       aria-label={label}
-      style={{ fontSize: 12, color: NAVY, maxWidth: "100%" }}
+      className="max-w-full text-xs text-foreground"
     />
   );
 }
 
 export function Disclosure({ summary, open, id, children }: { summary: string; open?: boolean; id?: string; children: React.ReactNode }) {
   return (
-    <details id={id} open={open} style={{ marginTop: 10 }}>
-      <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: AMBER, minHeight: 32, display: "flex", alignItems: "center" }}>{summary}</summary>
-      <div style={{ paddingTop: 10 }}>{children}</div>
+    <details id={id} open={open} className="mt-2.5">
+      <summary className="flex min-h-8 cursor-pointer items-center text-[13px] font-semibold text-accent">{summary}</summary>
+      <div className="pt-2.5">{children}</div>
     </details>
   );
 }
