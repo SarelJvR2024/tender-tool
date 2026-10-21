@@ -6,6 +6,21 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Municipality catalog sweep closed out, 2026-10-21 ~15:10 UTC** (`c0c1578`) - the last open lead,
+Abaqulusi, turned out not to be a reader candidate after all. Its real per-tender listing exists
+(a WP File Download plugin's AJAX file-listing API, one category id per tender type - the same
+"shell landing page, real data one call deeper" shape Kouga had) with genuine closing dates and a
+real reference-number format (`8/2/1/NNN`), structurally buildable the same way Lephalale was. But
+its own reference sequence runs straight into eTenders' live Abaqulusi listings (own-site samples
+`8/2/1/398-626` vs eTenders' current `8/2/1/647-667` - a single continuous numbering series, not two
+independent ones) and the municipality's own PDF states bids go through eTenders - strong evidence
+this is near-total duplicate coverage, not a gap, unlike Lephalale/Kouga/Vaal Central Water which
+were all confirmed zero/near-zero overlap. All 8 municipalities flagged across rounds 4-5 (Makana,
+King Sabata Dalindyebo, Enoch Mgijima, Abaqulusi, Maluti-a-Phofung, KwaDukuza, Alfred Duma, Ngwathe)
+are now resolved - none built. The municipality-catalog research thread (4 prior rounds, ~85+
+municipalities checked) is done for now; the real yield was Lephalale, Kouga, and Vaal Central
+Water, all three now live in production (see entry below).
+
 **Lephalale, Kouga, Vaal Central Water now live in production, 2026-10-21 ~14:50 UTC**
 (`f9675c1`) - the reachability run (`39600219996`) came back green on all 3 individually (randwater's
 own equivalent run, `39508282401`, genuinely failed - correctly stays out). Added all 3 to
