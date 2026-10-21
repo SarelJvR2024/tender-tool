@@ -6,6 +6,8 @@ import { TENDER_TEMPLATES } from "@/lib/tenderTemplates";
 import type { ChecklistRow } from "./pack-checklist";
 import { b7Status, docItemStatus, fieldStatus, humanizeFieldKey, positionStatus, provenanceStatus, signatureStatus, type ReviewStatus } from "./pack-review-logic";
 import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
+import { classifyComplianceItem } from "./bid-task-status";
+import type { ComplianceItem } from "@/lib/tenderCompliance";
 
 export type { ReviewStatus } from "./pack-review-logic";
 
@@ -72,6 +74,25 @@ function section(key: string, title: string, changeHref: string, changeLabel: st
 function failedSection(key: string, title: string, changeHref: string, changeLabel: string, err: unknown): ReviewSection {
   const message = err instanceof Error ? err.message : String(err);
   return { key, title, changeHref, changeLabel, items: [], error: `Couldn't load this section: ${message}` };
+}
+
+/**
+ * docItemStatus(d.status) alone is mandatory-blind: a "check" (unconfirmed)
+ * item always came back "needs_input" regardless of whether it's one of
+ * SANRAL's mandatory administration criteria - so a mandatory-and-
+ * unconfirmed doc showed here as merely Provide while compliance-report.tsx's
+ * own classifyComplianceItem() (bid-task-status.ts, PR #35) correctly shows
+ * the same item as Fix. Reconstructs the ReviewStatus that makes
+ * reviewStatusToBidTask() agree with classifyComplianceItem()'s answer,
+ * while keeping checklistStatus (pack-compilation inclusion, which has
+ * never depended on mandatory) exactly as docItemStatus already computed it.
+ */
+function docItemReviewStatus(d: ComplianceItem): { reviewStatus: ReviewStatus; checklistStatus: ReturnType<typeof docItemStatus>["checklistStatus"] } {
+  const { checklistStatus } = docItemStatus(d.status);
+  if (d.status === "have") return { reviewStatus: "confirmed", checklistStatus };
+  const task = classifyComplianceItem(d).status;
+  const reviewStatus: ReviewStatus = task === "fix" ? "missing" : task === "provide" ? "needs_input" : "assumed_default";
+  return { reviewStatus, checklistStatus };
 }
 
 export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<PackReviewSnapshot> => {
@@ -284,7 +305,7 @@ export const loadPackReviewSnapshot = cache(async (tenderId: string): Promise<Pa
     // check list the pack bridge checks against, so it's reused here rather
     // than re-derived.
     for (const d of data.docItems) {
-      const { reviewStatus, checklistStatus } = docItemStatus(d.status);
+      const { reviewStatus, checklistStatus } = docItemReviewStatus(d);
       pushChecklist({ title: `${d.form} - ${d.label}`, envelope: "Technical", status: checklistStatus, pages: null, note: d.status === "have" ? null : d.detail });
       items.push({ key: `doc-${d.key}`, label: `${d.form} - ${d.label}`, value: d.status === "have" ? "On file" : null, status: reviewStatus, note: d.detail });
     }
