@@ -13,9 +13,19 @@ confirmed by checking `engine/worker/Dockerfile` and `.github/workflows/bridge-w
 directly that this is **only true of this sandbox, not the real production worker** (both install
 `tesseract-ocr` for real). This session's own phase-2 checks of scanned documents are therefore
 unverified for the OCR path specifically - a genuine gap in how thoroughly this pass can check
-"100%", not a production bug. Running `python3 engine/discovery/gov_sources.py --sources
-etenders_portal,lephalale,kouga,vaal_central_water` as an integration check (the new readers tested
-standalone so far, not yet through the real merge/BUYER_FAMILY path together) - in progress.
+"100%", not a production bug.
+
+**Integration check done** (the new readers were only tested standalone so far, not through the
+real merge/BUYER_FAMILY path together): `python3 engine/discovery/gov_sources.py --sources
+etenders_portal,lephalale,kouga,vaal_central_water --no-documents` - confirmed clean. Lephalale (3)
+and Vaal Central Water (9) both fold to "only here" / "also on portal 0", matching their own
+confirmed-zero-overlap findings exactly. **Kouga folded correctly: 281 listed, 4 "also on portal"
+(the same 4 this session already found manually), 277 "only here"** - `merge()`'s own buyer-match
+logic correctly identified exactly the right 4 as portal duplicates and merged them (not left as
+separate duplicate rows, not wrongly folded into an unrelated buyer) - no sign of the 14th-run
+merge-contamination bug class recurring. `4 listed by more than one source` in the summary total
+matches Kouga's own count exactly, with nothing attributable to Lephalale/Vaal Central Water,
+confirming no cross-buyer leakage.
 
 **Msukaligwa checked, not built, 2026-10-21 ~12:40 UTC**
 (`docs/specs/Government-Buyer-Catalog-Round4-Final-Sweep.md`, `1de7af7`) - a clean, reachable
