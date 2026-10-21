@@ -6,6 +6,8 @@ import { requestSubmissionPack } from "./actions";
 import { AutoRefresh } from "../../_components/AutoRefresh";
 import { PackChecklist, checklistOf, type ChecklistRow } from "./pack-checklist";
 import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
+import { loadPackReviewSnapshot } from "./pack-review-data";
+import { computeTenderReadiness } from "./tender-readiness";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -114,6 +116,19 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   const needsAck = !readiness.checked || gaps.length > 0;
   const reviewed = !!reviewRow?.reviewed_at;
 
+  // Verify/Provide/Fix (app/AGENTS.md): the Submit button itself stays
+  // disabled while any Fix item is open, on top of the existing "pack
+  // review confirmed" gate above - reuses the exact same cached snapshot
+  // the workspace header's readiness score reads, so this can't disagree
+  // with what the header already shows.
+  const packReviewSnapshot = await loadPackReviewSnapshot(tenderId);
+  const fixCount = packReviewSnapshot.mapped ? computeTenderReadiness(packReviewSnapshot.sections).fix.length : 0;
+  const disabledReason = fixCount > 0
+    ? `Fix ${fixCount} item${fixCount === 1 ? "" : "s"} first - see the Fix list above`
+    : !reviewed
+      ? "Confirm the Pack review above first"
+      : null;
+
   // Signed links for ready packs (private 'submission-packs' bucket, 10 min).
   const paths = jobs
     .filter((j) => j.status === "ready")
@@ -208,12 +223,17 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
           )}
           <button
             type="submit"
-            disabled={!reviewed}
-            title={reviewed ? undefined : "Confirm the Pack review above first"}
-            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: reviewed ? "#16233B" : "#8A93A0", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: reviewed ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+            disabled={!!disabledReason}
+            title={disabledReason ?? undefined}
+            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: disabledReason ? "#8A93A0" : "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: disabledReason ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
           >
             Generate submission pack
           </button>
+          {/* title= (hover) doesn't reach touch devices - the same reason as
+              visible text so a phone user isn't left guessing why it's grey. */}
+          {disabledReason && (
+            <div style={{ fontSize: 11, color: "#B45309", width: "100%" }}>{disabledReason}</div>
+          )}
         </form>
       )}
 
