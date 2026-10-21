@@ -17,7 +17,7 @@ function initialsOf(email: string | null): string {
   return email.slice(0, 2).toUpperCase();
 }
 
-export function AvatarMenu({ email }: { email: string | null }) {
+export function AvatarMenu({ email, isEmployee }: { email: string | null; isEmployee: boolean }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -29,7 +29,9 @@ export function AvatarMenu({ email }: { email: string | null }) {
       <DropdownMenuContent align="end" className="w-56">
         {email && <DropdownMenuLabel className="truncate font-normal text-muted-foreground">{email}</DropdownMenuLabel>}
         <DropdownMenuSeparator />
-        <DropdownMenuItem render={<Link href="/company" />}>
+        {/* /company is RLS-blocked entirely for 'employee' (migration 0067) -
+            /my-cv is their real self-service profile page instead. */}
+        <DropdownMenuItem render={<Link href={isEmployee ? "/my-cv" : "/company"} />}>
           <User />
           Profile
         </DropdownMenuItem>

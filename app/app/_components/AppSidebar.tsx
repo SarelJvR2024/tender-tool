@@ -11,11 +11,11 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import { ADMIN_NAV_ITEM, NAV_ITEMS, isNavItemActive } from "./nav-items";
+import { ADMIN_NAV_ITEM, EMPLOYEE_NAV_ITEMS, NAV_ITEMS, isNavItemActive } from "./nav-items";
 
-export function AppSidebar({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
+export function AppSidebar({ isPlatformAdmin, isEmployee }: { isPlatformAdmin: boolean; isEmployee: boolean }) {
   const pathname = usePathname();
-  const items = isPlatformAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
+  const items = isEmployee ? EMPLOYEE_NAV_ITEMS : isPlatformAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
 
   return (
     <Sidebar collapsible="icon">
