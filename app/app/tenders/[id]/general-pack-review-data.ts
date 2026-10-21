@@ -27,7 +27,11 @@ import { docItemStatus, type ReviewStatus } from "./pack-review-logic";
  * docItemStatus(check.status) alone can't see `strength`, so on its own it
  * would show a required-but-unconfirmed returnable as Provide, not Fix.
  */
-function returnableReviewStatus(check: ReturnableCheck): { reviewStatus: ReviewStatus; checklistStatus: ReturnType<typeof docItemStatus>["checklistStatus"] } {
+// Exported so submission-plan-data.ts can reuse this exact reasoning
+// instead of keeping its own small duplicate in sync by hand (that
+// duplicate was deliberate when it was written, same-day, while this file
+// was under active edit - see submission-plan-data.ts's own history).
+export function returnableReviewStatus(check: ReturnableCheck): { reviewStatus: ReviewStatus; checklistStatus: ReturnType<typeof docItemStatus>["checklistStatus"] } {
   const { checklistStatus } = docItemStatus(check.status);
   if (check.status === "have") return { reviewStatus: "confirmed", checklistStatus };
   if (check.strength === "required") return { reviewStatus: "missing", checklistStatus };

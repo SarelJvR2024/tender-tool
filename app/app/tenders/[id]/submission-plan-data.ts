@@ -6,13 +6,13 @@ import {
   questionStates,
   type GeneralCompany,
   type RequirementManifest,
-  type ReturnableCheck,
   type TenderAnswer,
 } from "@/lib/generalTender";
 import { COMPANY_VAULT_COLUMNS } from "@/lib/tenderCompliance";
 import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { answerStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
-import { reviewStatusToBidTask, type ReviewStatus } from "./pack-review-logic";
+import { reviewStatusToBidTask } from "./pack-review-logic";
+import { returnableReviewStatus } from "./general-pack-review-data";
 import type { BidTaskStatus } from "./bid-task-status";
 import { tenderTimeline, type TimelineMilestone } from "@/lib/tenderTimeline";
 import { briefingStep, buyerFormStep, cidbGradingStep, formStep, gapStep, unrepresentedGaps, type PlanStep } from "./submission-plan-logic";
@@ -25,20 +25,14 @@ import { briefingStep, buyerFormStep, cidbGradingStep, formStep, gapStep, unrepr
  * read of what's "required" or "on file". See submission-plan-logic.ts's
  * own header for the full architecture rationale.
  *
- * checkReturnable's own `strength: "required" | "mentioned"` is this
- * screen's equivalent of SANRAL's ComplianceItem.mandatory -
- * returnableReviewStatus() below is a deliberate, small duplicate of
- * general-pack-review-data.ts's own (unexported) function of the same name
- * and exact reasoning, not an import: that file is under active edit by
- * another Claude session today (#35-#38, see System-Status.md) and is
- * explicitly out of scope here to avoid any collision. Keep both in sync by
- * hand until one of them can safely export it.
+ * Reuses general-pack-review-data.ts's own `returnableReviewStatus()`
+ * directly for returnables (checkReturnable's `strength: "required" |
+ * "mentioned"` field is this screen's equivalent of SANRAL's
+ * ComplianceItem.mandatory) - this was a small local duplicate when first
+ * written, same-day, while that file was under active edit by another
+ * Claude session; now exported there and imported here instead, once that
+ * file settled (see docs/specs/System-Status.md).
  */
-function returnableReviewStatus(check: ReturnableCheck): ReviewStatus {
-  if (check.status === "have") return "confirmed";
-  if (check.strength === "required") return "missing";
-  return check.status === "missing" ? "needs_input" : "assumed_default";
-}
 
 export type SubmissionPlanSnapshot = {
   mapped: boolean; // false until this tender's documents have been read (document_requirements)
@@ -102,7 +96,7 @@ export const loadSubmissionPlan = cache(async (tenderId: string): Promise<Submis
     const jvAnswer = answers.find((a) => a.field_key === "bidding_as_jv")?.value ?? null;
     for (const r of manifest.returnables) {
       const check = checkReturnable(r, company, closingDate, answers, jvAnswer === null ? null : jvAnswer === "yes");
-      const reviewStatus = returnableReviewStatus(check);
+      const { reviewStatus } = returnableReviewStatus(check);
       const title = check.label + (r.conditional === "jv" ? " (only if bidding as a JV/consortium)" : "");
       steps.push({
         category: "returnable",
