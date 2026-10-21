@@ -9,6 +9,7 @@ import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatorySc
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { computeTenderReadiness } from "./tender-readiness";
 import { SanralProgress } from "./sanral-progress";
+import { DownloadAllButton } from "./download-all-button";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -295,6 +296,14 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                     <a href={signed[j.storage_path_pdf]} style={{ color: "#D97706", fontWeight: 700 }}>
                       Download PDF{j.page_count ? ` (${j.page_count} pages)` : ""}
                     </a>
+                  )}
+                  {j.status === "ready" && (
+                    <DownloadAllButton
+                      urls={[j.storage_path_pdf, ...Object.values(j.output_files ?? {})]
+                        .filter((p): p is string => !!p)
+                        .map((p) => signed[p])
+                        .filter((u): u is string => !!u)}
+                    />
                   )}
                 </div>
                 {j.status === "failed" && j.error_message && (
