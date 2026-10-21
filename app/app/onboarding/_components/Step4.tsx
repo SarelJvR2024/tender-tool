@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { Upload, User } from "lucide-react";
 import { WizardShell } from "./WizardShell";
 import { Field, FormError } from "./fields";
 import { addPersonStep, uploadPersonCvStep } from "../actions";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 const MAX_PEOPLE = 3;
 
@@ -55,6 +56,12 @@ export function Step4({ companyId, people, error }: { companyId: string; people:
             Add this person
           </Button>
         </form>
+      )}
+
+      {people.length > 0 && (
+        <Link href="/onboarding?step=5" className={buttonVariants({ className: "mt-4 h-11 w-full" })}>
+          Continue
+        </Link>
       )}
     </WizardShell>
   );
