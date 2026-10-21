@@ -6,6 +6,20 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Lephalale reader added, 2026-10-21 ~10:50 UTC** (`engine/discovery/lephalale.py`, `35f6222`) -
+a confirmed real gap vs eTenders (zero results, independently re-verified). The municipality
+publishes periodic "batch" PDFs, each bundling several separate tenders (not the Finding 42
+"wrong buyer" problem - every tender in a batch genuinely is Lephalale's own) - every row inside a
+batch becomes its own release, keyed on the internal "Ref no:" field after finding the municipality
+reuses its own "T-number" field across two unrelated tenders in the same real batch (a genuine
+data-quality issue, not hidden). Dates are DD/MM/YYYY, parsed directly in the module rather than
+through the shared ambiguous US-style parser, to avoid silently swapping day and month. Same test
+discipline as every other reader (real fixtures, regression-catch independently verified). Also
+independently re-verified two sibling-session batches before building on top of them: Finding 43
+(a real SA ID redaction bypass on a line-split number - `engine/cv/test_extract_cv_fields.py` clean)
+and the onboarding/readiness/app-shell redesign (#28/#29/#30 - typecheck/lint/vitest/build all clean
+after a fresh `npm ci`). Not yet in `ALL_SOURCES`.
+
 **`submission_plan.py` added, 2026-10-21 ~10:30 UTC: first version of the "assessment engine"**
 Sarel asked for ("assesses each tender, each page, each field and compiles a plan of how to
 prepare a submission", `fb7b2ba`). `compile_plan(manifest, company, tender)` is a pure function
