@@ -6,9 +6,11 @@ import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
 import { AppShell } from "../_components/AppShell";
 import { PageHeader } from "@/components/tt/page-header";
 import { EmptyState } from "@/components/tt/empty-state";
+import { ErrorState } from "@/components/tt/error-state";
 import { DeadlineChip } from "@/components/tt/deadline-chip";
 import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { RetryButton } from "../_components/RetryButton";
 
 /**
  * "SANRAL schedules" (prompt 10, item 2: "make the SANRAL automation a
@@ -47,25 +49,38 @@ const JOB_STATUS_LABEL: Record<LatestJob["status"], string> = {
 export default async function SanralSchedulesPage() {
   const supabase = await createClient();
 
-  const { data: tenderRows } = await supabase
-    .from("tenders")
-    .select("id, contract_no, title, buyer, closing_date, tender_packs!inner(id)")
-    .eq("family", SANRAL_CONVENTIONAL_FAMILY)
-    .order("closing_date", { ascending: true });
+  let tenders: TenderRow[] = [];
+  let latestByTender = new Map<string, LatestJob>();
+  let loadError = false;
 
-  const tenders = (tenderRows ?? []) as unknown as TenderRow[];
-  const tenderIds = tenders.map((t) => t.id);
+  try {
+    const { data: tenderRows, error: tendersError } = await supabase
+      .from("tenders")
+      .select("id, contract_no, title, buyer, closing_date, tender_packs!inner(id)")
+      .eq("family", SANRAL_CONVENTIONAL_FAMILY)
+      .order("closing_date", { ascending: true });
+    if (tendersError) throw tendersError;
 
-  const latestByTender = new Map<string, LatestJob>();
-  if (tenderIds.length > 0) {
-    const { data: jobRows } = await supabase
-      .from("pack_generation_jobs")
-      .select("tender_id, status, requested_at")
-      .in("tender_id", tenderIds)
-      .order("requested_at", { ascending: false });
-    for (const j of (jobRows ?? []) as LatestJob[]) {
-      if (!latestByTender.has(j.tender_id)) latestByTender.set(j.tender_id, j);
+    tenders = (tenderRows ?? []) as unknown as TenderRow[];
+    const tenderIds = tenders.map((t) => t.id);
+
+    if (tenderIds.length > 0) {
+      const { data: jobRows, error: jobsError } = await supabase
+        .from("pack_generation_jobs")
+        .select("tender_id, status, requested_at")
+        .in("tender_id", tenderIds)
+        .order("requested_at", { ascending: false });
+      if (jobsError) throw jobsError;
+
+      for (const j of (jobRows ?? []) as LatestJob[]) {
+        if (!latestByTender.has(j.tender_id)) latestByTender.set(j.tender_id, j);
+      }
     }
+  } catch (error) {
+    console.error("Failed to load SANRAL schedules", error);
+    tenders = [];
+    latestByTender = new Map();
+    loadError = true;
   }
 
   return (
@@ -95,7 +110,13 @@ export default async function SanralSchedulesPage() {
         </div>
 
         <div className="flex flex-col divide-y divide-border rounded-xl border border-border bg-card">
-          {tenders.length === 0 ? (
+          {loadError ? (
+            <ErrorState
+              title="Couldn't load your SANRAL tenders"
+              description="Something went wrong fetching your tenders and their schedule status. Try again - if it keeps happening, let us know."
+              action={<RetryButton />}
+            />
+          ) : tenders.length === 0 ? (
             <EmptyState
               icon={FolderOpen}
               title="No SANRAL tenders yet"

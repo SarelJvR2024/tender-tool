@@ -473,10 +473,20 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
                  reason=f"detail={detail}: {'capped at 3 most relevant entries' if detail == 'summary' else 'all entries on file shown'}")
     if shown:
         for proj in shown:
+            # dict.get(key, default) only substitutes default when the key is
+            # ABSENT - start/end/value_rm/contact_name/contact_phone are all
+            # nullable columns (0001_init_schema.sql), so a real row with the
+            # key present but None (an ongoing project with no end date yet,
+            # a referee not captured) sailed straight through as the literal
+            # string "None" in a real, client-facing generated CV. The
+            # sibling builder just above (build_sanral_keyperson) already
+            # guards the same fields with `or` for this exact reason - this
+            # one didn't.
+            value_rm = proj.get("value_rm")
             d.add_paragraph(_safe_text(
-                f"{proj.get('start', '?')} to {proj.get('end', '?')}  —  {proj.get('client_and_number', '')}\n"
-                f"Position: {proj.get('position_held', '')}    Value: R{proj.get('value_rm', '?')}m\n"
-                f"Referee: {proj.get('contact', 'MISSING')}  {proj.get('contact_phone', '')}"
+                f"{proj.get('start') or '?'} to {proj.get('end') or '?'}  —  {proj.get('client_and_number', '')}\n"
+                f"Position: {proj.get('position_held', '')}    Value: R{value_rm if value_rm is not None else '?'}m\n"
+                f"Referee: {proj.get('contact') or 'MISSING'}  {proj.get('contact_phone') or ''}"
             ))
     else:
         d.add_paragraph("MISSING")

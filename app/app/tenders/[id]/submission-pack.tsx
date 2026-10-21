@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
+import { loadTenderCompliance, packReadiness, complianceItemLabel, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 import { loadB7State } from "./b7-data";
 import { requestSubmissionPack } from "./actions";
 import { AutoRefresh } from "../../_components/AutoRefresh";
 import { PackChecklist, checklistOf, type ChecklistRow } from "./pack-checklist";
 import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
 import { loadPackReviewSnapshot } from "./pack-review-data";
+import { classifyComplianceItem } from "./bid-task-status";
 import { computeTenderReadiness } from "./tender-readiness";
 import { SanralProgress } from "./sanral-progress";
 import { DownloadAllButton } from "./download-all-button";
@@ -81,7 +82,8 @@ function formatDuration(ms: number): string {
 
 export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: string; tenderPackId: string }) {
   const supabase = await createClient();
-  const readiness = packReadiness(await loadTenderCompliance(tenderId));
+  const complianceData = await loadTenderCompliance(tenderId);
+  const readiness = packReadiness(complianceData);
   const b7 = await loadB7State(tenderId);
 
   const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }, { data: reviewRow }, { data: scopeRows }, { data: tenderRow }] = await Promise.all([
@@ -126,11 +128,30 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     ...(b7.blocker ? [b7.blocker] : []),
     ...(active ? ["A pack is already queued or generating for this tender"] : []),
   ];
+  // Verify/Provide/Fix (app/AGENTS.md), not the old pre-unification
+  // "mandatory - disqualifying"/"don't have"/"confirm by hand" wording - and
+  // run through the exact same classifyComplianceItem() the Compliance Check
+  // card above uses, rather than compliance-data.ts's own mandatory-blind
+  // mandatoryMissing/missing/toConfirm split (which bucketed a mandatory-but-
+  // merely-unconfirmed item as "toConfirm"/amber here while the card one
+  // screen up correctly shows it as Fix - the exact same bug this session's
+  // "pack-review's own mandatory-blind bug" piece already fixed for
+  // pack-review-data.ts/general-pack-review-data.ts). A doc item the
+  // classifier buckets as Verify (confirmed, or an optional item still
+  // needing a look) isn't a gap, so it's left out here, same as
+  // pack-review-data.ts's own gapsCount.
   const gaps = [
-    ...readiness.mandatoryMissing.map((g) => ({ text: g, tone: "red" as const, note: "mandatory - disqualifying" })),
-    ...readiness.missing.map((g) => ({ text: g, tone: "red" as const, note: "don't have" })),
-    ...readiness.toConfirm.map((g) => ({ text: g, tone: "amber" as const, note: "confirm by hand" })),
-    ...b7.warnings.map((g) => ({ text: `Form B7: ${g}`, tone: "amber" as const, note: "your subcontracting plan" })),
+    ...(complianceData?.mapped
+      ? complianceData.docItems
+          .map((d) => ({ item: d, task: classifyComplianceItem(d) }))
+          .filter(({ task }) => task.status === "fix" || task.status === "provide")
+          .map(({ item, task }) => ({
+            text: complianceItemLabel(item),
+            tone: task.status === "fix" ? ("red" as const) : ("amber" as const),
+            note: task.status === "fix" ? "Fix" : "Provide",
+          }))
+      : []),
+    ...b7.warnings.map((g) => ({ text: `Form B7: ${g}`, tone: "amber" as const, note: "Provide" })),
   ];
   const needsAck = !readiness.checked || gaps.length > 0;
   const reviewed = !!reviewRow?.reviewed_at;
