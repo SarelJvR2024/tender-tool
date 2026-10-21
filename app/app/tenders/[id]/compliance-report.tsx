@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { loadTenderCompliance } from "./compliance-data";
 import { type ComplianceItem, type ComplianceStatus } from "@/lib/tenderCompliance";
+import { classifyComplianceItem, type BidTaskStatus } from "./bid-task-status";
 import { estimateSanralConventional, type Range } from "@/lib/sanralScoring";
 import { DOCUMENT_TYPES, disciplineLabel, isScoreableEvidence, labelFor, type ExperienceItem } from "@/lib/experience";
 import { acceptedDocTypes, describeRule, type ChosenRule, type EvaluationRules } from "@/lib/experienceEvidence";
@@ -25,6 +26,17 @@ const STATUS_STYLE: Record<ComplianceStatus, { label: string; bg: string; color:
   have: { label: "On file", bg: "#DCFCE7", color: "#15803D" },
   missing: { label: "Don't have", bg: "#FEE2E2", color: "#B91C1C" },
   check: { label: "Confirm by hand", bg: "#FEF3C7", color: "#B45309" },
+};
+
+// The Product promise's Verify/Provide/Fix grouping (app/AGENTS.md), applied
+// to the required-documents list below via bid-task-status.ts's shared
+// classifyComplianceItem(). Kept separate from STATUS_STYLE above, which
+// still drives Key people & Locality's own have/missing/check chips -
+// those haven't been migrated to this grouping yet.
+const TASK_STYLE: Record<BidTaskStatus, { title: string; bg: string; color: string }> = {
+  fix: { title: "Fix", bg: "#FEE2E2", color: "#B91C1C" },
+  provide: { title: "Provide", bg: "#FEF3C7", color: "#B45309" },
+  verify: { title: "Verify", bg: "#DCFCE7", color: "#15803D" },
 };
 
 const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
@@ -66,12 +78,13 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
   const ownMinimums = keyPersonMinimums?.source === "tender_document" ? keyPersonMinimums : null;
   const assumedPositions = positionRows.filter((p) => p.min.source === "assumed").map((p) => p.code);
 
-  const groups: { status: ComplianceStatus; title: string; empty: string }[] = [
-    { status: "missing", title: "Don't have", empty: "Nothing required is missing." },
-    { status: "check", title: "Confirm by hand", empty: "Nothing left to confirm." },
-    { status: "have", title: "On file", empty: "Nothing confirmed on file yet." },
+  const tasks = docItems.map((item) => ({ item, task: classifyComplianceItem(item) }));
+  const taskGroups: { status: BidTaskStatus; empty: string }[] = [
+    { status: "fix", empty: "Nothing here would disqualify the bid." },
+    { status: "provide", empty: "Nothing left for you to supply." },
+    { status: "verify", empty: "Nothing left to verify." },
   ];
-  const mandatoryFailing = docItems.filter((i) => i.mandatory && i.status === "missing").length;
+  const fixCount = tasks.filter((t) => t.task.status === "fix").length;
 
   return (
     <>
@@ -80,28 +93,29 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
         <SectionTitle title="Compliance check - required documents" />
         <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
           SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria, checked against your
-          company vault on the closing date. &quot;Confirm by hand&quot; means something on file needs a detail added (an
-          expiry date, the proof type) or a step only you can confirm - not that you don&apos;t have it.
+          company vault on the closing date. <strong>Fix</strong> items would disqualify the bid at Stage 2 if left as is.{" "}
+          <strong>Provide</strong> items only you can supply. <strong>Verify</strong> items are already filled from your
+          vault - just confirm them.
         </div>
-        {mandatoryFailing > 0 && (
+        {fixCount > 0 && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#B91C1C", fontWeight: 600 }}>
-            {mandatoryFailing} mandatory requirement{mandatoryFailing === 1 ? "" : "s"} not met - the tender would be disqualified at Stage 2.
+            {fixCount} requirement{fixCount === 1 ? "" : "s"} would disqualify this bid at Stage 2 - fix {fixCount === 1 ? "it" : "them"} before you submit.
           </div>
         )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-          {groups.map((g) => {
-            const rows = docItems.filter((i) => i.status === g.status);
-            const st = STATUS_STYLE[g.status];
+          {taskGroups.map((g) => {
+            const rows = tasks.filter((t) => t.task.status === g.status);
+            const st = TASK_STYLE[g.status];
             return (
               <div key={g.status} style={{ border: "1px solid #E3E6EA", borderRadius: 11, padding: "12px 14px", minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{g.title}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{st.title}</div>
                   <CountBadge count={rows.length} bg={st.bg} color={st.color} />
                 </div>
                 {rows.length === 0 ? (
                   <div style={{ fontSize: 12, color: "#8A93A0", paddingTop: 6 }}>{g.empty}</div>
                 ) : (
-                  rows.map((i) => <DocRow key={i.key} item={i} />)
+                  rows.map(({ item, task }) => <BidTaskRow key={item.key} item={item} task={task} />)
                 )}
               </div>
             );
@@ -482,17 +496,27 @@ function RangeBar({ range, max, threshold }: { range: Range; max: number; thresh
   );
 }
 
-function DocRow({ item }: { item: ComplianceItem }) {
+function BidTaskRow({ item, task }: { item: ComplianceItem; task: ReturnType<typeof classifyComplianceItem> }) {
   return (
     <div style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
         <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, color: "#16233B", background: "#ECEEF1", borderRadius: 100, padding: "2px 7px" }}>{item.form}</span>
         <span style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{item.label}</span>
-        {item.mandatory && <span style={{ fontSize: 10, fontWeight: 700, color: "#B91C1C" }}>MANDATORY</span>}
+        {/* Fix rows already say "disqualifies" via the Fix column itself - no need to repeat MANDATORY there. */}
+        {task.status !== "fix" && item.mandatory && <span style={{ fontSize: 10, fontWeight: 700, color: "#8A93A0" }}>MANDATORY</span>}
         {item.expiring && <Chip label="Renew soon" bg="#FEF3C7" color="#B45309" />}
         {item.expiredCopy && <Chip label="Expired copy in pack - replace" bg="#FEE2E2" color="#B91C1C" />}
       </div>
-      <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3, wordBreak: "break-word" }}>{item.detail}</div>
+      <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3, wordBreak: "break-word" }}>{task.reason}</div>
+      <div style={{ marginTop: 5 }}>
+        {task.confirmed ? (
+          <Chip label="Confirmed" bg="#DCFCE7" color="#15803D" />
+        ) : (
+          <Link href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: task.status === "fix" ? "#B91C1C" : "#B45309" }}>
+            {task.fixLabel} →
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

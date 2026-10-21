@@ -29,6 +29,29 @@ import { SACQSP_POSITION_RE, SAGC_POSITION_RE, catalogSlug, type CatalogBody, ty
 
 export type ComplianceStatus = "have" | "missing" | "check";
 
+// Short, verb-first text for each doc item's own form code - the item's own
+// `label` is a full catalog sentence (e.g. "Standard declarations (debt,
+// fronting, litigation, SBD 4, POPIA, past SCM practices, addenda,
+// commitments...)"), too long for a one-line badge or fix action. Shared by
+// the dashboard's "specific next step" (lib/tenderNextStep.ts) and the
+// compliance report's own Verify/Provide/Fix rows (tenders/[id]/bid-task-status.ts)
+// so both ever say the same short thing for the same form code.
+export const SHORT_ACTION_FOR_FORM: Record<string, string> = {
+  A2: "Confirm signatory authority",
+  "A4-A23": "Complete the SBD 4 declarations",
+  A7: "Confirm CSD registration",
+  A9: "Confirm SARS tax compliance",
+  A12: "Upload B-BBEE certificate",
+  A17: "Upload PI insurance certificate",
+  A18: "Upload bank confirmation letter",
+  A20: "Upload COID letter",
+  B4: "Upload ISO 9001 certificate",
+  B6: "Confirm past performance",
+  "C1.1.1": "Sign the Form of Offer",
+  "C2.4": "Confirm pricing",
+  Briefing: "Confirm briefing attendance",
+};
+
 export type ComplianceItem = {
   key: string;
   form: string;
