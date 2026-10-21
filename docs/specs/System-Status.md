@@ -6,6 +6,22 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Msukaligwa checked, not built, 2026-10-21 ~12:40 UTC**
+(`docs/specs/Government-Buyer-Catalog-Round4-Final-Sweep.md`, `1de7af7`) - a clean, reachable
+listing with real closing dates, but 5 of its 17 rows share one identical PDF across 5 different
+tenders (the same "one PDF, several real tenders" shape as Lephalale's batches, not a Finding-42
+problem) with no reference-number field anywhere, unlike every reader built so far - a release's
+identity would need a synthesized hash/slug, a real design choice not yet made. Deprioritized in
+favour of the bigger finds and continuing phase 2.
+
+**Phase 2, sixth real batch sampled (14 of 15 downloaded, 15th hit a network reset).** No new bugs
+- two consecutive clean batches now (Finding 44 was the last one found, batch #4). Genuine key-
+personnel asks and thin-advert/scanned-document cases both continue to be handled correctly.
+Phase 2 running total: ~86 real tenders sampled across 6 batches, 3 confirmed bugs fixed (Findings
+40, 42, 44). Diminishing returns on this exact sampling method are expected now - the easily-found
+bug classes have likely been exhausted; continuing it on an ad-hoc basis going forward rather than
+as the main focus.
+
 **Standing review pass, 2026-10-21 ~12:20 UTC**: orientation via `git log` found no sibling-session
 commits since the last pass. QA re-confirmed sound: every `engine/discovery/` and `engine/general/`
 `test_*.py`, plus `npm run typecheck`/`npm run lint` in `app/`. A fifth real batch (10 of 15 sampled
