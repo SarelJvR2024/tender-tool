@@ -6,6 +6,17 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~14:15 UTC**: orientation via `git log` found no sibling-session
+commits since the last pass. A real limitation of phase 2's own method, worth naming plainly: every
+batch sampled so far hit "Tesseract OCR is not installed on this worker" on every scanned document -
+confirmed by checking `engine/worker/Dockerfile` and `.github/workflows/bridge-worker-ci.yml`
+directly that this is **only true of this sandbox, not the real production worker** (both install
+`tesseract-ocr` for real). This session's own phase-2 checks of scanned documents are therefore
+unverified for the OCR path specifically - a genuine gap in how thoroughly this pass can check
+"100%", not a production bug. Running `python3 engine/discovery/gov_sources.py --sources
+etenders_portal,lephalale,kouga,vaal_central_water` as an integration check (the new readers tested
+standalone so far, not yet through the real merge/BUYER_FAMILY path together) - in progress.
+
 **Msukaligwa checked, not built, 2026-10-21 ~12:40 UTC**
 (`docs/specs/Government-Buyer-Catalog-Round4-Final-Sweep.md`, `1de7af7`) - a clean, reachable
 listing with real closing dates, but 5 of its 17 rows share one identical PDF across 5 different
