@@ -16,7 +16,7 @@
 -- One deliberate architecture choice, consistent with this app's own
 -- existing rule (see 0077's header: "this Next.js app never holds the
 -- Supabase service-role key... only engine/*, the bridge workers, do"):
--- PayFast's ITN (ok Instant Transaction Notification) webhook arrives at our
+-- PayFast's ITN (Instant Transaction Notification) webhook arrives at our
 -- Next.js route handler with NO Supabase session at all (PayFast's own
 -- server calls ours directly) - not a service-role client, but a narrow
 -- SECURITY DEFINER RPC (apply_payfast_itn below), on the exact same
