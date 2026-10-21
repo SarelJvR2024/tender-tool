@@ -1,5 +1,5 @@
-import type { CSSProperties } from "react";
 import Link from "next/link";
+import { Inbox } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
@@ -16,6 +16,11 @@ import { OutcomeForm, type Outcome } from "./outcome-form";
 import { loadPackReviewSnapshot } from "../tenders/[id]/pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "../tenders/[id]/general-pack-review-data";
 import { computeTenderReadiness } from "../tenders/[id]/tender-readiness";
+import { StatCard } from "@/components/tt/stat-card";
+import { EmptyState } from "@/components/tt/empty-state";
+import { ErrorState } from "@/components/tt/error-state";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -55,12 +60,13 @@ type Card = {
   readiness: number | null;
 };
 
-// Same chip vocabulary as app/app/discovery/page.tsx's verdictChip().
-const VERDICT_CHIP: Record<string, { label: string; bg: string; color: string }> = {
-  strong_fit: { label: "Strong fit", bg: "#DCFCE7", color: "#15803D" },
-  possible: { label: "Possible", bg: "#FEF3C7", color: "#B45309" },
-  needs_review: { label: "Needs review", bg: "#FEF3C7", color: "#B45309" },
-  not_a_fit: { label: "Not a fit", bg: "#FEE2E2", color: "#B91C1C" },
+// Same chip vocabulary as app/app/discovery/page.tsx's verdictChip() -
+// design-system audit fix (2026-10-21): soft-tint token classes, not stale hex.
+const VERDICT_CHIP: Record<string, { label: string; chipClass: string }> = {
+  strong_fit: { label: "Strong fit", chipClass: "border-success/20 bg-success/10 text-success" },
+  possible: { label: "Possible", chipClass: "border-warning/20 bg-warning/10 text-warning" },
+  needs_review: { label: "Needs review", chipClass: "border-warning/20 bg-warning/10 text-warning" },
+  not_a_fit: { label: "Not a fit", chipClass: "border-destructive/20 bg-destructive/10 text-destructive" },
 };
 
 const ACTION_LABEL: Record<PipelineStage, string> = {
@@ -91,13 +97,14 @@ function shortDate(d: string | null): string {
   return d ? new Date(d).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : "-";
 }
 
-// Card spec (item 4): "closing date with colour (red < 3d, amber < 7d)".
-function closingColor(left: number | null, closingDate: string | null): string {
-  if (left === null) return "#8A93A0";
-  if (isPast(closingDate)) return "#B91C1C";
-  if (left < 3) return "#B91C1C";
-  if (left < 7) return "#B45309";
-  return "#5B6472";
+// Card spec (item 4): "closing date with colour (red < 3d, amber < 7d)" -
+// design-system audit fix (2026-10-21): a token class, not a literal hex.
+export function closingColorClass(left: number | null, closingDate: string | null): string {
+  if (left === null) return "text-muted-foreground";
+  if (isPast(closingDate)) return "text-destructive";
+  if (left < 3) return "text-destructive";
+  if (left < 7) return "text-warning";
+  return "text-muted-foreground";
 }
 
 export default async function PipelinePage({
@@ -108,6 +115,27 @@ export default async function PipelinePage({
   const { error: actionError } = await searchParams;
   const supabase = await createClient();
 
+  try {
+    return await renderPipeline(supabase, actionError);
+  } catch (e) {
+    console.error("pipeline page failed to load", e);
+    return (
+      <AppShell>
+        <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6">
+          <ErrorState
+            action={
+              <Link href="/pipeline" className={buttonVariants({ variant: "outline", className: "min-h-11" })}>
+                Retry
+              </Link>
+            }
+          />
+        </div>
+      </AppShell>
+    );
+  }
+}
+
+async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>, actionError: string | undefined) {
   const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows }, { data: outcomeRows }] = await Promise.all([
     supabase
       .from("tenders")
@@ -189,9 +217,9 @@ export default async function PipelinePage({
   // a pack; Submitted/Awarded/Lost are already past needing it). Same cached
   // snapshot the tender workspace's own header score reads (prompt 9) - never
   // re-derived, and never computed for every card on the board, since a full
-  // Pack Review read per tender is real Supabase cost (same N+1 concern
-  // flagged for Home's own "specific next step", app/AGENTS.md "Home
-  // cockpit").
+  // Pack Review read is real, multi-query Supabase cost per tender (same N+1
+  // concern already flagged for Home's own "specific next step", see
+  // "Home cockpit" above).
   const biddingCards = cards.filter((c) => c.stage === "bidding");
   const readinessScores = await Promise.all(
     biddingCards.map(async (c) => {
@@ -243,30 +271,30 @@ export default async function PipelinePage({
 
   return (
     <AppShell>
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Bids</h1>
-          <Link href="/pipeline/pricing" style={{ fontSize: 13, fontWeight: 600, color: "#D97706", textDecoration: "none" }}>
+      <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6 sm:px-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-3">
+          <h1 className="mb-1 font-display text-xl font-medium text-foreground sm:text-2xl">Bids</h1>
+          <Link href="/pipeline/pricing" className="min-h-11 content-center text-sm font-semibold text-accent no-underline hover:underline">
             Pricing history →
           </Link>
         </div>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
+        <p className="mb-4 text-sm text-muted-foreground">
           Every tender you&apos;re tracking, by stage. Open a card for its workspace; move it on when something changes.
         </p>
 
         {(error || actionError) && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error ? "Couldn't load tenders - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 20 }}>
-          <StatCard label="Active bids" value={activeBids} color="#16233B" />
-          <StatCard label="Total value being bid" value={formatRand(totalValueBeingBid)} color="#16233B" />
-          <StatCard label="Submitted this month" value={submittedThisMonth} color="#16233B" />
-          <StatCard label="Win rate" value={winRate === null ? "-" : `${winRate}%`} color={winRate !== null && winRate >= 50 ? "#15803D" : "#16233B"} />
+        <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <StatCard label="Active bids" value={activeBids} />
+          <StatCard label="Total value being bid" value={formatRand(totalValueBeingBid)} />
+          <StatCard label="Submitted this month" value={submittedThisMonth} />
+          <StatCard label="Win rate" value={winRate === null ? "-" : `${winRate}%`} tone={winRate !== null && winRate >= 50 ? "success" : "default"} />
         </div>
-        <p style={{ fontSize: 11, color: "#8A93A0", margin: "-12px 0 20px" }}>
+        <p className="-mt-3 mb-5 text-xs text-muted-foreground">
           {submittedToDate} submitted to date · {byStage.won.length} won · {byStage.lost.length} lost
         </p>
 
@@ -279,71 +307,109 @@ export default async function PipelinePage({
             <TabsTrigger value="board">Board</TabsTrigger>
             <TabsTrigger value="list">List</TabsTrigger>
           </TabsList>
+
           <TabsContent value="list">
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                <thead>
-                  <tr style={{ textAlign: "left", color: "#5B6472", borderBottom: "1px solid #E3E6EA" }}>
-                    <th style={{ padding: "6px 8px" }}>Tender</th>
-                    <th style={{ padding: "6px 8px" }}>Client</th>
-                    <th style={{ padding: "6px 8px" }}>Stage</th>
-                    <th style={{ padding: "6px 8px" }}>Value</th>
-                    <th style={{ padding: "6px 8px" }}>Closing</th>
-                    <th style={{ padding: "6px 8px" }}>Owner</th>
-                    <th style={{ padding: "6px 8px" }}>Readiness</th>
-                  </tr>
-                </thead>
-                <tbody>
+            {cards.length === 0 ? (
+              <div className="rounded-lg border border-border bg-card">
+                <EmptyState icon={Inbox} title="Nothing tracked yet" description="Tenders you decide to pursue from Opportunities land here." />
+              </div>
+            ) : (
+              <>
+                {/* Desktop/tablet: a real table. Mobile: a stacked card list -
+                    a squeezed 7-column table cuts content off on a phone
+                    (design-system audit fix, 2026-10-21). */}
+                <div className="hidden overflow-hidden rounded-lg border border-border md:block">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="border-b border-border text-left text-muted-foreground">
+                        <th className="px-3 py-2 font-medium">Tender</th>
+                        <th className="px-3 py-2 font-medium">Client</th>
+                        <th className="px-3 py-2 font-medium">Stage</th>
+                        <th className="px-3 py-2 font-medium">Value</th>
+                        <th className="px-3 py-2 font-medium">Closing</th>
+                        <th className="px-3 py-2 font-medium">Owner</th>
+                        <th className="px-3 py-2 font-medium">Readiness</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {cards.map((c) => {
+                        const left = daysUntil(c.closingDate);
+                        const meta = STAGE_META[c.stage];
+                        const owner = c.economics?.submitted_by_person_id ? peopleById.get(c.economics.submitted_by_person_id) : null;
+                        return (
+                          <tr key={c.id} className="border-b border-border last:border-0 hover:bg-muted/50">
+                            <td className="px-3 py-2">
+                              <Link href={`/tenders/${c.id}`} className="font-semibold text-foreground no-underline hover:underline">
+                                {c.contractNo ?? c.title}
+                              </Link>
+                            </td>
+                            <td className="px-3 py-2 text-muted-foreground">{c.buyer}</td>
+                            <td className="px-3 py-2">
+                              <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold", meta.chipClass)}>{meta.label}</span>
+                            </td>
+                            <td className="px-3 py-2 text-foreground">{formatRand(toNumber(c.economics?.submitted_price_zar))}</td>
+                            <td className={cn("px-3 py-2", closingColorClass(left, c.closingDate))}>{c.closingDate ? shortDate(c.closingDate) : "-"}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{owner ?? "-"}</td>
+                            <td className="px-3 py-2 text-muted-foreground">{c.readiness !== null ? `${c.readiness}%` : "-"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="flex flex-col gap-2 md:hidden">
                   {cards.map((c) => {
                     const left = daysUntil(c.closingDate);
                     const meta = STAGE_META[c.stage];
                     const owner = c.economics?.submitted_by_person_id ? peopleById.get(c.economics.submitted_by_person_id) : null;
                     return (
-                      <tr key={c.id} style={{ borderBottom: "1px solid #ECEEF1" }}>
-                        <td style={{ padding: "8px" }}>
-                          <Link href={`/tenders/${c.id}`} style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
-                            {c.contractNo ?? c.title}
-                          </Link>
-                        </td>
-                        <td style={{ padding: "8px", color: "#4B5563" }}>{c.buyer}</td>
-                        <td style={{ padding: "8px" }}>
-                          <span style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 700, background: meta.bg, color: meta.color }}>{meta.label}</span>
-                        </td>
-                        <td style={{ padding: "8px", color: "#16233B" }}>{formatRand(toNumber(c.economics?.submitted_price_zar))}</td>
-                        <td style={{ padding: "8px", color: closingColor(left, c.closingDate) }}>{c.closingDate ? shortDate(c.closingDate) : "-"}</td>
-                        <td style={{ padding: "8px", color: "#4B5563" }}>{owner ?? "-"}</td>
-                        <td style={{ padding: "8px", color: "#4B5563" }}>{c.readiness !== null ? `${c.readiness}%` : "-"}</td>
-                      </tr>
+                      <Link
+                        key={c.id}
+                        href={`/tenders/${c.id}`}
+                        className="rounded-lg border border-border bg-card p-3 text-inherit no-underline hover:bg-muted/50"
+                      >
+                        <div className="mb-1 flex items-start justify-between gap-2">
+                          <span className="font-mono text-xs font-semibold text-foreground">{c.contractNo ?? c.title}</span>
+                          <span className={cn("shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold", meta.chipClass)}>{meta.label}</span>
+                        </div>
+                        <div className="mb-1 text-xs text-muted-foreground">{c.buyer}</div>
+                        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                          <span className="font-semibold text-foreground">{formatRand(toNumber(c.economics?.submitted_price_zar))}</span>
+                          <span className={closingColorClass(left, c.closingDate)}>{c.closingDate ? shortDate(c.closingDate) : "No closing date"}</span>
+                          {owner && <span className="text-muted-foreground">Owner: {owner}</span>}
+                          {c.readiness !== null && <span className="text-muted-foreground">Readiness: {c.readiness}%</span>}
+                        </div>
+                      </Link>
                     );
                   })}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              </>
+            )}
           </TabsContent>
+
           <TabsContent value="board">
-            {/* The board scrolls sideways on its own on a phone; the page itself never does.
-                Nothing used to hint that Won/Lost sit off-screen, so a right-edge
-                fade (hidden once the board actually fits, i.e. desktop widths) +
-                a small text cue give the scroll somewhere to point at. */}
-            <div style={{ position: "relative" }}>
-              <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 8 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(220px, 1fr))", gap: 12, alignItems: "start" }}>
+            {/* Stacked card list on mobile/tablet (every column full-width,
+                one after another); only becomes horizontally-scrolling
+                columns from lg up, where there's room for 5 side by side
+                without cutting content off (design-system audit fix,
+                2026-10-21 - was a fixed 5-column grid at every width). */}
+            <div className="relative">
+              <div className="flex flex-col gap-3 lg:flex-row lg:overflow-x-auto lg:pb-2" style={{ WebkitOverflowScrolling: "touch" }}>
                 {PIPELINE_STAGES.map((stage) => {
                   const meta = STAGE_META[stage];
                   const column = byStage[stage];
                   return (
-                    <section key={stage} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: 10 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "2px 4px 0" }}>
-                        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: meta.bg, color: meta.color }}>
-                          {meta.label}
-                        </span>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: "#5B6472" }}>{column.length}</span>
+                    <section key={stage} className="rounded-xl border border-border bg-card p-2.5 lg:min-w-[220px] lg:flex-1">
+                      <div className="flex items-center justify-between gap-2 px-1 pt-0.5">
+                        <span className={cn("inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold", meta.chipClass)}>{meta.label}</span>
+                        <span className="text-xs font-semibold text-muted-foreground">{column.length}</span>
                       </div>
-                      <div style={{ fontSize: 11, color: "#8A93A0", padding: "6px 4px 10px" }}>{meta.hint}</div>
+                      <div className="px-1 py-1.5 text-[11px] text-muted-foreground">{meta.hint}</div>
 
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div className="flex flex-col gap-2">
                         {column.length === 0 && (
-                          <div style={{ fontSize: 12, color: "#8A93A0", padding: "14px 8px", textAlign: "center", border: "1px dashed #E3E6EA", borderRadius: 9 }}>
+                          <div className="rounded-lg border border-dashed border-border px-2 py-3.5 text-center text-xs text-muted-foreground">
                             {EMPTY_COPY[stage]}
                           </div>
                         )}
@@ -353,18 +419,20 @@ export default async function PipelinePage({
                       </div>
 
                       {stage === "found" && (
-                        <Link href="/discovery" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#D97706", textDecoration: "none", padding: "10px 4px 2px" }}>
+                        <Link href="/discovery" className="block min-h-11 content-center px-1 pt-2 text-xs font-semibold text-accent no-underline hover:underline">
                           Find more in Opportunities →
                         </Link>
                       )}
                     </section>
                   );
                 })}
-                </div>
               </div>
-              {/* Right-edge fade: the only hint, on narrower viewports, that
-                  Won/Lost sit off-screen to the right. */}
-              <ScrollFade fadeColor="255, 255, 255" minWidthToHide={1180} />
+              {/* Right-edge fade: only relevant once columns actually sit
+                  side by side (lg and up) - below that, the board is a
+                  plain vertical stack with nothing to scroll past. */}
+              <div className="hidden lg:block">
+                <ScrollFade fadeColor="255, 255, 255" minWidthToHide={1180} />
+              </div>
             </div>
           </TabsContent>
         </Tabs>
@@ -389,66 +457,54 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
   const back = PREVIOUS_STAGE[card.stage];
   const owner = card.economics?.submitted_by_person_id ? people.find((p) => p.id === card.economics!.submitted_by_person_id)?.name ?? null : null;
 
-  let dateLine: { text: string; color: string };
+  let dateLine: { text: string; className: string };
   if (!open) {
     const when = card.stage === "submitted" ? card.submittedAt : card.stageChangedAt;
     dateLine = {
       text: `${card.stage === "submitted" ? "Submitted" : STAGE_META[card.stage].label} ${shortDate(when)}`,
-      color: "#5B6472",
+      className: "text-muted-foreground",
     };
   } else if (left === null) {
-    dateLine = { text: "No closing date", color: "#8A93A0" };
+    dateLine = { text: "No closing date", className: "text-muted-foreground" };
   } else if (isPast(card.closingDate)) {
     // Usually means it was handed in and just needs moving to Submitted.
-    dateLine = { text: `Closed ${shortDate(card.closingDate)}`, color: "#B91C1C" };
+    dateLine = { text: `Closed ${shortDate(card.closingDate)}`, className: "text-destructive" };
   } else {
-    dateLine = { text: `Closes ${shortDate(card.closingDate)} · ${left} day${left === 1 ? "" : "s"} left`, color: closingColor(left, card.closingDate) };
+    dateLine = { text: `Closes ${shortDate(card.closingDate)} · ${left} day${left === 1 ? "" : "s"} left`, className: closingColorClass(left, card.closingDate) };
   }
 
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "10px 12px" }}>
-      <Link href={`/tenders/${card.id}`} style={{ display: "block", textDecoration: "none" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
-          {card.contractNo && (
-            <span style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#16233B", overflowWrap: "anywhere" }}>{card.contractNo}</span>
-          )}
-          {verdict && (
-            <span style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: verdict.bg, color: verdict.color }}>{verdict.label}</span>
-          )}
+    <div className="rounded-lg border border-border bg-card p-2.5">
+      <Link href={`/tenders/${card.id}`} className="block text-inherit no-underline">
+        <div className="mb-1 flex flex-wrap items-center gap-1.5">
+          {card.contractNo && <span className="font-mono text-[11px] font-semibold break-words text-foreground">{card.contractNo}</span>}
+          {verdict && <span className={cn("rounded-full border px-2 py-0.5 text-[10px] font-semibold", verdict.chipClass)}>{verdict.label}</span>}
           {card.wasVerdict && (
             <span
               title="Re-assessed: the Discovery verdict got worse since this tender was found - see its Discovery entry"
-              style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 700, background: card.downgradeOpen ? "#FEE2E2" : "#FFFFFF", color: card.downgradeOpen ? "#B91C1C" : "#5B6472" }}
+              className={cn(
+                "rounded-full border px-2 py-0.5 text-[10px] font-bold",
+                card.downgradeOpen ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-border bg-card text-muted-foreground",
+              )}
             >
-              {card.downgradeOpen ? "\u26A0 " : ""}Re-assessed · was {VERDICT_CHIP[card.wasVerdict]?.label ?? card.wasVerdict}
+              {card.downgradeOpen ? "⚠ " : ""}Re-assessed · was {VERDICT_CHIP[card.wasVerdict]?.label ?? card.wasVerdict}
             </span>
           )}
         </div>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 2, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-          {card.title}
-        </div>
-        <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 4 }}>{card.buyer}</div>
-        <div style={{ fontSize: 11, fontWeight: 600, color: dateLine.color }}>{dateLine.text}</div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+        <div className="mb-0.5 line-clamp-3 text-sm font-semibold text-foreground">{card.title}</div>
+        <div className="mb-1 text-xs text-muted-foreground">{card.buyer}</div>
+        <div className={cn("text-[11px] font-semibold", dateLine.className)}>{dateLine.text}</div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
           {card.economics?.submitted_price_zar != null && (
-            <span style={{ fontSize: 11, fontWeight: 600, color: "#16233B" }}>{formatRand(toNumber(card.economics.submitted_price_zar))}</span>
+            <span className="text-[11px] font-semibold text-foreground">{formatRand(toNumber(card.economics.submitted_price_zar))}</span>
           )}
           {card.readiness !== null && (
             <span
               title="Readiness score"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                justifyContent: "center",
-                minWidth: 20,
-                height: 20,
-                padding: "0 5px",
-                borderRadius: 100,
-                fontSize: 10,
-                fontWeight: 700,
-                background: card.readiness === 100 ? "#DCFCE7" : card.readiness >= 50 ? "#FEF3C7" : "#FEE2E2",
-                color: card.readiness === 100 ? "#15803D" : card.readiness >= 50 ? "#B45309" : "#B91C1C",
-              }}
+              className={cn(
+                "inline-flex min-w-5 items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold",
+                card.readiness === 100 ? "bg-success/15 text-success" : card.readiness >= 50 ? "bg-warning/10 text-warning" : "bg-destructive/10 text-destructive",
+              )}
             >
               {card.readiness}%
             </span>
@@ -456,7 +512,7 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
           {owner && (
             <span
               title={`Owner: ${owner}`}
-              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: "50%", background: "#E8EBF1", color: "#16233B", fontSize: 9, fontWeight: 700 }}
+              className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground"
             >
               {initials(owner)}
             </span>
@@ -465,7 +521,7 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
       </Link>
 
       {card.stage !== "submitted" && (NEXT_STAGES[card.stage].length > 0 || back) && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 10, paddingTop: 8, borderTop: "1px solid #ECEEF1" }}>
+        <div className="mt-2.5 flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
           {NEXT_STAGES[card.stage].map((next) => (
             <StageButton key={next} tenderId={card.id} stage={next} primary />
           ))}
@@ -473,7 +529,7 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
         </div>
       )}
       {card.stage === "submitted" && back && (
-        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #ECEEF1" }}>
+        <div className="mt-2.5 border-t border-border pt-2">
           <StageButton tenderId={card.id} stage={back} />
         </div>
       )}
@@ -499,40 +555,33 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
 
 function StageButton({ tenderId, stage, primary = false }: { tenderId: string; stage: PipelineStage; primary?: boolean }) {
   const label = primary ? ACTION_LABEL[stage] : "← Back";
-  const style: CSSProperties = primary
-    ? {
-        // This is the single action that actually moves a tender forward on
-        // this board - on a phone it's tapped once per card, repeatedly down
-        // a scrolling column, so it gets the same 44px minimum as every other
-        // primary button in the app (company page, task-add), not the 32px
-        // used for lighter secondary controls like the "<- Back" link below.
-        minHeight: 44,
-        padding: "0 14px",
-        borderRadius: 8,
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: "pointer",
-        border: stage === "won" ? "1px solid #15803D" : stage === "lost" ? "1px solid #B91C1C" : "none",
-        background: stage === "won" ? "#DCFCE7" : stage === "lost" ? "#FEE2E2" : "#16233B",
-        color: stage === "won" ? "#15803D" : stage === "lost" ? "#B91C1C" : "#FFFFFF",
-      }
-    : { minHeight: 32, padding: "0 6px", border: "none", background: "transparent", fontSize: 12, color: "#8A93A0", cursor: "pointer" };
+  // The forward action gets the 44px minimum every primary button in this
+  // app uses (it's tapped once per card, repeatedly down a scrolling
+  // column); "Back" is a lighter secondary control but still keeps a real
+  // 44px tap target, just a visually smaller one (design-system audit fix,
+  // 2026-10-21: every button on this screen meets the touch-target minimum,
+  // not only the primary one).
+  const toneClass = primary
+    ? stage === "won"
+      ? "border border-success/30 bg-success/15 text-success"
+      : stage === "lost"
+        ? "border border-destructive/20 bg-destructive/10 text-destructive"
+        : "bg-primary text-primary-foreground"
+    : "bg-transparent text-muted-foreground hover:text-foreground";
   return (
     <form action={moveTenderStage}>
       <input type="hidden" name="tender_id" value={tenderId} />
       <input type="hidden" name="stage" value={stage} />
-      <button type="submit" style={style} title={primary ? undefined : `Move back to ${STAGE_META[stage].label}`}>
+      <button
+        type="submit"
+        title={primary ? undefined : `Move back to ${STAGE_META[stage].label}`}
+        className={cn(
+          "min-h-11 cursor-pointer rounded-lg px-3.5 text-xs font-semibold",
+          toneClass,
+        )}
+      >
         {label}
       </button>
     </form>
-  );
-}
-
-function StatCard({ label, value, color }: { label: string; value: number | string; color: string }) {
-  return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "13px 16px" }}>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 3 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
-    </div>
   );
 }
