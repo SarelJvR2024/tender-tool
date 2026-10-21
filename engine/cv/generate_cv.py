@@ -58,6 +58,17 @@ from suggest_pack import score_candidate, years_experience_at  # noqa: E402
 
 SANRAL_MAX_PROJECTS_SUMMARY = 3  # matches Form B1.1's own stated cap exactly
 
+# Same constant/pattern as engine/compliance/watch_deadlines.py's own SAST
+# (that file's own comment has the full reasoning): a bridge worker container
+# has no TZ set and runs in UTC by default, so a naive datetime.date.today()
+# is one calendar day behind the real SAST date for the whole 00:00-01:59
+# SAST window every day. Here that feeds years_experience_at()'s rounded
+# years-of-experience figure printed on a generated CV (suggest_pack.py:
+# round((closing_date - grad).days / 365.25)) - a one-day shift flips the
+# rounded year count whenever a person's initial_graduated date sits near
+# the rounding boundary, confirmed 2026-10-20 (same bug class as Finding 37).
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
 
 _XML_INVALID_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
 
@@ -304,7 +315,7 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
     # passes None) or an unreadable one raised TypeError/ValueError here and
     # failed the whole CV; count experience to today instead, like a
     # standard CV, and say so in the field log.
-    closing_date, as_of = datetime.date.today(), "today"
+    closing_date, as_of = datetime.datetime.now(SAST).date(), "today"
     if tender_ctx and tender_ctx.get("closing_date"):
         try:
             closing_date = datetime.date.fromisoformat(str(tender_ctx["closing_date"])[:10])

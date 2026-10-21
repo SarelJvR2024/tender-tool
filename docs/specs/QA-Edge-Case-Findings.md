@@ -2500,3 +2500,303 @@ have to re-discover them: `cv/generate_cv.py:307`, `pack_generator/suggest_pack.
 `company_documents.py:298`, `fingerprint.py:181`, `discovery/etenders_national.py:275`,
 `discovery/gov_sources.py:205`, `pack/harness_pack.py:93`, `pack/pdf_merge.py:118`,
 `pack/assemble_pack.py:506`, `pack/process_pack_jobs.py:862`.
+
+## 2026-10-21 (fifty-third run): CV engine - closing out one of last cycle's own deferred items, with an actual rounding-boundary trigger confirmed, not assumed
+
+**Why this area:** CV engine was the one remaining area without a fresh adversarial pass of my
+own this session (the enterprise audit covered `generate_cv.py`/`process_cv_jobs.py` for path
+traversal, raw-error leaks, null crashes and a control-character failure already). Rather than
+re-tread that ground, closed out `cv/generate_cv.py:307` - one of the 10 naive `date.today()`
+instances the fifty-first run's own repo-wide grep found and deliberately deferred, on the
+reasoning that each needed its own look before deciding whether fixing it was worth the churn.
+Took that look.
+
+### Finding 38 (CONFIRMED, FIXED, moderate - a real, narrow rounding-boundary trigger, not a hypothetical one)
+
+**Where:** `engine/cv/generate_cv.py`, `build_sanral_keyperson()`'s Form B2.1 fallback date.
+
+**What was tested:** when a CV is built outside a specific tender context (the standard,
+non-tender CV path), the "years of relevant experience" figure is computed "as of today" using
+`datetime.date.today()` - the same naive-UTC bug class as Finding 37, but feeding a rounded
+numeric computation (`suggest_pack.years_experience_at()`: `round((closing_date - grad).days /
+365.25)`) rather than a simple date-string comparison. A one-day shift from the timezone bug only
+changes the OUTPUT when the true value sits within about 1/365.25 of a half-integer rounding
+boundary - so, unlike Finding 37 (which fires for ANY document expiring on the real SAST today,
+a daily-occurring trigger), this needed checking whether a real trigger date actually exists, not
+assuming one does from the bug class alone. Wrote a direct search across 60 years of possible
+`initial_graduated` dates comparing the naive-UTC and correct-SAST computations under a simulated
+clock inside the bad window (UTC 2026-10-20 23:30 = SAST 2026-10-21 01:30): confirmed 60 real
+trigger dates in that 60-year span (one date per year, drifting slightly with leap years - e.g.
+`initial_graduated = "2026-04-21"` flips `0` -> `1`). Not a one-in-a-million theoretical edge
+case - a real person whose qualification date happens to land on the one calendar day per year
+this flips would get the wrong number printed on an actual generated CV, specifically during a CV
+build that happens to fall in a 2-hour window once a day.
+
+**Fix:** added the same local `SAST` constant pattern as Finding 37 (and `watch_deadlines.py`
+before it) to `generate_cv.py`; the fallback `closing_date` is now
+`datetime.datetime.now(SAST).date()`.
+
+**Verification:** re-ran the direct 60-year search against the fixed computation - confirmed the
+simulated-clock SAST date now matches the real SAST date exactly. Added a new test to
+`engine/cv/test_generate_cv.py`: runs the REAL `build_sanral_keyperson()` with a person whose
+`initial_graduated` is the confirmed trigger date (`2026-04-21`) and the system clock
+monkeypatched into the bad window, and checks the actual provenance-logged years figure. **Proved
+the test actually catches the regression** (first attempt didn't - monkeypatching only
+`datetime.datetime.now` missed a reverted-to-`date.today()` code path entirely, a real near-miss
+in the test's own design, caught by deliberately reverting the fix and seeing `0 failure(s)`
+instead of the expected failure; fixed the test to patch `datetime.date.today` too, re-reverted
+the fix, confirmed the corrected test now fails exactly as expected, restored the fix, confirmed
+clean). Ran `engine/cv/test_extract_cv_fields.py` and `process_cv_jobs.py --self-test` (the real
+end-to-end CV-generation smoke test) for regression safety - both still pass. `python3 -m
+py_compile` clean.
+
+**Still deferred, unchanged:** the other 9 naive `date.today()` instances from the fifty-first
+run's own list - each would need the same "does a real trigger actually exist" check before
+fixing, not assumed from the bug class alone.
+
+## 2026-10-21 (fifty-fourth run): closing out more of the deferred naive-UTC-date list - a real submission pack could silently omit a document's own expiry warning
+
+**Why this area:** continuing the deliberate, one-by-one triage of the 9 remaining naive
+`date.today()` instances logged by the fifty-first run's own repo-wide grep. Gave each of the 9
+its own real look (per the fifty-third run's own stated discipline) rather than fixing or
+dismissing them as a batch.
+
+**Triage results, each checked individually:**
+- `pack_generator/suggest_pack.py:179`, `pack/harness_pack.py:93`, `pack/assemble_pack.py:506`,
+  `fingerprint.py:181` - all four are cosmetic/internal-only: a "generated on" provenance
+  timestamp in a JSON/PDF-cover label never compared against anything, a test-harness-only
+  confirmation stamp (`admin_harness.py --pack`, not the production path), and a template-change
+  bookkeeping field. A one-day shift during the bad window prints a slightly-off label or
+  bookkeeping date, with no comparison logic anywhere reading it back - checked by reading every
+  call site, not assumed. Not fixed: no real consequence to close.
+- `company_documents.py:298` - a generated document's own printed date label, same "cosmetic
+  label" shape as the above (prints a date string, no comparison). Not fixed.
+- `discovery/etenders_national.py:275`, `discovery/gov_sources.py:209` - both are a discovery
+  feed's own "fetch releases published in the last N days" window upper bound. A one-day shift
+  could transiently exclude a release published on the exact real-today from one run's results -
+  but these are recurring, overlapping scheduled polls (same family as `watch_new_tenders.py`,
+  already fixed in the enterprise audit), so a release missed by one run's narrow window is
+  self-healing on the very next run. Lower priority than a one-shot event; logged, not fixed this
+  run, to keep this pass's scope to the two confirmed real, non-self-healing findings below.
+- `pack/pdf_merge.py:118` and `pack/process_pack_jobs.py:862` - both confirmed real, see Finding
+  39 below.
+
+### Finding 39 (CONFIRMED, FIXED, severe - a real submission pack's own compliance warning could go silently missing)
+
+**Where:** `engine/pack/pdf_merge.py`, `expiry_warning()`; `engine/pack/process_pack_jobs.py`,
+`sync_position_suggestions()`.
+
+**What was tested:** `expiry_warning()` is the function that decides whether a dated document
+(COID, B-BBEE proof, insurance, etc.) gets flagged "EXPIRED" in the assembled SANRAL submission
+pack's own warnings section (`app/lib/tenderCompliance.ts`'s `validityAtClosing()` rule, cross-
+referenced in this function's own docstring). It used `today = today or datetime.date.today()` -
+the naive-UTC bug class from Finding 37/38. Unlike Finding 37's exact-expiry-date trigger, this
+one is an inequality (`exp < today`): during the 00:00-01:59 SAST window, `today` still thinks
+it's real-yesterday, so a document that ACTUALLY expired real-yesterday (`exp == real_yesterday
+== naive_today`) evaluates `exp < naive_today` as False - no warning at all, for a document that
+is, by the real calendar, already expired. Reproduced directly: `expiry_warning("2026-10-20",
+None)` under the simulated bad-window clock (UTC 2026-10-20 23:30 = SAST 2026-10-21 01:30)
+returned `None` (no warning) pre-fix, when the real SAST date is already 2026-10-21 and the
+document expired the day before.
+
+`sync_position_suggestions()` (candidate ranking for SANRAL tender packs) had the same bug at
+`today = today or datetime.date.today()`, with two effects: (1) a tender that closed real-
+yesterday kept getting re-ranked for one extra cycle (`closing_date < today` false-negative,
+wasted work, not wrong data); (2) a tender with NO closing date on file at all falls back to the
+(possibly wrong) `today` as the date `rank_candidates()` scores experience-at-closing against -
+the identical rounding-boundary risk as Finding 38, one layer removed into candidate ranking
+order rather than a printed CV figure.
+
+**Fix:** both files now import and reuse `generate_cv.SAST` (via `pdf_merge.py`'s existing
+`from generate_cv import _convert_to_pdf` import, extended to also pull `SAST`; `process_pack_jobs.py`
+already imports from `pdf_merge`, extended the same way) rather than redefining a fourth local
+copy - `today = today or datetime.datetime.now(SAST).date()` in both places.
+
+**Verification:** new `engine/pack/test_pdf_merge.py` (first dedicated test file for either
+module): 3 checks - `expiry_warning()` now correctly flags the real-yesterday-expired document
+AND still does NOT falsely flag a document expiring exactly today (the deliberate mirror check,
+proving the fix isn't one-sided); `sync_position_suggestions()` against a small `FakeClient`
+(one tender closed real-yesterday) confirms it's now correctly skipped rather than re-ranked.
+**Proved all 3 actually catch the regression**, not just that they pass: the FIRST version of
+this test suite had the identical near-miss as Finding 38's own test - patching only
+`datetime.datetime.now` missed the reverted `date.today()` code path entirely (`0 failure(s)`
+when 2 were expected); caught this by deliberately reverting both fixes and checking the suite
+actually went red, fixed the test to patch `datetime.date.today` too, re-reverted, confirmed the
+corrected suite now genuinely fails (2 failures, including the exact wrong pre-fix ranking
+output), restored both fixes, confirmed clean again. Ran `engine/test_form_field_audit.py` and
+`engine/general/test_general_bridge.py` (both exercise adjacent pack-generation code) for
+regression safety - both still pass unchanged. `python3 -m py_compile` clean on all three
+changed files. Not run this pass: a full `admin_harness.py --pack` end-to-end LibreOffice build
+(several minutes per the enterprise audit's own prior timing) - the fix is narrowly scoped to two
+pure comparison functions already covered by direct reproduction, and the existing suites that do
+exercise the surrounding pack-assembly code show no regression.
+
+**Still deferred:** `etenders_national.py`/`gov_sources.py`'s self-healing discovery-window
+instances, logged above rather than fixed this run.
+
+### Finding 40 (CONFIRMED, FIXED, moderate - a real ESKOM form named in the docs never matched)
+
+**Where:** `engine/general/requirements.py`, `IN_TEXT_BUYER_FORMS`.
+
+**Context:** Sarel asked (2026-10-20/21) to go through advertised tenders and make sure the
+requirements engine understands each one's requirements, not just the curated samples already in
+`templates/general_samples/`. Ran a real, randomly-sampled batch of 12 currently-advertised eTenders
+tenders (diverse buyers: national departments, municipalities, SOEs) through the real
+`extract_requirements()`, downloading each one's actual published documents first - not an
+AI-summarized read, the real files. 11 of 12 ran cleanly (no crash, no silent empty result); most of
+the "thin" results turned out to be correct, not bugs (one eTenders listing genuinely has only the
+advert, not the full tender; one tender routes submission entirely through SAP Ariba with no
+document-based requirements at all; one PDF is a genuine scanned image with no text layer, correctly
+flagged unreadable rather than guessed).
+
+**What was tested:** One ESKOM tender (E3703CXMWP, "NMC/RMC Atmos Maintenance and Support", 7 real
+documents) came back with almost nothing extracted - no SBD/MBD forms (correct, ESKOM doesn't use
+them), but also none of ESKOM's own forms, despite `requirements.py`'s own module docstring
+explicitly naming "Form A" as one of them. Searched the real document text directly: "Form A
+(Enquiry/Contract/Quality Requirements for Supplier Quality Management)" is named 11 times across
+the corpus, including "The existing and/or potential suppliers must complete, sign and return Form
+A with the other returnables as listed in the List of Tender Returnable documents" - a real,
+explicit, mandatory returnable with no corresponding entry in `IN_TEXT_BUYER_FORMS` at all. A bidder
+using this engine today would submit without it and never know it was asked for.
+
+**Fix:** added `eskom_form_a` to `IN_TEXT_BUYER_FORMS`, anchored on the parenthetical that actually
+names the form (`FORM\s+A\s*\(\s*(?:ENQUIRY|TENDER)\s*(?:AND|/)?\s*CONTRACT\s*(?:AND|/)?\s*QUALITY\s+
+REQUIREMENTS\s+FOR\s+SUPPLIER\s+QUALITY\s+MANAGEMENT`) rather than bare "Form A" - that string alone
+is too generic and would false-positive on any other buyer's unrelated "Form A".
+
+**Verification:** the real 7-document corpus is now committed as a new `general_harness.py` sample,
+`templates/general_samples/eskom_e3703cxmwp/` (provenance recorded in `sources.json`, same PDDL
+licence/convention as every other sample there), with an `EXPECTED` entry pinning
+`buyer_forms_any: ["eskom_form_a"]` plus the real returnables found (`bbbee_proof`, `cidb`,
+`cipc_documents`, `financial_statements`) and role (`contractor.project_manager`).
+**Proved the regression test actually catches the bug**: reverted the fix, ran
+`general_harness.py --only eskom_e3703cxmwp` - 1 failed ("none of the buyer forms ['eskom_form_a']
+found"), all 7 company baselines flagged `changed ['buyer_forms']`; restored the fix, re-ran - clean
+again, baseline established for all 7 test companies. Full `general_harness.py` (all 10 samples x 7
+companies, including pack builds) and `test_requirements.py` both still pass with no regression
+elsewhere.
+
+**Broader context, not yet acted on:** this was one random sample of 12 current tenders out of
+2,200+ on eTenders alone (plus every direct-site reader this session has built). One confirmed gap
+found this way in a random dozen suggests more exist; this verification approach (real current
+tenders, real documents, run through the real engine, investigate every thin/empty/unexpected
+result rather than assume it's correct) is the one to keep using, not a one-off.
+
+## 2026-10-21 (fifty-fifth run): Discovery - two real, unrelated South African municipalities could be scored as the same place, inflating a company's estimated tender score
+
+**Why this area:** a parallel sibling session had started verifying `requirements.py` against
+real current tenders (Finding 40), so picked a different corner of discovery to avoid duplicating
+that effort: `score_outlook.py` (817 lines, Discovery's own fit-scoring engine) had no dedicated
+test file at all - only indirect coverage as a dependency of fan-out/downgrade tests, never a
+direct adversarial pass of its own internals. Read the whole file; `extract_locality`/
+`match_locality` (office-location preference-point matching against a tender's own text) stood
+out as plain-text fuzzy matching across real, varied South African place names - exactly the
+"different company shapes" territory this review targets, since a company's own office locations
+are as varied as the tenders' own locality wording.
+
+### Finding 41 (CONFIRMED, FIXED, severe - a real score-inflation bug reachable by ordinary geography, not contrived input)
+
+**Where:** `engine/discovery/score_outlook.py`, `_area_matches()`.
+
+**What was tested:** `_area_matches()`'s substring-match leg compares `_norm_area()`'s output -
+which strips every space and non-letter character, leaving bare concatenated letters with zero
+word-boundary information - using plain Python `in` substring testing (`len(v) >= 6 and (v in a
+or a in v)`). Normalized place names in South Africa frequently contain OTHER, completely
+unrelated place names as a coincidental run of letters once spaces are gone. Searched a list of
+~145 real district/local municipality names across all 9 provinces (built from this repo's own
+`docs/specs/Government-Buyer-Catalog-Municipalities*.md` catalog and general knowledge of SA
+local government) for every pairwise collision under the real matching rule: found "Nala" (a
+Free State local municipality, home to Wesselsbron/Bothaville) sits as a bare letter-run inside
+"Kannaland" (an unrelated Western Cape municipality) - `"nala" in "kannaland"` is literally True
+after normalization. Confirmed through the REAL `match_locality()` function, not a reimplementation:
+a company whose only office is in Kannaland, given a tender's locality row requiring an office in
+Nala, was reported `{"status": "matched", "points": 5, "reason": "office in Kannaland matches
+'Nala' - 5 point(s)."}` - real preference points awarded for an office nowhere near the required
+area, silently inflating that company's estimated score on a real tender.
+
+**Fix:** kept `_norm_area()` (used elsewhere for exact-match dedup keys, untouched) but added
+`_norm_area_words()` - the same administrative-word stripping, but keeping spaces between what's
+left - and changed the substring leg of `_area_matches()` to require the shorter name appear as a
+whole word/phrase (bounded by spaces or the string's edges via `_word_in()`), not an arbitrary run
+of letters. This still matches the rule's own real, intended case ("City of Tshwane" in tender
+text vs an office's plain "Tshwane" field - "city" isn't stripped, but "tshwane" is still a whole
+word inside the longer phrase) while rejecting the coincidental Nala/Kannaland collision. The
+exact-match and `SequenceMatcher` ratio checks (neither implicated - `ratio("nala", "kannaland")`
+is only 0.615, well under the 0.85 threshold) are untouched.
+
+**Verification:** re-ran the real `match_locality()` for the Kannaland/Nala case post-fix -
+correctly returns `"no_match"`. Re-ran the full ~145-name pairwise sweep - zero unexpected
+collisions remain (one correct, deliberately-excluded match survives: "Mpofana" vs "Mooi
+Mpofana" - the SAME real KwaZulu-Natal municipality under its current and former official name,
+confirmed via general knowledge of SA local-government renamings, not a bug). Added
+`engine/discovery/test_score_outlook.py` (first dedicated test file for this module): 5 checks -
+the Kannaland/Nala false-positive rejected, the "City of Tshwane" legitimate case still matches,
+a plain exact-name match still works, the Mpofana/Mooi-Mpofana legitimate near-miss still
+matches, and the full ~140-name sweep finds no other unexpected collision. **Proved the new tests
+actually catch the regression**, not just that they pass: temporarily reverted `_area_matches()`
+to the pre-fix substring check, re-ran - both the direct Kannaland/Nala check and the sweep check
+failed exactly as predicted (`FAIL ... [('Nala', 'Kannaland')]`); restored the fix and confirmed
+clean again. Ran `test_discovery_fanout.py`, `test_discovery_downgrades.py` and `test_taxonomy.py`
+(all depend on `score_outlook.py` indirectly) for regression safety - all still pass. `python3 -m
+py_compile` clean on both changed files.
+
+### Finding 42 (CONFIRMED, FIXED - option (a), Sarel's own call)
+
+**Where:** `engine/general/requirements.py`'s document-classification/extraction path (no single
+function - this is a shape of document the whole pipeline assumes doesn't exist).
+
+**Context:** continuing phase 2 (verifying the requirements engine against real current tenders,
+per Sarel's own instruction) - a second real random batch of 15 more advertised eTenders tenders.
+14 of 15 behaved reasonably on inspection; one surfaced a real, more serious issue than Finding 40.
+
+**What was found:** City of Tshwane Metropolitan Municipality's own eTenders listing for
+`GPM 08-2026/27` ("long-term lease and development of the following council owned [property]")
+links to a single PDF, "Notice 6 of 2026/27" - which is not that tender's own document at all, but
+a **combined bulletin listing 6 unrelated tenders together** (GPM 06, 08, 14, 15, 17, 18), each its
+own row in a table, all sharing one PDF. Confirmed directly in the real text: "CIDB grading 3ME" and
+"CIDB grading 6CE" appear only in GPM 18's and an unrelated "WSBU 01" tender's own rows - nowhere in
+GPM 08's own row (a property lease, which has no CIDB angle at all). Running this PDF through
+`extract_requirements()` for GPM 08 surfaces `returnable cidb required` anyway, because the engine
+has no concept of "this specific tender's own section of a document that covers several tenders" -
+it reads the whole file as one document and attributes everything in it to whichever tender is
+being processed. **A bidder pursuing GPM 08 would be told a CIDB grading is required when it is
+not, and conversely would never be told what GPM 08 itself actually needs**, since its own row
+("long-term lease and development... following council owned [properties]") isn't the kind of text
+`find_returnables()`/`find_roles()` look for at all.
+
+**Scope, not yet established:** how common this is across buyers beyond City of Tshwane wasn't
+checked this pass - municipalities publishing a single "Notice N of FY" PDF covering several
+tenders at once, rather than one document per tender, may or may not be common; this is one
+confirmed instance, not a surveyed pattern.
+
+**Fix (Sarel's own call, option (a) over (b)):** detect a "combined multi-tender bulletin" shape and
+decline to extract tender-specific requirements from it at all, rather than build the meaningfully
+harder row/section-scoped extraction (option (b) - isolating a specific reference's own table row,
+which nothing in this engine does today). Added `is_combined_bulletin()` / `BULLETIN_ROW_RE` to
+`requirements.py`: a buyer-agnostic signal (no reference-number format assumed) - a numbered list
+item ("N. ") immediately followed by an uppercase reference-like token (letters then digits) with a
+month name within the next 200 characters (the row's own closing date), repeated 3+ times. Checked
+against every other real document already in this corpus (every `general_samples/` fixture, plus
+the 26 further real tenders sampled for Findings 40/41/42 themselves) before picking the threshold:
+**zero false positives** at 3+; the one real bulletin matched 12 times, nowhere near borderline.
+
+A document flagged this way is excluded from every extraction signal (suite decision, forms,
+returnables, roles, CIDB, briefing, locality, experience, buyer-form detection) exactly like an
+unreadable document already was - not just hidden in the UI - and gets its own specific gap message
+("Covers multiple tenders in one document, not just this one...") instead of the generic "couldn't
+be read" or "no SBD/MBD forms" wording, which would have been misleading (the document WAS read;
+it's deliberately not attributed to this tender).
+
+**Verification:** the real bulletin PDF is now a permanent `general_harness.py` sample,
+`templates/general_samples/tshwane_gpm08_bulletin/` (provenance in `sources.json`), with an
+`EXPECTED` entry pinning empty returnables/forms - protected by the harness's own baseline-diff
+mechanism, not a bespoke assertion. **Proved the regression test actually catches the bug**:
+temporarily forced `is_combined_bulletin()` to always return `False` (simulating the pre-fix
+behaviour), ran `general_harness.py --only tshwane_gpm08_bulletin` - all 7 company baselines
+flagged `changed ['returnables']`; restored the real function, re-ran - clean again, 7/7. Full
+`general_harness.py` (all 11 samples x 7 companies, including PDF/Word pack builds) and
+`test_requirements.py` both pass with no regression elsewhere.
+
+**Scope, not yet established:** how common this bulletin shape is across buyers beyond City of
+Tshwane wasn't checked this pass - this fix handles it wherever it's found, but a wider survey
+(does any other municipality do this routinely?) hasn't been done.

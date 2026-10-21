@@ -819,7 +819,7 @@ function TaskTimeline({
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <TaskAssigneeSelect taskId={t.id} tenderId={tenderId} assignedTo={t.assigned_to} people={people} />
+                  <TaskAssigneeSelect taskId={t.id} tenderId={tenderId} assignedTo={t.assigned_to} people={people} taskDescription={t.description} />
                   <TaskStatusButton taskId={t.id} tenderId={tenderId} status={t.status} />
                 </div>
               </div>
@@ -857,8 +857,9 @@ function TaskTimeline({
       <form action={addTaskWithId} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #ECEEF1", paddingTop: 14 }}>
         <input type="hidden" name="tender_id" value={tenderId} />
         <div style={{ flex: "1 1 220px", minWidth: 180 }}>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Add a task</label>
+          <label htmlFor="new-task-description" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Add a task</label>
           <input
+            id="new-task-description"
             type="text"
             name="description"
             placeholder="e.g. Confirm subcontractor for electrical works"
@@ -867,16 +868,18 @@ function TaskTimeline({
           />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Due date</label>
+          <label htmlFor="new-task-due-date" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Due date</label>
           <input
+            id="new-task-due-date"
             type="date"
             name="due_date"
             style={{ minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit" }}
           />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Assign to (optional)</label>
+          <label htmlFor="new-task-assigned-to" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Assign to (optional)</label>
           <select
+            id="new-task-assigned-to"
             name="assigned_to"
             defaultValue=""
             style={{ minHeight: 40, padding: "0 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" }}

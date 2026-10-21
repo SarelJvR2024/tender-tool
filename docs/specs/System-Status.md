@@ -6,6 +6,201 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**`submission_plan.py` added, 2026-10-21 ~10:30 UTC: first version of the "assessment engine"**
+Sarel asked for ("assesses each tender, each page, each field and compiles a plan of how to
+prepare a submission", `fb7b2ba`). `compile_plan(manifest, company, tender)` is a pure function
+(no Supabase access, same discipline as `requirements.py` itself) that turns the existing
+requirement manifest into an ordered, actionable list: one step per form/buyer-form/returnable/
+role/question/CIDB-grading/briefing, each with a status (ready / needs_document / needs_input /
+by_hand / review / blocked) and a plain explanation - reusing `build_general_pack.py`'s own
+`VAULT_FILE_FOR` mapping so "already on file" never drifts from what the real pack build checks.
+Tested against the whole `templates/general_samples/` corpus (no crashes) and a synthetic bundle;
+reuses Finding 40/42's own real fixtures to prove it. Regression-catching verified the same way as
+every other fix this session.
+
+**Open questions this raises, not decided here - for Sarel:**
+1. Where should a plan live - computed fresh every time the page loads (like `compileReadiness.ts`
+   does today, client-side, no DB write), or stored (a new table, so a person's progress on it -
+   "I've uploaded the CSD report" - persists and a step can flip from `needs_document` to `ready`)?
+2. Should a `needs_input` step (a role, a question) check `tender_answers`/`tender_roles` for an
+   already-saved answer on THIS tender, rather than always showing `needs_input`? That needs DB
+   access this module deliberately doesn't have yet - a real design choice, not an oversight.
+3. Should this run automatically the moment a tender is discovered (before a company commits to
+   pursuing it - `compileReadiness.ts`'s own job today, but shallower), or only after pursuit once
+   documents are actually downloaded (`build_general_pack.py`'s current precondition)?
+4. Should a `needs_input`/`needs_document` step auto-seed a row in `tender_tasks` (the existing
+   per-tender task list), or stay a separate read-only view?
+
+**Government-buyer catalog: final bounded re-scan done, 2026-10-21 ~10:30 UTC**
+(`docs/specs/Government-Buyer-Catalog-Round4-Final-Sweep.md`, `fb7b2ba`). **Lephalale** confirmed
+as a strong new reader candidate - independently re-verified zero eTenders overlap, clean
+closing-dated structure (not a flat undated archive like Mbombela/Polokwane/Overstrand). Msukaligwa
+confirmed a real partial gap on its two construction-relevant tenders specifically (its other
+tenders are already on eTenders). Kouga (95 pages) needs a fuller eTenders comparison before
+ranking - 5 of 10 sampled were already duplicates. Not yet built: Lephalale is the clear next
+reader to build, not yet started.
+
+**Finding 42 fixed, 2026-10-21 ~09:15 UTC: Sarel chose option (a)** (decline to extract from a
+combined multi-tender bulletin PDF, rather than build row-scoped extraction). Implemented in
+`requirements.py`: `is_combined_bulletin()` detects the shape buyer-agnostically (a numbered list
+item followed by an uppercase reference token and a month name, repeated 3+ times - checked against
+every other real document in the corpus first, zero false positives). A flagged document is excluded
+from every extraction signal, same treatment as an unreadable one, with its own clear gap message.
+The real City of Tshwane bulletin is now a permanent `general_harness.py` sample
+(`templates/general_samples/tshwane_gpm08_bulletin/`) - verified the regression test genuinely
+catches the bug (forced the detection off, confirmed all 7 baselines flag `changed`, restored,
+confirmed clean). Full harness (11 samples, all with real pack builds) and `test_requirements.py`
+pass with no regression. **Not yet surveyed**: how common this bulletin shape is beyond City of
+Tshwane - the fix handles it wherever found, but no wider check was done this pass.
+
+**New instruction from Sarel (2026-10-21 ~09:15 UTC): re-scan the government/SOE/municipality list
+once more for any further sites worth tapping, then build a proper "assessment engine"** that reads
+each advertised tender page-by-page/field-by-field and compiles a submission-preparation plan - a
+materially bigger scope than the ad-hoc requirements-verification sampling done so far. Not yet
+started - picking this up now.
+
+**Standing review pass, 2026-10-21 ~08:20 UTC**: orientation via `git log` found one sibling-session
+commit (`24c47ba`, a different Claude session, "Finding 41" - two unrelated real municipalities,
+Nala and Kannaland, could falsely match on locality because the substring check stripped spaces
+before comparing; independently re-verified, not just trusted: `python3
+engine/discovery/test_score_outlook.py` genuinely passes, 5/5, including a full ~140-municipality
+sweep for any other such collision). QA re-confirmed sound across `engine/discovery/`'s test suite.
+
+**Continued phase 2 with a second real batch (15 more advertised tenders, same method as below) and
+found a more serious, NOT-yet-fixed issue: Finding 42
+(`docs/specs/QA-Edge-Case-Findings.md`).** City of Tshwane publishes some tenders' only document as
+a combined bulletin PDF covering several unrelated tenders in one file (confirmed: GPM 08-2026/27, a
+property lease, shares a PDF with GPM 06/14/15/17/18 and an unrelated WSBU 01 - each its own row).
+The engine has no concept of "this tender's own row in a shared document" - it attributes
+everything in the file to whichever tender is being processed, so GPM 08 was shown a CIDB grading
+requirement that actually belongs to a different tender in the same PDF, while its own real
+requirement (the lease/property terms) was never surfaced at all. **This is a real architectural
+gap, not a quick regex fix like Finding 40** - flagged to Sarel directly rather than rushed; scope
+(how common this bulletin-PDF shape is beyond City of Tshwane) is not yet established either.
+
+**Phase 2 started, 2026-10-21 ~06:30 UTC: verifying the requirements engine against REAL current
+tenders, not just the curated samples.** Per Sarel's own sequencing ("once [the reader-building
+phase is] done... go through each tender advertised and make sure our engines understand the tender
+requirements 100%"), and since 3+ standing check-ins passed with no reply on the open municipality-
+sweep question, made the call to proceed rather than wait indefinitely - flagged, not hidden.
+Method: pulled a real, randomly-sampled batch of 12 currently-advertised eTenders tenders (diverse
+buyers - national departments, municipalities, SOEs), downloaded each one's actual real documents
+(not an AI summary), ran them through the real `extract_requirements()`, and investigated every
+thin or unexpected result rather than assuming it was correct. **Found and fixed a real gap
+(Finding 40, `docs/specs/QA-Edge-Case-Findings.md`)**: an ESKOM tender named its own "Form A"
+(Supplier Quality Management form) as a mandatory returnable 11 times across its documents - a form
+`requirements.py`'s own docstring already named as ESKOM's, but nothing in the code ever matched
+it. Fixed, and the real 7-document corpus is now a permanent `general_harness.py` regression sample
+(`templates/general_samples/eskom_e3703cxmwp/`) - verified the regression test actually catches the
+bug (reverted the fix, confirmed the harness goes red, restored, confirmed clean). 11 of the 12
+sampled tenders turned out fine on inspection (either correctly flagged as unreadable/incomplete, or
+genuinely had nothing more to extract) - one confirmed real bug in a random dozen. **Not yet done**:
+this was one batch of 12 out of 2,200+ tenders on eTenders alone; the same method needs repeating
+across more, larger, more varied batches before "100%" is a defensible claim rather than a direction
+of travel - continuing this in further standing passes.
+
+**Standing review pass, 2026-10-21 ~04:15 UTC**: orientation via `git log` found one sibling-session
+commit since the last pass (`e5b6ae0`, a different Claude session, "Finding 39" - a naive-UTC date
+bug in `pdf_merge.expiry_warning()` that could silently miss an EXPIRED flag on a document during
+the 00:00-01:59 SAST window, plus the same bug in `process_pack_jobs.sync_position_suggestions()`).
+Independently verified, not just trusted: `python3 engine/pack/test_pdf_merge.py` genuinely passes,
+3/3, including the deliberate mirror case proving the fix doesn't false-flag a still-valid document.
+QA tooling re-confirmed sound after merging it: every `engine/discovery/`, `engine/pack/` and
+`engine/cv/` `test_*.py` passes, `npm run typecheck` and `npm run lint` both clean in `app/`.
+Still waiting on Sarel's call (flagged in the entry just below) on whether to keep sweeping
+municipalities further or move to the tender-requirements-verification phase - nothing else to
+report this pass.
+
+**Standing review pass, 2026-10-21 ~00:15 UTC**: orientation via `git log` found no sibling-session
+commits since the last push (`b443fc6`) - everything below from the Vaal Central Water reader
+through the Overstrand/Knysna correction is this session's own work, already independently verified
+as it went (not re-verified again here). QA tooling confirmed sound: every `engine/discovery/test_*.py`
+passes, `npm run typecheck` and `npm run lint` are both clean in `app/`. Nothing small/safe needed
+fixing this pass. One municipality-sweep background pass (North West/Northern Cape/remaining
+Limpopo-Mpumalanga-Gauteng) is still running as of this entry - not yet incorporated.
+
+**Resolved, confirmed by hard evidence (2026-10-20, ~22:35 UTC): the real daily-digest GitHub
+Actions test run (`39492435787`) timed out at exactly 120 minutes** (20:29:48 UTC → 22:30:01 UTC,
+GitHub Actions' own cancellation at the `timeout-minutes: 120` boundary set two passes ago - not a
+guess, the job's own recorded start/end times). The architecture question flagged as "not yet
+resolved" in the fifty-second run's own entry below is now a confirmed, not speculative, problem:
+`daily_digest.py` rebuilding the entire national tender feed from scratch, every single run, does
+not reliably finish inside two hours. Simply raising the timeout again is not a real fix - the
+right fix is almost certainly having the digest read Discovery's own already-scored
+`discovered_opportunities` table instead of redoing the whole fetch+score independently, which is
+a real architectural change (not a quick patch) that needs Sarel's own call before anyone rewrites
+it - flagged to him directly, not decided here.
+
+**New source added (2026-10-20, ~23:15 UTC): `engine/discovery/vaal_central_water.py`**, a dedicated
+reader for Vaal Central Water Board (committed `5e24ae8`) - a confirmed real gap vs eTenders (9
+construction/infrastructure tenders on its own site, zero reference overlap with the 4 small
+services/goods tenders eTenders carries for this buyer). Built and tested to the same standard as
+`randwater.py`: parsed against real saved HTML, raises rather than silently reporting zero tenders
+if the page's structure changes, has its own `BUYER_FAMILY` entry, and its offline test's
+regression-catching was independently verified (broke the parser, confirmed the test failed,
+restored, confirmed clean). Not yet in `ALL_SOURCES` - reachability from a scheduled run is
+unconfirmed. Also extended `source_http.parse_sast`'s DMY date format to accept a full month name,
+not just a 3-letter abbreviation (this site mixes "11 SEPTEMBER 2026" and "25 May 2026" on the same
+page) - verified against every existing format for zero regression.
+
+Eleven more candidates from the government/SOE/municipality catalogs were then checked against
+eTenders the same way (`docs/specs/Government-Buyer-Catalog-eTenders-Overlap-Checks.md` has the
+full evidence): four are confirmed **not** real gaps (Overberg Water, IDC, Necsa, mostly Limpopo
+Public Works - already duplicated on eTenders under their real buyer names), two are confirmed real
+gaps but **not buildable as a clean structured reader** without a materially bigger PDF-parsing
+effort (Mbombela and Polokwane's tender-documents page both turned out to be flat document archives
+with no closing date anywhere, on the listing or on an individual document's own page - a reader
+built against that shape would misreport every stale, years-old entry as permanently "open"), two
+are confirmed real gaps not yet built (Lephalale, Magalies Water - both need their real tender-page
+URL re-found first), and three came back partial/mixed overlap, not ruled in or out (Musina,
+uMhlathuze, Msukaligwa).
+
+**Municipality sweep continued past that (round 3, ~23:50 UTC), per Sarel's own instruction to keep
+checking until genuinely confident nothing's left.** Three parallel passes (two background,
+`Government-Buyer-Catalog-Municipalities-Round3-EC-KZN.md` and `-Round3-KZN-FS.md`, plus this
+session's own direct checks, which converged on near-identical findings to one of the background
+passes for Eastern Cape/KZN - a harmless duplication, not a conflict) checked ~19 more municipalities,
+bringing total coverage to roughly 78-85 of 257. **One new confirmed real gap: Ulundi** - a real,
+plain-text (not JS-rendered), structured tender-status register, 83 entries, zero eTenders overlap -
+but it's status-only (no bidder name or award amount inline, a real data-quality issue with the same
+bid number recurring across years already present too), ranking below the existing pilot buyers on
+value. Everything else reachable this round had a disqualifying problem: stale-only snapshots
+(uMngeni), the same flat-undated-document-archive trap as Mbombela/Polokwane (Setsoto), or
+JS-rendered content a text fetch can't see (King Sabata Dalindyebo - Mthatha's own site has a
+promising dedicated Awarded Tenders page, genuinely unresolved, worth a real-browser recheck).
+**A fourth distinct unreachability class surfaced**: this session's own egress proxy refusing a
+connection outright (Dihlabeng) - different from a site's 503, a DNS failure, or Rand Water's own
+TLS-chain error. A fifth municipality sweep (North West/Northern Cape/remaining Limpopo-Mpumalanga-
+Gauteng) was still running in the background as of this entry - not yet incorporated here.
+
+**A sixth pass (Eastern Cape + Western Cape, `Government-Buyer-Catalog-Municipalities-Round3-EC-WC.md`,
+committed `e67c1ab`) initially reported Overstrand and Knysna as "the strongest new candidates since
+Vaal Central Water Board itself" - verified independently against the real saved HTML before
+trusting that claim, and it was wrong for Overstrand (no closing date anywhere on the page or in any
+document title - the Mbombela/Polokwane trap again) and overstated for Knysna (its own "Current
+Tenders" section is actually cancellation notices; the real open tenders sit under an accordion
+mislabelled "Archived Tenders - 2027" - some, not all, entries do embed a real closing date as free
+text, a genuine edge over Mbombela/Polokwane, but each tender is split across 2-4 separate document
+rows needing reference-based grouping, and the page spans 6 years of archives with no reliable
+section-label signal for current-vs-expired).** Both remain confirmed real eTenders gaps (re-checked
+independently: Overstrand 1 of many duplicated, Knysna 0 duplicated) but neither was built this
+round - a correction is recorded directly in that file rather than left standing uncorrected.
+
+**The seventh pass (North West/Northern Cape/remaining Limpopo-Mpumalanga-Gauteng) malfunctioned and
+was stopped, not completed (2026-10-21, ~02:15 UTC).** It ran over 2 hours (its two siblings each
+took 2-4 minutes) and its final captured output was nonsensical, narrating in this session's own
+reporting voice rather than returning research findings - it never wrote its output file. No harm
+done: checked `git log` and working tree directly after stopping it, confirmed nothing was committed
+or pushed by it (the sibling CV-fix commit `f89b8a8` that landed around the same time is a genuine,
+independently-verified different session, not this fork). **Municipality coverage stands at roughly
+85 of 257**, with three full rounds now showing clearly diminishing returns (round 3's ~24
+municipalities across 4 sub-passes produced zero clean, immediately-buildable new reader candidates
+- Ulundi, Overstrand and Knysna are all real gaps but each has a real structural problem, same as
+Mbombela/Polokwane). Judgment call, not yet put to Sarel: treat the municipality sweep as reasonably
+concluded for now rather than dispatch an eighth multi-hour pass for ~170 still-uncovered,
+mostly-small municipalities with a demonstrated low hit rate - flagged to him directly since this is
+a "how thorough is thorough enough" call, not a technical one.
+
 Last full pass: 2026-10-20, ~22:11 UTC — fifty-second standing QA run: independently verified two
 substantial batches of sibling work rather than trusting either's own claims. First, the UI/UX
 redesign's first 3 real prompts landed (`ee60823`/`f5e5a6f`/`6787cf3` - shadcn/ui + oklch design-token
@@ -387,6 +582,86 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-fifth run): two real, unrelated South African municipalities could be scored as the same place, inflating a company's estimated tender score
+
+Orientation: `score_outlook.py` (Discovery's fit-scoring engine, 817 lines) had no dedicated test
+file - only indirect coverage as a dependency. `extract_locality`/`match_locality` (office vs
+tender-text fuzzy place-name matching) stood out as real adversarial territory.
+
+**Finding 41 (fixed, severe - reachable by ordinary geography, not contrived input):**
+`_area_matches()`'s substring check compared bare, space-stripped letters, so one South African
+municipality's name could coincidentally contain another's as a run of letters. Searched ~145
+real municipality names and found a live collision: "Nala" (Free State) sits inside "Kannaland"
+(Western Cape) once spaces are stripped. Confirmed through the real `match_locality()`: a company
+whose only office is in Kannaland was awarded real locality preference points for a tender
+requiring an office in Nala - a geographically absurd but silent score inflation.
+
+**Fix:** added a space-preserving normalization and required the substring match to be a whole
+word/phrase, not an arbitrary letter run - still matches the rule's real intended case ("City of
+Tshwane" vs "Tshwane") while rejecting the coincidental collision.
+
+**Verification:** new `engine/discovery/test_score_outlook.py` (first test file for this module),
+5 checks including a full ~140-name sweep for any other such collision (none found; one correct
+match - "Mpofana"/"Mooi Mpofana", the same municipality's current/former name - deliberately
+preserved). **Proved the tests catch the regression** (reverted the fix, confirmed both the
+direct case and the sweep fail exactly as predicted, restored it, confirmed clean).
+`test_discovery_fanout.py`, `test_discovery_downgrades.py` and `test_taxonomy.py` all still pass.
+`python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-fifth run" (Finding 41).
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-fourth run): a real submission pack's own compliance warning could silently go missing - the last two confirmed instances of the naive-UTC-date bug closed
+
+Orientation: continuing the deliberate, one-by-one triage of the 9 remaining naive
+`date.today()` instances from the fifty-first run's own grep. 7 checked and found cosmetic/
+internal/self-healing (no fix needed - see findings doc for the per-instance reasoning); 2
+confirmed real.
+
+**Finding 39 (fixed, severe):** `pdf_merge.py`'s `expiry_warning()` decides whether a dated
+document gets flagged "EXPIRED" in the assembled SANRAL submission pack's own warnings. Its
+naive `today` meant a document that actually expired real-yesterday evaluated as NOT expired
+during the bad window - a real compliance warning silently missing from an actual submission
+pack, confirmed by direct reproduction. `process_pack_jobs.py`'s `sync_position_suggestions()`
+had the same bug, wasting a re-ranking cycle on an already-closed tender and risking the same
+rounding-boundary ranking-order issue as Finding 38 for a tender with no closing date on file.
+
+**Fix:** both files now reuse `generate_cv.SAST` via their existing cross-module imports rather
+than defining a fourth local copy.
+
+**Verification:** new `engine/pack/test_pdf_merge.py` (first test file for either module), 3
+checks including the deliberate "don't false-flag a document valid today" mirror case. The test
+suite's own first draft had the identical near-miss as Finding 38's test (missed the regression
+entirely); caught and fixed before trusting it, then confirmed it genuinely catches both bugs.
+`test_form_field_audit.py` and `test_general_bridge.py` still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-fourth run" (Finding 39).
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-third run): closed one of last cycle's own deferred naive-UTC-date instances, with a real trigger date confirmed rather than assumed
+
+Orientation: CV engine - the one remaining area without a fresh pass of my own this session.
+Closed out `cv/generate_cv.py:307`, one of the 10 naive `date.today()` instances the fifty-first
+run's own grep found and deferred pending "does this one actually matter" checks.
+
+**Finding 38 (fixed, moderate - a real, narrow trigger confirmed, not assumed):** the standard
+CV path's "years of relevant experience" fallback used `date.today()` feeding a ROUNDED
+computation (`round(days / 365.25)`), unlike Finding 37's simple date comparison - a one-day
+shift only changes the output near a rounding boundary. Searched 60 years of possible graduation
+dates under the simulated bad-window clock and found 60 real trigger dates (one per year) where
+the figure actually flips (e.g. `initial_graduated = "2026-04-21"` flips 0 -> 1) - confirming a
+real, if narrow, consequence rather than a purely theoretical one.
+
+**Fix:** same local `SAST` constant pattern as Finding 37.
+
+**Verification:** new test in `test_generate_cv.py` running the real `build_sanral_keyperson()`
+against the confirmed trigger date with the clock monkeypatched into the bad window. Caught a real
+flaw in its own first draft along the way: patching only `datetime.datetime.now` missed the
+reverted-code case entirely (0 failures when a failure was expected) - fixed the test to also
+patch `datetime.date.today`, then confirmed it genuinely fails pre-fix and passes post-fix.
+`test_extract_cv_fields.py` and the real `process_cv_jobs.py --self-test` end-to-end smoke test
+both still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-third run" (Finding 38).
 
 ## This pass (2026-10-20, standing QA/robustness review - fifty-first run): the same naive-UTC "today" bug the enterprise audit fixed elsewhere was still open in two legal-document compliance checks - fixed
 
