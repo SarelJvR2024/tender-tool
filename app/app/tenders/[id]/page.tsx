@@ -381,10 +381,10 @@ export default async function TenderWorkspacePage({
                     <SummaryChip count={confirmedRows.length} label="confirmed" bg="#DCFCE7" color="#15803D" />
                   )}
                   {reviewRows.length > 0 && (
-                    <SummaryChip count={reviewRows.length} label="to review" bg="#FEF3C7" color="#B45309" />
+                    <SummaryChip count={reviewRows.length} label="to verify" bg="#FEF3C7" color="#B45309" />
                   )}
                   {missingRows.length > 0 && (
-                    <SummaryChip count={missingRows.length} label="missing" bg="#FEE2E2" color="#B91C1C" />
+                    <SummaryChip count={missingRows.length} label="to provide" bg="#FEF3C7" color="#B45309" />
                   )}
                   {overdueTaskCount > 0 && (
                     <SummaryChip count={overdueTaskCount} label={overdueTaskCount === 1 ? "task overdue" : "tasks overdue"} bg="#FEE2E2" color="#B91C1C" />
@@ -487,27 +487,19 @@ export default async function TenderWorkspacePage({
 
                 {provenance.length > 0 && (
                   <div id="readiness-report" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, marginBottom: 16 }}>
+                    {/* Verify/Provide, the Product promise's own grouping (app/AGENTS.md) -
+                        "Already confirmed" and "Please review" merged into one Verify card
+                        (AI-filled, green once confirmed - same pattern compliance-report.tsx
+                        uses) since both are the same type of task, just at different points
+                        of being confirmed. "Needs your input" is Provide, not Fix: a missing
+                        intake fact isn't a disqualification risk the way a missing mandatory
+                        compliance document is, so it's recolored amber, not red. */}
                     <ReportCard
-                      title="Already confirmed"
-                      count={confirmedRows.length}
+                      title="Verify"
+                      count={confirmedRows.length + reviewRows.length}
                       accent="#15803D"
                       bg="#DCFCE7"
-                      emptyText="Nothing confirmed yet."
-                    >
-                      {confirmedRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
-                          <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
-                        </div>
-                      ))}
-                    </ReportCard>
-
-                    <ReportCard
-                      title="Please review"
-                      count={reviewRows.length}
-                      accent="#B45309"
-                      bg="#FEF3C7"
-                      emptyText="Nothing waiting on review."
+                      emptyText="Nothing to verify yet."
                     >
                       {reviewRows.map((row) => (
                         <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid #ECEEF1" }}>
@@ -521,20 +513,26 @@ export default async function TenderWorkspacePage({
                           )}
                         </div>
                       ))}
+                      {confirmedRows.map((row) => (
+                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
+                          <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
+                        </div>
+                      ))}
                     </ReportCard>
 
                     <ReportCard
-                      title="Needs your input"
+                      title="Provide"
                       count={missingRows.length}
-                      accent="#B91C1C"
-                      bg="#FEE2E2"
-                      emptyText="Nothing missing."
+                      accent="#B45309"
+                      bg="#FEF3C7"
+                      emptyText="Nothing left for you to supply."
                     >
                       {missingRows.map((row) => (
                         <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
                           <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
                           {row.reason && (
-                            <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 2 }}>{row.reason}</div>
+                            <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>{row.reason}</div>
                           )}
                         </div>
                       ))}
