@@ -2952,3 +2952,60 @@ company, `basis: name_token`, no note); restored the fix and confirmed clean aga
 `test_award_outcomes.py`, `test_award_prices.py` and `test_etenders_portal.py` (all exercise code
 adjacent to or consuming this module) for regression safety - all still pass. `python3 -m
 py_compile` clean on both changed files.
+
+## 2026-10-21 (fifty-eighth run): SANRAL pack engine - the offline key-person suggestion could silently disagree with the live Tender Workspace for the identical tied-score candidates
+
+**Why this area:** continuing to avoid `requirements.py`/`submission_plan.py` while the sibling's
+phase-2 verification is active there. `engine/pack_generator/suggest_pack.py` (245 lines, zero
+dedicated test file) is Step 2 of the SANRAL pipeline - the first thing a human actually reads
+(`pack_suggestions.md`) to decide who to confirm for a key position - and its candidate-scoring
+function (`score_candidate()`) is reused by `engine/pack/process_pack_jobs.py`'s own
+`rank_candidates()` for the LIVE Tender Workspace's re-ranking of the SAME positions. Two
+independent call sites doing the same ranking job is exactly the kind of place a convention can
+drift between them unnoticed, so read both side by side.
+
+### Finding 46 (CONFIRMED, FIXED, moderate - two code paths silently disagreeing on the same real decision)
+
+**Where:** `engine/pack_generator/suggest_pack.py`, `suggest()`'s own candidate sort (now
+extracted into `rank_candidates()`).
+
+**What was tested:** `process_pack_jobs.py`'s own `rank_candidates()` explicitly documents its
+tie-break rule: "ties: more years' experience, then name - stated, not hidden." `suggest_pack.py`'s
+`suggest()` runs the exact same `score_candidate()` scoring for the exact same positions, but its
+own sort was `key=lambda c: c["score"], reverse=True` - no tie-break at all. Python's `sorted()`
+is stable, so an unbroken tie fell back to each person's position in the company's own profile
+JSON. Constructed a real adversarial case: two candidates tied on score (identical keyword
+overlap) but very different years of experience (7 vs 22 years) - a realistic "different company
+shapes" scenario (a company with a junior and a senior person both plausible for the same
+position). Ran the real `suggest_pack.py` ranking logic with the two people listed in each order.
+
+**Confirmed the bug:** with the junior person listed first in the profile, they were the
+"SUGGESTED" top candidate; with the senior person listed first instead, THEY were suggested -
+purely from file order, nothing to do with who is actually better qualified. Worse, this offline
+suggestion (the one a human reads first, in `pack_suggestions.md`) could silently disagree with
+what the SAME company's live Tender Workspace would rank first for the identical position, since
+`process_pack_jobs.py`'s `rank_candidates()` already ties-break correctly by years then name - two
+code paths computing the same decision, giving different answers for the identical input.
+
+**Fix:** extracted the ranking into a new `rank_candidates(people, position, closing_date)`
+function in `suggest_pack.py` itself (mirroring `process_pack_jobs.py`'s own name and tie-break
+convention exactly, rather than two independently-maintained copies that could drift again), with
+the sort key changed to `(-c["score"], -(c["years_experience"] or -1), c["name"] or "")` - the
+documented convention, now actually enforced here too.
+
+**Verification:** re-ran the real adversarial case post-fix in both profile orderings - both now
+consistently suggest the senior, more-experienced candidate. Mirror case confirmed the fix isn't
+one-sided: a genuinely better keyword-matched junior candidate still correctly outranks a
+higher-years but unmatched senior one (score stays the primary key; years only breaks a genuine
+tie). Added `engine/pack_generator/test_suggest_pack.py` (first dedicated test file for this
+module): 3 cases, 6 checks, including a third tie (same score AND same years) falling through to
+the name tie-break deterministically. **Proved the tests actually catch the regression**, not
+just that they pass: the first draft of this test reimplemented the sort key independently inside
+the test file itself rather than calling the real code - reverting the fix produced `0 failure(s)`
+when 3 were expected, exposing that the test exercised its own copy of the logic, not
+`suggest_pack.py`'s. Fixed by having the test call the newly-extracted `rank_candidates()`
+directly; re-reverted the real fix and confirmed the corrected test suite now genuinely fails (3
+failures, including the exact wrong tied-order outputs); restored the fix and confirmed clean
+again. Ran `engine/test_form_field_audit.py`, `engine/cv/test_generate_cv.py` and the real
+`process_cv_jobs.py --self-test` (all exercise code adjacent to or depending on this module) for
+regression safety - all still pass. `python3 -m py_compile` clean on both changed files.

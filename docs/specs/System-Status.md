@@ -719,6 +719,35 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-21, standing QA/robustness review - fifty-eighth run): the offline key-person suggestion could silently disagree with the live Tender Workspace for the identical tied-score candidates
+
+Orientation: `suggest_pack.py` (Step 2 of the SANRAL pipeline, zero test file) shares its
+candidate scoring with `process_pack_jobs.py`'s own live re-ranking - two independent call sites
+computing the same decision, exactly where a convention can drift unnoticed.
+
+**Finding 46 (fixed, moderate - two code paths silently disagreeing on the same decision):**
+`process_pack_jobs.py`'s `rank_candidates()` documents its own tie-break ("more years'
+experience, then name"); `suggest_pack.py`'s sort had none at all, so an unbroken tie fell back
+to each person's position in the company's profile JSON. Confirmed with two candidates tied on
+score (7 vs 22 years' experience): the "SUGGESTED" person flipped purely with file order, and
+could silently disagree with what the same company's live Tender Workspace would rank first for
+the identical position.
+
+**Fix:** extracted the ranking into a new `rank_candidates()` in `suggest_pack.py` itself,
+mirroring `process_pack_jobs.py`'s own name and tie-break convention exactly (one documented rule,
+not two copies that could drift again).
+
+**Verification:** new `engine/pack_generator/test_suggest_pack.py` (first test file for this
+module), 6 checks across 3 cases including a genuine-score-difference mirror case. The first draft
+of this test had a real near-miss worth noting: it reimplemented the sort key inside the test
+itself rather than calling the real code, so reverting the fix gave `0 failure(s)` when 3 were
+expected - caught and fixed by having the test call the newly-extracted function directly, then
+confirmed the corrected suite genuinely fails pre-fix and passes post-fix.
+`test_form_field_audit.py`, `test_generate_cv.py` and the real `process_cv_jobs.py --self-test`
+all still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-eighth run" (Finding 46).
+
 ## This pass (2026-10-21, standing QA/robustness review - fifty-seventh run): a genuinely different real company could be silently stored as a tender's winner, corrupting award/price intelligence
 
 Orientation: continuing to avoid `requirements.py`/`submission_plan.py` while a sibling actively
