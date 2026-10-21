@@ -25,7 +25,11 @@ function withinWindow(daysLeft: number | null, windowDays: number): daysLeft is 
   return daysLeft !== null && daysLeft <= windowDays;
 }
 
-const COMPANY_EXPIRY_FIELDS: { field: string; label: string }[] = [
+// Exported for documentExpiry.ts's own vault-wide overview - the one list of
+// which company-level fields carry an expiry date, shared so the two
+// screens (notification bell, vault overview) never silently diverge on
+// which fields count as "a document with an expiry".
+export const COMPANY_EXPIRY_FIELDS: { field: string; label: string }[] = [
   { field: "coid_letter_of_good_standing_expiry", label: "COID Letter of Good Standing" },
   { field: "cidb_expiry", label: "CIDB grading" },
   { field: "sars_tcs_pin_expiry", label: "SARS Tax Compliance PIN" },
