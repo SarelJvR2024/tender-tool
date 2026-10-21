@@ -2852,3 +2852,40 @@ the test actually catches the regression**, not just that it passes: temporarily
 and confirmed the full suite passes clean again (`ALL PASSED`). Ran `engine/cv/test_generate_cv.py`
 and the real `process_cv_jobs.py --self-test` end-to-end smoke test for regression safety in the
 same engine - both still pass. `python3 -m py_compile` clean on both changed files.
+
+### Finding 44 (CONFIRMED, FIXED, moderate - a contract-administration clause misread as a bid-time ask)
+
+**Where:** `engine/general/requirements.py`, `_key_personnel_gap()`.
+
+**Context:** continuing phase 2 (verifying the requirements engine against real current tenders) -
+a third real random batch of 15 more advertised eTenders tenders (sample #4 overall). A second,
+independently-sampled City of Tshwane combined-bulletin PDF correctly triggered the Finding 42 fix
+(no false requirements shown) - good confirmation the fix generalises, not a new finding on its
+own. 14 of 15 behaved reasonably; one (a Passenger Rail Agency tender) surfaced this.
+
+**What was found:** `_key_personnel_gap()` exists to catch a key-personnel ask that `find_roles()`'s
+catalogued `ROLE_PATTERNS` list doesn't recognise (an environmental control officer, a land
+surveyor...) and warn the UI it might be missing one. It took the FIRST `KEY_PERSONNEL_RE` match in
+the whole document with no context check at all. The real document's only "key personnel" mention
+was: "The Service Provider shall not, without the prior written consent of the Employer: ... 4.
+Deviate from or change the Scope of Services; 5. Change Key Personnel on the Service." - one item
+in a list of things needing the buyer's consent to change DURING the contract, not a bid-time ask
+for key personnel at all. The manifest told a bidder "this tender asks for key personnel" when it
+doesn't say that anywhere.
+
+**Fix:** added `_KEY_PERSONNEL_FALSE_CONTEXT_RE`, a narrow check on the ~20 characters immediately
+before a match for "change"/"changing"/"substitut-"/"replac-" (contract-administration verbs that
+only make sense applied to an EXISTING assignment, never a bid-time ask) - that match is skipped,
+not treated as "no gap" outright: `_key_personnel_gap()` now keeps searching the rest of the
+document (and the rest of the corpus) for a genuine mention, rather than returning on the first hit
+regardless of context the way it did before.
+
+**Verification:** added `check_key_personnel_false_positive()` to `test_requirements.py` - two real-
+shaped cases: a document whose ONLY key-personnel mention is the false-positive clause (now
+correctly produces no key-personnel gap) and a document with BOTH the false-positive clause AND a
+genuine "submit CVs of key personnel" ask (correctly still surfaces the genuine one, proving the
+fix doesn't just suppress the feature entirely). **Proved the regression test actually catches the
+bug**: reverted the fix, confirmed the first case now fails exactly as predicted (returns the false-
+positive clause as a genuine gap), restored, confirmed both cases pass again. `test_submission_plan.py`
+(all 18 checks) and the full `general_harness.py` (91 clean, 0 flagged, 0 failed) both still pass -
+no regression elsewhere.

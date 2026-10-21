@@ -6,6 +6,16 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Finding 44 fixed, 2026-10-21 ~12:10 UTC** (`docs/specs/QA-Edge-Case-Findings.md`) - a fourth real
+batch of 15 tenders sampled (phase 2 continues). `_key_personnel_gap()` was reading a contract-
+administration clause ("Change Key Personnel on the Service" - one item in a list of things needing
+the buyer's consent to change DURING the contract) as a bid-time ask for key personnel, on a real
+Passenger Rail Agency tender. Fixed with a narrow context check (skip a match immediately preceded
+by "change"/"substitute"/"replace") that keeps searching for a genuine mention rather than just
+suppressing the feature - verified both halves: a false-positive-only document now gets no gap, a
+document with both a false positive AND a real ask still surfaces the real one. Regression-catching
+independently verified (reverted, confirmed fails, restored, confirmed clean).
+
 **Kouga reader added, 2026-10-21 ~11:40 UTC** (`engine/discovery/kouga.py`, `363f042`) - the round-4
 catalog's own "needs a fuller comparison" flag turned out to be a real find, bigger than expected:
 `etenders_portal --buyer "kouga"` has only 4 rows against an own-site listing that runs 280 tenders

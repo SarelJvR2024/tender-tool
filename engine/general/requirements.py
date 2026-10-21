@@ -1248,13 +1248,23 @@ def _ocr_gaps(doc_entries):
 # land surveyor, an electrician...) would otherwise just not appear, and the
 # Roles card would read as if it were the whole requirement.
 KEY_PERSONNEL_RE = re.compile(r"key\s+(?:personnel|staff|persons?)\b|curriculum\s+vitae|\bCVs?\s+(?:of|for)\b", re.IGNORECASE)
+# A real find (2026-10-21, phase-2 sampling): "5. Change Key Personnel on the
+# Service" was a false positive - one item in a list of things the SERVICE
+# PROVIDER may not do without the buyer's written consent DURING THE
+# CONTRACT ("deviate from the programme", "deviate from the scope", "change
+# key personnel") - a contract-administration clause, not a bid-time ask for
+# key personnel. The whole-document text this came from genuinely has no
+# other key-personnel mention at all, so returning it as "this tender asks
+# for key personnel" was actively wrong, not just imprecise.
+_KEY_PERSONNEL_FALSE_CONTEXT_RE = re.compile(r"\b(?:change|changing|substitut\w*|replac\w*)\s*$", re.IGNORECASE)
 
 
 def _key_personnel_gap(docs):
     for d in docs:
         t = d.get("text") or ""
-        m = KEY_PERSONNEL_RE.search(t)
-        if m:
+        for m in KEY_PERSONNEL_RE.finditer(t):
+            if _KEY_PERSONNEL_FALSE_CONTEXT_RE.search(t[max(0, m.start() - 20):m.start()]):
+                continue  # "change/substitute/replace key personnel" - contract administration, not a bid-time ask
             return [f"This tender asks for key personnel (\"{_quote(t, m.start(), m.end())[:160]}\", {d['name']}). "
                     f"Tender Tool recognises {len(ROLE_PATTERNS)} common roles (listed under Roles when found); "
                     "check the tender's own list for any role it doesn't show."]

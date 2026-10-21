@@ -198,6 +198,52 @@ def check_past_corrections_feedback():
     check("the nudge is explained in confidence_reason", "platform admin" in false_positive["confidence_reason"])
 
 
+# --- Finding 44 (2026-10-21, phase-2 real-tender sampling): a contract-
+# administration clause ("5. Change Key Personnel on the Service" - one item
+# in a list of things needing the buyer's written consent to change DURING
+# the contract) was read as a bid-time ask for key personnel. Real document:
+# a Passenger Rail Agency tender whose only other text near "key personnel"
+# was this same false-positive clause - _key_personnel_gap() used to return
+# it as the tender's own gap message, wrongly.
+
+CONTRACT_ADMIN_CLAUSE_ONLY = """
+The Service Provider shall not, without the prior written consent of the Employer:
+1.   Amend the travel and subsistence arrangements and tariffs of charges;
+2.   Deviate from the final programme as per the programme above;
+3.   Deviate from the programme (delayed or earlier);
+4.   Deviate from or change the Scope of Services;
+5.   Change Key Personnel on the Service.
+"""
+
+GENUINE_KEY_PERSONNEL_ASK = """
+Bidders must submit CVs of key personnel to be assigned to this contract,
+showing relevant qualifications and experience.
+"""
+
+BOTH = CONTRACT_ADMIN_CLAUSE_ONLY + GENUINE_KEY_PERSONNEL_ASK
+
+
+def _key_personnel_gap_for(text):
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "bundle.txt")
+        with open(path, "w") as f:
+            f.write(text)
+        m = req.extract_requirements([path], work_dir=tempfile.mkdtemp(prefix="tt_req_test_"))
+        return m["gaps"]
+
+
+def check_key_personnel_false_positive():
+    print("Finding 44: 'change key personnel' (contract administration) is not a bid-time ask")
+    contract_admin_gaps = _key_personnel_gap_for(CONTRACT_ADMIN_CLAUSE_ONLY)
+    check("a document whose ONLY 'key personnel' mention is a change/consent clause gets no key-personnel gap",
+          not any("asks for key personnel" in g for g in contract_admin_gaps), contract_admin_gaps)
+
+    both_gaps = _key_personnel_gap_for(BOTH)
+    check("a document with BOTH the false-positive clause and a real ask still surfaces the real one",
+          any("asks for key personnel" in g and "CVs of key personnel" in g for g in both_gaps), both_gaps)
+
+
 def main():
     print("Finding 29: MBD/SBD suite decided by majority of real mentions, not mere presence")
     check("10 real MBD mentions + 1 stray SBD reference -> MBD (the bug itself: this used to come back SBD)",
@@ -212,6 +258,7 @@ def main():
     check_confidence_scoring()
     check_manifest_items_carry_confidence()
     check_past_corrections_feedback()
+    check_key_personnel_false_positive()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
