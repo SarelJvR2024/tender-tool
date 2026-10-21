@@ -2681,3 +2681,61 @@ elsewhere.
 found this way in a random dozen suggests more exist; this verification approach (real current
 tenders, real documents, run through the real engine, investigate every thin/empty/unexpected
 result rather than assume it's correct) is the one to keep using, not a one-off.
+
+## 2026-10-21 (fifty-fifth run): Discovery - two real, unrelated South African municipalities could be scored as the same place, inflating a company's estimated tender score
+
+**Why this area:** a parallel sibling session had started verifying `requirements.py` against
+real current tenders (Finding 40), so picked a different corner of discovery to avoid duplicating
+that effort: `score_outlook.py` (817 lines, Discovery's own fit-scoring engine) had no dedicated
+test file at all - only indirect coverage as a dependency of fan-out/downgrade tests, never a
+direct adversarial pass of its own internals. Read the whole file; `extract_locality`/
+`match_locality` (office-location preference-point matching against a tender's own text) stood
+out as plain-text fuzzy matching across real, varied South African place names - exactly the
+"different company shapes" territory this review targets, since a company's own office locations
+are as varied as the tenders' own locality wording.
+
+### Finding 41 (CONFIRMED, FIXED, severe - a real score-inflation bug reachable by ordinary geography, not contrived input)
+
+**Where:** `engine/discovery/score_outlook.py`, `_area_matches()`.
+
+**What was tested:** `_area_matches()`'s substring-match leg compares `_norm_area()`'s output -
+which strips every space and non-letter character, leaving bare concatenated letters with zero
+word-boundary information - using plain Python `in` substring testing (`len(v) >= 6 and (v in a
+or a in v)`). Normalized place names in South Africa frequently contain OTHER, completely
+unrelated place names as a coincidental run of letters once spaces are gone. Searched a list of
+~145 real district/local municipality names across all 9 provinces (built from this repo's own
+`docs/specs/Government-Buyer-Catalog-Municipalities*.md` catalog and general knowledge of SA
+local government) for every pairwise collision under the real matching rule: found "Nala" (a
+Free State local municipality, home to Wesselsbron/Bothaville) sits as a bare letter-run inside
+"Kannaland" (an unrelated Western Cape municipality) - `"nala" in "kannaland"` is literally True
+after normalization. Confirmed through the REAL `match_locality()` function, not a reimplementation:
+a company whose only office is in Kannaland, given a tender's locality row requiring an office in
+Nala, was reported `{"status": "matched", "points": 5, "reason": "office in Kannaland matches
+'Nala' - 5 point(s)."}` - real preference points awarded for an office nowhere near the required
+area, silently inflating that company's estimated score on a real tender.
+
+**Fix:** kept `_norm_area()` (used elsewhere for exact-match dedup keys, untouched) but added
+`_norm_area_words()` - the same administrative-word stripping, but keeping spaces between what's
+left - and changed the substring leg of `_area_matches()` to require the shorter name appear as a
+whole word/phrase (bounded by spaces or the string's edges via `_word_in()`), not an arbitrary run
+of letters. This still matches the rule's own real, intended case ("City of Tshwane" in tender
+text vs an office's plain "Tshwane" field - "city" isn't stripped, but "tshwane" is still a whole
+word inside the longer phrase) while rejecting the coincidental Nala/Kannaland collision. The
+exact-match and `SequenceMatcher` ratio checks (neither implicated - `ratio("nala", "kannaland")`
+is only 0.615, well under the 0.85 threshold) are untouched.
+
+**Verification:** re-ran the real `match_locality()` for the Kannaland/Nala case post-fix -
+correctly returns `"no_match"`. Re-ran the full ~145-name pairwise sweep - zero unexpected
+collisions remain (one correct, deliberately-excluded match survives: "Mpofana" vs "Mooi
+Mpofana" - the SAME real KwaZulu-Natal municipality under its current and former official name,
+confirmed via general knowledge of SA local-government renamings, not a bug). Added
+`engine/discovery/test_score_outlook.py` (first dedicated test file for this module): 5 checks -
+the Kannaland/Nala false-positive rejected, the "City of Tshwane" legitimate case still matches,
+a plain exact-name match still works, the Mpofana/Mooi-Mpofana legitimate near-miss still
+matches, and the full ~140-name sweep finds no other unexpected collision. **Proved the new tests
+actually catch the regression**, not just that they pass: temporarily reverted `_area_matches()`
+to the pre-fix substring check, re-ran - both the direct Kannaland/Nala check and the sweep check
+failed exactly as predicted (`FAIL ... [('Nala', 'Kannaland')]`); restored the fix and confirmed
+clean again. Ran `test_discovery_fanout.py`, `test_discovery_downgrades.py` and `test_taxonomy.py`
+(all depend on `score_outlook.py` indirectly) for regression safety - all still pass. `python3 -m
+py_compile` clean on both changed files.

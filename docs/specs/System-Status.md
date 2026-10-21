@@ -511,6 +511,34 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-21, standing QA/robustness review - fifty-fifth run): two real, unrelated South African municipalities could be scored as the same place, inflating a company's estimated tender score
+
+Orientation: `score_outlook.py` (Discovery's fit-scoring engine, 817 lines) had no dedicated test
+file - only indirect coverage as a dependency. `extract_locality`/`match_locality` (office vs
+tender-text fuzzy place-name matching) stood out as real adversarial territory.
+
+**Finding 41 (fixed, severe - reachable by ordinary geography, not contrived input):**
+`_area_matches()`'s substring check compared bare, space-stripped letters, so one South African
+municipality's name could coincidentally contain another's as a run of letters. Searched ~145
+real municipality names and found a live collision: "Nala" (Free State) sits inside "Kannaland"
+(Western Cape) once spaces are stripped. Confirmed through the real `match_locality()`: a company
+whose only office is in Kannaland was awarded real locality preference points for a tender
+requiring an office in Nala - a geographically absurd but silent score inflation.
+
+**Fix:** added a space-preserving normalization and required the substring match to be a whole
+word/phrase, not an arbitrary letter run - still matches the rule's real intended case ("City of
+Tshwane" vs "Tshwane") while rejecting the coincidental collision.
+
+**Verification:** new `engine/discovery/test_score_outlook.py` (first test file for this module),
+5 checks including a full ~140-name sweep for any other such collision (none found; one correct
+match - "Mpofana"/"Mooi Mpofana", the same municipality's current/former name - deliberately
+preserved). **Proved the tests catch the regression** (reverted the fix, confirmed both the
+direct case and the sweep fail exactly as predicted, restored it, confirmed clean).
+`test_discovery_fanout.py`, `test_discovery_downgrades.py` and `test_taxonomy.py` all still pass.
+`python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-fifth run" (Finding 41).
+
 ## This pass (2026-10-21, standing QA/robustness review - fifty-fourth run): a real submission pack's own compliance warning could silently go missing - the last two confirmed instances of the naive-UTC-date bug closed
 
 Orientation: continuing the deliberate, one-by-one triage of the 9 remaining naive
