@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { setDailyDigestOptIn } from "./digestActions";
+import { VaultSection } from "./_components/shared";
+import { Button } from "@/components/ui/button";
 
 /**
  * "Email notifications" - the opt-in toggle for the role-based daily digest
@@ -11,6 +13,11 @@ import { setDailyDigestOptIn } from "./digestActions";
  *
  * Self-contained server component, same reason as OfficeLocations.tsx: does
  * its own read under RLS, so company/page.tsx only mounts it.
+ *
+ * Migrated to the design system's tokens/Tailwind (Company vault sub-PR 2 -
+ * see app/AGENTS.md) - the stale amber/navy this card still carried was a
+ * visible seam beside the shell sub-PR's already-migrated sections on the
+ * same page. Same VaultSection shell the other sections use.
  */
 export async function Notifications() {
   const supabase = await createClient();
@@ -33,14 +40,11 @@ export async function Notifications() {
   const optedIn = membership.daily_digest_opt_in === true;
 
   return (
-    <div id="notifications" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
-      <h2 style={{ fontSize: 13, fontWeight: 600, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 12px" }}>
-        Email notifications
-      </h2>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-        <div style={{ maxWidth: 520 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B", marginBottom: 3 }}>Daily digest</div>
-          <div style={{ fontSize: 12.5, color: "#5B6472", lineHeight: 1.5 }}>
+    <VaultSection id="notifications" title="Email notifications">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="max-w-[520px]">
+          <div className="mb-0.5 text-sm font-semibold text-foreground">Daily digest</div>
+          <div className="text-xs leading-relaxed text-muted-foreground">
             A once-a-day email built for your role (new matching tenders, documents and tasks due,
             tenders closing soon). Off by default - this sets only your own preference, not the
             whole company&apos;s.
@@ -48,22 +52,11 @@ export async function Notifications() {
         </div>
         <form action={setDailyDigestOptIn}>
           <input type="hidden" name="opt_in" value={optedIn ? "false" : "true"} />
-          <button
-            type="submit"
-            aria-pressed={optedIn}
-            style={{
-              display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 44,
-              padding: "0 18px", borderRadius: 9, fontSize: 14, fontWeight: 600, border: "1px solid",
-              cursor: "pointer", boxSizing: "border-box", flexShrink: 0,
-              background: optedIn ? "#FFFFFF" : "#D97706",
-              color: optedIn ? "#16233B" : "#FFFFFF",
-              borderColor: optedIn ? "#E3E6EA" : "#D97706",
-            }}
-          >
+          <Button type="submit" variant={optedIn ? "outline" : "accent"} size="lg" aria-pressed={optedIn} className="min-h-11 shrink-0 px-[18px]">
             {optedIn ? "Subscribed - turn off" : "Turn on daily digest"}
-          </button>
+          </Button>
         </form>
       </div>
-    </div>
+    </VaultSection>
   );
 }
