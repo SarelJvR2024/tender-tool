@@ -6,6 +6,21 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Lephalale, Kouga, Vaal Central Water now live in production, 2026-10-21 ~14:50 UTC**
+(`f9675c1`) - the reachability run (`39600219996`) came back green on all 3 individually (randwater's
+own equivalent run, `39508282401`, genuinely failed - correctly stays out). Added all 3 to
+`gov_sources.ALL_SOURCES`, flipped their own "deliberately NOT in ALL_SOURCES" test assertions, full
+`engine/discovery` + `engine/general` suites re-run clean. Then ran the **real default-source
+integration pass** (no `--sources` filter - what actually runs in production) to confirm one more
+time with everything enabled together: Vaal Central Water and Lephalale both folded exactly as their
+own standalone testing predicted (0 "also on portal" each, matching their confirmed-zero-overlap
+findings). Kouga: 283 listed (281 previously - 2 new tenders published since last check, expected
+drift), 6 "also on portal" (4 before - live data moves). **Zero cross-buyer contamination**: summing
+every source's own "also on portal" count (SANRAL 45 + Eskom 145 + Transnet 71 + SARS 4 + DBSA 9 +
+Kouga 6 = 280) matches the run's own overall "280 listed by more than one source" headline exactly -
+nothing attributable to Vaal Central Water or Lephalale, nothing double-counted or misfolded anywhere
+in the merge. These 3 sources are no longer experimental; they feed the real pipeline from here on.
+
 **Reachability workflow added and triggered, 2026-10-21 ~14:30 UTC**
 (`.github/workflows/test-new-readers-reachability.yml`, `48bbec4`) - same precedent as
 `test-randwater-reachability.yml`: a `workflow_dispatch`-only check of whether a real GitHub
