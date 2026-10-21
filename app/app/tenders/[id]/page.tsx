@@ -32,6 +32,9 @@ import { PositionPersonSelect } from "./position-person-select";
 import { startTenderPack } from "./pack-inputs-actions";
 import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
+import { loadPackReviewSnapshot } from "./pack-review-data";
+import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
+import { computeTenderReadiness } from "./tender-readiness";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -317,6 +320,22 @@ export default async function TenderWorkspacePage({
   // general preparation flow instead of the SANRAL compliance report.
   const isGeneralFamily = tenderFacts?.family === GENERAL_FAMILY;
 
+  // Per-tender readiness (Product promise's Verify/Provide/Fix, app/AGENTS.md)
+  // - reuses the exact same Pack Review snapshot the card further down the
+  // page already reads (loadPackReviewSnapshot/loadGeneralPackReviewSnapshot
+  // are both React cache()'d, so this doesn't cost a second read), so the
+  // header's score can never disagree with the detailed list below it. null
+  // (not a fake 100%) when there's no pack yet or this family's returnables
+  // list hasn't been mapped - nothing real to assess yet, not "nothing left".
+  let tenderReadiness: ReturnType<typeof computeTenderReadiness> | null = null;
+  if (tenderPack && isSanralFamily) {
+    const snapshot = await loadPackReviewSnapshot(id);
+    if (snapshot.mapped) tenderReadiness = computeTenderReadiness(snapshot.sections);
+  } else if (tenderPack && isGeneralFamily) {
+    const snapshot = await loadGeneralPackReviewSnapshot(id);
+    if (snapshot.mapped) tenderReadiness = computeTenderReadiness(snapshot.sections);
+  }
+
   return (
     <AppShell>
       <div style={{ flex: 1, padding: "20px 16px", maxWidth: 820, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
@@ -345,9 +364,12 @@ export default async function TenderWorkspacePage({
                   </span>
                 )}
               </div>
-              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px", lineHeight: 1.35 }}>
+              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 2px", lineHeight: 1.35 }}>
                 {tenderFacts.description ?? "Untitled tender"}
               </h1>
+              <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 8 }}>
+                {tenderFacts.buyer ?? "No client on file"}
+              </div>
               <div style={{ fontSize: 13, color: "#5B6472" }}>
                 Closes{" "}
                 {tenderFacts.closing_date ? new Date(tenderFacts.closing_date).toLocaleDateString() : "- no closing date on file"}
@@ -357,6 +379,35 @@ export default async function TenderWorkspacePage({
                   </span>
                 )}
               </div>
+              {tenderReadiness && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, paddingTop: 10, borderTop: "1px solid #ECEEF1" }}>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      width: 38,
+                      height: 38,
+                      flex: "0 0 auto",
+                      borderRadius: "50%",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      background: tenderReadiness.thingsLeft === 0 ? "#DCFCE7" : tenderReadiness.fix.length > 0 ? "#FEE2E2" : "#FEF3C7",
+                      color: tenderReadiness.thingsLeft === 0 ? "#15803D" : tenderReadiness.fix.length > 0 ? "#B91C1C" : "#B45309",
+                    }}
+                  >
+                    {tenderReadiness.score}
+                  </span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
+                      {tenderReadiness.thingsLeft === 0
+                        ? "Ready to submit"
+                        : `${tenderReadiness.thingsLeft} thing${tenderReadiness.thingsLeft === 1 ? "" : "s"} left before you can submit`}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#8A93A0" }}>Readiness score</div>
+                  </div>
+                </div>
+              )}
               {tenderFacts.briefing_date && (
                 <div style={{ fontSize: 13, color: "#5B6472", marginTop: 2 }}>
                   Briefing {formatDay(tenderFacts.briefing_date)}
