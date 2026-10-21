@@ -6,6 +6,23 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~18:15 UTC**: orientation via `git log` found two sibling-session
+commits since the last pass, both from the "UI/UX design reviewer" session
+(`session_01HsxN8YLz5vfgFpz9qcdDVV`), steps 1-2 of 4 unifying the Tender Workspace's status
+vocabularies per its own product-promise audit: `1844408` (#35, `classifyComplianceItem()` groups
+compliance docs into Verify/Provide/Fix - a mandatory item left merely unconfirmed, not just outright
+missing, now correctly surfaces as Fix/disqualification-risk, which the old "Don't have" count
+missed) and `0d9d5c7` (#36, merges page.tsx's "Already confirmed"/"Please review" cards into one
+Verify card, recolors "Needs your input" to amber Provide). Independently verified both, not just
+read the commit messages: ran the new `bid-task-status.spec.ts` (genuinely covers all 6
+mandatory×status combinations plus two fallback cases, not a shallow test) plus `npx vitest run`,
+`npm run typecheck`, `npm run lint` - all clean; read the `0d9d5c7` diff directly and confirmed its
+"presentation-only, no change to field_provenance/ReviewButton/markFieldReviewed" claim actually
+holds (the diff only touches card titles/colors/row-merging, nothing else). No overlap with this
+session's own work (different domain - app UI vs. discovery/general engines).
+
+Full `test_*.py` sweep repo-wide re-run clean. Nothing new to fix this pass.
+
 **Standing review pass, 2026-10-21 ~16:15 UTC**: orientation via `git log` found one sibling-session
 commit since the last pass - Finding 46 (`83595ba`, `suggest_pack.py`), a genuine order-dependent
 key-person suggestion bug (an unbroken score-tie fell back to profile-JSON file order instead of
