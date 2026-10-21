@@ -29,7 +29,7 @@ export function Step5({ digestOptIn, error }: { digestOptIn: boolean; error?: st
         </div>
 
         <Button type="submit" className="h-11">
-          Finish setup
+          Continue
         </Button>
       </form>
     </WizardShell>

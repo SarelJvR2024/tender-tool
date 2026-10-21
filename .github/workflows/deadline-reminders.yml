@@ -1,0 +1,63 @@
+# Sends the "closing in 3 days / 24 hours" deadline-reminder email
+# (app/scripts/send-deadline-reminders.ts) once a day.
+#
+# Same architecture as daily-digest.yml, same reasoning: this job needs to
+# read every company's closing tenders and opted-in members' emails in one
+# run, which needs the Supabase SERVICE ROLE key - and the deployed Next.js
+# app itself never holds that key (supabase/migrations/0077's own header
+# comment). A scheduled GitHub Action, not an always-on worker, for the same
+# reason daily-digest.yml gives: one short batch job, once a day, degrades
+# to "today's reminder arrives a bit late" rather than being a broken
+# product if a run is ever delayed or dropped.
+#
+# Needs 3 repository secrets (Settings > Secrets and variables > Actions),
+# the same NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY daily-digest.yml
+# already uses, plus RESEND_API_KEY (see lib/resendEmail.ts's own docstring).
+# Until RESEND_API_KEY is set, this workflow still runs safely and still
+# goes green: the script detects the missing key and exits 0 having sent or
+# claimed nothing (see scripts/send-deadline-reminders.ts's own comment on
+# why it must not claim a reminder it couldn't actually send).
+
+name: deadline-reminders
+
+on:
+  schedule:
+    # 04:10 UTC = 06:10 SAST - shortly after daily-digest.yml's own 03:45 UTC
+    # run, deliberately not the same minute (GitHub discourages scheduling
+    # many workflows at exactly :00/:30, same reasoning as that workflow's
+    # own comment).
+    - cron: "10 4 * * *"
+  workflow_dispatch: {} # manual test run, e.g. right after adding the RESEND_API_KEY secret
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deadline-reminders
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies (needs @supabase/supabase-js and resend)
+        run: npm ci
+
+      - name: Send today's deadline reminders
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_ADDRESS: ${{ secrets.RESEND_FROM_ADDRESS }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: node --experimental-strip-types scripts/send-deadline-reminders.ts

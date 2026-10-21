@@ -1,9 +1,11 @@
 import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { getNotifications } from "@/lib/notifications";
+import { fetchCompanySubscription } from "@/lib/companySubscription";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { TopBar } from "./TopBar";
+import { SubscriptionBanner } from "@/components/tt/subscription-banner";
 
 /**
  * Replaces SiteNav (the old navy top bar every signed-in page mounted) with
@@ -21,20 +23,23 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   let isEmployee = false;
   let companyName: string | null = null;
   let notifications: Awaited<ReturnType<typeof getNotifications>> = [];
+  let subscription: Awaited<ReturnType<typeof fetchCompanySubscription>> = null;
 
   if (user) {
-    const [{ data: adminData }, { data: membership }, { data: company }, notificationRows] = await Promise.all([
+    const [{ data: adminData }, { data: membership }, { data: company }, notificationRows, subscriptionRow] = await Promise.all([
       supabase.rpc("is_platform_admin"),
       // 'employee' (migration 0067) only ever sees Home + My CV - see
       // nav-items.ts's own EMPLOYEE_NAV_ITEMS comment for why.
       supabase.from("company_members").select("role").eq("user_id", user.id).maybeSingle(),
       supabase.from("companies").select("legal_name, csd_trading_name").maybeSingle(),
       getNotifications(supabase),
+      fetchCompanySubscription(supabase),
     ]);
     isPlatformAdmin = adminData === true;
     isEmployee = membership?.role === "employee";
     companyName = (company?.csd_trading_name || company?.legal_name) ?? null;
     notifications = notificationRows;
+    subscription = subscriptionRow;
   }
 
   const sidebarOpen = cookieStore.get("sidebar_state")?.value !== "false";
@@ -44,6 +49,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
       <AppSidebar isPlatformAdmin={isPlatformAdmin} isEmployee={isEmployee} />
       <SidebarInset>
         <TopBar userEmail={user?.email ?? null} companyName={companyName} isPlatformAdmin={isPlatformAdmin} isEmployee={isEmployee} notifications={notifications} />
+        {!isEmployee && <SubscriptionBanner subscription={subscription} />}
         <div className="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">{children}</div>
       </SidebarInset>
     </SidebarProvider>
