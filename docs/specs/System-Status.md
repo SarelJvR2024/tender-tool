@@ -6,6 +6,22 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~14:15 UTC**: orientation via `git log` found one sibling-session
+commit since the last pass - Finding 45 (`2a5fb24`, `store_award_outcomes.py`), a genuine fix for a
+first-word-only name match being stored as a tender winner on real award data. Independently
+re-verified rather than trusted at face value: re-ran its own new test file clean (7/7), then
+reverted the fix myself, confirmed the same 3 checks fail with the wrong company marked winner,
+restored it, confirmed clean again - the regression-catching holds. Merged with `--ff-only`, no
+conflict with this session's own work (different files).
+
+Full QA sweep this pass, broader than usual (every `engine/*/test_*.py` across the whole repo, not
+just `engine/discovery`/`engine/general`): found and fixed one small, safe inconsistency -
+`engine/intake/test_manual_intake.py` crashed with a raw `IndexError` when run with no arguments,
+instead of skipping gracefully like every other live-Postgres-gated test in the repo (it indexed
+`sys.argv[1]` before ever checking its own `INTAKE_PSQL` env var). Added the same
+check-env-var-first-and-skip pattern every other `_PSQL`-gated test already uses. Everything else -
+`app/`'s `npm run typecheck`/`npm run lint`, every other engine test file - clean.
+
 **Municipality catalog sweep closed out, 2026-10-21 ~15:10 UTC** (`c0c1578`) - the last open lead,
 Abaqulusi, turned out not to be a reader candidate after all. Its real per-tender listing exists
 (a WP File Download plugin's AJAX file-listing API, one category id per tender type - the same

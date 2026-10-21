@@ -225,6 +225,10 @@ def pack_case(c, company_id, tender_id, storage, work):
 
 
 def main():
+    if not os.environ.get("INTAKE_PSQL") or len(sys.argv) < 2:
+        print("(skipped - set INTAKE_PSQL to a scratch Postgres with the migrations replayed "
+              "and pass a scratch storage directory, see module docstring)")
+        return
     storage = os.path.abspath(sys.argv[1])
     shutil.rmtree(storage, ignore_errors=True)
     os.makedirs(storage)
