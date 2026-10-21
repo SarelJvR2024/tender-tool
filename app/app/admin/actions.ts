@@ -36,7 +36,7 @@ async function writeReview(formData: FormData, reviewed: boolean) {
   }
   // RLS filters a non-owner's update down to zero rows rather than erroring.
   if (!data || data.length === 0) {
-    redirect(`/admin?error=${encodeURIComponent("Only a Tender Tool platform admin can review harness runs.")}`);
+    redirect(`/admin?error=${encodeURIComponent("Only a Tender Ready platform admin can review harness runs.")}`);
   }
   revalidatePath("/admin");
 }

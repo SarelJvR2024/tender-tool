@@ -52,7 +52,7 @@ export default async function BankAccountsPage({ searchParams }: { searchParams:
       intro={
         <>
           The company&apos;s own account and, where a tender asks, a director&apos;s. Account numbers are the most fraud-sensitive
-          detail Tender Tool holds: only owners and admins of your company can see or change them, other members see the last four
+          detail Tender Ready holds: only owners and admins of your company can see or change them, other members see the last four
           digits, and generated documents still print &quot;WITHHELD&quot; - the number is copied onto a buyer&apos;s form by hand.
         </>
       }

@@ -677,7 +677,7 @@ export default async function PersonDetailPage({
               Tender roles this CV qualifies for
             </h2>
             <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
-              Your company decides which tender roles {person!.name}&apos;s CV fits - Tender Tool uses this tag on each
+              Your company decides which tender roles {person!.name}&apos;s CV fits - Tender Ready uses this tag on each
               tender&apos;s compliance check instead of guessing from years of experience or registration. The roles are the
               ones real tenders ask for: SANRAL&apos;s Book 1 key-person codes (a Design Specialist is tendered per
               specialism) and the key personnel other buyers name. Hover a role to see which tender it came from.

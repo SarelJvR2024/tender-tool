@@ -478,7 +478,7 @@ export default async function DiscoveryPage({
 
                   {o.etenders_category && (
                     // The buyer's own pick on eTenders, as a cross-reference
-                    // only - Tender Tool's categories (above) drive the fit.
+                    // only - Tender Ready's categories (above) drive the fit.
                     <div title={o.etenders_category_check?.note ?? undefined} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11, color: "#5B6472", marginBottom: 6 }}>
                       <span>Buyer&apos;s eTenders category: <span style={{ color: "#16233B", fontWeight: 600 }}>{o.etenders_category}</span></span>
                       {o.etenders_category_check && XREF_STYLE[o.etenders_category_check.status] && (
@@ -488,7 +488,7 @@ export default async function DiscoveryPage({
                       )}
                       {o.etenders_category_check?.status === "differs" && o.etenders_category_check.matching_categories.length > 0 && (
                         <span>
-                          (on Tender Tool&apos;s list that is {o.etenders_category_check.matching_categories.slice(0, 3).map((c) => taxonomyLabel(taxonomy, c)).join(", ")})
+                          (on Tender Ready&apos;s list that is {o.etenders_category_check.matching_categories.slice(0, 3).map((c) => taxonomyLabel(taxonomy, c)).join(", ")})
                         </span>
                       )}
                     </div>

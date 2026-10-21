@@ -114,7 +114,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
         <SectionTitle title="Key people & CVs" />
         <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
           Whether each position is filled by someone <strong>your company has tagged</strong> as fitting that role (set on
-          the person&apos;s People page - Tender Tool doesn&apos;t guess role fit), with the C3.1.11 minimums checked
+          the person&apos;s People page - Tender Ready doesn&apos;t guess role fit), with the C3.1.11 minimums checked
           against the records on file as a cross-check, the CV on file and the tender-specific CV status.
         </div>
         {/* Whose C3.1.11 table the minimums come from - same banner pattern as the experience-evidence rule. */}

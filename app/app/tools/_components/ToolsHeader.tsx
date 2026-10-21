@@ -24,7 +24,7 @@ export function ToolsHeader({ showBackLink = true }: { showBackLink?: boolean } 
             <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>
               T
             </div>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Ready</div>
           </Link>
         )}
         <Link

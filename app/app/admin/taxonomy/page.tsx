@@ -153,10 +153,10 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
         <AdminNav active="taxonomy" />
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discipline list</h1>
         <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
-          Tender Tool&apos;s own, maintained category list: what Discovery sorts tenders into and what companies tag their
+          Tender Ready&apos;s own, maintained category list: what Discovery sorts tenders into and what companies tag their
           experience with. {groups.length} groups, {cats.length - groups.length} disciplines{retired ? ` (${retired} retired)` : ""}. A change here is used by
           Discovery on its next run - no deploy, no migration.{" "}
-          {canEdit ? "You can edit it." : "Read-only for your account: only a Tender Tool platform admin can change it."}
+          {canEdit ? "You can edit it." : "Read-only for your account: only a Tender Ready platform admin can change it."}
         </p>
 
         {(actionError || catError || sugError) && (

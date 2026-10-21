@@ -21,7 +21,7 @@ const interTight = Inter_Tight({
 });
 
 export const metadata: Metadata = {
-  title: "Tender Tool",
+  title: "Tender Ready",
   description: "SANRAL tender discovery, pack generation and document completion",
 };
 

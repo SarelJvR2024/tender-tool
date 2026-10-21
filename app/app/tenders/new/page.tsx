@@ -39,7 +39,7 @@ export default async function NewTenderPage() {
           <ManualTenderForm companyId={membership.company_id as string} />
         </div>
         <p style={{ fontSize: 12, color: "#8A93A0", margin: "12px 0 0", lineHeight: 1.5 }}>
-          The analysis runs on the Tender Tool worker (it needs Python and LibreOffice), so it takes a minute or two once the worker is
+          The analysis runs on the Tender Ready worker (it needs Python and LibreOffice), so it takes a minute or two once the worker is
           running. The tender page shows its progress.
         </p>
       </div>

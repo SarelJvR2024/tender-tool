@@ -113,7 +113,7 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
 
       <Card title="The registration list" id="catalog">
         <div style={{ fontSize: 13, color: MUTED, lineHeight: 1.5, marginBottom: 8 }}>
-          {types.filter((t) => !t.owner_company_id).length} types, each read from real tenders (the &quot;asked for by&quot; line). Tender Tool
+          {types.filter((t) => !t.owner_company_id).length} types, each read from real tenders (the &quot;asked for by&quot; line). Tender Ready
           maintains this shared list; a type it doesn&apos;t have yet can be added for your company below.
         </div>
         <Disclosure summary="Show the full list">

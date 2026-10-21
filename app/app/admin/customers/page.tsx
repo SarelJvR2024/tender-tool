@@ -49,7 +49,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Customers</h1>
         <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
-          Every company signed up to Tender Tool, with how many people they&apos;ve added and tenders they&apos;ve started.{" "}
+          Every company signed up to Tender Ready, with how many people they&apos;ve added and tenders they&apos;ve started.{" "}
           {customers.length} compan{customers.length === 1 ? "y" : "ies"}
           {testCount > 0 ? ` (${testCount} marked as test)` : ""}.
         </p>

@@ -253,7 +253,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
 
         {manifest.gaps.length > 0 && (
           <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 12px", marginBottom: 12, fontSize: 12, color: "#92400E" }}>
-            <div style={{ fontWeight: 700, marginBottom: 3 }}>What Tender Tool can&apos;t do for this tender</div>
+            <div style={{ fontWeight: 700, marginBottom: 3 }}>What Tender Ready can&apos;t do for this tender</div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {manifest.gaps.map((g, i) => <li key={i}>{g}</li>)}
             </ul>
@@ -535,7 +535,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
           One ordered PDF: contents page, the forms filled from your data and answers, a completion guide for every form that has to be
           done by hand, your vault documents, this tender&apos;s uploads, accepted experience evidence and the CVs of the people tagged for its
-          roles. Built by Tender Tool&apos;s document engine (it can&apos;t run in the browser), so it appears here a minute or two after you ask.
+          roles. Built by Tender Ready&apos;s document engine (it can&apos;t run in the browser), so it appears here a minute or two after you ask.
         </div>
         {needAnswer > 0 && (
           <div style={{ fontSize: 12, color: "#B45309", marginBottom: 8 }}>

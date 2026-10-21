@@ -27,7 +27,7 @@ async function requireAdmin() {
     console.error("is_platform_admin rpc failed", error);
     back("Could not check admin rights - try again. If it keeps happening, let us know.");
   }
-  if (!isAdmin) back("Only a Tender Tool platform admin can change the shared discipline list.");
+  if (!isAdmin) back("Only a Tender Ready platform admin can change the shared discipline list.");
   return { supabase, user };
 }
 

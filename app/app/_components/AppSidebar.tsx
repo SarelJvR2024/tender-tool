@@ -26,7 +26,7 @@ export function AppSidebar({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
               <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-sm font-bold text-sidebar-primary-foreground">
                 T
               </div>
-              <span className="font-display text-base font-semibold">Tender Tool</span>
+              <span className="font-display text-base font-semibold">Tender Ready</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
