@@ -147,7 +147,7 @@ export async function OfficeLocations() {
 
       {!error && (
         <details className={offices.length ? "border-t border-border pt-2.5" : ""} open={offices.length === 0}>
-          <summary className="cursor-pointer py-1 text-sm font-semibold text-accent">+ Add an office</summary>
+          <summary className="flex min-h-11 cursor-pointer items-center py-1 text-sm font-semibold text-accent">+ Add an office</summary>
           <form action={saveCompanyOffice} className="mt-2.5">
             <OfficeFields office={null} />
             <Button type="submit" variant="accent" size="lg" className="mt-3 min-h-11 px-[18px]">

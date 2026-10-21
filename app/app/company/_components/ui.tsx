@@ -230,7 +230,7 @@ export function FileUpload({ label, required = true }: { label: string; required
 export function Disclosure({ summary, open, id, children }: { summary: string; open?: boolean; id?: string; children: React.ReactNode }) {
   return (
     <details id={id} open={open} className="mt-2.5">
-      <summary className="flex min-h-8 cursor-pointer items-center text-[13px] font-semibold text-accent">{summary}</summary>
+      <summary className="flex min-h-11 cursor-pointer items-center text-[13px] font-semibold text-accent">{summary}</summary>
       <div className="pt-2.5">{children}</div>
     </details>
   );
