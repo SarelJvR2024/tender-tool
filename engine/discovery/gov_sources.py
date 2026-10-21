@@ -84,6 +84,7 @@ SOURCE_LABELS = {
     "randwater": "Rand Water's own bids portal",
     "vaal_central_water": "Vaal Central Water Board's own tenders page",
     "lephalale": "Lephalale Local Municipality's own tenders page",
+    "kouga": "Kouga Local Municipality's own open-tenders listing",
 }
 # A direct-site tender is only folded into a portal row of the SAME buyer:
 # reference numbers aren't unique across buyers ("RFQ 01/2026"). Every
@@ -108,6 +109,7 @@ BUYER_FAMILY = {
     "randwater": re.compile(r"rand\s*water", re.I),
     "vaal_central_water": re.compile(r"vaal\s*central\s*water", re.I),
     "lephalale": re.compile(r"lephalale", re.I),
+    "kouga": re.compile(r"kouga", re.I),
 }
 PORTAL_CLOSED_LOOKBACK = 3000  # newest rows of the portal's Closed tab checked for extended tenders
 MIN_CONTAINED_REF = 8  # "one reference contains the other" only for references this long
@@ -241,6 +243,9 @@ def read_source(name, with_documents=True, log=print):
     if name == "lephalale":
         import lephalale
         return lephalale.fetch_releases(log=log), []
+    if name == "kouga":
+        import kouga
+        return kouga.fetch_releases(log=log), []
     raise ValueError(f"unknown source {name!r}")
 
 
