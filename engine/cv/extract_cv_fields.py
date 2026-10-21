@@ -289,7 +289,16 @@ def assess_text_quality(text, pages=None):
 # 4. South African ID numbers: matched and redacted locally
 # ============================================================================
 
-SA_ID_RE = re.compile(r"(?<!\d)(\d{6})[ -]?(\d{4})[ -]?(\d{3})(?!\d)")
+# Separator between the 6/4/3 digit groups is [\s-], not just [ -]: a real
+# ID number that lands in a narrow table cell/column can be split across a
+# LINE BREAK by pdftotext -layout (confirmed 2026-10-21 - the exact artifact
+# this module's own "found locally and redacted BEFORE any text leaves this
+# machine" promise exists to prevent). A literal space/hyphen-only separator
+# let a line-broken ID (e.g. "800101\n5009087") pass through completely
+# unredacted - neither half is 13 digits on its own, so the whole-number
+# regex never matched at all, and the full ID reached the Anthropic API
+# verbatim, split only by a newline a reader skips straight past.
+SA_ID_RE = re.compile(r"(?<!\d)(\d{6})[\s-]?(\d{4})[\s-]?(\d{3})(?!\d)")
 
 
 def _luhn_ok(digits):

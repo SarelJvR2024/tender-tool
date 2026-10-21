@@ -2800,3 +2800,55 @@ flagged `changed ['returnables']`; restored the real function, re-ran - clean ag
 **Scope, not yet established:** how common this bulletin shape is across buyers beyond City of
 Tshwane wasn't checked this pass - this fix handles it wherever it's found, but a wider survey
 (does any other municipality do this routinely?) hasn't been done.
+
+## 2026-10-21 (fifty-sixth run): CV engine - a real South African ID number split across a line break by a narrow PDF table cell reached the Anthropic API unredacted
+
+**Why this area:** a parallel sibling session is actively verifying `requirements.py`/
+`submission_plan.py` against real current tenders, so picked a different corner to avoid
+duplicating that effort. `engine/cv/extract_cv_fields.py`'s SA-ID-redaction step (step 4 of its
+own documented pipeline: "found locally and replaced... BEFORE any text leaves this machine") is
+a real, narrow, privacy-critical (POPIA) piece of logic with a crisp testable boundary - and
+`test_text_extraction()`'s own existing comment already confirms the exact triggering artifact is
+real, not hypothetical: "LibreOffice's PDF wraps the narrow table column mid-token
+('TMRA/2019/04' / '4') - real behaviour of PDF CVs."
+
+### Finding 43 (CONFIRMED, FIXED, severe - a confirmed-real PDF-extraction artifact bypassing the module's own stated redaction promise)
+
+**Where:** `engine/cv/extract_cv_fields.py`, `SA_ID_RE` / `find_and_redact_sa_ids()`.
+
+**What was tested:** `SA_ID_RE` matched a 13-digit South African ID number's 6/4/3 digit groups
+with only a literal space or hyphen (`[ -]?`) as the allowed separator between them. The same
+test file's own `test_text_extraction()` already documents, from real LibreOffice-generated PDF
+output, that a narrow table column wraps text mid-token - the exact artifact that would land a
+digit group of an ID number on one line and the rest on the next. Constructed the real adversarial
+case directly: a checksum-valid synthetic ID (`sa_id()`'s own test helper) split across line
+breaks exactly the way a narrow "ID Number" table cell would wrap it (`"800101\n5009087\n..."`),
+run through the real `find_and_redact_sa_ids()`.
+
+**Confirmed the bug:** neither half of the split ID is 13 digits on its own, so `SA_ID_RE` never
+matched anything at all - the function returned the text completely unchanged, `ids == []`. The
+full, genuinely valid ID number would have reached the Anthropic API verbatim in the very next
+pipeline step, split only by a newline a human reader skips straight past without noticing -
+exactly the failure this module's own docstring states step 4 exists to prevent, for the one
+field (a government ID number) this whole redaction pipeline was built around.
+
+**Fix:** widened the separator between the three digit groups from `[ -]` to `[\s-]` (any
+whitespace, including a line break, not just a literal space or hyphen) - one-character regex
+change. The surrounding `(?<!\d)`/`(?!\d)` digit-boundary guards and the downstream Luhn/
+month-day/citizenship-digit validity checks (`_plausible_sa_id()`) are untouched, so the fix
+doesn't loosen WHAT counts as a valid ID, only how its three groups may be visually separated in
+the extracted text.
+
+**Verification:** re-ran the real adversarial case post-fix - the line-split ID is now found and
+redacted (`ids == [SYNTH_ID]`, the real ID string no longer present once newlines are stripped
+for the check). Mirror case, proving the fix isn't over-broad: two genuinely UNRELATED digit runs
+("Phone: 011555" / "1234 ext 99") sitting on either side of a line break are NOT fused into a
+false ID - `find_and_redact_sa_ids()` leaves that text completely untouched, confirming the
+digit-boundary and validity guards still do their job across the wider separator. Added
+`test_sa_id_redaction_line_break()` to `engine/cv/test_extract_cv_fields.py` (2 checks). **Proved
+the test actually catches the regression**, not just that it passes: temporarily reverted
+`SA_ID_RE` to its pre-fix pattern, re-ran - the line-split check failed exactly as predicted
+(`FAIL an ID split across line breaks is still found and redacted, not leaked`); restored the fix
+and confirmed the full suite passes clean again (`ALL PASSED`). Ran `engine/cv/test_generate_cv.py`
+and the real `process_cv_jobs.py --self-test` end-to-end smoke test for regression safety in the
+same engine - both still pass. `python3 -m py_compile` clean on both changed files.

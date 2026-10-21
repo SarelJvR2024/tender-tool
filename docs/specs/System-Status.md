@@ -583,6 +583,32 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-21, standing QA/robustness review - fifty-sixth run): a real South African ID number split across a line break reached the Anthropic API unredacted (POPIA-relevant)
+
+Orientation: avoided `requirements.py`/`submission_plan.py` (a parallel sibling session is
+actively verifying them against real current tenders). Picked `extract_cv_fields.py`'s SA-ID
+redaction - privacy-critical, narrow, testable, and the exact triggering artifact (a PDF table
+column wrapping text mid-token) is already confirmed real by this same test file's own comment.
+
+**Finding 43 (fixed, severe):** `SA_ID_RE` only allowed a literal space or hyphen between an ID
+number's 6/4/3 digit groups. A real checksum-valid ID split across a line break by a narrow table
+cell - confirmed real PDF-extraction behaviour, not hypothetical - has neither half at 13 digits,
+so the regex never matched at all. The full ID would have reached the Anthropic API completely
+unredacted, split only by a newline a reader skips past - exactly what step 4 of this module's
+own documented pipeline exists to prevent.
+
+**Fix:** widened the separator from `[ -]` to `[\s-]` (any whitespace) - a one-character regex
+change. The digit-boundary guards and Luhn/month-day/citizenship-digit validity checks are
+untouched.
+
+**Verification:** real adversarial case (a line-split checksum-valid ID) now correctly redacted;
+mirror case (two unrelated digit runs split by a line break) confirmed NOT fused into a false ID.
+New test added to `test_extract_cv_fields.py`, proved to actually catch the regression (reverted
+the fix, confirmed it fails, restored it, confirmed `ALL PASSED`). `test_generate_cv.py` and the
+real `process_cv_jobs.py --self-test` both still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-sixth run" (Finding 43).
+
 ## This pass (2026-10-21, standing QA/robustness review - fifty-fifth run): two real, unrelated South African municipalities could be scored as the same place, inflating a company's estimated tender score
 
 Orientation: `score_outlook.py` (Discovery's fit-scoring engine, 817 lines) had no dedicated test
