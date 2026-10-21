@@ -77,11 +77,17 @@ export function sortChanges(changes: ListingChange[]): ListingChange[] {
   );
 }
 
-export function changeTone(type: string): { bg: string; color: string; border: string } {
-  if (type === "cancelled") return { bg: "#FEE2E2", color: "#B91C1C", border: "#FCA5A5" };
+// Design-system audit fix (2026-10-21): a soft-tint token class, not a
+// literal hex triplet. The catch-all case (a new document, an extension, a
+// published list/award/regret letter) reads as `info`, not `accent` - the
+// product promise reserves accent for the single most important action on
+// a screen, and several rows can show this "notable but not urgent" tone
+// at once.
+export function changeTone(type: string): { chipClass: string } {
+  if (type === "cancelled") return { chipClass: "border border-destructive/30 bg-destructive/10 text-destructive" };
   if (type === "closing_date_changed" || type === "sources_disagree" || type === "briefing_changed")
-    return { bg: "#FEF3C7", color: "#B45309", border: "#FCD34D" };
-  return { bg: "#EFF6FF", color: "#1D4ED8", border: "#BFDBFE" };
+    return { chipClass: "border border-warning/30 bg-warning/10 text-warning" };
+  return { chipClass: "border border-info/30 bg-info/10 text-info" };
 }
 
 export function groupByOcid(changes: ListingChange[]): Map<string, ListingChange[]> {

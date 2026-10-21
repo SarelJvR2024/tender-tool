@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { RetryButton } from "./retry-button";
 import { ReviewButton } from "./review-button";
 import { TaskStatusButton } from "./task-status-button";
 import { TaskAssigneeSelect, type AssignablePerson } from "./task-assignee-select";
@@ -340,13 +341,65 @@ export default async function TenderWorkspacePage({
     if (snapshot.mapped) tenderReadiness = computeTenderReadiness(snapshot.sections);
   }
 
+  // Section-level error recovery: each of these is a self-contained async
+  // Server "component" doing its own several-query Supabase read - calling
+  // it directly (an async function component is just an async function; the
+  // JSX form `<Foo/>` is sugar for the same call) rather than through JSX
+  // lets a real try/catch wrap it, so one bad read degrades to a friendly
+  // ErrorBanner (with a working Retry, same as every other error on this
+  // page) for that section only, instead of throwing and 500-ing the whole
+  // tender workspace. Every other read on this page already returns
+  // {data, error} pairs and degrades to []/null without throwing - this is
+  // only for the handful of larger child components that could rethrow.
+  let disqualificationGuardSection: React.ReactNode = null;
+  if (isSanralFamily || isGeneralFamily) {
+    try {
+      disqualificationGuardSection = await DisqualificationGuard({ tenderId: id, isSanralFamily, isGeneralFamily });
+    } catch (err) {
+      console.error("DisqualificationGuard failed to render for tender", id, err);
+      disqualificationGuardSection = <ErrorBanner message="Couldn't load the Disqualification guard. If it keeps happening, let us know." />;
+    }
+  }
+
+  let complianceSection: React.ReactNode = null;
+  try {
+    if (isGeneralFamily) {
+      complianceSection = await GeneralTenderWorkspace({ tenderId: id, saved: saved ?? null });
+    } else if (tenderFacts?.family) {
+      complianceSection = await ComplianceReport({ tenderId: id });
+    }
+  } catch (err) {
+    console.error("Compliance/pack check failed to render for tender", id, err);
+    complianceSection = <ErrorBanner message="Couldn't load the compliance check. If it keeps happening, let us know." />;
+  }
+
+  let packReviewSection: React.ReactNode = null;
+  if (showSubmissionPack && tenderPack) {
+    try {
+      packReviewSection = await PackReview({ tenderId: id });
+    } catch (err) {
+      console.error("PackReview failed to render for tender", id, err);
+      packReviewSection = <ErrorBanner message="Couldn't load Pack review. If it keeps happening, let us know." />;
+    }
+  }
+
+  let submissionPackSection: React.ReactNode = null;
+  if (showSubmissionPack && tenderPack) {
+    try {
+      submissionPackSection = await SubmissionPack({ tenderId: id, tenderPackId: tenderPack.id });
+    } catch (err) {
+      console.error("SubmissionPack failed to render for tender", id, err);
+      submissionPackSection = <ErrorBanner message="Couldn't load the submission pack. If it keeps happening, let us know." />;
+    }
+  }
+
   return (
     <AppShell>
       <div style={{ flex: 1, padding: "20px 16px", maxWidth: 820, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         {actionError && <ErrorBanner message={actionError} />}
 
         {tenderError && (
-          <ErrorBanner message="Couldn't load this tender - try refreshing. If it keeps happening, let us know." />
+          <ErrorBanner message="Couldn't load this tender. If it keeps happening, let us know." />
         )}
 
         {!tenderFacts && !tenderError && (
@@ -436,7 +489,7 @@ export default async function TenderWorkspacePage({
                     <SummaryChip count={confirmedRows.length} label="confirmed" bg="#DCFCE7" color="#15803D" />
                   )}
                   {reviewRows.length > 0 && (
-                    <SummaryChip count={reviewRows.length} label="to verify" bg="#FEF3C7" color="#B45309" />
+                    <SummaryChip count={reviewRows.length} label="to verify" bg="#DCFCE7" color="#15803D" />
                   )}
                   {missingRows.length > 0 && (
                     <SummaryChip count={missingRows.length} label="to provide" bg="#FEF3C7" color="#B45309" />
@@ -457,9 +510,7 @@ export default async function TenderWorkspacePage({
                 bid outright, read from the same data the rest of the page
                 already reads. Mounted early, right after the facts, since
                 it's meant to be the first thing a director checks. */}
-            {(isSanralFamily || isGeneralFamily) && (
-              <DisqualificationGuard tenderId={id} isSanralFamily={isSanralFamily} isGeneralFamily={isGeneralFamily} />
-            )}
+            {disqualificationGuardSection}
 
             {/* Submission plan - the full assessment-engine step list (every
                 form/returnable/role/question/gap), not just the Guard's
@@ -529,7 +580,7 @@ export default async function TenderWorkspacePage({
               </div>
             )}
 
-            {packError && <ErrorBanner message="Couldn't load this tender's pack - try refreshing. If it keeps happening, let us know." />}
+            {packError && <ErrorBanner message="Couldn't load this tender's pack. If it keeps happening, let us know." />}
 
             {!tenderPack && !packError && (
               <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
@@ -550,7 +601,7 @@ export default async function TenderWorkspacePage({
 
             {tenderPack && (
               <>
-                {provenanceError && <ErrorBanner message="Couldn't load the readiness report - try refreshing. If it keeps happening, let us know." />}
+                {provenanceError && <ErrorBanner message="Couldn't load the readiness report. If it keeps happening, let us know." />}
 
                 {provenance.length === 0 && !provenanceError && (
                   <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#5B6472" }}>
@@ -627,11 +678,7 @@ export default async function TenderWorkspacePage({
                 A tender whose documents haven't been analysed yet (family
                 still null - a manual load waiting on its intake) has no
                 family to report against; the intake card says so. */}
-            {isGeneralFamily ? (
-              <GeneralTenderWorkspace tenderId={id} saved={saved ?? null} />
-            ) : tenderFacts.family ? (
-              <ComplianceReport tenderId={id} />
-            ) : null}
+            {complianceSection}
 
             {/* Published bids/awards for this tender + similar tenders (0044,
                 market-context.tsx): where this company's price sat, and how
@@ -811,10 +858,10 @@ export default async function TenderWorkspacePage({
             {showSubmissionPack && <SubcontractingPlan tenderId={id} saved={saved === "b7"} />}
 
             {/* Pack review: the full pre-compile preview (pack_review_confirmations, 0059) - shown before the generate button. */}
-            {showSubmissionPack && tenderPack && <PackReview tenderId={id} />}
+            {packReviewSection}
 
             {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
-            {showSubmissionPack && tenderPack && <SubmissionPack tenderId={id} tenderPackId={tenderPack.id} />}
+            {submissionPackSection}
           </>
         )}
       </div>
@@ -868,7 +915,7 @@ function TaskTimeline({
         plain task - there&apos;s no fixed list to pick from.
       </div>
 
-      {error && <ErrorBanner message="Couldn't load tasks - try refreshing. If it keeps happening, let us know." />}
+      {error && <ErrorBanner message="Couldn't load tasks. If it keeps happening, let us know." />}
 
       {!error && tasks.length === 0 && (
         <div style={{ fontSize: 12, color: "#8A93A0", padding: "6px 0 12px" }}>No tasks yet.</div>
@@ -1207,8 +1254,24 @@ function JumpLink({ href, label, variant = "default" }: { href: string; label: s
 
 function ErrorBanner({ message }: { message: string }) {
   return (
-    <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
-      {message}
+    <div
+      style={{
+        background: "#FEE2E2",
+        border: "1px solid #FCA5A5",
+        borderRadius: 9,
+        padding: "11px 16px",
+        marginBottom: 16,
+        fontSize: 13,
+        color: "#B91C1C",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: 12,
+        flexWrap: "wrap",
+      }}
+    >
+      <span>{message}</span>
+      <RetryButton />
     </div>
   );
 }

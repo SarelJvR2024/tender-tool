@@ -13,7 +13,7 @@ import {
   type RegistrationType,
 } from "@/lib/registrations";
 import { addRegistrationType, deleteHeldRegistration, saveHeldRegistration } from "./actions";
-import { AMBER, Area, BORDER, Card, Chip, DangerButton, Disclosure, FAINT, MUTED, NAVY, Select, SubPage, Submit, Text, fmtDate, grid } from "../_components/ui";
+import { Area, Card, Chip, DangerButton, Disclosure, Select, SubPage, Submit, Text, fmtDate, grid } from "../_components/ui";
 
 export const instant = false;
 
@@ -29,12 +29,15 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
   const { error, saved } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: typeRows }, { data: heldRows }, { data: people }, { data: principals }] = await Promise.all([
+  const [{ data: typeRows, error: typesError }, { data: heldRows, error: heldError }, { data: people }, { data: principals }] = await Promise.all([
     supabase.from("registration_types").select(REGISTRATION_TYPE_COLUMNS).eq("active", true).order("sort_order").order("label"),
     supabase.from("held_registrations").select(HELD_COLUMNS).order("expiry_date", { ascending: true, nullsFirst: false }),
     supabase.from("people").select("id, name").order("name"),
     supabase.from("company_principals").select("id, full_name, holder_type, person_id").order("full_name"),
   ]);
+  if (typesError) console.error("registration_types select failed", typesError);
+  if (heldError) console.error("held_registrations select failed", heldError);
+  const loadError = typesError || heldError;
   const types = (typeRows ?? []) as RegistrationType[];
   const typeById = new Map(types.map((t) => [t.id, t]));
   const held = (heldRows ?? []) as HeldRegistration[];
@@ -59,6 +62,10 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
 
   const companyHeld = held.filter((h) => !h.person_id && !h.principal_id);
   const personHeld = held.filter((h) => h.person_id || h.principal_id);
+  // Same 4-state expiry vocabulary as the rest of the vault (lib/documentExpiry.ts) -
+  // Expired/Renew soon/Not on file/Valid - deliberately not collapsed into
+  // Verify/Provide/Fix (app/AGENTS.md's "Document-expiry overview" already
+  // argues for this 4-state pattern on its own terms).
   const statuses = held.map((h) => (h.expiry_date ? expiryStatus(h.expiry_date) : null)).filter(Boolean);
   const expired = statuses.filter((s) => s!.label === "Expired").length;
   const soon = statuses.filter((s) => s!.label === "Renew soon").length;
@@ -82,8 +89,14 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
       error={error}
       saved={saved ? SAVED[saved] ?? null : null}
     >
-      {(expired > 0 || soon > 0) && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+      {loadError && (
+        <div className="mb-3.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+          Couldn&apos;t load your registrations - try refreshing. If it keeps happening, let us know.
+        </div>
+      )}
+
+      {!loadError && (expired > 0 || soon > 0) && (
+        <div className="mb-3.5 flex flex-wrap gap-2">
           {expired > 0 && <Chip status={{ label: `${expired} expired`, bg: "#FEE2E2", color: "#B91C1C" }} />}
           {soon > 0 && <Chip status={{ label: `${soon} renewing soon`, bg: "#FEF3C7", color: "#B45309" }} />}
         </div>
@@ -91,7 +104,7 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
 
       <Card title="Held by the company">
         {companyHeld.length === 0 ? (
-          <div style={{ fontSize: 13, color: MUTED }}>None recorded yet.</div>
+          <div className="text-sm text-muted-foreground">{loadError ? null : "None recorded yet."}</div>
         ) : (
           companyHeld.map((h) => <HeldRow key={h.id} h={h} t={typeById.get(h.registration_type_id)} holder="The company" urls={urls} holders={holders} types={typeOptions} />)
         )}
@@ -99,8 +112,12 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
 
       <Card title="Held by your people, directors and shareholders">
         {personHeld.length === 0 ? (
-          <div style={{ fontSize: 13, color: MUTED }}>
-            None recorded yet. ECSA, SACPCMP, SACNASP and SAGC stay on each person&apos;s own page (<Link href="/people" style={{ color: AMBER }}>People</Link>).
+          <div className="text-sm text-muted-foreground">
+            {loadError ? null : (
+              <>
+                None recorded yet. ECSA, SACPCMP, SACNASP and SAGC stay on each person&apos;s own page (<Link href="/people" className="text-accent">People</Link>).
+              </>
+            )}
           </div>
         ) : (
           personHeld.map((h) => <HeldRow key={h.id} h={h} t={typeById.get(h.registration_type_id)} holder={holderLabel(h) ?? "—"} urls={urls} holders={holders} types={typeOptions} />)
@@ -112,32 +129,32 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
       </Card>
 
       <Card title="The registration list" id="catalog">
-        <div style={{ fontSize: 13, color: MUTED, lineHeight: 1.5, marginBottom: 8 }}>
+        <div className="mb-2 text-sm leading-relaxed text-muted-foreground">
           {types.filter((t) => !t.owner_company_id).length} types, each read from real tenders (the &quot;asked for by&quot; line). Tender Ready
           maintains this shared list; a type it doesn&apos;t have yet can be added for your company below.
         </div>
         <Disclosure summary="Show the full list">
           {(["company", "both", "person"] as RegistrationScope[]).map((scope) => (
-            <div key={scope} style={{ marginBottom: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: NAVY, margin: "6px 0" }}>{SCOPE_LABELS[scope]}</div>
+            <div key={scope} className="mb-3">
+              <div className="my-1.5 text-xs font-bold text-foreground">{SCOPE_LABELS[scope]}</div>
               {types
                 .filter((t) => t.scope === scope)
                 .map((t) => {
                   const hint = storedInHint(t.stored_in);
                   return (
-                    <div key={t.id} style={{ borderTop: "1px solid #ECEEF1", padding: "6px 0", fontSize: 12, color: MUTED }}>
-                      <span style={{ color: NAVY, fontWeight: 600 }}>{t.label}</span>
+                    <div key={t.id} className="border-t border-border py-1.5 text-xs text-muted-foreground">
+                      <span className="font-semibold text-foreground">{t.label}</span>
                       {t.issuing_body ? ` · ${t.issuing_body}` : ""} · {KIND_LABELS[t.kind] ?? t.kind}
                       {t.owner_company_id ? " · added by your company" : ""}
                       {hint && (
                         <>
                           {" · "}
-                          <a href={hint.href} style={{ color: AMBER }}>
+                          <a href={hint.href} className="text-accent">
                             {hint.text}
                           </a>
                         </>
                       )}
-                      {t.asked_for_by && <div style={{ fontSize: 11, color: FAINT }}>Asked for by: {t.asked_for_by}</div>}
+                      {t.asked_for_by && <div className="text-[11px] text-muted-foreground">Asked for by: {t.asked_for_by}</div>}
                     </div>
                   );
                 })}
@@ -146,7 +163,7 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
         </Disclosure>
         <Disclosure summary="Add a type that isn't on the list">
           <form action={addRegistrationType}>
-            <div style={grid}>
+            <div className={grid}>
               <Text name="label" label="Registration / licence name" required />
               <Text name="issuing_body" label="Issued by" />
               <Select
@@ -163,7 +180,7 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
               <Select name="kind" label="Kind" defaultValue="registration" options={Object.entries(KIND_LABELS).map(([value, label]) => ({ value, label }))} />
               <Text name="asked_for_by" label="Which tender asked for it" />
             </div>
-            <div style={{ marginTop: 12 }}>
+            <div className="mt-3">
               <Submit secondary>Add to my list</Submit>
             </div>
           </form>
@@ -191,31 +208,31 @@ function HeldRow({
   const status = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Expiry not recorded", bg: "#ECEEF1", color: "#5B6472" };
   const name = h.original_filename ?? filenameFromPath(h.storage_path);
   return (
-    <div id={`r-${h.id}`} style={{ borderTop: `1px solid ${BORDER}`, padding: "12px 0" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: NAVY }}>{t?.label ?? "Registration"}</div>
-          <div style={{ fontSize: 12, color: MUTED, marginTop: 2, wordBreak: "break-word" }}>
+    <div id={`r-${h.id}`} className="border-t border-border py-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-foreground">{t?.label ?? "Registration"}</div>
+          <div className="mt-0.5 text-xs break-words text-muted-foreground">
             {holder}
             {h.registration_number ? ` · No. ${h.registration_number}` : ""}
             {h.category ? ` · ${h.category}` : ""}
             {h.issued_by ? ` · ${h.issued_by}` : ""}
           </div>
-          <div style={{ fontSize: 12, color: MUTED, marginTop: 2 }}>
+          <div className="mt-0.5 text-xs text-muted-foreground">
             {h.issued_on ? `Issued ${fmtDate(h.issued_on)} · ` : ""}Expires {fmtDate(h.expiry_date)}
             {h.certified_on ? ` · copy certified ${fmtDate(h.certified_on)}` : ""}
           </div>
-          <div style={{ fontSize: 12, marginTop: 4 }}>
+          <div className="mt-1 text-xs">
             {h.storage_path ? (
               urls[h.storage_path] ? (
-                <a href={urls[h.storage_path]} target="_blank" rel="noopener noreferrer" style={{ color: AMBER, fontWeight: 600, textDecoration: "none", wordBreak: "break-all" }}>
+                <a href={urls[h.storage_path]} target="_blank" rel="noopener noreferrer" className="font-semibold break-all text-accent no-underline">
                   {name}
                 </a>
               ) : (
-                <span style={{ color: MUTED }}>{name}</span>
+                <span className="text-muted-foreground">{name}</span>
               )
             ) : (
-              <span style={{ color: "#C7C3B5" }}>No copy uploaded</span>
+              <span className="text-muted-foreground/70">No copy uploaded</span>
             )}
           </div>
         </div>
@@ -223,7 +240,7 @@ function HeldRow({
       </div>
       <Disclosure summary="Edit">
         <HeldForm h={h} holders={holders} types={types} />
-        <form action={deleteHeldRegistration} style={{ marginTop: 10 }}>
+        <form action={deleteHeldRegistration} className="mt-2.5">
           <input type="hidden" name="held_id" value={h.id} />
           <DangerButton confirmMessage="Remove this registration? The uploaded certificate copy will also be removed. This can't be undone.">Remove</DangerButton>
         </form>
@@ -237,7 +254,7 @@ function HeldForm({ h, holders, types }: { h?: HeldRegistration; holders: Holder
   return (
     <form action={saveHeldRegistration}>
       {h && <input type="hidden" name="held_id" value={h.id} />}
-      <div style={grid}>
+      <div className={grid}>
         <Select name="registration_type_id" label="Registration" defaultValue={h?.registration_type_id ?? ""} required options={[{ value: "", label: "Choose" }, ...types]} />
         <Select name="holder" label="Held by" defaultValue={holderValue} options={holders.map((x) => ({ value: x.value, label: x.label }))} />
         <Text name="registration_number" label="Registration / licence number" defaultValue={h?.registration_number} />
@@ -248,11 +265,11 @@ function HeldForm({ h, holders, types }: { h?: HeldRegistration; holders: Holder
         <Text name="certified_on" label="Copy certified on (if certified)" type="date" defaultValue={h?.certified_on} />
         <Area name="notes" label="Notes" defaultValue={h?.notes} />
       </div>
-      <div style={{ margin: "12px 0" }}>
-        <div style={{ fontSize: 11.5, fontWeight: 600, color: NAVY, marginBottom: 5 }}>
+      <div className="my-3">
+        <div className="mb-1.5 text-[11.5px] font-semibold text-foreground">
           Certificate copy{h?.storage_path ? " (leave empty to keep the one on file)" : ""}
         </div>
-        <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" aria-label="Certificate copy" style={{ fontSize: 12, color: NAVY, maxWidth: "100%" }} />
+        <input type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" aria-label="Certificate copy" className="max-w-full text-xs text-foreground" />
       </div>
       <Submit>{h ? "Save changes" : "Add registration"}</Submit>
     </form>

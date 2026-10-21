@@ -61,7 +61,7 @@ export function NotStated(label: string): StatusChip {
  * expiryStatus()'s own logic is untouched; this only changes how its
  * result is painted.
  */
-function toneForChip(status: StatusChip): "success" | "warning" | "destructive" | "muted" {
+export function toneForChip(status: StatusChip): "success" | "warning" | "destructive" | "muted" {
   if (status.color === "#15803D") return "success";
   if (status.color === "#B45309") return "warning";
   if (status.color === "#B91C1C") return "destructive";
