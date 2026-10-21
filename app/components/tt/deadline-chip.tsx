@@ -1,9 +1,12 @@
 import { Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Band = "far" | "soon" | "urgent" | "past";
+export type Band = "far" | "soon" | "urgent" | "past";
 
-function bandFor(daysLeft: number): Band {
+// Exported so anything else that needs the same "how urgent is this
+// deadline" read (e.g. lib/tenderTimeline.ts) uses the identical bands
+// rather than a second copy that could silently drift from this chip's own.
+export function bandFor(daysLeft: number): Band {
   if (daysLeft < 0) return "past";
   if (daysLeft < 7) return "urgent";
   if (daysLeft <= 14) return "soon";

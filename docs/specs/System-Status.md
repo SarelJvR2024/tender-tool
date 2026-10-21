@@ -6,6 +6,58 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Sarel decided all 4 submission-plan open questions, 2026-10-21 ~19:10 UTC - "go with your
+recommendations on all 4"**, with one real refinement to #3: agreed the plan itself only computes
+post-pursuit, but asked for a separate timeline warning - due dates before the **compulsory
+briefing** and the **submission deadline** - that should exist even before a company commits to
+pursuing (so someone deciding whether to go for a tender can see the runway they actually have).
+Explicitly not a checklist step (nothing about it is ever "done"), just a warning that sharpens as
+a date gets close or passes.
+
+**Built the timeline-warning piece now** (`app/lib/tenderTimeline.ts` + `.spec.ts`, 6 passing vitest
+checks) - `tenderTimeline({closingDate, briefingDate, briefingCompulsory})` reuses `DeadlineChip`'s
+own far/soon/urgent/past day-bands directly (exported `bandFor`/`Band` from `deadline-chip.tsx`
+rather than redefining the thresholds a second time - a 3-line additive change, confirmed via diff).
+Deliberately a single function usable both pre-pursuit (Discovery's `discovered_opportunities.
+closing_date`/`briefing`) and post-pursuit (`tenders.closing_date`/`briefing_date`) - both already
+carry the same two dates. A non-compulsory briefing is never surfaced (missing an optional briefing
+isn't a real threat to submitting). `npm run typecheck`/`lint` both clean.
+
+**Real architecture finding while wiring this, worth flagging plainly:** `submission_plan.py`'s
+`compile_plan()` (the assessment-engine "plan" itself, Python) can't actually be called live from
+the Next.js app the way `compileReadiness.ts` is - every other "read the manifest, classify it"
+screen on this app (`general-pack-review-logic.ts`, `pack-review-logic.ts`) works by reading the
+ALREADY-STORED `tenders.document_requirements` manifest JSON (written once at intake by
+`requirements.py`) and doing the classification in TypeScript, not by calling Python synchronously
+on page load. So "computed fresh" (decision #1, confirmed) means **a TypeScript port of
+`compile_plan()`'s step-building logic**, reading the stored manifest the same way
+`general-pack-review-data.ts` already does - not a new Python round-trip. Not done yet (real,
+careful work, not a mechanical translation - see next finding), flagged as the next concrete step
+rather than started speculatively this pass.
+
+**Second finding, also worth flagging before anyone starts that port:** `compile_plan()`'s own
+6-way status vocabulary (ready/needs_document/needs_input/by_hand/review/blocked) would be a
+**5th parallel status system** on this exact screen cluster, landing right as the UI/UX review
+session finishes eliminating the other 4 into one Verify/Provide/Fix model (`#35`/`#36`/`#37`,
+entries above). The TS port should map into Verify/Provide/Fix instead of reintroducing its own
+vocabulary - but that mapping needs the same "checked every producer before deciding, not a guess"
+care `pack-review-logic.ts`'s own Verify/Provide/Fix pass used for its 5-way `ReviewStatus`, since
+`compile_plan()`'s categories don't correspond 1:1 (e.g. a mandatory vs. optional returnable needs
+different treatment, same as `classifyComplianceItem()` already distinguishes). Scoped as the next
+real piece of this work, not rushed into this pass.
+
+**Decision #4 (read-only, not auto-seeded into `tender_tasks`) and #2 (check `tender_answers`/
+`tender_roles` via the caller, keep `compile_plan()` itself DB-free) stand as recommended, confirmed
+by Sarel - no code implications yet since the TS port above hasn't started.**
+
+**Flagging PR #20 for Sarel, found while investigating migration history this pass:** "Team invites
++ employee role" has been open 2+ days, explicitly marked security-sensitive (new RLS policies) with
+no CI configured and 1 comment - still needs a human read, not something I'm driving (not my PR, not
+asked to watch it). **New, concrete finding: its migration `0065_company_invites_and_employee_role.
+sql` collides with `main`'s own real `0065_submission_reminders_and_won_projects.sql`** (merged
+since the PR branched) - main is now at `0076` - so beyond the security review, this PR needs a
+rebase and migration renumber before it can merge cleanly, not just a read-through.
+
 **Phase 2, seventh batch sampled (15 real tenders) - confirmed Finding 47, flagged not fixed.**
 `contractor.contract_manager`'s role detection has no exclusion for a buyer's own named
 administrator (unlike `contractor.project_manager`, which already excludes "Employer's/Client's
