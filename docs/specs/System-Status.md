@@ -6,6 +6,22 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Phase 2, seventh batch sampled (15 real tenders) - confirmed Finding 47, flagged not fixed.**
+`contractor.contract_manager`'s role detection has no exclusion for a buyer's own named
+administrator (unlike `contractor.project_manager`, which already excludes "Employer's/Client's
+Project Manager") - confirmed real on Transnet `TPT/2026/10/1428/13269/RFQ`, where the only 2
+"Contract Manager" mentions are both Transnet's own internal reviewer, not a bidder role, yet the
+engine flags it as `needs_input`. Tried the obvious fix (loosen the shared context-word filter) and
+caught it myself before committing: diffed role detections across the whole
+`templates/general_samples/` corpus before/after, found it silently deleted 3 already-correct
+detections including Finding 40's own regression fixture (`general_harness.py` went from 91 clean
+to an outright `EXPECTATION FAILED`). Reverted immediately, confirmed harness back to 91/0/0 clean.
+Full write-up with the real evidence, what was tried and why it was rejected:
+`docs/specs/QA-Edge-Case-Findings.md`. A real fix needs the tender's own buyer name plumbed into
+`find_roles()` (hardcoding specific buyer names wouldn't generalise) - flagged for a future pass,
+same discipline as Finding 42. Phase 2 running total: 7 batches, ~101 tenders, 4 confirmed bugs (3
+fixed, this one flagged).
+
 **Standing review pass, 2026-10-21 ~18:15 UTC**: orientation via `git log` found two sibling-session
 commits since the last pass, both from the "UI/UX design reviewer" session
 (`session_01HsxN8YLz5vfgFpz9qcdDVV`), steps 1-2 of 4 unifying the Tender Workspace's status

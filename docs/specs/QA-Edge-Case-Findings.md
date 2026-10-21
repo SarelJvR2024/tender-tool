@@ -3009,3 +3009,99 @@ failures, including the exact wrong tied-order outputs); restored the fix and co
 again. Ran `engine/test_form_field_audit.py`, `engine/cv/test_generate_cv.py` and the real
 `process_cv_jobs.py --self-test` (all exercise code adjacent to or depending on this module) for
 regression safety - all still pass. `python3 -m py_compile` clean on both changed files.
+
+## 2026-10-21 (phase 2, seventh batch): a real fix was tried and rejected before it broke 3 already-correct role detections - confirmed, flagged, not fixed
+
+**Why this batch:** phase 2's 7th real-tender sample (15 tenders, diverse buyers: ACSA, Transnet,
+ESKOM, 3 SETAs, City of Johannesburg, 2 development/catchment agencies, a TVET college, Public
+Works, Water and Sanitation, Commission for Gender Equality), continuing the "go through each
+tender advertised and make sure our engines understand the tender requirements 100%" verification.
+Downloaded each release's real documents from eTenders, ran them through the real
+`extract_requirements()` and `submission_plan.compile_plan()`, and investigated every result that
+looked thin or surprising against the actual PDF rather than assuming either tool was right.
+
+### Finding 47 (CONFIRMED, NOT FIXED this pass - a real false positive, but the obvious fix broke 3 other correct detections)
+
+**Where:** `engine/general/requirements.py`, `find_roles()` / `ROLE_PATTERNS`'s
+`contractor.contract_manager` entry (`r"\bcontracts?\s+manager\b"`), no exclusion at all - unlike
+`contractor.project_manager`, which already excludes "Employer's/Client's Project Manager" (a
+comment there already names this exact bug class: "NEC3's 'Employer's/Client's Project Manager'
+is the buyer's own agent, not a bidder role").
+
+**What was tested:** Transnet SOC Ltd's `TPT/2026/10/1428/13269/RFQ` (ocid `ocds-9t57fa-175017`,
+real eTenders document `PPA-170758 ELECTRICAL SERVICES & MAINTENANCE 1.pdf`) was flagged with role
+`contractor.contract_manager`, 2 mentions, confidence 62. Read both real mentions in the actual
+PDF: "Prior to mobilisation, the Contractor shall submit a Project Safety Compliance File for
+review and acceptance by **the Transnet Contract Manager** and SHEQ Department" (twice, near-
+identical wording). Both are Transnet's own internal contract administrator reviewing the
+Contractor's submissions - not a role the bidder is asked to nominate or supply a CV for. Grepped
+the entire extracted document text for every other "contract manager" occurrence: there are
+exactly these 2, and neither is a genuine ask. The resulting `submission_plan.py` step
+(`needs_input`, "No person is tagged for this role yet") would send a real user looking for a
+person to tag for a role nobody actually asked them to supply - a genuine false positive, not a
+hypothetical one.
+
+**Root cause:** `ROLE_CONTEXT_RE` (the ±250-char context window every role match must pass)
+includes `\bmust\b|\bshall\b|required` - words so common in ordinary contract/SHEQ boilerplate
+that they trigger on almost any sentence, including ones about the buyer's own named
+administrator. Both real Transnet mentions sit directly next to "shall" ("...Contractor shall
+submit...") with no personnel-specific word (CV, curriculum, qualifi*, experience, years,
+organogram, team) anywhere nearby - confirmed by testing the exact match windows against a
+narrower context pattern with `must`/`shall`/`required` removed: both false mentions correctly
+drop out.
+
+**Fix attempted and REJECTED:** tried removing `\bmust\b|\bshall\b|required` from the shared
+`ROLE_CONTEXT_RE` (used by all 17 role patterns, not just this one). Captured every role detected
+across the whole `templates/general_samples/` corpus before and after the change and diffed them -
+the change silently **deleted 3 already-correct, previously-verified role detections**:
+`eskom_e3703cxmwp` lost `contractor.project_manager` entirely (this is Finding 40's own committed
+regression fixture, with an explicit `general_harness.py` `EXPECTED` assertion - running the
+harness after the change immediately failed: `EXPECTATION FAILED: role 'contractor.project_manager'
+not found`, 7 companies flagged `changed: ['roles']`), `eskom_e3689` lost `hs.safety_officer`, and
+`ecdpwi_scmu5_0007` lost `psp.professional_architect`/`psp.architectural_technologist`. Read why:
+several genuine asks in those real documents are phrased with "must"/"shall" as their *only* nearby
+trigger word within the window (the personnel-specific word that would otherwise qualify them sits
+just outside the ±250-char range, or isn't present in that exact sentence at all) - so the three
+generic words are doing real, load-bearing work elsewhere even though they're also the exact cause
+of this false positive. **Reverted immediately** (`git status` confirmed no uncommitted change
+remains); re-ran `general_harness.py --no-pack`: `91 clean, 0 flagged, 0 failed` again, back to
+baseline.
+
+**Why not fixed a different way this pass:** a same-document check (also confirmed on
+`ecdpwi_scmu5_0007`, which has an identical-shaped "DPWI Project Manager" buyer-reference mention
+*alongside* a genuine ask elsewhere in the same document - both patterns coexist in real tenders,
+not mutually exclusive) shows the real distinguishing signal isn't a context word at all, it's
+*whose* name sits next to "Contract/Project Manager" - the buyer's own name (Transnet, DPWI) versus
+no such qualifier. `find_roles()` doesn't currently know the tender's own buyer name, and
+hardcoding specific buyer names would not generalise. A real fix needs either plumbing the buyer
+name into `find_roles()` so a "<buyer-name> Contract/Project Manager" phrasing can be excluded
+regardless of context words, or a smarter per-role-scoped context rule - not a blanket change to
+the shared `ROLE_CONTEXT_RE` every other role pattern also depends on. Flagged here rather than
+forced, same discipline as Finding 42's "real architectural gap, not a quick regex fix" and Finding
+37's ten deferred `date.today()` sites - logged with exact evidence so the next pass (mine or a
+sibling's) doesn't have to re-discover it.
+
+**Rest of the batch:** the other 14 tenders sampled were all correctly handled - 2 genuine "advert
+only, not the full tender document" cases (ESKOM `E1977DXNCRREGRET`'s only document turned out to
+be a Regret Letter for unsuccessful suppliers, not a tender at all; Majuba TVET College's single
+page is a 3-service cost/logistics notice directing bidders to buy the real documents by email for
+R500, with no SBD/MBD content anywhere - correctly flagged thin, not a Finding-42-style
+misattribution risk since all 3 services' visible content is identical non-requirement logistics),
+2 genuine scanned-PDF "unreadable" cases (Public Works `MTH09/2026`, a 105-page Konica Minolta scan
+with zero text layer; Water and Sanitation `WTE1063CE`'s addendum, same scanner signature - this
+sandbox's known no-Tesseract limitation, not a new bug), and a King Shaka Airport NEC3 contract
+(`KSIA8233/2026/RFP`) that independently reproduces the SAME underlying false-positive shape for
+`contractor.project_manager` (its own NEC3 ECC defines "the Project Manager" as the Employer's own
+contract administrator in clause 10.1, then uses the bare term 126 times for contract
+administration) but happens to land on the right overall answer anyway, since a genuine separate
+ask exists at clause 2.7 ("The Contractor shall appoint a dedicated Project Manager as the single
+point of contact...") - the role is correctly flagged, but the representative "quote" shown is the
+misleading NEC3-administrator one (about payment certification to subcontractors), not the real
+evidence. Noted as the same root cause as Finding 47, not a second finding.
+
+**Phase 2 running total: 7 batches, ~101 real tenders sampled. 4 confirmed bugs found (Findings 40,
+42, 44, 47 - 3 fixed, 1 confirmed-real-but-flagged-not-fixed pending a buyer-name-aware
+redesign), plus several confirmed-correctly-handled edge cases this batch specifically (thin
+adverts beyond a single page, buyer-regret-letter-only listings, scanned documents, a mixed
+buyer-reference + genuine-ask document landing on the right answer for the wrong displayed
+reason).**
