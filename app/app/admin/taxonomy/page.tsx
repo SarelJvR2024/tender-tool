@@ -14,6 +14,17 @@ export const instant = false;
  * review companies' suggestions to promote their own experience tags to the
  * list - never auto-promoted. Reading is open to every signed-in user (0040);
  * writing only to a platform admin (0043 platform_admins).
+ *
+ * Color-token migration (2026-10-21): was raw inline-CSSProperties
+ * throughout, including a bespoke `<style>` media-query block for the
+ * 2-column form grids - the media query is now Tailwind's own `sm:grid-cols-*`
+ * responsive classes (also fixes a real mobile bug: the old fixed 2/3-column
+ * grid only collapsed under 640px, keeping 3 columns in the 390-639px band
+ * where the add-category inputs already read as uncomfortably narrow).
+ * "amber" (the two add/approve CTAs) -> bg-accent, matching this page's own
+ * original distinction between an ordinary per-row "Save" and the two more
+ * consequential add-to-the-shared-list actions - not a redesign, the same
+ * two-tier button hierarchy the page already had, just blue instead of gold.
  */
 
 type Suggestion = {
@@ -30,22 +41,19 @@ type Suggestion = {
   created_at: string;
 };
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 18px", marginBottom: 16 };
-const field: React.CSSProperties = {
-  width: "100%", boxSizing: "border-box", minHeight: 40, padding: "0 10px", borderRadius: 9, border: "1px solid #E3E6EA",
-  fontSize: 13, fontFamily: "system-ui, sans-serif", color: "#16233B", background: "#FFFFFF",
-};
-const area: React.CSSProperties = { ...field, padding: "8px 10px", minHeight: 60, resize: "vertical" };
-const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#5B6472", marginBottom: 4, display: "block" };
-const hint: React.CSSProperties = { fontSize: 11, color: "#8A93A0", marginTop: 3 };
-const primary: React.CSSProperties = { minHeight: 40, padding: "0 16px", borderRadius: 9, background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer" };
-const amber: React.CSSProperties = { ...primary, background: "#D97706" };
-const quiet: React.CSSProperties = { ...primary, background: "#FFFFFF", color: "#B91C1C", border: "1px solid #FCA5A5" };
-const sectionTitle: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "#16233B", margin: "0 0 4px" };
+const card = "mb-4 rounded-xl border border-border bg-card p-4.5";
+const field = "min-h-11 w-full rounded-lg border border-border px-2.5 text-[13px] text-foreground bg-card";
+const area = `${field} min-h-[60px] resize-y py-2`;
+const label = "mb-1 block text-xs font-semibold text-muted-foreground";
+const hint = "mt-1 text-[11px] text-muted-foreground/70";
+const primary = "min-h-11 rounded-lg bg-foreground px-4 text-[13px] font-semibold text-white";
+const accentBtn = "min-h-11 rounded-lg bg-accent px-4 text-[13px] font-semibold text-accent-foreground";
+const quiet = "min-h-11 rounded-lg border border-destructive/40 bg-card px-4 text-[13px] font-semibold text-destructive";
+const sectionTitle = "mb-1 text-[15px] font-bold text-foreground";
 
 function ParentSelect({ groups, value, name = "parent_slug" }: { groups: DisciplineCategoryFull[]; value: string | null; name?: string }) {
   return (
-    <select name={name} defaultValue={value ?? ""} style={field}>
+    <select name={name} defaultValue={value ?? ""} className={field}>
       <option value="">(none - this is a group)</option>
       {groups.map((g) => (
         <option key={g.slug} value={g.slug}>
@@ -60,48 +68,48 @@ function CategoryForm({ c, groups, canEdit }: { c: DisciplineCategoryFull; group
   // A group stays a group (moving one under another would make its own
   // disciplines a third level); a discipline can move between groups.
   return (
-    <form action={updateCategory} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "12px 12px", margin: "6px 0 10px" }}>
+    <form action={updateCategory} className="my-1.5 rounded-lg border border-border bg-card p-3">
       <input type="hidden" name="slug" value={c.slug} />
-      <fieldset disabled={!canEdit} style={{ border: "none", padding: 0, margin: 0 }}>
-        <div className="tax-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+      <fieldset disabled={!canEdit} className="m-0 border-none p-0">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
           <div>
-            <label style={label}>Label</label>
-            <input name="label" defaultValue={c.label} style={field} required />
+            <label className={label}>Label</label>
+            <input name="label" defaultValue={c.label} className={field} required />
           </div>
           <div>
-            <label style={label}>Group</label>
+            <label className={label}>Group</label>
             {c.parent_slug ? <ParentSelect groups={groups} value={c.parent_slug} name="parent_slug" /> : (
               <>
                 <input type="hidden" name="parent_slug" value="" />
-                <div style={{ ...field, display: "flex", alignItems: "center", color: "#5B6472" }}>Top-level group</div>
+                <div className={`${field} flex items-center text-muted-foreground`}>Top-level group</div>
               </>
             )}
           </div>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <label style={label}>Keywords (comma-separated)</label>
-          <textarea name="keywords" defaultValue={c.keywords.join(", ")} style={area} />
-          <div style={hint}>Matched in a tender&apos;s title and description: whole words, a trailing * = any ending, &quot;a &amp; b&quot; = both present.</div>
+        <div className="mt-2.5">
+          <label className={label}>Keywords (comma-separated)</label>
+          <textarea name="keywords" defaultValue={c.keywords.join(", ")} className={area} />
+          <div className={hint}>Matched in a tender&apos;s title and description: whole words, a trailing * = any ending, &quot;a &amp; b&quot; = both present.</div>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <label style={label}>Exclude phrases (comma-separated)</label>
-          <input name="exclude_keywords" defaultValue={c.exclude_keywords.join(", ")} style={field} />
-          <div style={hint}>Cut out before this category is tried (e.g. a buyer&apos;s name); one starting with ! rules the category out.</div>
+        <div className="mt-2.5">
+          <label className={label}>Exclude phrases (comma-separated)</label>
+          <input name="exclude_keywords" defaultValue={c.exclude_keywords.join(", ")} className={field} />
+          <div className={hint}>Cut out before this category is tried (e.g. a buyer&apos;s name); one starting with ! rules the category out.</div>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <label style={label}>eTenders categories it corresponds to (one per line)</label>
-          <textarea name="etenders_categories" defaultValue={c.etenders_categories.join("\n")} style={area} />
-          <div style={hint}>Cross-reference only: Discovery compares the buyer&apos;s own eTenders category with these.</div>
+        <div className="mt-2.5">
+          <label className={label}>eTenders categories it corresponds to (one per line)</label>
+          <textarea name="etenders_categories" defaultValue={c.etenders_categories.join("\n")} className={area} />
+          <div className={hint}>Cross-reference only: Discovery compares the buyer&apos;s own eTenders category with these.</div>
         </div>
-        <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "#16233B", margin: "10px 0" }}>
-          <input type="checkbox" name="active" defaultChecked={c.active} /> Active (untick to retire: no longer offered or matched, stored tags keep their label)
+        <label className="my-2.5 flex items-center gap-2 text-[13px] text-foreground">
+          <input type="checkbox" name="active" defaultChecked={c.active} className="size-5" /> Active (untick to retire: no longer offered or matched, stored tags keep their label)
         </label>
         {c.parent_slug ? (
-          <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: "#16233B", margin: "0 0 10px" }}>
-            <input type="checkbox" name="matched_by_group_tag" defaultChecked={c.matched_by_group_tag} style={{ marginTop: 3 }} />
+          <label className="mb-2.5 flex items-start gap-2 text-[13px] text-foreground">
+            <input type="checkbox" name="matched_by_group_tag" defaultChecked={c.matched_by_group_tag} className="mt-0.5 size-5" />
             <span>
               A company tagged with the whole group counts as doing this
-              <span style={{ display: "block", ...hint }}>
+              <span className={`block ${hint}`}>
                 Untick for a discipline the group&apos;s name doesn&apos;t really claim (a firm tagged &quot;Professional &amp; consulting
                 services&quot; isn&apos;t thereby a property valuer): Discovery then matches it only for companies that ticked it
                 itself, and shows it to group-tagged companies as &quot;needs a look&quot;, never as a fit.
@@ -111,13 +119,13 @@ function CategoryForm({ c, groups, canEdit }: { c: DisciplineCategoryFull; group
         ) : (
           <input type="hidden" name="matched_by_group_tag" value="on" />
         )}
-        <div style={{ fontSize: 11, color: "#8A93A0", marginBottom: 8 }}>
+        <div className="mb-2 text-[11px] text-muted-foreground/70">
           {c.added_from ? `Added from: ${c.added_from}. ` : ""}
           {c.l2b_categories.length ? `L2B: ${c.l2b_categories.join(", ")}. ` : ""}
           {c.cidb_classes.length ? `CIDB: ${c.cidb_classes.join(", ")}. ` : ""}
           Last changed {new Date(c.updated_at).toLocaleDateString("en-ZA")}.
         </div>
-        {canEdit && <button type="submit" style={primary}>Save {c.slug}</button>}
+        {canEdit && <button type="submit" className={primary}>Save {c.slug}</button>}
       </fieldset>
     </form>
   );
@@ -148,11 +156,10 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
 
   return (
     <AppShell>
-      <style>{`@media (max-width: 640px) { .tax-grid { grid-template-columns: 1fr !important; } }`}</style>
-      <div style={{ padding: "24px 16px 40px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+      <div className="mx-auto w-full max-w-[1000px] px-4 pt-6 pb-10 sm:px-6 md:px-8">
         <AdminNav active="taxonomy" />
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discipline list</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
+        <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">Discipline list</h1>
+        <p className="mb-4 text-[13px] text-muted-foreground">
           Tender Ready&apos;s own, maintained category list: what Discovery sorts tenders into and what companies tag their
           experience with. {groups.length} groups, {cats.length - groups.length} disciplines{retired ? ` (${retired} retired)` : ""}. A change here is used by
           Discovery on its next run - no deploy, no migration.{" "}
@@ -160,84 +167,84 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
         </p>
 
         {(actionError || catError || sugError) && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             {actionError ?? (catError
               ? "Couldn't load the list - try refreshing. If it keeps happening, let us know."
               : "Couldn't load suggestions - try refreshing. If it keeps happening, let us know.")}
           </div>
         )}
         {saved && (
-          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+          <div className="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-2.5 text-[13px] text-success">
             {saved}
           </div>
         )}
 
         {/* Suggestions from companies */}
-        <div style={card}>
-          <div style={sectionTitle}>Suggested by companies ({pending.length} waiting)</div>
-          <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+        <div className={card}>
+          <div className={sectionTitle}>Suggested by companies ({pending.length} waiting)</div>
+          <div className="mb-2.5 text-xs text-muted-foreground">
             A company&apos;s own experience tag, offered for the shared list from its Experience Library. Nothing is added until it
             is approved here. Approving adds it under the same slug, so the company&apos;s tagged items become a listed category
             with no change to their data. If it is really an existing category, reject it with a note saying which one.
           </div>
-          {pending.length === 0 && <div style={{ fontSize: 13, color: "#8A93A0" }}>Nothing waiting for review.</div>}
+          {pending.length === 0 && <div className="text-[13px] text-muted-foreground/70">Nothing waiting for review.</div>}
           {pending.map((s) => (
-            <div key={s.id} style={{ borderTop: "1px solid #ECEEF1", padding: "12px 0" }}>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B" }}>
-                {s.label} <span style={{ fontFamily: "monospace", fontSize: 12, color: "#5B6472" }}>{s.slug}</span>
+            <div key={s.id} className="border-t border-border py-3">
+              <div className="text-sm font-semibold text-foreground">
+                {s.label} <span className="font-mono text-xs text-muted-foreground">{s.slug}</span>
               </div>
-              <div style={{ fontSize: 12, color: "#4B5563", margin: "2px 0 8px" }}>
+              <div className="my-0.5 mb-2 text-xs text-muted-foreground">
                 From {s.company_name ?? "a company"}
                 {s.example_project_name ? `, used on "${s.example_project_name}"` : ""}, {new Date(s.created_at).toLocaleDateString("en-ZA")}.
                 {s.note ? ` Their note: "${s.note}"` : ""}
               </div>
               {canEdit ? (
-                <div className="tax-grid" style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
-                  <form action={approveSuggestion} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: 12 }}>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-[2fr_1fr]">
+                  <form action={approveSuggestion} className="rounded-lg border border-border bg-card p-3">
                     <input type="hidden" name="id" value={s.id} />
-                    <div className="tax-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                       <div>
-                        <label style={label}>Label on the list</label>
-                        <input name="label" defaultValue={s.label} style={field} required />
+                        <label className={label}>Label on the list</label>
+                        <input name="label" defaultValue={s.label} className={field} required />
                       </div>
                       <div>
-                        <label style={label}>Group</label>
+                        <label className={label}>Group</label>
                         <ParentSelect groups={groups} value={s.suggested_parent_slug} />
                       </div>
                     </div>
-                    <div style={{ marginTop: 10 }}>
-                      <label style={label}>Keywords Discovery should match (comma-separated)</label>
-                      <input name="keywords" placeholder="e.g. hydrographic survey*, bathymetric*" style={field} />
-                      <div style={hint}>Without keywords it is a tag companies can pick, but Discovery won&apos;t sort tenders into it.</div>
+                    <div className="mt-2.5">
+                      <label className={label}>Keywords Discovery should match (comma-separated)</label>
+                      <input name="keywords" placeholder="e.g. hydrographic survey*, bathymetric*" className={field} />
+                      <div className={hint}>Without keywords it is a tag companies can pick, but Discovery won&apos;t sort tenders into it.</div>
                     </div>
-                    <div style={{ marginTop: 10 }}>
-                      <label style={label}>Exclude phrases (optional)</label>
-                      <input name="exclude_keywords" style={field} />
+                    <div className="mt-2.5">
+                      <label className={label}>Exclude phrases (optional)</label>
+                      <input name="exclude_keywords" className={field} />
                     </div>
-                    <div style={{ marginTop: 10 }}>
-                      <label style={label}>Note to the company (optional)</label>
-                      <input name="review_note" style={field} />
+                    <div className="mt-2.5">
+                      <label className={label}>Note to the company (optional)</label>
+                      <input name="review_note" className={field} />
                     </div>
-                    <button type="submit" style={{ ...amber, marginTop: 10 }}>Approve and add to the list</button>
+                    <button type="submit" className={`${accentBtn} mt-2.5`}>Approve and add to the list</button>
                   </form>
-                  <form action={rejectSuggestion} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: 12 }}>
+                  <form action={rejectSuggestion} className="rounded-lg border border-border bg-card p-3">
                     <input type="hidden" name="id" value={s.id} />
-                    <label style={label}>Why not (shown to the company)</label>
-                    <textarea name="review_note" placeholder="e.g. Already covered by Land surveying, GIS & mapping" style={area} />
-                    <button type="submit" style={{ ...quiet, marginTop: 10 }}>Reject</button>
+                    <label className={label}>Why not (shown to the company)</label>
+                    <textarea name="review_note" placeholder="e.g. Already covered by Land surveying, GIS & mapping" className={area} />
+                    <button type="submit" className={`${quiet} mt-2.5`}>Reject</button>
                   </form>
                 </div>
               ) : (
-                <div style={{ fontSize: 12, color: "#8A93A0" }}>Waiting for a platform admin to review it.</div>
+                <div className="text-xs text-muted-foreground/70">Waiting for a platform admin to review it.</div>
               )}
             </div>
           ))}
           {reviewed.length > 0 && (
-            <details style={{ marginTop: 10 }}>
-              <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#D97706", minHeight: 32 }}>Recently reviewed ({reviewed.length})</summary>
+            <details className="mt-2.5">
+              <summary className="min-h-8 cursor-pointer text-xs font-semibold text-accent">Recently reviewed ({reviewed.length})</summary>
               {reviewed.map((s) => (
-                <div key={s.id} style={{ fontSize: 12, color: "#4B5563", borderTop: "1px solid #ECEEF1", padding: "6px 0" }}>
-                  <strong style={{ color: s.status === "approved" ? "#15803D" : "#B91C1C" }}>{s.status}</strong> {s.label} ({s.slug}) from {s.company_name ?? "a company"}
+                <div key={s.id} className="border-t border-border py-1.5 text-xs text-muted-foreground">
+                  <strong className={s.status === "approved" ? "text-success" : "text-destructive"}>{s.status}</strong> {s.label} ({s.slug}) from {s.company_name ?? "a company"}
                   {s.review_note ? ` - "${s.review_note}"` : ""}
                 </div>
               ))}
@@ -247,77 +254,77 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
 
         {/* Add a category */}
         {canEdit && (
-          <div style={card}>
-            <div style={sectionTitle}>Add a category</div>
-            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+          <div className={card}>
+            <div className={sectionTitle}>Add a category</div>
+            <div className="mb-2.5 text-xs text-muted-foreground">
               The same as <code>taxonomy.py add</code>. Pick a group to add a discipline; leave it empty to add a new group.
               Two levels only.
             </div>
             <form action={addCategory}>
-              <div className="tax-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                 <div>
-                  <label style={label}>Slug</label>
-                  <input name="slug" required pattern="[a-z][a-z0-9_]{0,62}" placeholder="hydrographic_survey" style={field} />
-                  <div style={hint}>Lower-case, digits and _. Can&apos;t be changed later.</div>
+                  <label className={label}>Slug</label>
+                  <input name="slug" required pattern="[a-z][a-z0-9_]{0,62}" placeholder="hydrographic_survey" className={field} />
+                  <div className={hint}>Lower-case, digits and _. Can&apos;t be changed later.</div>
                 </div>
                 <div>
-                  <label style={label}>Label</label>
-                  <input name="label" required placeholder="Hydrographic & bathymetric survey" style={field} />
+                  <label className={label}>Label</label>
+                  <input name="label" required placeholder="Hydrographic & bathymetric survey" className={field} />
                 </div>
                 <div>
-                  <label style={label}>Group</label>
+                  <label className={label}>Group</label>
                   <ParentSelect groups={groups} value={null} />
                 </div>
               </div>
-              <div style={{ marginTop: 10 }}>
-                <label style={label}>Keywords (comma-separated)</label>
-                <input name="keywords" placeholder="hydrographic survey*, bathymetric*" style={field} />
+              <div className="mt-2.5">
+                <label className={label}>Keywords (comma-separated)</label>
+                <input name="keywords" placeholder="hydrographic survey*, bathymetric*" className={field} />
               </div>
-              <div className="tax-grid" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 10 }}>
+              <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                 <div>
-                  <label style={label}>Exclude phrases (optional)</label>
-                  <input name="exclude_keywords" style={field} />
+                  <label className={label}>Exclude phrases (optional)</label>
+                  <input name="exclude_keywords" className={field} />
                 </div>
                 <div>
-                  <label style={label}>Where it came from (optional)</label>
-                  <input name="note" placeholder="e.g. 3 uncategorised Transnet tenders, Oct 2026" style={field} />
+                  <label className={label}>Where it came from (optional)</label>
+                  <input name="note" placeholder="e.g. 3 uncategorised Transnet tenders, Oct 2026" className={field} />
                 </div>
               </div>
-              <div style={{ marginTop: 10 }}>
-                <label style={label}>eTenders categories it corresponds to (one per line, optional)</label>
-                <textarea name="etenders_categories" style={area} />
+              <div className="mt-2.5">
+                <label className={label}>eTenders categories it corresponds to (one per line, optional)</label>
+                <textarea name="etenders_categories" className={area} />
               </div>
-              <button type="submit" style={{ ...amber, marginTop: 10 }}>Add category</button>
+              <button type="submit" className={`${accentBtn} mt-2.5`}>Add category</button>
             </form>
           </div>
         )}
 
         {/* The list */}
-        <div style={card}>
-          <div style={sectionTitle}>The list</div>
-          <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 8 }}>Open a group to see and {canEdit ? "edit" : "read"} its disciplines.</div>
+        <div className={card}>
+          <div className={sectionTitle}>The list</div>
+          <div className="mb-2 text-xs text-muted-foreground">Open a group to see and {canEdit ? "edit" : "read"} its disciplines.</div>
           {groups.map((g) => {
             const children = cats.filter((c) => c.parent_slug === g.slug);
             return (
-              <details key={g.slug} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0" }}>
-                <summary style={{ cursor: "pointer", fontSize: 14, fontWeight: 600, color: g.active ? "#16233B" : "#8A93A0", minHeight: 32, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <details key={g.slug} className="border-t border-border py-2">
+                <summary className={`flex min-h-8 flex-wrap items-center gap-2 text-sm font-semibold ${g.active ? "text-foreground" : "text-muted-foreground/70"}`}>
                   {g.label}
-                  <span style={{ fontFamily: "monospace", fontSize: 11, color: "#8A93A0", fontWeight: 400 }}>{g.slug}</span>
-                  <span style={{ fontSize: 11, color: "#5B6472", fontWeight: 400 }}>{children.length} disciplines</span>
-                  {!g.active && <span style={{ fontSize: 11, color: "#B91C1C" }}>retired</span>}
+                  <span className="font-mono text-[11px] font-normal text-muted-foreground/70">{g.slug}</span>
+                  <span className="text-[11px] font-normal text-muted-foreground">{children.length} disciplines</span>
+                  {!g.active && <span className="text-[11px] text-destructive">retired</span>}
                 </summary>
-                <details style={{ marginLeft: 12 }}>
-                  <summary style={{ cursor: "pointer", fontSize: 12, color: "#D97706", minHeight: 28 }}>The group itself</summary>
+                <details className="ml-3">
+                  <summary className="min-h-7 cursor-pointer text-xs text-accent">The group itself</summary>
                   <CategoryForm c={g} groups={groups} canEdit={canEdit} />
                 </details>
                 {children.map((c) => (
-                  <details key={c.slug} style={{ marginLeft: 12, borderTop: "1px solid #FFFFFF" }}>
-                    <summary style={{ cursor: "pointer", fontSize: 13, color: c.active ? "#16233B" : "#8A93A0", minHeight: 30, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <details key={c.slug} className="ml-3 border-t border-card">
+                    <summary className={`flex min-h-[30px] flex-wrap items-center gap-2 text-[13px] ${c.active ? "text-foreground" : "text-muted-foreground/70"}`}>
                       {c.label}
-                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "#8A93A0" }}>{c.slug}</span>
-                      {!c.active && <span style={{ fontSize: 11, color: "#B91C1C" }}>retired</span>}
-                      {!c.matched_by_group_tag && <span style={{ fontSize: 11, color: "#5B6472" }}>not matched by a group tag</span>}
-                      {c.keywords.length === 0 && <span style={{ fontSize: 11, color: "#B45309" }}>no keywords - Discovery never sorts into it</span>}
+                      <span className="font-mono text-[11px] text-muted-foreground/70">{c.slug}</span>
+                      {!c.active && <span className="text-[11px] text-destructive">retired</span>}
+                      {!c.matched_by_group_tag && <span className="text-[11px] text-muted-foreground">not matched by a group tag</span>}
+                      {c.keywords.length === 0 && <span className="text-[11px] text-warning">no keywords - Discovery never sorts into it</span>}
                     </summary>
                     <CategoryForm c={c} groups={groups} canEdit={canEdit} />
                   </details>
