@@ -4,9 +4,21 @@ import { useMemo, useState } from "react";
 import { PPR_2022_THRESHOLD_ZAR, calculatePreferencePoints, systemForValue, type BeeLevel } from "@/lib/preferencePoints";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "20px 22px", boxSizing: "border-box" };
-const LABEL: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#16233B", display: "block", marginBottom: 6 };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box" };
+// Design-system migration (2026-10-21): raw inline-CSSProperties ->
+// Tailwind + tokens (see CidbGradeClient's own header comment for the
+// shared reasoning). No pass/fail verdict on this page - only a plain
+// input-validation error, mapped to text-destructive.
+const CARD = "rounded-xl border border-border bg-card p-5";
+const LABEL = "mb-1.5 block text-xs font-semibold text-foreground";
+const INPUT = "min-h-11 w-full rounded-lg border border-border px-3 text-sm";
+
+// Same real hydration-mismatch fix as CidbGradeClient's own formatZar: a
+// plain `.toLocaleString("en-ZA")` disagrees between Node's and the
+// browser's ICU data (comma vs the correct SA space grouping) on this
+// static-prerendered page. Formatted by hand instead.
+function formatThousands(n: number): string {
+  return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
 
 const LEVEL_OPTIONS: { value: string; label: string }[] = [
   { value: "1", label: "Level 1" },
@@ -52,54 +64,54 @@ export default function BeePreferencePointsClient() {
   const defaultSystem = Number.isFinite(Number(contractValue)) ? systemForValue(Number(contractValue)) : null;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#FFFFFF", fontFamily: "system-ui, sans-serif" }}>
+    <div className="min-h-screen bg-background">
       <ToolsHeader />
 
-      <main style={{ maxWidth: 640, margin: "0 auto", padding: "32px 16px 64px", boxSizing: "border-box" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>B-BBEE preference points calculator</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 24px", lineHeight: 1.5 }}>
+      <main className="mx-auto max-w-[640px] px-4 pt-8 pb-16">
+        <h1 className="mb-2 font-display text-[22px] font-bold text-foreground">B-BBEE preference points calculator</h1>
+        <p className="mb-6 text-[13px] leading-relaxed text-muted-foreground">
           Implements the actual 80/20 and 90/10 price-points formulas from the Preferential Procurement Regulations,
           2022 (regs 4-5), plus the standard B-BBEE status-level specific-goals table most organs of state publish
           (Treasury&apos;s SBD 6.1).
         </p>
 
-        <div style={{ ...CARD, marginBottom: 20 }}>
-          <div style={{ marginBottom: 16 }}>
-            <label style={LABEL} htmlFor="cv">Contract/tender value (Rand, incl. VAT)</label>
-            <input id="cv" type="number" min={0} value={contractValue} onChange={(e) => setContractValue(e.target.value)} style={INPUT} />
+        <div className={`${CARD} mb-5`}>
+          <div className="mb-4">
+            <label className={LABEL} htmlFor="cv">Contract/tender value (Rand, incl. VAT)</label>
+            <input id="cv" type="number" min={0} value={contractValue} onChange={(e) => setContractValue(e.target.value)} className={INPUT} />
             {defaultSystem && (
-              <p style={{ fontSize: 11, color: "#5B6472", marginTop: 6 }}>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
                 {`R50 million threshold -> defaults to the ${defaultSystem} system for this value.`}
               </p>
             )}
           </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <label style={LABEL} htmlFor="system">Preference point system</label>
-            <select id="system" value={systemOverride} onChange={(e) => setSystemOverride(e.target.value as "auto" | "80/20" | "90/10")} style={INPUT}>
+          <div className="mb-4">
+            <label className={LABEL} htmlFor="system">Preference point system</label>
+            <select id="system" value={systemOverride} onChange={(e) => setSystemOverride(e.target.value as "auto" | "80/20" | "90/10")} className={INPUT}>
               <option value="auto">Automatic (from contract value)</option>
               <option value="80/20">80/20 (force)</option>
               <option value="90/10">90/10 (force)</option>
             </select>
-            <p style={{ fontSize: 11, color: "#5B6472", marginTop: 6 }}>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
               A buyer must state the system on the tender itself (reg 3(1)) - override here when the document says so,
-              rather than relying on the R{PPR_2022_THRESHOLD_ZAR.toLocaleString("en-ZA")} default.
+              rather than relying on the R{formatThousands(PPR_2022_THRESHOLD_ZAR)} default.
             </p>
           </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <label style={LABEL} htmlFor="tp">Your tendered price (Rand)</label>
-            <input id="tp" type="number" min={0} value={tenderPrice} onChange={(e) => setTenderPrice(e.target.value)} style={INPUT} />
+          <div className="mb-4">
+            <label className={LABEL} htmlFor="tp">Your tendered price (Rand)</label>
+            <input id="tp" type="number" min={0} value={tenderPrice} onChange={(e) => setTenderPrice(e.target.value)} className={INPUT} />
           </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <label style={LABEL} htmlFor="lp">Lowest acceptable tender price, Pmin (Rand)</label>
-            <input id="lp" type="number" min={0} value={lowestPrice} onChange={(e) => setLowestPrice(e.target.value)} style={INPUT} />
+          <div className="mb-4">
+            <label className={LABEL} htmlFor="lp">Lowest acceptable tender price, Pmin (Rand)</label>
+            <input id="lp" type="number" min={0} value={lowestPrice} onChange={(e) => setLowestPrice(e.target.value)} className={INPUT} />
           </div>
 
-          <div style={{ marginBottom: 16 }}>
-            <label style={LABEL} htmlFor="level">Your B-BBEE status level</label>
-            <select id="level" value={level} onChange={(e) => setLevel(e.target.value)} style={INPUT}>
+          <div className="mb-4">
+            <label className={LABEL} htmlFor="level">Your B-BBEE status level</label>
+            <select id="level" value={level} onChange={(e) => setLevel(e.target.value)} className={INPUT}>
               {LEVEL_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -109,59 +121,61 @@ export default function BeePreferencePointsClient() {
           </div>
 
           {result.error ? (
-            <p style={{ color: "#B91C1C", fontSize: 13 }}>{result.error}</p>
+            <p className="text-[13px] text-destructive">{result.error}</p>
           ) : (
             result.data && (
-              <div style={{ background: "#FFFFFF", borderRadius: 8, padding: "14px 16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "4px 0" }}>
+              <div className="rounded-lg bg-card px-4 py-3.5">
+                <div className="flex justify-between py-1 text-[13px] text-foreground">
                   <span>Price points (Ps)</span>
-                  <span style={{ fontWeight: 700 }}>{result.data.pricePoints} / {result.data.maxPricePoints}</span>
+                  <span className="font-bold">{result.data.pricePoints} / {result.data.maxPricePoints}</span>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#16233B", padding: "4px 0" }}>
+                <div className="flex justify-between py-1 text-[13px] text-foreground">
                   <span>B-BBEE specific-goals points</span>
-                  <span style={{ fontWeight: 700 }}>{result.data.beeGoalsPoints} / {result.data.maxGoalsPoints}</span>
+                  <span className="font-bold">{result.data.beeGoalsPoints} / {result.data.maxGoalsPoints}</span>
                 </div>
-                <div style={{ borderTop: "1px solid #E3E6EA", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontSize: 16, color: "#16233B" }}>
-                  <span style={{ fontWeight: 700 }}>Total ({result.data.system})</span>
-                  <span style={{ fontWeight: 700 }}>{result.data.totalPoints} / 100</span>
+                <div className="mt-2 flex justify-between border-t border-border pt-2 text-base text-foreground">
+                  <span className="font-bold">Total ({result.data.system})</span>
+                  <span className="font-bold">{result.data.totalPoints} / 100</span>
                 </div>
               </div>
             )
           )}
         </div>
 
-        <div style={CARD}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B", marginBottom: 10 }}>B-BBEE status-level points table</div>
-          <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ textAlign: "left", color: "#5B6472" }}>
-                <th style={{ padding: "4px 0" }}>Level</th>
-                <th style={{ padding: "4px 0" }}>80/20 points</th>
-                <th style={{ padding: "4px 0" }}>90/10 points</th>
-              </tr>
-            </thead>
-            <tbody>
-              {[
-                [1, 20, 10], [2, 18, 9], [3, 14, 7], [4, 12, 5], [5, 8, 4], [6, 6, 3], [7, 4, 2], [8, 2, 1],
-              ].map(([lvl, p80, p90]) => (
-                <tr key={lvl} style={{ borderTop: "1px solid #ECEEF1" }}>
-                  <td style={{ padding: "6px 0" }}>Level {lvl}</td>
-                  <td style={{ padding: "6px 0" }}>{p80}</td>
-                  <td style={{ padding: "6px 0" }}>{p90}</td>
+        <div className={CARD}>
+          <div className="mb-2.5 text-[13px] font-bold text-foreground">B-BBEE status-level points table</div>
+          <div className="-mx-5 overflow-x-auto px-5">
+            <table className="w-full min-w-[320px] border-collapse text-[13px]">
+              <thead>
+                <tr className="text-left text-muted-foreground">
+                  <th className="py-1 pr-3">Level</th>
+                  <th className="py-1 pr-3">80/20 points</th>
+                  <th className="py-1">90/10 points</th>
                 </tr>
-              ))}
-              <tr style={{ borderTop: "1px solid #ECEEF1" }}>
-                <td style={{ padding: "6px 0" }}>Non-compliant</td>
-                <td style={{ padding: "6px 0" }}>0</td>
-                <td style={{ padding: "6px 0" }}>0</td>
-              </tr>
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {[
+                  [1, 20, 10], [2, 18, 9], [3, 14, 7], [4, 12, 5], [5, 8, 4], [6, 6, 3], [7, 4, 2], [8, 2, 1],
+                ].map(([lvl, p80, p90]) => (
+                  <tr key={lvl} className="border-t border-border text-foreground">
+                    <td className="py-1.5 pr-3">Level {lvl}</td>
+                    <td className="py-1.5 pr-3">{p80}</td>
+                    <td className="py-1.5">{p90}</td>
+                  </tr>
+                ))}
+                <tr className="border-t border-border text-foreground">
+                  <td className="py-1.5 pr-3">Non-compliant</td>
+                  <td className="py-1.5 pr-3">0</td>
+                  <td className="py-1.5">0</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <OtherTools except="/tools/bee-preference-points" />
 
-        <p style={{ fontSize: 11, color: "#5B6472", marginTop: 24, lineHeight: 1.5 }}>
+        <p className="mt-6 text-[11px] leading-relaxed text-muted-foreground">
           Source: Preferential Procurement Regulations, 2022 (GG 47452, Notice 2721 of 4 Nov 2022) regs 4-5 for the
           price-points formula and the R50 million threshold. The PPR 2022 itself sets no fixed B-BBEE points table -
           each organ of state defines its own specific goals (reg 3(1)) - so the level table above is the common
