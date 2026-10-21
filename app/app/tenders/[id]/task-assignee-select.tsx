@@ -15,16 +15,19 @@ export function TaskAssigneeSelect({
   tenderId,
   assignedTo,
   people,
+  taskDescription,
 }: {
   taskId: string;
   tenderId: string;
   assignedTo: string | null;
   people: AssignablePerson[];
+  taskDescription: string;
 }) {
   const [isPending, startTransition] = useTransition();
 
   return (
     <select
+      aria-label={`Assigned to, for task "${taskDescription}"`}
       value={assignedTo ?? ""}
       disabled={isPending}
       onChange={(e) =>

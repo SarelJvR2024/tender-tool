@@ -819,7 +819,7 @@ function TaskTimeline({
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <TaskAssigneeSelect taskId={t.id} tenderId={tenderId} assignedTo={t.assigned_to} people={people} />
+                  <TaskAssigneeSelect taskId={t.id} tenderId={tenderId} assignedTo={t.assigned_to} people={people} taskDescription={t.description} />
                   <TaskStatusButton taskId={t.id} tenderId={tenderId} status={t.status} />
                 </div>
               </div>
