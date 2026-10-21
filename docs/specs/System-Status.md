@@ -6,6 +6,18 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~04:15 UTC**: orientation via `git log` found one sibling-session
+commit since the last pass (`e5b6ae0`, a different Claude session, "Finding 39" - a naive-UTC date
+bug in `pdf_merge.expiry_warning()` that could silently miss an EXPIRED flag on a document during
+the 00:00-01:59 SAST window, plus the same bug in `process_pack_jobs.sync_position_suggestions()`).
+Independently verified, not just trusted: `python3 engine/pack/test_pdf_merge.py` genuinely passes,
+3/3, including the deliberate mirror case proving the fix doesn't false-flag a still-valid document.
+QA tooling re-confirmed sound after merging it: every `engine/discovery/`, `engine/pack/` and
+`engine/cv/` `test_*.py` passes, `npm run typecheck` and `npm run lint` both clean in `app/`.
+Still waiting on Sarel's call (flagged in the entry just below) on whether to keep sweeping
+municipalities further or move to the tender-requirements-verification phase - nothing else to
+report this pass.
+
 **Standing review pass, 2026-10-21 ~00:15 UTC**: orientation via `git log` found no sibling-session
 commits since the last push (`b443fc6`) - everything below from the Vaal Central Water reader
 through the Overstrand/Knysna correction is this session's own work, already independently verified
