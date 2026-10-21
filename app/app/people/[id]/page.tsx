@@ -184,7 +184,7 @@ function PersonJumpLink({ href, label }: { href: string; label: string }) {
   return (
     <a
       href={href}
-      className="inline-flex min-h-8 shrink-0 items-center rounded-full border border-border bg-card px-3 text-xs font-semibold whitespace-nowrap text-foreground no-underline"
+      className="inline-flex min-h-11 shrink-0 items-center rounded-full border border-border bg-card px-3 text-xs font-semibold whitespace-nowrap text-foreground no-underline"
     >
       {label}
     </a>
@@ -493,7 +493,7 @@ export default async function PersonDetailPage({
                   // Not asked for by any tender and not held: kept out of the
                   // way, one click to add (the fields still submit, empty).
                   <details className="mb-2.5">
-                    <summary className="min-h-8 cursor-pointer py-1.5 text-xs font-semibold text-accent">
+                    <summary className="flex min-h-11 cursor-pointer items-center py-1.5 text-xs font-semibold text-accent">
                       + Add another registration ({hidden.join(", ")}) - only some tenders ask for these
                     </summary>
                     {hidden.map((b) => (
@@ -553,7 +553,7 @@ export default async function PersonDetailPage({
                       <input type="hidden" name="scope_id" value={s.id} />
                       <ConfirmSubmitButton
                         confirmMessage="Remove this signatory scope? This can't be undone."
-                        className="min-h-8 cursor-pointer bg-transparent text-xs font-semibold text-destructive"
+                        className="flex min-h-11 cursor-pointer items-center bg-transparent text-xs font-semibold text-destructive"
                       >
                         Remove
                       </ConfirmSubmitButton>
@@ -634,7 +634,7 @@ export default async function PersonDetailPage({
                         );
                       })}
                       <details open={mine.length === 0}>
-                        <summary className="min-h-8 cursor-pointer py-1 text-xs font-semibold text-accent">
+                        <summary className="flex min-h-11 cursor-pointer items-center py-1 text-xs font-semibold text-accent">
                           {mine.length ? `+ Add another ${b} registration` : `+ Add ${person!.name}'s ${b} registration`}
                         </summary>
                         <form action={addPersonCatalogRegistration}>
@@ -863,7 +863,7 @@ export default async function PersonDetailPage({
                     <input type="hidden" name="person_id" value={person!.id} />
                     <ConfirmSubmitButton
                       confirmMessage="Remove this project from this person's history? This can't be undone."
-                      className="min-h-9 cursor-pointer rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 text-[11px] font-semibold text-destructive"
+                      className="min-h-10 cursor-pointer rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 text-[11px] font-semibold text-destructive"
                     >
                       Remove
                     </ConfirmSubmitButton>
