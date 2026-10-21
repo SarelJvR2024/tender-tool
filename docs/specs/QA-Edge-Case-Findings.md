@@ -3020,7 +3020,7 @@ Downloaded each release's real documents from eTenders, ran them through the rea
 `extract_requirements()` and `submission_plan.compile_plan()`, and investigated every result that
 looked thin or surprising against the actual PDF rather than assuming either tool was right.
 
-### Finding 47 (CONFIRMED, NOT FIXED this pass - a real false positive, but the obvious fix broke 3 other correct detections)
+### Finding 47 (CONFIRMED, FIXED in a later pass, moderate - see "Fixed" note below the original write-up)
 
 **Where:** `engine/general/requirements.py`, `find_roles()` / `ROLE_PATTERNS`'s
 `contractor.contract_manager` entry (`r"\bcontracts?\s+manager\b"`), no exclusion at all - unlike
@@ -3080,6 +3080,40 @@ the shared `ROLE_CONTEXT_RE` every other role pattern also depends on. Flagged h
 forced, same discipline as Finding 42's "real architectural gap, not a quick regex fix" and Finding
 37's ten deferred `date.today()` sites - logged with exact evidence so the next pass (mine or a
 sibling's) doesn't have to re-discover it.
+
+**Fixed, later pass (2026-10-21, same day):** plumbed the tender's own buyer name into
+`find_roles()` exactly as flagged above, rather than touching the shared `ROLE_CONTEXT_RE`.
+`extract_requirements(..., buyer=None)` and `find_roles(docs, ocr_mean=None, buyer=None)` both gained
+an optional `buyer` parameter; `_buyer_core_words(buyer)` strips generic legal/government suffixes
+("SOC", "Ltd", "Department", "Municipality", ...) and words under 4 characters, keeping only the
+buyer's own distinctive words ("Transnet" from "Transnet SOC Ltd"); `_is_buyers_own_person()` checks
+only the 60 characters immediately before a role match (not the whole ±250-char context window -
+this is about what qualifies THIS specific mention, not the document's general subject) for any of
+those words. Wired into the one real production call site that already has the buyer name on hand
+(`process_general_jobs.py`'s own `tender.get("buyer")`, confirmed already read on the very next line
+for `intake.classify_documents`) and into `general_harness.py`'s regression corpus (loads
+`sources.json`'s own recorded `buyer` field per sample, previously never passed through at all).
+
+**A genuine bonus find, not just the originally-reported case:** re-running the full sample corpus
+with buyer names wired through flagged `eskom_e3689` as changed (not an EXPECTATION FAILURE - no
+`roles` assertion was pinned for that sample - but a real behaviour change, correctly caught by the
+harness's own baseline-diff mechanism rather than silently passing). Read the real document text
+behind both now-excluded matches before accepting the change: `"...Eskom System engineer, quality
+control and project manager"` (a list of ESKOM's own reviewing staff, not a bidder ask) and `"The
+Supplier shall appoint a person who will liaise with the Eskom Safety Officer"` (the supplier
+appoints a liaison TO Eskom's own Safety Officer - the ask is the liaison appointment, not supplying
+"the Safety Officer" role itself). Both were previously-undetected false positives of the exact same
+bug class, now correctly excluded by the same fix - not a new bug. Confirmed no other sample in the
+corpus was affected (91 clean, 0 flagged after accepting this one intentional baseline change).
+
+**Verification:** `test_requirements.py`'s `check_buyers_own_manager_excluded()` (4 checks) uses the
+real quoted Transnet sentence verbatim as its fixture text (not synthetic prose) - confirms the
+buyer-prefixed mention is excluded only when the buyer name is actually passed (unchanged default
+behaviour with no buyer), that a genuine ask in the SAME document still surfaces, and a negative
+control (an unrelated buyer name never coincidentally excludes a genuine ask). Regression-catching
+independently verified the usual way: temporarily removed the new exclusion check, confirmed the
+exact expected assertion fails (not a different one), restored it, confirmed clean again. Full
+`engine/general` suite, the harness, and a full repo-wide `test_*.py` sweep all clean.
 
 **Rest of the batch:** the other 14 tenders sampled were all correctly handled - 2 genuine "advert
 only, not the full tender document" cases (ESKOM `E1977DXNCRREGRET`'s only document turned out to

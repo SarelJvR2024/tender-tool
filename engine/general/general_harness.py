@@ -42,6 +42,13 @@ SAMPLES = os.path.join(REPO, "templates", "general_samples")
 TEST_COMPANIES = os.path.join(REPO, "config", "test_companies")
 DEFAULT_STORE = os.path.join(REPO, "state", "general_harness_baselines")
 
+# Each real sample's own recorded buyer (templates/general_samples/sources.json)
+# - passed into extract_requirements() so this corpus actually exercises
+# Finding 47's buyer-name-aware role exclusion, not just samples built
+# without one (a regression here would otherwise go uncaught).
+with open(os.path.join(SAMPLES, "sources.json")) as _f:
+    SAMPLE_BUYERS = {k: v.get("buyer") for k, v in json.load(_f)["samples"].items()}
+
 # What each real document set must yield. Read by hand from the documents
 # (findings doc, round 3) - not copied from a previous run of this code.
 EXPECTED = {
@@ -176,7 +183,7 @@ def main(argv=None):
 
     for sample in samples:
         sdir = os.path.join(SAMPLES, sample)
-        m = req.extract_requirements([sdir], work_dir=os.path.join(work_root, sample, "src"))
+        m = req.extract_requirements([sdir], work_dir=os.path.join(work_root, sample, "src"), buyer=SAMPLE_BUYERS.get(sample))
         problems = check_expected(sample, m)
         print(f"{sample}: suite={m['form_suite']} forms={[(f['code'], f['status']) for f in m['forms']]} "
               f"returnables={len(m['returnables'])} questions={len(m['questions'])}")

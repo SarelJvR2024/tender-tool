@@ -244,6 +244,54 @@ def check_key_personnel_false_positive():
           any("asks for key personnel" in g and "CVs of key personnel" in g for g in both_gaps), both_gaps)
 
 
+# --- Finding 47 (2026-10-21, phase-2 real-tender sampling): "Contract
+# Manager"/"Project Manager" preceded by the TENDER'S OWN BUYER NAME is the
+# buyer's own named administrator, not a bidder role. Real document: a
+# Transnet SOC Ltd tender (ocds-9t57fa-175017, PPA-170758 ELECTRICAL
+# SERVICES & MAINTENANCE 1.pdf) - the sentence below is verbatim from that
+# real PDF (appears twice there, near-identically), read by hand before this
+# fix. The earlier fix attempt (removing "must/shall/required" from the
+# shared ROLE_CONTEXT_RE) was tried and rejected first - it silently deleted
+# 3 other genuine, already-regression-tested detections elsewhere in this
+# corpus - so this is a narrower, buyer-name-aware exclusion instead; see
+# docs/specs/QA-Edge-Case-Findings.md for the full evidence trail.
+
+BUYER_OWN_MANAGER_REAL_TEXT = """
+Prior to mobilisation, the Contractor shall submit a Project Safety
+Compliance File for review and acceptance by the Transnet Contract Manager
+and SHEQ Department.
+"""
+
+GENUINE_CONTRACT_MANAGER_ASK = """
+Bidders must submit the CV and qualifications of their proposed Contract
+Manager for this project, showing relevant experience.
+"""
+
+BUYER_TEXT_WITH_GENUINE_ASK_TOO = BUYER_OWN_MANAGER_REAL_TEXT + GENUINE_CONTRACT_MANAGER_ASK
+
+
+def _roles_for(text, buyer=None):
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        path = os.path.join(d, "bundle.txt")
+        with open(path, "w") as f:
+            f.write(text)
+        m = req.extract_requirements([path], work_dir=tempfile.mkdtemp(prefix="tt_req_test_"), buyer=buyer)
+        return [r["role_code"] for r in m["roles"]]
+
+
+def check_buyers_own_manager_excluded():
+    print("Finding 47: '<buyer name> Contract/Project Manager' is the buyer's own agent, not a bidder role")
+    check("without a buyer name passed, the real Transnet sentence still matches (unchanged default behaviour)",
+          "contractor.contract_manager" in _roles_for(BUYER_OWN_MANAGER_REAL_TEXT))
+    check("with the tender's own buyer name passed, the buyer's own 'Transnet Contract Manager' is excluded",
+          "contractor.contract_manager" not in _roles_for(BUYER_OWN_MANAGER_REAL_TEXT, buyer="Transnet SOC Ltd"))
+    check("a document with BOTH the buyer's-own-agent mention and a genuine ask still surfaces the real one",
+          "contractor.contract_manager" in _roles_for(BUYER_TEXT_WITH_GENUINE_ASK_TOO, buyer="Transnet SOC Ltd"))
+    check("an unrelated buyer name doesn't coincidentally exclude a genuine ask (negative control)",
+          "contractor.contract_manager" in _roles_for(GENUINE_CONTRACT_MANAGER_ASK, buyer="Transnet SOC Ltd"))
+
+
 def main():
     print("Finding 29: MBD/SBD suite decided by majority of real mentions, not mere presence")
     check("10 real MBD mentions + 1 stray SBD reference -> MBD (the bug itself: this used to come back SBD)",
@@ -259,6 +307,7 @@ def main():
     check_manifest_items_carry_confidence()
     check_past_corrections_feedback()
     check_key_personnel_false_positive()
+    check_buyers_own_manager_excluded()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

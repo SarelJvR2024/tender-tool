@@ -418,7 +418,7 @@ def run_extraction(client, job, work_root, fetch=None):
         raise JobRefusal("No tender documents could be downloaded" + (": " + "; ".join(notes) if notes else " - no document links on file."))
     shutil.rmtree(scratch, ignore_errors=True)
     manifest = req.extract_requirements(dirs, work_dir=scratch, source_label=tender.get("ocid") or tender.get("slug"),
-                                        keep_text=True, past_corrections=recent_corrections(client))
+                                        keep_text=True, past_corrections=recent_corrections(client), buyer=tender.get("buyer"))
     all_text = manifest.get("_all_text") or ""
     decision = intake.classify_documents(manifest["documents"], tender.get("buyer"), all_text)
     readable = [d for d in manifest["documents"] if d["chars"] > 0 and not d["unreadable"]]

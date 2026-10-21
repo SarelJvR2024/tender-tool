@@ -596,8 +596,56 @@ def _line_at(text, pos):
     return text[a: b if b != -1 else len(text)]
 
 
-def find_roles(docs, ocr_mean=None):
+# Finding 47: "Contract Manager"/"Project Manager" preceded by the TENDER'S
+# OWN BUYER NAME ("the Transnet Contract Manager") is the buyer's own named
+# administrator, not a bidder role - confirmed on a real Transnet SOC Ltd
+# tender (both real mentions read "...for review and acceptance by the
+# Transnet Contract Manager and SHEQ Department", not a bidder ask). This is
+# the same bug class NEC3's "Employer's/Client's Project Manager" lookbehind
+# already excludes (ROLE_PATTERNS above), just with the buyer's own NAME
+# instead of a generic legal title - a blanket ROLE_CONTEXT_RE change was
+# tried and rejected first (deleted 3 other genuine detections, see
+# QA-Edge-Case-Findings.md Finding 47), so this is deliberately narrow:
+# only the tender's own buyer name, only directly before the match, never a
+# change to the shared context-word check every other role pattern depends
+# on.
+_BUYER_STOPWORDS = {
+    "the", "of", "and", "soc", "ltd", "pty", "limited", "department", "dept",
+    "municipality", "metropolitan", "local", "district", "council", "board",
+    "agency", "authority", "corporation", "company", "services", "group",
+    "national", "provincial", "government", "republic", "south", "africa",
+    "province", "city", "state", "owned", "holdings", "incorporated", "inc",
+}
+
+
+def _buyer_core_words(buyer):
+    """The buyer name's own distinctive words ("Transnet" from "Transnet SOC
+    Ltd", "ESKOM" from "ESKOM Holdings SOC Ltd") - generic legal/government
+    suffixes stripped so they never themselves count as a "buyer name"
+    match (a document saying plain "the Department Project Manager" isn't
+    naming ANY specific buyer). Words under 4 characters are dropped too -
+    too short to be a reliable, specific signal on their own."""
+    if not buyer:
+        return []
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", buyer)
+    return sorted({w for w in words if len(w) >= 4 and w.lower() not in _BUYER_STOPWORDS}, key=len, reverse=True)
+
+
+def _is_buyers_own_person(text, match_start, buyer_words):
+    """Is the tender's own buyer named directly before this match
+    ("the Transnet Contract Manager")? A short, immediately-preceding
+    window only (not the whole ±250-char context window) - this is about
+    what qualifies THIS specific mention, not the document's general
+    subject matter."""
+    if not buyer_words:
+        return False
+    window = text[max(0, match_start - 60): match_start]
+    return any(re.search(r"\b" + re.escape(w) + r"\b", window, re.IGNORECASE) for w in buyer_words)
+
+
+def find_roles(docs, ocr_mean=None, buyer=None):
     ocr_mean = ocr_mean or {}
+    buyer_words = _buyer_core_words(buyer)
     out = []
     for code, pat in ROLE_PATTERNS:
         rx = re.compile(pat, re.IGNORECASE)
@@ -609,6 +657,8 @@ def find_roles(docs, ocr_mean=None):
                 if GLOSSARY_LINE_RE.match(_line_at(t, m.start())):
                     continue
                 if not ROLE_CONTEXT_RE.search(t[max(0, m.start() - 250): m.end() + 250]):
+                    continue
+                if _is_buyers_own_person(t, m.start(), buyer_words):
                     continue
                 n += 1
                 if hit is None:
@@ -883,7 +933,7 @@ COMPANY_FIELDS = [
 # Manifest
 # ---------------------------------------------------------------------------
 
-def extract_requirements(paths, work_dir=None, source_label=None, keep_text=False, past_corrections=None):
+def extract_requirements(paths, work_dir=None, source_label=None, keep_text=False, past_corrections=None, buyer=None):
     """paths: files and/or directories (zips are unpacked). Returns the manifest
     dict (JSON-safe). Document dicts keep local paths under `_local` so the pack
     generator can reuse the downloaded copies; strip_local() removes them before
@@ -896,7 +946,14 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
     this function itself (it stays a pure function of its inputs - no
     database access here) - see the module comment above
     _apply_past_corrections_to_manifest for exactly what this can and can't
-    do."""
+    do.
+
+    buyer: the tender's own buyer/client name (e.g. "Transnet SOC Ltd"), if
+    known - optional, and only ever used to tell find_roles() apart a
+    "<buyer name> Contract/Project Manager" mention (the buyer's own agent)
+    from a genuine bidder-role ask (Finding 47). Never fetched here; the
+    caller already has it (process_general_jobs.py reads it straight off
+    the tender row being processed)."""
     own_tmp = work_dir is None
     work_dir = work_dir or tempfile.mkdtemp(prefix="tt_req_")
     docs = [read_document(d, work_dir) for d in collect_documents(paths, work_dir)]
@@ -1047,7 +1104,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
     cidb_confidence = score_confidence("anchored_regex", 1) if cidb_m else (None, None)
     briefing_confidence = score_confidence("anchored_regex", 1) if brief_m else (None, None)
     returnables = find_returnables(usable_docs, ocr_mean)
-    roles = find_roles(usable_docs, ocr_mean)
+    roles = find_roles(usable_docs, ocr_mean, buyer=buyer)
     person_registrations = find_person_registrations(usable_docs, ocr_mean)
     # EXPERIMENTAL OCR: anything read out of OCR'd text says so, so the UI
     # can show it isn't from a real text layer.
