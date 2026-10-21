@@ -7,6 +7,7 @@ import {
   questionStates,
   type GeneralCompany,
   type RequirementManifest,
+  type ReturnableCheck,
   type TenderAnswer,
 } from "@/lib/generalTender";
 import { COMPANY_VAULT_COLUMNS } from "@/lib/tenderCompliance";
@@ -15,7 +16,24 @@ import { TENDER_ROLE_COLUMNS, type TenderRole } from "@/lib/tenderRoles";
 import { findMatchingExperience } from "@/lib/experience";
 import { acceptedDocTypes, evaluateEvidence, type EvaluationRules } from "@/lib/experienceEvidence";
 import { answerStatus, localityStatus, roleStatus, signatureAnswerStatus } from "./general-pack-review-logic";
-import { docItemStatus } from "./pack-review-logic";
+import { docItemStatus, type ReviewStatus } from "./pack-review-logic";
+
+/**
+ * checkReturnable's own `strength: "required" | "mentioned"` is this file's
+ * equivalent of SANRAL's ComplianceItem.mandatory - a "required" returnable
+ * left unconfirmed ("check") is a real disqualification risk, not a soft
+ * Provide, the same reasoning pack-review-data.ts's own docItemReviewStatus()
+ * applies to mandatory SANRAL doc items (see that function's comment).
+ * docItemStatus(check.status) alone can't see `strength`, so on its own it
+ * would show a required-but-unconfirmed returnable as Provide, not Fix.
+ */
+function returnableReviewStatus(check: ReturnableCheck): { reviewStatus: ReviewStatus; checklistStatus: ReturnType<typeof docItemStatus>["checklistStatus"] } {
+  const { checklistStatus } = docItemStatus(check.status);
+  if (check.status === "have") return { reviewStatus: "confirmed", checklistStatus };
+  if (check.strength === "required") return { reviewStatus: "missing", checklistStatus };
+  const reviewStatus: ReviewStatus = check.status === "missing" ? "needs_input" : "assumed_default";
+  return { reviewStatus, checklistStatus };
+}
 import type { ReviewItem, ReviewSection } from "./pack-review-data";
 import type { ChecklistRow } from "./pack-checklist";
 
@@ -137,7 +155,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     const jvAnswer = answers.find((a) => a.field_key === "bidding_as_jv")?.value ?? null;
     const items: ReviewItem[] = manifest.returnables.map((r) => {
       const check = checkReturnable(r, company, closingDate, answers, jvAnswer === null ? null : jvAnswer === "yes");
-      const { reviewStatus, checklistStatus } = docItemStatus(check.status);
+      const { reviewStatus, checklistStatus } = returnableReviewStatus(check);
       pushChecklist({ title: check.label, envelope: "Supporting documents", status: checklistStatus, pages: null, note: check.status === "have" ? null : check.detail });
       return {
         key: `returnable-${check.key}`, label: check.label, value: check.status === "have" ? "On file" : null, status: reviewStatus, note: check.detail,
