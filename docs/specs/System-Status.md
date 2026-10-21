@@ -200,6 +200,28 @@ every other fix this session.
 4. Should a `needs_input`/`needs_document` step auto-seed a row in `tender_tasks` (the existing
    per-tender task list), or stay a separate read-only view?
 
+**My own recommendation on each, added 2026-10-21 ~19:00 UTC - so this is "approve/override", not
+"design from scratch" (still your call, not decided here):**
+1. **Computed fresh, no new table.** `compile_plan()` is already a pure function; recomputing it on
+   page load is cheap, and it sidesteps inventing a whole new persistence layer. "Progress"
+   (#2 below) comes from tables that already exist, not a new one tracking the plan itself -
+   avoids exactly the kind of duplicate ad hoc status system the UI/UX review session is
+   currently unwinding elsewhere on this same screen cluster (#35/#36, right above).
+2. **Yes** - but keep `compile_plan()` itself DB-free. Have the *caller* (an app server action)
+   fetch `tender_answers`/`tender_roles` for this tender and fold them into the `company`/`tender`
+   dicts passed in, so an already-answered question or a tagged role flips to `ready` without the
+   engine module touching Supabase directly - same read/compute split `requirements.py` and
+   `build_general_pack.py` already keep.
+3. **After pursuit, once documents are downloaded** - matches `build_general_pack.py`'s existing
+   precondition, and a real plan needs real document content to mean anything. `compileReadiness.ts`
+   can keep doing the shallower pre-pursuit "should we even go for this" job it already does -
+   different funnel stage, not a duplicate.
+4. **Stay read-only for now.** Auto-seeding one `tender_tasks` row per manifest line could mean
+   10+ new tasks appearing per tender the moment a plan is computed, before you've seen whether
+   that's wanted at all - narrower to start, matching this project's own "start with a button, not
+   the fancier thing" pattern elsewhere (e.g. the Pipeline page's own documented choice). Can widen
+   to auto-seeding later once the read-only view has been used for a while.
+
 **Government-buyer catalog: final bounded re-scan done, 2026-10-21 ~10:30 UTC**
 (`docs/specs/Government-Buyer-Catalog-Round4-Final-Sweep.md`, `fb7b2ba`). **Lephalale** confirmed
 as a strong new reader candidate - independently re-verified zero eTenders overlap, clean
