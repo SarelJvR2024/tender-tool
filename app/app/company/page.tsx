@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { expiryStatus, type StatusChip } from "@/lib/dates";
 import { computeBidReadiness, type ReadinessResult } from "@/lib/readiness";
 import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
+import { DocumentExpiryOverview } from "./DocumentExpiryOverview";
 import { saveDocumentTemplate, updateCompanyProfile, uploadVaultDocument } from "./actions";
 import {
   COMPANY_DOCUMENT_TYPES,
@@ -214,6 +215,8 @@ export default async function CompanyPage({
           </div>
         )}
 
+        {row && !editing && <DocumentExpiryOverview />}
+
         {(loadError || !row) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", fontSize: 13, color: "#B91C1C" }}>
             {loadError ? "Couldn't load your company profile - try refreshing. If it keeps happening, let us know." : "Could not load your company profile."}
@@ -259,6 +262,7 @@ export default async function CompanyPage({
           <div style={{ position: "sticky", top: 0, zIndex: 5, background: "#FFFFFF", padding: "8px 2px", marginBottom: 12 }}>
             <div style={{ position: "relative" }}>
               <div style={{ display: "flex", gap: 6, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                <CompanyJumpLink href="#document-expiry" label="Expiry" />
                 <CompanyJumpLink href="#compliance-documents" label="Documents" />
                 <CompanyJumpLink href="#company-identity" label="Identity" />
                 <CompanyJumpLink href="#size-offices" label="Size & offices" />
