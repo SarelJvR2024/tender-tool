@@ -35,6 +35,7 @@ import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestio
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { computeTenderReadiness } from "./tender-readiness";
+import { DisqualificationGuard } from "./disqualification-guard";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -449,6 +450,14 @@ export default async function TenderWorkspacePage({
                 closing date changes everything below it. Nothing when none. */}
             <TenderUpdates tenderId={id} />
 
+            {/* Disqualification guard - the checks most likely to disqualify a
+                bid outright, read from the same data the rest of the page
+                already reads. Mounted early, right after the facts, since
+                it's meant to be the first thing a director checks. */}
+            {(isSanralFamily || isGeneralFamily) && (
+              <DisqualificationGuard tenderId={id} isSanralFamily={isSanralFamily} isGeneralFamily={isGeneralFamily} />
+            )}
+
             {/* Jump nav - this page stacks up to 9 report/management cards once
                 a pack exists, so a sticky row of anchors beats blind-scrolling
                 to find one (same idea as Stripe's data-dense dashboards: a
@@ -483,6 +492,7 @@ export default async function TenderWorkspacePage({
                   <div style={{ display: "flex", gap: 6, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                     {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
                     {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" variant="primary" />}
+                    {(isSanralFamily || isGeneralFamily) && <JumpLink href="#disqualification-guard" label="Guard" />}
                     {tenderFacts.source !== "sanral" && <JumpLink href="#intake" label="Intake" />}
                     {tenderPack && provenance.length > 0 && <JumpLink href="#readiness-report" label="Readiness" />}
                     {isSanralFamily && <JumpLink href="#compliance-check" label="Documents" />}
