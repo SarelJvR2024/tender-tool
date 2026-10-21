@@ -56,3 +56,51 @@ discovery as done for now unless a human points at a specific additional lead; t
 candidates from round 4 (Lephalale, Kouga) are already built, and diminishing returns are setting in
 on this specific research method (web search + URL guessing) the way they already did for phase 2's
 sampling.
+
+## Follow-up (21 Oct 2026, later the same day): Abaqulusi resolved - real listing found, not a gap
+
+Found the real per-tender data and it changes the verdict from "worth one more pass" to **not a
+meaningful gap**. The `/tenders/` page's sub-category links (Quotations, Tender Adverts, Tender
+Erratums, Tender Openings, Tender Documents, Cancellation of Bids) aren't dead `#` hrefs after all -
+the page runs the **WP File Download** WordPress plugin ("tree" theme), which loads each category's
+real file list via its own AJAX endpoint
+(`/wp-admin/admin-ajax.php?action=wpfd&task=files.display&view=files&id=<catid>&rootcat=103`). Every
+category has a numeric id baked into the page's own HTML (Quotations=44, Intention to award=149,
+Tender Erratums=146, **Tender Adverts=107**, Tender Openings=278, Tender Documents=323, Cancellation
+of Bids=352) - the same "landing page looks like a shell, real data is one AJAX call deeper" shape
+Kouga had, just a different plugin.
+
+Hitting that endpoint for Tender Adverts (107) returns real JSON: 19 files, each a PDF named with a
+real internal reference baked into the title (e.g. `8-2-1-578- Upgrade of East and Heeren Streets`,
+`TENDER ADVERT- 8-2-1-523`) - the same `8/2/1/NNN` reference family Lephalale and Kouga's own
+listings use elsewhere. **But there is no closing-date field anywhere in the listing metadata** -
+only `created`/`modified` upload timestamps. Downloaded one real PDF
+(`advert-for-deeds-and-rollers-8-2-1-398.pdf`, 150KB) and ran `pdftotext -layout` on it: text
+extracts cleanly (not scanned), and it turns out to be a **combined advert covering 2 separate
+tenders in one PDF** (`8/2/1/586` closing 15/05/2026, `8/2/1/398` closing 02/06/2026) with a real
+"TENDER NUMBER / PROJECT NAME / CLOSING DATE" table - structurally buildable (same shape as
+Lephalale's batches), but it would mean downloading and parsing every PDF across potentially several
+of these 7 categories just to recover closing dates the listing itself doesn't expose.
+
+**The disqualifying finding: this looks like near-total eTenders overlap, not a gap.** The PDF
+itself says outright: "Bids documents will be self-downloaded from E-tender Portal
+(www.e-tenders.gov.za)". A full-portal pull filtered to buyer "abaqulusi"
+(`etenders_portal.py --buyer abaqulusi --limit 2200`) found **22 tenders currently advertised**,
+with reference numbers `8/2/1/647` through `8/2/1/667` - the exact same numbering sequence as the
+website's own PDFs (`8/2/1/398` through `8/2/1/626` were the website's own samples, from
+May-July 2026; the portal's Oct/Nov 2026 batch picks up right where that sequence continues). This
+is one continuous reference-number pool shared by both channels, not two independent systems -
+unlike Lephalale/Kouga/Vaal Central Water, which all had their own separate numbering with
+confirmed zero or near-zero overlap. Did not do a row-by-row cross-check (time budget), but the
+sequential-numbering evidence alone is strong enough to downgrade this from "worth building" to
+"not a meaningful gap vs eTenders" - the municipality appears to register essentially everything it
+advertises onto eTenders under the same bid-number scheme.
+
+**Verdict: not a reader candidate.** Real site, real structure, real reference numbers, genuinely
+harder to build than Lephalale (closing dates require downloading every PDF, no metadata shortcut)
+AND the value proposition that would justify that work isn't there - this is very likely mostly
+duplicate coverage already on eTenders, the same conclusion already reached for most of Msukaligwa's
+tenders.
+
+This closes out the "one live follow-up candidate" from the section above - all 8 round-5
+municipalities are now resolved, none built.
