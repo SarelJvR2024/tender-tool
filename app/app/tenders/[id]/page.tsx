@@ -16,7 +16,7 @@ import {
   syncWonProjectToTeam,
   type TenderTaskStatus,
 } from "./actions";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { ScrollFade } from "../../_components/ScrollFade";
 import { SubmissionPack } from "./submission-pack";
 import { PackReview } from "./pack-review";
@@ -318,10 +318,8 @@ export default async function TenderWorkspacePage({
   const isGeneralFamily = tenderFacts?.family === GENERAL_FAMILY;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="dashboard" />
-
-      <div style={{ flex: 1, padding: "20px 16px", maxWidth: 820, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ flex: 1, padding: "20px 16px", maxWidth: 820, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         {actionError && <ErrorBanner message={actionError} />}
 
         {tenderError && (
@@ -734,7 +732,7 @@ export default async function TenderWorkspacePage({
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { PERSON_CREDENTIAL_COLUMNS, credentialChipLabel, credentialExpiries, type PersonCredentialFields } from "@/lib/personCredentials";
 
 // Reads the signed-in user's own company's roster on every request (via RLS) -
@@ -65,7 +65,7 @@ export default async function PeoplePage({
   const noDateCount = allExpiries.filter((c) => !c.expiry).length;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
+    <AppShell>
       <style>{`
         @media (max-width: 600px) {
           .people-grid { grid-template-columns: 1fr !important; }
@@ -73,9 +73,7 @@ export default async function PeoplePage({
         }
       `}</style>
 
-      <SiteNav active="people" />
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <div className="people-header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>People / CV Library</h1>
@@ -159,7 +157,7 @@ export default async function PeoplePage({
           })}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
 

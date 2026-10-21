@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { AdminNav } from "../AdminNav";
 import { DISCIPLINE_CATEGORY_FULL_COLUMNS, type DisciplineCategoryFull } from "@/lib/disciplineTaxonomy";
 import { addCategory, approveSuggestion, rejectSuggestion, updateCategory } from "./actions";
@@ -147,10 +147,9 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
   const retired = cats.filter((c) => !c.active).length;
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
+    <AppShell>
       <style>{`@media (max-width: 640px) { .tax-grid { grid-template-columns: 1fr !important; } }`}</style>
-      <SiteNav active="admin" />
-      <div style={{ padding: "24px 16px 40px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ padding: "24px 16px 40px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <AdminNav active="taxonomy" />
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discipline list</h1>
         <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
@@ -328,6 +327,6 @@ export default async function TaxonomyAdminPage({ searchParams }: { searchParams
           })}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

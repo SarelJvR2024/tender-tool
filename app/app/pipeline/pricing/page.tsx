@@ -16,7 +16,7 @@ import {
   toNumber,
   type PackEconomics,
 } from "@/lib/dealEconomics";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { EconomicsForm, type CreditPerson } from "../economics-form";
 import { MarketComparison } from "./market-comparison";
 
@@ -173,11 +173,9 @@ export default async function PricingHistoryPage({
   const stickyCol: CSSProperties = { position: "sticky", left: 0, zIndex: 1, background: "#FFFFFF", boxShadow: "2px 0 4px rgba(22,35,59,0.06)" };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="pipeline" />
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <Link href="/pipeline" style={{ fontSize: 13, color: "#5B6472", textDecoration: "none" }}>← Pipeline</Link>
+    <AppShell>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+        <Link href="/pipeline" style={{ fontSize: 13, color: "#5B6472", textDecoration: "none" }}>← Bids</Link>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "6px 0 4px" }}>Pricing history</h1>
         <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
           What you have submitted at, by tender type, client and sector, and how it compared with the published results. Internal only: nothing here goes into a submission pack.
@@ -353,7 +351,7 @@ export default async function PricingHistoryPage({
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }
 

@@ -4,8 +4,9 @@ import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { NEXT_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { moveTenderStage } from "./actions";
 import { derivedSector, ECONOMICS_COLUMNS, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
 import { loadDisciplineTaxonomy, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
@@ -158,12 +159,10 @@ export default async function PipelinePage({
   const submittedToDate = cards.filter((c) => c.submittedAt).length;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="pipeline" />
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Pipeline</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Bids</h1>
           <Link href="/pipeline/pricing" style={{ fontSize: 13, fontWeight: 600, color: "#D97706", textDecoration: "none" }}>
             Pricing history →
           </Link>
@@ -185,53 +184,64 @@ export default async function PipelinePage({
           <StatCard label="Lost" value={byStage.lost.length} color="#B91C1C" />
         </div>
 
-        {/* The board scrolls sideways on its own on a phone; the page itself never does.
-            Nothing used to hint that Won/Lost sit off-screen, so a right-edge
-            fade (hidden once the board actually fits, i.e. desktop widths) +
-            a small text cue give the scroll somewhere to point at. */}
-        <div style={{ position: "relative" }}>
-          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 8 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(220px, 1fr))", gap: 12, alignItems: "start" }}>
-            {PIPELINE_STAGES.map((stage) => {
-              const meta = STAGE_META[stage];
-              const column = byStage[stage];
-              return (
-                <section key={stage} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "2px 4px 0" }}>
-                    <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: meta.bg, color: meta.color }}>
-                      {meta.label}
-                    </span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#5B6472" }}>{column.length}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#8A93A0", padding: "6px 4px 10px" }}>{meta.hint}</div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {column.length === 0 && (
-                      <div style={{ fontSize: 12, color: "#8A93A0", padding: "14px 8px", textAlign: "center", border: "1px dashed #E3E6EA", borderRadius: 9 }}>
-                        {EMPTY_COPY[stage]}
+        {/* One tab today (Board) - structured as a real Tabs component, not a
+            bare div, because this is the merge point for Bids' list view
+            (app/AGENTS.md "App shell"): a future "List" tab lands here as a
+            second TabsTrigger/TabsContent, not a page restructure. */}
+        <Tabs defaultValue="board">
+          <TabsList className="mb-3">
+            <TabsTrigger value="board">Board</TabsTrigger>
+          </TabsList>
+          <TabsContent value="board">
+            {/* The board scrolls sideways on its own on a phone; the page itself never does.
+                Nothing used to hint that Won/Lost sit off-screen, so a right-edge
+                fade (hidden once the board actually fits, i.e. desktop widths) +
+                a small text cue give the scroll somewhere to point at. */}
+            <div style={{ position: "relative" }}>
+              <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(220px, 1fr))", gap: 12, alignItems: "start" }}>
+                {PIPELINE_STAGES.map((stage) => {
+                  const meta = STAGE_META[stage];
+                  const column = byStage[stage];
+                  return (
+                    <section key={stage} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "2px 4px 0" }}>
+                        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: meta.bg, color: meta.color }}>
+                          {meta.label}
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#5B6472" }}>{column.length}</span>
                       </div>
-                    )}
-                    {column.map((c) => (
-                      <TenderCard key={c.id} card={c} people={people} taxonomy={taxonomy} />
-                    ))}
-                  </div>
+                      <div style={{ fontSize: 11, color: "#8A93A0", padding: "6px 4px 10px" }}>{meta.hint}</div>
 
-                  {stage === "found" && (
-                    <Link href="/discovery" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#D97706", textDecoration: "none", padding: "10px 4px 2px" }}>
-                      Find more in Discovery →
-                    </Link>
-                  )}
-                </section>
-              );
-            })}
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {column.length === 0 && (
+                          <div style={{ fontSize: 12, color: "#8A93A0", padding: "14px 8px", textAlign: "center", border: "1px dashed #E3E6EA", borderRadius: 9 }}>
+                            {EMPTY_COPY[stage]}
+                          </div>
+                        )}
+                        {column.map((c) => (
+                          <TenderCard key={c.id} card={c} people={people} taxonomy={taxonomy} />
+                        ))}
+                      </div>
+
+                      {stage === "found" && (
+                        <Link href="/discovery" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#D97706", textDecoration: "none", padding: "10px 4px 2px" }}>
+                          Find more in Opportunities →
+                        </Link>
+                      )}
+                    </section>
+                  );
+                })}
+                </div>
+              </div>
+              {/* Right-edge fade: the only hint, on narrower viewports, that
+                  Won/Lost sit off-screen to the right. */}
+              <ScrollFade fadeColor="255, 255, 255" minWidthToHide={1180} />
             </div>
-          </div>
-          {/* Right-edge fade: the only hint, on narrower viewports, that
-              Won/Lost sit off-screen to the right. */}
-          <ScrollFade fadeColor="255, 255, 255" minWidthToHide={1180} />
-        </div>
+          </TabsContent>
+        </Tabs>
       </div>
-    </div>
+    </AppShell>
   );
 }
 

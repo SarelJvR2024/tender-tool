@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { AdminNav } from "../AdminNav";
 import RequirementItemTable from "./RequirementItemTable";
 import type { RequirementItemRowData } from "./RequirementItemRow";
@@ -58,10 +58,8 @@ export default async function AdminRequirementExtractionsPage({ searchParams }: 
   }));
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="admin" />
-
-      <div style={{ padding: "24px 32px", maxWidth: 1200, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ padding: "24px 32px", maxWidth: 1200, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <AdminNav active="requirement-extractions" />
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Requirement extractions below {DEFAULT_THRESHOLD}/100</h1>
@@ -86,6 +84,6 @@ export default async function AdminRequirementExtractionsPage({ searchParams }: 
 
         <RequirementItemTable rows={rows} />
       </div>
-    </div>
+    </AppShell>
   );
 }

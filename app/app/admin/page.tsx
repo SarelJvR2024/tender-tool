@@ -1,7 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import HarnessRunRow, { type HarnessDocument } from "./HarnessRunRow";
 import SystemAlertRow, { type SystemAlert } from "./SystemAlertRow";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { AdminNav } from "./AdminNav";
 
 // Reads per-request session/DB data (admin_harness_runs, gated by RLS on the
@@ -90,10 +90,8 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   }
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="admin" />
-
-      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <AdminNav active="alerts" />
         <section id="cv-document-stats" style={{ marginBottom: 36 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>CVs &amp; tender documents</h1>
@@ -197,7 +195,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           })}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
 

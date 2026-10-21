@@ -2,7 +2,7 @@
 // registrations, properties, bank accounts). Civic Navy, inline styles only -
 // the same values app/app/company/page.tsx uses.
 import type { StatusChip } from "@/lib/dates";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 
 export const NAVY = "#16233B";
@@ -26,9 +26,8 @@ export function SubPage({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: CREAM }}>
-      <SiteNav active="company" />
-      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif", background: CREAM }}>
         <a href="/company" style={{ fontSize: 13, color: AMBER, fontWeight: 600, textDecoration: "none" }}>
           ← Company profile
         </a>
@@ -46,7 +45,7 @@ export function SubPage({
         )}
         {children}
       </div>
-    </div>
+    </AppShell>
   );
 }
 

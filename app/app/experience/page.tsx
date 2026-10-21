@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { captureExperience } from "./actions";
 import { expandDisciplines, loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import {
@@ -97,16 +97,14 @@ export default async function ExperiencePage({
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
+    <AppShell>
       <style>{`
         @media (max-width: 600px) {
           .exp-grid-2 { grid-template-columns: 1fr !important; }
         }
       `}</style>
 
-      <SiteNav active="experience" />
-
-      <div style={{ flex: 1, padding: "24px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ flex: 1, padding: "24px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>Company experience</h1>
         <div style={{ fontSize: 13, color: "#5B6472", marginTop: 2, marginBottom: 16 }}>
           Reference letters, performance reports, completion certificates, close-out reports and award
@@ -202,7 +200,7 @@ export default async function ExperiencePage({
           <ExperienceRow key={e.id} item={e} url={e.storage_path ? signedUrls[e.storage_path] : undefined} labelOf={labelOf} />
         ))}
       </div>
-    </div>
+    </AppShell>
   );
 }
 

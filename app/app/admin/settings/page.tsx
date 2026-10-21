@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { AdminNav } from "../AdminNav";
 import { setPlatformSetting } from "../actions";
 
@@ -26,10 +26,8 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
   const settings = (data ?? []) as Setting[];
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif", background: "#FFFFFF" }}>
-      <SiteNav active="admin" />
-
-      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <AdminNav active="settings" />
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>System settings</h1>
@@ -71,6 +69,6 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
           ))}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

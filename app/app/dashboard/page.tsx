@@ -2,11 +2,11 @@ import Link from "next/link";
 import { FolderOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
+import { AppShell } from "../_components/AppShell";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { getNotifications } from "@/lib/notifications";
 import { nextStepFor } from "@/lib/tenderNextStep";
 import { ACTIVE_PURSUIT_STAGES } from "@/lib/discoveryReassessment";
-import { SiteNav } from "../_components/SiteNav";
 import { PageHeader } from "@/components/tt/page-header";
 import { StatCard } from "@/components/tt/stat-card";
 import { StatusBadge, type TenderStatus } from "@/components/tt/status-badge";
@@ -170,9 +170,7 @@ export default async function DashboardPage() {
   const companyName = companyRow?.csd_trading_name ?? companyRow?.legal_name ?? null;
 
   return (
-    <div className="flex min-h-screen flex-col bg-background">
-      <SiteNav active="dashboard" />
-
+    <AppShell>
       <div className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-6">
         <PageHeader
           className="mb-5"
@@ -304,6 +302,6 @@ export default async function DashboardPage() {
           </div>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }
