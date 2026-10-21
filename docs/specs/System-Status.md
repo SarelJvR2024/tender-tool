@@ -6,6 +6,40 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**`submission_plan.py` added, 2026-10-21 ~10:30 UTC: first version of the "assessment engine"**
+Sarel asked for ("assesses each tender, each page, each field and compiles a plan of how to
+prepare a submission", `fb7b2ba`). `compile_plan(manifest, company, tender)` is a pure function
+(no Supabase access, same discipline as `requirements.py` itself) that turns the existing
+requirement manifest into an ordered, actionable list: one step per form/buyer-form/returnable/
+role/question/CIDB-grading/briefing, each with a status (ready / needs_document / needs_input /
+by_hand / review / blocked) and a plain explanation - reusing `build_general_pack.py`'s own
+`VAULT_FILE_FOR` mapping so "already on file" never drifts from what the real pack build checks.
+Tested against the whole `templates/general_samples/` corpus (no crashes) and a synthetic bundle;
+reuses Finding 40/42's own real fixtures to prove it. Regression-catching verified the same way as
+every other fix this session.
+
+**Open questions this raises, not decided here - for Sarel:**
+1. Where should a plan live - computed fresh every time the page loads (like `compileReadiness.ts`
+   does today, client-side, no DB write), or stored (a new table, so a person's progress on it -
+   "I've uploaded the CSD report" - persists and a step can flip from `needs_document` to `ready`)?
+2. Should a `needs_input` step (a role, a question) check `tender_answers`/`tender_roles` for an
+   already-saved answer on THIS tender, rather than always showing `needs_input`? That needs DB
+   access this module deliberately doesn't have yet - a real design choice, not an oversight.
+3. Should this run automatically the moment a tender is discovered (before a company commits to
+   pursuing it - `compileReadiness.ts`'s own job today, but shallower), or only after pursuit once
+   documents are actually downloaded (`build_general_pack.py`'s current precondition)?
+4. Should a `needs_input`/`needs_document` step auto-seed a row in `tender_tasks` (the existing
+   per-tender task list), or stay a separate read-only view?
+
+**Government-buyer catalog: final bounded re-scan done, 2026-10-21 ~10:30 UTC**
+(`docs/specs/Government-Buyer-Catalog-Round4-Final-Sweep.md`, `fb7b2ba`). **Lephalale** confirmed
+as a strong new reader candidate - independently re-verified zero eTenders overlap, clean
+closing-dated structure (not a flat undated archive like Mbombela/Polokwane/Overstrand). Msukaligwa
+confirmed a real partial gap on its two construction-relevant tenders specifically (its other
+tenders are already on eTenders). Kouga (95 pages) needs a fuller eTenders comparison before
+ranking - 5 of 10 sampled were already duplicates. Not yet built: Lephalale is the clear next
+reader to build, not yet started.
+
 **Finding 42 fixed, 2026-10-21 ~09:15 UTC: Sarel chose option (a)** (decline to extract from a
 combined multi-tender bulletin PDF, rather than build row-scoped extraction). Implemented in
 `requirements.py`: `is_combined_bulletin()` detects the shape buyer-agnostically (a numbered list
