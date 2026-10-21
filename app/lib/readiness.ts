@@ -59,6 +59,15 @@ export type ReadinessResult = {
   criteria: Criterion[];
   /** Unsatisfied criteria, sorted by weight (highest first) - "top N fixes" is blockers.slice(0, N). */
   blockers: Criterion[];
+  /**
+   * Raw pass-through of the input this was scored from - no new computation,
+   * just surfaced so a caller can apply its OWN threshold instead of the
+   * scored criteria's (e.g. Home's new-company setup checklist wants "at
+   * least 1 person with a CV", a lower bar than the `people_cvs` criterion's
+   * own 2-person weight-10 threshold - both are real, honest reads of the
+   * same count, just different bars for different purposes).
+   */
+  peopleWithCvCount: number;
 };
 
 /** Expired or expiring within 14 days counts as not-current - null (no date on file) is a separate "missing" case, not treated as expired. */
@@ -183,5 +192,5 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
   const percent = criteria.reduce((sum, c) => sum + (c.satisfied ? c.weight : 0), 0);
   const blockers = criteria.filter((c) => !c.satisfied).sort((a, b) => b.weight - a.weight);
 
-  return { percent, criteria, blockers };
+  return { percent, criteria, blockers, peopleWithCvCount: input.peopleWithCvCount };
 }
