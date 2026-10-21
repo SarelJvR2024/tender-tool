@@ -70,7 +70,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import source_http as sh  # noqa: E402
 
 ALL_SOURCES = ("etenders_portal", "sanral", "eskom_bulletin", "transnet_etenders", "capetown_procurement",
-               "sars_procurement", "cidb_tenders", "dbsa_procurement")
+               "sars_procurement", "cidb_tenders", "dbsa_procurement", "vaal_central_water", "lephalale",
+               "kouga")
+# randwater is deliberately NOT here: a GitHub Actions runner (a different network path than this
+# dev sandbox) was used to test reachability for all 4 direct-site sources built 2026-10-20/21.
+# vaal_central_water/lephalale/kouga passed clean (run 39600219996); randwater's own reachability
+# run (39508282401) failed outright - it's genuinely blocked, not just blocked from this sandbox.
+# See test-randwater-reachability.yml / test-new-readers-reachability.yml.
 SOURCE_LABELS = {
     "etenders_portal": "eTenders portal (National Treasury)",
     "etenders_ocds": "eTenders OCDS feed (National Treasury)",

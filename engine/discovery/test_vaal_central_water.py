@@ -359,8 +359,8 @@ check("...and the real fixture is unaffected by that check (still parses clean)"
 # --- wired into gov_sources without reintroducing the 14th-run merge bug ---
 
 check("vaal_central_water is in SOURCE_LABELS", "vaal_central_water" in gov_sources.SOURCE_LABELS)
-check("vaal_central_water deliberately NOT in ALL_SOURCES (reachability from automation unconfirmed)",
-      "vaal_central_water" not in gov_sources.ALL_SOURCES)
+check("vaal_central_water is in ALL_SOURCES (reachability from a real GitHub Actions run confirmed - run 39600219996)",
+      "vaal_central_water" in gov_sources.ALL_SOURCES)
 check("vaal_central_water has its own BUYER_FAMILY entry - QA-Edge-Case-Findings.md 14th run's bug class",
       "vaal_central_water" in gov_sources.BUYER_FAMILY)
 check("the BUYER_FAMILY pattern actually matches 'Vaal Central Water Board'",

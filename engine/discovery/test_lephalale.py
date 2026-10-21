@@ -119,8 +119,8 @@ check("a batch PDF with no 'Ref no:' at all (an erratum, pure prose) legitimatel
 # --- wired into gov_sources without reintroducing the 14th-run merge bug ---
 
 check("lephalale is in SOURCE_LABELS", "lephalale" in gov_sources.SOURCE_LABELS)
-check("lephalale deliberately NOT in ALL_SOURCES (reachability from automation unconfirmed)",
-      "lephalale" not in gov_sources.ALL_SOURCES)
+check("lephalale is in ALL_SOURCES (reachability from a real GitHub Actions run confirmed - run 39600219996)",
+      "lephalale" in gov_sources.ALL_SOURCES)
 check("lephalale has its own BUYER_FAMILY entry - QA-Edge-Case-Findings.md 14th run's bug class",
       "lephalale" in gov_sources.BUYER_FAMILY)
 check("the BUYER_FAMILY pattern actually matches 'Lephalale Local Municipality'",

@@ -263,8 +263,8 @@ check("max_page() defaults to 1 (not a crash) when no pagination links are prese
 # --- wired into gov_sources without reintroducing the 14th-run merge bug ---
 
 check("kouga is in SOURCE_LABELS", "kouga" in gov_sources.SOURCE_LABELS)
-check("kouga deliberately NOT in ALL_SOURCES (reachability from automation unconfirmed)",
-      "kouga" not in gov_sources.ALL_SOURCES)
+check("kouga is in ALL_SOURCES (reachability from a real GitHub Actions run confirmed - run 39600219996)",
+      "kouga" in gov_sources.ALL_SOURCES)
 check("kouga has its own BUYER_FAMILY entry - QA-Edge-Case-Findings.md 14th run's bug class",
       "kouga" in gov_sources.BUYER_FAMILY)
 check("the BUYER_FAMILY pattern actually matches 'Kouga Local Municipality'",
