@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AlertTriangle, UserX } from "lucide-react";
 import { expiryStatus } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
@@ -7,6 +8,8 @@ import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
+import { EmptyState } from "@/components/tt/empty-state";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   CATALOG_BODIES,
   catalogSlug,
@@ -83,19 +86,41 @@ type GeneratedCv = {
   requested_at: string;
 };
 
-const CV_UPLOAD_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
-  uploaded: { label: "Uploaded - used as-is", bg: "#DCFCE7", color: "#15803D" },
-  extraction_requested: { label: "Waiting for AI extraction", bg: "#FEF3C7", color: "#B45309" },
-  extracting: { label: "Reading the CV…", bg: "#FEF3C7", color: "#B45309" },
-  extracted: { label: "Fields read - see above", bg: "#DCFCE7", color: "#15803D" },
-  extraction_failed: { label: "Extraction failed", bg: "#FEE2E2", color: "#B91C1C" },
+// Soft-tint tone, not a literal hex pair - the same 4-tone convention
+// app/company/_components/shared.tsx's ChipBadge uses, duplicated locally
+// rather than imported (People is its own feature folder; a cross-folder
+// import of Company's private _components would be an odd coupling for 4
+// lines of Tailwind class strings - same reasoning general-pack-review-logic.ts
+// gives for duplicating pack-review-logic.ts's own STATUS_STYLE map).
+type Tone = "success" | "warning" | "destructive" | "muted";
+const TONE_CLASS: Record<Tone, string> = {
+  success: "border-success/20 bg-success/10 text-success",
+  warning: "border-warning/20 bg-warning/10 text-warning",
+  destructive: "border-destructive/20 bg-destructive/10 text-destructive",
+  muted: "border-muted-foreground/20 bg-muted text-muted-foreground",
 };
 
-const GENERATED_CV_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
-  requested: { label: "Requested", bg: "#FEF3C7", color: "#B45309" },
-  generating: { label: "Generating…", bg: "#FEF3C7", color: "#B45309" },
-  ready: { label: "Ready", bg: "#DCFCE7", color: "#15803D" },
-  failed: { label: "Failed", bg: "#FEE2E2", color: "#B91C1C" },
+function Pill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+  return (
+    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap ${TONE_CLASS[tone]}`}>
+      {children}
+    </span>
+  );
+}
+
+const CV_UPLOAD_STATUS: Record<string, { label: string; tone: Tone }> = {
+  uploaded: { label: "Uploaded - used as-is", tone: "success" },
+  extraction_requested: { label: "Waiting for AI extraction", tone: "warning" },
+  extracting: { label: "Reading the CV…", tone: "warning" },
+  extracted: { label: "Fields read - see above", tone: "success" },
+  extraction_failed: { label: "Extraction failed", tone: "destructive" },
+};
+
+const GENERATED_CV_STATUS: Record<string, { label: string; tone: Tone }> = {
+  requested: { label: "Requested", tone: "warning" },
+  generating: { label: "Generating…", tone: "warning" },
+  ready: { label: "Ready", tone: "success" },
+  failed: { label: "Failed", tone: "destructive" },
 };
 
 const CV_FORMAT_LABEL: Record<string, string> = {
@@ -127,46 +152,39 @@ type Project = {
   source_note: string | null;
 };
 
-const field: React.CSSProperties = {
-  width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px",
-  borderRadius: 9, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "system-ui, sans-serif",
-  color: "#16233B", background: "#FFFFFF",
-};
-const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#5B6472", marginBottom: 4, display: "block" };
+const fieldClass =
+  "min-h-11 w-full rounded-lg border border-input bg-card px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const labelClass = "mb-1 block text-xs font-semibold text-muted-foreground";
+const gridClass = "grid grid-cols-1 gap-3 sm:grid-cols-2";
+const cardClass = "mb-5 rounded-xl border border-border bg-card p-4";
+const sectionLabelClass = "mb-2.5 text-xs font-bold tracking-wide text-muted-foreground uppercase";
 
 // Same badge shape and colours as the Document Vault (app/app/company/page.tsx).
-function ExpiryBadge({ status }: { status?: { label: string; bg: string; color: string } }) {
+function ExpiryBadge({ status }: { status?: { label: string; tone: Tone } }) {
   if (!status) return null;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", marginLeft: 6, padding: "1px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: status.bg, color: status.color, textTransform: "none", letterSpacing: 0 }}>
-      {status.label}
+    <span className="ml-1.5 inline-block align-middle">
+      <Pill tone={status.tone}>{status.label}</Pill>
     </span>
   );
 }
 
+function toneFromChip(status: { label: string; bg: string; color: string }): Tone {
+  if (status.color === "#15803D") return "success";
+  if (status.color === "#B45309") return "warning";
+  if (status.color === "#B91C1C") return "destructive";
+  return "muted";
+}
+
 function Field({ children }: { children: React.ReactNode }) {
-  return <div style={{ marginBottom: 12 }}>{children}</div>;
+  return <div className="mb-3">{children}</div>;
 }
 
 function PersonJumpLink({ href, label }: { href: string; label: string }) {
   return (
     <a
       href={href}
-      style={{
-        flexShrink: 0,
-        display: "inline-flex",
-        alignItems: "center",
-        minHeight: 32,
-        padding: "0 12px",
-        borderRadius: 100,
-        fontSize: 12,
-        fontWeight: 600,
-        textDecoration: "none",
-        background: "#FFFFFF",
-        color: "#16233B",
-        border: "1px solid #E3E6EA",
-        whiteSpace: "nowrap",
-      }}
+      className="inline-flex min-h-8 shrink-0 items-center rounded-full border border-border bg-card px-3 text-xs font-semibold whitespace-nowrap text-foreground no-underline"
     >
       {label}
     </a>
@@ -184,31 +202,31 @@ function ConditionalRegistration({
   body: ConditionalBody;
   person: Person | null;
   askedBy: string[];
-  status?: { label: string; bg: string; color: string };
+  status?: { label: string; tone: Tone };
 }) {
   const info = REGISTRATION_BODY_INFO[body];
   const key = body.toLowerCase() as "sacnasp" | "sagc";
   const listId = `${key}-categories`;
   return (
-    <div style={{ border: "1px solid #ECEEF1", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
-        {body} <span style={{ fontWeight: 400, color: "#5B6472" }}>- {info.name}</span>
+    <div className="mb-3 rounded-lg border border-border p-3">
+      <div className="text-sm font-semibold text-foreground">
+        {body} <span className="font-normal text-muted-foreground">- {info.name}</span>
       </div>
-      <div style={{ fontSize: 11, color: askedBy.length ? "#B45309" : "#8A93A0", margin: "2px 0 8px" }}>
+      <div className={`mb-2 text-[11px] ${askedBy.length ? "text-warning" : "text-muted-foreground"}`}>
         {askedBy.length
           ? `Asked for by ${askedBy.slice(0, 4).join(", ")}${askedBy.length > 4 ? ` and ${askedBy.length - 4} more` : ""}.`
           : `Only some tenders ask for this, ${info.example}.`}
       </div>
-      <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className={gridClass}>
         <Field>
-          <label style={label}>{body} category</label>
-          <input style={field} name={`${key}_category`} list={listId} defaultValue={person?.[`${key}_category`] ?? ""} />
+          <label className={labelClass}>{body} category</label>
+          <input className={fieldClass} name={`${key}_category`} list={listId} defaultValue={person?.[`${key}_category`] ?? ""} />
           <datalist id={listId}>{info.categories.map((c) => <option key={c} value={c} />)}</datalist>
         </Field>
-        <Field><label style={label}>{body} number</label><input style={field} name={`${key}_number`} defaultValue={person?.[`${key}_number`] ?? ""} /></Field>
+        <Field><label className={labelClass}>{body} number</label><input className={fieldClass} name={`${key}_number`} defaultValue={person?.[`${key}_number`] ?? ""} /></Field>
         <Field>
-          <label style={label}>{body} valid until / renewal due <ExpiryBadge status={status} /></label>
-          <input style={field} type="date" name={`${key}_expiry`} defaultValue={person?.[`${key}_expiry`] ?? ""} />
+          <label className={labelClass}>{body} valid until / renewal due <ExpiryBadge status={status} /></label>
+          <input className={fieldClass} type="date" name={`${key}_expiry`} defaultValue={person?.[`${key}_expiry`] ?? ""} />
         </Field>
       </div>
     </div>
@@ -239,6 +257,12 @@ export default async function PersonDetailPage({
   const supabase = await createClient();
 
   let person: Person | null = null;
+  // A real query failure (RLS/session hiccup, network blip) is a different
+  // situation from the record genuinely not existing/not being accessible -
+  // the old code read only `{ data }`, so any failed read silently became
+  // "not found", which is misleading. Captured separately so the not-found
+  // screen below can tell the two apart.
+  let personLoadError: string | null = null;
   let projects: Project[] = [];
   let cvUploads: CvUpload[] = [];
   let generatedCvs: GeneratedCv[] = [];
@@ -266,8 +290,12 @@ export default async function PersonDetailPage({
   const catalogBodiesShown = CATALOG_BODIES.filter((b) => askedFor[b].length > 0 || heldCatalog.some((h) => h.slug === catalogSlug(b)));
 
   if (!isNew) {
-    const { data } = await supabase.from("people").select("*").eq("id", id).maybeSingle();
+    const { data, error } = await supabase.from("people").select("*").eq("id", id).maybeSingle();
     person = data as Person | null;
+    if (error) {
+      console.error("people select failed for person detail", error);
+      personLoadError = error.message;
+    }
 
     // Tender role catalog + this person's tags (migration 0016).
     const [{ data: roleRows, error: roleErr }, { data: tagRows }] = await Promise.all([
@@ -338,32 +366,39 @@ export default async function PersonDetailPage({
 
   if (!isNew && !person) {
     return (
-      <div style={{ padding: 32, fontFamily: "system-ui, sans-serif" }}>
-        <p style={{ color: "#B91C1C" }}>Person not found, or you don&apos;t have access to this record.</p>
-        <Link href="/people">← Back to People</Link>
-      </div>
+      <AppShell>
+        <div className="mx-auto w-full max-w-[760px] flex-1 px-4 py-10">
+          <EmptyState
+            icon={personLoadError ? AlertTriangle : UserX}
+            title={personLoadError ? "Couldn't load this person" : "Person not found"}
+            description={
+              personLoadError
+                ? "Something went wrong reading this record - try refreshing. If it keeps happening, let us know."
+                : "This person may have been removed, or you don't have access to this record."
+            }
+            action={
+              <Link href="/people" className={buttonVariants({ variant: "outline" })}>
+                Back to People
+              </Link>
+            }
+          />
+        </div>
+      </AppShell>
     );
   }
 
   const yearsFromInitial = yearsSince(person?.initial_graduated ?? null);
-  const expiryByBody = Object.fromEntries(credentialExpiries(person ?? {}).map((c) => [c.body, c.status]));
+  const expiryByBody = Object.fromEntries(
+    credentialExpiries(person ?? {}).map((c) => [c.body, { label: c.status.label, tone: toneFromChip(c.status) }]),
+  );
 
   return (
     <AppShell>
-      <style>{`
-        @media (max-width: 600px) {
-          .person-grid-2 { grid-template-columns: 1fr !important; }
-          .cvx-row { grid-template-columns: 28px 1fr !important; }
-          .cvx-row > div:nth-child(n+3) { grid-column: 2; }
-          .cvx-proj { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+      <div className="mx-auto w-full max-w-[760px] flex-1 px-4 py-6">
+        <h1 className="mb-1 font-display text-xl font-medium text-foreground">
           {isNew ? "Add person" : person!.name}
         </h1>
-        <div style={{ fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
+        <div className="mb-4 text-sm text-muted-foreground">
           Real ID and registration numbers are stored for official SANRAL forms only - handle with care.
         </div>
 
@@ -371,20 +406,7 @@ export default async function PersonDetailPage({
             role tags -> CV documents -> project history, a long scroll on a
             phone. Same sticky-anchor idea as the Tender Workspace page. */}
         {!isNew && (
-          <div
-            style={{
-              position: "sticky",
-              top: 0,
-              zIndex: 5,
-              display: "flex",
-              gap: 6,
-              overflowX: "auto",
-              WebkitOverflowScrolling: "touch",
-              background: "#FFFFFF",
-              padding: "8px 2px",
-              marginBottom: 12,
-            }}
-          >
+          <div className="sticky top-0 z-5 mb-3 flex gap-1.5 overflow-x-auto bg-background py-2">
             {catalogBodiesShown.length > 0 && <PersonJumpLink href="#registrations-asked" label="Registrations" />}
             <PersonJumpLink href="#roles" label="Roles" />
             <PersonJumpLink href="#cv-documents" label="CV documents" />
@@ -393,13 +415,13 @@ export default async function PersonDetailPage({
         )}
 
         {errorParam && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {decodeURIComponent(errorParam)}
           </div>
         )}
 
         {cvApplied && (
-          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+          <div className="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">
             {(() => {
               const [f, p] = cvApplied.split("-").map((n) => Number(n) || 0);
               return `Saved from the CV: ${f} field${f === 1 ? "" : "s"}${p ? ` and ${p} project${p === 1 ? "" : "s"}` : ""}. The standard CV formats are queued.`;
@@ -418,49 +440,45 @@ export default async function PersonDetailPage({
           />
         ))}
 
-        <form action={savePerson} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "18px 16px", marginBottom: 20 }}>
+        <form action={savePerson} className={cardClass}>
           <input type="hidden" name="id" value={isNew ? "new" : person!.id} />
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>
-            Identity
-          </div>
-          <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field><label style={label}>Full name *</label><input style={field} name="name" defaultValue={person?.name ?? ""} required /></Field>
+          <div className={sectionLabelClass}>Identity</div>
+          <div className={gridClass}>
+            <Field><label className={labelClass}>Full name *</label><input className={fieldClass} name="name" defaultValue={person?.name ?? ""} required /></Field>
             <Field>
-              <label style={label}>ID number (PII - masked)</label>
-              <input style={field} type="text" autoComplete="off" name="id_number" defaultValue={person?.id_number ?? ""} />
+              <label className={labelClass}>ID number (PII - masked)</label>
+              <input className={fieldClass} type="text" autoComplete="off" name="id_number" defaultValue={person?.id_number ?? ""} />
             </Field>
-            <Field><label style={label}>Role / job title</label><input style={field} name="role" defaultValue={person?.role ?? ""} placeholder="e.g. Contracts Engineer" /></Field>
-            <Field><label style={label}>Description (position type)</label><input style={field} name="description" defaultValue={person?.description ?? ""} /></Field>
-            <Field><label style={label}>Signatory capacity</label><input style={field} name="signatory_capacity" defaultValue={person?.signatory_capacity ?? ""} /></Field>
+            <Field><label className={labelClass}>Role / job title</label><input className={fieldClass} name="role" defaultValue={person?.role ?? ""} placeholder="e.g. Contracts Engineer" /></Field>
+            <Field><label className={labelClass}>Description (position type)</label><input className={fieldClass} name="description" defaultValue={person?.description ?? ""} /></Field>
+            <Field><label className={labelClass}>Signatory capacity</label><input className={fieldClass} name="signatory_capacity" defaultValue={person?.signatory_capacity ?? ""} /></Field>
             <Field>
-              <label style={label}>Employment (SANRAL Form B1)</label>
-              <select style={field} name="employment_status" defaultValue={person?.employment_status ?? ""}>
+              <label className={labelClass}>Employment (SANRAL Form B1)</label>
+              <select className={fieldClass} name="employment_status" defaultValue={person?.employment_status ?? ""}>
                 <option value="">Not recorded</option>
                 <option value="full_time_employee">Full-time employee of the company</option>
                 <option value="not_full_time_employee">Not a full-time employee (e.g. subconsultant, JV partner)</option>
               </select>
             </Field>
-            <Field><label style={label}>Phone</label><input style={field} name="phone" defaultValue={person?.phone ?? ""} /></Field>
-            <Field><label style={label}>Email</label><input style={field} type="email" name="email" defaultValue={person?.email ?? ""} /></Field>
+            <Field><label className={labelClass}>Phone</label><input className={fieldClass} name="phone" defaultValue={person?.phone ?? ""} /></Field>
+            <Field><label className={labelClass}>Email</label><input className={fieldClass} type="email" name="email" defaultValue={person?.email ?? ""} /></Field>
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px" }}>
-            Registrations
-          </div>
-          <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field><label style={label}>ECSA level</label><input style={field} name="ecsa_level" defaultValue={person?.ecsa_level ?? ""} placeholder="e.g. Professional Engineer" /></Field>
-            <Field><label style={label}>ECSA number</label><input style={field} name="ecsa_number" defaultValue={person?.ecsa_number ?? ""} /></Field>
-            <Field><label style={label}>ECSA registration date</label><input style={field} type="date" name="ecsa_date" defaultValue={person?.ecsa_date ?? ""} /></Field>
+          <div className={`${sectionLabelClass} mt-4`}>Registrations</div>
+          <div className={gridClass}>
+            <Field><label className={labelClass}>ECSA level</label><input className={fieldClass} name="ecsa_level" defaultValue={person?.ecsa_level ?? ""} placeholder="e.g. Professional Engineer" /></Field>
+            <Field><label className={labelClass}>ECSA number</label><input className={fieldClass} name="ecsa_number" defaultValue={person?.ecsa_number ?? ""} /></Field>
+            <Field><label className={labelClass}>ECSA registration date</label><input className={fieldClass} type="date" name="ecsa_date" defaultValue={person?.ecsa_date ?? ""} /></Field>
             <Field>
-              <label style={label}>ECSA valid until / renewal due <ExpiryBadge status={expiryByBody.ECSA} /></label>
-              <input style={field} type="date" name="ecsa_expiry" defaultValue={person?.ecsa_expiry ?? ""} />
+              <label className={labelClass}>ECSA valid until / renewal due <ExpiryBadge status={expiryByBody.ECSA} /></label>
+              <input className={fieldClass} type="date" name="ecsa_expiry" defaultValue={person?.ecsa_expiry ?? ""} />
             </Field>
-            <Field><label style={label}>SACPCMP number</label><input style={field} name="sacpcmp_number" defaultValue={person?.sacpcmp_number ?? ""} /></Field>
-            <Field><label style={label}>SACPCMP registration date</label><input style={field} type="date" name="sacpcmp_date" defaultValue={person?.sacpcmp_date ?? ""} /></Field>
+            <Field><label className={labelClass}>SACPCMP number</label><input className={fieldClass} name="sacpcmp_number" defaultValue={person?.sacpcmp_number ?? ""} /></Field>
+            <Field><label className={labelClass}>SACPCMP registration date</label><input className={fieldClass} type="date" name="sacpcmp_date" defaultValue={person?.sacpcmp_date ?? ""} /></Field>
             <Field>
-              <label style={label}>SACPCMP valid until / renewal due <ExpiryBadge status={expiryByBody.SACPCMP} /></label>
-              <input style={field} type="date" name="sacpcmp_expiry" defaultValue={person?.sacpcmp_expiry ?? ""} />
+              <label className={labelClass}>SACPCMP valid until / renewal due <ExpiryBadge status={expiryByBody.SACPCMP} /></label>
+              <input className={fieldClass} type="date" name="sacpcmp_expiry" defaultValue={person?.sacpcmp_expiry ?? ""} />
             </Field>
           </div>
           {(() => {
@@ -474,8 +492,8 @@ export default async function PersonDetailPage({
                 {hidden.length > 0 && (
                   // Not asked for by any tender and not held: kept out of the
                   // way, one click to add (the fields still submit, empty).
-                  <details style={{ marginBottom: 10 }}>
-                    <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#D97706", padding: "6px 0", minHeight: 32 }}>
+                  <details className="mb-2.5">
+                    <summary className="min-h-8 cursor-pointer py-1.5 text-xs font-semibold text-accent">
                       + Add another registration ({hidden.join(", ")}) - only some tenders ask for these
                     </summary>
                     {hidden.map((b) => (
@@ -486,55 +504,46 @@ export default async function PersonDetailPage({
               </>
             );
           })()}
-          <div style={{ fontSize: 12, color: "#8A93A0", marginBottom: 10 }}>
+          <div className="mb-2.5 text-xs text-muted-foreground">
             Enter the date from the registration certificate or renewal notice. It drives the expiry
             badge here and the renewal reminder (60 days ahead, and again if it lapses).
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px" }}>
-            Qualifications
-          </div>
-          <div style={{ fontSize: 12, color: "#8A93A0", marginBottom: 10 }}>
+          <div className={`${sectionLabelClass} mt-4`}>Qualifications</div>
+          <div className="mb-2.5 text-xs text-muted-foreground">
             Years of experience is never stored here - the pack-matching engine computes it
             from the initial-qualification date relative to each tender&apos;s own closing date.
             {yearsFromInitial !== null && ` (As of today, that would be about ${yearsFromInitial} years.)`}
           </div>
-          <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field><label style={label}>Highest qualification level</label><input style={field} name="highest_level" defaultValue={person?.highest_level ?? ""} placeholder="e.g. Masters Degree" /></Field>
-            <Field><label style={label}>Highest qualification</label><input style={field} name="highest_description" defaultValue={person?.highest_description ?? ""} placeholder="e.g. MEng (Civil Engineering)" /></Field>
-            <Field><label style={label}>Institution (highest)</label><input style={field} name="highest_institution" defaultValue={person?.highest_institution ?? ""} /></Field>
-            <Field><label style={label}>Date graduated (highest)</label><input style={field} type="date" name="highest_graduated" defaultValue={person?.highest_graduated ?? ""} /></Field>
-            <Field><label style={label}>Initial qualification</label><input style={field} name="initial_description" defaultValue={person?.initial_description ?? ""} placeholder="e.g. BEng (Civil Engineering)" /></Field>
-            <Field><label style={label}>Institution (initial)</label><input style={field} name="initial_institution" defaultValue={person?.initial_institution ?? ""} /></Field>
-            <Field><label style={label}>Date graduated (initial)</label><input style={field} type="date" name="initial_graduated" defaultValue={person?.initial_graduated ?? ""} /></Field>
+          <div className={gridClass}>
+            <Field><label className={labelClass}>Highest qualification level</label><input className={fieldClass} name="highest_level" defaultValue={person?.highest_level ?? ""} placeholder="e.g. Masters Degree" /></Field>
+            <Field><label className={labelClass}>Highest qualification</label><input className={fieldClass} name="highest_description" defaultValue={person?.highest_description ?? ""} placeholder="e.g. MEng (Civil Engineering)" /></Field>
+            <Field><label className={labelClass}>Institution (highest)</label><input className={fieldClass} name="highest_institution" defaultValue={person?.highest_institution ?? ""} /></Field>
+            <Field><label className={labelClass}>Date graduated (highest)</label><input className={fieldClass} type="date" name="highest_graduated" defaultValue={person?.highest_graduated ?? ""} /></Field>
+            <Field><label className={labelClass}>Initial qualification</label><input className={fieldClass} name="initial_description" defaultValue={person?.initial_description ?? ""} placeholder="e.g. BEng (Civil Engineering)" /></Field>
+            <Field><label className={labelClass}>Institution (initial)</label><input className={fieldClass} name="initial_institution" defaultValue={person?.initial_institution ?? ""} /></Field>
+            <Field><label className={labelClass}>Date graduated (initial)</label><input className={fieldClass} type="date" name="initial_graduated" defaultValue={person?.initial_graduated ?? ""} /></Field>
           </div>
 
-          <button
-            type="submit"
-            style={{
-              marginTop: 8, minHeight: 44, padding: "0 20px", borderRadius: 10,
-              background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 14,
-              border: "none", cursor: "pointer",
-            }}
-          >
+          <Button type="submit" variant="accent" size="lg" className="mt-2 min-h-11 px-5">
             {isNew ? "Add person" : "Save changes"}
-          </button>
+          </Button>
         </form>
 
         {!isNew && person?.signatory_capacity && (
-          <div id="signatory-scope" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Signatory scope (optional)</div>
-            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+          <div id="signatory-scope" className={cardClass}>
+            <div className="mb-0.5 font-display text-base font-medium text-foreground">Signatory scope (optional)</div>
+            <div className="mb-3 text-xs text-muted-foreground">
               A region and/or industry/discipline this person usually signs for - e.g. &quot;Western Cape&quot;, or a
               discipline such as roads/civil. This only SUGGESTS {person!.name} as the default pick on a matching
               tender&apos;s &quot;Who signs this bid&quot; selector - the company can still choose anyone with a
               signatory capacity for any tender. Leave it blank if this person signs across the board.
             </div>
             {signatoryScopes.length > 0 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+              <div className="mb-3 flex flex-col gap-1.5">
                 {signatoryScopes.map((s) => (
-                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#16233B", border: "1px solid #ECEEF1", borderRadius: 8, padding: "6px 10px" }}>
-                    <span style={{ flex: 1 }}>
+                  <div key={s.id} className="flex items-center gap-2 rounded-lg border border-border px-2.5 py-1.5 text-sm text-foreground">
+                    <span className="flex-1">
                       {[s.region, s.industry_tag ? taxonomyLabel(taxonomy, s.industry_tag) : null, s.discipline_tag ? taxonomyLabel(taxonomy, s.discipline_tag) : null]
                         .filter(Boolean)
                         .join(" · ")}
@@ -544,7 +553,7 @@ export default async function PersonDetailPage({
                       <input type="hidden" name="scope_id" value={s.id} />
                       <ConfirmSubmitButton
                         confirmMessage="Remove this signatory scope? This can't be undone."
-                        style={{ background: "none", border: "none", color: "#B91C1C", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                        className="min-h-8 cursor-pointer bg-transparent text-xs font-semibold text-destructive"
                       >
                         Remove
                       </ConfirmSubmitButton>
@@ -553,15 +562,15 @@ export default async function PersonDetailPage({
                 ))}
               </div>
             )}
-            <form action={addSignatoryScope} style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <form action={addSignatoryScope} className="flex flex-wrap items-end gap-2.5">
               <input type="hidden" name="person_id" value={person!.id} />
               <Field>
-                <label style={label}>Region</label>
-                <input style={field} name="region" placeholder="e.g. Western Cape" />
+                <label className={labelClass}>Region</label>
+                <input className={fieldClass} name="region" placeholder="e.g. Western Cape" />
               </Field>
               <Field>
-                <label style={label}>Industry</label>
-                <select style={field} name="industry_tag" defaultValue="">
+                <label className={labelClass}>Industry</label>
+                <select className={fieldClass} name="industry_tag" defaultValue="">
                   <option value="">Not scoped by industry</option>
                   {disciplineGroups.map(({ group }) => (
                     <option key={group.slug} value={group.slug}>{group.label}</option>
@@ -569,8 +578,8 @@ export default async function PersonDetailPage({
                 </select>
               </Field>
               <Field>
-                <label style={label}>Discipline</label>
-                <select style={field} name="discipline_tag" defaultValue="">
+                <label className={labelClass}>Discipline</label>
+                <select className={fieldClass} name="discipline_tag" defaultValue="">
                   <option value="">Not scoped by discipline</option>
                   {disciplineGroups.map(({ group, children }) => (
                     <optgroup key={group.slug} label={group.label}>
@@ -581,12 +590,9 @@ export default async function PersonDetailPage({
                   ))}
                 </select>
               </Field>
-              <button
-                type="submit"
-                style={{ minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer" }}
-              >
+              <Button type="submit" variant="default" size="lg" className="min-h-11 px-4">
                 Add scope
-              </button>
+              </Button>
             </form>
           </div>
         )}
@@ -596,13 +602,11 @@ export default async function PersonDetailPage({
           (() => {
             const shown = catalogBodiesShown;
             return (
-              <div id="registrations-asked" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>
-                  Other registrations a tender asks for
-                </div>
-                <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+              <div id="registrations-asked" className={cardClass}>
+                <div className={sectionLabelClass}>Other registrations a tender asks for</div>
+                <div className="mb-2.5 text-xs text-muted-foreground">
                   Shown only because a tender on the system asks for the body, or {person!.name} already holds it. Kept in the
-                  company&apos;s registrations list (<Link href="/company/registrations" style={{ color: "#D97706" }}>Company &gt; Registrations</Link>),
+                  company&apos;s registrations list (<Link href="/company/registrations" className="text-accent">Company &gt; Registrations</Link>),
                   which also sends the renewal reminder.
                 </div>
                 {shown.map((b) => {
@@ -610,43 +614,44 @@ export default async function PersonDetailPage({
                   const mine = heldCatalog.filter((h) => h.slug === catalogSlug(b));
                   const asked = askedFor[b];
                   return (
-                    <div key={b} style={{ border: "1px solid #ECEEF1", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
-                        {b} <span style={{ fontWeight: 400, color: "#5B6472" }}>- {info.name}</span>
+                    <div key={b} className="mb-2.5 rounded-lg border border-border p-3">
+                      <div className="text-sm font-semibold text-foreground">
+                        {b} <span className="font-normal text-muted-foreground">- {info.name}</span>
                       </div>
-                      <div style={{ fontSize: 11, color: asked.length ? "#B45309" : "#8A93A0", margin: "2px 0 8px" }}>
+                      <div className={`mb-2 text-[11px] ${asked.length ? "text-warning" : "text-muted-foreground"}`}>
                         {asked.length
                           ? `Asked for by ${asked.slice(0, 4).join(", ")}${asked.length > 4 ? ` and ${asked.length - 4} more` : ""}.`
                           : `Held - no open tender asks for it right now.`}
                       </div>
                       {mine.map((h) => {
-                        const st = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Renewal date not on file", bg: "#ECEEF1", color: "#5B6472" };
+                        const st = h.expiry_date ? toneFromChip(expiryStatus(h.expiry_date)) : "muted";
+                        const stLabel = h.expiry_date ? expiryStatus(h.expiry_date).label : "Renewal date not on file";
                         return (
-                          <div key={h.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: "#16233B", marginBottom: 6 }}>
+                          <div key={h.id} className="mb-1.5 flex flex-wrap items-center gap-2 text-xs text-foreground">
                             <span>{h.category || "Registration"}{h.registration_number ? ` ${h.registration_number}` : ""}{h.expiry_date ? `, valid to ${h.expiry_date}` : ""}</span>
-                            <ExpiryBadge status={st} />
+                            <Pill tone={st}>{stLabel}</Pill>
                           </div>
                         );
                       })}
                       <details open={mine.length === 0}>
-                        <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#D97706", minHeight: 32, padding: "4px 0" }}>
+                        <summary className="min-h-8 cursor-pointer py-1 text-xs font-semibold text-accent">
                           {mine.length ? `+ Add another ${b} registration` : `+ Add ${person!.name}'s ${b} registration`}
                         </summary>
                         <form action={addPersonCatalogRegistration}>
                           <input type="hidden" name="person_id" value={person!.id} />
                           <input type="hidden" name="slug" value={catalogSlug(b)} />
-                          <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                          <div className={gridClass}>
                             <Field>
-                              <label style={label}>{b === "PSIRA" ? "Grade" : "Category"}</label>
-                              <input style={field} name="category" list={`${b}-cats`} />
+                              <label className={labelClass}>{b === "PSIRA" ? "Grade" : "Category"}</label>
+                              <input className={fieldClass} name="category" list={`${b}-cats`} />
                               <datalist id={`${b}-cats`}>{info.categories.map((c) => <option key={c} value={c} />)}</datalist>
                             </Field>
-                            <Field><label style={label}>{b} number</label><input style={field} name="registration_number" /></Field>
-                            <Field><label style={label}>Valid until / renewal due</label><input style={field} type="date" name="expiry_date" /></Field>
+                            <Field><label className={labelClass}>{b} number</label><input className={fieldClass} name="registration_number" /></Field>
+                            <Field><label className={labelClass}>Valid until / renewal due</label><input className={fieldClass} type="date" name="expiry_date" /></Field>
                           </div>
-                          <button type="submit" style={{ minHeight: 40, padding: "0 16px", borderRadius: 9, background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer" }}>
+                          <Button type="submit" variant="default" size="default" className="min-h-10 px-4 text-xs">
                             Add {b} registration
-                          </button>
+                          </Button>
                         </form>
                       </details>
                     </div>
@@ -657,14 +662,11 @@ export default async function PersonDetailPage({
           })()}
 
         {!isNew && (
-          <form action={deletePerson} style={{ marginBottom: 28 }}>
+          <form action={deletePerson} className="mb-7">
             <input type="hidden" name="id" value={person!.id} />
             <ConfirmSubmitButton
               confirmMessage={`Remove ${person!.name}? Their CVs and project history will also be removed. This can't be undone.`}
-              style={{
-                minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#FEE2E2",
-                color: "#B91C1C", fontWeight: 600, fontSize: 13, border: "1px solid #FCA5A5", cursor: "pointer",
-              }}
+              className="min-h-11 cursor-pointer rounded-lg border border-destructive/30 bg-destructive/10 px-4 text-xs font-semibold text-destructive"
             >
               Remove person
             </ConfirmSubmitButton>
@@ -673,28 +675,28 @@ export default async function PersonDetailPage({
 
         {!isNew && (
           <>
-            <h2 id="roles" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+            <h2 id="roles" className="mb-1 font-display text-base font-medium text-foreground">
               Tender roles this CV qualifies for
             </h2>
-            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+            <div className="mb-3 text-xs text-muted-foreground">
               Your company decides which tender roles {person!.name}&apos;s CV fits - Tender Ready uses this tag on each
               tender&apos;s compliance check instead of guessing from years of experience or registration. The roles are the
               ones real tenders ask for: SANRAL&apos;s Book 1 key-person codes (a Design Specialist is tendered per
               specialism) and the key personnel other buyers name. Hover a role to see which tender it came from.
             </div>
             {rolesSaved === "1" && (
-              <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "9px 14px", marginBottom: 12, fontSize: 13, color: "#15803D" }}>
+              <div className="mb-3 rounded-lg border border-success/20 bg-success/10 px-3.5 py-2 text-sm text-success">
                 Role tags saved.
               </div>
             )}
             {rolesError ? (
-              <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 14px", marginBottom: 20, fontSize: 12, color: "#92400E" }}>
+              <div className="mb-5 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2 text-xs text-warning">
                 Couldn&apos;t load role options — try again shortly.
               </div>
             ) : (
-              <form action={saveRoleEligibility} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginBottom: 24 }}>
+              <form action={saveRoleEligibility} className={cardClass}>
                 <input type="hidden" name="person_id" value={person!.id} />
-                <div style={{ fontSize: 12, color: "#16233B", marginBottom: 8 }}>
+                <div className="mb-2 text-xs text-foreground">
                   {taggedRoles.size === 0
                     ? "Not tagged for any role yet."
                     : `Tagged for: ${roleCatalog.filter((r) => taggedRoles.has(r.code)).map((r) => r.title).join(", ")}.`}
@@ -704,18 +706,18 @@ export default async function PersonDetailPage({
                   if (familyRoles.length === 0) return null;
                   const count = familyRoles.filter((r) => taggedRoles.has(r.code)).length;
                   return (
-                    <details key={family} open={count > 0 || family === "sanral_consultant"} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0" }}>
-                      <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#16233B" }}>
+                    <details key={family} open={count > 0 || family === "sanral_consultant"} className="border-t border-border py-2 first:border-t-0">
+                      <summary className="cursor-pointer text-sm font-semibold text-foreground">
                         {ROLE_FAMILY_LABEL[family] ?? family}
-                        {count > 0 && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#15803D", background: "#DCFCE7", borderRadius: 100, padding: "2px 8px" }}>{count} tagged</span>}
+                        {count > 0 && <span className="ml-2 rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-bold text-success">{count} tagged</span>}
                       </summary>
-                      <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 12px", marginTop: 8 }}>
+                      <div className="mt-2 grid grid-cols-1 gap-x-3 gap-y-1.5 sm:grid-cols-2">
                         {familyRoles.map((r) => (
-                          <label key={r.code} title={r.source} style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 13, color: "#16233B", minHeight: 32 }}>
-                            <input type="checkbox" name="role_code" value={r.code} defaultChecked={taggedRoles.has(r.code)} style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }} />
+                          <label key={r.code} title={r.source} className="flex min-h-8 items-start gap-2 text-sm text-foreground">
+                            <input type="checkbox" name="role_code" value={r.code} defaultChecked={taggedRoles.has(r.code)} className="mt-0.5 size-4 shrink-0" />
                             <span>
                               {r.title}
-                              {r.registration_body && <span style={{ color: "#8A93A0", fontSize: 11 }}> · {r.registration_body}</span>}
+                              {r.registration_body && <span className="text-[11px] text-muted-foreground"> · {r.registration_body}</span>}
                             </span>
                           </label>
                         ))}
@@ -723,19 +725,16 @@ export default async function PersonDetailPage({
                     </details>
                   );
                 })}
-                <button
-                  type="submit"
-                  style={{ marginTop: 10, minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}
-                >
+                <Button type="submit" variant="default" size="lg" className="mt-2.5 min-h-11 px-5">
                   Save role tags
-                </button>
+                </Button>
               </form>
             )}
 
-            <h2 id="cv-documents" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+            <h2 id="cv-documents" className="mb-1 font-display text-base font-medium text-foreground">
               CV documents
             </h2>
-            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+            <div className="mb-3 text-xs text-muted-foreground">
               Upload {person!.name}&apos;s CV once. Choose <strong>use as-is</strong> to attach
               the exact file to submissions with no AI involvement, or{" "}
               <strong>AI-extract</strong> to have the qualifications, registrations and projects read off the CV for
@@ -743,62 +742,53 @@ export default async function PersonDetailPage({
               text; a scanned/photographed CV can only be used as-is.
             </div>
 
-            <form
-              action={uploadCv}
-              encType="multipart/form-data"
-              style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginBottom: 16 }}
-            >
+            <form action={uploadCv} encType="multipart/form-data" className={cardClass}>
               <input type="hidden" name="person_id" value={person!.id} />
               <Field>
-                <label style={label}>CV file</label>
-                <input style={field} type="file" name="file" required accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
+                <label className={labelClass}>CV file</label>
+                <input className={fieldClass} type="file" name="file" required accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
               </Field>
-              <div style={{ display: "flex", gap: 16, marginBottom: 12, flexWrap: "wrap" }}>
-                <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 13, color: "#16233B", maxWidth: 320 }}>
-                  <input type="radio" name="mode" value="ai_extract" defaultChecked style={{ marginTop: 3 }} />
+              <div className="mb-3 flex flex-wrap gap-4">
+                <label className="flex max-w-[320px] items-start gap-1.5 text-sm text-foreground">
+                  <input type="radio" name="mode" value="ai_extract" defaultChecked className="mt-0.5" />
                   <span>
                     <strong>AI-extract</strong> the fields for you to check, then build the
                     standard CV formats from them.
                   </span>
                 </label>
-                <label style={{ display: "flex", alignItems: "flex-start", gap: 6, fontSize: 13, color: "#16233B", maxWidth: 320 }}>
-                  <input type="radio" name="mode" value="as_is" style={{ marginTop: 3 }} />
+                <label className="flex max-w-[320px] items-start gap-1.5 text-sm text-foreground">
+                  <input type="radio" name="mode" value="as_is" className="mt-0.5" />
                   <span>
                     <strong>Use as-is</strong> - attach this exact file to submissions, no AI
                     involvement at all.
                   </span>
                 </label>
               </div>
-              <button
-                type="submit"
-                style={{ minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}
-              >
+              <Button type="submit" variant="accent" size="lg" className="min-h-11 px-5">
                 Upload CV
-              </button>
+              </Button>
             </form>
 
             {cvUploads.length > 0 && (
-              <div style={{ marginBottom: 16 }}>
+              <div className="mb-4">
                 {cvUploads.map((u) => {
-                  const st = CV_UPLOAD_STATUS_LABEL[u.status] ?? { label: u.status, bg: "#ECEEF1", color: "#5B6472" };
+                  const st = CV_UPLOAD_STATUS[u.status] ?? { label: u.status, tone: "muted" as Tone };
                   const url = signedUrls[u.storage_path];
                   return (
-                    <div key={u.id} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "10px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div key={u.id} className="mb-2 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border bg-card px-4 py-2.5">
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{u.original_filename}</div>
-                        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 2 }}>
+                        <div className="text-sm font-semibold text-foreground">{u.original_filename}</div>
+                        <div className="mt-0.5 text-[11px] text-muted-foreground">
                           {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {new Date(u.created_at).toLocaleDateString()}
                         </div>
                         {u.status === "extraction_failed" && u.extraction_error && (
-                          <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 4, maxWidth: 480 }}>{u.extraction_error}</div>
+                          <div className="mt-1 max-w-[480px] text-xs text-destructive">{u.extraction_error}</div>
                         )}
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
-                          {st.label}
-                        </span>
+                      <div className="flex items-center gap-2.5">
+                        <Pill tone={st.tone}>{st.label}</Pill>
                         {url && (
-                          <a href={url} style={{ fontSize: 12, fontWeight: 600, color: "#D97706" }}>
+                          <a href={url} className="text-xs font-semibold text-accent">
                             Download
                           </a>
                         )}
@@ -810,33 +800,29 @@ export default async function PersonDetailPage({
             )}
 
             {generatedCvs.length > 0 && (
-              <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
-                  Standard generated CVs
-                </div>
-                <div style={{ fontSize: 11, color: "#8A93A0", marginBottom: 8 }}>
+              <div className="mb-5">
+                <div className={sectionLabelClass}>Standard generated CVs</div>
+                <div className="mb-2 text-[11px] text-muted-foreground">
                   Generated automatically, usually within a few minutes — refresh to check.
                 </div>
                 {generatedCvs.map((g) => {
-                  const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#ECEEF1", color: "#5B6472" };
+                  const st = GENERATED_CV_STATUS[g.status] ?? { label: g.status, tone: "muted" as Tone };
                   const docxUrl = g.storage_path_docx ? signedUrls[g.storage_path_docx] : null;
                   const pdfUrl = g.storage_path_pdf ? signedUrls[g.storage_path_pdf] : null;
                   return (
-                    <div key={g.id} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "10px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div key={g.id} className="mb-2 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border bg-card px-4 py-2.5">
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
+                        <div className="text-sm font-semibold text-foreground">
                           {CV_FORMAT_LABEL[g.format] ?? g.format} · {g.detail}
                         </div>
                         {g.error_message && (
-                          <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 2 }}>{g.error_message}</div>
+                          <div className="mt-0.5 text-xs text-destructive">{g.error_message}</div>
                         )}
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
-                          {st.label}
-                        </span>
-                        {docxUrl && <a href={docxUrl} style={{ fontSize: 12, fontWeight: 600, color: "#D97706" }}>Word</a>}
-                        {pdfUrl && <a href={pdfUrl} style={{ fontSize: 12, fontWeight: 600, color: "#D97706" }}>PDF</a>}
+                      <div className="flex items-center gap-2.5">
+                        <Pill tone={st.tone}>{st.label}</Pill>
+                        {docxUrl && <a href={docxUrl} className="text-xs font-semibold text-accent">Word</a>}
+                        {pdfUrl && <a href={pdfUrl} className="text-xs font-semibold text-accent">PDF</a>}
                       </div>
                     </div>
                   );
@@ -844,30 +830,30 @@ export default async function PersonDetailPage({
               </div>
             )}
 
-            <h2 id="projects" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
+            <h2 id="projects" className="mb-1 font-display text-base font-medium text-foreground">
               Project / reference history
             </h2>
-            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+            <div className="mb-3 text-xs text-muted-foreground">
               Used by the pack-matching engine to score this person against a tender&apos;s key positions
               (see engine/pack_generator/suggest_pack.py).
             </div>
 
             {projects.length === 0 && (
-              <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
+              <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3.5 text-sm text-muted-foreground">
                 No project history on file yet for {person!.name}.
               </div>
             )}
 
             {projects.map((proj) => (
-              <div key={proj.id} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "12px 16px", marginBottom: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div key={proj.id} className="mb-2.5 rounded-xl border border-border bg-card px-4 py-3">
+                <div className="flex flex-wrap justify-between gap-2.5">
                   <div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B", whiteSpace: "pre-line" }}>{proj.client_and_number}</div>
-                    <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
+                    <div className="text-sm font-bold whitespace-pre-line text-foreground">{proj.client_and_number}</div>
+                    <div className="mt-0.5 text-xs text-muted-foreground">
                       {proj.position_held || proj.position_code || "Position not set"}
                       {proj.value_rm != null && ` · R${proj.value_rm}m`}
                     </div>
-                    <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 2 }}>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">
                       {proj.start_date ?? "?"} – {proj.end_date ?? "ongoing"}
                       {proj.contact_match_confidence && ` · referee match: ${proj.contact_match_confidence}`}
                     </div>
@@ -877,7 +863,7 @@ export default async function PersonDetailPage({
                     <input type="hidden" name="person_id" value={person!.id} />
                     <ConfirmSubmitButton
                       confirmMessage="Remove this project from this person's history? This can't be undone."
-                      style={{ minHeight: 36, padding: "0 10px", borderRadius: 8, background: "#FEE2E2", color: "#B91C1C", fontSize: 11, fontWeight: 600, border: "1px solid #FCA5A5", cursor: "pointer" }}
+                      className="min-h-9 cursor-pointer rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 text-[11px] font-semibold text-destructive"
                     >
                       Remove
                     </ConfirmSubmitButton>
@@ -886,44 +872,44 @@ export default async function PersonDetailPage({
               </div>
             ))}
 
-            <details style={{ marginTop: 8 }}>
-              <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#D97706", padding: "8px 0" }}>
+            <details className="mt-2">
+              <summary className="cursor-pointer py-2 text-sm font-semibold text-accent">
                 + Add a project to this person&apos;s history
               </summary>
-              <form action={saveProject} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginTop: 8 }}>
+              <form action={saveProject} className={`${cardClass} mt-2`}>
                 <input type="hidden" name="person_id" value={person!.id} />
-                <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <Field><label style={label}>Client and contract number *</label><input style={field} name="client_and_number" placeholder={"e.g. ACSA (OR Tambo)\\nORT5737/2018/RFP"} required /></Field>
+                <div className={gridClass}>
+                  <Field><label className={labelClass}>Client and contract number *</label><input className={fieldClass} name="client_and_number" placeholder={"e.g. ACSA (OR Tambo)\\nORT5737/2018/RFP"} required /></Field>
                   {/* Suggestions are SANRAL's complete published code lists (Book 1 /
                       the Technical Submission workbook), not values seen in one
                       company's data. Free text: other buyers code differently. */}
                   <Field>
-                    <label style={label}>Client type</label>
-                    <input style={field} name="client_type" list="sanral-client-types" placeholder="e.g. Relevant SOE" />
+                    <label className={labelClass}>Client type</label>
+                    <input className={fieldClass} name="client_type" list="sanral-client-types" placeholder="e.g. Relevant SOE" />
                     <datalist id="sanral-client-types">{CLIENT_TYPES.map((c) => <option key={c} value={c} />)}</datalist>
                   </Field>
                   <Field>
-                    <label style={label}>Project type</label>
-                    <input style={field} name="project_type" list="sanral-project-types" placeholder="e.g. DS" />
+                    <label className={labelClass}>Project type</label>
+                    <input className={fieldClass} name="project_type" list="sanral-project-types" placeholder="e.g. DS" />
                     <datalist id="sanral-project-types">
                       {SANRAL_PROJECT_TYPES.map((p) => <option key={p.code} value={p.code}>{`${p.label} (${p.appliesTo.join("; ")})`}</option>)}
                     </datalist>
                   </Field>
                   <Field>
-                    <label style={label}>Position code</label>
-                    <input style={field} name="position_code" list="sanral-position-codes" placeholder="e.g. CE" />
+                    <label className={labelClass}>Position code</label>
+                    <input className={fieldClass} name="position_code" list="sanral-position-codes" placeholder="e.g. CE" />
                     <datalist id="sanral-position-codes">{SANRAL_POSITION_CODES.map((p) => <option key={p.code} value={p.code}>{p.label}</option>)}</datalist>
                   </Field>
-                  <Field><label style={label}>Position held</label><input style={field} name="position_held" placeholder="e.g. Contract Engineer" /></Field>
-                  <Field><label style={label}>Value (R million)</label><input style={field} type="number" step="0.01" name="value_rm" /></Field>
-                  <Field><label style={label}>Referee name</label><input style={field} name="contact_name" /></Field>
-                  <Field><label style={label}>Referee phone</label><input style={field} name="contact_phone" /></Field>
-                  <Field><label style={label}>Referee email</label><input style={field} type="email" name="contact_email" /></Field>
-                  <Field><label style={label}>Start date</label><input style={field} type="date" name="start_date" /></Field>
-                  <Field><label style={label}>End date</label><input style={field} type="date" name="end_date" /></Field>
+                  <Field><label className={labelClass}>Position held</label><input className={fieldClass} name="position_held" placeholder="e.g. Contract Engineer" /></Field>
+                  <Field><label className={labelClass}>Value (R million)</label><input className={fieldClass} type="number" step="0.01" name="value_rm" /></Field>
+                  <Field><label className={labelClass}>Referee name</label><input className={fieldClass} name="contact_name" /></Field>
+                  <Field><label className={labelClass}>Referee phone</label><input className={fieldClass} name="contact_phone" /></Field>
+                  <Field><label className={labelClass}>Referee email</label><input className={fieldClass} type="email" name="contact_email" /></Field>
+                  <Field><label className={labelClass}>Start date</label><input className={fieldClass} type="date" name="start_date" /></Field>
+                  <Field><label className={labelClass}>End date</label><input className={fieldClass} type="date" name="end_date" /></Field>
                   <Field>
-                    <label style={label}>Referee match confidence</label>
-                    <select style={field} name="contact_match_confidence" defaultValue="unconfirmed">
+                    <label className={labelClass}>Referee match confidence</label>
+                    <select className={fieldClass} name="contact_match_confidence" defaultValue="unconfirmed">
                       <option value="confirmed">Confirmed</option>
                       <option value="partially_confirmed">Partially confirmed</option>
                       <option value="unconfirmed">Unconfirmed</option>
@@ -931,13 +917,10 @@ export default async function PersonDetailPage({
                     </select>
                   </Field>
                 </div>
-                <Field><label style={label}>Source note</label><input style={field} name="source_note" placeholder="Where this was confirmed from" /></Field>
-                <button
-                  type="submit"
-                  style={{ minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}
-                >
+                <Field><label className={labelClass}>Source note</label><input className={fieldClass} name="source_note" placeholder="Where this was confirmed from" /></Field>
+                <Button type="submit" variant="default" size="lg" className="min-h-11 px-5">
                   Add project
-                </button>
+                </Button>
               </form>
             </details>
           </>

@@ -12,11 +12,7 @@ import {
   uploadPrefix,
 } from "@/lib/onboardingScan";
 import { registerOnboardingBatch } from "./actions";
-
-const NAVY = "#16233B";
-const AMBER = "#D97706";
-const BORDER = "#E3E6EA";
-const MUTED = "#5B6472";
+import { Button } from "@/components/ui/button";
 
 function checkFiles(files: File[]): string | null {
   if (files.length === 0) return "Choose at least one document, or drop a whole folder's worth at once.";
@@ -105,17 +101,10 @@ export function UploadForm({ companyId }: { companyId: string }) {
         onClick={() => inputRef.current?.click()}
         role="button"
         tabIndex={0}
-        style={{
-          border: `2px dashed ${dragOver ? AMBER : BORDER}`,
-          borderRadius: 12,
-          padding: "28px 16px",
-          textAlign: "center",
-          cursor: "pointer",
-          background: dragOver ? "#FFFBEB" : "#FAFAF7",
-        }}
+        className={`cursor-pointer rounded-xl border-2 border-dashed px-4 py-7 text-center ${dragOver ? "border-accent bg-accent/5" : "border-border bg-muted/30"}`}
       >
-        <div style={{ fontSize: 14, fontWeight: 600, color: NAVY }}>Drop a folder&apos;s worth of documents here, or click to choose</div>
-        <div style={{ fontSize: 12, color: MUTED, marginTop: 4 }}>
+        <div className="text-sm font-semibold text-foreground">Drop a folder&apos;s worth of documents here, or click to choose</div>
+        <div className="mt-1 text-xs text-muted-foreground">
           CIDB certificate, B-BBEE certificate/affidavit, SARS TCS PIN letter, ID documents, CVs, bank confirmation letter, PI insurance,
           ISO 9001 certificate, project reference letters - whatever you already have, one upload at a time or all at once.
           PDF, Word or an image, up to 25 MB each.
@@ -126,16 +115,16 @@ export function UploadForm({ companyId }: { companyId: string }) {
           multiple
           accept={ACCEPTED_EXTENSIONS.join(",")}
           onChange={(e) => e.target.files && addFiles(e.target.files)}
-          style={{ display: "none" }}
+          className="hidden"
         />
       </div>
 
       {files.length > 0 && (
-        <ul style={{ margin: "10px 0", paddingLeft: 18, fontSize: 12, color: "#4B5563" }}>
+        <ul className="my-2.5 list-none pl-0 text-xs text-foreground">
           {files.map((f, i) => (
-            <li key={f.name + f.size + i} style={{ display: "flex", justifyContent: "space-between", maxWidth: 480 }}>
-              <span>{f.name} <span style={{ color: "#8A93A0" }}>({(f.size / 1024).toFixed(0)} KB)</span></span>
-              <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} style={{ border: "none", background: "none", color: "#B91C1C", cursor: "pointer", fontSize: 12 }}>
+            <li key={f.name + f.size + i} className="flex max-w-[480px] justify-between py-1">
+              <span>{f.name} <span className="text-muted-foreground">({(f.size / 1024).toFixed(0)} KB)</span></span>
+              <button type="button" onClick={() => setFiles((prev) => prev.filter((_, j) => j !== i))} className="cursor-pointer border-none bg-transparent text-xs text-destructive">
                 remove
               </button>
             </li>
@@ -144,29 +133,20 @@ export function UploadForm({ companyId }: { companyId: string }) {
       )}
 
       {error && (
-        <div role="alert" style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "10px 14px", fontSize: 13, color: "#B91C1C", marginTop: 10 }}>
+        <div role="alert" className="mt-2.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">
           {error}
         </div>
       )}
       {progress && (
-        <div aria-live="polite" style={{ background: "#FEF3C7", borderRadius: 9, padding: "10px 14px", fontSize: 13, color: "#B45309", marginTop: 10 }}>
+        <div aria-live="polite" className="mt-2.5 rounded-lg border border-warning/20 bg-warning/10 px-3.5 py-2.5 text-sm text-warning">
           {progress}
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={submit}
-        disabled={pending || files.length === 0}
-        style={{
-          marginTop: 12, minHeight: 44, padding: "0 18px", borderRadius: 9,
-          background: pending || files.length === 0 ? "#D9D5C7" : AMBER, color: "#FFFFFF",
-          fontSize: 14, fontWeight: 600, border: "none", cursor: pending || files.length === 0 ? "default" : "pointer",
-        }}
-      >
+      <Button type="button" onClick={submit} disabled={pending || files.length === 0} variant="accent" size="lg" className="mt-3 min-h-11 px-5">
         {pending ? "Uploading…" : `Upload ${files.length || ""} document${files.length === 1 ? "" : "s"} for AI review`}
-      </button>
-      <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 6 }}>
+      </Button>
+      <div className="mt-1.5 text-[11px] text-muted-foreground">
         Nothing is filed into your company profile yet - each document is read and classified, then you confirm or correct it below
         before anything is saved.
       </div>
