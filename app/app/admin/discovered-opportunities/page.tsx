@@ -89,24 +89,24 @@ export default async function AdminDiscoveredOpportunitiesPage({ searchParams }:
 
   return (
     <AppShell>
-      <div style={{ padding: "24px 32px", maxWidth: 1200, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+      <div className="mx-auto w-full max-w-[1200px] p-4 sm:p-6 md:px-8 md:py-6">
         <AdminNav active="discovered-opportunities" />
 
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovered opportunities</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 10px", maxWidth: 820 }}>
+        <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">Discovered opportunities</h1>
+        <p className="mb-2.5 max-w-[820px] text-[13px] text-muted-foreground">
           Every tender/RFQ/RFP/EOI Discovery has scored, for every company - not scoped to one tenant. Each row&apos;s
           &quot;compile-readiness&quot; is an honest, listing-level signal (no documents are downloaded for an opportunity
           nobody has pursued yet); once the separate document-download step has fetched a release&apos;s files, &quot;requirements
           extraction&quot; runs the real intake classifier against them and the confidence number reflects what was actually
           found, not a guess. See lib/compileReadiness.ts for exactly what each status/number can and cannot tell you.
         </p>
-        <p style={{ fontSize: 12, color: "#8A93A0", margin: "0 0 16px" }}>
+        <p className="mb-4 text-xs text-muted-foreground/70">
           {rows.length} opportunit{rows.length === 1 ? "y" : "ies"} - {flaggedCount} flagged, {readyCount} look ready,{" "}
           {extractedCount} have real requirements extracted.
         </p>
 
         {(error || actionError) && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             {error ? "Couldn't load discovered opportunities - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}

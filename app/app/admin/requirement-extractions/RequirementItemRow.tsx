@@ -48,12 +48,18 @@ function itemTitle(itemType: RequirementItemRowData["itemType"], item: Record<st
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <div style={{ fontSize: 10.5, color: "#8A93A0", marginBottom: 1 }}>{label}</div>
+      <div className="mb-px text-[10.5px] text-muted-foreground/70">{label}</div>
       <div>{children}</div>
     </div>
   );
 }
 
+// Color-token migration (2026-10-21): was raw inline-CSSProperties
+// throughout - navy/muted/border/gold hex -> foreground/muted-foreground/
+// border/accent tokens. The confidence pill (every row on this page is
+// already below the review threshold) reads destructive under 30, warning
+// otherwise - there's no "good" band to show here, by definition of the
+// page. The post-submit confirmation row reads the success soft tint.
 export default function RequirementItemRow({ row }: { row: RequirementItemRowData }) {
   const [open, setOpen] = useState(false);
   const [verdict, setVerdict] = useState<"correct" | "corrected" | "false_positive">("correct");
@@ -70,7 +76,7 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
     // a thin confirmation row rather than vanishing outright, so an admin
     // working down the list can still see what they just did.
     return (
-      <div style={{ borderTop: "1px solid #ECEEF1", padding: "10px 18px", fontSize: 12, color: "#15803D", background: "#F8FFFB" }}>
+      <div className="border-t border-border bg-success/10 px-4.5 py-2.5 text-xs text-success first:border-t-0">
         Reviewed - marked <strong>{reviewedAs}</strong>: {row.tenderTitle || row.tenderContractNo || "(untitled tender)"} - {itemTitle(row.itemType, row.item)}
       </div>
     );
@@ -80,6 +86,7 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
   const reason = typeof row.item.confidence_reason === "string" ? row.item.confidence_reason : null;
   const quote = typeof row.item.quote === "string" ? row.item.quote : null;
   const document = typeof row.item.document === "string" ? row.item.document : null;
+  const lowConfidence = confidence !== null && confidence < 30;
 
   function submit() {
     setError(null);
@@ -102,40 +109,34 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
   }
 
   return (
-    <div style={{ borderTop: "1px solid #ECEEF1" }}>
+    <div className="border-t border-border first:border-t-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%", display: "flex", flexWrap: "wrap", gap: "6px 12px", alignItems: "center",
-          padding: "12px 18px", background: open ? "#FFFFFF" : "transparent", border: "none",
-          textAlign: "left", cursor: "pointer", font: "inherit", boxSizing: "border-box",
-        }}
+        className={`flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4.5 py-3 text-left font-[inherit] ${open ? "bg-card" : "bg-transparent"}`}
       >
-        <span style={{ display: "inline-flex", padding: "3px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "#F1F5F9", color: "#5B6472" }}>
+        <span className="inline-flex rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
           {ITEM_TYPE_LABEL[row.itemType]}
         </span>
-        <span style={{ flex: "1 1 220px", minWidth: 0, fontSize: 13.5, fontWeight: 600, color: "#16233B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span className="min-w-0 flex-[1_1_220px] overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-foreground">
           {row.tenderTitle || row.tenderContractNo || "(untitled tender)"}
         </span>
-        <span style={{ fontSize: 12, color: "#5B6472", flex: "0 1 180px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span className="flex-[0_1_180px] overflow-hidden text-ellipsis whitespace-nowrap text-xs text-muted-foreground">
           {row.tenderBuyer || "-"}
         </span>
-        <span style={{ fontSize: 11, color: "#8A93A0" }}>{row.companyId ? "private override" : "shared manifest"}</span>
+        <span className="text-[11px] text-muted-foreground/70">{row.companyId ? "private override" : "shared manifest"}</span>
         <span
-          style={{
-            display: "inline-flex", padding: "3px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600,
-            background: confidence !== null && confidence < 30 ? "#FEE2E2" : "#FEF3C7",
-            color: confidence !== null && confidence < 30 ? "#B91C1C" : "#B45309",
-          }}
+          className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${
+            lowConfidence ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning"
+          }`}
         >
           {confidence ?? "-"}/100
         </span>
-        <span style={{ fontSize: 11, color: "#8A93A0" }}>{open ? "hide ▲" : "open ▼"}</span>
+        <span className="text-[11px] text-muted-foreground/70">{open ? "hide ▲" : "open ▼"}</span>
       </button>
 
       {open && (
-        <div style={{ padding: "4px 18px 18px 18px", background: "#FFFFFF", fontSize: 12.5, color: "#16233B" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8, marginBottom: 14 }}>
+        <div className="bg-card px-4.5 pb-4.5 pt-1 text-[12.5px] text-foreground">
+          <div className="mb-3.5 grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-2">
             <Field label="Contract / reference">{row.tenderContractNo || "-"}</Field>
             <Field label="Buyer">{row.tenderBuyer || "-"}</Field>
             <Field label="Item">{itemTitle(row.itemType, row.item)}</Field>
@@ -144,31 +145,31 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
             <Field label="Scope">{row.companyId ? `Company ${row.companyId}'s private documents` : "Shared manifest (every company)"}</Field>
           </div>
 
-          <div style={{ background: "#FAFBFC", border: "1px solid #E3E6EA", borderRadius: 9, padding: "11px 14px", marginBottom: 12 }}>
-            <div style={{ fontWeight: 600, marginBottom: 4 }}>Why this confidence</div>
-            <div style={{ color: "#5B6472" }}>{reason || "(no reason recorded)"}</div>
+          <div className="mb-3 rounded-lg border border-border bg-muted/40 px-3.5 py-2.5">
+            <div className="mb-1 font-semibold">Why this confidence</div>
+            <div className="text-muted-foreground">{reason || "(no reason recorded)"}</div>
             {quote && (
               <>
-                <div style={{ fontWeight: 600, marginTop: 8, marginBottom: 4 }}>Quote from the document</div>
-                <div style={{ color: "#5B6472", fontStyle: "italic", whiteSpace: "pre-wrap" }}>&quot;{quote}&quot;</div>
+                <div className="mt-2 mb-1 font-semibold">Quote from the document</div>
+                <div className="whitespace-pre-wrap text-muted-foreground italic">&quot;{quote}&quot;</div>
               </>
             )}
           </div>
 
-          <details style={{ marginBottom: 12 }}>
-            <summary style={{ cursor: "pointer", fontSize: 11.5, color: "#8A93A0" }}>Full extracted item (raw)</summary>
-            <pre style={{ fontSize: 11, color: "#5B6472", background: "#FAFBFC", border: "1px solid #E3E6EA", borderRadius: 7, padding: 10, overflowX: "auto", marginTop: 6 }}>
+          <details className="mb-3">
+            <summary className="cursor-pointer text-[11.5px] text-muted-foreground/70">Full extracted item (raw)</summary>
+            <pre className="mt-1.5 overflow-x-auto rounded-md border border-border bg-muted/40 p-2.5 text-[11px] text-muted-foreground">
               {JSON.stringify(row.item, null, 2)}
             </pre>
           </details>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-            <label style={{ fontSize: 11, color: "#5B6472" }}>
+          <div className="flex flex-wrap items-end gap-2.5">
+            <label className="text-[11px] text-muted-foreground">
               Verdict
               <select
                 value={verdict}
                 onChange={(e) => setVerdict(e.target.value as typeof verdict)}
-                style={{ display: "block", marginTop: 2, padding: "6px 8px", borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12.5 }}
+                className="mt-0.5 block min-h-11 rounded-md border border-border px-2 text-[12.5px]"
               >
                 <option value="correct">Correct - this reading is right</option>
                 <option value="corrected">Corrected - the value should be different</option>
@@ -177,38 +178,38 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
             </label>
 
             {verdict === "corrected" && (
-              <label style={{ fontSize: 11, color: "#5B6472", flex: "1 1 260px" }}>
+              <label className="flex-[1_1_260px] text-[11px] text-muted-foreground">
                 Corrected value (plain text, or JSON for a structured change)
                 <textarea
                   value={correctedValueRaw}
                   onChange={(e) => setCorrectedValueRaw(e.target.value)}
                   rows={2}
-                  style={{ display: "block", width: "100%", marginTop: 2, padding: "6px 8px", borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12.5, boxSizing: "border-box", fontFamily: "monospace" }}
+                  className="mt-0.5 block w-full rounded-md border border-border px-2 py-1.5 font-mono text-[12.5px]"
                 />
               </label>
             )}
 
-            <label style={{ fontSize: 11, color: "#5B6472", flex: "1 1 220px" }}>
+            <label className="flex-[1_1_220px] text-[11px] text-muted-foreground">
               Note (optional)
               <input
                 type="text"
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
                 placeholder="Anything worth recording about this call"
-                style={{ display: "block", width: "100%", marginTop: 2, padding: "6px 8px", borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12.5, boxSizing: "border-box" }}
+                className="mt-0.5 block min-h-11 w-full rounded-md border border-border px-2 text-[12.5px]"
               />
             </label>
 
             <button
               onClick={submit}
               disabled={pending}
-              style={{ fontSize: 12, padding: "7px 12px", borderRadius: 7, border: "1px solid #E3E6EA", background: pending ? "#8A93A0" : "#16233B", color: "#FFFFFF", cursor: pending ? "default" : "pointer" }}
+              className={`min-h-11 rounded-md border border-border px-3 text-xs text-white ${pending ? "bg-muted-foreground" : "bg-foreground"}`}
             >
               {pending ? "Saving..." : "Save review"}
             </button>
           </div>
 
-          {error && <div style={{ color: "#B91C1C", fontSize: 12, marginTop: 8 }}>{error}</div>}
+          {error && <div className="mt-2 text-xs text-destructive">{error}</div>}
         </div>
       )}
     </div>

@@ -3,6 +3,7 @@ import HarnessRunRow, { type HarnessDocument } from "./HarnessRunRow";
 import SystemAlertRow, { type SystemAlert } from "./SystemAlertRow";
 import { AppShell } from "../_components/AppShell";
 import { AdminNav } from "./AdminNav";
+import { StatCard } from "@/components/tt/stat-card";
 
 // Reads per-request session/DB data (admin_harness_runs, gated by RLS on the
 // signed-in user being a platform admin - migration 0043) - same escape hatch as
@@ -44,6 +45,14 @@ type RunRow = {
 // engine/write_admin_harness_results.py), each expandable to the documents that
 // run actually generated - rendered inline - plus a reviewed / not-reviewed
 // record (migration 0022). Deliberately no filters or extra workflow states.
+//
+// Color-token migration (2026-10-21): was raw inline-CSSProperties
+// throughout (navy #16233B, muted #5B6472, border #E3E6EA, error banner
+// #FEE2E2/#FCA5A5/#B91C1C, success #15803D, warning #B45309) - now
+// Tailwind + tokens, same semantic mapping as every other admin page in
+// this pass. The page's own local StatCard is gone in favor of the
+// shared components/tt/stat-card.tsx (StatCard), which gained a `muted`
+// tone for this page's two de-emphasized counts.
 export default async function AdminPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error: actionError } = await searchParams;
   const supabase = await createClient();
@@ -91,35 +100,35 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
 
   return (
     <AppShell>
-      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+      <div className="mx-auto w-full max-w-[1000px] p-4 sm:p-6 md:px-8 md:py-6">
         <AdminNav active="alerts" />
-        <section id="cv-document-stats" style={{ marginBottom: 36 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>CVs &amp; tender documents</h1>
-          <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
+        <section id="cv-document-stats" className="mb-9">
+          <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">CVs &amp; tender documents</h1>
+          <p className="mb-4 text-[13px] text-muted-foreground">
             Daily check: how many CVs we have on file, and - of the tender-specific CVs being worked for
             currently-open tenders - how many of those tenders we actually have the blank templates downloaded for.
             See migration 0068 for exactly what each number counts.
           </p>
           {cvStatsError && (
-            <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+            <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
               {"Couldn't load CV/document stats - try refreshing. If it keeps happening, let us know."}
             </div>
           )}
           {cvStats && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-              <StatCard label="CVs uploaded (source files on file)" value={cvStats.cv_uploads_total} color="#16233B" />
-              <StatCard label="Generated CVs on file (ready)" value={cvStats.generated_cvs_ready} color="#16233B" />
-              <StatCard label="Generated CVs requested in total" value={cvStats.generated_cvs_total} color="#5B6472" />
-              <StatCard label="Open tenders with a CV being worked" value={cvStats.open_tender_cvs_count} color="#5B6472" />
-              <StatCard label="Tenders with documents downloaded" value={cvStats.open_tender_cvs_docs_downloaded} color="#15803D" />
-              <StatCard label="Tenders missing documents" value={cvStats.open_tender_cvs_docs_missing} color="#B45309" />
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-3">
+              <StatCard label="CVs uploaded (source files on file)" value={cvStats.cv_uploads_total} />
+              <StatCard label="Generated CVs on file (ready)" value={cvStats.generated_cvs_ready} />
+              <StatCard label="Generated CVs requested in total" value={cvStats.generated_cvs_total} tone="muted" />
+              <StatCard label="Open tenders with a CV being worked" value={cvStats.open_tender_cvs_count} tone="muted" />
+              <StatCard label="Tenders with documents downloaded" value={cvStats.open_tender_cvs_docs_downloaded} tone="success" />
+              <StatCard label="Tenders missing documents" value={cvStats.open_tender_cvs_docs_missing} tone="warning" />
             </div>
           )}
         </section>
 
-        <section id="system-alerts" style={{ marginBottom: 36 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>System alerts</h1>
-          <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
+        <section id="system-alerts" className="mb-9">
+          <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">System alerts</h1>
+          <p className="mb-4 text-[13px] text-muted-foreground">
             Every failure the engines and the bridge worker hit (a job that crashed, a scoring error, OCR that
             couldn&apos;t run, a worker pass that broke) - one row per problem, counted each time it happens again.
             New alerts are e-mailed by the scheduled check-in (engine/alerts/check_system_alerts.py); mark one resolved
@@ -127,30 +136,30 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             {open.length === 0 ? "Nothing open." : `${open.length} open${newCount > 0 ? `, ${newCount} not yet e-mailed` : ""}.`}
           </p>
           {alertsError && (
-            <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+            <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
               {"Couldn't load system alerts - try refreshing. If it keeps happening, let us know."}
             </div>
           )}
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
+          <div className="overflow-hidden rounded-xl border border-border bg-card">
             {open.length === 0 && !alertsError && (
-              <div style={{ padding: "18px", fontSize: 13, color: "#15803D" }}>No open system alerts.</div>
+              <div className="p-4.5 text-[13px] text-success">No open system alerts.</div>
             )}
             {open.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
           </div>
           {resolved.length > 0 && (
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ fontSize: 13, color: "#5B6472", cursor: "pointer", padding: "6px 0" }}>
+            <details className="mt-3">
+              <summary className="min-h-11 cursor-pointer py-1.5 text-[13px] text-muted-foreground">
                 Recently resolved ({resolved.length})
               </summary>
-              <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden", marginTop: 8 }}>
+              <div className="mt-2 overflow-hidden rounded-xl border border-border bg-card">
                 {resolved.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
               </div>
             </details>
           )}
         </section>
 
-        <h2 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Admin harness results</h2>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
+        <h2 className="mb-1 font-display text-[22px] font-bold text-foreground">Admin harness results</h2>
+        <p className="mb-4 text-[13px] text-muted-foreground">
           Results of running every test company through the real tender-filling pipeline (engine/admin_harness.py),
           checked against the stored baseline for each. Open a run to read the documents it generated, then mark it
           reviewed once they are right - that is the record that this tender template is trusted for real customers.{" "}
@@ -159,14 +168,14 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </p>
 
         {(error || actionError) && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             {error ? "Couldn't load harness results - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 
-        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
           {rows.length === 0 && !error && (
-            <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>
+            <div className="p-4.5 text-[13px] text-muted-foreground">
               No harness runs recorded yet - run <code>python3 engine/write_admin_harness_results.py --pack</code> to populate this.
             </div>
           )}
@@ -196,14 +205,5 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
         </div>
       </div>
     </AppShell>
-  );
-}
-
-function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
-  return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "13px 16px" }}>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 3 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
-    </div>
   );
 }

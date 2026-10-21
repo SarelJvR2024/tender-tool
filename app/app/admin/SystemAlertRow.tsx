@@ -18,99 +18,111 @@ export type SystemAlert = {
   resolution_note: string | null;
 };
 
-const SEVERITY_CHIP = {
-  critical: { bg: "#FEE2E2", color: "#991B1B", label: "critical" },
-  error: { bg: "#FEE2E2", color: "#B91C1C", label: "error" },
-  warning: { bg: "#FEF3C7", color: "#B45309", label: "warning" },
+// Color-token migration (2026-10-21): was raw inline-CSSProperties with a
+// literal hex pair per chip (red/amber/green tints) - now the same soft
+// 10%-tint convention every other status chip in this app uses
+// (bg-*/10, full-strength text, border-*/20). "Mark resolved" moved from
+// the old gold CTA to bg-accent/text-accent-foreground - the single most
+// important action on an open alert row, exactly what accent is reserved
+// for.
+const SEVERITY_TONE = {
+  critical: "destructive",
+  error: "destructive",
+  warning: "warning",
 } as const;
+
+// Tailwind's scanner needs full, static class strings - a template-literal
+// `bg-${tone}/10` is invisible to it, so each tone is spelled out in full.
+const CHIP_TONE_CLASS = {
+  destructive: "bg-destructive/10 text-destructive border-destructive/20",
+  warning: "bg-warning/10 text-warning border-warning/20",
+  success: "bg-success/10 text-success border-success/20",
+} as const;
+
+function chipClass(tone: keyof typeof CHIP_TONE_CLASS) {
+  return `inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${CHIP_TONE_CLASS[tone]}`;
+}
 
 // One system_alerts row (migration 0042). Client-only for the expand/collapse;
 // the data is server-rendered by page.tsx and the buttons post to Server
 // Actions in ./actions.ts - the same pattern as HarnessRunRow's review.
 export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
   const [open, setOpen] = useState(false);
-  const sev = SEVERITY_CHIP[alert.severity] ?? SEVERITY_CHIP.error;
+  const sevTone = SEVERITY_TONE[alert.severity] ?? "destructive";
+  const sevLabel = alert.severity;
   const status = alert.resolved_at
-    ? { bg: "#DCFCE7", color: "#15803D", label: "resolved" }
+    ? { tone: "success" as const, label: "resolved" }
     : alert.reported_at
-      ? { bg: "#FEF3C7", color: "#B45309", label: "open - e-mailed" }
-      : { bg: "#FEE2E2", color: "#B91C1C", label: "open - new" };
+      ? { tone: "warning" as const, label: "open - e-mailed" }
+      : { tone: "destructive" as const, label: "open - new" };
   const context = Object.entries(alert.context ?? {});
 
   return (
-    <div style={{ borderTop: "1px solid #ECEEF1" }}>
+    <div className="border-t border-border first:border-t-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%", display: "flex", flexWrap: "wrap", gap: "6px 12px", alignItems: "center",
-          padding: "11px 18px", background: open ? "#FFFFFF" : "transparent", border: "none",
-          textAlign: "left", cursor: "pointer", font: "inherit", boxSizing: "border-box",
-        }}
+        className={`flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4.5 py-2.5 text-left font-[inherit] ${open ? "bg-card" : "bg-transparent"}`}
       >
-        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: sev.bg, color: sev.color }}>
-          {sev.label}
-        </span>
-        <span style={{ fontSize: 12, fontFamily: "monospace", color: "#4B5563" }}>{alert.source}</span>
-        <span style={{ flex: "1 1 320px", minWidth: 0, fontSize: 13, color: "#16233B", overflowWrap: "anywhere" }}>{alert.message}</span>
-        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: status.bg, color: status.color }}>
-          {status.label}
-        </span>
-        <span style={{ fontSize: 11, color: "#8A93A0" }}>
+        <span className={chipClass(sevTone)}>{sevLabel}</span>
+        <span className="font-mono text-xs text-muted-foreground">{alert.source}</span>
+        <span className="min-w-0 flex-[1_1_320px] text-[13px] break-words text-foreground">{alert.message}</span>
+        <span className={chipClass(status.tone)}>{status.label}</span>
+        <span className="text-[11px] text-muted-foreground">
           {alert.occurrences > 1 ? `${alert.occurrences}x, last ` : ""}
           {new Date(alert.last_seen_at).toLocaleString()}
-          <span style={{ marginLeft: 6, color: "#D97706" }}>{open ? "hide ▲" : "open ▼"}</span>
+          <span className="ml-1.5 text-accent">{open ? "hide ▲" : "open ▼"}</span>
         </span>
       </button>
 
       {open && (
-        <div style={{ padding: "4px 18px 18px 18px", background: "#FFFFFF" }}>
-          <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 8 }}>
+        <div className="bg-card px-4.5 pb-4.5 pt-1">
+          <div className="mb-2 text-xs text-muted-foreground">
             First seen {new Date(alert.first_seen_at).toLocaleString()}
             {alert.occurrences > 1 && ` - happened ${alert.occurrences} times`}
             {alert.reported_at && ` - e-mailed ${new Date(alert.reported_at).toLocaleString()}`}
           </div>
           {context.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            <div className="mb-2.5 flex flex-wrap gap-1.5">
               {context.map(([k, v]) => (
-                <span key={k} style={{ fontSize: 11, padding: "2px 9px", borderRadius: 100, border: "1px solid #E3E6EA", background: "#FFFFFF", color: "#4B5563", fontFamily: "monospace", overflowWrap: "anywhere" }}>
+                <span key={k} className="rounded-full border border-border bg-card px-2.5 py-0.5 font-mono text-[11px] break-words text-muted-foreground">
                   {k}: {typeof v === "string" ? v : JSON.stringify(v)}
                 </span>
               ))}
             </div>
           )}
           {alert.detail && (
-            <pre style={{ fontSize: 11, color: "#4B5563", whiteSpace: "pre-wrap", overflowWrap: "anywhere", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "10px 12px", maxHeight: 320, overflow: "auto", margin: "0 0 12px" }}>
+            <pre className="mb-3 max-h-80 overflow-auto rounded-lg border border-border bg-card p-2.5 text-[11px] whitespace-pre-wrap break-words text-muted-foreground">
               {alert.detail}
             </pre>
           )}
 
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "12px 14px" }}>
+          <div className="rounded-lg border border-border bg-card p-3.5">
             {alert.resolved_at ? (
-              <form action={reopenSystemAlert} style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-start" }}>
+              <form action={reopenSystemAlert} className="flex flex-wrap items-start gap-3">
                 <input type="hidden" name="alert_id" value={alert.id} />
-                <div style={{ flex: "1 1 240px", fontSize: 12, color: "#15803D" }}>
+                <div className="flex-[1_1_240px] text-xs text-success">
                   Resolved {new Date(alert.resolved_at).toLocaleString()}
-                  {alert.resolution_note && <div style={{ color: "#4B5563", marginTop: 4, whiteSpace: "pre-wrap" }}>{alert.resolution_note}</div>}
+                  {alert.resolution_note && <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{alert.resolution_note}</div>}
                 </div>
-                <button type="submit" style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #E3E6EA", background: "#FFFFFF", color: "#16233B", cursor: "pointer" }}>
+                <button type="submit" className="min-h-11 rounded-md border border-border bg-card px-3 text-xs text-foreground">
                   Reopen
                 </button>
               </form>
             ) : (
-              <form action={markSystemAlertResolved} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "flex-start" }}>
+              <form action={markSystemAlertResolved} className="flex flex-wrap items-start gap-2.5">
                 <input type="hidden" name="alert_id" value={alert.id} />
                 <textarea
                   name="note"
                   rows={2}
                   placeholder="Note (optional) - e.g. what was fixed, or why it is not a bug"
-                  style={{ flex: "1 1 240px", font: "inherit", fontSize: 12, padding: "7px 9px", border: "1px solid #E3E6EA", borderRadius: 7, resize: "vertical" }}
+                  className="flex-[1_1_240px] resize-y rounded-md border border-border px-2.5 py-1.5 font-[inherit] text-xs"
                 />
-                <button type="submit" style={{ fontSize: 12, fontWeight: 600, padding: "8px 14px", minHeight: 44, borderRadius: 7, border: "none", background: "#D97706", color: "#FFFFFF", cursor: "pointer" }}>
+                <button type="submit" className="min-h-11 rounded-md bg-accent px-3.5 text-xs font-semibold text-accent-foreground">
                   Mark resolved
                 </button>
               </form>
             )}
-            <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 6 }}>
+            <div className="mt-1.5 text-[11px] text-muted-foreground">
               A resolved alert is never e-mailed again. If the same failure happens later it comes back as a new alert.
             </div>
           </div>
