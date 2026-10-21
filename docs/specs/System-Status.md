@@ -6,6 +6,67 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Subscription billing built, 2026-10-21** - Sarel: "I have a payfast account" -> "Add
+subscription billing to Tender Ready", sandbox-first, with his own verbatim 4-tier pricing (Starter
+R1,490/mo, Professional R2,990/mo, Business R4,990/mo, Enterprise custom - full feature parity
+across tiers, plans differ only in people/bid-pack volume; 14-day trial, one full bid pack, no card).
+
+- **Schema** (`app/supabase/migrations/0078_subscription_billing.sql`): `subscription_plans` (seeded,
+  4 rows), `company_subscriptions` (one row per company, `trialing`/`active`/`past_due`/`cancelled`,
+  auto-seeded on `AFTER INSERT ON companies` by `tt_seed_company_trial()`), `payfast_checkouts` (the
+  real access-control boundary - an unguessable `m_payment_id` UUID PayFast echoes back on its ITN,
+  same pattern as PR #20's own `company_invites.token`), `subscription_payments` (append-only ledger,
+  no client writes at all). `company_can_request_pack()`/`company_packs_this_period()` are the one
+  source of truth for the trial's one-pack-total cap and an active plan's monthly allowance - both
+  engines count toward the same pack cap, per Sarel's own "everything's included, nothing's
+  feature-gated" framing.
+- **Two real bugs found by testing against a live Postgres, not by reading the code**: (1) the
+  client-column guard trigger on `company_subscriptions` (blocks a client from directly setting
+  `plan_code`/`status`/etc.) also blocked `record_payfast_itn()`'s own legitimate `SECURITY DEFINER`
+  update - `SECURITY DEFINER` bypasses RLS, not triggers. Fixed with a transaction-local
+  `set_config('app.bypass_subscription_guard', ...)` flag the function sets immediately before its
+  own update, which the trigger checks and skips for. (2) `subscription_payments.company_id` was
+  `not null`, but an ITN for an unknown `m_payment_id` (never created by this app - not a real
+  checkout) legitimately has no company to attribute it to; made nullable. Both confirmed fixed by a
+  focused behavioral test script against a fresh scratch database (trial auto-seed, the guard
+  blocking a direct client update, a successful ITN activating the right plan, a tampered-amount ITN
+  correctly NOT upgrading the plan, an unknown-`m_payment_id` ITN logging without crashing), then a
+  full fresh-database replay (68 migrations, zero errors) and the complete real-Postgres RLS suite
+  (237/237, confirming the new tables don't disturb PR #20's own employee-role isolation).
+- **`app/lib/payfast.ts`**: signature generation/verification, PHP-`urlencode`-compatible encoding
+  (PayFast's own signature examples are written against it, not `encodeURIComponent` alone), and the
+  ITN host/validate-endpoint helpers. Deliberately resolves the field-order question (disputed across
+  third-party PayFast integrations found during research - some sort alphabetically, others insist on
+  "PayFast's documented order") by not depending on either: the OUTBOUND checkout form only needs
+  signing and rendering to use the *same* order (self-consistent, since PayFast recomputes from
+  whatever order it actually receives), while the INBOUND ITN is verified using the exact order the
+  POST body arrived in - the only order PayFast itself could have signed. 17 unit tests
+  (`lib/payfast.spec.ts`), all pure/no I/O.
+- **v1 deliberately does NOT use PayFast's native recurring-subscription fields**
+  (`subscription_type`/`frequency`/`billing_date`/`cycles`) - their exact codes (which number means
+  monthly vs. annual) couldn't be independently confirmed; PayFast's own docs site is JS-rendered and
+  unfetchable, and third-party sources didn't agree. Guessing wrong on a real payment integration
+  risks a silent double-charge or a subscription that never renews, so this ships as a once-off
+  PayFast payment per billing period instead - `record_payfast_itn()` already reactivates a
+  subscription on any completed checkout for that company, so renewing is just paying again via a
+  "Renew now" flow on the billing page. Flagged as the one piece deliberately left for later, once the
+  frequency codes are confirmed against a real sandbox subscription.
+- **Built**: `app/app/api/payfast/itn/route.ts` (the webhook - signature check, PayFast's own
+  server-to-server `/eng/query/validate` confirmation, source-host check, all three before touching
+  the database; always returns 200 so PayFast doesn't retry a forged/malformed request it would never
+  stop retrying otherwise), `app/app/company/billing/` (plan/usage/cancel page + `pay/[id]` auto-
+  submitting checkout form, admin-gated same as `bank-accounts`), a "Billing" tile on `/company`
+  alongside PR #20's own "Team" tile, and usage gating wired into both pack-request actions
+  (`requestSubmissionPack`, `general-actions.ts`'s `requestJob`) and team-invite creation (seat cap).
+- **Verified**: `npx vitest run` (70/70, all green including the new 17), `typecheck`, `lint`, and a
+  real `rm -rf .next && npm run build` (mounts 2 new routes: `/api/payfast/itn`,
+  `/company/billing[/pay/[id]]`). Not yet verified: a live PayFast sandbox checkout end-to-end (needs
+  a running dev server + sandbox credentials - this environment has no live Supabase project to point
+  a browser at), or the renew-later flow against a second real ITN.
+- **Not done / open for Sarel**: native PayFast recurring billing (see above - needs the real
+  sandbox-confirmed frequency codes); an Enterprise "contact us" flow (no self-serve checkout exists
+  for it, by design); a public marketing pricing page.
+
 **PR #20 ("Team invites + employee role") merged, 2026-10-21 ~23:05 UTC** (`b2174a7`) - open 2+ days,
 explicitly flagged by its own author as security-sensitive and needing a careful read before
 merging. Sarel: "I want to keep the employee role." Rebased onto current main (167 commits of drift

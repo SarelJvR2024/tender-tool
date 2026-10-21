@@ -18,6 +18,7 @@ export function RegisterLinks({ counts }: { counts: { principals: number; regist
     },
     { href: "/company/bank-accounts", title: "Bank accounts", detail: "Restricted - owners and admins only" },
     { href: "/company/team", title: "Team", detail: "Add teammates, assign roles, invite someone as a restricted employee" },
+    { href: "/company/billing", title: "Billing", detail: "Your plan, usage this period, and payment - restricted to owners and admins" },
     { href: "/company/document-scan", title: "Bulk document scan", detail: "Drop in a folder of compliance documents - AI sorts and pre-fills them, you confirm each one" },
     {
       href: "/company/properties",
