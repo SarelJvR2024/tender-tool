@@ -6,6 +6,16 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~12:20 UTC**: orientation via `git log` found no sibling-session
+commits since the last pass. QA re-confirmed sound: every `engine/discovery/` and `engine/general/`
+`test_*.py`, plus `npm run typecheck`/`npm run lint` in `app/`. A fifth real batch (10 of 15 sampled
+tenders downloaded before a network slowdown truncated the rest - proceeded with what downloaded
+rather than block on it) found no new engine bugs - one genuine (not a false-positive) key-personnel
+scoring-criteria mention confirmed correctly detected, everything else behaved as already
+documented (thin adverts, scanned docs). Phase 2 running total: ~72 real tenders sampled across 5
+batches, 3 confirmed bugs found and fixed (Findings 40, 42, 44), one confirmed correctly-handled
+repeat case (a second independent City of Tshwane bulletin).
+
 **Finding 44 fixed, 2026-10-21 ~12:10 UTC** (`docs/specs/QA-Edge-Case-Findings.md`) - a fourth real
 batch of 15 tenders sampled (phase 2 continues). `_key_personnel_gap()` was reading a contract-
 administration clause ("Change Key Personnel on the Service" - one item in a list of things needing
