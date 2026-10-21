@@ -3,7 +3,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { isPipelineStage } from "@/lib/pipeline";
+import { isPipelineStage, OUTCOME_FIELD_KEYS } from "@/lib/pipeline";
 import { isPriceSector, parsePercent, parseRand } from "@/lib/dealEconomics";
 
 /**
@@ -122,4 +122,76 @@ export async function saveTenderEconomics(formData: FormData) {
   revalidatePath("/pipeline");
   revalidatePath("/pipeline/pricing");
   redirect(back);
+}
+
+/**
+ * "Moving to Awarded/Lost opens an outcome form" (prompt 10, item 4): winning
+ * company, winning price, number of bidders, reason lost. None of these 4
+ * facts exist as a column anywhere in this schema (checked before writing
+ * this - no migration added). Stored instead in `tender_answers` (0018's
+ * generic company+tender+field_key+value table, already reused across
+ * families for things like `signatory_person_id`) under the `outcome:*` keys
+ * above - a real, working store, not a placeholder: nothing needs to read
+ * these back except this same form and the card's own summary line. Moves
+ * the pipeline stage in the same request, same upsert `moveTenderStage`
+ * itself uses.
+ */
+export async function recordOutcomeAndMoveStage(formData: FormData) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  const { data: membership } = await supabase
+    .from("company_members")
+    .select("company_id")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (!membership) redirect("/onboarding");
+  const companyId = membership.company_id as string;
+
+  const tenderId = formData.get("tender_id");
+  const stage = formData.get("stage");
+  if (typeof tenderId !== "string" || !tenderId || (stage !== "won" && stage !== "lost")) {
+    redirect(`/pipeline?error=${encodeURIComponent("Unknown tender or outcome.")}`);
+  }
+
+  const text = (k: string) => {
+    const v = formData.get(k);
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  };
+  const winningPrice = parseRand(formData.get("winning_price"));
+  if (winningPrice === null) {
+    redirect(`/pipeline?error=${encodeURIComponent("Winning price must be a rand amount, e.g. 1 250 000.")}`);
+  }
+
+  const answers = [
+    { field_key: OUTCOME_FIELD_KEYS.winningCompany, value: text("winning_company") },
+    { field_key: OUTCOME_FIELD_KEYS.winningPriceZar, value: winningPrice != null ? String(winningPrice) : null },
+    { field_key: OUTCOME_FIELD_KEYS.biddersCount, value: text("bidders_count") },
+    { field_key: OUTCOME_FIELD_KEYS.reasonLost, value: text("reason_lost") },
+  ].filter((a) => a.value !== null) as { field_key: string; value: string }[];
+
+  if (answers.length > 0) {
+    const { error: ansErr } = await supabase
+      .from("tender_answers")
+      .upsert(
+        answers.map((a) => ({ company_id: companyId, tender_id: tenderId as string, field_key: a.field_key, value: a.value, answered_by: user.id })),
+        { onConflict: "company_id,tender_id,field_key" },
+      );
+    if (ansErr) {
+      console.error("tender_answers upsert failed for pipeline outcome", ansErr);
+      redirect(`/pipeline?error=${encodeURIComponent("Could not save the outcome - try again. If it keeps happening, let us know.")}`);
+    }
+  }
+
+  const { error } = await supabase
+    .from("tender_packs")
+    .upsert({ company_id: companyId, tender_id: tenderId, pipeline_stage: stage }, { onConflict: "company_id,tender_id" });
+  if (error) {
+    console.error("tender_packs upsert failed for pipeline outcome move", error);
+    redirect(`/pipeline?error=${encodeURIComponent("Could not move this tender - try again. If it keeps happening, let us know.")}`);
+  }
+
+  revalidatePath("/pipeline");
+  revalidatePath(`/tenders/${tenderId}`);
+  redirect("/pipeline");
 }
