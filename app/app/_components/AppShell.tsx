@@ -20,16 +20,25 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   let isPlatformAdmin = false;
   let companyName: string | null = null;
   let notifications: Awaited<ReturnType<typeof getNotifications>> = [];
+  let notificationsError = false;
 
   if (user) {
-    const [{ data: adminData }, { data: company }, notificationRows] = await Promise.all([
+    // getNotifications is allowed to fail on its own (a bad expiry date, a
+    // transient Supabase read) without taking down the rest of the shell -
+    // every signed-in page renders through AppShell, so an unguarded
+    // rejection here used to break the whole page, not just the bell.
+    const [{ data: adminData }, { data: company }, notificationsResult] = await Promise.all([
       supabase.rpc("is_platform_admin"),
       supabase.from("companies").select("legal_name, csd_trading_name").maybeSingle(),
-      getNotifications(supabase),
+      getNotifications(supabase).catch((error) => {
+        console.error("Failed to load notifications", error);
+        return null;
+      }),
     ]);
     isPlatformAdmin = adminData === true;
     companyName = (company?.csd_trading_name || company?.legal_name) ?? null;
-    notifications = notificationRows;
+    notifications = notificationsResult ?? [];
+    notificationsError = notificationsResult === null;
   }
 
   const sidebarOpen = cookieStore.get("sidebar_state")?.value !== "false";
@@ -38,7 +47,13 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
     <SidebarProvider defaultOpen={sidebarOpen}>
       <AppSidebar isPlatformAdmin={isPlatformAdmin} />
       <SidebarInset>
-        <TopBar userEmail={user?.email ?? null} companyName={companyName} isPlatformAdmin={isPlatformAdmin} notifications={notifications} />
+        <TopBar
+          userEmail={user?.email ?? null}
+          companyName={companyName}
+          isPlatformAdmin={isPlatformAdmin}
+          notifications={notifications}
+          notificationsError={notificationsError}
+        />
         <div className="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">{children}</div>
       </SidebarInset>
     </SidebarProvider>
