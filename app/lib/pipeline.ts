@@ -21,12 +21,23 @@ export function isPipelineStage(value: unknown): value is PipelineStage {
 // flagged in app/AGENTS.md rather than invented. "Bidding" covers both
 // Assessing and Building here, and "Won" is relabeled "Awarded" (a genuine
 // 1:1 rename, not a new state).
-export const STAGE_META: Record<PipelineStage, { label: string; bg: string; color: string; hint: string }> = {
-  found: { label: "Discovered", bg: "#F0EEE6", color: "#6B6758", hint: "On our radar, not yet decided" },
-  bidding: { label: "Assessing & building", bg: "#FEF3C7", color: "#B45309", hint: "Assessing fit and preparing the submission" },
-  submitted: { label: "Submitted", bg: "#E8EBF1", color: "#16233B", hint: "Handed in, awaiting outcome" },
-  won: { label: "Awarded", bg: "#DCFCE7", color: "#15803D", hint: "Awarded to us" },
-  lost: { label: "Lost", bg: "#FEE2E2", color: "#B91C1C", hint: "Not awarded to us" },
+//
+// Design-system audit fix (2026-10-21): `chipClass` replaces this map's old
+// literal `bg`/`color` hex pairs (stale from before the design-system
+// migration) with the design tokens' own soft-tint pattern, mapped by
+// semantic intent rather than a 1:1 hex swap: found (not yet decided) is
+// neutral/muted, same as StatusBadge's "draft"; bidding (active work still
+// to do) is warning; submitted matches StatusBadge's own "submitted"
+// variant exactly (border-accent/30 bg-accent/10 text-accent); won/lost are
+// success/destructive. This is a STAGE MACHINE, not a Verify/Provide/Fix
+// task classifier (see app/AGENTS.md "Bids pipeline" for why V/P/F doesn't
+// apply here) - same judgment call as Home's own StatusBadge vocabulary.
+export const STAGE_META: Record<PipelineStage, { label: string; chipClass: string; hint: string }> = {
+  found: { label: "Discovered", chipClass: "border-muted-foreground/20 bg-muted text-muted-foreground", hint: "On our radar, not yet decided" },
+  bidding: { label: "Assessing & building", chipClass: "border-warning/20 bg-warning/10 text-warning", hint: "Assessing fit and preparing the submission" },
+  submitted: { label: "Submitted", chipClass: "border-accent/30 bg-accent/10 text-accent", hint: "Handed in, awaiting outcome" },
+  won: { label: "Awarded", chipClass: "border-success/30 bg-success/15 text-success", hint: "Awarded to us" },
+  lost: { label: "Lost", chipClass: "border-destructive/20 bg-destructive/10 text-destructive", hint: "Not awarded to us" },
 };
 
 // The forward step(s) offered on each card. Submitted forks into won/lost.
