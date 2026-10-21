@@ -2740,7 +2740,7 @@ clean again. Ran `test_discovery_fanout.py`, `test_discovery_downgrades.py` and 
 (all depend on `score_outlook.py` indirectly) for regression safety - all still pass. `python3 -m
 py_compile` clean on both changed files.
 
-### Finding 42 (CONFIRMED, NOT FIXED - architectural, flagged for Sarel's call)
+### Finding 42 (CONFIRMED, FIXED - option (a), Sarel's own call)
 
 **Where:** `engine/general/requirements.py`'s document-classification/extraction path (no single
 function - this is a shape of document the whole pipeline assumes doesn't exist).
@@ -2769,13 +2769,34 @@ checked this pass - municipalities publishing a single "Notice N of FY" PDF cove
 tenders at once, rather than one document per tender, may or may not be common; this is one
 confirmed instance, not a surveyed pattern.
 
-**Why not fixed here:** this isn't a one-line regex gap like Finding 40 - it needs either (a)
-detecting a "combined multi-tender bulletin" shape (several distinct reference numbers, each with
-its own row of facts, in one document) and declining to extract tender-specific requirements from
-it at all (safer, but loses real information for buyers who genuinely do this for every tender), or
-(b) row/section-scoped extraction that isolates the specific tender's own text before running
-`find_returnables()`/`find_roles()`/CIDB/briefing detection against it (more accurate, meaningfully
-harder - requires associating a reference number with its own table row or paragraph span, which
-nothing in this engine does today). Both are real architectural changes, not a quick patch - flagged
-to Sarel directly rather than rushed, same discipline as the daily-digest timeout question in
-`System-Status.md`.
+**Fix (Sarel's own call, option (a) over (b)):** detect a "combined multi-tender bulletin" shape and
+decline to extract tender-specific requirements from it at all, rather than build the meaningfully
+harder row/section-scoped extraction (option (b) - isolating a specific reference's own table row,
+which nothing in this engine does today). Added `is_combined_bulletin()` / `BULLETIN_ROW_RE` to
+`requirements.py`: a buyer-agnostic signal (no reference-number format assumed) - a numbered list
+item ("N. ") immediately followed by an uppercase reference-like token (letters then digits) with a
+month name within the next 200 characters (the row's own closing date), repeated 3+ times. Checked
+against every other real document already in this corpus (every `general_samples/` fixture, plus
+the 26 further real tenders sampled for Findings 40/41/42 themselves) before picking the threshold:
+**zero false positives** at 3+; the one real bulletin matched 12 times, nowhere near borderline.
+
+A document flagged this way is excluded from every extraction signal (suite decision, forms,
+returnables, roles, CIDB, briefing, locality, experience, buyer-form detection) exactly like an
+unreadable document already was - not just hidden in the UI - and gets its own specific gap message
+("Covers multiple tenders in one document, not just this one...") instead of the generic "couldn't
+be read" or "no SBD/MBD forms" wording, which would have been misleading (the document WAS read;
+it's deliberately not attributed to this tender).
+
+**Verification:** the real bulletin PDF is now a permanent `general_harness.py` sample,
+`templates/general_samples/tshwane_gpm08_bulletin/` (provenance in `sources.json`), with an
+`EXPECTED` entry pinning empty returnables/forms - protected by the harness's own baseline-diff
+mechanism, not a bespoke assertion. **Proved the regression test actually catches the bug**:
+temporarily forced `is_combined_bulletin()` to always return `False` (simulating the pre-fix
+behaviour), ran `general_harness.py --only tshwane_gpm08_bulletin` - all 7 company baselines
+flagged `changed ['returnables']`; restored the real function, re-ran - clean again, 7/7. Full
+`general_harness.py` (all 11 samples x 7 companies, including PDF/Word pack builds) and
+`test_requirements.py` both pass with no regression elsewhere.
+
+**Scope, not yet established:** how common this bulletin shape is across buyers beyond City of
+Tshwane wasn't checked this pass - this fix handles it wherever it's found, but a wider survey
+(does any other municipality do this routinely?) hasn't been done.

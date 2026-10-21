@@ -6,6 +6,25 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Finding 42 fixed, 2026-10-21 ~09:15 UTC: Sarel chose option (a)** (decline to extract from a
+combined multi-tender bulletin PDF, rather than build row-scoped extraction). Implemented in
+`requirements.py`: `is_combined_bulletin()` detects the shape buyer-agnostically (a numbered list
+item followed by an uppercase reference token and a month name, repeated 3+ times - checked against
+every other real document in the corpus first, zero false positives). A flagged document is excluded
+from every extraction signal, same treatment as an unreadable one, with its own clear gap message.
+The real City of Tshwane bulletin is now a permanent `general_harness.py` sample
+(`templates/general_samples/tshwane_gpm08_bulletin/`) - verified the regression test genuinely
+catches the bug (forced the detection off, confirmed all 7 baselines flag `changed`, restored,
+confirmed clean). Full harness (11 samples, all with real pack builds) and `test_requirements.py`
+pass with no regression. **Not yet surveyed**: how common this bulletin shape is beyond City of
+Tshwane - the fix handles it wherever found, but no wider check was done this pass.
+
+**New instruction from Sarel (2026-10-21 ~09:15 UTC): re-scan the government/SOE/municipality list
+once more for any further sites worth tapping, then build a proper "assessment engine"** that reads
+each advertised tender page-by-page/field-by-field and compiles a submission-preparation plan - a
+materially bigger scope than the ad-hoc requirements-verification sampling done so far. Not yet
+started - picking this up now.
+
 **Standing review pass, 2026-10-21 ~08:20 UTC**: orientation via `git log` found one sibling-session
 commit (`24c47ba`, a different Claude session, "Finding 41" - two unrelated real municipalities,
 Nala and Kannaland, could falsely match on locality because the substring check stripped spaces
