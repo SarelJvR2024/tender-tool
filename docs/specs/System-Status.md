@@ -6,6 +6,19 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Finding 47 fixed, 2026-10-21 ~22:25 UTC** (`5928abe`) - the "needs a buyer-name-aware redesign,
+not forced" gap flagged earlier this same day is now closed. `extract_requirements()`/`find_roles()`
+both gained an optional `buyer` param; a "&lt;buyer name&gt; Contract/Project Manager" mention (the
+buyer's own agent, confirmed real on a Transnet tender) is now excluded without touching the shared
+`ROLE_CONTEXT_RE` the earlier rejected fix attempt had broken 3 other detections by changing. Wired
+into the real production call site (`process_general_jobs.py`) and the regression corpus
+(`general_harness.py` now reads each sample's real buyer from `sources.json`). Re-running the corpus
+with buyer names wired through surfaced a genuine bonus find - `eskom_e3689` had 2 more real false
+positives of the same bug class, confirmed correct (not a regression) by reading the actual document
+text before accepting the new baseline. Verified with the real quoted Transnet sentence, a same-
+document genuine-ask check, a negative control, and the usual revert/confirm-fail/restore discipline.
+Phase 2 tally: 4 of 4 confirmed bugs from this session's sampling now fixed (Findings 40, 42, 44, 47).
+
 **Standing review pass, 2026-10-21 ~22:10 UTC**: orientation via `git log` found 2 more sibling
 commits since the last pass, both the UI/UX session's own work - `#43` (SANRAL schedules made a
 visible nav feature - presentation/discoverability only, the real automation untouched) and `#44`
