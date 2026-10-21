@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 // Deliberately scoped to *.spec.ts only - every existing test in this repo
@@ -12,5 +13,14 @@ export default defineConfig({
   test: {
     include: ["**/*.spec.ts"],
     exclude: ["**/node_modules/**", "**/.next/**"],
+  },
+  resolve: {
+    // Mirrors tsconfig.json's own "@/*": ["./*"] - vitest doesn't read
+    // tsconfig paths on its own, so without this any *.spec.ts covering
+    // app code that imports via the "@/" alias (rather than a relative
+    // path, as lib/readiness.spec.ts's target happens to) fails to resolve.
+    alias: {
+      "@": fileURLToPath(new URL(".", import.meta.url)),
+    },
   },
 });
