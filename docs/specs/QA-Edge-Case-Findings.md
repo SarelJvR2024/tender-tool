@@ -2889,3 +2889,66 @@ bug**: reverted the fix, confirmed the first case now fails exactly as predicted
 positive clause as a genuine gap), restored, confirmed both cases pass again. `test_submission_plan.py`
 (all 18 checks) and the full `general_harness.py` (91 clean, 0 flagged, 0 failed) both still pass -
 no regression elsewhere.
+
+## 2026-10-21 (fifty-seventh run): Discovery - a genuinely different real company could be silently stored as a tender's winner, corrupting award/price intelligence
+
+**Why this area:** a parallel sibling session is actively verifying `requirements.py`/
+`submission_plan.py` against real current tenders (phase 2, multiple batches in progress), so
+again picked a different corner: `store_award_outcomes.py`'s award/price intelligence - the
+original priority area from this review's very first runs ("a genuine R0,00 award") - had no
+dedicated test file of its own (`test_award_outcomes.py` only covers the separate,
+similarly-named `award_outcomes.py` parsing module). `find_winner()`'s fuzzy name-matching
+fallback is the exact same CLASS of risk as Finding 41's municipality mix-up - plain-text
+similarity matching between real, independently-named South African entities - just in a
+different engine, so it was the natural next thing to check after that finding.
+
+### Finding 45 (CONFIRMED, FIXED, severe - the same fuzzy-matching bug class as Finding 41, now in award/price data)
+
+**Where:** `engine/discovery/store_award_outcomes.py`, `find_winner()` / `merge()`.
+
+**What was tested:** `find_winner()`'s last-resort fallback ("name_token") matched a tender's
+announced winner to a bidder in the register by comparing ONLY the first word of each normalized
+company name. Real South African company names very commonly share a generic first word (place
+names, Nguni/Sesotho words used across many unrelated businesses). Constructed a realistic
+adversarial case: a bidders register listing "Bokamoso Trading CC" and "Siyakhula Projects (Pty)
+Ltd", with the buyer's announced winner being "Bokamoso Construction (Pty) Ltd" - a real, but
+DIFFERENT company, not present in this register at all (a believable real-world data gap: the
+award notice and the bidders register often come from different pages/sources and don't list
+every company identically). Ran the real `find_winner()`: it matched index 0 ("Bokamoso Trading
+CC") on `"name_token"` alone. Before reaching for a code fix, tried the obvious mitigation this
+codebase already uses elsewhere (Finding 41's `difflib.SequenceMatcher` ratio) and calibrated it
+against both the false-positive case and several realistic LEGITIMATE trading-name variants of
+the SAME company ("Khulani Civils CC" vs "Khulani Civil Engineering (Pty) Ltd", etc.) - the
+ratios overlap (0.632-0.686 for the false positives, 0.667-0.732 for the legitimate variants),
+so **no safe similarity threshold exists** to separate them; a stricter cutoff would also reject
+real matches, a looser one wouldn't catch this bug.
+
+**Confirmed the real consequence:** ran the full `merge()` pipeline (not just the isolated
+function) with this exact scenario - `bidders[0]["is_winner"]` was set `True` and
+`winner_match_basis` was `"name_token"`, with no note anywhere flagging the uncertainty. This
+feeds `winner_rank`, `winner_vs_median` and `lowest_bid_won` - real, stored, public award/price
+intelligence fields - meaning a company that never won anything could be recorded as this
+tender's winner, and the actual winner's price would never be compared against the field at all.
+
+**Fix (given no safe threshold exists, changed what the system is willing to assert instead of
+trying to tune the match):** `find_winner()` still returns the `"name_token"` candidate (kept for
+diagnostics - see its own updated docstring), but `merge()` now only sets `is_winner`/
+`winner_match_basis` for the two CONFIRMED bases (`"name"` exact match, `"amount"` exact price
+match). A `"name_token"`-only hit instead produces an honest note: `"The winner (X) could not be
+confidently matched to a name on the published register - closest candidate by first word: Y (not
+assumed; verify manually)."` - the exact same "never guess, say what you don't know" pattern this
+file already uses for the fully-unmatched case, just extended to the previously-overconfident
+fallback.
+
+**Verification:** added `engine/discovery/test_store_award_outcomes.py` (first dedicated test
+file for this module): 7 checks across 4 cases - the false-positive case (no `is_winner` set, null
+basis, the honest note present), the exact-name mirror case (still sets the winner, basis
+`"name"`), the exact-amount mirror case (still sets the winner, basis `"amount"`), and confirming
+`find_winner()` itself still surfaces the unconfirmed candidate for diagnostics rather than
+silently dropping it. **Proved the tests actually catch the regression**, not just that they
+pass: temporarily reverted `merge()`'s basis-gating back to trusting any non-null `find_winner()`
+result, re-ran - all 3 relevant checks failed exactly as predicted (`is_winner: True` on the wrong
+company, `basis: name_token`, no note); restored the fix and confirmed clean again. Ran
+`test_award_outcomes.py`, `test_award_prices.py` and `test_etenders_portal.py` (all exercise code
+adjacent to or consuming this module) for regression safety - all still pass. `python3 -m
+py_compile` clean on both changed files.

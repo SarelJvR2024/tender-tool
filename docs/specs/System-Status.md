@@ -703,6 +703,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-21, standing QA/robustness review - fifty-seventh run): a genuinely different real company could be silently stored as a tender's winner, corrupting award/price intelligence
+
+Orientation: continuing to avoid `requirements.py`/`submission_plan.py` while a sibling actively
+verifies them. `store_award_outcomes.py` - the original "award/price intelligence" priority area
+from this review's very first runs - had no dedicated test file; its `find_winner()` fuzzy
+name-matching fallback is the same bug CLASS as Finding 41's municipality mix-up, so checked it
+next.
+
+**Finding 45 (fixed, severe - same bug class as Finding 41, now in award data):**
+`find_winner()`'s last-resort fallback matched a winner to a bidder by first word only. Real SA
+company names commonly share a generic first word while being unrelated entities - "Bokamoso
+Trading CC" and "Bokamoso Construction (Pty) Ltd" matched with the latter not even present in the
+register. Tried Finding 41's own `difflib.SequenceMatcher` mitigation and calibrated it against
+both this false positive and several realistic legitimate trading-name variants: the ratios
+overlap (0.632-0.686 vs 0.667-0.732) - **no safe threshold exists**. Confirmed through the real
+`merge()` pipeline: the wrong company was marked `is_winner=True`, corrupting `winner_rank`,
+`winner_vs_median` and `lowest_bid_won` - real, stored, public award/price fields.
+
+**Fix:** since no threshold can safely narrow the match, changed what the system asserts instead
+- `merge()` now only trusts the two CONFIRMED match bases (exact name, exact amount); a
+first-word-only hit produces an honest "could not be confidently matched - closest candidate: Y"
+note, the same pattern this file already uses for a fully-unmatched winner.
+
+**Verification:** new `engine/discovery/test_store_award_outcomes.py` (first test file for this
+module), 7 checks across 4 cases including both confident-match mirror cases still working.
+**Proved the tests catch the regression** (reverted the fix, confirmed all 3 relevant checks fail
+with the wrong company marked winner, restored it, confirmed clean). `test_award_outcomes.py`,
+`test_award_prices.py` and `test_etenders_portal.py` all still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-seventh run" (Finding 45).
+
 ## This pass (2026-10-21, standing QA/robustness review - fifty-sixth run): a real South African ID number split across a line break reached the Anthropic API unredacted (POPIA-relevant)
 
 Orientation: avoided `requirements.py`/`submission_plan.py` (a parallel sibling session is

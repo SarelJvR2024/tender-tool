@@ -206,7 +206,18 @@ def without_typos(sorted_amounts):
 
 
 def find_winner(bidders, winner, amount, column=0):
-    """Index of the winner in the register and how it was found, or (None, None)."""
+    """Index of the winner in the register and how it was found, or (None, None).
+
+    "name_token" (first-word-only) is NOT a confident match - returned so
+    merge() can mention the closest candidate, never so it can be stored as
+    `is_winner`. Confirmed live, 2026-10-21: many real South African company
+    names share a common first word (place names, Nguni/Sesotho words) while
+    being completely unrelated entities - "Bokamoso Trading CC" and
+    "Bokamoso Construction (Pty) Ltd" matched on first-token alone with
+    neither an exact name nor an amount match, and a difflib similarity
+    check doesn't cleanly separate this from a genuine trading-name variant
+    of the SAME company (both land around 0.63-0.73) - there is no safe
+    threshold, so this basis is never trusted to assert a fact on its own."""
     if not winner or not bidders:
         return None, None
     w = norm_name(winner)
@@ -277,9 +288,12 @@ def merge(key, parts, existing_first_seen=None):
     wi, basis = (None, None)
     if winner_count == 1:
         wi, basis = find_winner(bidders, winner, amount)
-    if wi is not None:
+    if wi is not None and basis in ("name", "amount"):
         bidders[wi]["is_winner"] = True
         row["winner_match_basis"] = basis
+    elif wi is not None:  # basis == "name_token": a candidate, never a confirmed fact (see find_winner())
+        notes.append(f"The winner ({winner}) could not be confidently matched to a name on the published "
+                     f"register - closest candidate by first word: {bidders[wi]['name']} (not assumed; verify manually).")
     elif winner and bidders and winner_count == 1:
         notes.append(f"The winner ({winner}) could not be matched to a name on the published register.")
     if columns > 1:
