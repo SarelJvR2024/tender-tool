@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useFormStatus } from "react-dom";
 import { Upload, User, Loader2 } from "lucide-react";
 import { WizardShell } from "./WizardShell";
 import { Field, FormError } from "./fields";
 import { addPersonStep, uploadPersonCvStep } from "../actions";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 const MAX_PEOPLE = 3;
 
@@ -93,6 +94,12 @@ export function Step4({ companyId, people, error }: { companyId: string; people:
           </div>
           <AddPersonSubmitButton />
         </form>
+      )}
+
+      {people.length > 0 && (
+        <Link href="/onboarding?step=5" className={buttonVariants({ className: "mt-4 h-11 w-full" })}>
+          Continue
+        </Link>
       )}
     </WizardShell>
   );
