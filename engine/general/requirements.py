@@ -716,7 +716,53 @@ IN_TEXT_BUYER_FORMS = [
     ("certificate_of_authority", "Certificate / resolution of authority for signatory",
      r"(?:CERTIFICATE|RESOLUTION)\s+OF\s+AUTHORITY"),
     ("declaration_of_shareholding", "Declaration of Shareholding and Directorship", r"DECLARATION\s+OF\s+SHAREHOLDING"),
+    # ESKOM's own Supplier Quality Management form - confirmed from a real
+    # ESKOM tender (E3703CXMWP, 2026-10-21): "complete, sign and return Form A
+    # with the other returnables", repeated across 6 documents, never
+    # surfaced before this - requirements.py's own docstring already named
+    # "Form A" as one of ESKOM's own forms, but nothing matched it. "Form A"
+    # alone is too generic a string to match safely (any buyer could have an
+    # unrelated "Form A") - anchored on the parenthetical that names what it
+    # actually is, which recurs on every real mention in the corpus.
+    ("eskom_form_a", "Form A (Supplier Quality Management)",
+     r"FORM\s+A\s*\(\s*(?:ENQUIRY|TENDER)\s*(?:AND|/)?\s*CONTRACT\s*(?:AND|/)?\s*QUALITY\s+REQUIREMENTS\s+FOR\s+SUPPLIER\s+QUALITY\s+MANAGEMENT"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Finding 42 (QA-Edge-Case-Findings.md, 2026-10-21): some buyers (confirmed:
+# City of Tshwane's "Notice N of <FY>" bulletins) publish ONE PDF covering
+# SEVERAL unrelated tenders - a numbered table, one row per tender, each with
+# its own reference, closing date, CIDB grading, preference system. Reading
+# this as if it were one tender's own document attributes every other
+# tender's facts to whichever one is being processed (confirmed: GPM
+# 08-2026/27, a property lease with no CIDB angle at all, came back with a
+# CIDB grading requirement that actually belongs to a different row, GPM 18,
+# in the same PDF). Per Sarel's own call: detect this shape and decline to
+# extract tender-specific facts from it at all (option (a) - safer than
+# trying to isolate the right row, which nothing in this engine does today),
+# rather than keep attributing another tender's facts to this one.
+#
+# Detection, buyer-agnostic (no reference-number format assumed): a numbered
+# list item ("N. ") immediately followed by an uppercase reference-like token
+# (letters then digits - "HD 03", "GPM 18", "WSBU 01"), with a month name
+# within the next 200 characters (the row's own closing date, wrapped PDF
+# text and all). Checked against every other real document already in this
+# corpus (templates/general_samples/, plus 26 further real tenders sampled
+# for Finding 40/42 themselves) - zero false positives at a threshold of 3;
+# the one real bulletin matched 12 times, not a borderline case.
+_BULLETIN_MONTHS = (r"January|February|March|April|May|June|July|August|September|October|"
+                    r"November|December")
+BULLETIN_ROW_RE = re.compile(
+    r"(?:^|\n)\s*\d{1,2}\.\s+[A-Z]{2,8}\s?\d{1,4}[\s\S]{0,200}?\b(?:" + _BULLETIN_MONTHS + r")\b")
+BULLETIN_MIN_ROWS = 3
+
+
+def is_combined_bulletin(text):
+    """True if `text` looks like several different tenders' own rows bundled
+    into one document, not one tender's own document - see module comment
+    above BULLETIN_ROW_RE for the evidence and why 3 is the threshold."""
+    return len(BULLETIN_ROW_RE.findall(text or "")) >= BULLETIN_MIN_ROWS
 
 
 def classify_document(doc, mentioned_forms):
@@ -854,10 +900,17 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
     own_tmp = work_dir is None
     work_dir = work_dir or tempfile.mkdtemp(prefix="tt_req_")
     docs = [read_document(d, work_dir) for d in collect_documents(paths, work_dir)]
-    all_text = "\n".join(d.get("text") or "" for d in docs)
+    for d in docs:
+        d["is_bulletin"] = (not d.get("unreadable")) and is_combined_bulletin(d.get("text"))
+    # Finding 42: a bulletin's facts belong to whichever tender its own row is
+    # for, never knowably this one - excluded from every signal below (suite,
+    # forms, returnables, roles, CIDB, briefing, locality, experience) the
+    # same way an unreadable document already is, not just hidden from the UI.
+    usable_docs = [d for d in docs if not d["is_bulletin"]]
+    all_text = "\n".join(d.get("text") or "" for d in usable_docs)
 
     mentioned = {}
-    for d in docs:
+    for d in usable_docs:
         for k, n in forms_in_text(d.get("text") or "").items():
             mentioned[k] = mentioned.get(k, 0) + n
         for k, n in forms_in_text(os.path.basename(d["name"])).items():
@@ -867,7 +920,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
     ocr_mean = _ocr_mean(docs)
     doc_entries = []
     for d in docs:
-        kind = classify_document(d, mentioned)
+        kind = "combined_bulletin" if d["is_bulletin"] else classify_document(d, mentioned)
         editable = d["format"] == "docx" or bool(d.get("converted_docx"))
         doc_entries.append({
             "name": d["name"], "format": d["format"], "kind": kind,
@@ -921,12 +974,12 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         prefix = suite or "SBD"
         n_mentions = mentioned.get((prefix, code), 0) + mentioned.get(("SBD" if prefix == "MBD" else "MBD", code), 0)
         quote, quote_doc = None, None
-        for d in docs:
+        for d in usable_docs:
             m = re.search(rf"\b{prefix[0]}\s?B\s?D\s*{re.escape(code).replace(r'\.', r'\s*[.(]\s*')}", d.get("text") or "", re.IGNORECASE)
             if m:
                 quote, quote_doc = _quote(d["text"], m.start(), m.end(), 80), d["name"]
                 break
-        overlay = _overlay_edition(code, editions, docs) if capability == "fill" and not fillable else None
+        overlay = _overlay_edition(code, editions, usable_docs) if capability == "fill" and not fillable else None
         if capability == "fill" and fillable:
             status, reason = "auto", f"Filled from your data in {fillable[0]['name']}" + (
                 " (converted from .doc by LibreOffice - check the layout)" if fillable[0]["converted_from_doc"] else "")
@@ -969,7 +1022,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
                                 "document": e["name"], "format": e["format"],
                                 "reason": "Buyer-specific form - no Tender Tool template for it; complete by hand and attach."})
     for key, label, pat in IN_TEXT_BUYER_FORMS:
-        for d in docs:
+        for d in usable_docs:
             m = re.search(pat, d.get("text") or "", re.IGNORECASE)
             if m:
                 confidence, confidence_reason = score_confidence("form_code", 1, ocr_mean.get(d["name"]))
@@ -993,9 +1046,9 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
     loc = extract_locality(all_text) if all_text.strip() else {"rows": [], "mandatory_local_office": None}
     cidb_confidence = score_confidence("anchored_regex", 1) if cidb_m else (None, None)
     briefing_confidence = score_confidence("anchored_regex", 1) if brief_m else (None, None)
-    returnables = find_returnables(docs, ocr_mean)
-    roles = find_roles(docs, ocr_mean)
-    person_registrations = find_person_registrations(docs, ocr_mean)
+    returnables = find_returnables(usable_docs, ocr_mean)
+    roles = find_roles(usable_docs, ocr_mean)
+    person_registrations = find_person_registrations(usable_docs, ocr_mean)
     # EXPERIMENTAL OCR: anything read out of OCR'd text says so, so the UI
     # can show it isn't from a real text layer.
     for item in returnables + roles + buyer_forms + person_registrations:
@@ -1046,7 +1099,7 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         else {"source": "not_found", "clause": None, "rows": [], "unparsed": [], "reason": "No document text."},
         "questions": questions,
         "company_fields": company_fields,
-        "gaps": _gaps(doc_entries, forms, suite, buyer_forms, _depth(all_text)) + _key_personnel_gap(docs),
+        "gaps": _gaps(doc_entries, forms, suite, buyer_forms, _depth(all_text)) + _key_personnel_gap(usable_docs),
         "document_depth": _depth(all_text),
     }
     _apply_past_corrections_to_manifest(manifest, past_corrections)
@@ -1116,14 +1169,30 @@ def _gaps(doc_entries, forms, suite, buyer_forms, depth="full_document"):
     """Plain statements of what this engine can't do for this tender - shown
     in the UI and the pack index instead of being hidden."""
     gaps = []
-    readable = [e for e in doc_entries if e["chars"] > 0 and not e["unreadable"]]
-    if not readable:
+    bulletin = [e["name"] for e in doc_entries if e["kind"] == "combined_bulletin"]
+    if bulletin:
+        # Finding 42: this document's own facts (closing date, CIDB grading,
+        # preference system) belong to whichever tender its own row is for,
+        # never knowably this one - excluded from every signal above, so say
+        # so plainly rather than let the generic "couldn't be read" (implies
+        # a parsing failure, not true here) or "no SBD/MBD forms" (implies
+        # this document was actually checked) wording stand in for it.
+        gaps.append(
+            "Covers multiple tenders in one document, not just this one: " + "; ".join(bulletin[:5]) +
+            ". Tender Tool hasn't tried to work out which part is this tender's own - nothing from it is shown "
+            "below. Find this tender's own row/section in it and read it by eye, or get its own separate document "
+            "from the buyer if one exists.")
+    non_bulletin = [e for e in doc_entries if e["kind"] != "combined_bulletin"]
+    readable = [e for e in non_bulletin if e["chars"] > 0 and not e["unreadable"]]
+    if not non_bulletin:
+        pass  # every document was a bulletin - already said so above, nothing more to add
+    elif not readable:
         # Nothing was read, so nothing can be concluded about the forms - the
         # old wording ("uses no SBD/MBD standard forms") was a confident
         # statement made from zero evidence.
         gaps.append("None of this tender's documents could be read, so what it requires is unknown - nothing below "
                     "was checked against its documents. Upload a text PDF or Word copy.")
-    elif suite is None and any(e["unreadable"] for e in doc_entries):
+    elif suite is None and any(e["unreadable"] for e in non_bulletin):
         gaps.append("No SBD/MBD standard forms were found in the documents that could be read - but some couldn't be "
                     "read (listed below), and the forms may be in those.")
     elif suite is None and depth != "full_document":

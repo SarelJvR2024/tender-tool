@@ -2,16 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "../_components/AuthShell";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
-const LABEL: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4, textAlign: "left" };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box", marginBottom: 14 };
-const PRIMARY_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", borderRadius: 8, border: "none", background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, cursor: "pointer", boxSizing: "border-box" };
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function AuthCard({ children }: { children: React.ReactNode }) {
+  return <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-9 text-center shadow-sm">{children}</div>;
+}
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
+  const [fieldError, setFieldError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -19,6 +25,12 @@ export default function ForgotPasswordPage() {
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    if (!EMAIL_PATTERN.test(email.trim())) {
+      setFieldError("Enter a valid email address.");
+      return;
+    }
+    setFieldError(null);
+
     setPending(true);
     const supabase = createClient();
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
@@ -38,40 +50,52 @@ export default function ForgotPasswordPage() {
   if (submitted) {
     return (
       <AuthShell>
-        <div style={CARD}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Check your email</h1>
-          <p style={{ fontSize: 13, color: "#5B6472", margin: 0, lineHeight: 1.6 }}>
-            If an account exists for <strong>{email}</strong>, a password reset link is on its way.
+        <AuthCard>
+          <h1 className="mb-2.5 font-display text-lg font-medium text-foreground">Check your email</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            If an account exists for <strong className="text-foreground">{email}</strong>, a password reset link is on its way.
           </p>
-          <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
+          <Link href="/login" className="mt-6 inline-block text-sm font-medium text-foreground hover:underline">
             &larr; Back to sign in
           </Link>
-        </div>
+        </AuthCard>
       </AuthShell>
     );
   }
 
   return (
     <AuthShell>
-      <div style={CARD}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Reset your password</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 28px" }}>We&apos;ll email you a link to set a new one</p>
+      <AuthCard>
+        <h1 className="mb-1 font-display text-xl font-medium text-foreground">Reset your password</h1>
+        <p className="mb-7 text-sm text-muted-foreground">We&apos;ll email you a link to set a new one</p>
 
-        <form onSubmit={handleSubmit}>
-          <label style={LABEL} htmlFor="email">Email</label>
-          <input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} style={INPUT} />
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="mb-1 text-left">
+            <Label htmlFor="email" className="mb-1.5">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={!!fieldError}
+              className="h-11"
+            />
+            {fieldError && <p className="mt-1 text-xs text-destructive">{fieldError}</p>}
+          </div>
 
-          {error && <p style={{ color: "#B91C1C", fontSize: 12, textAlign: "left", margin: "-6px 0 14px" }}>{error}</p>}
+          {error && <p className="mt-3 text-left text-xs text-destructive">{error}</p>}
 
-          <button type="submit" disabled={pending} style={{ ...PRIMARY_BUTTON, opacity: pending ? 0.6 : 1 }}>
+          <Button type="submit" disabled={pending} className="mt-4 h-11 w-full">
+            {pending && <Loader2 className="size-4 animate-spin" />}
             {pending ? "Sending..." : "Send reset link"}
-          </button>
+          </Button>
         </form>
 
-        <Link href="/login" style={{ display: "inline-block", marginTop: 20, fontSize: 12, color: "#5B6472", textDecoration: "none" }}>
+        <Link href="/login" className="mt-5 inline-block text-xs text-muted-foreground hover:text-foreground">
           &larr; Back to sign in
         </Link>
-      </div>
+      </AuthCard>
     </AuthShell>
   );
 }

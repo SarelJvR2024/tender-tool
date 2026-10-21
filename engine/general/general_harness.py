@@ -71,6 +71,24 @@ EXPECTED = {
                           "typed_keys": ["sbd1.name_of_bidder", "ceq.name_of_enterprise", "ceq.company_registration_number",
                                          "form_of_offer.tenderer"]},
     "eskom_e3689": {"suite": None, "auto": [], "by_hand_fill": [], "returnables": [], "buyer_forms_any": ["nec3_contract", "form_of_offer"]},
+    # Finding 40 (QA-Edge-Case-Findings.md): ESKOM's own "Form A" (Supplier
+    # Quality Management form) was named in requirements.py's own docstring
+    # as one of ESKOM's forms but nothing ever matched it - confirmed on this
+    # real ESKOM tender (E3703CXMWP, checked 2026-10-21), which asks for it by
+    # name 11 times across its documents. buyer_forms_any pins specifically
+    # that this regression stays caught, not just "some buyer form or other".
+    "eskom_e3703cxmwp": {"suite": None, "auto": [], "by_hand_fill": [], "returnables": ["bbbee_proof", "cidb", "cipc_documents", "financial_statements"],
+                         "roles": ["contractor.project_manager"], "buyer_forms_any": ["eskom_form_a"]},
+    # Finding 42 (QA-Edge-Case-Findings.md): City of Tshwane's only eTenders
+    # document for GPM 08-2026/27 is "Notice 6 of 2026/27" - a bulletin
+    # covering 6 unrelated tenders in one PDF, each its own numbered row.
+    # Before the fix, GPM 08 (a property lease) was shown a CIDB grading
+    # requirement that actually belongs to a different row (GPM 18) in the
+    # same PDF - this sample's own EXPECTED (suite None, no returnables, no
+    # forms) pins it empty; general_harness.py's own baseline-diff would
+    # flag it as "changed" if a future regression made cidb (or anything
+    # else) reappear, same protection every other sample here already has.
+    "tshwane_gpm08_bulletin": {"suite": None, "auto": [], "by_hand_fill": [], "returnables": []},
 }
 
 ANSWERS = {

@@ -1,0 +1,43 @@
+# One-off manual check: can a GitHub Actions runner reach Rand Water's bids
+# portal at all? engine/discovery/randwater.py (added 2026-10-20) was built
+# and verified entirely offline, against a real saved page - every automated
+# fetch attempt from this project's own dev sandbox was blocked (curl: TLS
+# chain error; WebFetch: HTTP 503; the original research pass: HTTP 503),
+# while a real browser worked fine. That looks like bot-blocking, the same
+# pattern already seen for Engineering News (403) and News24 (Cloudflare
+# challenge) in the government-coverage research - but a GitHub Actions
+# runner is a different network path than a dev sandbox, so it needs its own
+# answer rather than assuming either outcome.
+#
+# This is why randwater.py is deliberately NOT in gov_sources.ALL_SOURCES
+# yet (see that file's own comment) - this workflow is how that gets
+# decided, not guessed. A green run here is real evidence it's safe to add;
+# a red run is real evidence it isn't (yet), without guessing either way.
+#
+# workflow_dispatch only - never runs on a schedule, a human triggers it on
+# purpose to answer this one question.
+
+name: test-randwater-reachability
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  try-fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          # randwater.py / source_http.py are pure standard library (urllib,
+          # re, json, datetime, html) - confirmed by reading both files
+          # before writing this workflow. Nothing to install.
+
+      - name: Try fetching and parsing the real Rand Water bids listing
+        run: python3 engine/discovery/randwater.py

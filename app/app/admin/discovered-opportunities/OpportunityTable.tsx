@@ -43,21 +43,21 @@ export default function OpportunityTable({ rows }: { rows: OpportunityRowData[] 
   return (
     <div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} style={field}>
+        <select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} style={field}>
           <option value="all">Every status</option>
           <option value="flagged">Flagged</option>
           <option value="needs_documents">Needs documents downloaded</option>
           <option value="looks_ready">Looks ready</option>
         </select>
-        <select value={source} onChange={(e) => setSource(e.target.value)} style={field}>
+        <select aria-label="Filter by source" value={source} onChange={(e) => setSource(e.target.value)} style={field}>
           <option value="all">Every source</option>
           {sources.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select value={company} onChange={(e) => setCompany(e.target.value)} style={field}>
+        <select aria-label="Filter by company" value={company} onChange={(e) => setCompany(e.target.value)} style={field}>
           <option value="all">Every company</option>
           {companies.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} style={field}>
+        <select aria-label="Sort order" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} style={field}>
           <option value="first_seen">Sort: newest first</option>
           <option value="closing_date">Sort: closing soonest</option>
           <option value="confidence">Sort: lowest confidence first</option>

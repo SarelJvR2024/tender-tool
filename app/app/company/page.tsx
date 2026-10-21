@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { expiryStatus, type StatusChip } from "@/lib/dates";
+import { computeBidReadiness, type ReadinessResult } from "@/lib/readiness";
+import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
 import { saveDocumentTemplate, updateCompanyProfile, uploadVaultDocument } from "./actions";
 import {
   COMPANY_DOCUMENT_TYPES,
@@ -164,6 +166,33 @@ export default async function CompanyPage({
     registerCounts.properties = c.count ?? 0;
   }
 
+  // Bid readiness (header badge) - reuses the row already fetched above plus
+  // registerCounts.principals; only cv_uploads/experience_items need their
+  // own query. Scoring itself lives in lib/readiness.ts (pure, unit-tested)
+  // so this page, the dashboard and the onboarding end screen can never
+  // quietly disagree - see lib/companyReadinessData.ts.
+  let readiness: ReadinessResult | null = null;
+  if (row && !editing) {
+    const [{ data: cvRows }, { count: experienceCount }] = await Promise.all([
+      supabase.from("cv_uploads").select("person_id"),
+      supabase.from("experience_items").select("id", { count: "exact", head: true }),
+    ]);
+    readiness = computeBidReadiness({
+      legalName: row.legal_name,
+      csdSupplierNumber: row.csd_supplier_number,
+      taxPin: row.sars_tcs_pin,
+      taxPinExpiry: row.sars_tcs_pin_expiry,
+      beeLevel: row.bee_level,
+      beeProofExpiry: row.bee_proof_expiry,
+      cidbGrading: row.cidb_grading,
+      cidbExpiry: row.cidb_expiry,
+      bankConfirmationValidUntil: row.bank_confirmation_letter_valid_until,
+      principalCount: registerCounts.principals,
+      peopleWithCvCount: new Set((cvRows ?? []).map((r) => r.person_id as string)).size,
+      experienceProjectCount: experienceCount ?? 0,
+    });
+  }
+
   return (
     <AppShell>
       <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
@@ -178,6 +207,12 @@ export default async function CompanyPage({
             </a>
           )}
         </div>
+
+        {readiness && (
+          <div style={{ marginBottom: 16 }}>
+            <BidReadinessCard result={readiness} size="compact" />
+          </div>
+        )}
 
         {(loadError || !row) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", fontSize: 13, color: "#B91C1C" }}>

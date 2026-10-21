@@ -3,8 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "../_components/AuthShell";
+import { PasswordInput } from "../_components/PasswordInput";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 /**
  * Google and Microsoft OAuth, plus email/password for anyone who'd rather
@@ -20,16 +25,13 @@ import { AuthShell } from "../_components/AuthShell";
 // this flag exists to stop a real visitor from hitting again).
 const MICROSOFT_AUTH_READY = false;
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
-const OAUTH_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", marginBottom: 10, borderRadius: 8, border: "1px solid #E3E6EA", background: "#FFFFFF", fontSize: 14, fontWeight: 600, color: "#16233B", cursor: "pointer", boxSizing: "border-box" };
-const LABEL: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4, textAlign: "left" };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 14, boxSizing: "border-box", marginBottom: 14 };
-const PRIMARY_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", borderRadius: 8, border: "none", background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, cursor: "pointer", boxSizing: "border-box" };
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -47,9 +49,19 @@ export default function LoginPage() {
     });
   };
 
+  function validate(): boolean {
+    const next: typeof fieldErrors = {};
+    if (!EMAIL_PATTERN.test(email.trim())) next.email = "Enter a valid email address.";
+    if (!password) next.password = "Enter your password.";
+    setFieldErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
   async function handlePasswordSignIn(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
+    if (!validate()) return;
+
     setPending(true);
     const supabase = createClient();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -67,42 +79,63 @@ export default function LoginPage() {
 
   return (
     <AuthShell>
-      <div style={CARD}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Welcome back</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 28px" }}>Sign in to continue</p>
+      <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-9 text-center shadow-sm">
+        <h1 className="mb-1 font-display text-xl font-medium text-foreground">Welcome back</h1>
+        <p className="mb-7 text-sm text-muted-foreground">Sign in to continue</p>
 
-        <button onClick={() => signInWith("google")} style={OAUTH_BUTTON}>
+        <Button variant="outline" className="mb-2.5 h-11 w-full" onClick={() => signInWith("google")}>
           Continue with Google
-        </button>
+        </Button>
         {MICROSOFT_AUTH_READY && (
-          <button onClick={() => signInWith("azure")} style={OAUTH_BUTTON}>
+          <Button variant="outline" className="mb-2.5 h-11 w-full" onClick={() => signInWith("azure")}>
             Continue with Microsoft
-          </button>
+          </Button>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "20px 0" }}>
-          <div style={{ flex: 1, height: 1, background: "#E3E6EA" }} />
-          <span style={{ fontSize: 11, color: "#5B6472" }}>or</span>
-          <div style={{ flex: 1, height: 1, background: "#E3E6EA" }} />
+        <div className="my-5 flex items-center gap-2.5">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-[11px] text-muted-foreground">or</span>
+          <div className="h-px flex-1 bg-border" />
         </div>
 
-        <form onSubmit={handlePasswordSignIn}>
-          <label style={LABEL} htmlFor="email">Email</label>
-          <input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} style={INPUT} />
+        <form onSubmit={handlePasswordSignIn} noValidate>
+          <div className="mb-3.5 text-left">
+            <Label htmlFor="email" className="mb-1.5">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={!!fieldErrors.email}
+              className="h-11"
+            />
+            {fieldErrors.email && <p className="mt-1 text-xs text-destructive">{fieldErrors.email}</p>}
+          </div>
 
-          <label style={LABEL} htmlFor="password">Password</label>
-          <input id="password" type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} style={INPUT} />
+          <div className="mb-1 text-left">
+            <Label htmlFor="password" className="mb-1.5">Password</Label>
+            <PasswordInput
+              id="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={!!fieldErrors.password}
+            />
+            {fieldErrors.password && <p className="mt-1 text-xs text-destructive">{fieldErrors.password}</p>}
+          </div>
 
-          {error && <p style={{ color: "#B91C1C", fontSize: 12, textAlign: "left", margin: "-6px 0 14px" }}>{error}</p>}
+          {error && <p className="mt-3 text-left text-xs text-destructive">{error}</p>}
 
-          <button type="submit" disabled={pending} style={{ ...PRIMARY_BUTTON, opacity: pending ? 0.6 : 1 }}>
+          <Button type="submit" disabled={pending} className="mt-4 h-11 w-full">
+            {pending && <Loader2 className="size-4 animate-spin" />}
             {pending ? "Signing in..." : "Sign in"}
-          </button>
+          </Button>
         </form>
 
-        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 16, fontSize: 12 }}>
-          <Link href="/forgot-password" style={{ color: "#5B6472", textDecoration: "none" }}>Forgot password?</Link>
-          <Link href="/signup" style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Create an account</Link>
+        <div className="mt-4 flex justify-between text-xs">
+          <Link href="/forgot-password" className="text-muted-foreground hover:text-foreground">Forgot password?</Link>
+          <Link href="/signup" className="font-medium text-foreground hover:underline">Create an account</Link>
         </div>
       </div>
     </AuthShell>

@@ -536,6 +536,27 @@ def _norm_area(s):
     return re.sub(r"[^a-z]", "", s)
 
 
+def _norm_area_words(s):
+    """Same administrative-word stripping as _norm_area(), but keeps spaces
+    between what's left - used only for the word-boundary substring check in
+    _area_matches(). _norm_area() collapses straight to bare letters with no
+    word boundaries at all, which let a genuinely different place be scored
+    as a locality "match" purely because its name happens to contain another
+    place's name as a run of letters - confirmed live, 2026-10-21: a company
+    office in "Kannaland" (Western Cape) matched a tender's own locality row
+    for "Nala" (a Free State local municipality, nothing to do with
+    Kannaland) because the bare letters "nala" sit inside "kannaland" -
+    awarding real preference points for an office nowhere near the required
+    area. Keeping spaces lets the substring check require a whole word (or
+    phrase), which still matches the rule's real intended case ("City of
+    Tshwane" vs "Tshwane" - "city" isn't stripped, but "tshwane" is still a
+    whole word inside it) while rejecting a coincidental letter run."""
+    s = re.sub(r"\b(the|boundaries|of|municipal|municipality|area|jurisdiction|local|district|metropolitan|metro|province)\b",
+               " ", (s or "").lower())
+    s = re.sub(r"[^a-z\s]", " ", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
 def _province_of(name):
     key = re.sub(r"[^a-z ]", " ", (name or "").lower()).strip()
     key = re.sub(r"\s+", " ", key)
@@ -663,11 +684,24 @@ def _area_matches(area, office):
     a = _norm_area(area)
     if not a:
         return False
+    aw = _norm_area_words(area)
     for f in ("district_municipality", "local_municipality", "town"):
         v = _norm_area(office.get(f))
-        if v and (a == v or difflib.SequenceMatcher(None, a, v).ratio() >= 0.85 or (len(v) >= 6 and (v in a or a in v))):
+        if not v:
+            continue
+        if a == v or difflib.SequenceMatcher(None, a, v).ratio() >= 0.85:
+            return True
+        vw = _norm_area_words(office.get(f))
+        if len(vw) >= 6 and (_word_in(vw, aw) or _word_in(aw, vw)):
             return True
     return False
+
+
+def _word_in(needle, haystack):
+    """Whole-word(s) substring: needle must appear in haystack bounded by
+    spaces or the string's own edges, not as an arbitrary run of letters
+    (see _norm_area_words()'s own docstring)."""
+    return bool(needle) and re.search(r"(?:^|\s)" + re.escape(needle) + r"(?:$|\s)", haystack) is not None
 
 
 def match_locality(loc, offices):
