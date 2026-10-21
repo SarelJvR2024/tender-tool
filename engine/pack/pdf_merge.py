@@ -56,7 +56,7 @@ ENGINE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 sys.path.insert(0, os.path.join(ENGINE_DIR, "cv"))
 sys.path.insert(0, os.path.join(ENGINE_DIR, "pack_generator"))
 sys.path.insert(0, ENGINE_DIR)
-from generate_cv import _convert_to_pdf  # noqa: E402
+from generate_cv import _convert_to_pdf, SAST  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -108,14 +108,23 @@ def expiry_warning(expiry, closing, today=None):
     """Warning text for a dated document that is NOT valid on the closing date
     (or, with no closing date, already lapsed) - None when it is valid or the
     date is unknown. Same rule as app/lib/tenderCompliance.ts
-    validityAtClosing(): valid ON the closing day counts."""
+    validityAtClosing(): valid ON the closing day counts.
+
+    `today`'s own fallback is SAST-anchored (Finding 37/38's own bug class:
+    a bridge worker container has no TZ set and runs in UTC by default, so
+    a naive datetime.date.today() is one calendar day behind the real SAST
+    date for the 00:00-01:59 SAST window every day) - confirmed 2026-10-21:
+    a document that expired exactly YESTERDAY by the real calendar was
+    silently NOT flagged "EXPIRED" in the assembled submission pack during
+    that window, because the naive fallback still thought it was yesterday
+    too."""
     if not expiry:
         return None
     try:
         exp = datetime.date.fromisoformat(str(expiry)[:10])
     except ValueError:
         return None
-    today = today or datetime.date.today()
+    today = today or datetime.datetime.now(SAST).date()
     try:
         close = datetime.date.fromisoformat(str(closing)[:10]) if closing else None
     except ValueError:

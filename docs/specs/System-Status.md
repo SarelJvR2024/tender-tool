@@ -478,6 +478,32 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-21, standing QA/robustness review - fifty-fourth run): a real submission pack's own compliance warning could silently go missing - the last two confirmed instances of the naive-UTC-date bug closed
+
+Orientation: continuing the deliberate, one-by-one triage of the 9 remaining naive
+`date.today()` instances from the fifty-first run's own grep. 7 checked and found cosmetic/
+internal/self-healing (no fix needed - see findings doc for the per-instance reasoning); 2
+confirmed real.
+
+**Finding 39 (fixed, severe):** `pdf_merge.py`'s `expiry_warning()` decides whether a dated
+document gets flagged "EXPIRED" in the assembled SANRAL submission pack's own warnings. Its
+naive `today` meant a document that actually expired real-yesterday evaluated as NOT expired
+during the bad window - a real compliance warning silently missing from an actual submission
+pack, confirmed by direct reproduction. `process_pack_jobs.py`'s `sync_position_suggestions()`
+had the same bug, wasting a re-ranking cycle on an already-closed tender and risking the same
+rounding-boundary ranking-order issue as Finding 38 for a tender with no closing date on file.
+
+**Fix:** both files now reuse `generate_cv.SAST` via their existing cross-module imports rather
+than defining a fourth local copy.
+
+**Verification:** new `engine/pack/test_pdf_merge.py` (first test file for either module), 3
+checks including the deliberate "don't false-flag a document valid today" mirror case. The test
+suite's own first draft had the identical near-miss as Finding 38's test (missed the regression
+entirely); caught and fixed before trusting it, then confirmed it genuinely catches both bugs.
+`test_form_field_audit.py` and `test_general_bridge.py` still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-fourth run" (Finding 39).
+
 ## This pass (2026-10-21, standing QA/robustness review - fifty-third run): closed one of last cycle's own deferred naive-UTC-date instances, with a real trigger date confirmed rather than assumed
 
 Orientation: CV engine - the one remaining area without a fresh pass of my own this session.

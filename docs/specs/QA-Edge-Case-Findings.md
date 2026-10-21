@@ -2553,3 +2553,83 @@ py_compile` clean.
 **Still deferred, unchanged:** the other 9 naive `date.today()` instances from the fifty-first
 run's own list - each would need the same "does a real trigger actually exist" check before
 fixing, not assumed from the bug class alone.
+
+## 2026-10-21 (fifty-fourth run): closing out more of the deferred naive-UTC-date list - a real submission pack could silently omit a document's own expiry warning
+
+**Why this area:** continuing the deliberate, one-by-one triage of the 9 remaining naive
+`date.today()` instances logged by the fifty-first run's own repo-wide grep. Gave each of the 9
+its own real look (per the fifty-third run's own stated discipline) rather than fixing or
+dismissing them as a batch.
+
+**Triage results, each checked individually:**
+- `pack_generator/suggest_pack.py:179`, `pack/harness_pack.py:93`, `pack/assemble_pack.py:506`,
+  `fingerprint.py:181` - all four are cosmetic/internal-only: a "generated on" provenance
+  timestamp in a JSON/PDF-cover label never compared against anything, a test-harness-only
+  confirmation stamp (`admin_harness.py --pack`, not the production path), and a template-change
+  bookkeeping field. A one-day shift during the bad window prints a slightly-off label or
+  bookkeeping date, with no comparison logic anywhere reading it back - checked by reading every
+  call site, not assumed. Not fixed: no real consequence to close.
+- `company_documents.py:298` - a generated document's own printed date label, same "cosmetic
+  label" shape as the above (prints a date string, no comparison). Not fixed.
+- `discovery/etenders_national.py:275`, `discovery/gov_sources.py:209` - both are a discovery
+  feed's own "fetch releases published in the last N days" window upper bound. A one-day shift
+  could transiently exclude a release published on the exact real-today from one run's results -
+  but these are recurring, overlapping scheduled polls (same family as `watch_new_tenders.py`,
+  already fixed in the enterprise audit), so a release missed by one run's narrow window is
+  self-healing on the very next run. Lower priority than a one-shot event; logged, not fixed this
+  run, to keep this pass's scope to the two confirmed real, non-self-healing findings below.
+- `pack/pdf_merge.py:118` and `pack/process_pack_jobs.py:862` - both confirmed real, see Finding
+  39 below.
+
+### Finding 39 (CONFIRMED, FIXED, severe - a real submission pack's own compliance warning could go silently missing)
+
+**Where:** `engine/pack/pdf_merge.py`, `expiry_warning()`; `engine/pack/process_pack_jobs.py`,
+`sync_position_suggestions()`.
+
+**What was tested:** `expiry_warning()` is the function that decides whether a dated document
+(COID, B-BBEE proof, insurance, etc.) gets flagged "EXPIRED" in the assembled SANRAL submission
+pack's own warnings section (`app/lib/tenderCompliance.ts`'s `validityAtClosing()` rule, cross-
+referenced in this function's own docstring). It used `today = today or datetime.date.today()` -
+the naive-UTC bug class from Finding 37/38. Unlike Finding 37's exact-expiry-date trigger, this
+one is an inequality (`exp < today`): during the 00:00-01:59 SAST window, `today` still thinks
+it's real-yesterday, so a document that ACTUALLY expired real-yesterday (`exp == real_yesterday
+== naive_today`) evaluates `exp < naive_today` as False - no warning at all, for a document that
+is, by the real calendar, already expired. Reproduced directly: `expiry_warning("2026-10-20",
+None)` under the simulated bad-window clock (UTC 2026-10-20 23:30 = SAST 2026-10-21 01:30)
+returned `None` (no warning) pre-fix, when the real SAST date is already 2026-10-21 and the
+document expired the day before.
+
+`sync_position_suggestions()` (candidate ranking for SANRAL tender packs) had the same bug at
+`today = today or datetime.date.today()`, with two effects: (1) a tender that closed real-
+yesterday kept getting re-ranked for one extra cycle (`closing_date < today` false-negative,
+wasted work, not wrong data); (2) a tender with NO closing date on file at all falls back to the
+(possibly wrong) `today` as the date `rank_candidates()` scores experience-at-closing against -
+the identical rounding-boundary risk as Finding 38, one layer removed into candidate ranking
+order rather than a printed CV figure.
+
+**Fix:** both files now import and reuse `generate_cv.SAST` (via `pdf_merge.py`'s existing
+`from generate_cv import _convert_to_pdf` import, extended to also pull `SAST`; `process_pack_jobs.py`
+already imports from `pdf_merge`, extended the same way) rather than redefining a fourth local
+copy - `today = today or datetime.datetime.now(SAST).date()` in both places.
+
+**Verification:** new `engine/pack/test_pdf_merge.py` (first dedicated test file for either
+module): 3 checks - `expiry_warning()` now correctly flags the real-yesterday-expired document
+AND still does NOT falsely flag a document expiring exactly today (the deliberate mirror check,
+proving the fix isn't one-sided); `sync_position_suggestions()` against a small `FakeClient`
+(one tender closed real-yesterday) confirms it's now correctly skipped rather than re-ranked.
+**Proved all 3 actually catch the regression**, not just that they pass: the FIRST version of
+this test suite had the identical near-miss as Finding 38's own test - patching only
+`datetime.datetime.now` missed the reverted `date.today()` code path entirely (`0 failure(s)`
+when 2 were expected); caught this by deliberately reverting both fixes and checking the suite
+actually went red, fixed the test to patch `datetime.date.today` too, re-reverted, confirmed the
+corrected suite now genuinely fails (2 failures, including the exact wrong pre-fix ranking
+output), restored both fixes, confirmed clean again. Ran `engine/test_form_field_audit.py` and
+`engine/general/test_general_bridge.py` (both exercise adjacent pack-generation code) for
+regression safety - both still pass unchanged. `python3 -m py_compile` clean on all three
+changed files. Not run this pass: a full `admin_harness.py --pack` end-to-end LibreOffice build
+(several minutes per the enterprise audit's own prior timing) - the fix is narrowly scoped to two
+pure comparison functions already covered by direct reproduction, and the existing suites that do
+exercise the surrounding pack-assembly code show no regression.
+
+**Still deferred:** `etenders_national.py`/`gov_sources.py`'s self-healing discovery-window
+instances, logged above rather than fixed this run.
