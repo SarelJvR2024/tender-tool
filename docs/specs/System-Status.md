@@ -6,6 +6,17 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Kouga reader added, 2026-10-21 ~11:40 UTC** (`engine/discovery/kouga.py`, `363f042`) - the round-4
+catalog's own "needs a fuller comparison" flag turned out to be a real find, bigger than expected:
+`etenders_portal --buyer "kouga"` has only 4 rows against an own-site listing that runs 280 tenders
+across 28 real pages (confirmed from the page's own pagination, not guessed) - the earlier "high
+overlap" read was only comparing page 1 (where the few eTenders duplicates happen to sit). A full
+fetch takes ~50s from this sandbox. Same test discipline as every other reader this session.
+
+**Phase 2, third real batch sampled (15 more tenders, including a second independent City of
+Tshwane bulletin PDF - the Finding 42 fix correctly handled it, no false requirements shown).**
+No new bugs found this batch - a healthy result, not every batch needs to find one.
+
 **Lephalale reader added, 2026-10-21 ~10:50 UTC** (`engine/discovery/lephalale.py`, `35f6222`) -
 a confirmed real gap vs eTenders (zero results, independently re-verified). The municipality
 publishes periodic "batch" PDFs, each bundling several separate tenders (not the Finding 42
