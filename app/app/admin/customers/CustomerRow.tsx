@@ -21,64 +21,64 @@ export type Customer = {
 // Client-only for the expand/collapse, same pattern as SystemAlertRow and
 // HarnessRunRow - data is server-rendered by page.tsx, the test-company
 // toggle posts to the Server Action in ../actions.ts.
+//
+// Color-token migration (2026-10-21): was raw inline-CSSProperties
+// throughout - navy/muted/border/gold hex -> foreground/muted-foreground/
+// border/accent tokens, same mapping as every other admin row in this pass.
 export default function CustomerRow({ customer }: { customer: Customer }) {
   const [open, setOpen] = useState(false);
   const name = customer.csd_trading_name || customer.legal_name;
 
   return (
-    <div style={{ borderTop: "1px solid #ECEEF1" }}>
+    <div className="border-t border-border first:border-t-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%", display: "flex", flexWrap: "wrap", gap: "6px 14px", alignItems: "center",
-          padding: "12px 18px", background: open ? "#FFFFFF" : "transparent", border: "none",
-          textAlign: "left", cursor: "pointer", font: "inherit", boxSizing: "border-box",
-        }}
+        className={`flex min-h-11 w-full flex-wrap items-center gap-x-3.5 gap-y-1.5 px-4.5 py-3 text-left font-[inherit] ${open ? "bg-card" : "bg-transparent"}`}
       >
-        <span style={{ flex: "1 1 220px", minWidth: 0, fontSize: 13.5, fontWeight: 600, color: "#16233B", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span className="min-w-0 flex-[1_1_220px] overflow-hidden text-ellipsis whitespace-nowrap text-[13.5px] font-semibold text-foreground">
           {name}
           {customer.csd_trading_name && customer.csd_trading_name !== customer.legal_name && (
-            <span style={{ fontWeight: 400, color: "#8A93A0" }}> ({customer.legal_name})</span>
+            <span className="font-normal text-muted-foreground"> ({customer.legal_name})</span>
           )}
         </span>
         {customer.is_test_company && (
-          <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "#ECEEF1", color: "#5B6472" }}>
+          <span className="inline-flex rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
             test company
           </span>
         )}
-        <span style={{ fontSize: 12, color: "#5B6472" }}>{customer.member_count} member{customer.member_count === 1 ? "" : "s"}</span>
-        <span style={{ fontSize: 12, color: "#5B6472" }}>{customer.people_count} people</span>
-        <span style={{ fontSize: 12, color: "#5B6472" }}>{customer.tenders_pursued_count} pack{customer.tenders_pursued_count === 1 ? "" : "s"}</span>
-        <span style={{ fontSize: 11, color: "#8A93A0" }}>
+        <span className="text-xs text-muted-foreground">{customer.member_count} member{customer.member_count === 1 ? "" : "s"}</span>
+        <span className="text-xs text-muted-foreground">{customer.people_count} people</span>
+        <span className="text-xs text-muted-foreground">{customer.tenders_pursued_count} pack{customer.tenders_pursued_count === 1 ? "" : "s"}</span>
+        <span className="text-[11px] text-muted-foreground">
           joined {new Date(customer.created_at).toLocaleDateString()}
-          <span style={{ marginLeft: 6, color: "#D97706" }}>{open ? "hide ▲" : "open ▼"}</span>
+          <span className="ml-1.5 text-accent">{open ? "hide ▲" : "open ▼"}</span>
         </span>
       </button>
 
       {open && (
-        <div style={{ padding: "4px 18px 18px 18px", background: "#FFFFFF" }}>
-          <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+        <div className="bg-card px-4.5 pb-4.5 pt-1">
+          <div className="mb-2.5 text-xs text-muted-foreground">
             Last activity {customer.last_activity_at ? new Date(customer.last_activity_at).toLocaleString() : "none recorded"}
           </div>
 
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, overflow: "hidden", marginBottom: 12 }}>
-            {customer.members.length === 0 && <div style={{ padding: "10px 14px", fontSize: 12, color: "#8A93A0" }}>No members.</div>}
+          <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
+            {customer.members.length === 0 && <div className="px-3.5 py-2.5 text-xs text-muted-foreground">No members.</div>}
             {customer.members.map((m) => (
-              <div key={m.user_id} style={{ display: "flex", gap: 10, padding: "8px 14px", fontSize: 12, borderTop: "1px solid #ECEEF1" }}>
-                <span style={{ flex: "1 1 auto", color: "#16233B" }}>{m.email}</span>
-                <span style={{ color: "#5B6472" }}>{m.role}</span>
-                <span style={{ color: "#8A93A0" }}>since {new Date(m.joined_at).toLocaleDateString()}</span>
+              <div key={m.user_id} className="flex gap-2.5 border-t border-border px-3.5 py-2 text-xs first:border-t-0">
+                <span className="flex-1 text-foreground">{m.email}</span>
+                <span className="text-muted-foreground">{m.role}</span>
+                <span className="text-muted-foreground">since {new Date(m.joined_at).toLocaleDateString()}</span>
               </div>
             ))}
           </div>
 
-          <form action={setTestCompany} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <form action={setTestCompany} className="flex items-center gap-2.5">
             <input type="hidden" name="company_id" value={customer.id} />
             <input type="hidden" name="is_test" value={(!customer.is_test_company).toString()} />
-            <button type="submit" style={{ fontSize: 12, padding: "7px 12px", borderRadius: 7, border: "1px solid #E3E6EA", background: "#FFFFFF", color: "#16233B", cursor: "pointer" }}>
+            <button type="submit" className="min-h-11 rounded-md border border-border bg-card px-3 text-xs text-foreground">
               {customer.is_test_company ? "Unmark as test company" : "Mark as test company"}
             </button>
-            <span style={{ fontSize: 11, color: "#8A93A0" }}>
+            <span className="text-[11px] text-muted-foreground">
               A test company never counts in customer-facing reports or metrics.
             </span>
           </form>

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
-const STEP_TITLES = ["Company basics", "Compliance", "Where you work", "Your people", "What to bid on"];
+const STEP_TITLES = ["Company basics", "Compliance", "Where you work", "Your people", "What to bid on", "Choose a plan"];
 export const TOTAL_STEPS = STEP_TITLES.length;
 
 /**

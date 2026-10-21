@@ -22,69 +22,75 @@ type Props = {
 const KIND_LABEL = { forms: "Form fill", pack: "Submission pack" } as const;
 const COUNT_LABEL: Record<string, string> = { confirmed: "confirmed", computed: "computed", assumed_default: "assumed default", missing: "missing" };
 
+// Tailwind's scanner needs full, static class strings - see the same note
+// in SystemAlertRow.tsx.
+const CHIP_TONE_CLASS = {
+  destructive: "bg-destructive/10 text-destructive border-destructive/20",
+  warning: "bg-warning/10 text-warning border-warning/20",
+  success: "bg-success/10 text-success border-success/20",
+} as const;
+
+function chipClass(tone: keyof typeof CHIP_TONE_CLASS) {
+  return `inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${CHIP_TONE_CLASS[tone]}`;
+}
+
+const COUNT_TEXT_CLASS: Record<string, string> = {
+  missing: "text-destructive",
+  assumed_default: "text-warning",
+};
+
 // Client-only because of the expand/collapse and document-picker state - the
 // data itself is server-rendered by page.tsx (signed URLs included), and the
 // review buttons post to Server Actions in ./actions.ts.
+//
+// Color-token migration (2026-10-21): was raw inline-CSSProperties
+// throughout - see SystemAlertRow.tsx (the near-identical sibling row this
+// shares its whole visual pattern with) for the shared reasoning on the
+// soft-tint chip convention and accent-for-the-one-CTA rule.
 export default function HarnessRunRow(props: Props) {
   const { runId, testCompany, tenderRef, kind, status, runAt, details, counts, documents, reviewedAt, reviewNote } = props;
   const [open, setOpen] = useState(false);
   const [docIndex, setDocIndex] = useState(0);
   const ok = status === "ok";
-  const chip = ok
-    ? { bg: "#DCFCE7", color: "#15803D", label: "ok" }
-    : { bg: "#FEE2E2", color: "#B91C1C", label: "flagged" };
-  const review = reviewedAt
-    ? { bg: "#DCFCE7", color: "#15803D", label: "reviewed" }
-    : { bg: "#FEF3C7", color: "#B45309", label: "not reviewed" };
+  const chipTone = ok ? ("success" as const) : ("destructive" as const);
+  const chipLabel = ok ? "ok" : "flagged";
+  const reviewTone = reviewedAt ? ("success" as const) : ("warning" as const);
+  const reviewLabel = reviewedAt ? "reviewed" : "not reviewed";
   const doc = documents[docIndex] ?? null;
 
   return (
-    <div style={{ borderTop: "1px solid #ECEEF1" }}>
+    <div className="border-t border-border first:border-t-0">
       <button
         onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%",
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "6px 12px",
-          alignItems: "center",
-          padding: "11px 18px",
-          background: open ? "#FFFFFF" : "transparent",
-          border: "none",
-          textAlign: "left",
-          cursor: "pointer",
-          font: "inherit",
-          boxSizing: "border-box",
-        }}
+        className={`flex min-h-11 w-full flex-wrap items-center gap-x-3 gap-y-1.5 px-4.5 py-2.5 text-left font-[inherit] ${open ? "bg-card" : "bg-transparent"}`}
       >
-        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: chip.bg, color: chip.color }}>
-          {chip.label}
+        <span className={chipClass(chipTone)}>{chipLabel}</span>
+        <span className="text-[13px] font-semibold text-foreground">{testCompany}</span>
+        <span className="min-w-0 flex-[1_1_220px]">
+          <span className="font-mono text-xs text-muted-foreground">{tenderRef}</span>
+          <span className="ml-1.5 text-[11px] text-muted-foreground">{KIND_LABEL[kind]}</span>
         </span>
-        <span style={{ fontSize: 13, color: "#16233B", fontWeight: 600 }}>{testCompany}</span>
-        <span style={{ flex: "1 1 220px", minWidth: 0 }}>
-          <span style={{ fontSize: 12, fontFamily: "monospace", color: "#4B5563" }}>{tenderRef}</span>
-          <span style={{ fontSize: 11, color: "#8A93A0", marginLeft: 6 }}>{KIND_LABEL[kind]}</span>
-        </span>
-        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: review.bg, color: review.color }}>
-          {review.label}
-        </span>
-        <span style={{ fontSize: 11, color: "#8A93A0" }}>
+        <span className={chipClass(reviewTone)}>{reviewLabel}</span>
+        <span className="text-[11px] text-muted-foreground">
           {new Date(runAt).toLocaleString()}
-          <span style={{ marginLeft: 6, color: "#D97706" }}>{open ? "hide ▲" : "open ▼"}</span>
+          <span className="ml-1.5 text-accent">{open ? "hide ▲" : "open ▼"}</span>
         </span>
       </button>
 
       {open && (
-        <div style={{ padding: "4px 18px 18px 18px", background: "#FFFFFF" }}>
+        <div className="bg-card px-4.5 pb-4.5 pt-1">
           {details && (
-            <div style={{ fontSize: 12, color: "#4B5563", whiteSpace: "pre-wrap", fontFamily: "monospace", marginBottom: 10 }}>
+            <div className="mb-2.5 whitespace-pre-wrap font-mono text-xs text-muted-foreground">
               {details}
             </div>
           )}
           {counts && Object.keys(counts).length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+            <div className="mb-3 flex flex-wrap gap-1.5">
               {Object.entries(counts).map(([k, n]) => (
-                <span key={k} style={{ fontSize: 11, padding: "2px 9px", borderRadius: 100, border: "1px solid #E3E6EA", background: "#FFFFFF", color: k === "missing" ? "#B91C1C" : k === "assumed_default" ? "#B45309" : "#4B5563" }}>
+                <span
+                  key={k}
+                  className={`rounded-full border border-border bg-card px-2.5 py-0.5 text-[11px] ${COUNT_TEXT_CLASS[k] ?? "text-muted-foreground"}`}
+                >
                   {n} {COUNT_LABEL[k] ?? k}
                 </span>
               ))}
@@ -93,43 +99,40 @@ export default function HarnessRunRow(props: Props) {
 
           {/* Generated documents, rendered inline */}
           {documents.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+            <div className="mb-3 text-xs text-muted-foreground">
               No generated document stored for this run{status !== "ok" ? " (the run was refused or failed - see above)" : ""}.
             </div>
           ) : (
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginBottom: 8 }}>
+            <div className="mb-3.5">
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
                 {documents.map((d, i) => (
                   <button
                     key={d.label}
                     onClick={() => setDocIndex(i)}
-                    style={{
-                      font: "inherit", fontSize: 12, padding: "5px 11px", borderRadius: 7, cursor: "pointer",
-                      border: i === docIndex ? "1px solid #16233B" : "1px solid #E3E6EA",
-                      background: i === docIndex ? "#16233B" : "#FFFFFF",
-                      color: i === docIndex ? "#FFFFFF" : "#16233B",
-                    }}
+                    className={`min-h-11 rounded-md border px-2.5 text-xs font-[inherit] ${
+                      i === docIndex ? "border-foreground bg-foreground text-white" : "border-border bg-card text-foreground"
+                    }`}
                   >
                     {d.label}
                   </button>
                 ))}
                 {doc?.url && (
-                  <a href={doc.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: "#D97706", marginLeft: "auto" }}>
+                  <a href={doc.url} target="_blank" rel="noopener noreferrer" className="ml-auto text-xs font-medium text-accent">
                     {doc.isPdf ? "Open in new tab ↗" : "Download ↓"}
                   </a>
                 )}
               </div>
               {!doc?.url ? (
-                <div style={{ fontSize: 12, color: "#B91C1C" }}>Could not create a link to this document (missing from storage?).</div>
+                <div className="text-xs text-destructive">Could not create a link to this document (missing from storage?).</div>
               ) : doc.isPdf ? (
                 <iframe
                   key={doc.url}
                   src={doc.url}
                   title={`${testCompany} - ${tenderRef} - ${doc.label}`}
-                  style={{ width: "100%", height: "75vh", border: "1px solid #E3E6EA", borderRadius: 9, background: "#FFFFFF" }}
+                  className="h-[75vh] w-full rounded-lg border border-border bg-card"
                 />
               ) : (
-                <div style={{ fontSize: 12, color: "#5B6472" }}>
+                <div className="text-xs text-muted-foreground">
                   Stored as .docx (LibreOffice wasn&apos;t available to make a PDF preview) - download to read it.
                 </div>
               )}
@@ -137,33 +140,33 @@ export default function HarnessRunRow(props: Props) {
           )}
 
           {/* Review */}
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "12px 14px" }}>
+          <div className="rounded-lg border border-border bg-card p-3.5">
             {reviewedAt ? (
-              <form action={clearHarnessRunReview} style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+              <form action={clearHarnessRunReview} className="flex items-start gap-3">
                 <input type="hidden" name="run_id" value={runId} />
-                <div style={{ flex: 1, fontSize: 12, color: "#15803D" }}>
+                <div className="flex-1 text-xs text-success">
                   Reviewed {new Date(reviewedAt).toLocaleString()}
-                  {reviewNote && <div style={{ color: "#4B5563", marginTop: 4, whiteSpace: "pre-wrap" }}>{reviewNote}</div>}
+                  {reviewNote && <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{reviewNote}</div>}
                 </div>
-                <button type="submit" style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #E3E6EA", background: "#FFFFFF", color: "#16233B", cursor: "pointer" }}>
+                <button type="submit" className="min-h-11 rounded-md border border-border bg-card px-3 text-xs text-foreground">
                   Undo review
                 </button>
               </form>
             ) : (
-              <form action={markHarnessRunReviewed} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+              <form action={markHarnessRunReviewed} className="flex items-start gap-2.5">
                 <input type="hidden" name="run_id" value={runId} />
                 <textarea
                   name="note"
                   rows={2}
                   placeholder="Note (optional) - e.g. what you checked"
-                  style={{ flex: 1, font: "inherit", fontSize: 12, padding: "7px 9px", border: "1px solid #E3E6EA", borderRadius: 7, resize: "vertical" }}
+                  className="flex-1 resize-y rounded-md border border-border px-2.5 py-1.5 font-[inherit] text-xs"
                 />
-                <button type="submit" style={{ fontSize: 12, fontWeight: 600, padding: "8px 14px", borderRadius: 7, border: "none", background: "#D97706", color: "#FFFFFF", cursor: "pointer" }}>
+                <button type="submit" className="min-h-11 rounded-md bg-accent px-3.5 text-xs font-semibold text-accent-foreground">
                   Mark reviewed
                 </button>
               </form>
             )}
-            <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 6 }}>
+            <div className="mt-1.5 text-[11px] text-muted-foreground">
               A review stays while later runs produce the same result; a changed result clears it automatically.
             </div>
           </div>

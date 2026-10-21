@@ -3,10 +3,7 @@
 import { useMemo, useState } from "react";
 import OpportunityRow, { type OpportunityRowData } from "./OpportunityRow";
 
-const field: React.CSSProperties = {
-  minHeight: 36, padding: "0 10px", borderRadius: 8, border: "1px solid #E3E6EA",
-  fontSize: 12.5, fontFamily: "system-ui, sans-serif", color: "#16233B", background: "#FFFFFF",
-};
+const field = "min-h-11 rounded-lg border border-border bg-card px-2.5 text-[12.5px] text-foreground";
 
 type SortKey = "first_seen" | "closing_date" | "confidence";
 
@@ -42,34 +39,34 @@ export default function OpportunityTable({ rows }: { rows: OpportunityRowData[] 
 
   return (
     <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-        <select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} style={field}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <select aria-label="Filter by status" value={status} onChange={(e) => setStatus(e.target.value)} className={field}>
           <option value="all">Every status</option>
           <option value="flagged">Flagged</option>
           <option value="needs_documents">Needs documents downloaded</option>
           <option value="looks_ready">Looks ready</option>
         </select>
-        <select aria-label="Filter by source" value={source} onChange={(e) => setSource(e.target.value)} style={field}>
+        <select aria-label="Filter by source" value={source} onChange={(e) => setSource(e.target.value)} className={field}>
           <option value="all">Every source</option>
           {sources.map((s) => <option key={s} value={s}>{s}</option>)}
         </select>
-        <select aria-label="Filter by company" value={company} onChange={(e) => setCompany(e.target.value)} style={field}>
+        <select aria-label="Filter by company" value={company} onChange={(e) => setCompany(e.target.value)} className={field}>
           <option value="all">Every company</option>
           {companies.map((c) => <option key={c} value={c}>{c}</option>)}
         </select>
-        <select aria-label="Sort order" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} style={field}>
+        <select aria-label="Sort order" value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className={field}>
           <option value="first_seen">Sort: newest first</option>
           <option value="closing_date">Sort: closing soonest</option>
           <option value="confidence">Sort: lowest confidence first</option>
         </select>
-        <span style={{ fontSize: 12, color: "#8A93A0", alignSelf: "center" }}>
+        <span className="self-center text-xs text-muted-foreground/70">
           {filtered.length} of {rows.length}
         </span>
       </div>
 
-      <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
         {filtered.length === 0 && (
-          <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>No opportunities match these filters.</div>
+          <div className="p-4.5 text-[13px] text-muted-foreground">No opportunities match these filters.</div>
         )}
         {filtered.map((r) => <OpportunityRow key={r.id} row={r} />)}
       </div>

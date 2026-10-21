@@ -7,6 +7,9 @@ import { randomUUID } from "node:crypto";
 import { buildCompanyUpdate } from "@/lib/companyProfileUpdate";
 import { PROVINCES, OFFICE_KINDS } from "@/lib/locality";
 import { safeFileName } from "@/lib/safeFileName";
+import { sendTransactionalEmail } from "@/lib/resendEmail";
+import { welcomeEmail } from "@/lib/emailTemplates";
+import { siteUrl } from "@/lib/siteUrl";
 
 /**
  * The 5-step onboarding wizard's own actions - thin, redirect-to-the-next-
@@ -49,6 +52,20 @@ export async function createCompanyBasics(formData: FormData) {
   if (Object.keys(update).length > 0) {
     const { error: updateError } = await supabase.from("companies").update(update).eq("id", companyId);
     if (updateError) console.error("companies update failed after create (onboarding step 1)", updateError);
+  }
+
+  // Welcome email - sent once, here, since this is the one moment a company
+  // (and its trial, via the companies_start_trial trigger - migration 0078)
+  // is actually created. Never blocks/fails the wizard: a Resend outage or
+  // missing RESEND_API_KEY (lib/resendEmail.ts logs and no-ops) must never
+  // stop someone from completing onboarding.
+  if (user.email) {
+    try {
+      const { subject, html, text } = welcomeEmail({ companyName: legalName, appUrl: await siteUrl() });
+      await sendTransactionalEmail({ to: user.email, subject, html, text });
+    } catch (e) {
+      console.error("Welcome email failed (non-fatal)", e);
+    }
   }
 
   revalidatePath("/onboarding");
@@ -174,5 +191,5 @@ export async function saveNotificationStep(formData: FormData) {
     redirect(`/onboarding?step=5&error=${encodeURIComponent("Could not save your email preference - try again. If it keeps happening, let us know.")}`);
   }
   revalidatePath("/onboarding");
-  redirect("/onboarding?step=done");
+  redirect("/onboarding?step=6");
 }

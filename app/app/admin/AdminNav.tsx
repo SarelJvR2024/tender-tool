@@ -21,17 +21,23 @@ const ADMIN_NAV_ITEMS: { key: AdminNavKey; href: string; label: string }[] = [
  * as ToolsHeader (app/app/tools/_components/ToolsHeader.tsx) for the public
  * tool pages' near-identical duplicated header - one shared list, one place
  * to add the next admin page.
+ *
+ * Color-token migration (2026-10-21): was raw inline-CSSProperties (navy
+ * #16233B for the active item, gold #D97706 for every link) - now
+ * text-foreground/text-accent, blue not gold, matching every other
+ * migrated nav in the app. Each item wrapped in its own min-h-11 flex
+ * item (was bare inline text with no padding) for a real touch target.
  */
 export function AdminNav({ active }: { active: AdminNavKey }) {
   return (
-    <div style={{ display: "flex", gap: 14, fontSize: 13, marginBottom: 12, flexWrap: "wrap" }}>
+    <div className="mb-3 flex flex-wrap gap-x-3.5 gap-y-1 text-[13px]">
       {ADMIN_NAV_ITEMS.map((item) =>
         item.key === active ? (
-          <span key={item.key} style={{ color: "#16233B", fontWeight: 600 }}>
+          <span key={item.key} className="flex min-h-11 items-center font-semibold text-foreground">
             {item.label}
           </span>
         ) : (
-          <Link key={item.key} href={item.href} style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>
+          <Link key={item.key} href={item.href} className="flex min-h-11 items-center font-semibold text-accent no-underline">
             {item.label}
           </Link>
         ),

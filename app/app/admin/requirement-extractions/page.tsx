@@ -59,11 +59,11 @@ export default async function AdminRequirementExtractionsPage({ searchParams }: 
 
   return (
     <AppShell>
-      <div style={{ padding: "24px 32px", maxWidth: 1200, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+      <div className="mx-auto w-full max-w-[1200px] p-4 sm:p-6 md:px-8 md:py-6">
         <AdminNav active="requirement-extractions" />
 
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Requirement extractions below {DEFAULT_THRESHOLD}/100</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 10px", maxWidth: 860 }}>
+        <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">Requirement extractions below {DEFAULT_THRESHOLD}/100</h1>
+        <p className="mb-2.5 max-w-[860px] text-[13px] text-muted-foreground">
           Every form, buyer form, returnable, role, person registration, CIDB and briefing item that
           engine/general/requirements.py read out of a tender&apos;s documents with a confidence below {DEFAULT_THRESHOLD}, across
           every tender&apos;s shared manifest and every company&apos;s own private-document override. This confidence is
@@ -72,12 +72,12 @@ export default async function AdminRequirementExtractionsPage({ searchParams }: 
           judging itself; it&apos;s just how strong the match was. Mark each item correct, corrected, or a false positive -
           those verdicts feed back into future extractions.
         </p>
-        <p style={{ fontSize: 12, color: "#8A93A0", margin: "0 0 16px" }}>
+        <p className="mb-4 text-xs text-muted-foreground/70">
           {rows.length} item{rows.length === 1 ? "" : "s"} below threshold.
         </p>
 
         {(error || actionError) && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             {error ? "Couldn't load the review queue - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}

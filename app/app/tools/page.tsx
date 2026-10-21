@@ -39,76 +39,53 @@ const TOOLS = [
   },
 ];
 
-// All four individual tool pages are navy/cream only, no amber accents -
-// the index cards' badges should match what the destination pages actually
-// look like instead of arbitrarily alternating amber/navy.
-const ACCENT = "#16233B";
-
+// Design-system migration (2026-10-21): was raw inline-CSSProperties with
+// the old navy/amber pairing (a hover highlight on each card used the old
+// gold #D97706) - now Tailwind + tokens throughout. The card badges read
+// bg-foreground/text-white (the deep navy ink, same pairing ToolsHeader
+// itself uses), and the one hover highlight reads the blue accent token
+// (hover:border-accent) rather than reintroducing gold - consistent with
+// "accent is the one highlight color" everywhere else in the app. Page
+// background moved from a flat white to bg-background (the app's own
+// neutral grey canvas) so the white tool cards read as lifted surfaces,
+// same card-on-canvas layering every other migrated page already uses.
 export default function ToolsIndexPage() {
   return (
-    <div style={{ minHeight: "100vh", background: "#FFFFFF", fontFamily: "system-ui, sans-serif" }}>
-      <style>{`
-        .tool-card { transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease; }
-        .tool-card:hover { border-color: #D97706; box-shadow: 0 4px 14px rgba(217, 119, 6, 0.14); transform: translateY(-1px); }
-      `}</style>
-
+    <div className="min-h-screen bg-background">
       <ToolsHeader showBackLink={false} />
 
-      <main style={{ maxWidth: 720, margin: "0 auto", padding: "40px 16px 64px", boxSizing: "border-box" }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>Free tender tools</h1>
-        <p style={{ fontSize: 14, color: "#5B6472", margin: "0 0 32px", lineHeight: 1.5 }}>
+      <main className="mx-auto max-w-[720px] px-4 pt-10 pb-16">
+        <h1 className="mb-2 font-display text-2xl font-bold text-foreground">Free tender tools</h1>
+        <p className="mb-8 text-sm leading-relaxed text-muted-foreground">
           No sign-up required. Each tool is correct against the actual South African regulation or public data table
           it&apos;s built on, not a guess - sources are cited on each page.
         </p>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div className="flex flex-col gap-3.5">
           {TOOLS.map((tool) => (
             <Link
               key={tool.href}
               href={tool.href}
-              className="tool-card"
-              style={{
-                display: "flex",
-                alignItems: "flex-start",
-                gap: 14,
-                background: "#FFFFFF",
-                border: "1px solid #E3E6EA",
-                borderLeft: `4px solid ${ACCENT}`,
-                borderRadius: 12,
-                padding: "20px 22px",
-                textDecoration: "none",
-                boxSizing: "border-box",
-              }}
+              className="flex items-start gap-3.5 rounded-xl border border-border border-l-4 border-l-foreground bg-card p-5 no-underline transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-accent hover:border-l-accent hover:shadow-md"
             >
-              <div
-                style={{
-                  flexShrink: 0,
-                  width: 36,
-                  height: 36,
-                  borderRadius: 8,
-                  background: ACCENT,
-                  color: "#FFFFFF",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: 12,
-                  fontWeight: 700,
-                }}
-              >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-xs font-bold text-white">
                 {tool.badge}
               </div>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: "#16233B", marginBottom: 6 }}>{tool.title}</div>
-                <div style={{ fontSize: 13, color: "#5B6472", lineHeight: 1.5 }}>{tool.blurb}</div>
+                <div className="mb-1.5 text-base font-bold text-foreground">{tool.title}</div>
+                <div className="text-[13px] leading-relaxed text-muted-foreground">{tool.blurb}</div>
               </div>
             </Link>
           ))}
         </div>
 
-        <p style={{ fontSize: 12, color: "#5B6472", marginTop: 40, lineHeight: 1.5 }}>
-          Built by <Link href="/" style={{ color: "#16233B", fontWeight: 600 }}>Tender Ready</Link> - correct, not
-          AI-guessed. These calculators are free and standalone; Tender Ready itself helps SA engineering/construction
-          firms find, track and prepare public-sector tender submissions.
+        <p className="mt-10 text-xs leading-relaxed text-muted-foreground">
+          Built by{" "}
+          <Link href="/" className="font-semibold text-foreground">
+            Tender Ready
+          </Link>{" "}
+          - correct, not AI-guessed. These calculators are free and standalone; Tender Ready itself helps SA
+          engineering/construction firms find, track and prepare public-sector tender submissions.
         </p>
       </main>
     </div>
