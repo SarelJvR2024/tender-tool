@@ -6,6 +6,49 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Submission-plan TypeScript port built, 2026-10-21 ~19:55 UTC** (`app/app/tenders/[id]/
+submission-plan-logic.ts` + its 24-check `.spec.ts`, `submission-plan-data.ts`) - the TS port
+flagged as the next concrete step in the entry just below. New files only, nothing touched on the
+actively-redesigned page cluster (`#35`-`#39`, entries above/below).
+
+- `submission-plan-logic.ts` covers only what had no existing classifier to reuse - forms,
+  buyer_forms, CIDB grading comparison, compulsory briefing, unrepresented gaps - each producing the
+  canonical `ReviewStatus`, via `reviewStatusToBidTask()`. Returnables/roles/questions are NOT
+  re-derived: `submission-plan-data.ts` calls the real `checkReturnable()`/`roleStatus()`/
+  `answerStatus()`/`signatureAnswerStatus()` directly, so the plan never disagrees with what Pack
+  Review already says about the exact same document or role.
+- **Real decision, checked against evidence before deciding (not a guess):** `FORM_STATUS_STYLE`
+  (`lib/generalTender.ts`) already colors `by_hand` forms AMBER ("Complete by hand"), the same color
+  as Provide - not red/Fix. So `by_hand` -> `needs_input`/Provide here too, not `missing`/Fix as a
+  first instinct might suggest (a form needing manual completion isn't itself a disqualification
+  risk, it's work only a person can do - matches Provide's own AGENTS.md definition exactly).
+  `auto`/`attach`/`overlay` -> `confirmed`/Verify (already styled green). Buyer forms follow the same
+  rule (overlay -> Verify, else -> Provide).
+- **CIDB grading comparison** (separate from the "cidb" returnable): no grading on file at all ->
+  `missing`/Fix (nothing to even compare); grading on file -> `needs_input`/Provide, NOT
+  `confirmed`/Verify - the engine admits it can't compare grading codes itself, so a human must
+  actually do the comparison, same reasoning `localityStatus()`'s own "unknown" case already uses.
+- **Compulsory briefing** -> always `needs_input`/Provide (an action only a person can physically
+  do - never Verify, nothing was filled; never Fix, it's not a document/data gap).
+- **Gaps** (the engine admitting it couldn't confidently determine something, after de-duplicating
+  against each by_hand/overlay form's own restated gap message, ported faithfully from
+  `submission_plan.py`'s own `_form_gap_prefixes`) -> `missing`/Fix - a real unresolved risk, unlike
+  a by_hand form where the engine succeeded and the task is simply known.
+- `submission-plan-data.ts` mirrors `general-pack-review-data.ts`'s own conventions exactly
+  (`cache()`-wrapped, per-section try/catch, same Supabase queries for company/tender_answers/
+  tender_roles/person_role_eligibility/CVs) and also calls `tenderTimeline()` for the separate,
+  non-step due-date warning. `returnableReviewStatus()` is a small, deliberate duplicate of
+  `general-pack-review-data.ts`'s own unexported function of the same name (that file is under
+  active edit by the UI/UX session today - out of scope here) - flagged to keep both in sync by hand
+  until one can safely export it.
+- All 44 vitest checks pass (24 new), `npm run typecheck`/`lint` both clean.
+
+**Still not done - the actual next step:** no UI card reads this snapshot yet. `page.tsx` just
+grew its own new `computeTenderReadiness()` unified score (`#39`, entry below) that flattens Pack
+Review's sections the same way - the submission plan's steps are a natural second input to that
+same score once a UI card for them exists, worth keeping in mind for whoever wires it rather than
+inventing a third, disagreeing readiness number.
+
 **Sarel decided all 4 submission-plan open questions, 2026-10-21 ~19:10 UTC - "go with your
 recommendations on all 4"**, with one real refinement to #3: agreed the plan itself only computes
 post-pursuit, but asked for a separate timeline warning - due dates before the **compulsory
