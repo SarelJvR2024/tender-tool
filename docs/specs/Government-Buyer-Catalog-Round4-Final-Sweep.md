@@ -47,3 +47,27 @@ pages, the key structural requirement every reader built this session has needed
 Not reached this pass (time budget): Makana, King Sabata Dalindyebo, Enoch Mgijima, Abaqulusi,
 Maluti-a-Phofung, KwaDukuza, Alfred Duma, Ngwathe - all still in the "real activity, no official
 URL confirmed" state from prior rounds, unchanged.
+
+## Addendum (2026-10-21, later the same day): Lephalale and Kouga built; Msukaligwa checked, not built
+
+**Lephalale** (`engine/discovery/lephalale.py`, `35f6222`) and **Kouga**
+(`engine/discovery/kouga.py`, `363f042`) are both now built and committed - see their own module
+docstrings and `System-Status.md` for what each one found. Kouga in particular turned out bigger
+than this file estimated: not "95 pages" (a misread somewhere upstream) but a confirmed 28 real
+pages, 280 tenders, only 4 of which are on eTenders at all.
+
+**Msukaligwa checked properly, not built this pass.** Its real listing (`/index.php/tenders-rfqs`)
+is clean and reachable (17 rows, a genuine "CLOSING DATE" column, format "13 November 2026 at
+12H00" - parseable with source_http's existing DMY format plus a small local pre-clean for the "at"
+and "H" time separator, the same "handle a buyer's own quirk locally, don't touch the shared
+ambiguous parser" discipline Lephalale's DD/MM/YYYY dates already established). **But: 5 of the 17
+rows share one identical PDF link** (`12-october-2026-tender-advert.pdf`) with 5 different titles
+and the same closing date - the same "one PDF, several real tenders" shape Lephalale's own batches
+have, not a Finding-42-style wrong-buyer problem, but it does mean there's no clean reference-number
+field anywhere on the listing (unlike Lephalale's "Ref no:", Kouga's "Ref No:", or Vaal Central
+Water's own clean per-tender numbers) - a release's identity would have to be synthesized from the
+title text itself (a hash or slug), a real design choice not yet made. Given Msukaligwa's own
+confirmed value is modest (2 construction-relevant tenders out of 17, the rest already on eTenders -
+see `Government-Buyer-Catalog-eTenders-Overlap-Checks.md`), deprioritized in favour of the bigger,
+cleaner finds (Lephalale, Kouga) and continuing phase 2 (verifying the requirements engine) - not
+ruled out, just not worth building today.
