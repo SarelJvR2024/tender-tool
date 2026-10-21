@@ -10,38 +10,35 @@ import Link from "next/link";
 // `showBackLink` (default true, matching the four tool pages) renders the
 // "<- Free tools" link on the left. The index page itself has nowhere to
 // go back to, so it passes false to get the logo + wordmark instead - the
-// same amber-badge "T" mark the rest of the public site uses.
+// same blue-badge "T" mark the rest of the public site uses.
+//
+// Design-system migration (2026-10-21): was raw inline-CSSProperties with
+// the old Civic Navy (#16233B) / gold accent (#D97706) pairing, from
+// before the "confident & premium" direction shipped. Now reads
+// bg-foreground/text-white (same navy-panel-with-white-text pairing
+// AuthShell already established) and bg-accent/text-accent-foreground for
+// the one solid CTA - the blue accent, not the old gold. Links bumped to
+// a 44px touch target (min-h-11) to match this app's convention - the old
+// 36px CTA predates that convention being written down.
 export function ToolsHeader({ showBackLink = true }: { showBackLink?: boolean } = {}) {
   return (
-    <header style={{ background: "#16233B", color: "#FFFFFF", padding: "16px 20px" }}>
-      <div style={{ maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+    <header className="bg-foreground px-5 py-4 text-white">
+      <div className="mx-auto flex max-w-[640px] flex-wrap items-center justify-between gap-3">
         {showBackLink ? (
-          <Link href="/tools" style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, textDecoration: "none" }}>
+          <Link href="/tools" className="flex min-h-11 items-center text-[13px] text-white/75 no-underline">
             &larr; Free tools
           </Link>
         ) : (
-          <Link href="/" style={{ display: "flex", alignItems: "center", gap: 12, textDecoration: "none", color: "#FFFFFF", width: "fit-content" }}>
-            <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>
+          <Link href="/" className="flex w-fit items-center gap-3 text-white no-underline">
+            <div className="flex size-[26px] items-center justify-center rounded-md bg-accent text-[13px] font-bold text-accent-foreground">
               T
             </div>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Ready</div>
+            <div className="text-[15px] font-semibold">Tender Ready</div>
           </Link>
         )}
         <Link
           href="/signup"
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            minHeight: 36,
-            padding: "0 16px",
-            borderRadius: 8,
-            background: "#D97706",
-            color: "#FFFFFF",
-            fontSize: 13,
-            fontWeight: 700,
-            textDecoration: "none",
-            whiteSpace: "nowrap",
-          }}
+          className="inline-flex min-h-11 items-center whitespace-nowrap rounded-lg bg-accent px-4 text-[13px] font-bold text-accent-foreground no-underline"
         >
           Start free
         </Link>
@@ -67,25 +64,14 @@ export const OTHER_TOOLS = [
 export function OtherTools({ except }: { except: string }) {
   const others = OTHER_TOOLS.filter((t) => t.href !== except);
   return (
-    <div style={{ marginTop: 32 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", marginBottom: 10 }}>Other free tools</div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+    <div className="mt-8">
+      <div className="mb-2.5 text-xs font-bold text-foreground">Other free tools</div>
+      <div className="flex flex-wrap gap-2">
         {others.map((t) => (
           <Link
             key={t.href}
             href={t.href}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              padding: "7px 14px",
-              borderRadius: 100,
-              background: "#FFFFFF",
-              border: "1px solid #E3E6EA",
-              color: "#16233B",
-              fontSize: 12,
-              fontWeight: 600,
-              textDecoration: "none",
-            }}
+            className="inline-flex min-h-11 items-center rounded-full border border-border bg-card px-3.5 text-xs font-semibold text-foreground no-underline"
           >
             {t.label}
           </Link>
