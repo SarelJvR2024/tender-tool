@@ -13,11 +13,13 @@ export function TopBar({
   userEmail,
   companyName,
   isPlatformAdmin,
+  isEmployee,
   notifications,
 }: {
   userEmail: string | null;
   companyName: string | null;
   isPlatformAdmin: boolean;
+  isEmployee: boolean;
   notifications: AppNotification[];
 }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -52,9 +54,9 @@ export function TopBar({
       <div className="ml-auto flex items-center gap-1">
         {companyName && <div className="hidden max-w-40 truncate text-sm font-medium text-foreground md:block">{companyName}</div>}
         <NotificationsBell notifications={notifications} />
-        <AvatarMenu email={userEmail} />
+        <AvatarMenu email={userEmail} isEmployee={isEmployee} />
       </div>
-      <CommandPalette isPlatformAdmin={isPlatformAdmin} open={paletteOpen} onOpenChange={setPaletteOpen} />
+      <CommandPalette isPlatformAdmin={isPlatformAdmin} isEmployee={isEmployee} open={paletteOpen} onOpenChange={setPaletteOpen} />
     </header>
   );
 }

@@ -1,4 +1,4 @@
-import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, Zap, type LucideIcon } from "lucide-react";
+import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, Zap, FileUser, type LucideIcon } from "lucide-react";
 
 export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: string };
 
@@ -25,6 +25,17 @@ export const NAV_ITEMS: NavItem[] = [
 ];
 
 export const ADMIN_NAV_ITEM: NavItem = { href: "/admin", label: "Admin", icon: ShieldCheck };
+
+// An 'employee' (migration 0067) only ever gets this - their own CV and
+// documents, nothing about the company's tenders, pricing or other people.
+// Matches the RESTRICTIVE RLS policies that same migration adds; this nav
+// swap is cosmetic (RLS already blocks the data), but showing a link to a
+// page that would come back empty is confusing, so every other item is left
+// off entirely rather than shown and silently failing.
+export const EMPLOYEE_NAV_ITEMS: NavItem[] = [
+  { href: "/dashboard", label: "Home", icon: Home },
+  { href: "/my-cv", label: "My CV", icon: FileUser },
+];
 
 /** /tenders/* drills down from Home; every other item matches its own prefix (so /pipeline/pricing still highlights Bids). */
 export function isNavItemActive(pathname: string, href: string): boolean {

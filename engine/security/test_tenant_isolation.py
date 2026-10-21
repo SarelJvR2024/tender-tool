@@ -924,6 +924,83 @@ select 1;""")
               "their task survives with created_by cleared")
 
 
+def part2_employee_role(db):
+    """0065: the restricted 'employee' role. An employee may read/update
+    their OWN linked person's record, CV uploads, generated CVs and
+    projects - and nothing else, not even another person's record in the
+    SAME company, and not the company's tenders/pricing/bank data. Builds
+    its own two-company fixture (company C = the employee's own company,
+    with a second person "Colleague" who is NOT the employee) rather than
+    reusing seed_db's A/B, since this needs an employee-role member who
+    doesn't exist in that fixture."""
+    print("\n[18] Employee role: restricted to own record, nothing else - even within their own company")
+    i = {k: str(uuid.uuid4()) for k in ("uEmp", "uOwner", "c", "pSelf", "pColleague", "t", "pack")}
+    db.one(f"""
+insert into auth.users (id, email) values ('{i['uEmp']}', 'emp@example.test'), ('{i['uOwner']}', 'owner@example.test');
+insert into companies (id, legal_name) values ('{i['c']}', 'Iso Employee Co');
+insert into company_members (company_id, user_id, role) values ('{i['c']}', '{i['uOwner']}', 'owner'), ('{i['c']}', '{i['uEmp']}', 'employee');
+insert into people (id, company_id, name, linked_user_id) values ('{i['pSelf']}', '{i['c']}', 'Employee Self', '{i['uEmp']}'),
+  ('{i['pColleague']}', '{i['c']}', 'Colleague', null);
+insert into projects (company_id, person_id, client_and_number) values ('{i['c']}', '{i['pSelf']}', 'Self project'),
+  ('{i['c']}', '{i['pColleague']}', 'Colleague project');
+insert into cv_uploads (company_id, person_id, storage_path, original_filename, mode) values
+  ('{i['c']}', '{i['pSelf']}', '{i['c']}/people/{i['pSelf']}/uploads/self.pdf', 'self.pdf', 'as_is'),
+  ('{i['c']}', '{i['pColleague']}', '{i['c']}/people/{i['pColleague']}/uploads/colleague.pdf', 'colleague.pdf', 'as_is');
+insert into generated_cvs (company_id, person_id, format, detail) values
+  ('{i['c']}', '{i['pSelf']}', 'world_bank', 'summary'), ('{i['c']}', '{i['pColleague']}', 'world_bank', 'summary');
+insert into tenders (id, slug, title, closing_date, family) values
+  ('{i['t']}', 'iso-emp-{i['t'][:8]}', 'Employee-role tender', now() + interval '30 days', 'Conventional Consultant Tender');
+insert into tender_packs (id, company_id, tender_id) values ('{i['pack']}', '{i['c']}', '{i['t']}');
+insert into financial_captures (company_id, tender_id) values ('{i['c']}', '{i['t']}');
+insert into bank_accounts (company_id, bank_name, account_holder, account_number) values ('{i['c']}', 'ABC Bank', 'Iso Employee Co', '123456789');
+select 1;""")
+    uEmp, uOwner, c = i["uEmp"], i["uOwner"], i["c"]
+
+    print("  -- own record: full access --")
+    check(db.one(f"select count(*) from people where id = '{i['pSelf']}'", uEmp) == "1", "employee sees own person row")
+    ok, _, err = db.run(f"update people set phone = '0820000000' where id = '{i['pSelf']}'", uEmp)
+    check(ok, f"employee updates own person row ({err.splitlines()[0] if err else 'ok'})")
+    check(db.one(f"select count(*) from projects where person_id = '{i['pSelf']}'", uEmp) == "1", "employee sees own projects")
+    check(db.one(f"select count(*) from cv_uploads where person_id = '{i['pSelf']}'", uEmp) == "1", "employee sees own cv_uploads")
+    check(db.one(f"select count(*) from generated_cvs where person_id = '{i['pSelf']}'", uEmp) == "1", "employee sees own generated_cvs")
+    ok, _, err = db.run(
+        f"insert into cv_uploads (company_id, person_id, storage_path, original_filename, mode) values "
+        f"('{c}', '{i['pSelf']}', '{c}/people/{i['pSelf']}/uploads/new.pdf', 'new.pdf', 'as_is')", uEmp)
+    check(ok, f"employee uploads a new CV for themselves ({err.splitlines()[0] if err else 'ok'})")
+
+    print("  -- a colleague in the SAME company: no access --")
+    check(db.one(f"select count(*) from people where id = '{i['pColleague']}'", uEmp) == "0", "employee can't see colleague's person row")
+    check(db.one(f"select count(*) from projects where person_id = '{i['pColleague']}'", uEmp) == "0", "employee can't see colleague's projects")
+    check(db.one(f"select count(*) from cv_uploads where person_id = '{i['pColleague']}'", uEmp) == "0", "employee can't see colleague's cv_uploads")
+    check(db.one(f"select count(*) from generated_cvs where person_id = '{i['pColleague']}'", uEmp) == "0", "employee can't see colleague's generated_cvs")
+    bad, _ = refused(db, f"update people set phone = '000' where id = '{i['pColleague']}'", uEmp)
+    check(bad or db.one(f"with u as (update people set phone = '000' where id = '{i['pColleague']}' returning 1) select count(*) from u", uEmp) == "0",
+          "employee can't update colleague's person row")
+    bad, _ = refused(
+        db, f"insert into cv_uploads (company_id, person_id, storage_path, original_filename, mode) values "
+            f"('{c}', '{i['pColleague']}', '{c}/people/{i['pColleague']}/uploads/x.pdf', 'x.pdf', 'as_is')", uEmp)
+    check(bad, "employee can't insert a CV upload for a colleague")
+
+    print("  -- company-wide business data: no access at all --")
+    for q in (f"select count(*) from tenders where id = '{i['t']}'",
+              f"select count(*) from tender_packs where company_id = '{c}'",
+              f"select count(*) from financial_captures where company_id = '{c}'",
+              f"select count(*) from bank_accounts where company_id = '{c}'"):
+        check(db.one(q, uEmp) == "0", f"employee sees 0 via: {q.split('from ')[1][:40]}")
+    bad, _ = refused(db, f"insert into tender_packs (company_id, tender_id) values ('{c}', '{i['t']}')", uEmp)
+    check(bad, "employee can't open a tender pack")
+
+    print("  -- owner/admin/member access is completely unchanged by the restrictive policies --")
+    check(db.one(f"select count(*) from people where company_id = '{c}'", uOwner) == "2", "owner still sees every person in the company")
+    check(db.one(f"select count(*) from tenders where id = '{i['t']}'", uOwner) == "1", "owner still sees the tender")
+    check(db.one(f"select count(*) from bank_accounts where company_id = '{c}'", uOwner) == "1", "owner still sees the bank account")
+
+    print("  -- cross-tenant: an employee gets no MORE access to another company than a member would --")
+    other = str(uuid.uuid4())
+    db.one(f"insert into companies (id, legal_name) values ('{other}', 'Iso Other Co')")
+    check(db.one(f"select count(*) from companies where id = '{other}'", uEmp) == "0", "employee sees 0 of an unrelated company")
+
+
 def main():
     part1()
     psql = os.environ.get("TENANT_PSQL")
@@ -931,6 +1008,7 @@ def main():
         part2(Db(psql))
         part2_shared_templates(Db(psql))
         part2_deletion(Db(psql))
+        part2_employee_role(Db(psql))
     else:
         print("\n(Part 2 skipped - set TENANT_PSQL to a scratch Postgres with every migration replayed)")
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED'}")
