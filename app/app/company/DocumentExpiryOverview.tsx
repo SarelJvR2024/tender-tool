@@ -1,5 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { loadDocumentExpiryOverview, type DocumentExpiryStatus } from "@/lib/documentExpiry";
+import { SectionCard } from "@/components/tt/section-card";
+import { cn } from "@/lib/utils";
 
 /**
  * "2 documents need attention before your next bid" - Sarel's own ask: every
@@ -8,16 +10,23 @@ import { loadDocumentExpiryOverview, type DocumentExpiryStatus } from "@/lib/doc
  * COMPANY_EXPIRY_FIELDS and source tables (lib/documentExpiry.ts), so this
  * can never disagree with what the topbar bell already says about the same
  * document - it just shows the whole list, not only what's within the
- * bell's 60-day window.
+ * bell's 60-day window. Card shell restyled to the design system for this
+ * sub-PR (prompt 10.1, Company vault shell); the data/logic above is
+ * untouched.
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const STATUS_STYLE: Record<DocumentExpiryStatus, { label: string; tone: "destructive" | "warning" | "muted" | "success" }> = {
+  expired: { label: "Expired", tone: "destructive" },
+  expiring_soon: { label: "Expires in 30 days", tone: "warning" },
+  missing: { label: "Not on file", tone: "muted" },
+  valid: { label: "Valid", tone: "success" },
+};
 
-const STATUS_STYLE: Record<DocumentExpiryStatus, { label: string; bg: string; color: string }> = {
-  expired: { label: "Expired", bg: "#FEE2E2", color: "#B91C1C" },
-  expiring_soon: { label: "Expires in 30 days", bg: "#FEF3C7", color: "#B45309" },
-  missing: { label: "Not on file", bg: "#ECEEF1", color: "#5B6472" },
-  valid: { label: "Valid", bg: "#DCFCE7", color: "#15803D" },
+const TONE_CLASS = {
+  destructive: "border-destructive/20 bg-destructive/10 text-destructive",
+  warning: "border-warning/20 bg-warning/10 text-warning",
+  muted: "border-muted-foreground/20 bg-muted text-muted-foreground",
+  success: "border-success/20 bg-success/10 text-success",
 };
 
 export async function DocumentExpiryOverview() {
@@ -26,31 +35,41 @@ export async function DocumentExpiryOverview() {
   const needsAttention = rows.filter((r) => r.status === "expired" || r.status === "expiring_soon" || r.status === "missing").length;
 
   return (
-    <div id="document-expiry" style={card}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Document expiry</div>
-      {needsAttention > 0 ? (
-        <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 12px", margin: "8px 0 12px", fontSize: 12, color: "#92400E", fontWeight: 600 }}>
-          {needsAttention} document{needsAttention === 1 ? "" : "s"} need{needsAttention === 1 ? "s" : ""} attention before your next bid.
+    <div id="document-expiry" className="scroll-mt-20">
+      <SectionCard title="Document expiry">
+        {needsAttention > 0 ? (
+          <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs font-semibold text-warning">
+            {needsAttention} document{needsAttention === 1 ? "" : "s"} need{needsAttention === 1 ? "s" : ""} attention before your next bid.
+          </div>
+        ) : (
+          <div className="mb-3 text-xs text-muted-foreground">Every tracked document is valid - nothing needs attention right now.</div>
+        )}
+        <div className="flex flex-col">
+          {rows.map((r) => {
+            const st = STATUS_STYLE[r.status];
+            return (
+              <a
+                key={r.id}
+                href={r.href}
+                className="flex items-start gap-2 border-t border-border py-2.5 text-inherit no-underline first:border-t-0 hover:bg-muted/50"
+              >
+                <span
+                  className={cn(
+                    "mt-px inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+                    TONE_CLASS[st.tone],
+                  )}
+                >
+                  {st.label}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold text-foreground">{r.label}</div>
+                  <div className="text-xs text-muted-foreground">{r.detail}</div>
+                </div>
+              </a>
+            );
+          })}
         </div>
-      ) : (
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>Every tracked document is valid - nothing needs attention right now.</div>
-      )}
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        {rows.map((r) => {
-          const st = STATUS_STYLE[r.status];
-          return (
-            <a key={r.id} href={r.href} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "9px 0", borderTop: "1px solid #ECEEF1", textDecoration: "none" }}>
-              <span style={{ flex: "0 0 auto", marginTop: 1, display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color, whiteSpace: "nowrap" }}>
-                {st.label}
-              </span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{r.label}</div>
-                <div style={{ fontSize: 12, color: "#4B5563" }}>{r.detail}</div>
-              </div>
-            </a>
-          );
-        })}
-      </div>
+      </SectionCard>
     </div>
   );
 }
