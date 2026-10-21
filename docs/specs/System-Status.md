@@ -6,6 +6,14 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~00:15 UTC**: orientation via `git log` found no sibling-session
+commits since the last push (`b443fc6`) - everything below from the Vaal Central Water reader
+through the Overstrand/Knysna correction is this session's own work, already independently verified
+as it went (not re-verified again here). QA tooling confirmed sound: every `engine/discovery/test_*.py`
+passes, `npm run typecheck` and `npm run lint` are both clean in `app/`. Nothing small/safe needed
+fixing this pass. One municipality-sweep background pass (North West/Northern Cape/remaining
+Limpopo-Mpumalanga-Gauteng) is still running as of this entry - not yet incorporated.
+
 **Resolved, confirmed by hard evidence (2026-10-20, ~22:35 UTC): the real daily-digest GitHub
 Actions test run (`39492435787`) timed out at exactly 120 minutes** (20:29:48 UTC → 22:30:01 UTC,
 GitHub Actions' own cancellation at the `timeout-minutes: 120` boundary set two passes ago - not a
