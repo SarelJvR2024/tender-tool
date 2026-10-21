@@ -6,6 +6,23 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~22:10 UTC**: orientation via `git log` found 2 more sibling
+commits since the last pass, both the UI/UX session's own work - `#43` (SANRAL schedules made a
+visible nav feature - presentation/discoverability only, the real automation untouched) and `#44`
+(CV-tailoring/cover-page screens, with two real gaps found and honestly flagged rather than faked:
+no engine input exists yet for a cover-page title/contact-person override or a per-position CV
+choice). Full validation re-run after merging: every `engine/*/test_*.py` in the repo (none
+touched), `npx vitest run` (53/53), `typecheck`/`lint`, and a real `npm run build` - all clean,
+confirmed my own `submission-plan-view.tsx` mount in `page.tsx` is still intact and untouched by
+either new commit.
+
+**Small cleanup, same pass**: `submission-plan-data.ts`'s own `returnableReviewStatus()` was a
+deliberate, flagged, hand-synced duplicate of `general-pack-review-data.ts`'s identical function,
+written that way only because the latter was under active edit by the other session when first
+built. That file has been stable for 8 commits now - exported the real function there and had
+`submission-plan-data.ts` import it instead, removing the duplication risk. Full validation
+(vitest/typecheck/lint/build) re-confirmed clean, `7ae22ea`.
+
 **Submission plan now visible in the app, 2026-10-21 ~21:12 UTC** (`app/app/tenders/[id]/
 submission-plan-view.tsx`, `5434bd1`) - the assessment engine Sarel asked for is no longer backend-
 only. Shows the FULL step list (every form/buyer_form/returnable/role/question/CIDB-grading/
