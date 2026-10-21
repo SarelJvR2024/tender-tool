@@ -3189,3 +3189,45 @@ test) stayed green; restored the fix (`git stash pop`), re-ran: `0 failure(s)`. 
 `test_general_bridge.py`, `test_requirements.py`, and `test_submission_plan.py`: all still pass
 (no interaction with the private-document-path / role-classification / submission-plan-status
 logic those cover).
+
+### Finding 49 (CONFIRMED, FIXED, moderate - a real, client-facing generated CV could print the literal word "None")
+
+**Where:** `engine/cv/generate_cv.build_world_bank()`'s project/employment-record rendering.
+`proj.get("start", "?")`, `proj.get("end", "?")`, `proj.get("value_rm", "?")` and
+`proj.get("contact", "MISSING")` - the Python `dict.get(key, default)` default only substitutes
+when the key is *absent*, never when it's present with value `None`. `start_date`, `end_date`,
+`value_rm`, `contact_name` and `contact_phone` are all nullable columns on `projects`
+(`0001_init_schema.sql`) - adapted straight through by `process_cv_jobs.adapt_project_row()` with
+the same keys and the same `None`s, unchanged. The sibling builder in the same file,
+`build_sanral_keyperson()` (same file, same project rows, just above this one), already guards
+the identical fields with `proj.get("start", "") or ""` for exactly this reason - this one didn't.
+
+**What was tested:** called the real `build_world_bank()` (not a reimplementation) with one
+project shaped like the single most common real case - an ongoing assignment with no end date yet
+(`end: None`), plus a referee and a contract value not yet captured (`value_rm`/`contact`/
+`contact_phone: None`). Before the fix, the generated World Bank CV's employment-record paragraph
+read: `"2022-01-01 to None  —  Ongoing Project A/2022\nPosition: Site Engineer    Value:
+RNonem\nReferee: None  None"` - the literal word "None" appearing three times in a document meant
+to go to a real buyer, for the ordinary case of a person's current, still-running project (true
+for most currently-employed key people, not an edge case).
+
+**Fix:** matched `build_sanral_keyperson()`'s own existing pattern - `proj.get("start") or "?"`,
+`proj.get("end") or "?"`, an explicit `is not None` check for `value_rm` (0 is a legitimate value,
+not "missing"), `proj.get("contact") or "MISSING"`, `proj.get("contact_phone") or ""`.
+
+**Verified the test actually catches the regression:** new
+`test_world_bank_project_with_null_fields_does_not_print_the_word_none()` in
+`engine/cv/test_generate_cv.py`. Reverted the fix (`git stash`): both the "not 'None'" checks
+failed, showing exactly the predicted `"...to None...RNonem...Referee: None  None"` string;
+restored it: `0 failure(s)`. Full `test_generate_cv.py` (8 test functions) and
+`test_extract_cv_fields.py` both clean.
+
+**Also checked this pass, no bug found:** `engine/cv/process_cv_jobs.py`'s job-isolation (`claim_job`/
+`fail_stale_jobs`/`process_job`/`poll_once`) - each CV job is already wrapped in its own
+try/except with a company-scoped, security-checked job context (POPIA cross-company read guard,
+confirmed against `0043`'s own DB-level check), and an unexpected `job["format"]` value (the
+`{"sanral_keyperson": ..., "world_bank": ...}[fmt]` lookup has no DB CHECK constraint behind it)
+already fails just that one job cleanly rather than the whole bridge, by the same per-job
+try/except. `claimed_at`'s `fromisoformat()` parse is unguarded but always fed a value this same
+code just wrote with `_now_iso()`, never client-supplied, so it can't actually receive a malformed
+string.
