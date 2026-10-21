@@ -1,7 +1,11 @@
 import Link from "next/link";
+import { Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { PERSON_CREDENTIAL_COLUMNS, credentialChipLabel, credentialExpiries, type PersonCredentialFields } from "@/lib/personCredentials";
+import { PageHeader } from "@/components/tt/page-header";
+import { EmptyState } from "@/components/tt/empty-state";
+import { buttonVariants } from "@/components/ui/button";
 
 // Reads the signed-in user's own company's roster on every request (via RLS) -
 // can't be prerendered. Same Cache Components escape hatch as dashboard/page.tsx.
@@ -20,20 +24,47 @@ type PersonRow = PersonCredentialFields & {
   highest_description: string | null;
 };
 
-function registrationSummary(p: PersonRow): { label: string; bg: string; color: string }[] {
-  const tags: { label: string; bg: string; color: string }[] = [];
+type Tone = "success" | "warning" | "destructive" | "muted";
+const TONE_CLASS: Record<Tone, string> = {
+  success: "border-success/20 bg-success/10 text-success",
+  warning: "border-warning/20 bg-warning/10 text-warning",
+  destructive: "border-destructive/20 bg-destructive/10 text-destructive",
+  muted: "border-muted-foreground/20 bg-muted text-muted-foreground",
+};
+
+function toneFromChip(status: { color: string }): Tone {
+  if (status.color === "#15803D") return "success";
+  if (status.color === "#B45309") return "warning";
+  if (status.color === "#B91C1C") return "destructive";
+  return "muted";
+}
+
+function Chip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${TONE_CLASS[tone]}`}>
+      {children}
+    </span>
+  );
+}
+
+// ECSA/SACPCMP registration-health chips - the same 4-state expiry
+// vocabulary as the rest of the vault (lib/documentExpiry.ts), deliberately
+// NOT forced into Verify/Provide/Fix (app/AGENTS.md argues for this
+// pattern elsewhere; these are a renewal-date state, not a bid task).
+function registrationSummary(p: PersonRow): { label: string; tone: Tone }[] {
+  const tags: { label: string; tone: Tone }[] = [];
   if (p.ecsa_level) {
-    tags.push({ label: `ECSA: ${p.ecsa_level}`, bg: "#DCFCE7", color: "#15803D" });
+    tags.push({ label: `ECSA: ${p.ecsa_level}`, tone: "success" });
   } else {
-    tags.push({ label: "No ECSA on file", bg: "#FEF3C7", color: "#B45309" });
+    tags.push({ label: "No ECSA on file", tone: "warning" });
   }
   if (p.sacpcmp_number) {
-    tags.push({ label: "SACPCMP registered", bg: "#DCFCE7", color: "#15803D" });
+    tags.push({ label: "SACPCMP registered", tone: "success" });
   }
   // Registration expiry badges (0035), same colours and 60-day threshold as
   // the Document Vault's expiry badges (app/lib/dates.ts expiryStatus).
   for (const c of credentialExpiries(p)) {
-    tags.push({ label: credentialChipLabel(c), bg: c.status.bg, color: c.status.color });
+    tags.push({ label: credentialChipLabel(c), tone: toneFromChip(c.status) });
   }
   return tags;
 }
@@ -66,90 +97,73 @@ export default async function PeoplePage({
 
   return (
     <AppShell>
-      <style>{`
-        @media (max-width: 600px) {
-          .people-grid { grid-template-columns: 1fr !important; }
-          .people-header-row { flex-direction: column; align-items: flex-start !important; gap: 10px !important; }
-        }
-      `}</style>
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <div className="people-header-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>People / CV Library</h1>
-            <div style={{ fontSize: 13, color: "#5B6472", marginTop: 2 }}>
-              Staff on file for key-position matching against SANRAL tenders.
-            </div>
-          </div>
-          <Link
-            href="/people/new"
-            style={{
-              display: "inline-flex", alignItems: "center", justifyContent: "center",
-              minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#D97706",
-              color: "#FFFFFF", fontWeight: 600, fontSize: 14, textDecoration: "none",
-            }}
-          >
-            + Add person
-          </Link>
-        </div>
+      <div className="mx-auto w-full max-w-[900px] flex-1 px-4 py-6">
+        <PageHeader
+          className="mb-4"
+          title="People / CV Library"
+          description="Staff on file for key-position matching against SANRAL tenders."
+          actions={
+            <Link href="/people/new" className={buttonVariants({ variant: "accent", size: "lg", className: "min-h-11" })}>
+              + Add person
+            </Link>
+          }
+        />
 
         {errorParam && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {decodeURIComponent(errorParam)}
           </div>
         )}
 
         {error && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
-            {"Couldn't load people - try refreshing. If it keeps happening, let us know."}
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            Couldn&apos;t load people - try refreshing. If it keeps happening, let us know.
           </div>
         )}
 
-        {allExpiries.length > 0 && (
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
-            {expiredCount > 0 && <SummaryChip text={`${expiredCount} registration${expiredCount === 1 ? "" : "s"} expired`} bg="#FEE2E2" color="#B91C1C" />}
-            {renewSoonCount > 0 && <SummaryChip text={`${renewSoonCount} renewing within 60 days`} bg="#FEF3C7" color="#B45309" />}
-            {noDateCount > 0 && <SummaryChip text={`${noDateCount} without a renewal date`} bg="#ECEEF1" color="#5B6472" />}
-            {expiredCount === 0 && renewSoonCount === 0 && noDateCount === 0 && <SummaryChip text="Registrations current" bg="#DCFCE7" color="#15803D" />}
+        {!error && allExpiries.length > 0 && (
+          <div className="mb-3.5 flex flex-wrap gap-1.5">
+            {expiredCount > 0 && <Chip tone="destructive">{expiredCount} registration{expiredCount === 1 ? "" : "s"} expired</Chip>}
+            {renewSoonCount > 0 && <Chip tone="warning">{renewSoonCount} renewing within 60 days</Chip>}
+            {noDateCount > 0 && <Chip tone="muted">{noDateCount} without a renewal date</Chip>}
+            {expiredCount === 0 && renewSoonCount === 0 && noDateCount === 0 && <Chip tone="success">Registrations current</Chip>}
           </div>
         )}
 
         {rows.length === 0 && !error && (
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>
-            No one on file yet. Add the first person to make them available for tender pack matching.
+          <div className="rounded-xl border border-border bg-card">
+            <EmptyState
+              icon={Users}
+              title="No one on file yet"
+              description="Add the first person to make them available for tender pack matching."
+              action={
+                <Link href="/people/new" className={buttonVariants({ variant: "accent", size: "lg", className: "min-h-11" })}>
+                  + Add person
+                </Link>
+              }
+            />
           </div>
         )}
 
-        <div className="people-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 12 }}>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           {rows.map((p) => {
             const tags = registrationSummary(p);
             return (
               <Link
                 key={p.id}
                 href={`/people/${p.id}`}
-                style={{
-                  display: "block", background: "#FFFFFF", border: "1px solid #E3E6EA",
-                  borderRadius: 11, padding: "14px 16px", textDecoration: "none", minHeight: 44,
-                }}
+                className="block min-h-11 rounded-xl border border-border bg-card px-4 py-3.5 no-underline transition-colors hover:bg-muted/30"
               >
-                <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>{p.name}</div>
-                <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
+                <div className="text-[15px] font-bold text-foreground">{p.name}</div>
+                <div className="mt-0.5 text-xs text-muted-foreground">
                   {p.role || p.description || "Role not set"}
                 </div>
                 {p.highest_description && (
-                  <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 4 }}>{p.highest_description}</div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">{p.highest_description}</div>
                 )}
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {tags.map((t) => (
-                    <span
-                      key={t.label}
-                      style={{
-                        display: "inline-flex", alignItems: "center", padding: "3px 10px",
-                        borderRadius: 100, fontSize: 11, fontWeight: 600, background: t.bg, color: t.color,
-                      }}
-                    >
-                      {t.label}
-                    </span>
+                    <Chip key={t.label} tone={t.tone}>{t.label}</Chip>
                   ))}
                 </div>
               </Link>
@@ -158,13 +172,5 @@ export default async function PeoplePage({
         </div>
       </div>
     </AppShell>
-  );
-}
-
-function SummaryChip({ text, bg, color }: { text: string; bg: string; color: string }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color }}>
-      {text}
-    </span>
   );
 }
