@@ -211,7 +211,7 @@ function FilterLink({ href, active, text }: { href: string; active: boolean; tex
   return (
     <Link
       href={href}
-      className={`inline-flex min-h-8 items-center rounded-full border px-3 text-xs font-semibold no-underline ${
+      className={`inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold no-underline ${
         active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground"
       }`}
     >

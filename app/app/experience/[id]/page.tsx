@@ -207,7 +207,7 @@ export default async function ExperienceDetailPage({
               const ticked = [group, ...children].filter((c) => item.disciplines.includes(c.slug)).length;
               return (
                 <details key={group.slug} open={ticked > 0} className="border-t border-border py-1.5 first:border-t-0">
-                  <summary className="flex min-h-8 cursor-pointer items-center gap-2 text-sm font-semibold text-foreground">
+                  <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold text-foreground">
                     {group.label}
                     {ticked > 0 && <span className="rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-bold text-success">{ticked} ticked</span>}
                   </summary>
@@ -326,7 +326,7 @@ export default async function ExperienceDetailPage({
                   )}
                   {(!sug || sug.status === "rejected") && (
                     <details className="mt-1.5">
-                      <summary className="min-h-8 cursor-pointer text-xs font-semibold text-accent">
+                      <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-accent">
                         {sug ? "Suggest it again" : "Suggest this as a shared category"}
                       </summary>
                       <form action={suggestSharedCategory} className="mt-1.5">
