@@ -93,7 +93,7 @@ from suggest_pack import read_required_positions, score_candidate  # noqa: E402
 from sanral_fill import Workbook  # noqa: E402
 import sanral_b7  # noqa: E402
 from assemble_pack import build_submission_pack  # noqa: E402
-from pdf_merge import verify_pack  # noqa: E402
+from pdf_merge import verify_pack, SAST  # noqa: E402
 from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 
 DEFAULT_WORK_DIR = os.path.join(ENGINE_DIR, "..", "out", "pack_jobs")
@@ -858,8 +858,16 @@ def sync_position_suggestions(client, today=None):
     position's tender_pack_assignments row (created when missing, with
     confirmed_person_id left null). Written only when the ranking changed, so
     a quiet poll writes nothing. Returns the number of rows written. A failure
-    on one pack is reported and skipped - it never stops the pack jobs."""
-    today = today or datetime.date.today()
+    on one pack is reported and skipped - it never stops the pack jobs.
+
+    `today`'s own fallback is SAST-anchored (Finding 37/38's own bug class) -
+    a naive datetime.date.today() is one calendar day behind the real SAST
+    date for the 00:00-01:59 SAST window every day, which here (a) kept
+    re-ranking a tender that had already closed real-yesterday for one
+    extra cycle, and (b) fed the wrong closing_date into rank_candidates()'s
+    own years-of-experience-at-closing scoring (the same rounding-boundary
+    risk as Finding 38) for a tender with no closing date on file at all."""
+    today = today or datetime.datetime.now(SAST).date()
     reqs = [r for r in client.select("tender_requirements") if not r.get("is_alternate")]
     if not reqs:
         return 0

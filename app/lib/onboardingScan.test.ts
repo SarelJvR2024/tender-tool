@@ -15,6 +15,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  cidbNameMismatchWarning,
   DOCUMENT_KINDS,
   isFieldPersisted,
   KIND_FIELDS,
@@ -81,11 +82,11 @@ test("parseBeeLevel: null/empty/non-compliant never crash and never fabricate a 
 // QA-Edge-Case-Findings.md, 2026-10-18 (thirteenth run): several KIND_FIELDS
 // entries (cidb_registration/registration_number+contractor_name,
 // bbbee_certificate/entity_name, bank_confirmation_letter/bank_name+
-// account_holder, iso_9001_certificate/certified_entity_name) have no
-// companies column at all - confirmVaultDocument silently drops them while
+// account_holder, iso_9001_certificate/certified_entity_name) had no
+// companies column at all - confirmVaultDocument silently dropped them while
 // the review screen showed a tick-box and "Confirm and file" exactly like
-// a field that IS saved. isFieldPersisted() is what review.tsx now uses to
-// tell the two apart; this pins its answer for every real field so a future
+// a field that IS saved. isFieldPersisted() is what review.tsx uses to tell
+// the two apart; this pins its answer for every real field so a future
 // column addition (or removal) is caught here, not discovered by a
 // reviewer whose confirmed value silently vanished.
 test("isFieldPersisted: every VAULT_FIELD_COLUMNS mapping is persisted", () => {
@@ -100,13 +101,27 @@ test("isFieldPersisted: bee_level is persisted despite not being a VAULT_FIELD_C
   assert.ok(isFieldPersisted("bbbee_certificate", "bee_level"));
 });
 
-test("isFieldPersisted: fields with nowhere to be saved come back false, not true by default", () => {
-  assert.equal(isFieldPersisted("cidb_registration", "registration_number"), false);
-  assert.equal(isFieldPersisted("cidb_registration", "contractor_name"), false);
-  assert.equal(isFieldPersisted("bbbee_certificate", "entity_name"), false);
-  assert.equal(isFieldPersisted("bank_confirmation_letter", "bank_name"), false);
-  assert.equal(isFieldPersisted("bank_confirmation_letter", "account_holder"), false);
-  assert.equal(isFieldPersisted("iso_9001_certificate", "certified_entity_name"), false);
+// Migration 0069 closed every one of the thirteenth run's six gaps with a
+// real companies column (cidb_registration_number, cidb_contractor_name,
+// bee_entity_name, bank_confirmation_bank_name,
+// bank_confirmation_account_holder, iso_9001_certified_entity_name) - these
+// now persist, which is the whole point of adding the columns.
+test("isFieldPersisted: the six previously-orphaned fields are now persisted (migration 0069)", () => {
+  assert.equal(isFieldPersisted("cidb_registration", "registration_number"), true);
+  assert.equal(isFieldPersisted("cidb_registration", "contractor_name"), true);
+  assert.equal(isFieldPersisted("bbbee_certificate", "entity_name"), true);
+  assert.equal(isFieldPersisted("bank_confirmation_letter", "bank_name"), true);
+  assert.equal(isFieldPersisted("bank_confirmation_letter", "account_holder"), true);
+  assert.equal(isFieldPersisted("iso_9001_certificate", "certified_entity_name"), true);
+});
+
+test("VAULT_FIELD_COLUMNS: the six newly-persisted fields map onto the real migration-0069 column names", () => {
+  assert.equal(VAULT_FIELD_COLUMNS.cidb_registration.registration_number, "cidb_registration_number");
+  assert.equal(VAULT_FIELD_COLUMNS.cidb_registration.contractor_name, "cidb_contractor_name");
+  assert.equal(VAULT_FIELD_COLUMNS.bbbee_certificate.entity_name, "bee_entity_name");
+  assert.equal(VAULT_FIELD_COLUMNS.bank_confirmation_letter.bank_name, "bank_confirmation_bank_name");
+  assert.equal(VAULT_FIELD_COLUMNS.bank_confirmation_letter.account_holder, "bank_confirmation_account_holder");
+  assert.equal(VAULT_FIELD_COLUMNS.iso_9001_certificate.certified_entity_name, "iso_9001_certified_entity_name");
 });
 
 test("isFieldPersisted: every KIND_FIELDS entry for every vault kind is accounted for as persisted or not (never throws, never silently undefined)", () => {
@@ -115,4 +130,40 @@ test("isFieldPersisted: every KIND_FIELDS entry for every vault kind is accounte
       assert.equal(typeof isFieldPersisted(kind, field), "boolean", `${kind}.${field} should resolve to a real boolean`);
     }
   }
+});
+
+// ---------------------------------------------------------------------------
+// cidbNameMismatchWarning() - the one genuinely new feature in this pass
+// (QA-Edge-Case-Findings.md, thirteenth run: "a mismatched contractor_name
+// on a CIDB certificate is a real compliance signal, not just metadata").
+// Never a blocker - these tests only pin when it warns vs. stays silent.
+// ---------------------------------------------------------------------------
+
+test("cidbNameMismatchWarning: exact match - no warning", () => {
+  assert.equal(cidbNameMismatchWarning("Klipcorp Construction (Pty) Ltd", "Klipcorp Construction (Pty) Ltd"), null);
+});
+
+test("cidbNameMismatchWarning: formatting-only difference (missing/extra legal suffix) - no warning", () => {
+  assert.equal(cidbNameMismatchWarning("Klipcorp Construction Pty Ltd", "Klipcorp Construction (Pty) Ltd"), null);
+  assert.equal(cidbNameMismatchWarning("Klipcorp Construction", "Klipcorp Construction (Pty) Ltd"), null);
+  assert.equal(cidbNameMismatchWarning("KLIPCORP CONSTRUCTION (PTY) LTD.", "klipcorp construction pty ltd"), null);
+  assert.equal(cidbNameMismatchWarning("Acme Trading CC", "Acme Trading Close Corporation"), null);
+});
+
+test("cidbNameMismatchWarning: real mismatch - warns, names both values, never throws", () => {
+  const warning = cidbNameMismatchWarning("Klipcorp Construction (Pty) Ltd", "Acme Builders (Pty) Ltd");
+  assert.ok(warning, "expected a warning for two unrelated names");
+  assert.ok(warning!.includes("Klipcorp Construction"));
+  assert.ok(warning!.includes("Acme Builders"));
+});
+
+test("cidbNameMismatchWarning: missing input never warns (nothing to compare)", () => {
+  assert.equal(cidbNameMismatchWarning(null, "Klipcorp Construction (Pty) Ltd"), null);
+  assert.equal(cidbNameMismatchWarning("Klipcorp Construction (Pty) Ltd", null), null);
+  assert.equal(cidbNameMismatchWarning(null, null), null);
+  assert.equal(cidbNameMismatchWarning("", ""), null);
+});
+
+test("cidbNameMismatchWarning: partial/trading-name overlap below the threshold still warns (surfaced, not silently accepted)", () => {
+  assert.ok(cidbNameMismatchWarning("Klipcorp Trading", "Klipcorp Construction (Pty) Ltd"));
 });

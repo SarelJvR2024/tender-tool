@@ -292,9 +292,59 @@ def test_general_fillers():
           "completion guide carries SBD 4's real wording (was 'Interest in a related enterprise bidding?')")
 
 
+def test_today_iso_is_sast_not_naive_utc():
+    print("_today_iso() (fill_a_forms.py / fill_sbd_docx.py) uses SAST, not a naive UTC date")
+    # Finding (2026-10-20): both files computed "today" via naive
+    # datetime.date.today() - a bridge worker container has no TZ set and
+    # runs in UTC by default, so this is one calendar day behind the real
+    # SAST date for the whole 00:00-01:59 SAST window every day. In
+    # fill_a_forms.py this silently flipped A12/A20's "is this B-BBEE proof /
+    # COID letter still current" verdict from expired to current for a
+    # document expiring on the real SAST today. Simulates the system clock
+    # at UTC 2026-10-20 23:30 (= SAST 2026-10-21 01:30, inside the bad
+    # window) by monkeypatching datetime.datetime.now, restored immediately
+    # after - never leaves the real clock patched.
+    import fill_sbd_docx
+    import datetime as real_datetime
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = real_datetime.datetime(2026, 10, 20, 23, 30, tzinfo=real_datetime.timezone.utc)
+            return base.astimezone(tz) if tz else base
+
+    for mod, label in ((fill_a_forms, "fill_a_forms"), (fill_sbd_docx, "fill_sbd_docx")):
+        real_dt = mod.datetime.datetime
+        mod.datetime.datetime = FixedDateTime
+        try:
+            today = mod._today_iso()
+        finally:
+            mod.datetime.datetime = real_dt
+        check(today == "2026-10-21", f"{label}._today_iso() reads the real SAST date (2026-10-21), "
+              f"not the naive UTC one (2026-10-20) - got {today}")
+
+    # End-to-end, through the REAL fill_a_forms.main() against the real
+    # template: a B-BBEE proof expiring exactly on the real SAST today must
+    # be reported as expired, not current, even while the clock sits in the
+    # bad window.
+    prof = copy.deepcopy(UNLIKE)
+    prof["company"].update(bee_level=1, bee_proof_type="certificate", bee_proof_expiry="2026-10-21",
+                           black_ownership_pct=51, status="EME")
+    real_dt = fill_a_forms.datetime.datetime
+    fill_a_forms.datetime.datetime = FixedDateTime
+    try:
+        es, _ = a_forms(prof, tempfile.mkdtemp())
+    finally:
+        fill_a_forms.datetime.datetime = real_dt
+    check(es["a_forms.A12.bee_certificate"]["status"] == "missing"
+          and "expired 2026-10-21" in es["a_forms.A12.bee_certificate"]["reason"],
+          f"a B-BBEE proof expiring on the real SAST today (2026-10-21) is reported expired, "
+          f"not confirmed-current, even from inside the bad UTC-midnight window ({es.get('a_forms.A12.bee_certificate')})")
+
+
 if __name__ == "__main__":
     for fn in (test_a_forms, test_docx_forms, test_technical_workbook, test_covers, test_intake_readers,
-               test_financial_rows, test_general_fillers):
+               test_financial_rows, test_general_fillers, test_today_iso_is_sast_not_naive_utc):
         fn()
     print(f"\n{len(failures)} failure(s)")
     sys.exit(1 if failures else 0)

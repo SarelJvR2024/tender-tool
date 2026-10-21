@@ -375,6 +375,146 @@ REQUIRED_CONTEXT_RE = re.compile(
     re.IGNORECASE)
 
 
+# ---------------------------------------------------------------------------
+# Per-item confidence (Sarel, 2026-10-20: "indicate the confidence level ...
+# train to improve the confidence"). A pure function so it's unit-testable
+# without running the whole extractor (test_requirements.py).
+#
+# Score = a base per HOW the item was recognised, nudged by how many
+# independent mentions agree, then pulled down if the text behind it came
+# from OCR (scan_ocr.py's own mean_confidence - never re-derived, just
+# folded in). Every signal already exists elsewhere in this module; nothing
+# here is a fabricated number.
+#
+#   form_edition    - a real document FILE was matched to a form code (the
+#                      strongest signal: the form itself exists, not just a
+#                      mention of its name).
+#   form_code       - an anchored SBD/MBD form-number regex matched (FORM_RE/
+#                      FORM_TYPO_RE) but no edition file was found.
+#   strong_context  - a returnable/role whose surrounding text matched an
+#                      explicit requirement verb (REQUIRED_CONTEXT_RE /
+#                      REQUIREMENT_VERB_RE: "must", "shall", "attach"...).
+#   weak_context    - same pattern matched, but only the looser topic regex
+#                      (ROLE_CONTEXT_RE) - plausible, not explicit.
+#   anchored_regex  - a narrow, specific pattern with its own capture group
+#                      (CIDB_RE / BRIEFING_RE), not a bag of synonyms.
+CONFIDENCE_BASE = {
+    "form_edition": 92,
+    "form_code": 72,
+    "strong_context": 82,
+    "weak_context": 58,
+    "anchored_regex": 85,
+}
+
+CONFIDENCE_LABEL = {
+    "form_edition": "a document file matching this form was found",
+    "form_code": "the form's number was named in the text",
+    "strong_context": "matched next to an explicit requirement (\"must\"/\"shall\"/\"attach\")",
+    "weak_context": "matched a plausible context, but no explicit requirement wording nearby",
+    "anchored_regex": "matched a specific, narrow pattern",
+}
+
+
+def score_confidence(kind, mentions=1, ocr_confidence=None):
+    """Returns (score 0-100, reason). kind is one of CONFIDENCE_BASE's keys.
+    mentions = how many independent, consistent hits backed this item (more
+    agreement = higher confidence; a single hit is neither boosted nor
+    penalised - every base score above already assumes exactly one).
+    ocr_confidence = scan_ocr.py's mean_confidence (0-100) when any of the
+    text behind this item was read by OCR, else None - OCR can misread
+    characters, so it always pulls the score down, scaled by how good the
+    OCR read itself was (a near-perfect OCR barely moves it; a poor one pulls
+    hard)."""
+    score = CONFIDENCE_BASE[kind]
+    reason = CONFIDENCE_LABEL[kind]
+    if mentions >= 5:
+        score += 8
+        reason += f"; {mentions} consistent mentions"
+    elif mentions >= 2:
+        score += 4
+        reason += f"; {mentions} consistent mentions"
+    score = min(score, 100)
+    if ocr_confidence is not None:
+        factor = 0.5 + 0.5 * (ocr_confidence / 100)
+        score = round(score * factor)
+        reason += f"; read from an OCR'd scan at {ocr_confidence:.0f}/100 OCR confidence, reduced"
+    return max(0, min(100, int(round(score)))), reason
+
+
+# ---------------------------------------------------------------------------
+# "Train to improve the confidence" (Sarel). Honesty check first: this
+# module has NO LLM call anywhere in it - every extraction above is regex/
+# heuristic. So there is no prompt to fold few-shot examples into. What a
+# handful of past admin corrections (requirement_extraction_reviews,
+# migration 0074) CAN honestly do here: when a new item looks like one a
+# human already flagged as wrong (same item type + same stable identifying
+# field - a form code, a returnable key, a role code... - the SOURCE TEXT
+# will differ tender to tender, so matching on the quote itself would almost
+# never hit), knock its confidence down and say why, so the UI shows it as
+# less trustworthy instead of silently repeating the same mistake with full
+# confidence. It never changes WHAT gets extracted - no regex adapts itself
+# from a correction - only how confidently that one item is reported this
+# time. `past_corrections` is passed in by the caller (process_general_jobs.py
+# reads up to 5 recent rows from requirement_extraction_reviews - "most
+# recent N corrections globally", the cheap heuristic the task scope allows
+# when nothing smarter - buyer/form matching - is available); this stays a
+# plain function of its input so it's unit-testable without any database.
+def _item_identity(item_type, item):
+    """The one field that identifies "the same kind of item" across
+    different tenders/documents (never the quote - that's tender-specific
+    free text and would never recur)."""
+    return {
+        "forms": item.get("code"), "buyer_forms": item.get("key"),
+        "returnables": item.get("key"), "roles": item.get("role_code"),
+        "person_registrations": item.get("body"),
+        "cidb": "cidb", "briefing": "briefing",
+    }.get(item_type)
+
+
+def _apply_past_corrections(item_type, item, past_corrections):
+    """Mutates item['confidence']/['confidence_reason'] in place when a past
+    correction matches this item's identity (see module comment above).
+    Up to 5 corrections are expected in past_corrections; only the first
+    match (most recent) is applied."""
+    if not past_corrections or item.get("confidence") is None:
+        return
+    ident = _item_identity(item_type, item)
+    if ident is None:
+        return
+    for c in past_corrections:
+        if c.get("item_type") != item_type:
+            continue
+        if _item_identity(item_type, c.get("item_snapshot") or {}) != ident:
+            continue
+        if c.get("verdict") == "false_positive":
+            item["confidence"] = max(5, item["confidence"] - 25)
+            item["confidence_reason"] += ("; a platform admin previously marked a similar "
+                                          f"{item_type} extraction a false positive - treat with extra caution")
+        elif c.get("verdict") == "corrected":
+            item["confidence"] = max(5, item["confidence"] - 12)
+            item["confidence_reason"] += ("; a platform admin previously corrected a similar "
+                                          f"{item_type} extraction - double-check this one")
+        break
+
+
+def _apply_past_corrections_to_manifest(manifest, past_corrections):
+    if not past_corrections:
+        return
+    for item_type in ("forms", "buyer_forms", "returnables", "roles", "person_registrations"):
+        for item in manifest.get(item_type) or []:
+            _apply_past_corrections(item_type, item, past_corrections)
+    for item_type in ("cidb", "briefing"):
+        item = manifest.get(item_type)
+        if item:
+            _apply_past_corrections(item_type, item, past_corrections)
+
+
+def _ocr_mean(docs):
+    """{document name -> scan_ocr.py's mean_confidence} for every document
+    some of whose text came from OCR (see ocr_scanned_pages())."""
+    return {d["name"]: d["ocr"]["mean_confidence"] for d in docs if d.get("ocr") and d["ocr"].get("mean_confidence") is not None}
+
+
 def _quote(text, start, end, width=110):
     a = max(0, start - min(width, 70))
     b = min(len(text), end + width + 40)
@@ -382,7 +522,8 @@ def _quote(text, start, end, width=110):
     return s[:240]
 
 
-def find_returnables(docs):
+def find_returnables(docs, ocr_mean=None):
+    ocr_mean = ocr_mean or {}
     out = []
     for r in RETURNABLES:
         rx = re.compile(r["re"], re.IGNORECASE)
@@ -401,11 +542,14 @@ def find_returnables(docs):
             if best and best[0]:
                 break
         if best:
+            confidence, confidence_reason = score_confidence(
+                "strong_context" if best[0] else "weak_context", mentions, ocr_mean.get(best[1]))
             out.append({
                 "key": r["key"], "label": r["label"], "vault": r["vault"],
                 "conditional": r.get("conditional"),
                 "strength": "required" if best[0] else "mentioned",
                 "mentions": mentions, "document": best[1], "quote": best[2],
+                "confidence": confidence, "confidence_reason": confidence_reason,
             })
     return out
 
@@ -452,7 +596,56 @@ def _line_at(text, pos):
     return text[a: b if b != -1 else len(text)]
 
 
-def find_roles(docs):
+# Finding 47: "Contract Manager"/"Project Manager" preceded by the TENDER'S
+# OWN BUYER NAME ("the Transnet Contract Manager") is the buyer's own named
+# administrator, not a bidder role - confirmed on a real Transnet SOC Ltd
+# tender (both real mentions read "...for review and acceptance by the
+# Transnet Contract Manager and SHEQ Department", not a bidder ask). This is
+# the same bug class NEC3's "Employer's/Client's Project Manager" lookbehind
+# already excludes (ROLE_PATTERNS above), just with the buyer's own NAME
+# instead of a generic legal title - a blanket ROLE_CONTEXT_RE change was
+# tried and rejected first (deleted 3 other genuine detections, see
+# QA-Edge-Case-Findings.md Finding 47), so this is deliberately narrow:
+# only the tender's own buyer name, only directly before the match, never a
+# change to the shared context-word check every other role pattern depends
+# on.
+_BUYER_STOPWORDS = {
+    "the", "of", "and", "soc", "ltd", "pty", "limited", "department", "dept",
+    "municipality", "metropolitan", "local", "district", "council", "board",
+    "agency", "authority", "corporation", "company", "services", "group",
+    "national", "provincial", "government", "republic", "south", "africa",
+    "province", "city", "state", "owned", "holdings", "incorporated", "inc",
+}
+
+
+def _buyer_core_words(buyer):
+    """The buyer name's own distinctive words ("Transnet" from "Transnet SOC
+    Ltd", "ESKOM" from "ESKOM Holdings SOC Ltd") - generic legal/government
+    suffixes stripped so they never themselves count as a "buyer name"
+    match (a document saying plain "the Department Project Manager" isn't
+    naming ANY specific buyer). Words under 4 characters are dropped too -
+    too short to be a reliable, specific signal on their own."""
+    if not buyer:
+        return []
+    words = re.findall(r"[A-Za-z][A-Za-z'-]*", buyer)
+    return sorted({w for w in words if len(w) >= 4 and w.lower() not in _BUYER_STOPWORDS}, key=len, reverse=True)
+
+
+def _is_buyers_own_person(text, match_start, buyer_words):
+    """Is the tender's own buyer named directly before this match
+    ("the Transnet Contract Manager")? A short, immediately-preceding
+    window only (not the whole ±250-char context window) - this is about
+    what qualifies THIS specific mention, not the document's general
+    subject matter."""
+    if not buyer_words:
+        return False
+    window = text[max(0, match_start - 60): match_start]
+    return any(re.search(r"\b" + re.escape(w) + r"\b", window, re.IGNORECASE) for w in buyer_words)
+
+
+def find_roles(docs, ocr_mean=None, buyer=None):
+    ocr_mean = ocr_mean or {}
+    buyer_words = _buyer_core_words(buyer)
     out = []
     for code, pat in ROLE_PATTERNS:
         rx = re.compile(pat, re.IGNORECASE)
@@ -465,11 +658,15 @@ def find_roles(docs):
                     continue
                 if not ROLE_CONTEXT_RE.search(t[max(0, m.start() - 250): m.end() + 250]):
                     continue
+                if _is_buyers_own_person(t, m.start(), buyer_words):
+                    continue
                 n += 1
                 if hit is None:
                     hit = (d["name"], _quote(t, m.start(), m.end()))
         if hit:
-            out.append({"role_code": code, "mentions": n, "document": hit[0], "quote": hit[1]})
+            confidence, confidence_reason = score_confidence("weak_context", n, ocr_mean.get(hit[0]))
+            out.append({"role_code": code, "mentions": n, "document": hit[0], "quote": hit[1],
+                        "confidence": confidence, "confidence_reason": confidence_reason})
     return out
 
 
@@ -515,11 +712,12 @@ REQUIREMENT_VERB_RE = re.compile(r"\bmust\b|\bshall\b|required|registered\s+with
                                  re.IGNORECASE)
 
 
-def find_person_registrations(docs):
+def find_person_registrations(docs, ocr_mean=None):
+    ocr_mean = ocr_mean or {}
     out = []
     for body, pat in PERSON_REGISTRATION_PATTERNS:
         rx = re.compile(pat, re.IGNORECASE)
-        hit, n = None, 0
+        hit, n, strong = None, 0, False
         for d in docs:
             t = d.get("text") or ""
             for m in rx.finditer(t):
@@ -531,10 +729,15 @@ def find_person_registrations(docs):
                 if DEFINITION_CONTEXT_RE.search(near) and not REQUIREMENT_VERB_RE.search(near):
                     continue
                 n += 1
+                if REQUIREMENT_VERB_RE.search(near):
+                    strong = True
                 if hit is None:
                     hit = (d["name"], _quote(t, m.start(), m.end()))
         if hit:
-            out.append({"body": body, "mentions": n, "document": hit[0], "quote": hit[1]})
+            confidence, confidence_reason = score_confidence(
+                "strong_context" if strong else "weak_context", n, ocr_mean.get(hit[0]))
+            out.append({"body": body, "mentions": n, "document": hit[0], "quote": hit[1],
+                        "confidence": confidence, "confidence_reason": confidence_reason})
     return out
 
 
@@ -563,7 +766,53 @@ IN_TEXT_BUYER_FORMS = [
     ("certificate_of_authority", "Certificate / resolution of authority for signatory",
      r"(?:CERTIFICATE|RESOLUTION)\s+OF\s+AUTHORITY"),
     ("declaration_of_shareholding", "Declaration of Shareholding and Directorship", r"DECLARATION\s+OF\s+SHAREHOLDING"),
+    # ESKOM's own Supplier Quality Management form - confirmed from a real
+    # ESKOM tender (E3703CXMWP, 2026-10-21): "complete, sign and return Form A
+    # with the other returnables", repeated across 6 documents, never
+    # surfaced before this - requirements.py's own docstring already named
+    # "Form A" as one of ESKOM's own forms, but nothing matched it. "Form A"
+    # alone is too generic a string to match safely (any buyer could have an
+    # unrelated "Form A") - anchored on the parenthetical that names what it
+    # actually is, which recurs on every real mention in the corpus.
+    ("eskom_form_a", "Form A (Supplier Quality Management)",
+     r"FORM\s+A\s*\(\s*(?:ENQUIRY|TENDER)\s*(?:AND|/)?\s*CONTRACT\s*(?:AND|/)?\s*QUALITY\s+REQUIREMENTS\s+FOR\s+SUPPLIER\s+QUALITY\s+MANAGEMENT"),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Finding 42 (QA-Edge-Case-Findings.md, 2026-10-21): some buyers (confirmed:
+# City of Tshwane's "Notice N of <FY>" bulletins) publish ONE PDF covering
+# SEVERAL unrelated tenders - a numbered table, one row per tender, each with
+# its own reference, closing date, CIDB grading, preference system. Reading
+# this as if it were one tender's own document attributes every other
+# tender's facts to whichever one is being processed (confirmed: GPM
+# 08-2026/27, a property lease with no CIDB angle at all, came back with a
+# CIDB grading requirement that actually belongs to a different row, GPM 18,
+# in the same PDF). Per Sarel's own call: detect this shape and decline to
+# extract tender-specific facts from it at all (option (a) - safer than
+# trying to isolate the right row, which nothing in this engine does today),
+# rather than keep attributing another tender's facts to this one.
+#
+# Detection, buyer-agnostic (no reference-number format assumed): a numbered
+# list item ("N. ") immediately followed by an uppercase reference-like token
+# (letters then digits - "HD 03", "GPM 18", "WSBU 01"), with a month name
+# within the next 200 characters (the row's own closing date, wrapped PDF
+# text and all). Checked against every other real document already in this
+# corpus (templates/general_samples/, plus 26 further real tenders sampled
+# for Finding 40/42 themselves) - zero false positives at a threshold of 3;
+# the one real bulletin matched 12 times, not a borderline case.
+_BULLETIN_MONTHS = (r"January|February|March|April|May|June|July|August|September|October|"
+                    r"November|December")
+BULLETIN_ROW_RE = re.compile(
+    r"(?:^|\n)\s*\d{1,2}\.\s+[A-Z]{2,8}\s?\d{1,4}[\s\S]{0,200}?\b(?:" + _BULLETIN_MONTHS + r")\b")
+BULLETIN_MIN_ROWS = 3
+
+
+def is_combined_bulletin(text):
+    """True if `text` looks like several different tenders' own rows bundled
+    into one document, not one tender's own document - see module comment
+    above BULLETIN_ROW_RE for the evidence and why 3 is the threshold."""
+    return len(BULLETIN_ROW_RE.findall(text or "")) >= BULLETIN_MIN_ROWS
 
 
 def classify_document(doc, mentioned_forms):
@@ -684,27 +933,51 @@ COMPANY_FIELDS = [
 # Manifest
 # ---------------------------------------------------------------------------
 
-def extract_requirements(paths, work_dir=None, source_label=None, keep_text=False):
+def extract_requirements(paths, work_dir=None, source_label=None, keep_text=False, past_corrections=None, buyer=None):
     """paths: files and/or directories (zips are unpacked). Returns the manifest
     dict (JSON-safe). Document dicts keep local paths under `_local` so the pack
     generator can reuse the downloaded copies; strip_local() removes them before
-    the manifest is stored."""
+    the manifest is stored.
+
+    past_corrections: up to a handful of past platform-admin verdicts from
+    requirement_extraction_reviews (migration 0074), each shaped like
+    {"item_type": ..., "item_snapshot": {...}, "verdict": "corrected" |
+    "false_positive", "corrected_value": ...}. Optional, and never fetched by
+    this function itself (it stays a pure function of its inputs - no
+    database access here) - see the module comment above
+    _apply_past_corrections_to_manifest for exactly what this can and can't
+    do.
+
+    buyer: the tender's own buyer/client name (e.g. "Transnet SOC Ltd"), if
+    known - optional, and only ever used to tell find_roles() apart a
+    "<buyer name> Contract/Project Manager" mention (the buyer's own agent)
+    from a genuine bidder-role ask (Finding 47). Never fetched here; the
+    caller already has it (process_general_jobs.py reads it straight off
+    the tender row being processed)."""
     own_tmp = work_dir is None
     work_dir = work_dir or tempfile.mkdtemp(prefix="tt_req_")
     docs = [read_document(d, work_dir) for d in collect_documents(paths, work_dir)]
-    all_text = "\n".join(d.get("text") or "" for d in docs)
+    for d in docs:
+        d["is_bulletin"] = (not d.get("unreadable")) and is_combined_bulletin(d.get("text"))
+    # Finding 42: a bulletin's facts belong to whichever tender its own row is
+    # for, never knowably this one - excluded from every signal below (suite,
+    # forms, returnables, roles, CIDB, briefing, locality, experience) the
+    # same way an unreadable document already is, not just hidden from the UI.
+    usable_docs = [d for d in docs if not d["is_bulletin"]]
+    all_text = "\n".join(d.get("text") or "" for d in usable_docs)
 
     mentioned = {}
-    for d in docs:
+    for d in usable_docs:
         for k, n in forms_in_text(d.get("text") or "").items():
             mentioned[k] = mentioned.get(k, 0) + n
         for k, n in forms_in_text(os.path.basename(d["name"])).items():
             mentioned[k] = mentioned.get(k, 0) + n
 
     ocr_docs = {d["name"] for d in docs if d.get("ocr")}
+    ocr_mean = _ocr_mean(docs)
     doc_entries = []
     for d in docs:
-        kind = classify_document(d, mentioned)
+        kind = "combined_bulletin" if d["is_bulletin"] else classify_document(d, mentioned)
         editable = d["format"] == "docx" or bool(d.get("converted_docx"))
         doc_entries.append({
             "name": d["name"], "format": d["format"], "kind": kind,
@@ -718,16 +991,38 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
             "_local": d.get("converted_docx") or d["path"],
         })
 
-    suites = {s for (s, _), n in mentioned.items()}
-    if "MBD" in suites and "SBD" not in suites:
+    # A single stray cross-reference to the other suite (a municipal buyer's
+    # boilerplate note pointing bidders at "the National Treasury SBD 4
+    # guideline" while every real form in the bundle is MBD, the OCPO-style
+    # glossary annexure) used to flip the whole tender's suite on mere
+    # presence - `if "MBD" in suites and "SBD" not in suites` required SBD
+    # to be COMPLETELY ABSENT for MBD to win, so one single, real SBD
+    # mention anywhere outweighed ten real MBD mentions. Reproduced directly
+    # with a synthetic MBD bundle (MBD 1/4/6.1/7/8/9, 10 real mentions) plus
+    # one boilerplate "SBD 4 guideline" reference in an annexure - every form
+    # label in the manifest came back "SBD 1", "SBD 4", etc. for a genuinely
+    # municipal tender (QA-Edge-Case-Findings.md, 2026-10-20). Majority of
+    # mentions decides now; a tie still defaults to SBD, same as before.
+    mbd_total = sum(n for (s, _), n in mentioned.items() if s == "MBD")
+    sbd_total = sum(n for (s, _), n in mentioned.items() if s == "SBD")
+    if mbd_total > sbd_total:
         suite = "MBD"
-    elif "SBD" in suites:
+    elif sbd_total > 0:
         suite = "SBD"
     else:
         suite = None
 
     forms = []
-    codes = sorted({c for (_, c) in mentioned} | {c for e in doc_entries for c in e["forms"]},
+    # Finding 35 (2026-10-20): a stray cross-reference to the LOSING suite's
+    # own form code (e.g. one boilerplate "this tender does not use SBD 9"
+    # sentence in an MBD-dominant bundle) used to still list that code as
+    # required - `{c for (_, c) in mentioned}` unioned mentions across BOTH
+    # suites with no suite-consistency check, the same root-cause class
+    # Finding 29 already fixed for the suite label itself. Only a mention
+    # under the WINNING suite's own prefix counts now; a genuine document
+    # EDITION found for a code (doc_entries' own "forms") is a different,
+    # suite-independent signal (a real file exists) and stays unconditional.
+    codes = sorted({c for (s, c) in mentioned if s == suite} | {c for e in doc_entries for c in e["forms"]},
                    key=lambda c: float(c))
     for code in codes:
         title, capability = FORMS[code]
@@ -736,12 +1031,12 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         prefix = suite or "SBD"
         n_mentions = mentioned.get((prefix, code), 0) + mentioned.get(("SBD" if prefix == "MBD" else "MBD", code), 0)
         quote, quote_doc = None, None
-        for d in docs:
+        for d in usable_docs:
             m = re.search(rf"\b{prefix[0]}\s?B\s?D\s*{re.escape(code).replace(r'\.', r'\s*[.(]\s*')}", d.get("text") or "", re.IGNORECASE)
             if m:
                 quote, quote_doc = _quote(d["text"], m.start(), m.end(), 80), d["name"]
                 break
-        overlay = _overlay_edition(code, editions, docs) if capability == "fill" and not fillable else None
+        overlay = _overlay_edition(code, editions, usable_docs) if capability == "fill" and not fillable else None
         if capability == "fill" and fillable:
             status, reason = "auto", f"Filled from your data in {fillable[0]['name']}" + (
                 " (converted from .doc by LibreOffice - check the layout)" if fillable[0]["converted_from_doc"] else "")
@@ -767,10 +1062,14 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
                 "6.2": "Local-content declaration needs this bid's own product data - complete by hand.",
                 "7": "Contract form - signed by hand (some buyers want it with the bid, most only after award).",
             }.get(code, "Complete by hand.")
+        confidence, confidence_reason = score_confidence(
+            "form_edition" if editions else "form_code", n_mentions,
+            ocr_mean.get(quote_doc) if quote_doc in ocr_docs else None)
         forms.append({"code": code, "label": f"{prefix} {code}", "title": title, "status": status, "reason": reason,
                       **({"overlay": overlay} if overlay else {}),
                       "mentions": n_mentions, "quote": quote,
                       **({"from_ocr": True} if quote_doc in ocr_docs else {}),
+                      "confidence": confidence, "confidence_reason": confidence_reason,
                       "editions": [{"document": e["name"], "format": e["format"], "editable": e["editable"]} for e in editions]})
 
     buyer_forms = []
@@ -780,11 +1079,13 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
                                 "document": e["name"], "format": e["format"],
                                 "reason": "Buyer-specific form - no Tender Tool template for it; complete by hand and attach."})
     for key, label, pat in IN_TEXT_BUYER_FORMS:
-        for d in docs:
+        for d in usable_docs:
             m = re.search(pat, d.get("text") or "", re.IGNORECASE)
             if m:
+                confidence, confidence_reason = score_confidence("form_code", 1, ocr_mean.get(d["name"]))
                 entry = {"key": key, "label": label, "document": d["name"], "format": d["format"],
                          "quote": _quote(d["text"], m.start(), m.end(), 80),
+                         "confidence": confidence, "confidence_reason": confidence_reason,
                          "reason": "Buyer-specific form inside the tender document - complete by hand."}
                 ov = _overlay_buyer_form(key, d)
                 if ov:
@@ -800,9 +1101,11 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
     outlook = estimate_score_outlook(all_text, "full_document" if all_text.strip() else "no_extractable_text",
                                      {"disciplines": [], "bee_level": None, "offices": []})
     loc = extract_locality(all_text) if all_text.strip() else {"rows": [], "mandatory_local_office": None}
-    returnables = find_returnables(docs)
-    roles = find_roles(docs)
-    person_registrations = find_person_registrations(docs)
+    cidb_confidence = score_confidence("anchored_regex", 1) if cidb_m else (None, None)
+    briefing_confidence = score_confidence("anchored_regex", 1) if brief_m else (None, None)
+    returnables = find_returnables(usable_docs, ocr_mean)
+    roles = find_roles(usable_docs, ocr_mean, buyer=buyer)
+    person_registrations = find_person_registrations(usable_docs, ocr_mean)
     # EXPERIMENTAL OCR: anything read out of OCR'd text says so, so the UI
     # can show it isn't from a real text layer.
     for item in returnables + roles + buyer_forms + person_registrations:
@@ -832,8 +1135,14 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         # 0040: only present when the tender asks (People page shows the
         # SACNASP / SAGC fields because of it)
         **({"person_registrations": person_registrations} if person_registrations else {}),
-        "cidb": {"grading": cidb_m.group(1).replace(" ", "").upper(), "quote": _quote(all_text, cidb_m.start(), cidb_m.end())} if cidb_m else None,
-        "briefing": {"compulsory": conditions["briefing"], "quote": _quote(all_text, brief_m.start(), brief_m.end())} if brief_m else None,
+        # cidb/briefing are read off all_text (every document concatenated),
+        # so no single source document can be attributed for an OCR discount
+        # - score_confidence() still applies the anchored_regex base, just
+        # with ocr_confidence left unknown rather than guessed.
+        "cidb": {"grading": cidb_m.group(1).replace(" ", "").upper(), "quote": _quote(all_text, cidb_m.start(), cidb_m.end()),
+                 "confidence": cidb_confidence[0], "confidence_reason": cidb_confidence[1]} if cidb_m else None,
+        "briefing": {"compulsory": conditions["briefing"], "quote": _quote(all_text, brief_m.start(), brief_m.end()),
+                     "confidence": briefing_confidence[0], "confidence_reason": briefing_confidence[1]} if brief_m else None,
         "scoring": {
             "preference_system": outlook["preference_system"],
             "functionality": outlook["functionality"],
@@ -847,9 +1156,10 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         else {"source": "not_found", "clause": None, "rows": [], "unparsed": [], "reason": "No document text."},
         "questions": questions,
         "company_fields": company_fields,
-        "gaps": _gaps(doc_entries, forms, suite, buyer_forms, _depth(all_text)) + _key_personnel_gap(docs),
+        "gaps": _gaps(doc_entries, forms, suite, buyer_forms, _depth(all_text)) + _key_personnel_gap(usable_docs),
         "document_depth": _depth(all_text),
     }
+    _apply_past_corrections_to_manifest(manifest, past_corrections)
     if own_tmp:
         manifest["_work_dir"] = work_dir
     if keep_text:
@@ -916,14 +1226,30 @@ def _gaps(doc_entries, forms, suite, buyer_forms, depth="full_document"):
     """Plain statements of what this engine can't do for this tender - shown
     in the UI and the pack index instead of being hidden."""
     gaps = []
-    readable = [e for e in doc_entries if e["chars"] > 0 and not e["unreadable"]]
-    if not readable:
+    bulletin = [e["name"] for e in doc_entries if e["kind"] == "combined_bulletin"]
+    if bulletin:
+        # Finding 42: this document's own facts (closing date, CIDB grading,
+        # preference system) belong to whichever tender its own row is for,
+        # never knowably this one - excluded from every signal above, so say
+        # so plainly rather than let the generic "couldn't be read" (implies
+        # a parsing failure, not true here) or "no SBD/MBD forms" (implies
+        # this document was actually checked) wording stand in for it.
+        gaps.append(
+            "Covers multiple tenders in one document, not just this one: " + "; ".join(bulletin[:5]) +
+            ". Tender Tool hasn't tried to work out which part is this tender's own - nothing from it is shown "
+            "below. Find this tender's own row/section in it and read it by eye, or get its own separate document "
+            "from the buyer if one exists.")
+    non_bulletin = [e for e in doc_entries if e["kind"] != "combined_bulletin"]
+    readable = [e for e in non_bulletin if e["chars"] > 0 and not e["unreadable"]]
+    if not non_bulletin:
+        pass  # every document was a bulletin - already said so above, nothing more to add
+    elif not readable:
         # Nothing was read, so nothing can be concluded about the forms - the
         # old wording ("uses no SBD/MBD standard forms") was a confident
         # statement made from zero evidence.
         gaps.append("None of this tender's documents could be read, so what it requires is unknown - nothing below "
                     "was checked against its documents. Upload a text PDF or Word copy.")
-    elif suite is None and any(e["unreadable"] for e in doc_entries):
+    elif suite is None and any(e["unreadable"] for e in non_bulletin):
         gaps.append("No SBD/MBD standard forms were found in the documents that could be read - but some couldn't be "
                     "read (listed below), and the forms may be in those.")
     elif suite is None and depth != "full_document":
@@ -979,13 +1305,23 @@ def _ocr_gaps(doc_entries):
 # land surveyor, an electrician...) would otherwise just not appear, and the
 # Roles card would read as if it were the whole requirement.
 KEY_PERSONNEL_RE = re.compile(r"key\s+(?:personnel|staff|persons?)\b|curriculum\s+vitae|\bCVs?\s+(?:of|for)\b", re.IGNORECASE)
+# A real find (2026-10-21, phase-2 sampling): "5. Change Key Personnel on the
+# Service" was a false positive - one item in a list of things the SERVICE
+# PROVIDER may not do without the buyer's written consent DURING THE
+# CONTRACT ("deviate from the programme", "deviate from the scope", "change
+# key personnel") - a contract-administration clause, not a bid-time ask for
+# key personnel. The whole-document text this came from genuinely has no
+# other key-personnel mention at all, so returning it as "this tender asks
+# for key personnel" was actively wrong, not just imprecise.
+_KEY_PERSONNEL_FALSE_CONTEXT_RE = re.compile(r"\b(?:change|changing|substitut\w*|replac\w*)\s*$", re.IGNORECASE)
 
 
 def _key_personnel_gap(docs):
     for d in docs:
         t = d.get("text") or ""
-        m = KEY_PERSONNEL_RE.search(t)
-        if m:
+        for m in KEY_PERSONNEL_RE.finditer(t):
+            if _KEY_PERSONNEL_FALSE_CONTEXT_RE.search(t[max(0, m.start() - 20):m.start()]):
+                continue  # "change/substitute/replace key personnel" - contract administration, not a bid-time ask
             return [f"This tender asks for key personnel (\"{_quote(t, m.start(), m.end())[:160]}\", {d['name']}). "
                     f"Tender Tool recognises {len(ROLE_PATTERNS)} common roles (listed under Roles when found); "
                     "check the tender's own list for any role it doesn't show."]

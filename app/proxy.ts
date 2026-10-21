@@ -8,8 +8,15 @@ import { NextResponse, type NextRequest } from "next/server";
  * logged out at unpredictable times), and routes a signed-in user to
  * wherever they actually belong: /onboarding if they have no company yet
  * (company_members has no row for them - see
- * supabase/migrations/0003_onboarding.sql), /dashboard if they already do
- * and land on /onboarding anyway. Every other route is untouched.
+ * supabase/migrations/0003_onboarding.sql). Every other route is untouched.
+ *
+ * Does NOT redirect a member away from /onboarding anymore (it used to) -
+ * the 5-step wizard (app/AGENTS.md "Auth + onboarding") keeps gathering
+ * compliance/people/preference data at /onboarding?step=2..5 for a while
+ * after step 1 already created the company and its company_members row, so
+ * "membership exists" can no longer mean "onboarding is done, send them to
+ * /dashboard". /onboarding/page.tsx itself decides what to show a member
+ * who lands there (the bid-readiness end screen by default).
  */
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -63,11 +70,6 @@ export async function proxy(request: NextRequest) {
     if (!membership && !path.startsWith("/onboarding")) {
       const url = request.nextUrl.clone();
       url.pathname = "/onboarding";
-      return NextResponse.redirect(url);
-    }
-    if (membership && path.startsWith("/onboarding")) {
-      const url = request.nextUrl.clone();
-      url.pathname = "/dashboard";
       return NextResponse.redirect(url);
     }
   }

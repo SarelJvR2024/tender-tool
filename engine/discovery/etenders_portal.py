@@ -127,18 +127,32 @@ def dedupe_rows(rows):
     """The portal returns one row per joined child record: a tender cancelled
     twice (174406 above) or with several awards comes back as several rows
     with the same id. Keeps one row per id, merging the cancellation records
-    into a list under `_cancellations` (latest first)."""
+    into a list under `_cancellations` (latest first).
+
+    `bidders` is merged across duplicate rows the same way: this docstring's
+    own "or with several awards comes back as several rows with the same
+    id" names bidders/awards as the other documented cause of a duplicate
+    row, alongside a repeat cancellation - but before this fix, only
+    `cancelled` was actually merged. A multi-lot award (several rows, one
+    per lot, each with that lot's own bidders) kept whichever duplicate row
+    happened to be dict()'d first and silently dropped every other lot's
+    bidders/amounts - confirmed with a synthetic 2-lot fixture reproducing
+    this docstring's own stated shape (2026-10-20)."""
     out = {}
     for r in rows:
         i = r.get("id")
         if i is None:
             continue
-        keep = out.setdefault(i, dict(r, _cancellations=[]))
+        keep = out.setdefault(i, dict(r, _cancellations=[], _bidders=[]))
         c = r.get("cancelled")
         if c and c not in keep["_cancellations"]:
             keep["_cancellations"].append(c)
+        for b in r.get("bidders") or []:
+            if b not in keep["_bidders"]:
+                keep["_bidders"].append(b)
     for r in out.values():
         r["_cancellations"].sort(key=lambda c: c.get("dateModified") or "", reverse=True)
+        r["bidders"] = r.pop("_bidders")
     return list(out.values())
 
 

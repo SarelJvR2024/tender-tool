@@ -370,3 +370,153 @@ create policy "property_documents: employee has no access" on property_documents
   for all to authenticated
   using (not is_employee_in_company(company_id))
   with check (not is_employee_in_company(company_id));
+
+-- ---------------------------------------------------------------------------
+-- Part D: additional tenant-table coverage (found reviewing this migration
+-- before merge, 2026-10-21 - this PR branched before several of these tables
+-- existed). Every table above with an `is_company_member(company_id)`-style
+-- PERMISSIVE policy was audited one by one against this migration's own
+-- coverage; these 15 were company-scoped tenant data with no RESTRICTIVE
+-- employee policy at all, which would have left an employee with full
+-- read/write on all of it - the exact gap Part C exists to close. Same
+-- additive-only, narrow-only reasoning as Part C throughout: for owner/
+-- admin/member, is_employee_in_company()/the tenders() role check is false,
+-- so every restrictive clause below is unconditionally true and nothing
+-- about their access changes.
+--
+-- Not added: tender_requirements/tender_documents (already "readable by
+-- authenticated users" for EVERYONE, not a tenant-isolation policy to begin
+-- with - unaffected by any role); tender_watch_state (RLS enabled, zero
+-- policies at all - service-role-only already, nothing for any authenticated
+-- role to narrow); discovered_opportunity_documents (keyed by release_key,
+-- not company_id - shared across every company watching the same release,
+-- same as tenders/tender_documents' own shared nature); tender_engine_jobs
+-- (a `security_invoker` VIEW over pack_generation_jobs, confirmed by actually
+-- replaying this migration against a real scratch Postgres - CREATE POLICY
+-- on a view fails outright, and isn't needed: security_invoker means a
+-- query against the view runs under the CALLER's own RLS, so
+-- pack_generation_jobs' own Part C policy above already applies
+-- transitively every time this view is queried).
+-- ---------------------------------------------------------------------------
+
+-- tender_answers: every answer given for a tender, including total_bid_price
+-- and uploaded compliance documents - squarely "pricing... and other
+-- people's records", exactly what this role is not for.
+create policy "tender_answers: employee has no access" on tender_answers
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+-- field_provenance has no company_id of its own - scoped via its parent
+-- tender_packs, same EXISTS shape as tender_pack_assignments above.
+create policy "field_provenance: employee has no access" on field_provenance
+  as restrictive
+  for all to authenticated
+  using (not exists (
+    select 1 from tender_packs tp where tp.id = field_provenance.tender_pack_id and is_employee_in_company(tp.company_id)
+  ))
+  with check (not exists (
+    select 1 from tender_packs tp where tp.id = field_provenance.tender_pack_id and is_employee_in_company(tp.company_id)
+  ));
+
+create policy "pack_review_confirmations: employee has no access" on pack_review_confirmations
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "signatory_scopes: employee has no access" on signatory_scopes
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "discovered_opportunities: employee has no access" on discovered_opportunities
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "company_offices: employee has no access" on company_offices
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "company_document_templates: employee has no access" on company_document_templates
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "onboarding_uploads: employee has no access" on onboarding_uploads
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "onboarding_document_results: employee has no access" on onboarding_document_results
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "tender_subcontracting_plans: employee has no access" on tender_subcontracting_plans
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "deadline_reminders_seen: employee has no access" on deadline_reminders_seen
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "digest_readiness_seen: employee has no access" on digest_readiness_seen
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "discovery_seen_releases: employee has no access" on discovery_seen_releases
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "discipline_category_suggestions: employee has no access" on discipline_category_suggestions
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+create policy "tender_update_notifications: employee has no access" on tender_update_notifications
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(company_id))
+  with check (not is_employee_in_company(company_id));
+
+-- tender_watched_documents has no company_id of its own either - scoped via
+-- its parent tenders.owner_company_id (nullable: null = a shared portal
+-- tender, already visible to everyone and unaffected here).
+create policy "tender_watched_documents: employee has no access" on tender_watched_documents
+  as restrictive
+  for all to authenticated
+  using (not exists (
+    select 1 from tenders t where t.id = tender_watched_documents.tender_id and is_employee_in_company(t.owner_company_id)
+  ))
+  with check (not exists (
+    select 1 from tenders t where t.id = tender_watched_documents.tender_id and is_employee_in_company(t.owner_company_id)
+  ));
+
+-- registration_types: owner_company_id is nullable (null = shared catalog
+-- row, visible to everyone - is_employee_in_company(null) is false since no
+-- company_members row ever has a null company_id, so this never touches
+-- shared rows). Only a company's OWN added registration types are hidden.
+create policy "registration_types: employee no access to own company rows" on registration_types
+  as restrictive
+  for all to authenticated
+  using (not is_employee_in_company(owner_company_id))
+  with check (not is_employee_in_company(owner_company_id));

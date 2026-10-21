@@ -32,7 +32,8 @@ export async function acceptTenderUpdateDate(formData: FormData) {
     p_change: change,
   });
   if (error) {
-    redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}#tender-updates`);
+    console.error("accept_tender_update_date rpc failed", error);
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not accept this update - try again. If it keeps happening, let us know.")}#tender-updates`);
   }
 
   revalidatePath(`/tenders/${tenderId}`);

@@ -16,7 +16,7 @@ import {
   toNumber,
   type PackEconomics,
 } from "@/lib/dealEconomics";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { EconomicsForm, type CreditPerson } from "../economics-form";
 import { MarketComparison } from "./market-comparison";
 
@@ -84,6 +84,8 @@ export default async function PricingHistoryPage({
   const people = (peopleRows ?? []) as CreditPerson[];
   const taxonomy = await loadDisciplineTaxonomy(supabase);
   const nameById = new Map(people.map((p) => [p.id, p.name]));
+
+  if (error) console.error("tender_packs select failed for pricing history", error);
 
   const categoriesByKey = new Map<string, string[]>();
   for (const o of (opportunities ?? []) as { ocid: string | null; contract_number: string | null; tender_id: string | null; categories: string[] | null }[]) {
@@ -159,9 +161,9 @@ export default async function PricingHistoryPage({
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   const mixedVat = new Set(rows.map((r) => r.inclVat)).size > 1;
 
-  const select: CSSProperties = { minHeight: 36, padding: "0 8px", borderRadius: 7, border: "1px solid #E5E1D5", background: "#FFFFFF", fontSize: 13, color: "#16233B", maxWidth: "100%" };
-  const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#6B6758", padding: "8px 10px", borderBottom: "1px solid #E5E1D5", whiteSpace: "nowrap" };
-  const td: CSSProperties = { fontSize: 13, color: "#16233B", padding: "8px 10px", borderBottom: "1px solid #F0EEE6", verticalAlign: "top" };
+  const select: CSSProperties = { minHeight: 36, padding: "0 8px", borderRadius: 7, border: "1px solid #E3E6EA", background: "#FFFFFF", fontSize: 13, color: "#16233B", maxWidth: "100%" };
+  const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#5B6472", padding: "8px 10px", borderBottom: "1px solid #E3E6EA", whiteSpace: "nowrap" };
+  const td: CSSProperties = { fontSize: 13, color: "#16233B", padding: "8px 10px", borderBottom: "1px solid #ECEEF1", verticalAlign: "top" };
   const num: CSSProperties = { ...td, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" };
   // The "Tenders" table below is 10 columns wide (minWidth: 980) and scrolls
   // sideways on a phone - without a frozen first column, scrolling right to
@@ -171,19 +173,17 @@ export default async function PricingHistoryPage({
   const stickyCol: CSSProperties = { position: "sticky", left: 0, zIndex: 1, background: "#FFFFFF", boxShadow: "2px 0 4px rgba(22,35,59,0.06)" };
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
-      <SiteNav active="pipeline" />
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <Link href="/pipeline" style={{ fontSize: 13, color: "#6B6758", textDecoration: "none" }}>← Pipeline</Link>
+    <AppShell>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+        <Link href="/pipeline" style={{ fontSize: 13, color: "#5B6472", textDecoration: "none" }}>← Bids</Link>
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "6px 0 4px" }}>Pricing history</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
           What you have submitted at, by tender type, client and sector, and how it compared with the published results. Internal only: nothing here goes into a submission pack.
         </p>
 
         {(error || sp.error) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load pricing: ${error.message}` : sp.error}
+            {error ? "Couldn't load pricing history - try refreshing. If it keeps happening, let us know." : sp.error}
           </div>
         )}
 
@@ -195,7 +195,7 @@ export default async function PricingHistoryPage({
           </div>
         )}
 
-        <form method="get" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: 12, marginBottom: 16 }}>
+        <form method="get" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: 12, marginBottom: 16 }}>
           <Filter label="Tender type">
             <select name="type" defaultValue={sp.type ?? ""} style={select}>
               <option value="">All types</option>
@@ -236,16 +236,16 @@ export default async function PricingHistoryPage({
           <button type="submit" style={{ minHeight: 36, padding: "0 16px", border: "none", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
             Apply
           </button>
-          <Link href="/pipeline/pricing" style={{ fontSize: 12, color: "#6B6758", alignSelf: "center" }}>Clear</Link>
+          <Link href="/pipeline/pricing" style={{ fontSize: 12, color: "#5B6472", alignSelf: "center" }}>Clear</Link>
         </form>
 
         {priced.length === 0 ? (
-          <div style={{ background: "#FFFFFF", border: "1px dashed #E5E1D5", borderRadius: 11, padding: 24, textAlign: "center", fontSize: 13, color: "#6B6758" }}>
+          <div style={{ background: "#FFFFFF", border: "1px dashed #E3E6EA", borderRadius: 11, padding: 24, textAlign: "center", fontSize: 13, color: "#5B6472" }}>
             No submitted prices recorded yet. Open &ldquo;Price &amp; credit&rdquo; on a Bidding, Submitted, Won or Lost card on the{" "}
             <Link href="/pipeline" style={{ color: "#D97706", fontWeight: 600 }}>Pipeline</Link>.
           </div>
         ) : rows.length === 0 ? (
-          <div style={{ background: "#FFFFFF", border: "1px dashed #E5E1D5", borderRadius: 11, padding: 24, textAlign: "center", fontSize: 13, color: "#6B6758" }}>
+          <div style={{ background: "#FFFFFF", border: "1px dashed #E3E6EA", borderRadius: 11, padding: 24, textAlign: "center", fontSize: 13, color: "#5B6472" }}>
             No priced tenders match these filters.
           </div>
         ) : (
@@ -256,7 +256,7 @@ export default async function PricingHistoryPage({
                 These rows mix VAT-inclusive and VAT-exclusive prices; the summary adds them as typed.
               </p>
             )}
-            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, marginBottom: 20 }}>
+            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, marginBottom: 20 }}>
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr>
@@ -288,7 +288,7 @@ export default async function PricingHistoryPage({
             <h2 style={{ fontSize: 15, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>
               Tenders ({rows.length})
             </h2>
-            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11 }}>
+            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11 }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
                 <thead>
                   <tr>
@@ -319,7 +319,7 @@ export default async function PricingHistoryPage({
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{r.type}</td>
                         <td style={td}>
                           {sectorLabel(r.sector, taxonomy)}
-                          {r.sectorDerived && <div style={{ fontSize: 10, color: "#9A9684" }}>suggested</div>}
+                          {r.sectorDerived && <div style={{ fontSize: 10, color: "#8A93A0" }}>suggested</div>}
                         </td>
                         <td style={td}>
                           <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: meta.bg, color: meta.color }}>
@@ -329,12 +329,12 @@ export default async function PricingHistoryPage({
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{shortDate(r.submittedAt)}</td>
                         <td style={num}>
                           {formatRand(r.price)}
-                          {!r.inclVat && <div style={{ fontSize: 10, color: "#9A9684" }}>excl. VAT</div>}
+                          {!r.inclVat && <div style={{ fontSize: 10, color: "#8A93A0" }}>excl. VAT</div>}
                         </td>
                         <td style={td}>{r.person ?? "-"}</td>
                         <td style={td}>
                           {r.commission ?? "-"}
-                          {r.pack.commission_note && <div style={{ fontSize: 11, color: "#6B6758" }}>{r.pack.commission_note}</div>}
+                          {r.pack.commission_note && <div style={{ fontSize: 11, color: "#5B6472" }}>{r.pack.commission_note}</div>}
                         </td>
                         <td style={{ ...td, minWidth: 220 }}>
                           <EconomicsForm tenderId={r.tenderId} economics={r.pack} people={people} defaultSector={r.defaultSector} taxonomy={taxonomy} returnTo="pricing" toggleLabel="Edit" />
@@ -351,13 +351,13 @@ export default async function PricingHistoryPage({
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }
 
 function Filter({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, fontWeight: 600, color: "#6B6758", minWidth: 0, maxWidth: "100%" }}>
+    <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, fontWeight: 600, color: "#5B6472", minWidth: 0, maxWidth: "100%" }}>
       {label}
       {children}
     </label>

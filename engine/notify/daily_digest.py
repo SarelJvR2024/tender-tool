@@ -17,7 +17,26 @@ sendgrid, resend, nodemailer or send_email anywhere in this repo as of
 2026-10-16). This script's output is written to be read the same way:
 either by a human, or by that same scheduled check-in, which can now also
 read one well-known file per person instead of inventing email content from
-three raw reports by hand.
+three raw reports by hand. The ACTUAL sending of this JSON as an email to a
+real customer is engine/notify/send_digest_emails.py's job, not this
+script's - see that module's own docstring for the provider (Resend) and
+the env var it needs.
+
+Opt-in (2026-10-20, Sarel directly asked: "yes let's make this an optional
+email that the customer can decide if they want to receive it."):
+company_members.daily_digest_opt_in (migration 0073) defaults to false, and
+filter_opted_in() below drops every roster entry that hasn't explicitly
+opted in BEFORE any digest is built for them - not just before sending.
+This is a pure function (no network), unit-tested on its own in
+test_digest_opt_in.py; the live/local roster loaders below just populate
+the "email_opt_in" field it reads.
+
+Every "today" in this file is watch_deadlines.SAST-anchored (enterprise-
+readiness audit round 1, 2026-10-20), not a naive datetime.date.today() -
+the worker container has no TZ set and runs in UTC by default, so a naive
+call is one calendar day behind the real SAST date for the whole 00:00-
+01:59 SAST window every day. See watch_deadlines.py's own SAST constant
+comment for the full reasoning.
 
 What this script reuses rather than reimplements, concretely:
   - New-tender fit: the Discovery feed's own per-company scoring -
@@ -230,7 +249,7 @@ def fetch_releases(days=14, sources="all", with_documents=True):
     detail-page fetch still ran in full regardless of the flag, so a "quick"
     local run was never actually quick. QA-Edge-Case-Findings.md, 2026-10-19
     (nineteenth run)."""
-    today = datetime.date.today()
+    today = datetime.datetime.now(watch_deadlines.SAST).date()
     date_from = (today - datetime.timedelta(days=days)).isoformat()
     if sources == "ocds":
         raw = etenders_national.fetch_releases(date_from, today.isoformat())
@@ -309,7 +328,7 @@ def submission_due_signals(scored, lead_days=14):
     new_tender_signals' default), since 'something you might be bidding on
     closes soon' is a different, more inclusive question than 'should you
     look at this at all'."""
-    today = datetime.date.today()
+    today = datetime.datetime.now(watch_deadlines.SAST).date()
     out = []
     for r in scored:
         if r.get("verdict") not in watch_new_tenders.REPORT_WORTHY_VERDICTS_WIDE:
@@ -389,7 +408,7 @@ def load_roster_live(url, key, company_id=None, client=None):
     role since 0048). company_members has no name column, so the e-mail is the
     name shown; a member whose e-mail can't be read is "a team member (no
     e-mail found)", never a raw user id."""
-    path = "company_members?select=user_id,company_id,tender_role,companies(legal_name)"
+    path = "company_members?select=user_id,company_id,tender_role,daily_digest_opt_in,companies(legal_name)"
     if company_id:
         path += f"&company_id=eq.{company_id}"
     rows = watch_deadlines.supabase_request(url, key, path)
@@ -404,6 +423,10 @@ def load_roster_live(url, key, company_id=None, client=None):
             "company_id": r["company_id"],
             "company_name": (r.get("companies") or {}).get("legal_name"),
             "tender_role": r.get("tender_role") or DEFAULT_ROLE,
+            # Opt-in, not opt-out (0073) - missing/false/None all mean "not
+            # opted in". filter_opted_in() is what actually enforces this;
+            # this loader only reports the column truthfully.
+            "email_opt_in": r.get("daily_digest_opt_in") is True,
         })
     return roster
 
@@ -429,8 +452,26 @@ def load_roster_local(path):
             "company_id": None,
             "company_name": data.get("company_legal_name"),
             "tender_role": role,
+            # Local mode has no company_members row to read a real opt-in
+            # from - a roster entry opts in explicitly ("email_opt_in": true
+            # in the roster file), same opt-in-not-opt-out default as live
+            # mode. See config/team_roster.example.json.
+            "email_opt_in": member.get("email_opt_in") is True,
         })
     return roster
+
+
+def filter_opted_in(roster):
+    """Keep only roster entries that have actually opted in to the daily
+    digest email (company_members.daily_digest_opt_in, migration 0073, or
+    the local roster file's own "email_opt_in"). Pure, no network - this is
+    the single gate between "has a company_members/roster row" and "gets a
+    digest built at all"; main() calls it right after loading the roster, so
+    an opted-out person's digest is never built, not merely never sent.
+    Anything other than exactly True (missing key, None, False, a truthy
+    string typo) is treated as "not opted in" - this is an opt-in feature,
+    never an opt-out one, per Sarel's own instruction."""
+    return [p for p in roster if p.get("email_opt_in") is True]
 
 
 # ---------------------------------------------------------------------------
@@ -572,7 +613,7 @@ def main():
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     mode = args.mode or ("live" if url and key else "local")
 
-    today = datetime.date.today()
+    today = datetime.datetime.now(watch_deadlines.SAST).date()
 
     if mode == "local":
         if not args.profile:
@@ -627,9 +668,30 @@ def main():
                                  "error", exc=e)
             reassessed = []
 
+    # Opt-in gate (0073): drop anyone who hasn't explicitly opted in BEFORE
+    # building anything for them, not just before sending. roster_total is
+    # kept only for the log line below - everything after this uses the
+    # filtered list.
+    roster_total = len(roster)
+    roster = filter_opted_in(roster)
+    print(f"Roster: {roster_total} {'person' if roster_total == 1 else 'people'}, "
+          f"{len(roster)} opted in to the daily digest email ({roster_total - len(roster)} not opted in).")
+    if not roster:
+        print("Nobody has opted in - nothing to build. (This is expected until people turn the toggle on at /company.)")
+
     print(f"Scoring the national feed ({args.days} days) for {len(companies)} compan"
           f"{'y' if len(companies) == 1 else 'ies'}, each from its own profile...")
     releases, gov_res = fetch_releases(args.days, args.sources, with_documents=not args.no_fetch_documents)
+    if gov_res is not None and gov_res.get("errors"):
+        # Same gap as watch_new_tenders.py's own equivalent call site:
+        # gov_sources.fetch_all() isolates one source's own failure from the
+        # rest, but nothing ever surfaced that to Sarel - a source silently
+        # missing from a whole digest run, invisible outside stdout.
+        failed = ", ".join(sorted(gov_res["errors"]))
+        system_alerts.record(
+            "digest",
+            f"{len(gov_res['errors'])} government source(s) failed this run and were skipped: {failed}",
+            "warning", detail=str(gov_res["errors"]))
     scored_by_company = score_per_company(releases, companies,
                                           fetch_documents=not args.no_fetch_documents)
     # Listing changes on the same read: recorded in the change store (Supabase
@@ -650,6 +712,8 @@ def main():
             listing_changes = store.recent_changes(feed_ocids, since)
         except Exception as e:
             print(f"WARNING: listing changes could not be tracked ({e}) - digest goes out without them.")
+            system_alerts.record("digest", f"The daily digest could not track listing changes: {type(e).__name__}: {e}",
+                                 "error", exc=e)
 
     if mode == "live":
         n = (watch_deadlines.save_seen_db(client, seen, seen_loaded, DIGEST_CONSUMER)
@@ -658,16 +722,29 @@ def main():
 
     digests, totals, delivered_downgrades = [], {}, set()
     for p in roster:
-        ckey = LOCAL_COMPANY_KEY if mode == "local" else p["company_id"]
-        signals = company_signals(ckey, scored_by_company, document_expiry, tender_tasks, readiness_changes,
-                                  args.submission_lead_days, company_id=None if mode == "local" else p["company_id"],
-                                  tender_updates=tender_updates, listing_changes=listing_changes,
-                                  reassessed_tenders=reassessed)
-        for k, v in signals.items():
-            totals.setdefault(k, {})[ckey] = len(v)
-        d = build_digest_for_person(p, signals)
-        delivered_downgrades.update(d.pop("_delivered_downgrades", []))
-        digests.append(d)
+        # One bad roster entry (a malformed/corrupted row - missing a key
+        # signals() or build_digest_for_person() assumes) must not cost
+        # everyone else their digest. Enterprise-readiness audit round 2,
+        # 2026-10-20: this loop previously had no isolation at all - one
+        # bad entry raised uncaught and aborted every digest after it in
+        # roster order, with no alert, silently.
+        try:
+            ckey = LOCAL_COMPANY_KEY if mode == "local" else p["company_id"]
+            signals = company_signals(ckey, scored_by_company, document_expiry, tender_tasks, readiness_changes,
+                                      args.submission_lead_days, company_id=None if mode == "local" else p["company_id"],
+                                      tender_updates=tender_updates, listing_changes=listing_changes,
+                                      reassessed_tenders=reassessed)
+            for k, v in signals.items():
+                totals.setdefault(k, {})[ckey] = len(v)
+            d = build_digest_for_person(p, signals)
+            delivered_downgrades.update(d.pop("_delivered_downgrades", []))
+            digests.append(d)
+        except Exception as e:
+            label = p.get("email") or p.get("user_id") or "(unidentified roster entry)"
+            print(f"  WARNING: could not build a digest for {label} ({type(e).__name__}: {e}) - skipping this one, "
+                  "the rest of the run continues.")
+            system_alerts.record("digest", f"Could not build a digest for one roster entry ({label}): "
+                                 f"{type(e).__name__}: {e}", "error", exc=e)
 
     def total(k):
         return sum((totals.get(k) or {}).values())

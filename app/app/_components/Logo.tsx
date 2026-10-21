@@ -1,4 +1,4 @@
-// The Tender Tool mark: a checked document, not a generic AI-startup
+// The Tender Ready mark: a checked document, not a generic AI-startup
 // gradient blob. A rounded page (contents list suggested by three short
 // lines) with a bold amber checkmark breaking the page's top-right corner -
 // "this page has been checked" is the entire product promise in one shape.
@@ -13,7 +13,7 @@
 // shipped (PR #6) and filled in now that there's a second real use for it.
 export function Logo({ size = 40, variant = "default" }: { size?: number; variant?: "default" | "light" }) {
   const light = variant === "light";
-  const stroke = light ? "#F6F5F1" : "#16233B";
+  const stroke = light ? "#FFFFFF" : "#16233B";
   const fill = light ? "rgba(246, 245, 241, 0.08)" : "#FFFFFF";
 
   return (
@@ -24,7 +24,7 @@ export function Logo({ size = 40, variant = "default" }: { size?: number; varian
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
-      aria-label="Tender Tool"
+      aria-label="Tender Ready"
     >
       <rect x="7" y="5" width="22" height="30" rx="4" fill={fill} stroke={stroke} strokeWidth="2.2" />
       <line x1="12" y1="15" x2="23" y2="15" stroke={stroke} strokeWidth="1.6" strokeLinecap="round" />

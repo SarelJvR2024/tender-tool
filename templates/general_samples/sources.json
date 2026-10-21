@@ -79,6 +79,22 @@
    "description": "PROVISION OF PROFESSIONAL ARCHITECTURAL SERVICES (PSP) FOR REHABILITATION, RENOVATION AND REFURBISHMENT TO SOMERSET EAST SERVICE OFFICE IN SARAH BAARTMAN DISTRICT",
    "closing_date": "2026-10-27T11:00:00Z",
    "note": "added 2026-10-17: PSP tender (Klipcorp's sector) - SBD bundle in a flat PDF, CEQ with dotted leaders, CIDB Form of Offer and Acceptance"
+  },
+  "eskom_e3703cxmwp": {
+   "ocid": "ocds-9t57fa-174927",
+   "buyer": "ESKOM",
+   "reference": "E3703CXMWP",
+   "description": "NMC/RMC Atmos Maintenance and Support for a period of (5) five years.",
+   "closing_date": "2026-11-12T10:00:00Z",
+   "note": "added 2026-10-21: Finding 40 regression input - names ESKOM's own 'Form A' (Supplier Quality Management form) by name 11 times, which nothing matched before this fix"
+  },
+  "tshwane_gpm08_bulletin": {
+   "ocid": "ocds-9t57fa-174535",
+   "buyer": "City of Tshwane",
+   "reference": "GPM 08-2026/27",
+   "description": "Tender invitation for the long-term lease and development of the following council owned property: a portion of erf 95 Maroelana.",
+   "closing_date": "2026-12-17T10:00:00Z",
+   "note": "added 2026-10-21: Finding 42 regression input - this tender's only eTenders document, 'Notice 6 of 2026/27', is a combined bulletin covering 6 unrelated tenders (GPM 06/08/14/15/17/18) in one PDF, each its own numbered row with its own closing date and CIDB grading. Before the fix, this tender was shown a CIDB requirement that actually belongs to a different row (GPM 18) in the same PDF."
   }
  }
 }

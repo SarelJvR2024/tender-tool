@@ -15,8 +15,8 @@ import {
 import { addManualTenderDocuments, addPrivateTenderDocuments, registerManualTender } from "./actions";
 
 const label: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4 };
-const help: React.CSSProperties = { fontSize: 11, color: "#6B6758", marginTop: 3 };
-const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" };
+const help: React.CSSProperties = { fontSize: 11, color: "#5B6472", marginTop: 3 };
+const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" };
 const primaryBtn: React.CSSProperties = { minHeight: 44, padding: "0 18px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, border: "none", cursor: "pointer" };
 
 /** Checks every file before anything is uploaded - a bad one fails the batch up front. */
@@ -49,8 +49,9 @@ async function uploadAll(
     const path = `${prefix}${crypto.randomUUID().slice(0, 8)}-${safeFileName(f.name)}`;
     const { error } = await supabase.storage.from(TENDER_DOCS_BUCKET).upload(path, f, { contentType: f.type || "application/octet-stream" });
     if (error) {
+      console.error("tender document upload failed", f.name, error);
       if (done.length > 0) await supabase.storage.from(TENDER_DOCS_BUCKET).remove(done.map((d) => d.storage_path));
-      return { error: `Could not upload ${f.name}: ${error.message}` };
+      return { error: `Could not upload ${f.name} - try again. If it keeps happening, let us know.` };
     }
     done.push({ title: f.name, storage_path: path });
   }
@@ -153,7 +154,7 @@ export function ManualTenderForm({ companyId }: { companyId: string }) {
           <ul style={{ margin: "8px 0 0", paddingLeft: 18, fontSize: 12, color: "#4B5563" }}>
             {files.map((f) => (
               <li key={f.name + f.size}>
-                {f.name} <span style={{ color: "#9A9684" }}>({(f.size / 1024 / 1024).toFixed(1)} MB)</span>
+                {f.name} <span style={{ color: "#8A93A0" }}>({(f.size / 1024 / 1024).toFixed(1)} MB)</span>
               </li>
             ))}
           </ul>
@@ -219,7 +220,7 @@ export function AddTenderDocumentsForm({ companyId, tenderId }: { companyId: str
       <button
         type="submit"
         disabled={pending}
-        style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E5E1D5", color: "#16233B", fontSize: 12, fontWeight: 600, cursor: pending ? "default" : "pointer", opacity: pending ? 0.6 : 1 }}
+        style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E3E6EA", color: "#16233B", fontSize: 12, fontWeight: 600, cursor: pending ? "default" : "pointer", opacity: pending ? 0.6 : 1 }}
       >
         {pending ? "Uploading…" : "Add documents and re-analyse"}
       </button>

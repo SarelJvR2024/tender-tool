@@ -3,13 +3,19 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
-import { NEXT_STAGES, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
-import { SiteNav } from "../_components/SiteNav";
+import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
+import { NEXT_STAGES, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { moveTenderStage } from "./actions";
-import { derivedSector, ECONOMICS_COLUMNS, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
+import { derivedSector, ECONOMICS_COLUMNS, formatRand, toNumber, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
 import { loadDisciplineTaxonomy, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
 import { EconomicsForm, type CreditPerson } from "./economics-form";
+import { OutcomeForm, type Outcome } from "./outcome-form";
+import { loadPackReviewSnapshot } from "../tenders/[id]/pack-review-data";
+import { loadGeneralPackReviewSnapshot } from "../tenders/[id]/general-pack-review-data";
+import { computeTenderReadiness } from "../tenders/[id]/tender-readiness";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -44,6 +50,9 @@ type Card = {
   downgradeOpen: boolean;
   economics: PackEconomics | null;
   defaultSector: PriceSector | null;
+  family: string | null;
+  outcome: Outcome;
+  readiness: number | null;
 };
 
 // Same chip vocabulary as app/app/discovery/page.tsx's verdictChip().
@@ -82,6 +91,15 @@ function shortDate(d: string | null): string {
   return d ? new Date(d).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : "-";
 }
 
+// Card spec (item 4): "closing date with colour (red < 3d, amber < 7d)".
+function closingColor(left: number | null, closingDate: string | null): string {
+  if (left === null) return "#8A93A0";
+  if (isPast(closingDate)) return "#B91C1C";
+  if (left < 3) return "#B91C1C";
+  if (left < 7) return "#B45309";
+  return "#5B6472";
+}
+
 export default async function PipelinePage({
   searchParams,
 }: {
@@ -90,7 +108,7 @@ export default async function PipelinePage({
   const { error: actionError } = await searchParams;
   const supabase = await createClient();
 
-  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows }] = await Promise.all([
+  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows }, { data: outcomeRows }] = await Promise.all([
     supabase
       .from("tenders")
       .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, ${ECONOMICS_COLUMNS})`)
@@ -100,9 +118,26 @@ export default async function PipelinePage({
     // Who can get credit for a submission (item 26, migration 0034): the
     // company's people roster, same list the task assignee picker uses.
     supabase.from("people").select("id, name").order("name"),
+    // Outcome facts (item 4) - tender_answers' own outcome:* keys, see
+    // recordOutcomeAndMoveStage (pipeline/actions.ts) for why this table.
+    supabase.from("tender_answers").select("tender_id, field_key, value").in("field_key", Object.values(OUTCOME_FIELD_KEYS)),
   ]);
   const people = (peopleRows ?? []) as CreditPerson[];
+  const peopleById = new Map(people.map((p) => [p.id, p.name]));
   const taxonomy = await loadDisciplineTaxonomy(supabase);
+
+  if (error) console.error("tenders select failed for pipeline board", error);
+
+  const outcomeByTender = new Map<string, Outcome>();
+  for (const a of (outcomeRows ?? []) as { tender_id: string; field_key: string; value: string | null }[]) {
+    const o = outcomeByTender.get(a.tender_id) ?? { winningCompany: null, winningPriceZar: null, biddersCount: null, reasonLost: null };
+    if (a.field_key === OUTCOME_FIELD_KEYS.winningCompany) o.winningCompany = a.value;
+    else if (a.field_key === OUTCOME_FIELD_KEYS.winningPriceZar) o.winningPriceZar = a.value;
+    else if (a.field_key === OUTCOME_FIELD_KEYS.biddersCount) o.biddersCount = a.value;
+    else if (a.field_key === OUTCOME_FIELD_KEYS.reasonLost) o.reasonLost = a.value;
+    outcomeByTender.set(a.tender_id, o);
+  }
+  const EMPTY_OUTCOME: Outcome = { winningCompany: null, winningPriceZar: null, biddersCount: null, reasonLost: null };
 
   const verdictByKey = new Map<string, string>();
   const downgradeByKey = new Map<string, { was: string; open: boolean }>();
@@ -143,8 +178,41 @@ export default async function PipelinePage({
         t.family,
         categoriesByKey.get(`id:${t.id}`) ?? (t.ocid ? categoriesByKey.get(`ocid:${t.ocid}`) : undefined) ?? (t.contract_no ? categoriesByKey.get(`no:${t.contract_no}`) : undefined)
       ),
+      family: t.family,
+      outcome: outcomeByTender.get(t.id) ?? EMPTY_OUTCOME,
+      readiness: null,
     });
   }
+
+  // Readiness score (item 4's card spec) - bounded to "Assessing & building"
+  // cards only, the one stage it's actually relevant to (Found hasn't started
+  // a pack; Submitted/Awarded/Lost are already past needing it). Same cached
+  // snapshot the tender workspace's own header score reads (prompt 9) - never
+  // re-derived, and never computed for every card on the board, since a full
+  // Pack Review read per tender is real Supabase cost (same N+1 concern
+  // flagged for Home's own "specific next step", app/AGENTS.md "Home
+  // cockpit").
+  const biddingCards = cards.filter((c) => c.stage === "bidding");
+  const readinessScores = await Promise.all(
+    biddingCards.map(async (c) => {
+      try {
+        if (c.family === SANRAL_CONVENTIONAL_FAMILY) {
+          const snap = await loadPackReviewSnapshot(c.id);
+          return snap.mapped ? computeTenderReadiness(snap.sections).score : null;
+        }
+        if (c.family === GENERAL_FAMILY) {
+          const snap = await loadGeneralPackReviewSnapshot(c.id);
+          return snap.mapped ? computeTenderReadiness(snap.sections).score : null;
+        }
+      } catch (e) {
+        console.error("readiness score failed for pipeline card", c.id, e);
+      }
+      return null;
+    }),
+  );
+  biddingCards.forEach((c, i) => {
+    c.readiness = readinessScores[i];
+  });
 
   const byStage = Object.fromEntries(PIPELINE_STAGES.map((s) => [s, [] as Card[]])) as Record<PipelineStage, Card[]>;
   for (const c of cards) byStage[c.stage].push(c);
@@ -155,82 +223,163 @@ export default async function PipelinePage({
 
   const submittedToDate = cards.filter((c) => c.submittedAt).length;
 
-  return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
-      <SiteNav active="pipeline" />
+  // Header strip (item 4): active bids (Discovered + Assessing & building,
+  // i.e. not yet at an outcome), total value being bid (sum of this
+  // company's own submitted_price_zar across those same active cards - the
+  // only "value" this app tracks, same field the card itself shows),
+  // submitted this month (submitted_at's calendar month = now's), win rate
+  // (Awarded / (Awarded + Lost), the only two outcomes that exist).
+  const activeCards = [...byStage.found, ...byStage.bidding];
+  const activeBids = activeCards.length;
+  const totalValueBeingBid = activeCards.reduce((sum, c) => sum + (toNumber(c.economics?.submitted_price_zar) ?? 0), 0);
+  const now = new Date();
+  const submittedThisMonth = cards.filter((c) => {
+    if (!c.submittedAt) return false;
+    const d = new Date(c.submittedAt);
+    return d.getUTCFullYear() === now.getUTCFullYear() && d.getUTCMonth() === now.getUTCMonth();
+  }).length;
+  const decided = byStage.won.length + byStage.lost.length;
+  const winRate = decided === 0 ? null : Math.round((byStage.won.length / decided) * 100);
 
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+  return (
+    <AppShell>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Pipeline</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Bids</h1>
           <Link href="/pipeline/pricing" style={{ fontSize: 13, fontWeight: 600, color: "#D97706", textDecoration: "none" }}>
             Pricing history →
           </Link>
         </div>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
           Every tender you&apos;re tracking, by stage. Open a card for its workspace; move it on when something changes.
         </p>
 
         {(error || actionError) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load tenders: ${error.message}` : actionError}
+            {error ? "Couldn't load tenders - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 20 }}>
-          <StatCard label="In progress" value={byStage.found.length + byStage.bidding.length} color="#16233B" />
-          <StatCard label="Submitted to date" value={submittedToDate} color="#16233B" />
-          <StatCard label="Won" value={byStage.won.length} color="#15803D" />
-          <StatCard label="Lost" value={byStage.lost.length} color="#B91C1C" />
+          <StatCard label="Active bids" value={activeBids} color="#16233B" />
+          <StatCard label="Total value being bid" value={formatRand(totalValueBeingBid)} color="#16233B" />
+          <StatCard label="Submitted this month" value={submittedThisMonth} color="#16233B" />
+          <StatCard label="Win rate" value={winRate === null ? "-" : `${winRate}%`} color={winRate !== null && winRate >= 50 ? "#15803D" : "#16233B"} />
         </div>
+        <p style={{ fontSize: 11, color: "#8A93A0", margin: "-12px 0 20px" }}>
+          {submittedToDate} submitted to date · {byStage.won.length} won · {byStage.lost.length} lost
+        </p>
 
-        {/* The board scrolls sideways on its own on a phone; the page itself never does.
-            Nothing used to hint that Won/Lost sit off-screen, so a right-edge
-            fade (hidden once the board actually fits, i.e. desktop widths) +
-            a small text cue give the scroll somewhere to point at. */}
-        <div style={{ position: "relative" }}>
-          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 8 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(220px, 1fr))", gap: 12, alignItems: "start" }}>
-            {PIPELINE_STAGES.map((stage) => {
-              const meta = STAGE_META[stage];
-              const column = byStage[stage];
-              return (
-                <section key={stage} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: 10 }}>
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "2px 4px 0" }}>
-                    <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: meta.bg, color: meta.color }}>
-                      {meta.label}
-                    </span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: "#6B6758" }}>{column.length}</span>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#9A9684", padding: "6px 4px 10px" }}>{meta.hint}</div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {column.length === 0 && (
-                      <div style={{ fontSize: 12, color: "#9A9684", padding: "14px 8px", textAlign: "center", border: "1px dashed #E5E1D5", borderRadius: 9 }}>
-                        {EMPTY_COPY[stage]}
-                      </div>
-                    )}
-                    {column.map((c) => (
-                      <TenderCard key={c.id} card={c} people={people} taxonomy={taxonomy} />
-                    ))}
-                  </div>
-
-                  {stage === "found" && (
-                    <Link href="/discovery" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#D97706", textDecoration: "none", padding: "10px 4px 2px" }}>
-                      Find more in Discovery →
-                    </Link>
-                  )}
-                </section>
-              );
-            })}
+        {/* Board + List (item 4's "list-view toggle") - the List tab promised
+            when this became a real Tabs component (app/AGENTS.md "App
+            shell") lands here, reading the exact same `cards` array, not a
+            second query. */}
+        <Tabs defaultValue="board">
+          <TabsList className="mb-3">
+            <TabsTrigger value="board">Board</TabsTrigger>
+            <TabsTrigger value="list">List</TabsTrigger>
+          </TabsList>
+          <TabsContent value="list">
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", color: "#5B6472", borderBottom: "1px solid #E3E6EA" }}>
+                    <th style={{ padding: "6px 8px" }}>Tender</th>
+                    <th style={{ padding: "6px 8px" }}>Client</th>
+                    <th style={{ padding: "6px 8px" }}>Stage</th>
+                    <th style={{ padding: "6px 8px" }}>Value</th>
+                    <th style={{ padding: "6px 8px" }}>Closing</th>
+                    <th style={{ padding: "6px 8px" }}>Owner</th>
+                    <th style={{ padding: "6px 8px" }}>Readiness</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cards.map((c) => {
+                    const left = daysUntil(c.closingDate);
+                    const meta = STAGE_META[c.stage];
+                    const owner = c.economics?.submitted_by_person_id ? peopleById.get(c.economics.submitted_by_person_id) : null;
+                    return (
+                      <tr key={c.id} style={{ borderBottom: "1px solid #ECEEF1" }}>
+                        <td style={{ padding: "8px" }}>
+                          <Link href={`/tenders/${c.id}`} style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
+                            {c.contractNo ?? c.title}
+                          </Link>
+                        </td>
+                        <td style={{ padding: "8px", color: "#4B5563" }}>{c.buyer}</td>
+                        <td style={{ padding: "8px" }}>
+                          <span style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 700, background: meta.bg, color: meta.color }}>{meta.label}</span>
+                        </td>
+                        <td style={{ padding: "8px", color: "#16233B" }}>{formatRand(toNumber(c.economics?.submitted_price_zar))}</td>
+                        <td style={{ padding: "8px", color: closingColor(left, c.closingDate) }}>{c.closingDate ? shortDate(c.closingDate) : "-"}</td>
+                        <td style={{ padding: "8px", color: "#4B5563" }}>{owner ?? "-"}</td>
+                        <td style={{ padding: "8px", color: "#4B5563" }}>{c.readiness !== null ? `${c.readiness}%` : "-"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          </div>
-          {/* Right-edge fade: the only hint, on narrower viewports, that
-              Won/Lost sit off-screen to the right. */}
-          <ScrollFade fadeColor="246, 245, 241" minWidthToHide={1180} />
-        </div>
+          </TabsContent>
+          <TabsContent value="board">
+            {/* The board scrolls sideways on its own on a phone; the page itself never does.
+                Nothing used to hint that Won/Lost sit off-screen, so a right-edge
+                fade (hidden once the board actually fits, i.e. desktop widths) +
+                a small text cue give the scroll somewhere to point at. */}
+            <div style={{ position: "relative" }}>
+              <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(220px, 1fr))", gap: 12, alignItems: "start" }}>
+                {PIPELINE_STAGES.map((stage) => {
+                  const meta = STAGE_META[stage];
+                  const column = byStage[stage];
+                  return (
+                    <section key={stage} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "2px 4px 0" }}>
+                        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: meta.bg, color: meta.color }}>
+                          {meta.label}
+                        </span>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#5B6472" }}>{column.length}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#8A93A0", padding: "6px 4px 10px" }}>{meta.hint}</div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {column.length === 0 && (
+                          <div style={{ fontSize: 12, color: "#8A93A0", padding: "14px 8px", textAlign: "center", border: "1px dashed #E3E6EA", borderRadius: 9 }}>
+                            {EMPTY_COPY[stage]}
+                          </div>
+                        )}
+                        {column.map((c) => (
+                          <TenderCard key={c.id} card={c} people={people} taxonomy={taxonomy} />
+                        ))}
+                      </div>
+
+                      {stage === "found" && (
+                        <Link href="/discovery" style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#D97706", textDecoration: "none", padding: "10px 4px 2px" }}>
+                          Find more in Opportunities →
+                        </Link>
+                      )}
+                    </section>
+                  );
+                })}
+                </div>
+              </div>
+              {/* Right-edge fade: the only hint, on narrower viewports, that
+                  Won/Lost sit off-screen to the right. */}
+              <ScrollFade fadeColor="255, 255, 255" minWidthToHide={1180} />
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
-    </div>
+    </AppShell>
   );
+}
+
+// "Owner avatar" (item 4's card spec): the same submitted_by_person_id
+// ("credit for the submission", items 26/27) EconomicsForm already writes -
+// no separate "bid owner" concept exists or was invented; this is that same
+// fact, just also shown as a small avatar on the card face.
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/);
+  return ((parts[0]?.[0] ?? "") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
 }
 
 function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPerson[]; taxonomy: DisciplineTaxonomy }) {
@@ -238,25 +387,26 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
   const left = daysUntil(card.closingDate);
   const open = card.stage === "found" || card.stage === "bidding";
   const back = PREVIOUS_STAGE[card.stage];
+  const owner = card.economics?.submitted_by_person_id ? people.find((p) => p.id === card.economics!.submitted_by_person_id)?.name ?? null : null;
 
   let dateLine: { text: string; color: string };
   if (!open) {
     const when = card.stage === "submitted" ? card.submittedAt : card.stageChangedAt;
     dateLine = {
       text: `${card.stage === "submitted" ? "Submitted" : STAGE_META[card.stage].label} ${shortDate(when)}`,
-      color: "#6B6758",
+      color: "#5B6472",
     };
   } else if (left === null) {
-    dateLine = { text: "No closing date", color: "#9A9684" };
+    dateLine = { text: "No closing date", color: "#8A93A0" };
   } else if (isPast(card.closingDate)) {
     // Usually means it was handed in and just needs moving to Submitted.
     dateLine = { text: `Closed ${shortDate(card.closingDate)}`, color: "#B91C1C" };
   } else {
-    dateLine = { text: `Closes ${shortDate(card.closingDate)} · ${left} day${left === 1 ? "" : "s"} left`, color: left <= 7 ? "#B45309" : "#6B6758" };
+    dateLine = { text: `Closes ${shortDate(card.closingDate)} · ${left} day${left === 1 ? "" : "s"} left`, color: closingColor(left, card.closingDate) };
   }
 
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "10px 12px" }}>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "10px 12px" }}>
       <Link href={`/tenders/${card.id}`} style={{ display: "block", textDecoration: "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 4 }}>
           {card.contractNo && (
@@ -268,7 +418,7 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
           {card.wasVerdict && (
             <span
               title="Re-assessed: the Discovery verdict got worse since this tender was found - see its Discovery entry"
-              style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 700, background: card.downgradeOpen ? "#FEE2E2" : "#F6F5F1", color: card.downgradeOpen ? "#B91C1C" : "#6B6758" }}
+              style={{ padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 700, background: card.downgradeOpen ? "#FEE2E2" : "#FFFFFF", color: card.downgradeOpen ? "#B91C1C" : "#5B6472" }}
             >
               {card.downgradeOpen ? "\u26A0 " : ""}Re-assessed · was {VERDICT_CHIP[card.wasVerdict]?.label ?? card.wasVerdict}
             </span>
@@ -279,16 +429,58 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
         </div>
         <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 4 }}>{card.buyer}</div>
         <div style={{ fontSize: 11, fontWeight: 600, color: dateLine.color }}>{dateLine.text}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+          {card.economics?.submitted_price_zar != null && (
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#16233B" }}>{formatRand(toNumber(card.economics.submitted_price_zar))}</span>
+          )}
+          {card.readiness !== null && (
+            <span
+              title="Readiness score"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: 20,
+                height: 20,
+                padding: "0 5px",
+                borderRadius: 100,
+                fontSize: 10,
+                fontWeight: 700,
+                background: card.readiness === 100 ? "#DCFCE7" : card.readiness >= 50 ? "#FEF3C7" : "#FEE2E2",
+                color: card.readiness === 100 ? "#15803D" : card.readiness >= 50 ? "#B45309" : "#B91C1C",
+              }}
+            >
+              {card.readiness}%
+            </span>
+          )}
+          {owner && (
+            <span
+              title={`Owner: ${owner}`}
+              style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 20, height: 20, borderRadius: "50%", background: "#E8EBF1", color: "#16233B", fontSize: 9, fontWeight: 700 }}
+            >
+              {initials(owner)}
+            </span>
+          )}
+        </div>
       </Link>
 
-      {(NEXT_STAGES[card.stage].length > 0 || back) && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 10, paddingTop: 8, borderTop: "1px solid #F0EEE6" }}>
+      {card.stage !== "submitted" && (NEXT_STAGES[card.stage].length > 0 || back) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginTop: 10, paddingTop: 8, borderTop: "1px solid #ECEEF1" }}>
           {NEXT_STAGES[card.stage].map((next) => (
             <StageButton key={next} tenderId={card.id} stage={next} primary />
           ))}
           {back && <StageButton tenderId={card.id} stage={back} />}
         </div>
       )}
+      {card.stage === "submitted" && back && (
+        <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #ECEEF1" }}>
+          <StageButton tenderId={card.id} stage={back} />
+        </div>
+      )}
+
+      {/* Outcome (item 4): winning company/price, bidders, reason lost -
+          see outcome-form.tsx for why these live in tender_answers. */}
+      <OutcomeForm tenderId={card.id} stage={card.stage} outcome={card.outcome} />
 
       {/* Price & credit (items 26/27): from Bidding on, once a pack row exists. */}
       {card.stage !== "found" && (
@@ -324,7 +516,7 @@ function StageButton({ tenderId, stage, primary = false }: { tenderId: string; s
         background: stage === "won" ? "#DCFCE7" : stage === "lost" ? "#FEE2E2" : "#16233B",
         color: stage === "won" ? "#15803D" : stage === "lost" ? "#B91C1C" : "#FFFFFF",
       }
-    : { minHeight: 32, padding: "0 6px", border: "none", background: "transparent", fontSize: 12, color: "#9A9684", cursor: "pointer" };
+    : { minHeight: 32, padding: "0 6px", border: "none", background: "transparent", fontSize: 12, color: "#8A93A0", cursor: "pointer" };
   return (
     <form action={moveTenderStage}>
       <input type="hidden" name="tender_id" value={tenderId} />
@@ -336,10 +528,10 @@ function StageButton({ tenderId, stage, primary = false }: { tenderId: string; s
   );
 }
 
-function StatCard({ label, value, color }: { label: string; value: number; color: string }) {
+function StatCard({ label, value, color }: { label: string; value: number | string; color: string }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 9, padding: "13px 16px" }}>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 3 }}>{label}</div>
+    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9, padding: "13px 16px" }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 3 }}>{label}</div>
       <div style={{ fontSize: 22, fontWeight: 700, color }}>{value}</div>
     </div>
   );

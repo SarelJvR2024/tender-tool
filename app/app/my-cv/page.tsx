@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { ConfirmSubmitButton } from "../_components/ConfirmSubmitButton";
 import { saveMyDetails, uploadMyCv, applyMyCvExtraction, discardMyCvExtraction } from "./actions";
 
@@ -85,16 +85,15 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
 
   if (!person) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: CREAM }}>
-        <SiteNav active="my-cv" />
-        <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <AppShell>
+        <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", background: CREAM }}>
           <h1 style={{ fontSize: 20, fontWeight: 700, color: NAVY }}>My CV</h1>
           <p style={{ fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
             No roster record is linked to your account yet. Ask an owner or admin of your company to link your account to your
             CV record (Company &rarr; Team), or to send you an invite tied to your name.
           </p>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
@@ -107,9 +106,8 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
   ]);
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: CREAM }}>
-      <SiteNav active="my-cv" />
-      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", background: CREAM }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: NAVY, margin: "0 0 6px" }}>My CV</h1>
         <p style={{ fontSize: 13, color: MUTED, lineHeight: 1.55, marginBottom: 16 }}>
           Your own record only - {person.name}. Update your details, upload a CV, and see your generated CVs and project
@@ -244,6 +242,6 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
           )}
         </Card>
       </div>
-    </div>
+    </AppShell>
   );
 }

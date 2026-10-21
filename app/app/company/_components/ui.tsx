@@ -2,15 +2,15 @@
 // registrations, properties, bank accounts). Civic Navy, inline styles only -
 // the same values app/app/company/page.tsx uses.
 import type { StatusChip } from "@/lib/dates";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 
 export const NAVY = "#16233B";
 export const AMBER = "#D97706";
-export const CREAM = "#F6F5F1";
-export const BORDER = "#E5E1D5";
-export const MUTED = "#6B6758";
-export const FAINT = "#9A9684";
+export const CREAM = "#FFFFFF";
+export const BORDER = "#E3E6EA";
+export const MUTED = "#5B6472";
+export const FAINT = "#8A93A0";
 
 export function SubPage({
   title,
@@ -26,9 +26,8 @@ export function SubPage({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: CREAM }}>
-      <SiteNav active="company" />
-      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+    <AppShell>
+      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif", background: CREAM }}>
         <a href="/company" style={{ fontSize: 13, color: AMBER, fontWeight: 600, textDecoration: "none" }}>
           ← Company profile
         </a>
@@ -46,7 +45,7 @@ export function SubPage({
         )}
         {children}
       </div>
-    </div>
+    </AppShell>
   );
 }
 

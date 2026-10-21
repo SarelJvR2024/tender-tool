@@ -24,6 +24,7 @@ import json
 import os
 import re
 import sys
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import source_http as sh  # noqa: E402
@@ -81,7 +82,16 @@ def fetch_documents(url):
     page = sh.http_get(url, timeout=60).decode("utf-8", errors="replace")
     docs, seen = [], set()
     for m in DOC_LINK.finditer(page):
-        link, title = html.unescape(m.group(1)), _text(m.group(2))
+        # DOC_LINK has no scheme requirement (unlike TENDER_LINK/transnet_etenders.py's
+        # own doc-link pattern) - a relative href ("/files/x.pdf") is a normal thing for
+        # a real site's HTML, resolved here against the page it was found on (not just
+        # SARS's site root - a detail page under a different path could have its own
+        # relative base). An unresolved relative/scheme-less URL stored as-is made
+        # download_discovered_documents.py's urllib.request.Request() raise ValueError
+        # on construction - a plain crash, not one of urlopen's own network-error types,
+        # so it was uncaught there and took out that run's ENTIRE document-download pass
+        # on the first such link (QA-Edge-Case-Findings.md, 2026-10-19).
+        link, title = urllib.parse.urljoin(url, html.unescape(m.group(1))), _text(m.group(2))
         if link in seen or not title:
             continue
         seen.add(link)

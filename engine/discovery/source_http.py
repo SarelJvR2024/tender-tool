@@ -41,10 +41,17 @@ USER_AGENT = "Mozilla/5.0 (tender-tool discovery; public tender listings)"
 SAST = datetime.timezone(datetime.timedelta(hours=2))
 
 
+MAX_RETRY_AFTER = 30  # seconds - a cap on a 429's own Retry-After, so one
+# slow/misconfigured source can't stall a whole scheduled run on its own say-so
+
+
 def http_get(url, timeout=90, retries=3, backoff=2.0, headers=None):
     """Bytes of a GET. Retries on network errors and 5xx (government sites
-    drop connections under load - seen on etenders.gov.za and nra.co.za);
-    a 4xx is raised at once (it won't fix itself)."""
+    drop connections under load - seen on etenders.gov.za and nra.co.za)
+    and on 429 (rate-limited, not broken - confirmed live 2026-10-20 that
+    treating it identically to a permanent 4xx meant one source hitting its
+    own rate limit lost that source's listings for the whole run with zero
+    retry); any other 4xx is raised at once (it won't fix itself)."""
     h = {"User-Agent": USER_AGENT}
     h.update(headers or {})
     last = None
@@ -53,6 +60,15 @@ def http_get(url, timeout=90, retries=3, backoff=2.0, headers=None):
             with urllib.request.urlopen(urllib.request.Request(url, headers=h), timeout=timeout) as r:
                 return r.read()
         except urllib.error.HTTPError as e:
+            if e.code == 429:
+                last = e
+                retry_after = e.headers.get("Retry-After") if e.headers else None
+                try:
+                    wait = min(float(retry_after), MAX_RETRY_AFTER) if retry_after else backoff * (attempt + 1)
+                except ValueError:
+                    wait = backoff * (attempt + 1)  # Retry-After can be an HTTP-date, not just seconds
+                time.sleep(max(wait, 0))
+                continue
             if e.code < 500:
                 raise
             last = e
@@ -68,20 +84,45 @@ def http_json(url, **kw):
 
 _US_DT = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?)?$", re.I)
 
+_MONTH_ABBR = {m: i for i, m in enumerate(
+    ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"], start=1)}
+# "23 Oct 2026 16:00" (Rand Water's own ASPxNewsControl date format, confirmed
+# from a real saved page, 2026-10-20) - day, English month abbreviation, year,
+# 24-hour time. Distinct from the three formats already handled above: no
+# slashes, month is a name not a number, so it can't collide with _US_DT or
+# the ISO/`/`-normalised path below. The month group also accepts a full name
+# ("11 September 2026", "08 SEPTEMBER 2026" - Vaal Central Water's own
+# "Date uploaded"/"Closing date" fields, confirmed from a real saved page,
+# 2026-10-20, mixing full-name and abbreviated months on the same listing) -
+# only the first 3 letters are looked up, so both forms resolve the same way.
+_DMY_DT = re.compile(r"^(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})(?:\s+(\d{1,2}):(\d{2}))?$")
+
 
 def parse_sast(value):
     """A listing's date/time -> aware datetime in SAST, or None. Accepts ISO
     ('2026-11-16T12:00:00', with or without fraction/offset), US-style
-    ('11/30/2026 3:00:00 PM', Transnet) and '2026/10/28' (Cape Town). A naive
-    value is SAST (every SA government listing states local time). Year 1
-    (the portal's '0001-01-01' placeholder) is None."""
+    ('11/30/2026 3:00:00 PM', Transnet), '2026/10/28' (Cape Town) and
+    '23 Oct 2026 16:00' (Rand Water) and '11 September 2026' / '08 SEPTEMBER
+    2026' (Vaal Central Water, full month name, either case). A naive value
+    is SAST (every SA government listing states local time). Year 1 (the
+    portal's '0001-01-01' placeholder) is None."""
     if not value:
         return None
     s = str(value).strip()
     dt = None
-    m = _US_DT.match(s)
-    if m:
-        mo, d, y, hh, mm, ss, ap = m.groups()
+    dmy = _DMY_DT.match(s)
+    us = _US_DT.match(s) if not dmy else None
+    if dmy:
+        d, mon, y, hh, mm = dmy.groups()
+        month = _MONTH_ABBR.get(mon[:3].lower())
+        if month is None:
+            return None  # an unrecognised month name - unreadable, same as a malformed ISO value
+        try:
+            dt = datetime.datetime(int(y), month, int(d), int(hh or 0), int(mm or 0))
+        except ValueError:
+            return None
+    elif us:
+        mo, d, y, hh, mm, ss, ap = us.groups()
         hh = int(hh or 0)
         if ap:
             hh = hh % 12 + (12 if ap.upper() == "PM" else 0)

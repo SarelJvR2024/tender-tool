@@ -60,12 +60,18 @@ export async function saveBankAccount(formData: FormData) {
     ? await supabase.from("bank_accounts").update(row).eq("id", id)
     : await supabase.from("bank_accounts").insert(row);
   if (error) {
+    const known = error.message.includes("bank_accounts_one_") || error.message.includes("account_number");
+    // Not logging error.message itself for the unknown case - this file's
+    // own rule above is that no message here ever contains an account
+    // number, and an unrecognised Postgres error is exactly the case this
+    // function can't already prove is safe to echo or log.
+    if (!known) console.error("bank_accounts write failed with an unrecognised error (message withheld, see rule above)");
     fail(
       error.message.includes("bank_accounts_one_")
         ? "There is already an account on file for this holder - edit that one."
         : error.message.includes("account_number")
           ? "The account number must be 6 to 16 digits."
-          : error.message,
+          : "Could not save this bank account - try again. If it keeps happening, let us know.",
     );
   }
   revalidatePath(BACK);
@@ -78,7 +84,10 @@ export async function deleteBankAccount(formData: FormData) {
   const id = str(formData, "account_id");
   if (!id) redirect(BACK);
   const { error } = await supabase.from("bank_accounts").delete().eq("id", id);
-  if (error) fail(error.message);
+  if (error) {
+    console.error("bank_accounts delete failed");
+    fail("Could not delete this bank account - try again. If it keeps happening, let us know.");
+  }
   revalidatePath(BACK);
   redirect(`${BACK}?saved=removed`);
 }

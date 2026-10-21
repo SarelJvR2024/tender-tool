@@ -8,6 +8,7 @@ import { randomUUID } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { safeFileName } from "@/lib/safeFileName";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { GENERAL_ENGINE, JOBS_TABLE, UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
 import { advanceFoundToBidding } from "@/lib/pipeline";
@@ -67,14 +68,20 @@ export async function saveGeneralAnswers(formData: FormData) {
 
   if (rows.length > 0) {
     const { error } = await supabase.from("tender_answers").upsert(rows, { onConflict: "company_id,tender_id,field_key" });
-    if (error) redirect(back(tenderId, `?error=${encodeURIComponent(error.message)}`));
+    if (error) {
+      console.error("tender_answers upsert failed", error);
+      redirect(back(tenderId, `?error=${encodeURIComponent("Could not save your answers - try again. If it keeps happening, let us know.")}`));
+    }
   }
   if (cleared.length > 0) {
     await supabase.from("tender_answers").delete().eq("company_id", companyId).eq("tender_id", tenderId).in("field_key", cleared).is("storage_path", null);
   }
   if (Object.keys(companyUpdate).length > 0) {
     const { error } = await supabase.from("companies").update(companyUpdate).eq("id", companyId);
-    if (error) redirect(back(tenderId, `?error=${encodeURIComponent(error.message)}`));
+    if (error) {
+      console.error("companies update failed for general answers", error);
+      redirect(back(tenderId, `?error=${encodeURIComponent("Answers saved, but your company details could not be updated - try again. If it keeps happening, let us know.")}`));
+    }
   }
 
   revalidatePath(`/tenders/${tenderId}`);
@@ -104,18 +111,22 @@ export async function uploadTenderDocument(formData: FormData) {
     .eq("field_key", fieldKey)
     .maybeSingle();
 
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = safeFileName(file.name);
   const storagePath = `${companyId}/tenders/${tenderId}/${randomUUID()}-${safeName}`;
   const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
-  if (upErr) redirect(back(tenderId, `?error=${encodeURIComponent(`Could not upload file: ${upErr.message}`)}`));
+  if (upErr) {
+    console.error("tender document upload failed", file.name, upErr);
+    redirect(back(tenderId, `?error=${encodeURIComponent(`Could not upload ${file.name} - try again. If it keeps happening, let us know.`)}`));
+  }
 
   const { error } = await supabase.from("tender_answers").upsert(
     { company_id: companyId, tender_id: tenderId, field_key: fieldKey, storage_path: storagePath, original_filename: file.name, value: null, answered_by: userId },
     { onConflict: "company_id,tender_id,field_key" },
   );
   if (error) {
+    console.error("tender_answers upsert failed for document", error);
     await supabase.storage.from(VAULT_BUCKET).remove([storagePath]);
-    redirect(back(tenderId, `?error=${encodeURIComponent(error.message)}`));
+    redirect(back(tenderId, `?error=${encodeURIComponent("Could not save this document - try again. If it keeps happening, let us know.")}`));
   }
   const previous = (existing?.storage_path as string | null | undefined) ?? null;
   if (previous && previous !== storagePath) await supabase.storage.from(VAULT_BUCKET).remove([previous]);
@@ -126,11 +137,31 @@ export async function uploadTenderDocument(formData: FormData) {
 
 /** Queue a job for engine/general/process_general_jobs.py: a pack_generation_jobs
  * row with engine 'general' - the one queue every engine shares (0026). RLS:
- * insert only, status 'requested'. */
+ * insert only, status 'requested'.
+ *
+ * generate_pack additionally requires a pack_review_confirmations row
+ * (migration 0059, reused as-is - general-pack-review.tsx / -actions.ts) -
+ * the same confirm-before-compile gate requestSubmissionPack() (actions.ts)
+ * already applies to SANRAL packs, extended here per the standing QA
+ * finding that general tenders had no equivalent review step. Additive to
+ * every existing check above (missing documents/answers still just produce
+ * a draft with blanks, by design) - this only blocks an UNREVIEWED compile.
+ */
 async function requestJob(formData: FormData, kind: "extract_requirements" | "generate_pack") {
   const { supabase, userId, companyId } = await requireMember();
   const tenderId = formData.get("tender_id") as string | null;
   if (!tenderId) redirect("/dashboard");
+  if (kind === "generate_pack") {
+    const { data: reviewRow } = await supabase
+      .from("pack_review_confirmations")
+      .select("reviewed_at")
+      .eq("tender_id", tenderId)
+      .eq("company_id", companyId)
+      .maybeSingle();
+    if (!reviewRow?.reviewed_at) {
+      redirect(back(tenderId, `?error=${encodeURIComponent("Review the full Pack Review list above and click \"I've reviewed this\" before generating a pack.")}`));
+    }
+  }
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).maybeSingle();
   const { error } = await supabase.from(JOBS_TABLE).insert({
     engine: GENERAL_ENGINE,
@@ -141,7 +172,10 @@ async function requestJob(formData: FormData, kind: "extract_requirements" | "ge
     requested_by: userId,
   });
   // 23505 = one already open (unique partial index) - that's fine, it's queued.
-  if (error && error.code !== "23505") redirect(back(tenderId, `?error=${encodeURIComponent(error.message)}`));
+  if (error && error.code !== "23505") {
+    console.error("pack_generation_jobs insert failed for general engine", error);
+    redirect(back(tenderId, `?error=${encodeURIComponent("Could not queue this job - try again. If it keeps happening, let us know.")}`));
+  }
   // Pipeline board (0021): asking for a pack means we're bidding.
   if (kind === "generate_pack" && pack?.id) {
     await advanceFoundToBidding(supabase, pack.id as string);
@@ -179,7 +213,10 @@ export async function removePrivateTenderDocument(formData: FormData) {
     .maybeSingle();
   if (!doc) redirect(`/tenders/${tenderId}#private-documents`);
   const { error } = await supabase.from("tender_private_documents").delete().eq("id", doc.id as string);
-  if (error) redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}#private-documents`);
+  if (error) {
+    console.error("tender_private_documents delete failed", error);
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not remove this document - try again. If it keeps happening, let us know.")}#private-documents`);
+  }
   await supabase.storage.from("tender-documents").remove([doc.storage_path as string]);
 
   const { count } = await supabase
@@ -195,7 +232,10 @@ export async function removePrivateTenderDocument(formData: FormData) {
       engine: GENERAL_ENGINE, company_id: companyId, tender_id: tenderId, tender_pack_id: pack.id as string,
       kind: "extract_requirements", requested_by: userId,
     });
-    if (jobErr && jobErr.code !== "23505") redirect(`/tenders/${tenderId}?error=${encodeURIComponent(jobErr.message)}#private-documents`);
+    if (jobErr && jobErr.code !== "23505") {
+      console.error("pack_generation_jobs insert failed after removing private document", jobErr);
+      redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Document removed, but the re-read could not be queued - try again. If it keeps happening, let us know.")}#private-documents`);
+    }
   }
   revalidatePath(`/tenders/${tenderId}`);
   redirect(`/tenders/${tenderId}#private-documents`);

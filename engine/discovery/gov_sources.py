@@ -70,7 +70,13 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import source_http as sh  # noqa: E402
 
 ALL_SOURCES = ("etenders_portal", "sanral", "eskom_bulletin", "transnet_etenders", "capetown_procurement",
-               "sars_procurement", "cidb_tenders", "dbsa_procurement")
+               "sars_procurement", "cidb_tenders", "dbsa_procurement", "vaal_central_water", "lephalale",
+               "kouga")
+# randwater is deliberately NOT here: a GitHub Actions runner (a different network path than this
+# dev sandbox) was used to test reachability for all 4 direct-site sources built 2026-10-20/21.
+# vaal_central_water/lephalale/kouga passed clean (run 39600219996); randwater's own reachability
+# run (39508282401) failed outright - it's genuinely blocked, not just blocked from this sandbox.
+# See test-randwater-reachability.yml / test-new-readers-reachability.yml.
 SOURCE_LABELS = {
     "etenders_portal": "eTenders portal (National Treasury)",
     "etenders_ocds": "eTenders OCDS feed (National Treasury)",
@@ -81,6 +87,10 @@ SOURCE_LABELS = {
     "sars_procurement": "SARS Published Tenders",
     "cidb_tenders": "cidb's own procurement",
     "dbsa_procurement": "DBSA open RFPs/RFRs",
+    "randwater": "Rand Water's own bids portal",
+    "vaal_central_water": "Vaal Central Water Board's own tenders page",
+    "lephalale": "Lephalale Local Municipality's own tenders page",
+    "kouga": "Kouga Local Municipality's own open-tenders listing",
 }
 # A direct-site tender is only folded into a portal row of the SAME buyer:
 # reference numbers aren't unique across buyers ("RFQ 01/2026"). Every
@@ -102,6 +112,10 @@ BUYER_FAMILY = {
     "sars_procurement": re.compile(r"\bsars\b|revenue service", re.I),
     "cidb_tenders": re.compile(r"\bcidb\b|construction industry development board", re.I),
     "dbsa_procurement": re.compile(r"\bdbsa\b|development bank of southern africa", re.I),
+    "randwater": re.compile(r"rand\s*water", re.I),
+    "vaal_central_water": re.compile(r"vaal\s*central\s*water", re.I),
+    "lephalale": re.compile(r"lephalale", re.I),
+    "kouga": re.compile(r"kouga", re.I),
 }
 PORTAL_CLOSED_LOOKBACK = 3000  # newest rows of the portal's Closed tab checked for extended tenders
 MIN_CONTAINED_REF = 8  # "one reference contains the other" only for references this long
@@ -226,6 +240,18 @@ def read_source(name, with_documents=True, log=print):
     if name == "dbsa_procurement":
         import dbsa_procurement
         return dbsa_procurement.fetch_releases(log=log), []
+    if name == "randwater":
+        import randwater
+        return randwater.fetch_releases(log=log), []
+    if name == "vaal_central_water":
+        import vaal_central_water
+        return vaal_central_water.fetch_releases(log=log), []
+    if name == "lephalale":
+        import lephalale
+        return lephalale.fetch_releases(log=log), []
+    if name == "kouga":
+        import kouga
+        return kouga.fetch_releases(log=log), []
     raise ValueError(f"unknown source {name!r}")
 
 

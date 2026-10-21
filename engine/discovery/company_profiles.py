@@ -165,6 +165,27 @@ class RestClient:
         """POST /rest/v1/rpc/<fn> (company_member_labels, 0033/0048)."""
         return self._req("POST", f"rpc/{fn}", args or {})
 
+    def upload(self, bucket, path, data, content_type="application/octet-stream"):
+        """Uploads raw bytes to Supabase Storage (not PostgREST - a separate
+        /storage/v1/ endpoint, same service-role key). x-upsert overwrites a
+        path already there, same as engine/general/process_general_jobs.py's
+        Supabase.upload(), so a re-run that re-downloads a document never
+        fails on "already exists". Used by
+        engine/discovery/download_discovered_documents.py (migration 0071) -
+        the only Discovery writer that needs Storage, not just PostgREST."""
+        import urllib.request
+        import urllib.error
+        import urllib.parse
+        h = {"apikey": self.key, "Authorization": f"Bearer {self.key}", "Content-Type": content_type,
+             "x-upsert": "true"}
+        req = urllib.request.Request(self.url + "/storage/v1/object/" + bucket + "/" + urllib.parse.quote(path),
+                                     method="POST", headers=h, data=data)
+        try:
+            with urllib.request.urlopen(req, timeout=120) as r:
+                r.read()
+        except urllib.error.HTTPError as e:
+            raise RuntimeError(f"upload {bucket}/{path} failed: {e.code} {e.read().decode(errors='replace')[:300]}")
+
 
 # ---------------------------------------------------------------------------
 # Who a company member is, for the engine's reports (tender-update alerts,

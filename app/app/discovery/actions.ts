@@ -20,7 +20,8 @@ export async function pursueOpportunity(formData: FormData) {
 
   const { data: tenderId, error } = await supabase.rpc("pursue_discovered_opportunity", { p_opportunity_id: opportunityId });
   if (error || !tenderId) {
-    redirect(`/discovery?error=${encodeURIComponent(error?.message ?? "Could not open this tender.")}`);
+    if (error) console.error("pursue_discovered_opportunity rpc failed", error);
+    redirect(`/discovery?error=${encodeURIComponent(error ? "Could not open this tender - try again. If it keeps happening, let us know." : "Could not open this tender.")}`);
   }
   redirect(`/tenders/${tenderId as string}#general-preparation`);
 }
@@ -43,7 +44,10 @@ export async function acknowledgeDowngrade(formData: FormData) {
 
   const { error } = await supabase.rpc("acknowledge_discovery_downgrade", { p_opportunity_id: opportunityId });
   const sep = back.includes("?") ? "&" : "?";
-  if (error) redirect(`${back}${sep}error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("acknowledge_discovery_downgrade rpc failed", error);
+    redirect(`${back}${sep}error=${encodeURIComponent("Could not mark this as seen - try again. If it keeps happening, let us know.")}`);
+  }
   revalidatePath("/discovery");
   revalidatePath("/pipeline");
   if (back.startsWith("/tenders/")) revalidatePath(back.split("?")[0]);

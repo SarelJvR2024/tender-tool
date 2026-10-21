@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { randomUUID } from "node:crypto";
 import { DOCUMENT_TYPES, SERVICE_STAGES, CLIENT_TYPES, PERFORMANCE_RATINGS, disciplineSlug } from "@/lib/experience";
+import { safeFileName } from "@/lib/safeFileName";
 
 /**
  * Company experience library (0012_experience_items.sql). Two separate steps,
@@ -48,12 +49,13 @@ const RATING_VALUES = PERFORMANCE_RATINGS.map((r) => r.value);
 
 async function uploadFile(companyId: string, file: File) {
   const supabase = await createClient();
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+  const safeName = safeFileName(file.name);
   const storagePath = `${companyId}/experience/${randomUUID()}-${safeName}`;
   const { error } = await supabase.storage
     .from("experience-documents")
     .upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
-  return { storagePath, error: error?.message ?? null };
+  if (error) console.error("experience document upload failed", file.name, error);
+  return { storagePath, error: error ? true : false };
 }
 
 const err = (path: string, msg: string) => `${path}?error=${encodeURIComponent(msg)}`;
@@ -77,7 +79,7 @@ export async function captureExperience(formData: FormData) {
   let storagePath: string | null = null;
   if (hasFile) {
     const up = await uploadFile(companyId, file!);
-    if (up.error) redirect(err("/experience", `Could not upload file: ${up.error}`));
+    if (up.error) redirect(err("/experience", `Could not upload ${file!.name} - try again. If it keeps happening, let us know.`));
     storagePath = up.storagePath;
   }
 
@@ -93,7 +95,10 @@ export async function captureExperience(formData: FormData) {
     })
     .select("id")
     .single();
-  if (error) redirect(err("/experience", error.message));
+  if (error) {
+    console.error("experience_items insert failed", error);
+    redirect(err("/experience", "Could not save this project - try again. If it keeps happening, let us know."));
+  }
 
   revalidatePath("/experience");
   redirect(`/experience/${data!.id}?captured=1`);
@@ -157,13 +162,16 @@ export async function saveExperienceTags(formData: FormData) {
     const { data: existing } = await supabase.from("experience_items").select("storage_path").eq("id", id).maybeSingle();
     replacedPath = existing?.storage_path ?? null;
     const up = await uploadFile(companyId, file);
-    if (up.error) redirect(err(back, `Could not upload file: ${up.error}`));
+    if (up.error) redirect(err(back, `Could not upload ${file.name} - try again. If it keeps happening, let us know.`));
     update.storage_path = up.storagePath;
     update.original_filename = file.name;
   }
 
   const { error } = await supabase.from("experience_items").update(update).eq("id", id);
-  if (error) redirect(err(back, error.message));
+  if (error) {
+    console.error("experience_items update failed", error);
+    redirect(err(back, "Could not save these tags - try again. If it keeps happening, let us know."));
+  }
   if (replacedPath) {
     await supabase.storage.from("experience-documents").remove([replacedPath]);
   }
@@ -214,12 +222,14 @@ export async function suggestSharedCategory(formData: FormData) {
     suggested_by: userId,
   });
   if (error) {
+    const known = error.code === "23505" || error.message.includes("already on the shared list");
+    if (!known) console.error("discipline_category_suggestions insert failed", error);
     const msg =
       error.code === "23505"
         ? "Your company has already suggested this tag - it is waiting for review."
         : error.message.includes("already on the shared list")
           ? "That tag is already on the shared list."
-          : error.message;
+          : "Could not suggest this tag - try again. If it keeps happening, let us know.";
     redirect(err(back, msg));
   }
   revalidatePath(back);
@@ -233,7 +243,10 @@ export async function withdrawSuggestion(formData: FormData) {
   const back = itemId ? `/experience/${itemId}` : "/experience";
   const supabase = await createClient();
   const { error } = await supabase.from("discipline_category_suggestions").delete().eq("id", id ?? "").eq("status", "pending");
-  if (error) redirect(err(back, error.message));
+  if (error) {
+    console.error("discipline_category_suggestions delete failed", error);
+    redirect(err(back, "Could not withdraw this suggestion - try again. If it keeps happening, let us know."));
+  }
   revalidatePath(back);
   redirect(back);
 }

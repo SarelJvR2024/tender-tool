@@ -89,8 +89,9 @@ export async function registerManualTender(input: {
     p_documents: docs,
   });
   if (error || !data) {
+    if (error) console.error("load_manual_tender rpc failed", error);
     await cleanup();
-    return { error: error?.message ?? "Could not load this tender." };
+    return { error: error ? "Could not load this tender - try again. If it keeps happening, let us know." : "Could not load this tender." };
   }
   revalidatePath("/dashboard");
   redirect(`/tenders/${input.tenderId}#intake`);
@@ -105,8 +106,9 @@ export async function addManualTenderDocuments(input: { tenderId: string; docume
   if (!docs) return { error: "Choose at least one document." };
   const { error } = await supabase.rpc("add_manual_tender_documents", { p_tender_id: input.tenderId, p_documents: docs });
   if (error) {
+    console.error("add_manual_tender_documents rpc failed", error);
     await supabase.storage.from(TENDER_DOCS_BUCKET).remove(docs.map((d) => d.storage_path));
-    return { error: error.message };
+    return { error: "Could not add these documents - try again. If it keeps happening, let us know." };
   }
   revalidatePath(`/tenders/${input.tenderId}`);
   redirect(`/tenders/${input.tenderId}?saved=intake#intake`);
@@ -138,8 +140,9 @@ export async function addPrivateTenderDocuments(input: { tenderId: string; docum
     docs.map((d) => ({ company_id: companyId, tender_id: input.tenderId, title: d.title || "document", storage_path: d.storage_path, original_filename: d.title, uploaded_by: userId })),
   );
   if (error) {
+    console.error("tender_private_documents insert failed", error);
     await cleanup();
-    return { error: error.message };
+    return { error: "Could not add your documents - try again. If it keeps happening, let us know." };
   }
   const { error: jobErr } = await supabase.from(JOBS_TABLE).insert({
     engine: GENERAL_ENGINE,
@@ -150,7 +153,10 @@ export async function addPrivateTenderDocuments(input: { tenderId: string; docum
     requested_by: userId,
   });
   // 23505: a read is already queued - it will pick these documents up.
-  if (jobErr && jobErr.code !== "23505") return { error: jobErr.message };
+  if (jobErr && jobErr.code !== "23505") {
+    console.error("extract_requirements job insert failed", jobErr);
+    return { error: "Documents saved, but the read could not be queued - try again. If it keeps happening, let us know." };
+  }
   revalidatePath(`/tenders/${input.tenderId}`);
   redirect(`/tenders/${input.tenderId}?saved=extract#private-documents`);
 }

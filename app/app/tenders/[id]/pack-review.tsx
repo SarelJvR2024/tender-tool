@@ -2,6 +2,8 @@ import Link from "next/link";
 import { loadPackReviewSnapshot, type ReviewStatus } from "./pack-review-data";
 import { confirmPackReview } from "./pack-review-actions";
 import { PackChecklist } from "./pack-checklist";
+import { reviewStatusToBidTask } from "./pack-review-logic";
+import type { BidTaskStatus } from "./bid-task-status";
 
 /**
  * Pack Review: the pre-compile screen Sarel asked for (2026-10-18) - "share
@@ -18,18 +20,20 @@ import { PackChecklist } from "./pack-checklist";
  * requestSubmissionPack().
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
-const STATUS_STYLE: Record<ReviewStatus, { label: string; bg: string; color: string }> = {
-  confirmed: { label: "Confirmed", bg: "#DCFCE7", color: "#15803D" },
-  needs_input: { label: "Needs input", bg: "#FEF3C7", color: "#B45309" },
-  assumed_default: { label: "Assumed default", bg: "#FEF3C7", color: "#B45309" },
-  warning: { label: "Warning", bg: "#FEE2E2", color: "#B91C1C" },
-  missing: { label: "Missing", bg: "#FEE2E2", color: "#B91C1C" },
+// The Product promise's own Verify/Provide/Fix grouping (app/AGENTS.md),
+// collapsed from this screen's 5-way ReviewStatus via pack-review-logic.ts's
+// reviewStatusToBidTask() - see that function's own comment for exactly
+// which of the 5 values becomes which of these 3.
+const TASK_STYLE: Record<BidTaskStatus, { label: string; bg: string; color: string }> = {
+  verify: { label: "Verify", bg: "#DCFCE7", color: "#15803D" },
+  provide: { label: "Provide", bg: "#FEF3C7", color: "#B45309" },
+  fix: { label: "Fix", bg: "#FEE2E2", color: "#B91C1C" },
 };
 
 function Pill({ status }: { status: ReviewStatus }) {
-  const s = STATUS_STYLE[status];
+  const s = TASK_STYLE[reviewStatusToBidTask(status)];
   return (
     <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: s.bg, color: s.color, whiteSpace: "nowrap" }}>
       {s.label}
@@ -63,7 +67,7 @@ export async function PackReview({ tenderId }: { tenderId: string }) {
   return (
     <div id="pack-review" style={card}>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Pack review - confirm before you compile</div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 14 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 14 }}>
         Everything identified to go into this tender&apos;s submission pack: company data, key positions and CVs, form
         answers, the signature, supporting documents, Form B7, and the JV/typical-share field if set. Check each
         section, use &quot;Change&quot; to jump to where it&apos;s edited, then confirm below - &quot;Generate submission
@@ -93,12 +97,12 @@ export async function PackReview({ tenderId }: { tenderId: string }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {snapshot.sections.map((s) => (
-          <details key={s.key} open={s.error !== null || s.items.some((i) => i.status !== "confirmed")} style={{ border: "1px solid #E5E1D5", borderRadius: 9, background: "#F6F5F1" }}>
+          <details key={s.key} open={s.error !== null || s.items.some((i) => i.status !== "confirmed")} style={{ border: "1px solid #E3E6EA", borderRadius: 9, background: "#FFFFFF" }}>
             <summary style={{ cursor: "pointer", padding: "8px 12px", fontSize: 12, fontWeight: 700, color: "#16233B", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
               <span style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {s.title}
                 {!s.error && (
-                  <span style={{ fontWeight: 400, color: "#9A9684" }}>
+                  <span style={{ fontWeight: 400, color: "#8A93A0" }}>
                     {s.items.length} item{s.items.length === 1 ? "" : "s"}
                     {s.items.some((i) => i.status !== "confirmed") ? ` - ${s.items.filter((i) => i.status !== "confirmed").length} to look at` : " - all confirmed"}
                   </span>
@@ -112,19 +116,19 @@ export async function PackReview({ tenderId }: { tenderId: string }) {
               {s.error ? (
                 <div style={{ color: "#B91C1C", fontSize: 12, padding: "6px 0" }}>{s.error}</div>
               ) : s.items.length === 0 ? (
-                <div style={{ color: "#9A9684", fontSize: 12, padding: "6px 0" }}>Nothing to show yet.</div>
+                <div style={{ color: "#8A93A0", fontSize: 12, padding: "6px 0" }}>Nothing to show yet.</div>
               ) : (
                 s.items.map((item) => (
-                  <div key={item.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 0", borderTop: "1px solid #E5E1D5", fontSize: 12 }}>
+                  <div key={item.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 0", borderTop: "1px solid #E3E6EA", fontSize: 12 }}>
                     <span style={{ flex: "0 0 auto", marginTop: 1 }}>
                       <Pill status={item.status} />
                     </span>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={{ color: "#16233B", fontWeight: 600, wordBreak: "break-word" }}>
                         {item.label}
-                        {item.value && <span style={{ color: "#6B6758", fontWeight: 400 }}> &middot; {item.value}</span>}
+                        {item.value && <span style={{ color: "#5B6472", fontWeight: 400 }}> &middot; {item.value}</span>}
                       </div>
-                      {item.note && <div style={{ color: "#6B6758", wordBreak: "break-word" }}>{item.note}</div>}
+                      {item.note && <div style={{ color: "#5B6472", wordBreak: "break-word" }}>{item.note}</div>}
                     </div>
                   </div>
                 ))
@@ -144,7 +148,7 @@ export async function PackReview({ tenderId }: { tenderId: string }) {
         >
           I&apos;ve reviewed this
         </button>
-        <span style={{ fontSize: 11, color: "#9A9684" }}>Records that you looked at this list before generating a pack.</span>
+        <span style={{ fontSize: 11, color: "#8A93A0" }}>Records that you looked at this list before generating a pack.</span>
       </form>
     </div>
   );

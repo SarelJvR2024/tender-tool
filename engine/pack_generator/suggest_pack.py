@@ -74,7 +74,7 @@ def years_experience_at(person, closing_date):
     - called in a loop over every key person for every position
     (suggest_pack.suggest()), so ONE person's typo'd date used to crash
     suggestion-building for the WHOLE company, not just that one person."""
-    grad = person.get("qualifications", {}).get("initial_graduated")
+    grad = (person.get("qualifications") or {}).get("initial_graduated")
     if not grad:
         return None
     try:
@@ -101,7 +101,7 @@ def candidate_person_text(person):
     """Everything about a candidate worth matching keywords against: quals + every project's
     own text fields. Deliberately excludes name/contact fields - those aren't evidence of
     relevant experience."""
-    q = person.get("qualifications", {})
+    q = person.get("qualifications") or {}
     parts = [q.get("highest_description", ""), q.get("initial_description", ""),
              person.get("description", "")]
     for proj in person.get("projects", []):
@@ -126,6 +126,7 @@ def score_candidate(person_id, person, position, closing_date):
 
     score = len(specific_overlap) * 3 + (1 if overlap & generic else 0)
     years = years_experience_at(person, closing_date)
+    quals = person.get("qualifications") or {}
 
     reasons = []
     if specific_overlap:
@@ -134,8 +135,8 @@ def score_candidate(person_id, person, position, closing_date):
         reasons.append(f"NO evidence found of: {', '.join(sorted(specific_miss))}")
     if years is not None:
         reasons.append(f"{years} years' experience as of this tender's closing date "
-                        f"(computed from {person['qualifications']['initial_graduated']}, not a stored number)")
-    ecsa = person.get("qualifications", {}).get("ecsa_level")
+                        f"(computed from {quals.get('initial_graduated')}, not a stored number)")
+    ecsa = quals.get("ecsa_level")
     if ecsa:
         reasons.append(f"ECSA level on file: {ecsa}")
 
@@ -155,6 +156,28 @@ def score_candidate(person_id, person, position, closing_date):
     }
 
 
+def rank_candidates(people, position, closing_date):
+    """score_candidate() for every (person_id, person) in `people`, ranked
+    highest first. Ties: more years' experience, then name - the SAME
+    tie-break engine/pack/process_pack_jobs.py's own rank_candidates()
+    already states and uses for the live Tender Workspace's re-ranking of
+    this exact scoring (kept as one documented convention, not two separate
+    copies that could silently drift apart).
+
+    This used to break ties purely by each person's position in the
+    company's profile JSON (Python's sorted() is stable, so an unbroken tie
+    fell back to input order) - confirmed live, 2026-10-21: two candidates
+    tied on score (7 years' vs 22 years' experience) got a DIFFERENT
+    "SUGGESTED" person simply depending on which one happened to be listed
+    first in the profile, and that pick could silently disagree with what
+    the same company's live Tender Workspace would rank first for the
+    identical position."""
+    return sorted(
+        (score_candidate(pid, p, position, closing_date) for pid, p in people.items()),
+        key=lambda c: (-c["score"], -(c["years_experience"] or -1), c["name"] or ""),
+    )
+
+
 def suggest(template_path, profile_path, out_dir):
     wb = Workbook(template_path)
     profile = json.load(open(profile_path))
@@ -166,10 +189,7 @@ def suggest(template_path, profile_path, out_dir):
 
     suggestions = {}
     for pos in positions:
-        ranked = sorted(
-            (score_candidate(pid, p, pos, closing_date) for pid, p in people.items()),
-            key=lambda c: c["score"], reverse=True,
-        )
+        ranked = rank_candidates(people, pos, closing_date)
         suggestions[pos["code"]] = {"position": pos, "candidates": ranked}
 
     out = {

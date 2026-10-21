@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../_components/SiteNav";
+import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { loadDisciplineTaxonomy, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { pursueOpportunity } from "./actions";
@@ -61,8 +61,8 @@ type OpportunityRow = Downgrade & {
 const XREF_STYLE: Record<string, { label: string; bg: string; color: string }> = {
   agrees: { label: "agrees", bg: "#DCFCE7", color: "#15803D" },
   differs: { label: "differs - check", bg: "#FEF3C7", color: "#B45309" },
-  generic: { label: "catch-all bucket", bg: "#F0EEE6", color: "#6B6758" },
-  unmapped: { label: "not cross-referenced yet", bg: "#F0EEE6", color: "#6B6758" },
+  generic: { label: "catch-all bucket", bg: "#ECEEF1", color: "#5B6472" },
+  unmapped: { label: "not cross-referenced yet", bg: "#ECEEF1", color: "#5B6472" },
 };
 
 type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed";
@@ -133,6 +133,7 @@ export default async function DiscoveryPage({
     supabase.from("tender_packs").select("tender_id, pipeline_stage"),
     supabase.rpc("company_member_labels"),
   ]);
+  if (error) console.error("discovered_opportunities select failed", error);
   const { data: { user } } = await supabase.auth.getUser();
   const stageByTender = new Map<string, string>();
   for (const p of (packRows ?? []) as { tender_id: string; pipeline_stage: string | null }[]) {
@@ -180,7 +181,7 @@ export default async function DiscoveryPage({
   );
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif" }}>
+    <AppShell>
       {/* The right-hand "Closes / action / docs" rail is a fixed flex-basis
           with flex-shrink: 0 so it keeps its width on desktop - but that same
           fixed width means that once a card wraps it to its own line on a
@@ -192,13 +193,12 @@ export default async function DiscoveryPage({
           .disco-right { flex: 1 1 100% !important; text-align: left !important; }
         }
       `}</style>
-      <SiteNav active="discovery" />
 
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", margin: "0 0 16px" }}>
           <div style={{ flex: "1 1 320px" }}>
             <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovery</h1>
-            <p style={{ fontSize: 13, color: "#6B6758", margin: 0 }}>
+            <p style={{ fontSize: 13, color: "#5B6472", margin: 0 }}>
               Government tenders - national, provincial, municipal and state-owned buyers - scored against your company
               profile. Read daily from National Treasury&apos;s eTenders portal (every buyer that publishes there) plus
               SANRAL, Eskom, Transnet and the City of Cape Town&apos;s own sites, with cancellations, moved closing dates
@@ -218,7 +218,7 @@ export default async function DiscoveryPage({
 
         {error && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            Could not load discovered opportunities: {error.message}
+            {"Couldn't load discovered opportunities - try refreshing. If it keeps happening, let us know."}
           </div>
         )}
         {actionError && (
@@ -276,7 +276,7 @@ export default async function DiscoveryPage({
                   fontSize: 12,
                   fontWeight: 600,
                   textDecoration: "none",
-                  border: isActive ? "1px solid #16233B" : "1px solid #E5E1D5",
+                  border: isActive ? "1px solid #16233B" : "1px solid #E3E6EA",
                   background: isActive ? "#16233B" : "#FFFFFF",
                   color: isActive ? "#FFFFFF" : "#16233B",
                 }}
@@ -312,7 +312,7 @@ export default async function DiscoveryPage({
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {visibleRows.length === 0 && !error && (
-            <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>
+            <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>
               {activeFilter !== "all"
                 ? "Nothing matches this filter yet - try \"All\" to see everything scored so far."
                 : "Nothing scored for your company profile yet. The daily scan checks every open tender against it automatically, or you can load a tender you've already found with the button above."}
@@ -331,7 +331,7 @@ export default async function DiscoveryPage({
                 id={`opp-${o.id}`}
                 style={{
                   background: "#FFFFFF",
-                  border: open ? `2px solid ${pursuingStage ? "#B91C1C" : "#B45309"}` : "1px solid #E5E1D5",
+                  border: open ? `2px solid ${pursuingStage ? "#B91C1C" : "#B45309"}` : "1px solid #E3E6EA",
                   borderRadius: 11,
                   padding: "14px 18px",
                   display: "flex",
@@ -357,11 +357,11 @@ export default async function DiscoveryPage({
                       {o.contract_number || "(no reference number)"}
                     </span>
                     {o.source === "manual" && (
-                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>Loaded manually</span>
+                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#ECEEF1", color: "#16233B" }}>Loaded manually</span>
                     )}
                     {o.source !== "manual" &&
                       listingSourceLabels(o.listing_sources, o.source).map((label) => (
-                        <span key={label} title="Where this tender is listed" style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F0EEE6", color: "#16233B" }}>
+                        <span key={label} title="Where this tender is listed" style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#ECEEF1", color: "#16233B" }}>
                           {label}
                         </span>
                       ))}
@@ -385,7 +385,7 @@ export default async function DiscoveryPage({
                     {isDowngraded(o) && (
                       <span
                         title="The verdict this tender had before it was re-assessed"
-                        style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#F6F5F1", border: "1px solid #E5E1D5", color: "#6B6758", textDecoration: "line-through" }}
+                        style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#FFFFFF", border: "1px solid #E3E6EA", color: "#5B6472", textDecoration: "line-through" }}
                       >
                         was {verdictLabel(o.downgraded_from)}
                       </span>
@@ -400,7 +400,7 @@ export default async function DiscoveryPage({
                         <input type="hidden" name="opportunity_id" value={o.id} />
                         <button
                           type="submit"
-                          style={{ minHeight: 28, padding: "0 10px", borderRadius: 100, background: "#16233B", color: "#FFFFFF", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                          style={{ minHeight: 32, padding: "0 10px", borderRadius: 100, background: "#16233B", color: "#FFFFFF", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
                         >
                           {o.tender_id ? "Open in workspace" : "Prepare this tender"}
                         </button>
@@ -412,12 +412,12 @@ export default async function DiscoveryPage({
                   </div>
                   <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 6 }}>
                     {o.buyer || "(unknown buyer)"}
-                    {facts && <span style={{ color: "#9A9684" }}> · {facts}</span>}
+                    {facts && <span style={{ color: "#8A93A0" }}> · {facts}</span>}
                   </div>
                   {o.briefing?.date && (
                     <div style={{ fontSize: 12, color: o.briefing.compulsory ? "#B45309" : "#4B5563", fontWeight: o.briefing.compulsory ? 600 : 400, marginBottom: 6 }}>
                       {o.briefing.compulsory ? "Compulsory briefing" : "Briefing"}: {new Date(o.briefing.date).toLocaleString("en-ZA", SAST_DATETIME)}
-                      {o.briefing.venue && <span style={{ fontWeight: 400, color: "#6B6758" }}> · {o.briefing.venue.slice(0, 120)}</span>}
+                      {o.briefing.venue && <span style={{ fontWeight: 400, color: "#5B6472" }}> · {o.briefing.venue.slice(0, 120)}</span>}
                     </div>
                   )}
 
@@ -478,8 +478,8 @@ export default async function DiscoveryPage({
 
                   {o.etenders_category && (
                     // The buyer's own pick on eTenders, as a cross-reference
-                    // only - Tender Tool's categories (above) drive the fit.
-                    <div title={o.etenders_category_check?.note ?? undefined} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11, color: "#6B6758", marginBottom: 6 }}>
+                    // only - Tender Ready's categories (above) drive the fit.
+                    <div title={o.etenders_category_check?.note ?? undefined} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11, color: "#5B6472", marginBottom: 6 }}>
                       <span>Buyer&apos;s eTenders category: <span style={{ color: "#16233B", fontWeight: 600 }}>{o.etenders_category}</span></span>
                       {o.etenders_category_check && XREF_STYLE[o.etenders_category_check.status] && (
                         <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: XREF_STYLE[o.etenders_category_check.status].bg, color: XREF_STYLE[o.etenders_category_check.status].color }}>
@@ -488,14 +488,14 @@ export default async function DiscoveryPage({
                       )}
                       {o.etenders_category_check?.status === "differs" && o.etenders_category_check.matching_categories.length > 0 && (
                         <span>
-                          (on Tender Tool&apos;s list that is {o.etenders_category_check.matching_categories.slice(0, 3).map((c) => taxonomyLabel(taxonomy, c)).join(", ")})
+                          (on Tender Ready&apos;s list that is {o.etenders_category_check.matching_categories.slice(0, 3).map((c) => taxonomyLabel(taxonomy, c)).join(", ")})
                         </span>
                       )}
                     </div>
                   )}
 
                   {(o.reasons ?? []).length > 0 && (
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#6B6758" }}>
+                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#5B6472" }}>
                       {(o.reasons ?? []).map((r, i) => (
                         <li key={i} style={{ marginBottom: 2 }}>
                           {r}
@@ -518,7 +518,7 @@ export default async function DiscoveryPage({
                   {/* Fit (above) answers "is this our kind of work"; this answers
                       "how would we be scored" - kept visibly separate on purpose. */}
                   {(o.score_outlook?.summary ?? []).length > 0 && (
-                    <div style={{ marginTop: 8, padding: "8px 12px", background: "#F6F5F1", border: "1px solid #E5E1D5", borderRadius: 9 }}>
+                    <div style={{ marginTop: 8, padding: "8px 12px", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9 }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: "#16233B", marginBottom: 3 }}>How it&apos;s scored</div>
                       <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#4B5563" }}>
                         {(o.score_outlook?.summary ?? []).map((line, i) => (
@@ -532,7 +532,7 @@ export default async function DiscoveryPage({
                 </div>
 
                 <div className="disco-right" style={{ flex: "0 0 180px", textAlign: "right" }}>
-                  <div style={{ fontSize: 11, color: "#9A9684", marginBottom: 2 }}>Closes</div>
+                  <div style={{ fontSize: 11, color: "#8A93A0", marginBottom: 2 }}>Closes</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 10 }}>
                     {o.closing_date ? new Date(o.closing_date).toLocaleString("en-ZA", SAST_DATETIME) : "-"}
                   </div>
@@ -543,14 +543,14 @@ export default async function DiscoveryPage({
                       <input type="hidden" name="opportunity_id" value={o.id} />
                       <button
                         type="submit"
-                        style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                        style={{ minHeight: 44, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
                       >
                         {o.tender_id ? "Open in workspace" : "Prepare this tender"}
                       </button>
                     </form>
                   )}
                   {docs.length === 0 && (
-                    <div style={{ fontSize: 11, color: "#9A9684" }}>{o.source === "manual" ? "Documents uploaded by you" : "No document URL on file"}</div>
+                    <div style={{ fontSize: 11, color: "#8A93A0" }}>{o.source === "manual" ? "Documents uploaded by you" : "No document URL on file"}</div>
                   )}
                   {docs.map((d, i) => (
                     <a
@@ -576,6 +576,6 @@ export default async function DiscoveryPage({
           })}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

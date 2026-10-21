@@ -47,9 +47,9 @@ const toRow = (te: TargetedEnterprise): Row => ({
   tax_reference: te.tax_reference ?? "",
 });
 
-const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 10px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" };
+const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 10px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" };
 const label: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#16233B", fontWeight: 600, flex: "1 1 200px", minWidth: 0 };
-const hint: React.CSSProperties = { fontSize: 11, color: "#6B6758", fontWeight: 400 };
+const hint: React.CSSProperties = { fontSize: 11, color: "#5B6472", fontWeight: 400 };
 const grid: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 };
 
 export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string; initial: SubcontractingPlan | null }) {
@@ -97,7 +97,7 @@ export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string
       {mode === "subcontract" && (
         <>
           {rows.map((r, i) => (
-            <div key={i} style={{ border: "1px solid #E5E1D5", borderRadius: 10, padding: "12px 14px", marginBottom: 10, background: "#F6F5F1" }}>
+            <div key={i} style={{ border: "1px solid #E3E6EA", borderRadius: 10, padding: "12px 14px", marginBottom: 10, background: "#FFFFFF" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>Targeted Enterprise {i + 1}</div>
                 {rows.length > 1 && (
@@ -109,7 +109,7 @@ export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string
               <div style={grid}>
                 <label style={label}>
                   Name
-                  <input value={r.to_be_identified ? B7_TBC_NAME : r.name} disabled={r.to_be_identified} onChange={(e) => set(i, { name: e.target.value })} style={{ ...input, color: r.to_be_identified ? "#6B6758" : "#16233B" }} />
+                  <input value={r.to_be_identified ? B7_TBC_NAME : r.name} disabled={r.to_be_identified} onChange={(e) => set(i, { name: e.target.value })} style={{ ...input, color: r.to_be_identified ? "#5B6472" : "#16233B" }} />
                 </label>
                 <label style={{ ...label, flex: "0 1 auto", flexDirection: "row", alignItems: "center", fontWeight: 400, alignSelf: "flex-end", minHeight: 38 }}>
                   <input type="checkbox" checked={r.to_be_identified} onChange={(e) => set(i, { to_be_identified: e.target.checked })} style={{ width: 18, height: 18 }} />
@@ -182,11 +182,11 @@ export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string
           ))}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
             {rows.length < B7_MAX_TES ? (
-              <button type="button" onClick={() => setRows((rs) => [...rs, { ...EMPTY }])} style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", color: "#16233B", border: "1px solid #E5E1D5", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              <button type="button" onClick={() => setRows((rs) => [...rs, { ...EMPTY }])} style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", color: "#16233B", border: "1px solid #E3E6EA", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                 Add another Targeted Enterprise
               </button>
             ) : (
-              <span style={{ fontSize: 12, color: "#6B6758" }}>Form B7 holds at most {B7_MAX_TES}.</span>
+              <span style={{ fontSize: 12, color: "#5B6472" }}>Form B7 holds at most {B7_MAX_TES}.</span>
             )}
             <span style={{ fontSize: 12, color: total >= B7_POLICY_MIN_PCT ? "#15803D" : "#B45309", fontWeight: 600 }}>Total (excl. provisional sums): {Math.round(total * 100) / 100}%</span>
           </div>

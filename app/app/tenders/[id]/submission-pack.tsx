@@ -6,6 +6,10 @@ import { requestSubmissionPack } from "./actions";
 import { AutoRefresh } from "../../_components/AutoRefresh";
 import { PackChecklist, checklistOf, type ChecklistRow } from "./pack-checklist";
 import { pickDefaultSignatory, NO_TENDER_SCOPE, type Signatory, type SignatoryScope } from "./signatory-logic";
+import { loadPackReviewSnapshot } from "./pack-review-data";
+import { computeTenderReadiness } from "./tender-readiness";
+import { SanralProgress } from "./sanral-progress";
+import { DownloadAllButton } from "./download-all-button";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -20,6 +24,7 @@ type PackJob = {
   id: string;
   status: "requested" | "generating" | "ready" | "failed";
   requested_at: string;
+  started_at: string | null;
   completed_at: string | null;
   storage_path_pdf: string | null;
   output_files: Record<string, string> | null;
@@ -56,7 +61,23 @@ const OUTPUT_LABEL: Record<string, string> = {
   actions_to_sign: "What to sign (summary)",
 };
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+
+// "SANRAL schedules" premium feature (item 2 of 10): the marketing claim
+// itself ("usually 6 to 8 hours by hand") is Sarel's own fixed copy, not a
+// per-tender measurement - nothing in this app tracks how long a human would
+// have taken by hand. What IS real and already stored (requested_at/
+// started_at/completed_at, 0017) is how long the engine itself took on this
+// run, shown alongside it so the claim has a real number next to it rather
+// than standing alone.
+function formatDuration(ms: number): string {
+  const mins = Math.round(ms / 60000);
+  if (mins < 1) return "under a minute";
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"}`;
+  const hrs = Math.floor(mins / 60);
+  const rem = mins % 60;
+  return `${hrs}h${rem ? ` ${rem}m` : ""}`;
+}
 
 export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: string; tenderPackId: string }) {
   const supabase = await createClient();
@@ -67,7 +88,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     supabase.from("tender_documents").select("doc_type").eq("tender_id", tenderId),
     supabase
       .from("pack_generation_jobs")
-      .select("id, status, requested_at, completed_at, storage_path_pdf, output_files, page_count, manifest, error_message, acknowledged_gaps")
+      .select("id, status, requested_at, started_at, completed_at, storage_path_pdf, output_files, page_count, manifest, error_message, acknowledged_gaps")
       .eq("tender_id", tenderId)
       .order("requested_at", { ascending: false })
       .limit(5),
@@ -114,6 +135,19 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   const needsAck = !readiness.checked || gaps.length > 0;
   const reviewed = !!reviewRow?.reviewed_at;
 
+  // Verify/Provide/Fix (app/AGENTS.md): the Submit button itself stays
+  // disabled while any Fix item is open, on top of the existing "pack
+  // review confirmed" gate above - reuses the exact same cached snapshot
+  // the workspace header's readiness score reads, so this can't disagree
+  // with what the header already shows.
+  const packReviewSnapshot = await loadPackReviewSnapshot(tenderId);
+  const fixCount = packReviewSnapshot.mapped ? computeTenderReadiness(packReviewSnapshot.sections).fix.length : 0;
+  const disabledReason = fixCount > 0
+    ? `Fix ${fixCount} item${fixCount === 1 ? "" : "s"} first - see the Fix list above`
+    : !reviewed
+      ? "Confirm the Pack review above first"
+      : null;
+
   // Signed links for ready packs (private 'submission-packs' bucket, 10 min).
   const paths = jobs
     .filter((j) => j.status === "ready")
@@ -130,8 +164,25 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   return (
     <div id="submission-pack" style={card}>
       <AutoRefresh active={active} />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          background: "linear-gradient(90deg, #FFF7E6, #FFFFFF)",
+          border: "1px solid #F5D08A",
+          borderRadius: 9,
+          padding: "10px 14px",
+          marginBottom: 10,
+        }}
+      >
+        <span style={{ fontSize: 18 }} aria-hidden>⚡</span>
+        <div style={{ fontSize: 13, color: "#92400E", fontWeight: 600, lineHeight: 1.4 }}>
+          SANRAL schedules - usually 6 to 8 hours by hand. We fill them in minutes.
+        </div>
+      </div>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Submission pack</div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
         Two PDFs, one per sealed envelope, each in submission order with a contents page and page numbers. The
         submission pack: outer cover, then Envelope 1 (Technical) - authority letter, A-Forms, your vault documents,
         Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B5, and Form B7 from your own
@@ -161,7 +212,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
           </div>
           {gaps.slice(0, 8).map((g) => (
             <div key={g.text} style={{ color: g.tone === "red" ? "#B91C1C" : "#92400E" }}>
-              - {g.text} <span style={{ color: "#9A9684" }}>({g.note})</span>
+              - {g.text} <span style={{ color: "#8A93A0" }}>({g.note})</span>
             </div>
           ))}
           {gaps.length > 8 && <div>…and {gaps.length - 8} more (see the compliance check)</div>}
@@ -196,7 +247,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
             <label id="signatory-select" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B", flexWrap: "wrap" }}>
               Who signs this bid
               <select name="signatory_person_id" defaultValue={signers.some((p) => p.id === chosenSigner) ? chosenSigner : ""}
-                style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12, padding: "0 8px", maxWidth: "100%" }}>
+                style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 8px", maxWidth: "100%" }}>
                 <option value="">
                   Not chosen - {suggested?.name ?? signers[0].name} (suggested for this tender; the pack will say so)
                 </option>
@@ -208,29 +259,36 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
           )}
           <button
             type="submit"
-            disabled={!reviewed}
-            title={reviewed ? undefined : "Confirm the Pack review above first"}
-            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: reviewed ? "#16233B" : "#9A9684", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: reviewed ? "pointer" : "not-allowed", whiteSpace: "nowrap" }}
+            disabled={!!disabledReason}
+            title={disabledReason ?? undefined}
+            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: disabledReason ? "#8A93A0" : "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: disabledReason ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
           >
-            Generate submission pack
+            Fill SANRAL schedules
           </button>
+          {/* title= (hover) doesn't reach touch devices - the same reason as
+              visible text so a phone user isn't left guessing why it's grey. */}
+          {disabledReason && (
+            <div style={{ fontSize: 11, color: "#B45309", width: "100%" }}>{disabledReason}</div>
+          )}
         </form>
       )}
+
+      <SanralProgress active={active} />
 
       {jobs.length > 0 && (
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column" }}>
           {jobs.map((j) => {
-            const st = STATUS[j.status] ?? { label: j.status, bg: "#F0EEE6", color: "#6B6758" };
+            const st = STATUS[j.status] ?? { label: j.status, bg: "#ECEEF1", color: "#5B6472" };
             const warnings = j.manifest?.warnings ?? [];
             const techRows = checklistOf(j.manifest);
             const finRows = checklistOf(j.manifest?.financial);
             return (
-              <div key={j.id} style={{ borderTop: "1px solid #F0EEE6", padding: "10px 0", fontSize: 12, color: "#4B5563" }}>
+              <div key={j.id} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0", fontSize: 12, color: "#4B5563" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
                     {st.label}
                   </span>
-                  <span style={{ color: "#9A9684" }}>
+                  <span style={{ color: "#8A93A0" }}>
                     requested {new Date(j.requested_at).toLocaleString()}
                     {j.acknowledged_gaps ? " · draft, with known gaps" : ""}
                   </span>
@@ -239,9 +297,23 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                       Download PDF{j.page_count ? ` (${j.page_count} pages)` : ""}
                     </a>
                   )}
+                  {j.status === "ready" && (
+                    <DownloadAllButton
+                      urls={[j.storage_path_pdf, ...Object.values(j.output_files ?? {})]
+                        .filter((p): p is string => !!p)
+                        .map((p) => signed[p])
+                        .filter((u): u is string => !!u)}
+                    />
+                  )}
                 </div>
                 {j.status === "failed" && j.error_message && (
                   <div style={{ color: "#B91C1C", marginTop: 4, wordBreak: "break-word" }}>{j.error_message}</div>
+                )}
+                {j.status === "ready" && j.started_at && j.completed_at && (
+                  <div style={{ color: "#15803D", fontWeight: 600, marginTop: 4 }}>
+                    Time saved: usually 6-8 hours by hand - this run took{" "}
+                    {formatDuration(new Date(j.completed_at).getTime() - new Date(j.started_at).getTime())}.
+                  </div>
                 )}
                 {j.status === "ready" && (
                   <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4 }}>

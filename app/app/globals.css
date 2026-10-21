@@ -1,26 +1,241 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Tender Tool design system - "confident & premium" direction (2026-10-20),
+ * color scheme updated 2026-10-21: deep navy ink, blue accent, neutral grey
+ * canvas (no cream/beige anywhere), editorial (Fraunces) headings over a
+ * quiet UI sans (Inter Tight). Tokens below are the only place these
+ * colors are defined - every component should read them through Tailwind's
+ * generated utilities (bg-background, text-foreground, bg-accent, ...)
+ * rather than hardcoding a hex/oklch value again. See app/AGENTS.md for the
+ * one-line rationale behind each non-obvious choice.
+ *
+ * .dark exists so a future theme toggle has somewhere to land, but nothing
+ * in this app currently adds the `dark` class - see app/AGENTS.md.
+ */
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+  --font-mono: var(--font-mono);
+  --font-heading: var(--font-display);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --background-image-hero: var(--gradient-hero);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  /* No mono display font was asked for - a plain system stack, not a
+     dangling reference to a font nobody loads. */
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Neutral soft grey page background, deep navy ink (2026-10-21 color
+     update: the earlier warm off-white/gold pairing is gone - no cream or
+     beige anywhere in the neutral/surface colors, and the one accent is
+     blue, not gold). */
+  --background: oklch(0.97 0.0029 264.5); /* #F4F5F7 - no blue tint, just neutral grey */
+  --foreground: oklch(0.2393 0.0581 256.7); /* #0B1F3A navy ink */
+
+  /* Cards stay pure white against the grey page - the layering cue that
+     makes a dense screen read as stacked surfaces rather than a flat
+     table. */
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+
+  --primary: var(--foreground);
+  --primary-foreground: oklch(1 0 0);
+
+  --secondary: oklch(0.9371 0.0042 271.4); /* #E9EAED - neutral grey, not the old cream wash */
+  --secondary-foreground: var(--foreground);
+
+  --muted: oklch(0.9371 0.0042 271.4); /* #E9EAED */
+  --muted-foreground: oklch(0.4999 0.0285 267.7); /* #5C6374 */
+
+  /* Blue is the one accent color in this system - reserved for the single
+     most important action or highlight on a screen, not a general-purpose
+     decoration. White text on solid blue (not dark ink) is what reads as
+     confident here - blue is dark/saturated enough that dark-on-blue loses
+     contrast the way dark-on-gold never did. Soft-tint usages (a badge, an
+     icon roundel) should read `text-accent` directly instead of
+     `accent-foreground` - that pairing is for a SOLID accent fill only;
+     white text on a 10%-opacity accent wash is invisible. */
+  --accent: oklch(0.4882 0.2172 264.4); /* #1D4ED8 */
+  --accent-foreground: oklch(1 0 0);
+
+  --success: oklch(0.6271 0.1699 149.2); /* #16A34A */
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.5664 0.1414 51.6); /* #B5590E - a warm amber is still correct here: this is a semantic status color, not a neutral/surface tone, so "no cream or beige" doesn't apply to it */
+  --warning-foreground: oklch(1 0 0);
+  --destructive: oklch(0.5013 0.1783 28.7); /* #B3261E */
+  --destructive-foreground: oklch(1 0 0);
+  --info: oklch(0.4949 0.1244 253.2); /* #2563A6 */
+  --info-foreground: oklch(1 0 0);
+
+  --border: oklch(0.9053 0.0052 247.9); /* #DDE0E3 - neutral grey, not the old cream border */
+  --input: var(--border);
+  --ring: var(--accent); /* focus rings use the brand blue */
+
+  /* A five-color categorical set for charts: navy, blue, then three
+     supporting hues chosen at matched lightness/chroma so no single series
+     visually dominates the way a stray saturated primary would. */
+  --chart-1: var(--foreground);
+  --chart-2: var(--accent);
+  --chart-3: oklch(0.5360 0.0821 175.3); /* #2E7D6B teal */
+  --chart-4: oklch(0.5972 0.1391 45.2); /* #C1602F terracotta */
+  --chart-5: oklch(0.5510 0.0234 264.4); /* #6B7280 slate */
+
+  --radius: 0.5rem;
+
+  /* Soft, navy-tinted shadows (not pure black, and not blue-tinted either) -
+     everything in this system casts a shadow the color of the ink, at low
+     opacity, so elevation reads as "lifted off the grey page" rather than
+     "generic UI-kit drop shadow". */
+  --shadow-sm: 0 1px 2px 0 oklch(0.2393 0.0581 256.7 / 6%);
+  --shadow-md: 0 4px 10px -2px oklch(0.2393 0.0581 256.7 / 10%), 0 2px 4px -2px oklch(0.2393 0.0581 256.7 / 6%);
+  --shadow-lg: 0 16px 32px -8px oklch(0.2393 0.0581 256.7 / 16%), 0 4px 10px -4px oklch(0.2393 0.0581 256.7 / 8%);
+
+  /* Subtle hero backdrop: mostly ink, with a whisper of the blue accent in
+     one corner - for a page-top banner or empty-state panel, never a loud
+     multi-stop rainbow. */
+  --gradient-hero: linear-gradient(135deg, oklch(0.22 0.05 257) 0%, oklch(0.16 0.045 257) 60%, oklch(0.32 0.14 264) 100%);
+
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--foreground);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: var(--secondary);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--accent);
+}
+
+.dark {
+  --background: oklch(0.2021 0.034 265.5); /* #0F1626 */
+  --foreground: oklch(0.9525 0.0099 87.5); /* #F2EFE8 */
+
+  --card: oklch(0.2488 0.0516 266.8); /* #16203A */
+  --card-foreground: var(--foreground);
+  --popover: var(--card);
+  --popover-foreground: var(--foreground);
+
+  /* Navy itself is the dark background's own hue family, so it can't serve
+     as "primary" here the way it does on the light page - primary flips to
+     a light, high-contrast surface instead (shadcn's own dark-mode
+     convention). This block was NOT updated by the 2026-10-21 light-mode
+     color change (background/navy/accent/success) - dark mode is still
+     dormant (no toggle exists, see the file header), so its accent is
+     still gold, not blue. Update this block too whenever dark mode
+     actually ships. */
+  --primary: var(--foreground);
+  --primary-foreground: var(--background);
+
+  --secondary: oklch(0.2757 0.0491 265.3); /* #1C2740 */
+  --secondary-foreground: var(--foreground);
+
+  --muted: oklch(0.2757 0.0491 265.3); /* #1C2740 */
+  --muted-foreground: oklch(0.7141 0.0281 264.4); /* #9AA3B5 */
+
+  --accent: oklch(0.7613 0.1248 81.9); /* #D9A94A - slightly brighter gold for a dark surface */
+  --accent-foreground: oklch(0.2021 0.034 265.5);
+
+  --success: oklch(0.6549 0.126 161.6); /* #34A878 */
+  --success-foreground: oklch(0.2021 0.034 265.5);
+  --warning: oklch(0.6745 0.1448 55.0); /* #D97B30 */
+  --warning-foreground: oklch(0.2021 0.034 265.5);
+  --destructive: oklch(0.645 0.1716 27.1); /* #E35B51 */
+  --destructive-foreground: oklch(0.2021 0.034 265.5);
+  --info: oklch(0.6353 0.1211 250.0); /* #4C8FD1 */
+  --info-foreground: oklch(0.2021 0.034 265.5);
+
+  --border: oklch(0.3356 0.0523 265.9); /* #2A3652 */
+  --input: var(--border);
+  --ring: var(--accent);
+
+  --chart-1: var(--foreground);
+  --chart-2: var(--accent);
+  --chart-3: oklch(0.6549 0.126 161.6);
+  --chart-4: oklch(0.6745 0.1448 55.0);
+  --chart-5: oklch(0.7141 0.0281 264.4);
+
+  --shadow-sm: 0 1px 2px 0 oklch(0 0 0 / 24%);
+  --shadow-md: 0 4px 10px -2px oklch(0 0 0 / 32%), 0 2px 4px -2px oklch(0 0 0 / 20%);
+  --shadow-lg: 0 16px 32px -8px oklch(0 0 0 / 40%), 0 4px 10px -4px oklch(0 0 0 / 24%);
+
+  --gradient-hero: linear-gradient(135deg, oklch(0.16 0.04 264) 0%, oklch(0.1 0.03 264) 60%, oklch(0.3 0.1 81) 100%);
+
+  --sidebar: var(--background);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: oklch(0.2021 0.034 265.5);
+  --sidebar-accent: var(--secondary);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--accent);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
   }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
+  h1, h2, h3, h4 {
+    @apply font-display;
+  }
 }

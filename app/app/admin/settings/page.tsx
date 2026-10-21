@@ -1,6 +1,6 @@
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
+import { AdminNav } from "../AdminNav";
 import { setPlatformSetting } from "../actions";
 
 // Reads per-request session/DB data (platform_admin_settings RPC, 0064) -
@@ -22,41 +22,35 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
   const supabase = await createClient();
 
   const { data, error } = await supabase.rpc("platform_admin_settings");
+  if (error) console.error("platform_admin_settings rpc failed", error);
   const settings = (data ?? []) as Setting[];
 
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "system-ui, sans-serif" }}>
-      <SiteNav active="admin" />
-
-      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", gap: 14, fontSize: 13, marginBottom: 12 }}>
-          <Link href="/admin" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Alerts &amp; harness results</Link>
-          <Link href="/admin/customers" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Customers</Link>
-          <span style={{ color: "#16233B", fontWeight: 600 }}>Settings</span>
-          <Link href="/admin/taxonomy" style={{ color: "#D97706", textDecoration: "none", fontWeight: 600 }}>Discipline list</Link>
-        </div>
+    <AppShell>
+      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+        <AdminNav active="settings" />
 
         <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>System settings</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 16px" }}>
+        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
           Platform-wide switches, applied the moment you flip them - no deploy needed.
         </p>
 
         {(error || actionError) && (
           <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {error ? `Could not load settings: ${error.message}` : actionError}
+            {error ? "Couldn't load settings - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 
-        <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, overflow: "hidden" }}>
+        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
           {settings.length === 0 && !error && (
-            <div style={{ padding: "24px 18px", fontSize: 13, color: "#6B6758" }}>No settings recorded.</div>
+            <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>No settings recorded.</div>
           )}
           {settings.map((s) => (
-            <div key={s.key} style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", alignItems: "center", padding: "16px 18px", borderTop: "1px solid #F0EEE6" }}>
+            <div key={s.key} style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", alignItems: "center", padding: "16px 18px", borderTop: "1px solid #ECEEF1" }}>
               <div style={{ flex: "1 1 320px", minWidth: 0 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 600, color: "#16233B" }}>{SETTING_LABEL[s.key] ?? s.key}</div>
-                <div style={{ fontSize: 12, color: "#6B6758", marginTop: 2 }}>{s.description}</div>
-                <div style={{ fontSize: 11, color: "#9A9684", marginTop: 4 }}>Last changed {new Date(s.updated_at).toLocaleString()}</div>
+                <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2 }}>{s.description}</div>
+                <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 4 }}>Last changed {new Date(s.updated_at).toLocaleString()}</div>
               </div>
               <form action={setPlatformSetting}>
                 <input type="hidden" name="key" value={s.key} />
@@ -65,7 +59,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
                   type="submit"
                   style={{
                     fontSize: 12, fontWeight: 600, padding: "8px 14px", minHeight: 40, borderRadius: 7, border: "none", cursor: "pointer",
-                    background: s.value ? "#16233B" : "#E5E1D5", color: s.value ? "#FFFFFF" : "#6B6758",
+                    background: s.value ? "#16233B" : "#E3E6EA", color: s.value ? "#FFFFFF" : "#5B6472",
                   }}
                 >
                   {s.value ? "On - click to turn off" : "Off - click to turn on"}
@@ -75,6 +69,6 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
           ))}
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

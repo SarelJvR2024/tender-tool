@@ -113,7 +113,7 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
 
       <Card title="The registration list" id="catalog">
         <div style={{ fontSize: 13, color: MUTED, lineHeight: 1.5, marginBottom: 8 }}>
-          {types.filter((t) => !t.owner_company_id).length} types, each read from real tenders (the &quot;asked for by&quot; line). Tender Tool
+          {types.filter((t) => !t.owner_company_id).length} types, each read from real tenders (the &quot;asked for by&quot; line). Tender Ready
           maintains this shared list; a type it doesn&apos;t have yet can be added for your company below.
         </div>
         <Disclosure summary="Show the full list">
@@ -125,7 +125,7 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
                 .map((t) => {
                   const hint = storedInHint(t.stored_in);
                   return (
-                    <div key={t.id} style={{ borderTop: "1px solid #F0EEE6", padding: "6px 0", fontSize: 12, color: MUTED }}>
+                    <div key={t.id} style={{ borderTop: "1px solid #ECEEF1", padding: "6px 0", fontSize: 12, color: MUTED }}>
                       <span style={{ color: NAVY, fontWeight: 600 }}>{t.label}</span>
                       {t.issuing_body ? ` · ${t.issuing_body}` : ""} · {KIND_LABELS[t.kind] ?? t.kind}
                       {t.owner_company_id ? " · added by your company" : ""}
@@ -188,7 +188,7 @@ function HeldRow({
   holders: Holder[];
   types: { value: string; label: string }[];
 }) {
-  const status = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Expiry not recorded", bg: "#F0EEE6", color: "#6B6758" };
+  const status = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Expiry not recorded", bg: "#ECEEF1", color: "#5B6472" };
   const name = h.original_filename ?? filenameFromPath(h.storage_path);
   return (
     <div id={`r-${h.id}`} style={{ borderTop: `1px solid ${BORDER}`, padding: "12px 0" }}>

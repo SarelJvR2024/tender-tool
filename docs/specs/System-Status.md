@@ -6,7 +6,742 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
-Last full pass: 2026-10-19, ~00:30 UTC — demo-prep sprint verified: landing page (`4fc2e19`),
+**Standing review pass, 2026-10-21 ~22:25 UTC**: orientation via `git log` found no sibling commits
+since the last pass (this session's own Finding 47 fix was the most recent). Full QA re-confirmed
+sound: every `test_*.py` repo-wide, `npx vitest run` (53/53), `typecheck`/`lint`, and a real
+`npm run build` (the Bids pipeline board redesign, `#45`, landed just before this pass and rebuilds
+clean). Nothing new to fix or flag this pass.
+
+**Finding 47 fixed, 2026-10-21 ~22:25 UTC** (`5928abe`) - the "needs a buyer-name-aware redesign,
+not forced" gap flagged earlier this same day is now closed. `extract_requirements()`/`find_roles()`
+both gained an optional `buyer` param; a "&lt;buyer name&gt; Contract/Project Manager" mention (the
+buyer's own agent, confirmed real on a Transnet tender) is now excluded without touching the shared
+`ROLE_CONTEXT_RE` the earlier rejected fix attempt had broken 3 other detections by changing. Wired
+into the real production call site (`process_general_jobs.py`) and the regression corpus
+(`general_harness.py` now reads each sample's real buyer from `sources.json`). Re-running the corpus
+with buyer names wired through surfaced a genuine bonus find - `eskom_e3689` had 2 more real false
+positives of the same bug class, confirmed correct (not a regression) by reading the actual document
+text before accepting the new baseline. Verified with the real quoted Transnet sentence, a same-
+document genuine-ask check, a negative control, and the usual revert/confirm-fail/restore discipline.
+Phase 2 tally: 4 of 4 confirmed bugs from this session's sampling now fixed (Findings 40, 42, 44, 47).
+
+**Standing review pass, 2026-10-21 ~22:10 UTC**: orientation via `git log` found 2 more sibling
+commits since the last pass, both the UI/UX session's own work - `#43` (SANRAL schedules made a
+visible nav feature - presentation/discoverability only, the real automation untouched) and `#44`
+(CV-tailoring/cover-page screens, with two real gaps found and honestly flagged rather than faked:
+no engine input exists yet for a cover-page title/contact-person override or a per-position CV
+choice). Full validation re-run after merging: every `engine/*/test_*.py` in the repo (none
+touched), `npx vitest run` (53/53), `typecheck`/`lint`, and a real `npm run build` - all clean,
+confirmed my own `submission-plan-view.tsx` mount in `page.tsx` is still intact and untouched by
+either new commit.
+
+**Small cleanup, same pass**: `submission-plan-data.ts`'s own `returnableReviewStatus()` was a
+deliberate, flagged, hand-synced duplicate of `general-pack-review-data.ts`'s identical function,
+written that way only because the latter was under active edit by the other session when first
+built. That file has been stable for 8 commits now - exported the real function there and had
+`submission-plan-data.ts` import it instead, removing the duplication risk. Full validation
+(vitest/typecheck/lint/build) re-confirmed clean, `7ae22ea`.
+
+**Submission plan now visible in the app, 2026-10-21 ~21:12 UTC** (`app/app/tenders/[id]/
+submission-plan-view.tsx`, `5434bd1`) - the assessment engine Sarel asked for is no longer backend-
+only. Shows the FULL step list (every form/buyer_form/returnable/role/question/CIDB-grading/
+briefing/gap from `loadSubmissionPlan()`), grouped Fix/Provide/Verify, plus the compulsory-briefing/
+submission-deadline timeline warning via `DeadlineChip` - complementing, not duplicating,
+`disqualification-guard.tsx`'s curated 7-check subset (same data source, same day, a different
+Claude session's own work, read and reused as-is). Mounted on `page.tsx` right after the
+Disqualification guard, general-family tenders only (SANRAL has no requirements.py-shaped manifest),
+with a matching "Plan" JumpLink.
+
+`page.tsx` has had 7 real commits today from the UI/UX redesign session (#35-#42) by the time this
+landed - re-fetched and re-read the file fresh immediately before editing it (not relying on an
+earlier read in this pass), confirmed the insertion point was still exactly where expected, and
+re-ran every validation check after merging. Full validation, not just typecheck: `npx vitest run`
+(53/53, up from 44 - picked up the #42 document-expiry sibling's own new spec file too),
+`typecheck`, `lint`, and a REAL `rm -rf .next && npm run build` (not skipped, since this mounts into
+a live page route) - all passed clean on the first attempt, no retries needed.
+
+With this, the assessment engine's full loop is closed: built (Python) -> ported (TypeScript,
+reusing every existing classifier rather than re-deriving) -> verified (phase 2 sampling, 101
+tenders) -> visible (this entry). The only remaining open item from Sarel's own 4 decisions is
+nothing - all 4 are implemented, not just decided.
+
+**Submission-plan TypeScript port built, 2026-10-21 ~19:55 UTC** (`app/app/tenders/[id]/
+submission-plan-logic.ts` + its 24-check `.spec.ts`, `submission-plan-data.ts`) - the TS port
+flagged as the next concrete step in the entry just below. New files only, nothing touched on the
+actively-redesigned page cluster (`#35`-`#39`, entries above/below).
+
+- `submission-plan-logic.ts` covers only what had no existing classifier to reuse - forms,
+  buyer_forms, CIDB grading comparison, compulsory briefing, unrepresented gaps - each producing the
+  canonical `ReviewStatus`, via `reviewStatusToBidTask()`. Returnables/roles/questions are NOT
+  re-derived: `submission-plan-data.ts` calls the real `checkReturnable()`/`roleStatus()`/
+  `answerStatus()`/`signatureAnswerStatus()` directly, so the plan never disagrees with what Pack
+  Review already says about the exact same document or role.
+- **Real decision, checked against evidence before deciding (not a guess):** `FORM_STATUS_STYLE`
+  (`lib/generalTender.ts`) already colors `by_hand` forms AMBER ("Complete by hand"), the same color
+  as Provide - not red/Fix. So `by_hand` -> `needs_input`/Provide here too, not `missing`/Fix as a
+  first instinct might suggest (a form needing manual completion isn't itself a disqualification
+  risk, it's work only a person can do - matches Provide's own AGENTS.md definition exactly).
+  `auto`/`attach`/`overlay` -> `confirmed`/Verify (already styled green). Buyer forms follow the same
+  rule (overlay -> Verify, else -> Provide).
+- **CIDB grading comparison** (separate from the "cidb" returnable): no grading on file at all ->
+  `missing`/Fix (nothing to even compare); grading on file -> `needs_input`/Provide, NOT
+  `confirmed`/Verify - the engine admits it can't compare grading codes itself, so a human must
+  actually do the comparison, same reasoning `localityStatus()`'s own "unknown" case already uses.
+- **Compulsory briefing** -> always `needs_input`/Provide (an action only a person can physically
+  do - never Verify, nothing was filled; never Fix, it's not a document/data gap).
+- **Gaps** (the engine admitting it couldn't confidently determine something, after de-duplicating
+  against each by_hand/overlay form's own restated gap message, ported faithfully from
+  `submission_plan.py`'s own `_form_gap_prefixes`) -> `missing`/Fix - a real unresolved risk, unlike
+  a by_hand form where the engine succeeded and the task is simply known.
+- `submission-plan-data.ts` mirrors `general-pack-review-data.ts`'s own conventions exactly
+  (`cache()`-wrapped, per-section try/catch, same Supabase queries for company/tender_answers/
+  tender_roles/person_role_eligibility/CVs) and also calls `tenderTimeline()` for the separate,
+  non-step due-date warning. `returnableReviewStatus()` is a small, deliberate duplicate of
+  `general-pack-review-data.ts`'s own unexported function of the same name (that file is under
+  active edit by the UI/UX session today - out of scope here) - flagged to keep both in sync by hand
+  until one can safely export it.
+- All 44 vitest checks pass (24 new), `npm run typecheck`/`lint` both clean.
+
+**Still not done - the actual next step:** no UI card reads this snapshot yet. `page.tsx` just
+grew its own new `computeTenderReadiness()` unified score (`#39`, entry below) that flattens Pack
+Review's sections the same way - the submission plan's steps are a natural second input to that
+same score once a UI card for them exists, worth keeping in mind for whoever wires it rather than
+inventing a third, disagreeing readiness number.
+
+**Sarel decided all 4 submission-plan open questions, 2026-10-21 ~19:10 UTC - "go with your
+recommendations on all 4"**, with one real refinement to #3: agreed the plan itself only computes
+post-pursuit, but asked for a separate timeline warning - due dates before the **compulsory
+briefing** and the **submission deadline** - that should exist even before a company commits to
+pursuing (so someone deciding whether to go for a tender can see the runway they actually have).
+Explicitly not a checklist step (nothing about it is ever "done"), just a warning that sharpens as
+a date gets close or passes.
+
+**Built the timeline-warning piece now** (`app/lib/tenderTimeline.ts` + `.spec.ts`, 6 passing vitest
+checks) - `tenderTimeline({closingDate, briefingDate, briefingCompulsory})` reuses `DeadlineChip`'s
+own far/soon/urgent/past day-bands directly (exported `bandFor`/`Band` from `deadline-chip.tsx`
+rather than redefining the thresholds a second time - a 3-line additive change, confirmed via diff).
+Deliberately a single function usable both pre-pursuit (Discovery's `discovered_opportunities.
+closing_date`/`briefing`) and post-pursuit (`tenders.closing_date`/`briefing_date`) - both already
+carry the same two dates. A non-compulsory briefing is never surfaced (missing an optional briefing
+isn't a real threat to submitting). `npm run typecheck`/`lint` both clean.
+
+**Real architecture finding while wiring this, worth flagging plainly:** `submission_plan.py`'s
+`compile_plan()` (the assessment-engine "plan" itself, Python) can't actually be called live from
+the Next.js app the way `compileReadiness.ts` is - every other "read the manifest, classify it"
+screen on this app (`general-pack-review-logic.ts`, `pack-review-logic.ts`) works by reading the
+ALREADY-STORED `tenders.document_requirements` manifest JSON (written once at intake by
+`requirements.py`) and doing the classification in TypeScript, not by calling Python synchronously
+on page load. So "computed fresh" (decision #1, confirmed) means **a TypeScript port of
+`compile_plan()`'s step-building logic**, reading the stored manifest the same way
+`general-pack-review-data.ts` already does - not a new Python round-trip. Not done yet (real,
+careful work, not a mechanical translation - see next finding), flagged as the next concrete step
+rather than started speculatively this pass.
+
+**Second finding, also worth flagging before anyone starts that port:** `compile_plan()`'s own
+6-way status vocabulary (ready/needs_document/needs_input/by_hand/review/blocked) would be a
+**5th parallel status system** on this exact screen cluster, landing right as the UI/UX review
+session finishes eliminating the other 4 into one Verify/Provide/Fix model (`#35`/`#36`/`#37`,
+entries above). The TS port should map into Verify/Provide/Fix instead of reintroducing its own
+vocabulary - but that mapping needs the same "checked every producer before deciding, not a guess"
+care `pack-review-logic.ts`'s own Verify/Provide/Fix pass used for its 5-way `ReviewStatus`, since
+`compile_plan()`'s categories don't correspond 1:1 (e.g. a mandatory vs. optional returnable needs
+different treatment, same as `classifyComplianceItem()` already distinguishes). Scoped as the next
+real piece of this work, not rushed into this pass.
+
+**Decision #4 (read-only, not auto-seeded into `tender_tasks`) and #2 (check `tender_answers`/
+`tender_roles` via the caller, keep `compile_plan()` itself DB-free) stand as recommended, confirmed
+by Sarel - no code implications yet since the TS port above hasn't started.**
+
+**Flagging PR #20 for Sarel, found while investigating migration history this pass:** "Team invites
++ employee role" has been open 2+ days, explicitly marked security-sensitive (new RLS policies) with
+no CI configured and 1 comment - still needs a human read, not something I'm driving (not my PR, not
+asked to watch it). **New, concrete finding: its migration `0065_company_invites_and_employee_role.
+sql` collides with `main`'s own real `0065_submission_reminders_and_won_projects.sql`** (merged
+since the PR branched) - main is now at `0076` - so beyond the security review, this PR needs a
+rebase and migration renumber before it can merge cleanly, not just a read-through.
+
+**Phase 2, seventh batch sampled (15 real tenders) - confirmed Finding 47, flagged not fixed.**
+`contractor.contract_manager`'s role detection has no exclusion for a buyer's own named
+administrator (unlike `contractor.project_manager`, which already excludes "Employer's/Client's
+Project Manager") - confirmed real on Transnet `TPT/2026/10/1428/13269/RFQ`, where the only 2
+"Contract Manager" mentions are both Transnet's own internal reviewer, not a bidder role, yet the
+engine flags it as `needs_input`. Tried the obvious fix (loosen the shared context-word filter) and
+caught it myself before committing: diffed role detections across the whole
+`templates/general_samples/` corpus before/after, found it silently deleted 3 already-correct
+detections including Finding 40's own regression fixture (`general_harness.py` went from 91 clean
+to an outright `EXPECTATION FAILED`). Reverted immediately, confirmed harness back to 91/0/0 clean.
+Full write-up with the real evidence, what was tried and why it was rejected:
+`docs/specs/QA-Edge-Case-Findings.md`. A real fix needs the tender's own buyer name plumbed into
+`find_roles()` (hardcoding specific buyer names wouldn't generalise) - flagged for a future pass,
+same discipline as Finding 42. Phase 2 running total: 7 batches, ~101 tenders, 4 confirmed bugs (3
+fixed, this one flagged).
+
+**Standing review pass, 2026-10-21 ~18:15 UTC**: orientation via `git log` found two sibling-session
+commits since the last pass, both from the "UI/UX design reviewer" session
+(`session_01HsxN8YLz5vfgFpz9qcdDVV`), steps 1-2 of 4 unifying the Tender Workspace's status
+vocabularies per its own product-promise audit: `1844408` (#35, `classifyComplianceItem()` groups
+compliance docs into Verify/Provide/Fix - a mandatory item left merely unconfirmed, not just outright
+missing, now correctly surfaces as Fix/disqualification-risk, which the old "Don't have" count
+missed) and `0d9d5c7` (#36, merges page.tsx's "Already confirmed"/"Please review" cards into one
+Verify card, recolors "Needs your input" to amber Provide). Independently verified both, not just
+read the commit messages: ran the new `bid-task-status.spec.ts` (genuinely covers all 6
+mandatory×status combinations plus two fallback cases, not a shallow test) plus `npx vitest run`,
+`npm run typecheck`, `npm run lint` - all clean; read the `0d9d5c7` diff directly and confirmed its
+"presentation-only, no change to field_provenance/ReviewButton/markFieldReviewed" claim actually
+holds (the diff only touches card titles/colors/row-merging, nothing else). No overlap with this
+session's own work (different domain - app UI vs. discovery/general engines).
+
+Full `test_*.py` sweep repo-wide re-run clean. Nothing new to fix this pass.
+
+**Standing review pass, 2026-10-21 ~16:15 UTC**: orientation via `git log` found one sibling-session
+commit since the last pass - Finding 46 (`83595ba`, `suggest_pack.py`), a genuine order-dependent
+key-person suggestion bug (an unbroken score-tie fell back to profile-JSON file order instead of
+`process_pack_jobs.py`'s own documented years-then-name tie-break, so the "SUGGESTED" person a human
+sees first could silently disagree with the live Tender Workspace's own ranking). Independently
+re-verified, not trusted at face value: reran its new test clean, then reverted the fix myself,
+confirmed the test genuinely fails (an `AttributeError` - the test calls the real extracted
+`rank_candidates()`, not a reimplementation, so it can't rubber-stamp itself), restored, confirmed
+clean again. No overlap with this session's own work - different module, no sign of contention with
+the sibling session (`session_01UMAzowxArab6cV4KurgXNE`), which is now 2-for-2 on real, carefully-
+verified bug finds (Findings 45, 46) in areas this session hasn't touched (award outcomes, pack
+suggestions).
+
+Widened this pass's own QA sweep to literally every `test_*.py` in the repo (not just a curated
+list) - all clean. `app/` typecheck/lint also clean. Nothing new to fix this pass.
+
+**Standing review pass, 2026-10-21 ~14:15 UTC**: orientation via `git log` found one sibling-session
+commit since the last pass - Finding 45 (`2a5fb24`, `store_award_outcomes.py`), a genuine fix for a
+first-word-only name match being stored as a tender winner on real award data. Independently
+re-verified rather than trusted at face value: re-ran its own new test file clean (7/7), then
+reverted the fix myself, confirmed the same 3 checks fail with the wrong company marked winner,
+restored it, confirmed clean again - the regression-catching holds. Merged with `--ff-only`, no
+conflict with this session's own work (different files).
+
+Full QA sweep this pass, broader than usual (every `engine/*/test_*.py` across the whole repo, not
+just `engine/discovery`/`engine/general`): found and fixed one small, safe inconsistency -
+`engine/intake/test_manual_intake.py` crashed with a raw `IndexError` when run with no arguments,
+instead of skipping gracefully like every other live-Postgres-gated test in the repo (it indexed
+`sys.argv[1]` before ever checking its own `INTAKE_PSQL` env var). Added the same
+check-env-var-first-and-skip pattern every other `_PSQL`-gated test already uses. Everything else -
+`app/`'s `npm run typecheck`/`npm run lint`, every other engine test file - clean.
+
+**Municipality catalog sweep closed out, 2026-10-21 ~15:10 UTC** (`c0c1578`) - the last open lead,
+Abaqulusi, turned out not to be a reader candidate after all. Its real per-tender listing exists
+(a WP File Download plugin's AJAX file-listing API, one category id per tender type - the same
+"shell landing page, real data one call deeper" shape Kouga had) with genuine closing dates and a
+real reference-number format (`8/2/1/NNN`), structurally buildable the same way Lephalale was. But
+its own reference sequence runs straight into eTenders' live Abaqulusi listings (own-site samples
+`8/2/1/398-626` vs eTenders' current `8/2/1/647-667` - a single continuous numbering series, not two
+independent ones) and the municipality's own PDF states bids go through eTenders - strong evidence
+this is near-total duplicate coverage, not a gap, unlike Lephalale/Kouga/Vaal Central Water which
+were all confirmed zero/near-zero overlap. All 8 municipalities flagged across rounds 4-5 (Makana,
+King Sabata Dalindyebo, Enoch Mgijima, Abaqulusi, Maluti-a-Phofung, KwaDukuza, Alfred Duma, Ngwathe)
+are now resolved - none built. The municipality-catalog research thread (4 prior rounds, ~85+
+municipalities checked) is done for now; the real yield was Lephalale, Kouga, and Vaal Central
+Water, all three now live in production (see entry below).
+
+**Lephalale, Kouga, Vaal Central Water now live in production, 2026-10-21 ~14:50 UTC**
+(`f9675c1`) - the reachability run (`39600219996`) came back green on all 3 individually (randwater's
+own equivalent run, `39508282401`, genuinely failed - correctly stays out). Added all 3 to
+`gov_sources.ALL_SOURCES`, flipped their own "deliberately NOT in ALL_SOURCES" test assertions, full
+`engine/discovery` + `engine/general` suites re-run clean. Then ran the **real default-source
+integration pass** (no `--sources` filter - what actually runs in production) to confirm one more
+time with everything enabled together: Vaal Central Water and Lephalale both folded exactly as their
+own standalone testing predicted (0 "also on portal" each, matching their confirmed-zero-overlap
+findings). Kouga: 283 listed (281 previously - 2 new tenders published since last check, expected
+drift), 6 "also on portal" (4 before - live data moves). **Zero cross-buyer contamination**: summing
+every source's own "also on portal" count (SANRAL 45 + Eskom 145 + Transnet 71 + SARS 4 + DBSA 9 +
+Kouga 6 = 280) matches the run's own overall "280 listed by more than one source" headline exactly -
+nothing attributable to Vaal Central Water or Lephalale, nothing double-counted or misfolded anywhere
+in the merge. These 3 sources are no longer experimental; they feed the real pipeline from here on.
+
+**Reachability workflow added and triggered, 2026-10-21 ~14:30 UTC**
+(`.github/workflows/test-new-readers-reachability.yml`, `48bbec4`) - same precedent as
+`test-randwater-reachability.yml`: a `workflow_dispatch`-only check of whether a real GitHub
+Actions runner (not just this dev sandbox) can reach Lephalale, Kouga, and Vaal Central Water.
+Triggered immediately after pushing (run id `39600219996`, in progress at time of writing) rather
+than leaving it dormant - this is the one piece of evidence still missing before any of the three
+can go into `gov_sources.ALL_SOURCES`. Will report the real result once the run finishes.
+
+**Standing review pass, 2026-10-21 ~14:15 UTC**: orientation via `git log` found no sibling-session
+commits since the last pass. A real limitation of phase 2's own method, worth naming plainly: every
+batch sampled so far hit "Tesseract OCR is not installed on this worker" on every scanned document -
+confirmed by checking `engine/worker/Dockerfile` and `.github/workflows/bridge-worker-ci.yml`
+directly that this is **only true of this sandbox, not the real production worker** (both install
+`tesseract-ocr` for real). This session's own phase-2 checks of scanned documents are therefore
+unverified for the OCR path specifically - a genuine gap in how thoroughly this pass can check
+"100%", not a production bug.
+
+**Integration check done** (the new readers were only tested standalone so far, not through the
+real merge/BUYER_FAMILY path together): `python3 engine/discovery/gov_sources.py --sources
+etenders_portal,lephalale,kouga,vaal_central_water --no-documents` - confirmed clean. Lephalale (3)
+and Vaal Central Water (9) both fold to "only here" / "also on portal 0", matching their own
+confirmed-zero-overlap findings exactly. **Kouga folded correctly: 281 listed, 4 "also on portal"
+(the same 4 this session already found manually), 277 "only here"** - `merge()`'s own buyer-match
+logic correctly identified exactly the right 4 as portal duplicates and merged them (not left as
+separate duplicate rows, not wrongly folded into an unrelated buyer) - no sign of the 14th-run
+merge-contamination bug class recurring. `4 listed by more than one source` in the summary total
+matches Kouga's own count exactly, with nothing attributable to Lephalale/Vaal Central Water,
+confirming no cross-buyer leakage.
+
+**Msukaligwa checked, not built, 2026-10-21 ~12:40 UTC**
+(`docs/specs/Government-Buyer-Catalog-Round4-Final-Sweep.md`, `1de7af7`) - a clean, reachable
+listing with real closing dates, but 5 of its 17 rows share one identical PDF across 5 different
+tenders (the same "one PDF, several real tenders" shape as Lephalale's batches, not a Finding-42
+problem) with no reference-number field anywhere, unlike every reader built so far - a release's
+identity would need a synthesized hash/slug, a real design choice not yet made. Deprioritized in
+favour of the bigger finds and continuing phase 2.
+
+**Phase 2, sixth real batch sampled (14 of 15 downloaded, 15th hit a network reset).** No new bugs
+- two consecutive clean batches now (Finding 44 was the last one found, batch #4). Genuine key-
+personnel asks and thin-advert/scanned-document cases both continue to be handled correctly.
+Phase 2 running total: ~86 real tenders sampled across 6 batches, 3 confirmed bugs fixed (Findings
+40, 42, 44). Diminishing returns on this exact sampling method are expected now - the easily-found
+bug classes have likely been exhausted; continuing it on an ad-hoc basis going forward rather than
+as the main focus.
+
+**Standing review pass, 2026-10-21 ~12:20 UTC**: orientation via `git log` found no sibling-session
+commits since the last pass. QA re-confirmed sound: every `engine/discovery/` and `engine/general/`
+`test_*.py`, plus `npm run typecheck`/`npm run lint` in `app/`. A fifth real batch (10 of 15 sampled
+tenders downloaded before a network slowdown truncated the rest - proceeded with what downloaded
+rather than block on it) found no new engine bugs - one genuine (not a false-positive) key-personnel
+scoring-criteria mention confirmed correctly detected, everything else behaved as already
+documented (thin adverts, scanned docs). Phase 2 running total: ~72 real tenders sampled across 5
+batches, 3 confirmed bugs found and fixed (Findings 40, 42, 44), one confirmed correctly-handled
+repeat case (a second independent City of Tshwane bulletin).
+
+**Finding 44 fixed, 2026-10-21 ~12:10 UTC** (`docs/specs/QA-Edge-Case-Findings.md`) - a fourth real
+batch of 15 tenders sampled (phase 2 continues). `_key_personnel_gap()` was reading a contract-
+administration clause ("Change Key Personnel on the Service" - one item in a list of things needing
+the buyer's consent to change DURING the contract) as a bid-time ask for key personnel, on a real
+Passenger Rail Agency tender. Fixed with a narrow context check (skip a match immediately preceded
+by "change"/"substitute"/"replace") that keeps searching for a genuine mention rather than just
+suppressing the feature - verified both halves: a false-positive-only document now gets no gap, a
+document with both a false positive AND a real ask still surfaces the real one. Regression-catching
+independently verified (reverted, confirmed fails, restored, confirmed clean).
+
+**Kouga reader added, 2026-10-21 ~11:40 UTC** (`engine/discovery/kouga.py`, `363f042`) - the round-4
+catalog's own "needs a fuller comparison" flag turned out to be a real find, bigger than expected:
+`etenders_portal --buyer "kouga"` has only 4 rows against an own-site listing that runs 280 tenders
+across 28 real pages (confirmed from the page's own pagination, not guessed) - the earlier "high
+overlap" read was only comparing page 1 (where the few eTenders duplicates happen to sit). A full
+fetch takes ~50s from this sandbox. Same test discipline as every other reader this session.
+
+**Phase 2, third real batch sampled (15 more tenders, including a second independent City of
+Tshwane bulletin PDF - the Finding 42 fix correctly handled it, no false requirements shown).**
+No new bugs found this batch - a healthy result, not every batch needs to find one.
+
+**Lephalale reader added, 2026-10-21 ~10:50 UTC** (`engine/discovery/lephalale.py`, `35f6222`) -
+a confirmed real gap vs eTenders (zero results, independently re-verified). The municipality
+publishes periodic "batch" PDFs, each bundling several separate tenders (not the Finding 42
+"wrong buyer" problem - every tender in a batch genuinely is Lephalale's own) - every row inside a
+batch becomes its own release, keyed on the internal "Ref no:" field after finding the municipality
+reuses its own "T-number" field across two unrelated tenders in the same real batch (a genuine
+data-quality issue, not hidden). Dates are DD/MM/YYYY, parsed directly in the module rather than
+through the shared ambiguous US-style parser, to avoid silently swapping day and month. Same test
+discipline as every other reader (real fixtures, regression-catch independently verified). Also
+independently re-verified two sibling-session batches before building on top of them: Finding 43
+(a real SA ID redaction bypass on a line-split number - `engine/cv/test_extract_cv_fields.py` clean)
+and the onboarding/readiness/app-shell redesign (#28/#29/#30 - typecheck/lint/vitest/build all clean
+after a fresh `npm ci`). Not yet in `ALL_SOURCES`.
+
+**`submission_plan.py` added, 2026-10-21 ~10:30 UTC: first version of the "assessment engine"**
+Sarel asked for ("assesses each tender, each page, each field and compiles a plan of how to
+prepare a submission", `fb7b2ba`). `compile_plan(manifest, company, tender)` is a pure function
+(no Supabase access, same discipline as `requirements.py` itself) that turns the existing
+requirement manifest into an ordered, actionable list: one step per form/buyer-form/returnable/
+role/question/CIDB-grading/briefing, each with a status (ready / needs_document / needs_input /
+by_hand / review / blocked) and a plain explanation - reusing `build_general_pack.py`'s own
+`VAULT_FILE_FOR` mapping so "already on file" never drifts from what the real pack build checks.
+Tested against the whole `templates/general_samples/` corpus (no crashes) and a synthetic bundle;
+reuses Finding 40/42's own real fixtures to prove it. Regression-catching verified the same way as
+every other fix this session.
+
+**Open questions this raises, not decided here - for Sarel:**
+1. Where should a plan live - computed fresh every time the page loads (like `compileReadiness.ts`
+   does today, client-side, no DB write), or stored (a new table, so a person's progress on it -
+   "I've uploaded the CSD report" - persists and a step can flip from `needs_document` to `ready`)?
+2. Should a `needs_input` step (a role, a question) check `tender_answers`/`tender_roles` for an
+   already-saved answer on THIS tender, rather than always showing `needs_input`? That needs DB
+   access this module deliberately doesn't have yet - a real design choice, not an oversight.
+3. Should this run automatically the moment a tender is discovered (before a company commits to
+   pursuing it - `compileReadiness.ts`'s own job today, but shallower), or only after pursuit once
+   documents are actually downloaded (`build_general_pack.py`'s current precondition)?
+4. Should a `needs_input`/`needs_document` step auto-seed a row in `tender_tasks` (the existing
+   per-tender task list), or stay a separate read-only view?
+
+**My own recommendation on each, added 2026-10-21 ~19:00 UTC - so this is "approve/override", not
+"design from scratch" (still your call, not decided here):**
+1. **Computed fresh, no new table.** `compile_plan()` is already a pure function; recomputing it on
+   page load is cheap, and it sidesteps inventing a whole new persistence layer. "Progress"
+   (#2 below) comes from tables that already exist, not a new one tracking the plan itself -
+   avoids exactly the kind of duplicate ad hoc status system the UI/UX review session is
+   currently unwinding elsewhere on this same screen cluster (#35/#36, right above).
+2. **Yes** - but keep `compile_plan()` itself DB-free. Have the *caller* (an app server action)
+   fetch `tender_answers`/`tender_roles` for this tender and fold them into the `company`/`tender`
+   dicts passed in, so an already-answered question or a tagged role flips to `ready` without the
+   engine module touching Supabase directly - same read/compute split `requirements.py` and
+   `build_general_pack.py` already keep.
+3. **After pursuit, once documents are downloaded** - matches `build_general_pack.py`'s existing
+   precondition, and a real plan needs real document content to mean anything. `compileReadiness.ts`
+   can keep doing the shallower pre-pursuit "should we even go for this" job it already does -
+   different funnel stage, not a duplicate.
+4. **Stay read-only for now.** Auto-seeding one `tender_tasks` row per manifest line could mean
+   10+ new tasks appearing per tender the moment a plan is computed, before you've seen whether
+   that's wanted at all - narrower to start, matching this project's own "start with a button, not
+   the fancier thing" pattern elsewhere (e.g. the Pipeline page's own documented choice). Can widen
+   to auto-seeding later once the read-only view has been used for a while.
+
+**Government-buyer catalog: final bounded re-scan done, 2026-10-21 ~10:30 UTC**
+(`docs/specs/Government-Buyer-Catalog-Round4-Final-Sweep.md`, `fb7b2ba`). **Lephalale** confirmed
+as a strong new reader candidate - independently re-verified zero eTenders overlap, clean
+closing-dated structure (not a flat undated archive like Mbombela/Polokwane/Overstrand). Msukaligwa
+confirmed a real partial gap on its two construction-relevant tenders specifically (its other
+tenders are already on eTenders). Kouga (95 pages) needs a fuller eTenders comparison before
+ranking - 5 of 10 sampled were already duplicates. Not yet built: Lephalale is the clear next
+reader to build, not yet started.
+
+**Finding 42 fixed, 2026-10-21 ~09:15 UTC: Sarel chose option (a)** (decline to extract from a
+combined multi-tender bulletin PDF, rather than build row-scoped extraction). Implemented in
+`requirements.py`: `is_combined_bulletin()` detects the shape buyer-agnostically (a numbered list
+item followed by an uppercase reference token and a month name, repeated 3+ times - checked against
+every other real document in the corpus first, zero false positives). A flagged document is excluded
+from every extraction signal, same treatment as an unreadable one, with its own clear gap message.
+The real City of Tshwane bulletin is now a permanent `general_harness.py` sample
+(`templates/general_samples/tshwane_gpm08_bulletin/`) - verified the regression test genuinely
+catches the bug (forced the detection off, confirmed all 7 baselines flag `changed`, restored,
+confirmed clean). Full harness (11 samples, all with real pack builds) and `test_requirements.py`
+pass with no regression. **Not yet surveyed**: how common this bulletin shape is beyond City of
+Tshwane - the fix handles it wherever found, but no wider check was done this pass.
+
+**New instruction from Sarel (2026-10-21 ~09:15 UTC): re-scan the government/SOE/municipality list
+once more for any further sites worth tapping, then build a proper "assessment engine"** that reads
+each advertised tender page-by-page/field-by-field and compiles a submission-preparation plan - a
+materially bigger scope than the ad-hoc requirements-verification sampling done so far. Not yet
+started - picking this up now.
+
+**Standing review pass, 2026-10-21 ~08:20 UTC**: orientation via `git log` found one sibling-session
+commit (`24c47ba`, a different Claude session, "Finding 41" - two unrelated real municipalities,
+Nala and Kannaland, could falsely match on locality because the substring check stripped spaces
+before comparing; independently re-verified, not just trusted: `python3
+engine/discovery/test_score_outlook.py` genuinely passes, 5/5, including a full ~140-municipality
+sweep for any other such collision). QA re-confirmed sound across `engine/discovery/`'s test suite.
+
+**Continued phase 2 with a second real batch (15 more advertised tenders, same method as below) and
+found a more serious, NOT-yet-fixed issue: Finding 42
+(`docs/specs/QA-Edge-Case-Findings.md`).** City of Tshwane publishes some tenders' only document as
+a combined bulletin PDF covering several unrelated tenders in one file (confirmed: GPM 08-2026/27, a
+property lease, shares a PDF with GPM 06/14/15/17/18 and an unrelated WSBU 01 - each its own row).
+The engine has no concept of "this tender's own row in a shared document" - it attributes
+everything in the file to whichever tender is being processed, so GPM 08 was shown a CIDB grading
+requirement that actually belongs to a different tender in the same PDF, while its own real
+requirement (the lease/property terms) was never surfaced at all. **This is a real architectural
+gap, not a quick regex fix like Finding 40** - flagged to Sarel directly rather than rushed; scope
+(how common this bulletin-PDF shape is beyond City of Tshwane) is not yet established either.
+
+**Phase 2 started, 2026-10-21 ~06:30 UTC: verifying the requirements engine against REAL current
+tenders, not just the curated samples.** Per Sarel's own sequencing ("once [the reader-building
+phase is] done... go through each tender advertised and make sure our engines understand the tender
+requirements 100%"), and since 3+ standing check-ins passed with no reply on the open municipality-
+sweep question, made the call to proceed rather than wait indefinitely - flagged, not hidden.
+Method: pulled a real, randomly-sampled batch of 12 currently-advertised eTenders tenders (diverse
+buyers - national departments, municipalities, SOEs), downloaded each one's actual real documents
+(not an AI summary), ran them through the real `extract_requirements()`, and investigated every
+thin or unexpected result rather than assuming it was correct. **Found and fixed a real gap
+(Finding 40, `docs/specs/QA-Edge-Case-Findings.md`)**: an ESKOM tender named its own "Form A"
+(Supplier Quality Management form) as a mandatory returnable 11 times across its documents - a form
+`requirements.py`'s own docstring already named as ESKOM's, but nothing in the code ever matched
+it. Fixed, and the real 7-document corpus is now a permanent `general_harness.py` regression sample
+(`templates/general_samples/eskom_e3703cxmwp/`) - verified the regression test actually catches the
+bug (reverted the fix, confirmed the harness goes red, restored, confirmed clean). 11 of the 12
+sampled tenders turned out fine on inspection (either correctly flagged as unreadable/incomplete, or
+genuinely had nothing more to extract) - one confirmed real bug in a random dozen. **Not yet done**:
+this was one batch of 12 out of 2,200+ tenders on eTenders alone; the same method needs repeating
+across more, larger, more varied batches before "100%" is a defensible claim rather than a direction
+of travel - continuing this in further standing passes.
+
+**Standing review pass, 2026-10-21 ~04:15 UTC**: orientation via `git log` found one sibling-session
+commit since the last pass (`e5b6ae0`, a different Claude session, "Finding 39" - a naive-UTC date
+bug in `pdf_merge.expiry_warning()` that could silently miss an EXPIRED flag on a document during
+the 00:00-01:59 SAST window, plus the same bug in `process_pack_jobs.sync_position_suggestions()`).
+Independently verified, not just trusted: `python3 engine/pack/test_pdf_merge.py` genuinely passes,
+3/3, including the deliberate mirror case proving the fix doesn't false-flag a still-valid document.
+QA tooling re-confirmed sound after merging it: every `engine/discovery/`, `engine/pack/` and
+`engine/cv/` `test_*.py` passes, `npm run typecheck` and `npm run lint` both clean in `app/`.
+Still waiting on Sarel's call (flagged in the entry just below) on whether to keep sweeping
+municipalities further or move to the tender-requirements-verification phase - nothing else to
+report this pass.
+
+**Standing review pass, 2026-10-21 ~00:15 UTC**: orientation via `git log` found no sibling-session
+commits since the last push (`b443fc6`) - everything below from the Vaal Central Water reader
+through the Overstrand/Knysna correction is this session's own work, already independently verified
+as it went (not re-verified again here). QA tooling confirmed sound: every `engine/discovery/test_*.py`
+passes, `npm run typecheck` and `npm run lint` are both clean in `app/`. Nothing small/safe needed
+fixing this pass. One municipality-sweep background pass (North West/Northern Cape/remaining
+Limpopo-Mpumalanga-Gauteng) is still running as of this entry - not yet incorporated.
+
+**Resolved, confirmed by hard evidence (2026-10-20, ~22:35 UTC): the real daily-digest GitHub
+Actions test run (`39492435787`) timed out at exactly 120 minutes** (20:29:48 UTC → 22:30:01 UTC,
+GitHub Actions' own cancellation at the `timeout-minutes: 120` boundary set two passes ago - not a
+guess, the job's own recorded start/end times). The architecture question flagged as "not yet
+resolved" in the fifty-second run's own entry below is now a confirmed, not speculative, problem:
+`daily_digest.py` rebuilding the entire national tender feed from scratch, every single run, does
+not reliably finish inside two hours. Simply raising the timeout again is not a real fix - the
+right fix is almost certainly having the digest read Discovery's own already-scored
+`discovered_opportunities` table instead of redoing the whole fetch+score independently, which is
+a real architectural change (not a quick patch) that needs Sarel's own call before anyone rewrites
+it - flagged to him directly, not decided here.
+
+**New source added (2026-10-20, ~23:15 UTC): `engine/discovery/vaal_central_water.py`**, a dedicated
+reader for Vaal Central Water Board (committed `5e24ae8`) - a confirmed real gap vs eTenders (9
+construction/infrastructure tenders on its own site, zero reference overlap with the 4 small
+services/goods tenders eTenders carries for this buyer). Built and tested to the same standard as
+`randwater.py`: parsed against real saved HTML, raises rather than silently reporting zero tenders
+if the page's structure changes, has its own `BUYER_FAMILY` entry, and its offline test's
+regression-catching was independently verified (broke the parser, confirmed the test failed,
+restored, confirmed clean). Not yet in `ALL_SOURCES` - reachability from a scheduled run is
+unconfirmed. Also extended `source_http.parse_sast`'s DMY date format to accept a full month name,
+not just a 3-letter abbreviation (this site mixes "11 SEPTEMBER 2026" and "25 May 2026" on the same
+page) - verified against every existing format for zero regression.
+
+Eleven more candidates from the government/SOE/municipality catalogs were then checked against
+eTenders the same way (`docs/specs/Government-Buyer-Catalog-eTenders-Overlap-Checks.md` has the
+full evidence): four are confirmed **not** real gaps (Overberg Water, IDC, Necsa, mostly Limpopo
+Public Works - already duplicated on eTenders under their real buyer names), two are confirmed real
+gaps but **not buildable as a clean structured reader** without a materially bigger PDF-parsing
+effort (Mbombela and Polokwane's tender-documents page both turned out to be flat document archives
+with no closing date anywhere, on the listing or on an individual document's own page - a reader
+built against that shape would misreport every stale, years-old entry as permanently "open"), two
+are confirmed real gaps not yet built (Lephalale, Magalies Water - both need their real tender-page
+URL re-found first), and three came back partial/mixed overlap, not ruled in or out (Musina,
+uMhlathuze, Msukaligwa).
+
+**Municipality sweep continued past that (round 3, ~23:50 UTC), per Sarel's own instruction to keep
+checking until genuinely confident nothing's left.** Three parallel passes (two background,
+`Government-Buyer-Catalog-Municipalities-Round3-EC-KZN.md` and `-Round3-KZN-FS.md`, plus this
+session's own direct checks, which converged on near-identical findings to one of the background
+passes for Eastern Cape/KZN - a harmless duplication, not a conflict) checked ~19 more municipalities,
+bringing total coverage to roughly 78-85 of 257. **One new confirmed real gap: Ulundi** - a real,
+plain-text (not JS-rendered), structured tender-status register, 83 entries, zero eTenders overlap -
+but it's status-only (no bidder name or award amount inline, a real data-quality issue with the same
+bid number recurring across years already present too), ranking below the existing pilot buyers on
+value. Everything else reachable this round had a disqualifying problem: stale-only snapshots
+(uMngeni), the same flat-undated-document-archive trap as Mbombela/Polokwane (Setsoto), or
+JS-rendered content a text fetch can't see (King Sabata Dalindyebo - Mthatha's own site has a
+promising dedicated Awarded Tenders page, genuinely unresolved, worth a real-browser recheck).
+**A fourth distinct unreachability class surfaced**: this session's own egress proxy refusing a
+connection outright (Dihlabeng) - different from a site's 503, a DNS failure, or Rand Water's own
+TLS-chain error. A fifth municipality sweep (North West/Northern Cape/remaining Limpopo-Mpumalanga-
+Gauteng) was still running in the background as of this entry - not yet incorporated here.
+
+**A sixth pass (Eastern Cape + Western Cape, `Government-Buyer-Catalog-Municipalities-Round3-EC-WC.md`,
+committed `e67c1ab`) initially reported Overstrand and Knysna as "the strongest new candidates since
+Vaal Central Water Board itself" - verified independently against the real saved HTML before
+trusting that claim, and it was wrong for Overstrand (no closing date anywhere on the page or in any
+document title - the Mbombela/Polokwane trap again) and overstated for Knysna (its own "Current
+Tenders" section is actually cancellation notices; the real open tenders sit under an accordion
+mislabelled "Archived Tenders - 2027" - some, not all, entries do embed a real closing date as free
+text, a genuine edge over Mbombela/Polokwane, but each tender is split across 2-4 separate document
+rows needing reference-based grouping, and the page spans 6 years of archives with no reliable
+section-label signal for current-vs-expired).** Both remain confirmed real eTenders gaps (re-checked
+independently: Overstrand 1 of many duplicated, Knysna 0 duplicated) but neither was built this
+round - a correction is recorded directly in that file rather than left standing uncorrected.
+
+**The seventh pass (North West/Northern Cape/remaining Limpopo-Mpumalanga-Gauteng) malfunctioned and
+was stopped, not completed (2026-10-21, ~02:15 UTC).** It ran over 2 hours (its two siblings each
+took 2-4 minutes) and its final captured output was nonsensical, narrating in this session's own
+reporting voice rather than returning research findings - it never wrote its output file. No harm
+done: checked `git log` and working tree directly after stopping it, confirmed nothing was committed
+or pushed by it (the sibling CV-fix commit `f89b8a8` that landed around the same time is a genuine,
+independently-verified different session, not this fork). **Municipality coverage stands at roughly
+85 of 257**, with three full rounds now showing clearly diminishing returns (round 3's ~24
+municipalities across 4 sub-passes produced zero clean, immediately-buildable new reader candidates
+- Ulundi, Overstrand and Knysna are all real gaps but each has a real structural problem, same as
+Mbombela/Polokwane). Judgment call, not yet put to Sarel: treat the municipality sweep as reasonably
+concluded for now rather than dispatch an eighth multi-hour pass for ~170 still-uncovered,
+mostly-small municipalities with a demonstrated low hit rate - flagged to him directly since this is
+a "how thorough is thorough enough" call, not a technical one.
+
+Last full pass: 2026-10-20, ~22:11 UTC — fifty-second standing QA run: independently verified two
+substantial batches of sibling work rather than trusting either's own claims. First, the UI/UX
+redesign's first 3 real prompts landed (`ee60823`/`f5e5a6f`/`6787cf3` - shadcn/ui + oklch design-token
+foundations, `/dashboard` migrated, a gold-to-blue accent swap) - confirmed zero files outside `app/`
+touched, zero Supabase/query lines changed in the migrated dashboard page, `npm run verify` genuinely
+passes (a stale `node_modules` in this sandbox made it look broken at first - a clean `npm ci`
+resolved it, no real bug on `main`), and `app/AGENTS.md` carries real, detailed design-decision notes
+exactly as Sarel's own rules for this redesign require. One low-priority finding, not fixed
+unilaterally: `npm audit` flags 9 high-severity advisories, all tracing to one `braces`/`fast-glob`
+chain pulled in only by the `shadcn` CLI's own tooling (confirmed `shadcn` is never imported by real
+app code - dev/build-time only, not a runtime risk); fixing it needs a breaking `shadcn` major-version
+bump, not something to force mid-redesign. Second, independently re-verified `db0cefc` (the
+Edge-Case QA session's own `fill_a_forms.py`/`fill_sbd_docx.py` timezone fix, below) by re-running its
+new test myself - clean. Also checked on the real daily-digest GitHub Actions test run from two passes
+ago (`39492435787`): still in progress at over 1h40m, well past both the local dry-run's 31+ minutes
+and comfortably eating into the 120-minute timeout raised just for this - a real, still-developing
+question of whether 120 minutes is actually enough, not yet resolved as this entry is written.
+~21:30 UTC — fifty-first standing QA run: `fill_a_forms.py`/
+`fill_sbd_docx.py`'s `_today_iso()` used a naive `datetime.date.today()` - the same bug class the
+enterprise audit fixed in 4 other files, but missed here. During the 00:00-01:59 SAST window this
+could flip a SANRAL A-Forms declaration's A12 (B-BBEE)/A20 (COID) compliance verdict from EXPIRED
+to CURRENT for a proof expiring on the real SAST today - confirmed end to end against the real
+template with the clock monkeypatched into that window (Finding 37). Fixed with a local `SAST`
+constant matching `watch_deadlines.py`'s own pattern. Added 3 checks to `test_form_field_audit.py`,
+verified to actually catch the regression. 10 more naive `date.today()` instances found by the
+same repo-wide grep, deliberately logged rather than fixed blind - each needs its own look at
+what it actually affects. ~20:11 UTC — fiftieth standing QA run: the digest cron workflow shipped
+two passes ago (`3dc4bdf`) had its own `timeout-minutes: 30` proven wrong by a real timed dry-run
+against the live project - the run was still going at 31+ minutes (never reached its own final
+"Wrote ..." line) because `daily_digest.py` scores the ENTIRE national feed fresh every run rather
+than reading Discovery's own already-scored `discovered_opportunities` table - confirmed by reading
+the code, not assumed. Fixed `timeout-minutes` to 120 with the real measured evidence documented in
+the workflow's own comments, rather than picking a safer-sounding round number. The deeper question -
+should the digest read Discovery's own table instead of redoing the whole feed? - is flagged for
+Sarel below, not decided unilaterally. Independently re-verified the forty-ninth run's own fix
+(`d64a97`) before building on top of it: reran its new `test_etenders_portal.py` myself (7 checks,
+0 failures). ~19:15 UTC — forty-ninth standing QA run: `etenders_portal.py`'s own
+`dedupe_rows()` docstring names two causes of a duplicate portal row - a repeat cancellation, or a
+multi-lot award - but only merged the cancellation across duplicates; a multi-lot award's later
+lots' bidders were silently dropped (whichever duplicate row happened to be first "won"), feeding
+`store_award_outcomes.py`'s real award/price data and a bidder-count-keyed change event with
+incomplete information (Finding 36). Fixed by merging `bidders` the same way `_cancellations`
+already is. Added this module's first test file (7 checks), verified to actually catch the
+regression (reverted the fix, confirmed it fails with Lot 2 missing, restored it, confirmed
+clean). `test_gov_sources.py`/`test_tender_changes.py` (real callers) unaffected. ~18:11 UTC —
+forty-eighth standing QA run: two things happened this
+cycle. First, the single biggest "known gaps" item in this file's whole history closed — migrations
+`0063`–`0075` (13 files, flagged as growing and unresolved since the twentieth run, confirmed to have
+caused two real production crashes) are now ALL confirmed applied to Sarel's real Supabase project,
+verified directly via the live project's own schema (not inference, not trust) - see Known-gaps item
+9 below for the full account, including the two real user-facing consequences the gap had (onboarding
+document-scan confirm failing for 4 document kinds; the email-notifications toggle silently absent).
+Second, reviewed a substantial new sibling feature that landed since the last pass - per-item
+confidence scoring for the general-pack engine's requirement extraction, plus a platform-admin review
+queue (`a0be7ca`, `8737b3a`, new migration `0076`) - independently verified rather than trusted:
+replayed all 66 migrations including `0076` on a fresh scratch Postgres, re-ran
+`engine/general/test_requirements.py`/`general_harness.py --no-pack`/`test_general_bridge.py`/
+`test_process_general_jobs.py` (all pass), confirmed the new admin RPCs and RLS policy actually gate
+on `is_platform_admin()` (not just documented as doing so), confirmed the UI never mislabels the
+regex/heuristic score as "AI confidence," and confirmed real CI green via the GitHub Actions API for
+all 3 new commits. No issues found - genuinely solid work, no overlap with anything else in flight.
+~16:13 UTC — quiet check-in (forty-seventh standing QA run): fast-forwarded
+onto the forty-sixth run's independent re-verification (confirmed it only touched docs, no code -
+clean to build on), confirmed CI genuinely green at current `main` tip via the real GitHub Actions
+API (`app-ci` run 32 on `095a89a` and `bridge-worker-ci` run 86 on `a36ef61` both `success`; the two
+commits since are docs-only and didn't trigger new runs), ran `npm audit --omit=dev` on `app/` (0
+vulnerabilities), and swept the repo for `TODO`/`FIXME`/`XXX` markers outside test files (one pair
+found, `actions.ts`/`review-button.tsx`'s `reviewed_at` TODO - a long-known, already-documented gap
+from migration `0059`'s own design, not a new finding). No overlap or duplication with the forty-
+sixth run's own work, nothing new to fix, nothing new to flag. ~16:00 UTC — independently re-verified round 3 of the enterprise-
+readiness audit (forty-sixth standing QA run) rather than duplicate it: reproduced the SAST
+timezone mismatch by hand (not just read the claim), confirmed by diff that Finding 33's own
+`find_documents_lapsing_before_closing()` guard is untouched by the new `SAST` constant, confirmed
+via the real GitHub Actions API that `main` is genuinely green (traced the one failing run on
+`a36ef61` to the already-fixed `25e8a20` regression, two commits behind current `main`), and
+re-ran 7 test suites across compliance/notify/intake/general with no regressions. No new findings.
+~15:28 UTC — round 3 of the enterprise-readiness audit, at Sarel's own
+explicit follow-up ("continue the next audit round on the deferred items"): every item round 2 had
+named as deliberately deferred is now closed - 2 more timezone-bug instances, the identical
+qualifications-null crash the CV engine had already been fixed for, 2 SECURITY DEFINER functions
+missing `pg_temp`, a test-infra role-reuse fragility, duplicated filename sanitization consolidated
+into one shared helper, confirmed-dead buggy legacy code deleted outright, a bounded 429 retry added
+to the digest emailer, and CV-request rate-limiting plus this app's first root error/404 boundaries
+added. One item was re-scoped after direct investigation rather than blindly fixed (`confirm_pack.py`'s
+project-type-fit gap turned out to already be handled correctly downstream - the real, narrower gap
+is a UX enhancement, not a bug, deferred to its own pass). **A real CI regression I introduced
+mid-round** (the filename-sanitization consolidation broke `app-ci` on `main` - confirmed via the
+actual GitHub Actions job log, not assumed) was caught and fixed the same pass, with the real CI run
+confirmed green afterward. Full list, commit hashes, and verification evidence in the pass-history
+entry below. ~14:35 UTC — a full enterprise-readiness audit at Sarel's own direct
+request, before onboarding a real company: 8 parallel adversarial audits across every engine and
+the app layer (round 1, find-only, ~31 findings, most independently reproduced), then 9 severe
+findings fixed and re-verified (round 2) - a confirmed-live orphaned-LibreOffice-process bug in the
+SANRAL pack engine (the highest-stakes fix), a silent data-loss key collision in discovery, a path
+traversal in the CV engine, a systemic timezone bug in compliance/notify, a missing stale-job
+recovery pattern in the general pack engine (the third job queue to need it), and more - full list
+and commit hashes in the pass-history entry below. RLS/security audited separately and found
+genuinely clean (zero confirmed cross-tenant leaks, verified against a real replayed Postgres, not
+just read policy SQL). Several smaller findings deliberately deferred to a later round, named
+explicitly below rather than silently dropped. ~12:50 UTC — `engine/onboarding/process_onboarding_jobs.py`'s
+storage-path guard (defence against a forged row pointing outside its own company's folder) used
+a blind `".." in sp` substring check; the upload form's own `safeFileName()` keeps dots in a
+filename unchanged, so an ordinary file like "Report..final.pdf" produced a path containing ".."
+and was rejected as if it were a path-traversal attempt, with a message ("isn't in your company's
+own storage folder") that pointed nowhere near the real cause (Finding 35). Fixed to check for a
+genuine `..` path SEGMENT instead of the bare substring; a real traversal attempt, a wrong-company
+prefix, and a double slash are all still rejected. Added this module's first test file (6 checks),
+verified to actually catch the regression (reverted the fix, confirmed it fails, restored it).
+~10:25 UTC — two sibling commits independently re-verified, both
+correct: Discovery's undersized touch target on its own "Prepare this tender"/"Open in workspace"
+button (confirmed the 44px convention it cites is real, pre-existing); and Finding 34's digest
+alerting fix, where I personally reproduced the commit's own "reverted the fix, confirmed the
+test fails" claim (removed the new alert call, watched the check fail with zero alerts recorded,
+restored it). Green on real CI, no code changes needed. ~09:50 UTC — `daily_digest.py`'s listing-changes tracker was the odd
+one out of 3 near-identical "optional extra signal, a failure must not cost the rest of the
+digest" try/excepts: the other two call `system_alerts.record(...)` on failure, this one only
+printed a stdout warning - invisible on an unattended scheduled run (Finding 34). Added the
+matching alert call and a new `test_digest_live.py` check, verified to actually catch the
+regression (reverted the fix, confirmed the check fails with zero alert calls, restored it). Full
+`test_digest_live.py` and all 5 `engine/compliance/test_*.py` files still green. ~08:15 UTC —
+independently re-verified Finding 33 (`3255b00`, the
+duplicate-reminder compliance fix): confirmed the new guard's lead-time expression matches
+`find_due_documents()`'s own exactly, traced the `_expiry_window()` boundary for an off-by-one,
+and personally reproduced the commit's own "reverted the fix, confirmed the new test fails"
+claim rather than trust it. All 5 `engine/compliance/test_*.py` files pass. No issues found, no
+code changes needed - green on real CI. ~07:00 UTC — `find_documents_lapsing_before_closing()`'s own docstring
+promised it only fires for a document OUTSIDE the normal reminder window, but the code never
+enforced that: a document already inside the ordinary 60-day window (or a field's own shorter
+override, e.g. the bank letter's 30 days) that also happened to expire before some open, pursued
+tender's closing date got reported TWICE - once correctly by `find_due_documents()`, once more
+under a misleading "lapses before closing" framing naming a tender that has nothing to do with it
+(Finding 33). Added the missing guard (same effective lead time `find_due_documents()` itself
+uses per field) and threaded a `lead_days` parameter through so `--doc-lead-days` is honoured here
+too (it was silently ignored before). Confirmed with a real adversarial fixture and a new check in
+`test_watch_deadlines_urgency.py`, verified to actually catch the regression (reverted the fix,
+confirmed the new check fails, restored it). Full `engine/compliance/test_*.py` suite (5 files)
+still green. ~06:15 UTC — the raw-Postgres-error-leak sweep (thirty-second through
+thirty-fifth runs) is now genuinely complete: `d081793` closed out the last 5 admin pages + 2
+upload forms, confirmed by a fresh repo-wide grep (the only remaining `error.message` matches are
+intermediate objects already shown generically downstream, or legitimate Supabase Auth SDK
+messages on the login/signup/forgot-password pages - a different, safe class, correctly untouched).
+`fd73a51` also fixed a real but separate gap: 6 onboarding-scan fields (migration `0069`) were
+saved on every vault confirm and shown nowhere - now read back and displayed, column names
+verified against `0069` exactly. Both green on real CI, `npm run build` clean. No code changes
+needed this pass. ~04:20 UTC — independently re-verified `49d1305` (Finding 32, the
+SANRAL `.docx` intake fix): confirmed the claimed `.xlsm`-branch precedent is real, re-ran both the
+new test file and the real regression suite (`test_opportunity_requirements.py`, 17/17), checked
+for any other code assuming an empty `notes` list. No issues found, no code changes needed - green
+on real CI. ~03:15 UTC — `engine/intake/classify_tender.py`'s `classify_documents()`
+silently dropped a corrupt/mislabeled `.docx` SANRAL form with zero trace (the parallel `.xlsm`
+branch already logged a note for an unreadable workbook; the `.docx` branch's exception handler
+didn't), then let the downstream "missing documents" message tell the user to re-upload a document
+they'd already uploaded (Finding 32). Fixed by mirroring the `.xlsm` branch's own note-logging
+pattern; added this module's first dedicated test file (`test_classify_tender.py`, 3 cases,
+including a real valid `.docx` proving no spurious note on the working path); confirmed no
+regression via `test_opportunity_requirements.py`'s 17 checks (same `classify_documents()`, a
+different caller). ~02:25 UTC — closed two real gaps this pass, both left by otherwise-
+correct sibling fixes: `b66dc44`'s raw-error-leak fix covered 4 customer-facing pages but missed 6
+more (Dashboard, People, Discovery, `OfficeLocations.tsx` - which literally told a customer
+"migration 0015 may not be applied yet" - and 2 Tender Workspace sub-components), all now fixed
+with the same established pattern and confirmed by a repo-wide grep that none remain; and `4a2d20f`'s
+new MBD/SBD suite-misclassification fix (Finding 29) had real, careful ad-hoc verification but zero
+persisted test coverage, closed with a new `test_requirements.py` whose regression-catching power
+was itself verified (temporarily reverted the fix, confirmed the new test fails, restored it).
+`npm run typecheck`/`lint`/`build` all clean, `general_harness.py --no-pack` still `77 clean, 0
+flagged, 0 failed`. ~00:25 UTC — reviewed and independently verified `b82210a`: a live
+discovery-watch run crashed after successfully scoring and seeding 4,034 real opportunities,
+because the document-download step's one unguarded Supabase read hit migration `0071`'s
+not-yet-live `discovered_opportunity_documents` table (`PGRST205`). Confirmed the fix is correctly
+scoped (catches only `RuntimeError`, the one error type the REST client actually raises on an
+HTTP failure) and the new test reproduces the exact live failure against a real HTTP server, not a
+mock. Green on real CI. Known-gaps item 9 updated: this is now a confirmed second real production
+crash from the committed-but-not-live migration gap, not just a theoretical risk. ~22:15 UTC — two
+commits reviewed and independently verified clean, no
+code issues found: a nonsensical internal provenance-log sentence on the CV cover page fixed and
+given its first dedicated test file (`b71dc5d`), and a dark-mode illegibility fix across 6 pages
+including Dashboard and Discovery (`01a15de`) - confirmed complete by scanning all 33 `page.tsx`
+files for the wrapper-background convention, not just trusting the commit's own file list. Both
+green on real CI. Known-gaps item 9 (committed-but-not-live migrations) unchanged this pass - still
+Sarel's own call, still 8 real files deep. ~00:30 UTC — demo-prep sprint verified: landing page (`4fc2e19`),
 SANRAL B6 estimator + real logo (`ffbba14`), auth-pages redesign (`d64e652`), 3 new discovery
 sources (`cace3f7`), a real bug caught by live Playwright E2E testing against production
 (`9061deb`), demo-blocking copy fixes (`95bce9f`) - all now authored directly by Sarel with
@@ -83,7 +818,7 @@ bridged by `engine/general/process_general_jobs.py`.
 | SANRAL workbook fill (`engine/fill_tender.py`, `fill_conventional.py`, `fill_a_forms.py`, `fill_financial*.py`) | Fills both template families (Conventional 9-sheet, RRM 15-sheet), A-Forms bundle, financial/hours sheets | `engine/admin_harness.py` regression-tests this against 3 test companies on every run; real tender runs recorded in git history (e.g. `afad9d2`, `6658b73`) |
 | Template fingerprinting (`engine/fingerprint.py`) | Detects a changed SANRAL template before filling | Documented false-positive case already found and understood (README's own "open question") |
 | Field-level provenance (`engine/provenance.py`, migration `0002`) | Every written field tagged confirmed/computed/assumed_default/missing | `app/app/tenders/[id]/page.tsx` reads `field_provenance` directly and renders the 3-bucket readiness report (item 32) — genuinely wired end-to-end, not just a CLI/DB concept |
-| National tender discovery (`engine/discovery/etenders_national.py`, `assess_tender.py`, `watch_new_tenders.py`, `company_profiles.py`, `seed_supabase_opportunities.py`) | Pulls OCDS feed; reads each tender's documents once and scores it **separately for every company** (each from its own Experience Library tags, CIDB, B-BBEE, offices - no default/sample profile since 2026-10-17, audit Q4), one `discovered_opportunities` row per company x report-worthy tender with that company's own verdict. Test companies (`is_test_company`) included by default since 2026-10-17 (`--exclude-test-companies`). Seen store: `discovery_seen_releases` (0038, per company x release) in Supabase mode; the local `state/seen_tenders.json` only for a `--profile` run. Since 2026-10-17 (Audit §11): a company whose own profile changed since it was scored (stored `profile_fingerprint` differs) is re-scored and a report-worthy result reported again (`rescored: profile_changed`, `previous_verdict`), its seen row updated in place; an `ERROR` verdict is retried every run and recorded in `system_alerts`. Since 2026-10-18 (`0055`, Audit §11.4): a re-score that makes a verdict **worse** (strong_fit > possible > needs_review > not_a_fit; `discovery_downgrades.py`) is flagged on the company's existing row - "Re-assessed: was Strong fit, now Not a fit as of ...", the reasons it matched before, red when the company is working on the tender, amber otherwise - on /discovery (banner + "Re-assessed" filter), the Workspace's "How this tender was read" card and the Pipeline chip, until a member presses "Mark as seen" (`acknowledge_discovery_downgrade()`); then a small "was Strong fit" marker stays. Carried once in the digest (`reassessed_tenders`: pursued tenders first, to every role; plain-feed ones only where new tenders go). A tender never shown as a match gets no row | `engine/discovery/test_discovery_fanout.py` + `test_discovery_downgrades.py` (CI; Part 2 on a replayed DB): same real tender -> strong_fit / not_a_fit / needs_review for different companies, rows per company, seen rows per company read back, RLS. CLI run twice against the live feed with the DB seen store over a local PostgREST stand-in (Audit §9.2). | `app/app/discovery/page.tsx` reads `discovered_opportunities` and renders the same verdict buckets `assess_tender.py` produces — genuinely wired, not a disconnected feed |
+| National tender discovery (`engine/discovery/etenders_national.py`, `assess_tender.py`, `watch_new_tenders.py`, `company_profiles.py`, `seed_supabase_opportunities.py`) | Pulls OCDS feed; reads each tender's documents once and scores it **separately for every company** (each from its own Experience Library tags, CIDB, B-BBEE, offices - no default/sample profile since 2026-10-17, audit Q4), one `discovered_opportunities` row per company x report-worthy tender with that company's own verdict. Test companies (`is_test_company`) included by default since 2026-10-17 (`--exclude-test-companies`). Seen store: `discovery_seen_releases` (0038, per company x release) in Supabase mode; the local `state/seen_tenders.json` only for a `--profile` run. Since 2026-10-17 (Audit §11): a company whose own profile changed since it was scored (stored `profile_fingerprint` differs) is re-scored and a report-worthy result reported again (`rescored: profile_changed`, `previous_verdict`), its seen row updated in place; an `ERROR` verdict is retried every run and recorded in `system_alerts`. Since 2026-10-18 (`0055`, Audit §11.4): a re-score that makes a verdict **worse** (strong_fit > possible > needs_review > not_a_fit; `discovery_downgrades.py`) is flagged on the company's existing row - "Re-assessed: was Strong fit, now Not a fit as of ...", the reasons it matched before, red when the company is working on the tender, amber otherwise - on /discovery (banner + "Re-assessed" filter), the Workspace's "How this tender was read" card and the Pipeline chip, until a member presses "Mark as seen" (`acknowledge_discovery_downgrade()`); then a small "was Strong fit" marker stays. Carried once in the digest (`reassessed_tenders`: pursued tenders first, to every role; plain-feed ones only where new tenders go). A tender never shown as a match gets no row. Since 2026-10-19 (Sarel: "we need ... all documents already downloaded ... it shouldn't be manually prompted by a user"): `main()` also calls the new `download_discovered_documents.download_for_releases()` on every run's report-worthy releases (unless `--no-download-documents`, mirroring `--no-seed`) - every document is downloaded and permanently stored in the new `discovered_opportunity_documents` table (migration `0071`) + `discovered-tender-documents` bucket, keyed by `release_key` (ocid/contract_number, same identity as the seen store) not `company_id`/`tender_id` since most discovered releases never become a `tenders` row. Every source EXCEPT SANRAL (reCAPTCHA v3 wall, confirmed live - `download_documents.py`'s own docstring): SANRAL's document titles are still recorded with no URL exactly as before, never silently dropped. Idempotent (checked by `(release_key, document_url)` before any fetch, so a daily re-run never re-downloads); one dead link is recorded `status='failed'` with a reason and does not stop the run, with a single summary `system_alerts` entry per run if any failed | `engine/discovery/test_discovery_fanout.py` + `test_discovery_downgrades.py` (CI; Part 2 on a replayed DB): same real tender -> strong_fit / not_a_fit / needs_review for different companies, rows per company, seen rows per company read back, RLS. CLI run twice against the live feed with the DB seen store over a local PostgREST stand-in (Audit §9.2). `engine/discovery/test_download_discovered_documents.py` (CI, offline, synthetic `file://` fixtures): two real documents downloaded/stored/hashed, a SANRAL no-URL document gets no row at all, a dead link fails without aborting the run and raises one summary alert, a second run re-downloads nothing, and two company-result dicts sharing one release/document store it only once. **Not yet run against a live Supabase project (no live project in this environment) - the bucket/table/upload path are unverified end to end until the next live round-trip.** | `app/app/discovery/page.tsx` reads `discovered_opportunities` and renders the same verdict buckets `assess_tender.py` produces — genuinely wired, not a disconnected feed |
 | Government tender sources + listing-change tracking (`engine/discovery/gov_sources.py`, `etenders_portal.py`, `eskom_bulletin.py`, `transnet_etenders.py`, `capetown_procurement.py`, `source_http.py`, `tender_changes.py`; migration `0051`; Discovery page source chips / briefing / "Changed" filter, `app/lib/listingChanges.ts`; digest `listing_changes`) | The watch and the digest now read **every automatable government source** by default (`--sources ocds` = old behaviour): the eTenders portal in full (2,211 open, 408 buyers; replaces the OCDS API, which returned ~300 of ~1,400 releases in a 14-day window - Strategy §10.3), SANRAL's own site (matched to the portal on contract number AND NRA bid number), Eskom's Tender Bulletin (tenders + bidders-list/award/cancellation/validity notices), Transnet eTenders (with addenda links), City of Cape Town RFQs (none on eTenders). Merged to one release per tender (`listing_sources`); a buyer-site tender the portal has moved to Closed is folded in and flagged. `tender_changes.py` records listing-level changes for every tender (not just pursued ones - those are `watch_tender_updates.py`, 0039): cancelled (portal Cancelled tab with reason - OCDS can't show it), buyer site vs eTenders date disagreement, re-listing with a new date, addendum-named documents uploaded after publication, snapshot diffs of closing/briefing/title/documents, Eskom notices. `etenders_national.normalize()` now stores the bid number as `contract_number` (was the portal id); `pursue_discovered_opportunity()` (0051) uses it and only sets `tenders.ocid` for a real OCDS ocid. `award_outcomes.py --source capetown/eskom` | Live 2026-10-17: merged 2,590 tenders (2,540 open) from 415 buyers; SANRAL 72 own open tenders, 69 on the portal's advertised tab + 3 only in its Closed tab with an older date; Eskom 159/180 on portal; Transnet 68/104 matched; Cape Town 0/246. Real changes detected: 55 cancellations in 14 days with reasons, 9 extensions eTenders doesn't show (SANRAL NRA 2026/0754 (A) portal 15 Oct vs SANRAL 6 Nov, 0021 (B), 0062...; 3 Eskom), EC Transport SCMU10 bids re-listed 26 Oct -> 6 Nov, 597 addendum-named late documents on 301 tenders (e.g. WTE1062CE). Cross-run date diff: no edits occurred in the 1-hour re-read window; covered by tests on real rows. `test_gov_sources.py` (CI, offline). `0001`->`0051` replayed: new source values / change types checked, changes readable not writable by `authenticated`, snapshots invisible, pursue on an Eskom-only listing. `tsc`/`eslint` clean; page not rendered against a live project (Gap #9). Gaps: municipalities off eTenders, Gauteng provincial portal, NTCSA bulletin (403) - see the findings doc |
 | Award outcomes + competitor bids, report-only (items 17, 28: `engine/discovery/award_outcomes.py`, `test_award_outcomes.py` in CI; `list_tenders.fetch_tenders(list_slug=...)`) | Reads the two public sources that actually carry award data (OCDS `awards`/`contracts` re-confirmed empty on 800 releases, 5 windows): the eTenders portal's Awarded tab (35,316 awards, all buyers: winner, amount, date, enterprise type, some full bidder lists; joins to OCDS as `ocds-9t57fa-<portal id>`) and SANRAL's awarded/closed pages (winner, points, approved amount, award date, and the tender opening register - every bidder and price, per contract on batch tenders). Drops contact people, phone numbers and officials' names at parse time; SANRAL records carry SANRAL's attribution. Writes a JSON report; storing it is `store_award_outcomes.py`'s job (next row) | Live 2026-10-17: portal all buyers 200 read (196 winner, 187 amount, 32 bidder lists, 15 server-broken records skipped individually), SANRAL dept 100/100 winner+amount; SANRAL awarded 69 pages (64 winner+amount, 67 registers), closed newest 60 (48 registers, 4 attachment-only, not fetched). NRA 2026/0084(B) register read correctly incl. Klipcorp's own three prices. Offline test on trimmed real fixtures. Evidence: `Award-Outcomes-Findings.md` |
 | Award and price analysis - market feedback on submitted prices (Sarel 2026-10-17; migration `0053` `public_tender_outcomes` + `award_match_keys()` + `tender_market_outcomes()`; `engine/discovery/store_award_outcomes.py`; `app/lib/marketPricing.ts`; Tender Workspace "Market" card `market-context.tsx`; `/pipeline/pricing` "How your prices compared" `market-comparison.tsx`) | One row per real tender from SANRAL's closed/awarded pages + the eTenders Awarded tab (sources merged by SANRAL reference / OCDS id, each source's record kept in `parts`), winner placed in the register (name / awarded amount / first word, basis recorded), scale-free field numbers only where the register supports them, plain-language data notes otherwise (batch, gated, multi-package, typo 5x off the median, non-competitive). Workspace: this tender's register as a strip plot + where the company's price placed (confirmed only on name AND price; name-only, price-only, similar-name shown as "probably you - check"; batch registers read in the recorded price's column), then benchmarks for this buyer + discipline and all buyers + discipline (bidders per tender, lowest won, winner vs median, contract size, winner concentration - counts only, no names; each with its own n, hidden under 5, "thin" under 15). Pricing page: every priced tender with a published result + "firms you have bid against most" (own registers only). **Coverage is thin by nature:** of 1 761 real tenders read, 301 have 2+ priced bids; SANRAL consulting 33 registers / 14 with winner placed; other buyers' eTenders awards 18% priced. Design + caveats: `Award-Price-Analysis-Findings.md` | `test_award_prices.py` (CI; Part 2 on a `0001`→`0053` replay - 0 failures): 9 real records -> 8 tenders, merge, VNA amount match, Klipcorp's real NRA 2026/0084(B) batch prices, 24 real reference formats SQL = Python, matching by OCDS id / reference spacing / `nra_reference`, another company's private tender never matched, read-only for users. TS matching on the same real rows (jiti). Rendered with `next dev` on PostgREST 12.2.3 + RLS holding all 1 761 real outcomes: Klipcorp's real bid 6th of 41 (+4.3% vs lowest, -5.5% vs median). **Not scheduled, no backfill run, not against a live project (Gap 9)** |
@@ -124,6 +859,7 @@ bridged by `engine/general/process_general_jobs.py`.
 | Route guard (`app/proxy.ts`) | Redirects signed-out users to `/login`, no-company users to `/onboarding` | Covers every real app route, including `/experience` (added this round) |
 | RLS policy set (`0001`–`0026`, `0030`–`0045`, `0048`, `0050`, `0051`, `0053`, `0055`) + cross-tenant isolation (`0043`–`0045`, `engine/security/test_tenant_isolation.py`, `docs/specs/POPIA-Security-Audit.md`) | Tenant isolation via `is_company_member()`, shared/public tables explicitly marked as such. Since `0043`: same-company triggers on every person/pack reference, storage paths confined to the row's own company folder, `platform_admins` for the admin console, pinned `search_path`. Since `0045`: a company's uploaded blank SANRAL template is its own copy (`tender_documents.company_id`, `tender_requirements.company_id`), only the buyer-published copy registered by the intake is shared; service-role bridges read only the job company's rows, files and templates | `test_tenant_isolation.py` (Part 1 in CI; Part 2 on a fresh `0001`→`0045` replay): 215 pass / 0 fail - RLS on 21 tables, storage per bucket, private tenders, 17 cross-reference probes, the 7 bridge exfiltration paths, shared-template cases 16-17 (before `0045`: 18 fail, incl. B's pack keeping A's projects/referee/SACPCMP number from A's filled workbook and B downloading it from Storage), deletion. `bridge_selftest.py` (full pack from shared templates) and `test_manual_intake.py` (44 pass) on the same replay. Earlier: Internally consistent — every deviation carries its own comment explaining why. No RLS inconsistency found across any pass to date; re-replayed all 25 migrations (`0020` was never a real file — see QA section) against a fresh scratch Postgres this pass, all still apply cleanly. `0026` (unified job queue) replaces `0017`'s "for all" policy on `pack_generation_jobs` with select + strict insert for every engine, keeping update/delete for SANRAL rows only — independently re-tested, not just read: called `pursue_discovered_opportunity()` for real against the replayed schema, confirmed its insert through the `tender_engine_jobs` compatibility view lands in `pack_generation_jobs` with `engine='general'` set by the view's default, and that calling it a second time correctly no-ops via `ON CONFLICT` rather than erroring or duplicating | |
 | Free standalone tools: working-day deadline, CIDB grade, B-BBEE preference points (`/tools`, `app/lib/publicHolidays.ts`, `cidbGrading.ts`, `preferencePoints.ts`) | Three lead-magnet calculators needing no sign-in and no company/tender context, per the Solution Architect's TenderFlow gap check. Deadline calculator: add/count working days excluding weekends and SA public holidays (Public Holidays Act 36 of 1994, incl. Easter-derived Good Friday/Family Day, computed per year, not hardcoded). CIDB grade calculator: the published cidb grading-designation value bands (Grade 1-9). B-BBEE preference points: the actual PPPFA/PPR 2022 regs 4-5 80/20 and 90/10 price-points formula plus the SBD 6.1 B-BBEE-level specific-goals table - the first place in the codebase that computes the formula itself (`tenderCompliance.ts` only tracked level/risk conceptually; confirmed by grep before building) | `publicHolidays.test.ts` / `cidbGrading.test.ts` / `preferencePoints.test.ts` (Node's built-in test runner, 26 cases total): holiday table incl. the s2A Sunday→Monday rule, business-day math starting from a non-business day and spanning a year boundary, CIDB boundary values, the regs 4/5 worked example and rounding, the full B-BBEE level table both systems, the R50m system switch and an explicit-system override. `npm run typecheck` and `npm run lint` clean |
+| Onboarding document scan: the six previously-orphaned fields now have real homes + a CIDB name-mismatch warning (migration `0069`; `app/lib/onboardingScan.ts`, `app/app/company/document-scan/review.tsx`/`page.tsx`) | Closes the QA thirteenth-run finding (`2d4c124`): `cidb_registration.registration_number`/`contractor_name`, `bbbee_certificate.entity_name`, `bank_confirmation_letter.bank_name`/`account_holder` and `iso_9001_certificate.certified_entity_name` now persist to real `companies` columns (`cidb_registration_number`, `cidb_contractor_name`, `bee_entity_name`, `bank_confirmation_bank_name`, `bank_confirmation_account_holder`, `iso_9001_certified_entity_name`), following the exact Document Vault (`0014`) column-per-document pattern - no new table. Bank fields deliberately stayed on `companies`, not `bank_accounts` (`0050`): that table's `account_number` is `NOT NULL` and the scan never extracts an account number at all, so a row can't be created from `bank_name`/`account_holder` alone. New: `cidbNameMismatchWarning()` compares a CIDB certificate's `contractor_name` against the company's own `legal_name` (legal-suffix-aware normalization, word-overlap threshold) and the review screen shows a red "Name mismatch" banner when they look substantially different - a warning, never a blocker, since a trading name or a genuine rename are both valid reasons. All six fields go through the same ticked/quote-verification gate (`confirmVaultDocument`'s existing generic field loop) as every other onboarding-scan field - no new write path | `node --experimental-strip-types --test app/lib/onboardingScan.test.ts` - 18/18 pass (12 pre-existing + 6 new: the six fields flip from not-persisted to persisted, the real column names, and `cidbNameMismatchWarning` on exact match / formatting-only difference (`"(Pty) Ltd"` added, removed, re-cased) / a real mismatch / missing input / a below-threshold trading-name case). `npx eslint` clean on the changed files; `npm run typecheck` shows only pre-existing, unrelated `general-pack-review-data.ts` errors (confirmed present before this change too). Not run against a live Supabase project (standing Gap #9) |
 
 ## In progress / partially built
 
@@ -144,6 +880,48 @@ bridged by `engine/general/process_general_jobs.py`.
 7. **`tender_requirements`' SETUP facts (managerial flag, tender project type, DS specialism description) are unseeded**, except for tenders whose templates went through the intake (manual load, 2026-10-17), which now get SETUP positions, descriptions and the Man/Non-Man flag written to `tender_requirements` from the uploaded workbook; so the SANRAL score estimate is wider than it needs to be, and every DS1 shows role fit as "Confirm by hand" (a DS role can't be matched to a tag without its specialism). `tenders.evaluation_rules` is also unseeded until `engine/seed_tender_evaluation_rules.py --write` runs against a live project. The vault-field half of this gap (TCS PIN, insurance, ISO, bank-letter date, B-BBEE proof) is **closed** by `0014`. Two related items remain: Klipcorp's ISO 9001 certificate number and expiry are still unknown, and CSD registration validity has no column.
 8. **Uploads are capped at ~4.4 MB** (Server Action body `4.5mb`, which is Vercel's hard 413 limit) for CVs, experience and the vault. **Narrowed this pass**: the pattern to fix it now exists and is proven — `app/app/tenders/new/manual-tender-form.tsx` uploads straight from the browser to the `tender-documents` bucket via the Supabase client (`supabase.storage.from(...).upload(...)`, RLS-gated by `manualPrefix()`), never touching a Server Action body at all. That's a real answer to "is it worth building" (the open item below) for one path; the other three (CVs, experience, vault) still go through a capped Server Action and haven't been migrated to this pattern yet.
 9. **Narrowed 2026-10-18 (`a232e77`, Sarel's own commit — the first human-authored commit in this whole project): a live Supabase project and a Vercel deployment now exist.** Sarel applied every migration through `0062` to the real project and got a green Vercel build, after fixing three build-breaking issues the sandbox's own `next build` had never caught (no Supabase env vars here means those prerender failures never surfaced locally): `/login` instantiating the Supabase client at component-body top level (fails prerender when env vars aren't visible at build time), `/tools/deadline-calculator` reading `new Date()` during render (Next 16 rejects non-deterministic prerender output), and no `engines.node` pin in `package.json`. All three independently re-verified this pass: `npm run build` now completes cleanly end to end in this sandbox too (29/29 static pages, `/login` and all 3 `/tools/*` routes now genuinely static) — the "`/login`'s pre-existing prerender gap" caveat that every single pass's own build verification has carried all session is gone. **What this changes:** nothing built so far has been tested against real Supabase rows, and this pass still has no live credentials to do that itself — scratch-Postgres replay (now through `0063`) stays the verification method here. What it means going forward: the next person with real project access can actually click through the app, and any gap or bug that was "unverified against live rows" throughout this file can start being closed for real rather than only in a replayed schema. Decide, when there's time: should every pass's own verification note explicitly say "schema-replay only, not live" vs. "confirmed on the live project" now that the distinction is real and not purely theoretical.
+
+    **Narrowed further 2026-10-19 (twentieth run): 5 migrations are committed but not yet applied live, and this just caused a real user-facing error.** `0063`–`0066`/`0068` (5 files - `0063` onboarding document scan, `0064` super admin console, `0065` submission/opening reminders + won-project sync, `0066` this session's own trigger-bug fix, `0068` CV/document stats; `0067` was never created, a benign gap) were added after Sarel's `0062` cutoff above and have not been confirmed applied to the live project. Direct evidence, not inference: commit `8146259`'s own message says tonight's live E2E walkthrough hit a raw Postgres error on the Tender Workspace, `column tender_packs.project_completed_at does not exist` - that column only exists from `0065` onward, so the live database is still on `0062` or close to it. The commit fixed the symptom (no longer leaks the raw SQL error to the user - now a generic message + server-side log) but **not the cause**: the won-project CV-sync feature, the super-admin customer/CV-stats console, and the opening-reminder task kind are all still live-broken (or entirely inert) until these migrations are actually run against the real Supabase project. This needs Sarel's own Supabase SQL editor / migration access - no session in this sandbox has live credentials to do it. Nothing here is new schema risk (`0066` already fixes the one bug that would have shipped broken; everything else replays clean on `0001`→`0068` in this pass's own scratch-Postgres verification) - purely an apply-it-live step.
+
+    **The gap has kept growing and nothing has narrowed it since (2026-10-19, thirtieth run): 8 real migrations now committed since the confirmed `0062` cutoff, still unconfirmed live.** `0063`–`0072` (`0067`/`0070` never created, both confirmed benign numbering gaps - 8 real files, not 10) now covers onboarding document scan, the super admin console, submission/opening reminders + won-project sync, this session's own `0066` trigger-bug fix, CV/document stats (`0068`), the onboarding-scan orphaned-field fix (`0069`), automatic permanent document storage for every discovered tender except SANRAL (`0071`), and the discovered-opportunities admin review screen + real requirements extraction (`0072`). Every one of these replays clean on scratch Postgres through `0001`→`0072` (re-confirmed this pass) - the risk here is purely "not yet run against the real project," never schema correctness. Still nothing any sandbox session can do about this directly: it needs Sarel's own Supabase SQL editor or migration access. Flagging again, in case it has slipped off the radar as "just the usual note" - 8 real, user-visible features are sitting live-inert right now.
+
+    **This gap just caused a real production crash (2026-10-20, thirty-third run) - no longer purely
+    theoretical.** `b82210a`'s own commit message states directly: a live `watch_new_tenders.py` run
+    scored and seeded 4,034 real discovered opportunities successfully, then crashed uncaught at the
+    document-download step because `discovered_opportunity_documents` (migration `0071`) doesn't
+    exist on the live project yet - confirmed by the exact live error text (`PGRST205`, "Could not
+    find the table ... in the schema cache"). The commit degrades this one step gracefully instead
+    of crashing the whole run (verified this pass - see pass-history entry below) but the underlying
+    gap - the live project is still not current with `0071`/`0072` - is unchanged and this is now
+    the second time it has broken something real in production (the first: the `tender_packs.project_completed_at`
+    error from the twentieth run, above). Same remedy as always: needs Sarel's own Supabase migration
+    access, nothing a sandbox session can do.
+
+    **RESOLVED 2026-10-20 (forty-eighth run) - after a dozen-plus passes flagging this as growing,
+    Sarel closed the entire gap in one session.** Working directly with him (this sandbox still has
+    no direct Postgres/management-API access to his real project, only its REST API + service-role
+    key), confirmed via live schema introspection - not inference, not trust in a commit message -
+    that `0063` through `0075` are now ALL applied: `0063`/`0064`/`0065`/`0068`/`0071`/`0072`
+    confirmed by their tables/columns/RPCs existing in the live PostgREST schema; `0069`/`0073`
+    (previously the two still-missing ones, with a concrete live consequence each - see below)
+    confirmed the same way after Sarel ran them; `0066`/`0074`/`0075` (function/index-only changes,
+    invisible to a schema-only check) confirmed by having Sarel run one read-only `pg_proc`/
+    `pg_indexes` query and paste back the result - `0066`'s fix text present, both `0074` functions
+    show `search_path=public, pg_temp`, `0075`'s index exists. **Two real, live consequences of the
+    gap, found and explained in the process (both already degrading gracefully, per this project's
+    own convention - neither was corrupting data or crashing pages):** the onboarding document-scan
+    confirm action would fail outright (generic error, nothing filed) for CIDB/bank-confirmation/
+    ISO-9001 documents if a user ticked the fields `0069` was supposed to add; the "Email
+    notifications" toggle on `/company` was silently absent from the page (its own `SELECT` erroring,
+    caught, rendering `null`) because `0073`'s column didn't exist. Both now work. **What's still
+    open:** `0076` (landed this same pass, see below) is not yet confirmed live - the smallest version
+    of this gap so far, one migration instead of thirteen, and the same "ask Sarel to run it, verify
+    via the schema API" playbook now exists to close it fast. Resend (`RESEND_API_KEY` +
+    `DIGEST_FROM_ADDRESS` + a verified sending domain) is a separate, still-open prerequisite before
+    the digest toggle users just got back can actually send anything - and even once that's set,
+    nothing in this repo schedules `daily_digest.py`/`send_digest_emails.py` to run automatically yet
+    (no cron, no GitHub Actions schedule, no bridge-worker wiring) - Sarel's own call on where that
+    should live.
 10. **Naming collision risk, not a functional bug: `company_members.tender_role` vs. the `tender_roles` table are two unrelated concepts with near-identical names.** The first (migration `0010`) is a 5-value workflow-visibility role (full_cycle/validator/cv_admin/finance/viewer) — "what sections of the daily digest can this user see." The second (migration `0016`) is a 47-row reference catalog of real tender position codes (PL, CE, DS1 Pavement and Materials, SACPCMP safety officer, etc.) plus `person_role_eligibility` — "which tender positions does this person's CV qualify them for." They're on different tables with no code-level collision (checked by grep: `daily_digest.py` only ever touches `company_members.tender_role`; the role-catalog code only ever touches `tender_roles`/`person_role_eligibility`), built independently by different agents on the same day without either referencing the other. Flagging because a future reader skimming the schema or a future agent extending either feature could easily conflate the two from the name alone. Not renaming either unilaterally — both are already referenced across multiple files (`engine/notify/daily_digest.py` for the first; `app/lib/tenderRoles.ts`, `0016`, `score_outlook.py`, the People page and compliance report for the second), so a rename is a real multi-file change, not a one-line fix — flagging for whoever next touches either feature to pick a clearer name (e.g. `digest_role` vs. `tender_position_roles`) rather than silently leaving two "tender role" concepts in one schema.
 
 11. ~~A hard-killed worker leaves a CV job stuck in `generating`~~ — **fixed this pass.** Migration `0019_generated_cvs_claimed_at.sql` adds `generated_cvs.claimed_at` (set the moment a worker claims a row), and `process_cv_jobs.py` gained `fail_stale_jobs()`, same shape and 60-minute threshold as `process_pack_jobs.py`'s own, called at the top of every `poll_once()`. Verified: migration replays cleanly as part of the full `0001`→`0019` chain; `python3 engine/cv/process_cv_jobs.py --self-test` still passes unchanged; a direct functional test (monkeypatched `supabase_request`, no live Supabase needed) confirmed `fail_stale_jobs()` fails only a job claimed >60 minutes ago and leaves a 5-minute-old job and an unclaimed job alone.
@@ -165,6 +943,1255 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-ninth run): the naive-UTC-"today" bug class, not yet swept in engine/general/, could let a general-pack experience-recency check pass stale evidence
+
+Orientation: rotated to worker/job-queue, then found the actual bug one layer down in
+`engine/general/process_general_jobs.py` - the general (non-SANRAL) pack bridge, whose
+`_within()` experience-recency filter had never been checked against the SAST-vs-UTC bug class
+Findings 37-39 (this session) already swept in `fill_a_forms.py`/`fill_sbd_docx.py`/
+`generate_cv.py`/`pdf_merge.py`/`process_pack_jobs.py`.
+
+**Finding 48 (CONFIRMED, FIXED, moderate).** `_within()`'s `window_years` recency rule falls back
+to "today" when a tender's `closing_date` is missing (Finding 9c, an earlier pass) - but it got
+"today" from this module's own `_now()` helper, `datetime.datetime.now(datetime.timezone.utc)`.
+During the 00:00-01:59 SAST window, that's one calendar day behind real SAST "today", which moves
+the recency cutoff a day early and can let a stale Experience Library row through as
+recent-enough evidence for a tender's own "last N years" requirement - the opposite direction from
+Findings 37-39 (there, a compliance warning went missing; here, a company's own pack could
+over-claim compliance it doesn't have). Reproduced against the real `_within()` (not a
+reimplementation): closing=None, a `{"window_years": 5}` rule, an experience row dated
+2021-10-20, clock mocked to 2026-10-20T22:30:00+00:00 (00:30 SAST on 2026-10-21) - real SAST
+today's 5-year cutoff is 2021-10-21, so this row is genuinely too old, but the old code returned
+`True` (included).
+
+**Fix:** `_now()` itself untouched (it also timestamps real DB rows - `downloaded_at`/
+`analysed_at`/`started_at`/`completed_at` - where a true UTC instant is correct, not a shifted
+one). Added a local `SAST` constant (same per-file-local convention as `watch_deadlines.py`) and
+pointed only `_within()`'s own "today" fallback at `datetime.datetime.now(SAST).date()`.
+
+**Verified the regression test actually catches the bug:** new
+`test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()` in
+`engine/general/test_process_general_jobs.py` (plus a boundary check that an item exactly on the
+real cutoff day stays included). Reverted the fix (`git stash`): the new check failed with
+exactly the predicted wrong `True`; restored it: `0 failure(s)`. Re-ran
+`test_general_bridge.py`/`test_requirements.py`/`test_submission_plan.py` too: all clean, no
+interaction with the private-document-path, role-classification or submission-plan-status logic
+those cover.
+
+**Also checked this pass, no bug:** `engine/worker/poll_loop.py`/`run_bridges.py`'s
+`TimeoutExpired` handling (`(e.stdout or b"") + (e.stderr or b"")` after a hung bridge subprocess
+is killed) looked fragile reading it cold - `subprocess.run(..., text=True)` plus a timeout could
+plausibly hand back `str`, not `bytes`, making that concatenation raise `TypeError` inside the
+very except-block meant to keep one hung bridge from taking down the others. Reproduced directly
+(three cases: stdout-only, both streams, neither) on this environment's real Python (3.13.16):
+`TimeoutExpired.stdout`/`.stderr` are consistently `bytes`-or-`None` even with `text=True`, so the
+existing `isinstance(out, bytes)` guard already covers it. Logged so a future pass doesn't
+re-spend time on the same dead end, and because this would change on an older CPython where that
+attribute's type is known to have been inconsistent - worth a second look if the worker's own
+Python version ever changes (`engine/worker/Dockerfile`).
+Also checked and found clean: `registration_reminders.py`'s `_mark_company()` seen-key patching
+(keys match `_expiry_window()`'s own format exactly), `find_due_registrations()`'s id-sorting
+(every id column it sorts is `not null` in `0050_principals_registrations_properties.sql`), and
+`send_digest_emails.py`/`daily_digest.py`'s `build_digest_for_person()` (the `reassessed_tenders`
+`i["opportunity_id"]` bare-key access looked unguarded, but `discovery_downgrades.
+pending_digest_downgrades()` always sets it from the row's own primary key).
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-eighth run): the offline key-person suggestion could silently disagree with the live Tender Workspace for the identical tied-score candidates
+
+Orientation: `suggest_pack.py` (Step 2 of the SANRAL pipeline, zero test file) shares its
+candidate scoring with `process_pack_jobs.py`'s own live re-ranking - two independent call sites
+computing the same decision, exactly where a convention can drift unnoticed.
+
+**Finding 46 (fixed, moderate - two code paths silently disagreeing on the same decision):**
+`process_pack_jobs.py`'s `rank_candidates()` documents its own tie-break ("more years'
+experience, then name"); `suggest_pack.py`'s sort had none at all, so an unbroken tie fell back
+to each person's position in the company's profile JSON. Confirmed with two candidates tied on
+score (7 vs 22 years' experience): the "SUGGESTED" person flipped purely with file order, and
+could silently disagree with what the same company's live Tender Workspace would rank first for
+the identical position.
+
+**Fix:** extracted the ranking into a new `rank_candidates()` in `suggest_pack.py` itself,
+mirroring `process_pack_jobs.py`'s own name and tie-break convention exactly (one documented rule,
+not two copies that could drift again).
+
+**Verification:** new `engine/pack_generator/test_suggest_pack.py` (first test file for this
+module), 6 checks across 3 cases including a genuine-score-difference mirror case. The first draft
+of this test had a real near-miss worth noting: it reimplemented the sort key inside the test
+itself rather than calling the real code, so reverting the fix gave `0 failure(s)` when 3 were
+expected - caught and fixed by having the test call the newly-extracted function directly, then
+confirmed the corrected suite genuinely fails pre-fix and passes post-fix.
+`test_form_field_audit.py`, `test_generate_cv.py` and the real `process_cv_jobs.py --self-test`
+all still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-eighth run" (Finding 46).
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-seventh run): a genuinely different real company could be silently stored as a tender's winner, corrupting award/price intelligence
+
+Orientation: continuing to avoid `requirements.py`/`submission_plan.py` while a sibling actively
+verifies them. `store_award_outcomes.py` - the original "award/price intelligence" priority area
+from this review's very first runs - had no dedicated test file; its `find_winner()` fuzzy
+name-matching fallback is the same bug CLASS as Finding 41's municipality mix-up, so checked it
+next.
+
+**Finding 45 (fixed, severe - same bug class as Finding 41, now in award data):**
+`find_winner()`'s last-resort fallback matched a winner to a bidder by first word only. Real SA
+company names commonly share a generic first word while being unrelated entities - "Bokamoso
+Trading CC" and "Bokamoso Construction (Pty) Ltd" matched with the latter not even present in the
+register. Tried Finding 41's own `difflib.SequenceMatcher` mitigation and calibrated it against
+both this false positive and several realistic legitimate trading-name variants: the ratios
+overlap (0.632-0.686 vs 0.667-0.732) - **no safe threshold exists**. Confirmed through the real
+`merge()` pipeline: the wrong company was marked `is_winner=True`, corrupting `winner_rank`,
+`winner_vs_median` and `lowest_bid_won` - real, stored, public award/price fields.
+
+**Fix:** since no threshold can safely narrow the match, changed what the system asserts instead
+- `merge()` now only trusts the two CONFIRMED match bases (exact name, exact amount); a
+first-word-only hit produces an honest "could not be confidently matched - closest candidate: Y"
+note, the same pattern this file already uses for a fully-unmatched winner.
+
+**Verification:** new `engine/discovery/test_store_award_outcomes.py` (first test file for this
+module), 7 checks across 4 cases including both confident-match mirror cases still working.
+**Proved the tests catch the regression** (reverted the fix, confirmed all 3 relevant checks fail
+with the wrong company marked winner, restored it, confirmed clean). `test_award_outcomes.py`,
+`test_award_prices.py` and `test_etenders_portal.py` all still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-seventh run" (Finding 45).
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-sixth run): a real South African ID number split across a line break reached the Anthropic API unredacted (POPIA-relevant)
+
+Orientation: avoided `requirements.py`/`submission_plan.py` (a parallel sibling session is
+actively verifying them against real current tenders). Picked `extract_cv_fields.py`'s SA-ID
+redaction - privacy-critical, narrow, testable, and the exact triggering artifact (a PDF table
+column wrapping text mid-token) is already confirmed real by this same test file's own comment.
+
+**Finding 43 (fixed, severe):** `SA_ID_RE` only allowed a literal space or hyphen between an ID
+number's 6/4/3 digit groups. A real checksum-valid ID split across a line break by a narrow table
+cell - confirmed real PDF-extraction behaviour, not hypothetical - has neither half at 13 digits,
+so the regex never matched at all. The full ID would have reached the Anthropic API completely
+unredacted, split only by a newline a reader skips past - exactly what step 4 of this module's
+own documented pipeline exists to prevent.
+
+**Fix:** widened the separator from `[ -]` to `[\s-]` (any whitespace) - a one-character regex
+change. The digit-boundary guards and Luhn/month-day/citizenship-digit validity checks are
+untouched.
+
+**Verification:** real adversarial case (a line-split checksum-valid ID) now correctly redacted;
+mirror case (two unrelated digit runs split by a line break) confirmed NOT fused into a false ID.
+New test added to `test_extract_cv_fields.py`, proved to actually catch the regression (reverted
+the fix, confirmed it fails, restored it, confirmed `ALL PASSED`). `test_generate_cv.py` and the
+real `process_cv_jobs.py --self-test` both still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-sixth run" (Finding 43).
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-fifth run): two real, unrelated South African municipalities could be scored as the same place, inflating a company's estimated tender score
+
+Orientation: `score_outlook.py` (Discovery's fit-scoring engine, 817 lines) had no dedicated test
+file - only indirect coverage as a dependency. `extract_locality`/`match_locality` (office vs
+tender-text fuzzy place-name matching) stood out as real adversarial territory.
+
+**Finding 41 (fixed, severe - reachable by ordinary geography, not contrived input):**
+`_area_matches()`'s substring check compared bare, space-stripped letters, so one South African
+municipality's name could coincidentally contain another's as a run of letters. Searched ~145
+real municipality names and found a live collision: "Nala" (Free State) sits inside "Kannaland"
+(Western Cape) once spaces are stripped. Confirmed through the real `match_locality()`: a company
+whose only office is in Kannaland was awarded real locality preference points for a tender
+requiring an office in Nala - a geographically absurd but silent score inflation.
+
+**Fix:** added a space-preserving normalization and required the substring match to be a whole
+word/phrase, not an arbitrary letter run - still matches the rule's real intended case ("City of
+Tshwane" vs "Tshwane") while rejecting the coincidental collision.
+
+**Verification:** new `engine/discovery/test_score_outlook.py` (first test file for this module),
+5 checks including a full ~140-name sweep for any other such collision (none found; one correct
+match - "Mpofana"/"Mooi Mpofana", the same municipality's current/former name - deliberately
+preserved). **Proved the tests catch the regression** (reverted the fix, confirmed both the
+direct case and the sweep fail exactly as predicted, restored it, confirmed clean).
+`test_discovery_fanout.py`, `test_discovery_downgrades.py` and `test_taxonomy.py` all still pass.
+`python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-fifth run" (Finding 41).
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-fourth run): a real submission pack's own compliance warning could silently go missing - the last two confirmed instances of the naive-UTC-date bug closed
+
+Orientation: continuing the deliberate, one-by-one triage of the 9 remaining naive
+`date.today()` instances from the fifty-first run's own grep. 7 checked and found cosmetic/
+internal/self-healing (no fix needed - see findings doc for the per-instance reasoning); 2
+confirmed real.
+
+**Finding 39 (fixed, severe):** `pdf_merge.py`'s `expiry_warning()` decides whether a dated
+document gets flagged "EXPIRED" in the assembled SANRAL submission pack's own warnings. Its
+naive `today` meant a document that actually expired real-yesterday evaluated as NOT expired
+during the bad window - a real compliance warning silently missing from an actual submission
+pack, confirmed by direct reproduction. `process_pack_jobs.py`'s `sync_position_suggestions()`
+had the same bug, wasting a re-ranking cycle on an already-closed tender and risking the same
+rounding-boundary ranking-order issue as Finding 38 for a tender with no closing date on file.
+
+**Fix:** both files now reuse `generate_cv.SAST` via their existing cross-module imports rather
+than defining a fourth local copy.
+
+**Verification:** new `engine/pack/test_pdf_merge.py` (first test file for either module), 3
+checks including the deliberate "don't false-flag a document valid today" mirror case. The test
+suite's own first draft had the identical near-miss as Finding 38's test (missed the regression
+entirely); caught and fixed before trusting it, then confirmed it genuinely catches both bugs.
+`test_form_field_audit.py` and `test_general_bridge.py` still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-fourth run" (Finding 39).
+
+## This pass (2026-10-21, standing QA/robustness review - fifty-third run): closed one of last cycle's own deferred naive-UTC-date instances, with a real trigger date confirmed rather than assumed
+
+Orientation: CV engine - the one remaining area without a fresh pass of my own this session.
+Closed out `cv/generate_cv.py:307`, one of the 10 naive `date.today()` instances the fifty-first
+run's own grep found and deferred pending "does this one actually matter" checks.
+
+**Finding 38 (fixed, moderate - a real, narrow trigger confirmed, not assumed):** the standard
+CV path's "years of relevant experience" fallback used `date.today()` feeding a ROUNDED
+computation (`round(days / 365.25)`), unlike Finding 37's simple date comparison - a one-day
+shift only changes the output near a rounding boundary. Searched 60 years of possible graduation
+dates under the simulated bad-window clock and found 60 real trigger dates (one per year) where
+the figure actually flips (e.g. `initial_graduated = "2026-04-21"` flips 0 -> 1) - confirming a
+real, if narrow, consequence rather than a purely theoretical one.
+
+**Fix:** same local `SAST` constant pattern as Finding 37.
+
+**Verification:** new test in `test_generate_cv.py` running the real `build_sanral_keyperson()`
+against the confirmed trigger date with the clock monkeypatched into the bad window. Caught a real
+flaw in its own first draft along the way: patching only `datetime.datetime.now` missed the
+reverted-code case entirely (0 failures when a failure was expected) - fixed the test to also
+patch `datetime.date.today`, then confirmed it genuinely fails pre-fix and passes post-fix.
+`test_extract_cv_fields.py` and the real `process_cv_jobs.py --self-test` end-to-end smoke test
+both still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-third run" (Finding 38).
+
+## This pass (2026-10-20, standing QA/robustness review - fifty-first run): the same naive-UTC "today" bug the enterprise audit fixed elsewhere was still open in two legal-document compliance checks - fixed
+
+Orientation: SANRAL pack engine - the remaining area not yet given a fresh pass of my own this
+session (the enterprise audit covered it, but that's independent verification, not a new finding).
+Noticed `engine/fill_a_forms.py`'s `_today_iso()` used plain `datetime.date.today()` - the exact
+bug class the audit already fixed in 4 other files. Grepped the whole `engine/` tree for every
+remaining instance rather than assume the audit's sweep was complete: found 12, none named in its
+write-up.
+
+**Finding 37 (fixed, severe - a legal tender declaration's own compliance verdict could silently
+flip):** `fill_a_forms.py`'s `_today_iso()` feeds `expiry > _today_iso()` for A12 (B-BBEE proof)
+and A20 (COID Letter of Good Standing) - whether the generated SANRAL A-Forms declaration states a
+proof is CURRENT or EXPIRED. During the 00:00-01:59 SAST daily window, a proof expiring exactly on
+the real SAST today was judged CURRENT by the naive check and EXPIRED by the correct one.
+Confirmed end to end: ran the real `fill_a_forms.main()` against the real template with the clock
+monkeypatched into that window - the generated document's A12 provenance read `"confirmed ...
+valid to 2026-10-21"` for a certificate that had, by the real calendar, just expired.
+`fill_sbd_docx.py` carries the identical bug at lower stakes (a fallback reference date).
+
+**Fix:** added a local `SAST` constant (same value/pattern as `watch_deadlines.py`) to both files;
+`_today_iso()` now reads `datetime.datetime.now(SAST).date()`.
+
+**Verification:** extended `engine/test_form_field_audit.py` with 3 checks - both files' corrected
+date, and the real end-to-end A12 provenance flip. **Proved all 3 catch the regression** (reverted
+both fixes, confirmed all 3 fail with the exact wrong pre-fix values, restored them, confirmed
+clean). Full existing suite (A-Forms, docx forms, technical workbook, covers, intake readers,
+financial rows, general-pack fillers) still passes. `python3 -m py_compile` clean.
+
+**Flagged, not fixed this run (scope discipline):** 10 more naive `date.today()` call sites found
+by the same grep, each needing its own look at what it actually affects before fixing is worth
+the churn - logged by file/line in the findings doc for the next pass.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-first run" (Finding 37).
+
+## This pass (2026-10-20, standing QA/robustness review - forty-ninth run): a multi-lot award's later lots' bidders were silently dropped by the eTenders portal reader's own dedupe step - fixed
+
+Orientation: discovery hadn't had a genuinely NEW adversarial pass from this review's own hand in
+a while (recent discovery cycles were independent re-verification of a parallel enterprise-
+readiness audit, not fresh findings). Read `key_person_minimums.py` in full first - already has
+solid real-fixture test coverage, no new finding. Moved to `etenders_portal.py` (239 lines, zero
+dedicated test file, not named in the audit's own discovery summary).
+
+**Finding 36 (fixed, moderate - feeds real award/price intelligence with silently incomplete
+data):** `dedupe_rows()`'s own docstring says the portal returns one row per joined child record
+- "a tender cancelled twice ... or with several awards comes back as several rows with the same
+id." Only `cancelled` was actually merged across duplicate rows; `bidders` (a multi-lot award's
+per-lot winner/amount) was left as whichever duplicate row happened to be dict()'d first, silently
+dropping every other lot's bidder data. Confirmed with a synthetic 2-lot fixture reproducing
+exactly the shape the docstring itself names: only Lot 1's R100,000 winner survived, Lot 2's
+R250,000 winner vanished with no trace. Not cosmetic - `store_award_outcomes.py` stores this field
+as real award data, and `tender_changes.py` emits a "bidders list published" change event keyed by
+bidder count, so a truncated list means wrong stored award data and a wrong change notification.
+
+**Fix:** merged `bidders` across duplicate rows the same way `_cancellations` already is -
+collected into a list during the same pass, deduping identical repeated entries, replacing the
+stale single-row field at the end.
+
+**Verification:** re-ran the 2-lot fixture post-fix - both lots survive through `normalize()`.
+Added `engine/discovery/test_etenders_portal.py` (first dedicated test file for this module): 4
+cases, 7 checks. **Proved the test catches the regression** (reverted the fix, confirmed the
+2-lot checks fail with Lot 2 missing, restored it, confirmed clean). `test_gov_sources.py` and
+`test_tender_changes.py` (this module's real callers) still pass unchanged. `python3 -m
+py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "forty-ninth run" (Finding 36).
+
+## This pass (2026-10-20, standing QA/robustness review - forty-fourth run): a full enterprise-readiness audit, round 1 (find) and round 2 (fix), before Sarel onboards a real company
+
+Sarel's own explicit request: "make sure it is designed and build to catch all and execute for all scenarios. Run multiple scenarios, consider all scenarios for each process and each engine and each field... before I upload and onboard one of my companies." This was a deliberately larger, multi-hour effort, not a routine pass - 8 parallel adversarial-audit agents (round 1, find-only) covering every engine and the app layer, followed by 5 parallel fix agents plus 3 fixes done directly (round 2), each independently verified rather than trusted.
+
+**Round 1 (find-only) - 8 areas audited in parallel, ~31 distinct findings, most independently reproduced rather than just reasoned about:** discovery pipeline, intake/classification, SANRAL pack engine, general (non-SANRAL) pack engine, CV engine, compliance/notify, RLS/security across every migration since the confirmed-live `0062` cutoff, and the app layer (authorization, input handling, rate limiting). Full findings list and severity ranking: see the chat record of this pass (not reproduced verbatim here - the fixes below are each self-documenting with the original finding quoted in their own commit).
+
+**Genuinely good news from round 1, verified not assumed:** the RLS/security audit found **zero confirmed cross-tenant leaks** - built a real replayed Postgres via `engine/security/replay_schema.sh`, ran actual adversarial queries as `anon`/`authenticated`/`service_role`, tried path-traversal variants against every storage bucket, and checked all 37 `SECURITY DEFINER` functions against the live `pg_proc` catalog directly (catching its own first-pass false positive on `is_company_member()` along the way - confirmed it's patched in a later migration, not unpinned). Admin authorization, OCR handling, malformed-workbook handling, PDF-rotation handling, and job-claim concurrency in two of the three job queues were all independently confirmed solid.
+
+**Round 2 (fix) - 9 severe findings fixed, each independently verified (reproduced before, fixed, reproduced after, and where feasible, proved the new test actually catches the regression by reverting and re-running):**
+
+- **`b82210a`-adjacent area, discovery:** `tender_changes.py`'s dedupe key collapsed to `"<source>:None"` for any release missing both ocid and contract_number - confirmed reachable from 3 real source readers, causing silent data loss and possible fabricated change events. Fixed to skip (not track) such releases, matching the convention the sibling modules already use. Also: government source failures were invisible (only `print()`ed, never alerted) and a 429 was treated as a permanent failure with zero retry; both fixed. Also: no size cap on document downloads (OOM risk) - fixed with a `Content-Length` pre-check plus a hard byte cap on the actual read. `4141a75`.
+- **Intake:** SANRAL `.docx` heading regexes didn't tolerate a period after the form letter - `"C.1.1.1 FORM OF OFFER"` (an entirely normal way to write it) was never recognized, with zero trace; the project's own existing test fixture had this exact mismatch baked in unnoticed. Fixed, plus a duplicate-candidate tie-break that picked alphabetically-first rather than most-recently-modified. `80afc14`.
+- **SANRAL pack engine (the highest-stakes fix of the whole round):** `print_reports.py`/`print_financial.py` had **no wall-clock timeout anywhere around a UNO call** - a malformed workbook could hang LibreOffice forever, and the outer 30-minute bridge watchdog can't help, because `Office.__enter__` deliberately decouples soffice into its own process group (so a kill aimed at one job never reaches another's), which also means an external kill of the parent never reaches the orphaned soffice. **Reproduced live**: killing a real `admin_harness.py --pack` run left a genuinely orphaned `soffice.bin` running at 97% CPU. Fixed with the same wall-clock-deadline pattern already proven in `assess_tender.fetch_pdf_text` (daemon thread + hard deadline + direct force-kill on timeout, since the polite shutdown path would also hang on the same wedged connection). Also fixed: an unrecognized key-position title in C.1.2.3 was silently skipped identically to a genuinely-optional row, with zero provenance trace - would hit a brand-new company's very first tender with no warning. `d396979`.
+- **General pack engine:** `process_general_jobs.py` had **no stale-job recovery at all** - the exact pattern already built and proven in both sibling job queues (CV, SANRAL pack) on the same shared `pack_generation_jobs` table. A crashed worker stranded a job forever. Added `fail_stale_jobs()`, scoped to `engine='general'` so it never touches a sibling queue's rows. Also fixed: a stray cross-suite form-code reference still got listed as "required" even when the tender's own text said it wasn't needed; a single control character in one field discarded an entire form's worth of otherwise-good fields. `9bc3474`.
+- **CV engine:** path traversal (CWE-22) via `person['name']` (a free-text field any company member controls) used almost raw in an output filename - reproduced directly, confirmed the resolved path escaped the intended output directory. Also fixed: a raw Python exception shown verbatim to the customer on a CV failure (same bug class as the earlier app-side error-leak sweep, found on the engine side); `projects`/`qualifications` stored as explicit `null` crashing generation; a stray control character (a realistic OCR artifact) permanently failing a CV job. `8aad3bb`.
+- **Compliance/Notify:** `watch_deadlines.py` and `daily_digest.py` computed "today" via naive `date.today()` (the worker container has no `TZ`, defaults UTC) instead of SAST - a guaranteed ~2-hour daily window where every due-date/digest decision was one calendar day off; the correct pattern already existed elsewhere in this codebase. Also fixed: no per-item isolation in the digest build/send loops - one malformed entry crashed the whole batch, contradicting the module's own documented guarantee. `cdff2ae`.
+
+**Deliberately NOT fixed this round - flagged for Sarel's own call or a later round:**
+- `confirm_pack.py` checks project *field completeness* for a confirmed key person, not whether any of those projects are the right *type* for the assigned position - needs a dedicated follow-up pass into `sanral_fill.py`'s own handoff, bigger than a quick fix.
+- `suggest_pack.py:77` has the identical `qualifications: null`-crashes bug the CV-engine fix just closed elsewhere - found by the CV-engine fix fork while it was in `generate_cv.py`, correctly left untouched as out of that fork's assigned scope, not yet fixed anywhere.
+- `watch_new_tenders.py` has its own naive `date.today()` instance (same timezone bug class as the compliance/notify fix) - found by the discovery fork while it was in-scope, correctly left for a follow-up since it wasn't one of that fork's 3 assigned findings.
+- Dead, confirmed-buggy legacy code (`fill_sbd1`/`fill_sbd4`/`fill_sbd6_1` in `fill_sbd_docx.py`) sits unguarded with zero live callers - delete outright or mark loudly deprecated, Sarel's call, zero urgency either way.
+- A few minor/informational items from round 1 (duplicated filename-sanitization regexes across ~8 app files, no Resend backoff on a 429, a regression-corpus coverage gap, 2 functions missing `pg_temp` in their search_path, a test-infra role-reuse fragility in `scratch_supabase_stub.sql`, client-side-only file upload type validation, no app-wide rate limiting, no custom `error.tsx`/`not-found.tsx`) - lower severity, left for a later round rather than rushed into this one.
+
+**Verification discipline held throughout:** every fix in round 2 was reproduced against the original bug first (not assumed real from round 1's own report), fixed, re-verified, and checked for regression against each engine's own existing test suite (all green) - `general_harness.py --no-pack` (`77 clean, 0 flagged, 0 failed`), both real LibreOffice export paths smoke-tested end to end against real sample workbooks, and the new LibreOffice timeout mechanics directly tested (a hung operation times out at the real deadline and force-kills, a fast operation returns immediately with no kill, a genuine non-timeout exception still propagates normally). Final confirmation: the real, full `admin_harness.py --pack` run (all 7 test companies, the exact pipeline a real customer's pack goes through) - `Submission-pack check: 7 clean, 0 flagged for review, 0 run failures`, with the SANRAL pack engine's two fixes (LibreOffice timeout, key-position logging) both exercised live, not just in isolation.
+
+**Commits this pass:** `8aad3bb` (CV), `4141a75` (discovery), `80afc14` (intake), `cdff2ae` (compliance/notify), `9bc3474` (general pack), `d396979` (SANRAL pack).
+
+## This pass (2026-10-20, standing QA/robustness review - fiftieth run): a self-introduced bug in last pass's own GitHub Actions cron workflow, caught by actually running the real thing rather than trusting the design
+
+**What happened:** Sarel asked for the daily-digest build+send to be wired into a GitHub Actions cron schedule (previous pass, `3dc4bdf`). That workflow set `timeout-minutes: 30` - a reasonable-sounding guess, never actually measured against the real script's real behavior. Before trusting it, ran `python3 engine/notify/daily_digest.py --mode live --out digest_report.json` for real, against Sarel's real Supabase project (read-only - confirmed via `watch_deadlines.supabase_request`: GET only, before running anything).
+
+**What the real run showed:** still going at 31+ minutes (never reached its own final `"Wrote ..."` line - the true full duration is unconfirmed, only known to be more than half an hour), with warnings along the way: a few SANRAL detail-page connection resets (`ConnectionResetError`), one eTenders portal page failing whole with an HTTP 500 and recovering via chunked re-reads - and, root cause, `daily_digest.py` scores the **entire national tender feed from scratch every single run**, including a paginated 3,000-row read of the closed-tenders portal (110,228 total, for market-trend history) and a per-release document fetch for every report-worthy tender across its 14-day window. It does **not** read Discovery's own already-scored `discovered_opportunities` table - confirmed by reading the code (`fetch_releases()`/`score_per_company()` call the same national-feed-scoring path `watch_new_tenders.py` uses, independently, not a read of Discovery's stored results).
+
+**Fixed:** `timeout-minutes` raised to 120, with the real measured evidence (not a guess) documented directly in the workflow's own comments, including an honest note that the true duration is still unconfirmed and should be tightened once the first real scheduled run reports its actual wall-clock time in the Actions log.
+
+**Deliberately NOT fixed, flagged for Sarel instead:** whether the digest should eventually read Discovery's own `discovered_opportunities` table instead of redoing the whole national-feed fetch+score independently every day. That's a real architectural question (the two paths might deliberately want independently-fresh data - Discovery's own cron could be hours stale by digest time) and a meaningfully larger change than "fix a wrong timeout" - not something to decide unilaterally while wiring up a cron schedule.
+
+**Also this pass:** independently re-verified the forty-ninth run's own fix (`d64a987`, a sibling session's multi-lot-award bidder-loss fix in `etenders_portal.py`) before building anything on top of it - reran its new `test_etenders_portal.py` myself (7 checks, 0 failures) rather than trusting the commit message.
+
+## This pass (2026-10-20, standing QA/robustness review - forty-eighth run): the oldest, biggest "known gap" in this file finally closed (migrations `0063`-`0075` confirmed live), plus a substantial sibling feature independently verified clean
+
+**Part 1 - closing Known-gaps item 9, the committed-but-not-live migration gap this file has tracked since the twentieth run.** Sarel asked which of today's migrations he'd already run against his real Supabase project. This sandbox has no direct Postgres or management-API access to that project - only its REST API URL and service-role key, found in this environment - so verification had to go through PostgREST's own OpenAPI schema listing (`GET /rest/v1/` with the service-role key: completely read-only, describes the live schema, touches no data). Checked each of `0063`-`0075` against a specific table/column/RPC it introduces:
+- Confirmed already live: `0063`, `0064`, `0065`, `0068`, `0071`, `0072` (their tables/columns/RPCs all present).
+- Confirmed MISSING, with concrete live consequences traced through the actual app code (not guessed): `0069` (the onboarding document-scan confirm action would fail outright - generic error, nothing filed - for CIDB/bank-confirmation/ISO-9001 documents, since `confirmVaultDocument()`'s single `.update()` call includes columns `0069` was supposed to add) and `0073` (the "Email notifications" toggle on `/company` was silently absent from the page - its own `SELECT` erroring, caught, rendering `null` - because `0073`'s column didn't exist).
+- `0066`/`0074`/`0075` are function/index-only changes, invisible to a schema-listing check - gave Sarel the exact SQL to run and a one-line read-only `pg_proc`/`pg_indexes` query to paste back the result of, rather than guessing.
+
+Shared the exact SQL for all 5 missing migrations (copy-pasted verbatim from the committed files, not retyped) for Sarel to run in the Supabase SQL Editor. Re-checked after each batch, same read-only method - all 5 confirmed applied cleanly (the `0066` fix text present in `tt_check_same_company()`'s body, both `0074` functions showing `search_path=public, pg_temp`, `0075`'s index existing). **Result: all 13 migrations since the `0062` cutoff are now confirmed live** - full account in Known-gaps item 9 above, which also names what's still open (`0076`, landed this same pass below, not yet live; Resend setup; no scheduler wired for the digest sender yet).
+
+**Part 2 - independently verified a substantial new sibling feature rather than trusting its own commit claims.** Two sibling commits (`a0be7ca`, `8737b3a`, session `01PAw7oeNsQgNdYpS5qH2b1R`) added per-item confidence scoring to the general-pack engine's requirement extraction (`engine/general/requirements.py`), a platform-admin review/correction queue (`/admin/requirement-extractions`, migration `0076_requirement_extraction_reviews.sql`), and company-facing "match strength" badges on the Pack Review screen. Verified independently: replayed all 66 migrations including `0076` on a fresh scratch Postgres (clean); re-ran `test_requirements.py`, `general_harness.py --no-pack` (`77 clean, 0 flagged, 0 failed`), `test_general_bridge.py` and `test_process_general_jobs.py` (all pass, matching the commit's own claims); read `0076`'s actual DDL and confirmed both new RPCs and the new RLS policy genuinely call `is_platform_admin()` (not just documented as doing so - the same pattern as `0043`/`0064`/`0072`, consistent with the rest of this schema); confirmed the new UI text never calls the regex/heuristic score "AI confidence," matching the commit's own stated care about that; confirmed real CI green for all 3 commits via the GitHub Actions API (`app-ci` runs 33/34/35, `bridge-worker-ci` run 87, all `success`). No issues found - solid, well-scoped work with no overlap with anything else in flight.
+
+**Commits reviewed this pass (not authored by this session):** `cb4f951` (accessibility fix, UI/UX Design Reviewer), `a0be7ca` + `8737b3a` (confidence scoring + admin review queue, parent/linking session).
+
+## This pass (2026-10-20, standing QA/robustness review - forty-fifth run): round 3 of the enterprise-readiness audit - every item deliberately deferred from round 2 closed out, plus a real CI regression I introduced mid-round caught and fixed the same pass
+
+Sarel's own explicit follow-up: "continue the next audit round on the deferred items." Round 2 had named 6 items as deliberately deferred (not silently dropped) plus one investigation still open; this pass closed all of them, 6 parallel fix-forks plus one personal investigation, each independently verified rather than trusted, exactly as round 2 was.
+
+**Fixed, each reproduced before/after (and where feasible, proved the new test actually catches the regression):**
+- **`a68b342`:** `watch_new_tenders.py`'s own naive `date.today()` instance - reused the existing `source_http.SAST` constant rather than a third definition. `suggest_pack.py:77`'s identical `qualifications: null` crash the CV-engine fix (`8aad3bb`) had already closed in `generate_cv.py` - fixed at all 3 call sites. Investigated `confirm_pack.py`'s project-type-fit gap personally rather than rushing a fix: the downstream handling (`sanral_fill.projects_for_block`) already filters correctly and transparently - every excluded project gets an explicit note, and a missing type is deliberately kept, not dropped. The real gap is narrower than round 1 framed it (a confirming human only sees this at final pack-build time, not confirmation time) and is a legitimate UX enhancement needing the Book 1 matrix lookup shared between two files - real design work, left for its own dedicated pass rather than rushed here. Fixed in passing: `confirm_pack.py`'s own naive `date.today()` (same bug class, lower stakes - only the pack's own provenance timestamp).
+- **`abcd91f`:** 2 of this schema's 37 `SECURITY DEFINER` functions were missing `pg_temp` in their `search_path` (`discipline_category_suggestions_guard`, `acknowledge_discovery_downgrade`) - not a live exploit, an inconsistency with the other 35. Both source migrations predate the confirmed-live `0062` cutoff, so this is a new migration (`0074`), never an edit to `0054`/`0055` in place. Also hardened `scratch_supabase_stub.sql`: its role creation used `IF NOT EXISTS` guards on cluster-global roles, so re-running it against a second database in the same cluster could silently skip `BYPASSRLS` if the role already existed, producing a false-safe test result on local/CI reuse (test-infra only, not exploitable in the real CI job or Supabase project).
+- **`25e8a20`:** consolidated the duplicated `safeFileName()` - a canonical version already existed, byte-for-byte duplicated in `onboardingScan.ts`/`manualTender.ts`, while 8 action files hand-rolled a narrower inline version. Not exploitable today, but one future edit to any inline copy being slightly less careful would reopen path traversal with no shared place to fix it. Moved the canonical implementation to `app/lib/safeFileName.ts`; both existing files now re-export it; all 8 inline occurrences replaced.
+- **`af1e25b`:** deleted `fill_sbd1`/`fill_sbd4`/`fill_sbd6_1` in `fill_sbd_docx.py` outright (a known "first-match-only" bug per their own code comments, confirmed zero external callers before deleting - 284 lines removed, the real pipeline untouched). Added a bounded 429 retry to `send_digest_emails.py`'s Resend send, mirroring `source_http.py`'s own established pattern exactly (respects `Retry-After`, capped, one bounded retry per recipient).
+- **`a36ef61`:** `requestTenderCv()` had no protection against repeated submission - a signed-in user could queue unlimited CV-generation jobs on a worker pool shared across every company. Added an app-level check for an already-pending request, plus `0075_generated_cvs_dedupe_pending.sql` (a partial unique index) as the real backstop against the check-then-insert race window. Also added `app/error.tsx` and `app/not-found.tsx` - this app had no root error boundary or 404 page anywhere; an unhandled error or bad URL fell through to Next.js's own generic fallback instead of this app's own on-brand handling.
+
+**A genuine CI regression I introduced mid-round, caught the same pass, not carried forward:** `25e8a20`'s filename-sanitization consolidation broke `app-ci` on `main` - confirmed via the real GitHub Actions job log (run `39447233530`): typecheck/lint/build all green, only the test step failed, `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '.../lib/safeFileName'`. Root cause: `onboardingScan.test.ts` runs `onboardingScan.ts` directly as a Node ESM entry point (not through Next's bundler, which resolves extensionless imports fine), and `onboardingScan.ts`'s own `export { safeFileName } from "./safeFileName"` has no extension - Node's native loader needs one. `manualTender.ts` had the identical pattern with no test file today, so it wasn't caught there, but would break the same way the moment one exists. Fixed (`095a89a`) by adding the `.ts` extension to both re-exports plus `allowImportingTsExtensions` in `tsconfig.json` (safe alongside the project's existing `noEmit: true`). Verified: reproduced the exact failure locally by reverting the extension (same `ERR_MODULE_NOT_FOUND`), restored it, then ran every `*.test.ts` file the exact way `app-ci.yml` does (not via `node --test`'s glob - this repo's own `node --test` silently finds 0 tests for any path containing a `[id]` bracketed directory, which is why CI invokes `node --experimental-strip-types` directly) - all 10 files, 118 tests, 0 failures. Real CI run for `095a89a` confirmed via the GitHub Actions API.
+
+**Verification discipline held throughout:** both deferred-fix bugs (`watch_new_tenders.py`, `suggest_pack.py`) reproduced before the fix, confirmed resolved after. `0074`+`0075` both replayed cleanly together on a fresh scratch Postgres (65 migrations); `0074` independently confirmed via `pg_proc.proconfig` directly plus a full `test_tenant_isolation.py` re-run (ALL PASSED); `0075`'s index independently queried and its column list/partial predicate confirmed to match the design. `general_harness.py --no-pack` unchanged (`77 clean, 0 flagged, 0 failed`) after the dead-code deletion, confirming zero dangling references. Real local HTTP servers confirmed the 429 retry succeeds after exactly one retry respecting `Retry-After`, a permanent error fails immediately with no wasted attempt, and two consecutive 429s give up after exactly 2 calls (bounded, not infinite).
+
+**Commits this pass:** `a68b342`, `abcd91f`, `25e8a20`, `af1e25b`, `a36ef61`, `095a89a` (the CI hotfix).
+
+**Still deliberately deferred (unchanged from round 2, not part of this round):** a general-pack regression-corpus coverage gap (no Transnet/Cape Town samples - needs real document acquisition, not a code fix); client-side-only file upload type validation; no app-wide rate limiting beyond the one CV-request fix above.
+
+## This pass (2026-10-20, standing QA/robustness review - forty-third run): a legitimate filename with two consecutive dots was rejected by the onboarding worker as if it were a path-traversal attempt - fixed
+
+Orientation: `engine/worker/` (`poll_loop.py`/`run_bridges.py`) hadn't had a dedicated pass since
+the twenty-first run. Both already heavily hardened and tested; widened the pass to the bridge
+SCRIPTS `run_bridges.py` drives, since "worker/job-queue" includes whether each one correctly
+implements the claim/process contract. `engine/onboarding/process_onboarding_jobs.py` (newest of
+the 5 registered bridges) had no dedicated test coverage of its own.
+
+**Finding 35 (fixed, moderate - a false-positive security gate):** `process_upload()`'s
+defence-in-depth guard against a forged `storage_path` pointing outside a company's own folder
+used a blind `".." in sp` substring check. Traced how `storage_path` is actually built
+(`upload-form.tsx` + `onboardingScan.ts`'s `safeFileName()`, which keeps dots in a filename
+unchanged) - any original filename with two consecutive dots anywhere (an ordinary, harmless
+shape) produces a path containing `".."`, rejected identically to a real traversal attempt.
+Reproduced directly: a file correctly stored under its own company's folder, named
+"Report..final.pdf", was rejected with "isn't in your company's own storage folder" - wrong and
+unhelpful, since it WAS in the right folder and would fail the same way on every re-upload.
+
+**Fix:** changed the check to a path-SEGMENT match (`".." in sp.split("/")`) so only a genuine
+`..` segment is rejected; a `".."` inside a filename component no longer matches. The `//` and
+company-prefix checks are untouched (no demonstrated false-positive risk from either).
+
+**Verification:** new `engine/onboarding/test_process_onboarding_jobs.py` (first test file for
+this module) runs the real `process_upload()` end to end against 4 cases - 6 checks, all pass.
+**Proved the test catches the regression** (reverted the fix, confirmed the double-dot case fails
+with the real rejection message, restored it, confirmed clean). Existing
+`test_classify_documents.py` and `test_poll_loop.py` suites still pass unchanged.
+`python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "forty-third run" (Finding 35).
+
+## This pass (2026-10-20, standing QA/robustness review - forty-second run): two sibling commits, both correct - one trivial touch-target fix, one alerting fix with its own regression-proof personally reproduced
+
+Orientation: 2 new commits since the forty-first run, from two different concurrent sibling
+sessions - `b56189b` (Discovery's undersized touch target on its real conversion action) and
+`99a8e67` (Finding 34, above).
+
+**`b56189b`:** verified the commit's claimed "44px primary / 32-40px secondary floor" convention
+is a real, pre-existing rule in this codebase, not invented to justify the diff - grepped for it
+and found it stated identically in `SiteNav.tsx` and twice already in `System-Status.md`'s own
+pass history (a pricing-board button at half the 44px minimum, fixed in an earlier pass). A
+one-line CSS bump, correctly scoped and justified.
+
+**`99a8e67`:** read all three of `main()`'s "optional extra signal" try/except blocks side by side
+to confirm the claimed asymmetry is real (the first two really do call `system_alerts.record(...)`
+on failure; the third really was a bare `print`). Ran `test_digest_live.py` myself - clean. Then
+independently reproduced the commit's own regression-proof rather than trust it: removed the new
+`system_alerts.record(...)` call from a working copy of `daily_digest.py`, re-ran the test, watched
+the new check fail with `recorded == []` exactly as predicted, restored the file (`git diff`
+confirmed zero remaining changes), re-ran clean. Ran all 5 `engine/compliance/test_*.py` files too
+(same alerting pattern, different module) - all still pass.
+
+**Verification:** `npm run typecheck`/`lint` clean. `python3 -m py_compile` clean on both touched
+engine files. Both commits green on real CI (`39394434821` app-ci.yml, `39403672742`
+bridge-worker-ci.yml). No code changes needed this pass.
+
+## This pass (2026-10-20, standing QA/robustness review - forty-first run): a broken listing-changes tracker degraded silently instead of raising a system alert - fixed
+
+Orientation: `engine/notify/` (`daily_digest.py`) hadn't had a dedicated pass since the
+nineteenth run - the next-most-neglected area after compliance/reminders (just covered).
+
+**Finding 34 (fixed, minor-but-real - a missing alert, not wrong data):** `main()` has three
+near-identical try/except blocks guarding optional extra signals (tender updates, re-assessed
+tenders, listing changes) so one failure doesn't cost anyone the rest of their digest. The first
+two call `system_alerts.record(...)` on failure; listing changes only printed a `WARNING` to
+stdout - invisible on an unattended scheduled run. Confirmed with a real adversarial case (forced
+`tender_changes.run()` to raise via the existing `test_digest_live.py` harness, captured every
+`system_alerts.record` call) - zero were made for this path.
+
+**Fix:** added the matching `system_alerts.record(...)` call, mirroring the two blocks right
+above it in the same function. No behavior change otherwise - the digest still goes out without
+listing changes on this kind of failure, it's just no longer silent to Sarel.
+
+**Verification:** extended `test_digest_live.py` with a new check; **proved it actually catches
+the regression** (temporarily reverted the fix, confirmed the new check fails with zero alert
+calls recorded, restored it, confirmed clean). Full `test_digest_live.py` and all 5
+`engine/compliance/test_*.py` files still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "forty-first run" (Finding 34).
+
+## This pass (2026-10-20, standing QA/robustness review - fortieth run): one commit, independently re-verified correct - its own "proved the regression test catches the bug" claim reproduced, not just trusted
+
+Orientation: one new commit since the thirty-ninth run - `3255b00` (Finding 33, above), from a
+different concurrent sibling session.
+
+**Independently verified, not just read:** confirmed `TRACKED_EXPIRY_FIELDS`' third tuple element
+really is the per-field lead-time override (`None` for most fields, `30` for the bank letter) and
+that the new guard's `lead_override if lead_override is not None else lead_days` expression is
+character-for-character the same one `find_due_documents()` itself already uses - so "already
+inside the normal window" means exactly the same thing in both functions, not an approximation.
+Traced `_expiry_window()`'s own boundary (`left > lead_days -> None`, i.e. a hit on `left <=
+lead_days`) to confirm the new guard's `<=` has no off-by-one against the window
+`find_due_documents()` actually enforces. Ran the full `test_watch_deadlines_urgency.py` myself -
+clean. Then independently reproduced the commit's own "proved it actually catches the regression"
+claim rather than take it on trust: removed the new guard line from a working copy, re-ran the
+test, watched the exact new check fail, restored the file, confirmed `git diff` showed zero
+remaining changes and the suite clean again. Ran all 5 `engine/compliance/test_*.py` files - all
+pass. `python3 -m py_compile` clean on both touched files.
+
+Green on real CI (`39382894500`, `bridge-worker-ci.yml`). No code changes needed this pass - the
+fix is correct and complete as committed.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-ninth run): a reminder a document is already renewing on schedule got a second, misleadingly-framed copy pointing at an unrelated tender - fixed
+
+Orientation: `engine/compliance/` (`watch_deadlines.py`) hadn't had a dedicated pass since the
+sixth run - the most-neglected engine area by a wide margin (30+ runs). This is the engine Sarel
+actually relies on for what's about to lapse, so noisy/misleading reminders carry a real cost even
+when the underlying dates are right.
+
+**Finding 33 (fixed, moderate - duplicate/misleading, not wrong data):**
+`find_documents_lapsing_before_closing()`'s own docstring says it exists for a document "outside
+the 60-day window" that will lapse before a pursued tender's closing date - the one case the
+ordinary reminder can't see. The code never actually enforced "outside the window": a document
+already inside the normal lead-time window (so `find_due_documents()` already reports it as
+"renew soon") that also happens to expire before ANY open, pursued tender's closing date got a
+SECOND reminder, framed as if that tender were the reason - when the tender has nothing to do
+with it. Confirmed with a real adversarial fixture (a COID 30 days out - inside the default
+60-day window - plus a tender closing in 100 days): the COID was reported twice, once correctly
+and once misleadingly. Worse, this risks training a reader to discount "lapses before closing"
+reminders as noise right when a genuine one (the actual case this check exists for) needs to
+stand out.
+
+**Fix:** added the missing "already inside the normal window" guard, using each field's own
+effective lead time (the per-field override where one exists, e.g. the bank letter's 30 days, or
+`--doc-lead-days` otherwise) - the same window `find_due_documents()` itself uses for that field.
+Also fixed a related, smaller gap found while doing this: the function took no `lead_days`
+parameter at all, so a `--doc-lead-days` CLI override was silently ignored by this one function
+while honoured everywhere else - threaded it through and updated `main()`'s call site.
+
+**Verification:** adversarial fixture confirms the duplicate is gone while the genuine case (a
+PIN at 90 days, outside the window, lapsing before a tender's 100-day closing) still fires -
+proving the fix isn't one-sided. Extended `test_watch_deadlines_urgency.py` with a new check;
+**proved it actually catches the regression** (temporarily removed the fix, confirmed the new
+check fails, restored it, confirmed clean). Full `engine/compliance/test_*.py` suite (5 files, all
+in-memory, no network) - all pass, including the bank letter's 30-day override path specifically
+(not just the 60-day default). `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "thirty-ninth run" (Finding 33).
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-eighth run): two sibling commits, both correct and complete - the raw-error-leak sweep is now genuinely finished
+
+Orientation: 2 new commits since the thirty-seventh run, from two different concurrent sibling
+sessions - `d081793` ("Close out the raw-error-leak fix on the last 5 admin pages + 2 uploads" -
+the admin pages this review's own thirty-fifth run deliberately left out, plus the 2 upload
+forms) and `fd73a51` ("Show the 6 onboarding-scan fields (`0069`) that were still write-only on
+the Company vault page").
+
+**`d081793`:** verified its own closing claim directly rather than trust it - a repo-wide grep for
+`error.message` outside `console.error(...)` calls now turns up only 2 classes of match, both
+legitimate and out of scope: `tasksError`/`provenanceError` in `tenders/[id]/page.tsx`, which are
+intermediate `{message: ...}` objects already displayed as generic text downstream (confirmed by
+reading where they're consumed - `TaskTimeline`/`ErrorBanner` already show the fixed generic
+message), and the 3 auth pages (`login`, `signup`, `forgot-password`), which show Supabase Auth
+SDK messages ("Invalid login credentials" etc.) - a different, deliberately user-facing and safe
+class, never a raw Postgres/schema error, correctly never touched by any of this work. The
+raw-Postgres-error-leak sweep that started at the thirty-second run and continued through the
+thirty-fifth is now genuinely complete, not just claimed complete.
+
+**`fd73a51`:** confirmed all 6 column names (`cidb_registration_number`, `cidb_contractor_name`,
+`bee_entity_name`, `bank_confirmation_bank_name`, `bank_confirmation_account_holder`,
+`iso_9001_certified_entity_name`) against migration `0069`'s own `add column` statements - exact
+match, no typos. Checked the `[...].filter(Boolean).join(" · ")` pattern doesn't leave a stray
+empty bullet when neither optional field is set (an empty string from the inner join is still
+falsy, so the outer `.filter(Boolean)` drops it) - correct.
+
+**Verification:** `npm run typecheck`/`lint` clean, full `npm run build` from a fresh `.next` -
+exit 0, same route list. Both commits confirmed green on real CI (`39370320075`, `39377554678`,
+`app-ci.yml`). No code changes needed this pass.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-seventh run): one commit, independently re-verified correct and complete - no issues found
+
+Orientation: one new commit since the thirty-sixth run - `49d1305` (Finding 32, above), from a
+different concurrent sibling session (its own `Claude-Session` trailer differs from this
+session's). Re-verified rather than take its own write-up on trust: confirmed the
+`.xlsm` branch's existing unreadable-note pattern is exactly what the fix claims to mirror (read
+`classify_documents()` directly - `info["kind"] == "unreadable" -> notes.append(...)` is right
+there in the same loop), re-ran `test_classify_tender.py` myself (3/3 pass) and
+`test_opportunity_requirements.py` (the real regression suite for the same `classify_documents()`,
+via a different caller - all 17 checks pass). Checked for any other code that might assume an
+empty `notes` list and break now that a genuinely corrupt document can add one - found none.
+`python3 -m py_compile` clean. Green on real CI (`39366639756`, `bridge-worker-ci.yml`). No code
+changes needed this pass.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-sixth run): a corrupt SANRAL .docx form was silently dropped at intake with zero trace, then misreported as "not uploaded" - fixed
+
+Orientation: `engine/intake/` (`classify_tender.py`, the SANRAL-vs-general routing gate) hadn't
+had a dedicated pass since the first run - the longest-neglected area after `engine/general/`
+was just covered.
+
+**Finding 32 (fixed, severe - a routing "gate"):** `classify_documents()` runs two parallel
+document-reading branches in the same loop - one for `.xlsm`/`.xlsx` workbooks, one for `.docx`
+SANRAL forms. The workbook branch already logs a note when a workbook can't be opened; the
+`.docx` branch's `except Exception: continue` logged nothing at all. Built a real adversarial
+fixture (a file named exactly `C.1.1.1 Form of Offer.docx` containing garbage bytes - the shape a
+corrupted upload or a renamed non-docx file would actually take) and confirmed the bug: `notes:
+[]`, `sanral_files: {}` - zero trace that a document named like a required SANRAL form was even
+present. In the realistic case where a tender already routes `sanral` (a separate, valid
+Technical workbook present) and this one form is the corrupt one, the same silent drop makes the
+"missing documents" message tell the user to re-upload a document they already uploaded, with no
+hint the real problem is that it couldn't be read - the "bad input cascades into confidently-
+wrong output instead of failing loudly" pattern this review targets, same class as Finding 26.
+
+**Fix:** mirrored the `.xlsm` branch's own existing pattern - log a note in the `.docx` branch's
+exception handler (naming the document and the real error) instead of silently continuing. No
+other routing/`candidates`/`sanral_files` logic touched.
+
+**Verification:** re-ran the adversarial reproduction post-fix - note now correctly reads "...
+could not be opened as a Word document (...) - re-download it and add it again.", `sanral_files`
+still correctly empty. Added `engine/intake/test_classify_tender.py` (first dedicated test file
+for this module - `test_manual_intake.py` needs Postgres, isn't in CI, happy-path only): 3 cases,
+including a real valid `.docx` built with `python-docx` to confirm the fix adds no spurious note
+on the working path. All 3 pass. Ran `engine/discovery/test_opportunity_requirements.py` (calls
+the same `classify_documents()` via `opportunity_requirements.py`) for regression safety - all 17
+checks still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "thirty-sixth run" (Finding 32).
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-fifth run): a raw-error-leak fix left 6 customer-facing pages behind, and a genuinely new adversarial finding had zero persisted test coverage - both closed
+
+Orientation: 3 new commits since the thirty-third run - `b66dc44` ("Stop leaking raw Postgres/
+Supabase errors on 4 customer-facing pages"), `4a2d20f` (Finding 29: the MBD/SBD suite-
+misclassification fix), and `25ad827` (a doc-only follow-up confirming `general_harness.py`'s
+regression run is clean). Reviewed all three rather than skip the ones with their own write-ups
+already - an author's own verification claim isn't this review's independent one.
+
+**Finding 30 (fixed, moderate): `b66dc44`'s own fix was incomplete relative to its own stated
+purpose.** The commit explicitly reasons that any customer-facing page querying Supabase can hit
+the same class of raw-error leak that caused the original, confirmed `tender_packs.project_completed_at`
+production bug - and fixes exactly 4 pages. A repo-wide grep for the same `{error.message}` pattern
+turned up 6 more customer-facing call sites the commit didn't touch: Dashboard (`dashboard/page.tsx`
+- "the very first thing a user sees after logging in", per the thirty-second run's own words) and
+People, Discovery, `OfficeLocations.tsx` (Company page), and two Tender Workspace sub-components
+(`tender-templates.tsx`, `tender-updates.tsx`). One of these was a worse instance of the exact bug
+class this fix exists to prevent: `OfficeLocations.tsx` literally printed "...migration 0015 may
+not be applied yet" straight to a customer - internal schema-state language, not even disguised.
+Fixed all 6 with the identical established pattern (`console.error` server-side, a generic "try
+refreshing" message to the customer) - no new pattern invented, just applied consistently.
+Confirmed no further customer-facing pages were missed: grepped every `page.tsx`/component under
+`app/app` for the same leak shape after the fix - none remain outside admin-only screens and the
+two upload-form sites the original commit deliberately and correctly left alone.
+
+**Finding 31 (fixed, process gap, not a code bug): Finding 29's own fix (`4a2d20f`) had zero
+persisted test coverage.** The commit's message describes real, careful verification - 6 cases
+run by hand against the live CLI, plus a full `general_harness.py` regression - but added no test
+file, so none of that verification survives the next change to this function. The commit itself
+already states the existing 9-sample harness corpus doesn't exercise this shape, meaning a future
+regression here would currently go undetected. Added `engine/general/test_requirements.py`, which
+runs the exact adversarial fixture from Finding 29 (10 real MBD mentions + 1 stray SBD reference)
+plus the other 5 cases the commit verified by hand, through the real `extract_requirements()` CLI
+path (`.txt` documents, no LibreOffice needed). **Verified the test actually catches the
+regression**, not just that it passes: temporarily reverted `requirements.py` to its pre-`4a2d20f`
+state and re-ran - the adversarial case failed exactly as expected (`FAIL ... -> MBD`), confirming
+the test is a real regression guard, then restored the fix and confirmed clean again.
+
+**Verification:** `npm run typecheck` and `npm run lint` clean; full `npm run build` exits 0, all
+routes unchanged. `python3 engine/general/test_requirements.py` - 6/6 checks pass (and the
+revert-to-confirm-it-catches-the-bug check above). Full `general_harness.py --no-pack` regression -
+`77 clean, 0 flagged, 0 failed`, matching the sibling's own `25ad827` confirmation exactly.
+`python3 -m py_compile` clean on the new test file.
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-fourth run): a single stray
+cross-reference to the wrong form suite could relabel an entire municipal tender's pack
+
+Rotated to `engine/general/` (the non-SANRAL pack engine) - untouched since the third run's own
+minor fix, the longest-neglected rotation area. Ran `general_harness.py` (9 real tender samples
+x 7 test companies) in the background for regression coverage while reading `requirements.py` by
+hand for a genuinely new adversarial case.
+
+**Finding 29 (fixed, severe):** `extract_requirements()`'s suite-detection required the OTHER
+suite (MBD vs. SBD - municipal vs. National Treasury forms) to be **completely absent** for a
+tender to be labelled correctly - a single stray cross-reference anywhere in the document set
+(a municipal buyer's boilerplate "see the National Treasury SBD 4 guideline" note, exactly the
+kind of template-reuse text real municipal tenders carry) was enough to flip the whole tender's
+labelling, however dominant the real suite was. Constructed a realistic adversarial fixture
+directly (`.txt` documents, no LibreOffice needed): a genuinely municipal bundle with 10 real MBD
+mentions plus one boilerplate SBD reference - the real CLI relabelled every form "SBD 1", "SBD 4"
+etc. throughout the pack, mismatched against the municipality's own actual terminology. Not a
+crash - the confident, silently-wrong-label class this review exists to catch.
+
+**Fix:** suite is now decided by majority of real mentions, not mere presence. A genuine tie
+still defaults to SBD (unchanged); MBD-only, SBD-only and neither-suite cases all verified
+unchanged.
+
+**Verification:** direct reproduction of the bug, then 6 cases against the real suite-decision
+logic (the bug case now correct, both single-suite cases, neither, a tie, and the mirror case
+proving this isn't one-sided). Re-ran the real `extract_requirements()` CLI end to end against
+the adversarial fixture - fixed through the whole pipeline. Confirmed none of the 9 real harness
+samples exercises this exact mixed-suite shape (each is unambiguously single-suite already), so
+this is a genuinely new finding the existing regression suite would never have caught. Full
+detail: `QA-Edge-Case-Findings.md`, "thirty-fourth run" (Finding 29).
+
+## This pass (2026-10-20, standing QA/robustness review - thirty-third run): the committed-but-not-live migration gap just caused its second real production crash - caught and degraded gracefully, gap itself still open
+
+Orientation: one new commit since the thirty-second run - `b82210a`, "Stop a missing documents
+table from crashing the whole tender watch run" (`engine/discovery/download_discovered_documents.py`).
+Direct evidence, not inference: the commit's own message states a live `watch_new_tenders.py` run
+scored and seeded 4,034 real discovered opportunities successfully, then crashed uncaught at the
+very last step (document download) because migration `0071`'s `discovered_opportunity_documents`
+table doesn't exist on the live project yet - `existing_urls()`'s read was the only unguarded
+Supabase call left in the whole download path (insert/upload already degraded per-document from
+the twenty-ninth/thirtieth runs' own work). This is Known-gaps item 9 causing real, confirmed
+damage for the second time (the first: the `tender_packs.project_completed_at` crash from the
+twentieth run) - updated that item above rather than only noting it here.
+
+**Verified, not just read:** confirmed `RestClient._req()` (`company_profiles.py`) only ever raises
+`RuntimeError`, and only on an actual `HTTPError` from PostgREST - so catching `RuntimeError`
+specifically (not a bare `except Exception`) is correctly scoped to "the table/bucket is genuinely
+unreachable," not silently swallowing some other bug. Ran the updated `test_download_discovered_documents.py`
+myself: new case 7 spins up a real local HTTP server replying with the exact live `PGRST205`
+"Could not find the table ... in the schema cache" 400 response, and confirms the run returns
+`{skipped_not_migrated: True}` with exactly one summary alert instead of raising - `All checks
+passed`. Checked the caller (`watch_new_tenders.py`): the summary dict is only printed, never
+re-raised, so this degrades cleanly all the way up - the tenders already seeded in the same run are
+genuinely unaffected either way. `python3 -m py_compile` clean on both touched files.
+
+No code changes needed this pass - the commit is correct and complete as committed. Confirmed green
+on real CI (`39344195863`, `bridge-worker-ci.yml`).
+
+## This pass (2026-10-19, standing QA/robustness review - thirty-second run): two sibling commits, both independently confirmed correct and complete - no code issues found
+
+Orientation: two new commits since the thirty-first run, from two different concurrent sibling
+sessions (different `Claude-Session` trailers) - `b71dc5d` (the thirty-first run's own entry above,
+Finding 28: the CV cover-page provenance-reason fix) and `01a15de` ("Fix dark-mode illegibility on
+Dashboard, Discovery and 4 admin pages"), which had no pass-history entry of its own yet. Reviewed
+both rather than just the undocumented one, since "already has a pass-history entry" isn't the same
+as "independently verified by this review."
+
+**`b71dc5d` (Finding 28, CV cover-page provenance reason):** re-read the diff and the new
+`engine/cv/test_generate_cv.py` cold, confirmed the root cause claim directly (`cand` is literally
+the same value `tender_ctx["candidate"]` that the branch is guarded on being `None`, so the old
+f-string's `{tender_ctx['candidate']!r}` could only ever render the literal string `'None'` - not a
+judgment call, a plain substitution bug). Ran the new test file myself: `0 failure(s)`, all 8 checks
+pass (the exact bug, the person_id/position code now present, status unchanged, the matched-
+candidate and specialism-warning paths unaffected). Confirms the thirty-first run's own self-
+reported verification rather than just trusting it.
+
+**`01a15de` (dark-mode illegibility, 6 pages):** the commit's own message lists exactly which 6
+pages it touched and asserts the fix makes the app's dark-mode wrapper-background convention
+consistent - checked that claim rather than taking the file list at face value. Scanned **every**
+`page.tsx` in the app (33 files, not just the 6 named) for the `minHeight: "100vh"` wrapper pattern
+and confirmed each one now also sets `background: "#FFFFFF"` - zero pages left behind. Also
+independently re-derived the root cause claim: confirmed `app/app/globals.css` does set a real
+`@media (prefers-color-scheme: dark)` body background with no `color-scheme` override anywhere in
+the app, so an un-backgrounded full-height wrapper genuinely does let it show through. A one-line,
+mechanical, low-risk fix, correctly and completely applied - no issues found.
+
+Both commits: `completed`/`success` on real GitHub Actions (`39320580253` for `01a15de`,
+`39330520763` for `b71dc5d`), confirmed via the API, not assumed from the push.
+
+No code changes this pass - both commits already correct. Updated the running top-of-file summary
+and Known-gaps item 9's standing note (unchanged count - no new migrations landed this pass).
+
+## This pass (2026-10-19, standing QA/robustness review - thirty-first run): a tender-specific
+CV's own internal audit trail said a real person was "not present in None candidates list"
+
+Picked up the sibling pass's "thirtieth run" (a threading fix + a pre-existing temp-file leak in
+`assess_tender.py`, both independently reproduced and confirmed) and deliberately rotated away
+from discovery - it's absorbed most of this review's recent cycles - to `engine/cv/generate_cv.py`.
+CV had only been verified once before (eighth run, a non-bug) and has no dedicated test file at
+all; `process_cv_jobs.py --self-test` smoke-tests the standard CV path but never exercises
+`--tender`/`--position`, so the cover-page logic had zero coverage.
+
+**Finding 28 (fixed, minor-but-real):** `add_cover_page()`'s "candidate not matched" branch
+records a provenance `missing()` reason that interpolated `tender_ctx['candidate']!r` - but that
+value is structurally always `None` inside this exact branch (it's the same `cand` the branch is
+guarded on). Every occurrence, for every person never matched to a position, rendered as the
+nonsensical "`<name> not present in None candidates list for position <code>...`". Not a buyer-
+facing bug (this reason lives only in the internal `.provenance.json`, never the printed page -
+the page itself shows a correct, generic sentence regardless) - but a real, confirmed defect in
+the one mechanism this whole project relies on for "never guess, say what you don't know and
+why," exactly the kind of thing an internal reviewer would trust and be misled by. Fixed to name
+the actual person_id and position code instead.
+
+**Verification:** new `engine/cv/test_generate_cv.py` - 3 tests, 8 checks (the exact bug fixed;
+a matched-candidate case proving the internal rationale text never reaches the buyer-facing page;
+a specialism-warning case proving the warning is both printed and logged with a reason). Full
+regression: `process_cv_jobs.py --self-test` unchanged (`Self-test OK`, same provenance summary),
+`test_extract_cv_fields.py` - `ALL PASSED`. Full detail: `QA-Edge-Case-Findings.md`,
+"thirty-first run" (Finding 28).
+
+## This pass (2026-10-19, standing QA/robustness review - thirtieth run): a genuinely hard-to-get-right threading fix, independently reproduced and confirmed correct - plus one real leak it (and its predecessor) left behind
+
+Orientation: one new commit since the twenty-ninth run - `de4541b`, "Fix a document fetch that can
+hang the entire discovery run forever" (`engine/discovery/assess_tender.py`'s `fetch_pdf_text()`).
+Flagged for careful scrutiny on sight: threading-based timeout fixes are exactly the kind of change
+that reads correct and isn't. Did not take the commit's own "Confirmed live 2026-10-19" docstring
+claim at face value - built independent reproductions of the actual failure mode instead.
+
+**What `de4541b` fixed (verified correct):** `urlopen(..., timeout=N)` only bounds each individual
+socket read, not the download as a whole - a server that trickles a few bytes just under that
+interval, or hangs after sending headers without ever closing the connection, can make `r.read()`
+block indefinitely with no exception ever raised. The fix moves the download into a plain
+`daemon=True` thread and enforces a true wall-clock deadline (`timeout + 15s`) via
+`queue.Queue.get(timeout=...)` - deliberately not `ThreadPoolExecutor`/`concurrent.futures`, since a
+`Future`'s worker thread is not daemonic and an abandoned one would block process exit instead of
+just leaking one socket the OS reclaims.
+
+**Independent verification, not just a read-through:** wrote 3 throwaway local HTTP servers
+(`verify_fetch_pdf_text.py`/`2.py`, not committed) to reproduce each case directly rather than trust
+the docstring: (1) a server that trickles 10 bytes every 0.5s forever with no `Content-Length`,
+under a 1s per-read timeout - this is the *exact* bug class described, and no per-read timeout can
+ever fire for it; confirmed `fetch_pdf_text` still returns cleanly at the ~16s wall-clock deadline
+instead of hanging, (2) a server that accepts the connection then goes fully silent (already caught
+by the plain per-read socket timeout, confirms the common case still works), (3) a normal fast
+server (no regression - returns well under the deadline), (4) connection-refused (graceful, fast).
+Also confirmed the abandoned background thread does not block process exit (the whole test process
+exits cleanly right after the 16s deadline, not hung waiting to join it) - the "one leaked socket,
+reclaimed by the OS at exit" tradeoff the commit claims is real, not asserted. Also ran the real
+production path end to end: `test_discovery_fanout.py` (`fetch_pdf_text` over genuine PDF files via
+`file://`, the same code path a live eTenders document link takes) - `0 failure(s)`, unchanged
+verdicts. Verdict on `de4541b` itself: correct, well-reasoned, properly scoped. No note was found in
+`QA-Edge-Case-Findings.md` for it before this pass - added one.
+
+**Finding 27 (fixed, pre-existing - not introduced by `de4541b`, but found while reading the code it
+touched):** every failed document download leaks its temp `.pdf` file into `/tmp` forever.
+`tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)` creates the file on disk the moment it is
+opened, before `urlopen` is even attempted - and the surrounding `except` clause (in both the old
+synchronous code and `de4541b`'s new threaded version) never calls `os.unlink` on that path. Confirmed
+directly: one `fetch_pdf_text()` call against a refused connection left exactly one orphaned
+`tmp*.pdf` file behind (checked `glob` before/after). This is the common case, not the rare one -
+`0071`'s own migration header calls dead links, 404s and timeouts routine, expected traffic for this
+pipeline, not edge cases - so every ordinary bad link on a real buyer's site was already quietly
+filling `/tmp` with empty/partial files, unbounded, for as long as this function has existed.
+
+**Fix:** `_download_to_tempfile` now unlinks its own temp file in the `except` branch (covers the
+common case - dead link, 404, connection refused, a genuine per-read socket timeout). Added a second,
+narrower case the threading fix itself makes newly possible: a download that is abandoned at the
+wall-clock deadline but completes (success or failure) afterward in the now-unwatched background
+thread - a plain `threading.Event` (`abandoned`), set by `fetch_pdf_text` when it gives up waiting,
+tells that thread to clean up its own temp file itself once it finishes, rather than queueing a path
+nobody will ever read or delete.
+
+**Verification of the fix:** re-ran all 4 reproduction cases above clean, plus re-ran the specific
+leak check - 0 leaked files after a failed download (was 1 before the fix, same repro). Re-ran
+`test_discovery_fanout.py` end to end again after the edit - `0 failure(s)`, unchanged. `python3 -m
+py_compile` clean.
+
+**Known-gaps item 9 updated** (see above) - the committed-but-not-live migration gap has grown from
+5 to 8 real files (`0063`–`0072`, excluding the two benign never-created numbers) since it was last
+narrowed in the twentieth run, with nothing in any sandbox session able to close it. Full detail on
+both findings: `QA-Edge-Case-Findings.md`, "thirtieth run" (Finding 27).
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-ninth run): a relative document
+link crashed the entire new auto-download pass, taking every other tender down with it
+
+Picked up two sibling passes (twenty-seventh: narrowed the oscillation fix to a minute;
+twenty-eighth: a migration-ordering fix) plus a large new batch - `download_discovered_documents.py`
+(auto-downloads and permanently stores every discovered tender's documents, unattended, per
+Sarel's own direction), `opportunity_requirements.py`, and the admin discovered-opportunities
+review UI. Picked the auto-download module: new, runs with no human review before it fires, and
+its own docstring explicitly promises "one bad or dead link must not take out the whole run" -
+worth testing against, not trusting.
+
+**Finding 26 (fixed, severe):** `fetch_document()`'s exception handler didn't catch `ValueError` -
+and a relative or scheme-less URL makes `urllib.request.Request()` raise exactly that, before
+`urlopen` is even called. Confirmed directly reachable: `sars_procurement.py`'s own
+`fetch_documents()` captured a raw regex-matched href with no absolute-URL resolution at all
+(unlike `dbsa_procurement.py`'s equivalent, which does resolve relative links). A same-site
+relative link - an entirely ordinary thing for a real site's HTML - reaches this module with no
+scheme, raises uncaught, and crashes `download_for_releases()` for every OTHER tender's documents
+in that same run too. Reproduced directly before fixing.
+
+**Also checked, deliberately not kept:** first added an http(s)-only scheme allowlist as SSRF/
+`file://` defense-in-depth, then discovered `file://` is this codebase's own established,
+deliberate convention for offline test fixtures across several discovery tests, feeding the SAME
+production fetch path. Reverted that allowlist rather than silently breaking an intentional
+pattern to close a gap never shown to be reachable from a real external source - kept only the
+fix for the bug actually reproduced.
+
+**Fix:** root cause + containment, both applied. `sars_procurement.py`'s `fetch_documents()` now
+resolves every href with `urllib.parse.urljoin()` against the page it came from.
+`download_discovered_documents.py`'s `fetch_document()` also now catches `ValueError`, so a bad
+link from any source degrades to a normal `failed` row instead of crashing the run.
+
+**Verification:** `test_gov_sources.py` gained 2 new checks (relative-href resolution, absolute
+href left untouched) - `ALL PASSED`. `test_download_discovered_documents.py` gained a 6th case
+(relative URL + normal URL on the same release: one fails cleanly, the other still downloads,
+nothing raises) - `All checks passed`. `test_opportunity_requirements.py` unaffected, still
+clean. Full detail: `QA-Edge-Case-Findings.md`, "twenty-ninth run" (Finding 26).
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-eighth run): migration `0072` would have failed to apply to any fresh/real database - caught by replaying it, not by reading it
+
+Orientation: four new commits since the last pass - a company-profile jump-nav (`26d808d`, trivial,
+correct, confirmed all 9 anchors exist incl. the two pre-existing ones), wiring
+`seed_supabase_opportunities.seed()` into `watch_new_tenders.py` so a scheduled watch run actually
+populates `/discovery` instead of leaving matches sitting unseen (`ffd476b` - confirmed live: 1,974
+scored company x release rows with nothing ever seeding `discovered_opportunities`), automatic
+permanent document storage for every discovered tender except SANRAL (`99485ce`, migration `0071`),
+and a super-admin review screen for discovered opportunities with real requirements extraction and
+a reviewable confidence level (`ff37b66`, migration `0072`). All four are Sarel's own explicitly
+requested features ("a full repository of all tenders... documents already downloaded", "review
+what came in and if our engines understand... and can compile each one").
+
+**Finding 25 (fixed, severe - would have blocked any fresh deployment or full replay):** migration
+`0072`'s `platform_admin_discovered_opportunities()` function (written first in the file, as the
+conceptual centrepiece) SELECTs from `discovered_opportunity_requirements` (created later in the
+same file, as "Part 2") and reads `confidence_override`/`confidence_override_note`/
+`confidence_overridden_at` (added to `discovered_opportunities` later still, as "Part 3"). A
+`language sql` function is planned at `CREATE FUNCTION` time, not first call (unlike `plpgsql`,
+which only checks syntax) - so this function's own `CREATE OR REPLACE FUNCTION` statement failed
+outright on a fresh database: `ERROR: relation "discovered_opportunity_requirements" does not
+exist`. Caught by actually replaying `0001`→`0072` on scratch Postgres, not by reading the file -
+the ordering bug is invisible on a read-through since each "Part" is internally consistent and
+well-commented; it only surfaces when the file is executed top to bottom. **Fixed** (migration
+not yet live - Known-gaps item 9 - so edited in place, per this project's standing rule that an
+edit is only unsafe once a migration has plausibly reached the real database): reordered the file
+so Part 2 (the table) and Part 3 (the new columns + override RPC) come first, with Part 1 (the
+read function, which depends on both) moved to the end - added a short note explaining the
+file's physical order no longer matches the numbering, which still describes each part's
+conceptual role. Re-replayed `0001`→`0072` clean from scratch after the fix.
+
+**Also independently verified, not just read:** the admin gating on both new `0072` functions,
+directly - a non-admin authenticated user gets 0 rows from `platform_admin_discovered_opportunities()`
+and is refused (`42501`) by `platform_admin_override_opportunity_confidence()`; a user added to
+`platform_admins` gets correctly-joined rows (confirmed `requirements_status`/`requirements_route`/
+`requirements_signal` actually reflect a `discovered_opportunity_requirements` row I inserted
+myself) and can set/read back a confidence override; the 0-100 bounds check rejects 150. (One early
+"bug" I chased turned out to be my own test mistake, not a real one: a raw `select ... from
+discovered_opportunities` as the test admin returned nothing after a successful override call -
+correctly blocked by that table's own per-company RLS, since the test admin wasn't a member of the
+test company; re-reading through the actual admin RPC showed the override had in fact persisted
+correctly all along.) Ran both new engine test files directly: `test_download_discovered_documents.py`
+and `test_opportunity_requirements.py` - all checks passed. Ran `app/lib/compileReadiness.test.ts`
+directly - 14/14. Spot-checked `overrideOpportunityConfidence()` (the server action) and the admin
+page's own data fetch - both go through the gated RPC/function, no direct table bypass. Confirmed
+`seed()` (now called automatically) upserts on `(company_id, ocid)`, so a repeated scheduled call
+is idempotent; `test_discovery_fanout.py`/`test_discovery_downgrades.py` (Part 1, the function this
+wiring calls into) still clean. Whole-tree `npm run typecheck`/`lint`/`build` from a fresh `.next`
+state, and all `*.test.ts` files in `app/`, all clean.
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-seventh run): narrowed the twenty-sixth run's own accepted trade-off from a whole day's collision window to one minute's
+
+Orientation: one new commit since the last pass (`480a976`, Finding 24 above - the oscillating
+closing-date dedupe-key fix, plus the new `test_tender_changes.py`). Read the fix in full before
+accepting it, not just the diff: the author's own write-up was explicit and honest about a
+remaining trade-off - "a literal same-day flip-flop to the exact same value would still dedupe -
+an accepted, narrower trade-off against the larger fix a proper per-event history lookup in both
+stores would need." That honesty is exactly what made this worth checking further rather than
+filing it as closed.
+
+**Reproduced the accepted trade-off directly, not just reasoned about it:** a closing date flipping
+A→B→A→B three genuine times within ONE calendar day (hours 9/10/11, not days apart) still silently
+dropped the third occurrence under day-level bucketing - confirmed with a standalone repro script
+before touching anything, using the test file's own `_FrozenDay` pattern at hourly granularity.
+
+**Found the trade-off was narrower than it needed to be, not fundamental:** the day-bucket's whole
+justification is deduping two `detect()`/`save()` calls racing the same stale snapshot - but
+`watch_new_tenders.py` and `daily_digest.py` each call `tender_changes.run()` exactly once per
+scheduled run (no retry loop wraps either call site, confirmed by reading both), and this project's
+own established cadence is once-daily. So the only realistic way two calls ever race the same
+stale snapshot is an operator or an infra-level retry re-running the same script by hand - which
+happens within seconds to a couple of minutes, never requiring a whole calendar day's width to
+catch. Narrowed the bucket from the day to the minute: the real protection (two near-simultaneous
+calls still collapse to one event) is unchanged, while a genuine third same-day occurrence now
+only collides if it repeats within the same single minute as an earlier one - not a true fix for
+every conceivable case, but it turns "once per calendar day" into "once per minute," closing the
+practical gap rather than documenting around it.
+
+**Verified:** re-ran the existing `test_tender_changes.py` unchanged - all 4 original tests, 8
+checks, still pass under minute-bucketing (the "same-day retry" test's two calls are pinned to the
+exact same frozen minute, so it still correctly dedupes). Added a 5th test,
+`test_same_day_multiple_real_oscillations_all_reported`, reproducing the exact hour-9/10/11
+same-day triple-flip and asserting the third occurrence is now reported - confirmed failing
+against the pre-fix day-bucket logic (by temporarily reverting the one-line change and re-running),
+then passing after. Full regression: `test_gov_sources.py` and `test_digest_live.py` (the two
+other files importing this module) both still `ALL PASSED` / `0 failure(s)`, unchanged behaviour
+on every case neither of those files' own tests target this fix.
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-sixth run): a tender's closing
+date oscillating between two values could silently stop being reported
+
+Picked up the sibling pass's "twenty-fifth run" (independent re-confirmation of the CI-green
+result, no new findings) and finally closed this review's own oldest standing open item: `tender_
+changes.py` had no dedicated test file, flagged repeatedly since the eleventh run. Read the whole
+module first, specifically hunting for a real bug to anchor the new test file on rather than
+writing coverage for its own sake.
+
+**Finding 24 (fixed, severe):** `_event()`'s fallback `dedupe_key` (used by `closing_date_changed`,
+`briefing_changed`, `title_changed`, and the closing-date branch of `sources_disagree`) was keyed
+on the NEW value alone, with no time component - contradicting the module's own docstring promise
+("a re-run never records the same change twice") in the one way that actually loses real data: a
+closing date extended A->B, reverted B->A, then genuinely extended A->B again weeks later produced
+an identical dedupe_key for the third event as the first, so `store.save()` silently dropped it.
+No error, nothing in the digest - the tender's date moved again and nobody would ever be told.
+Reproduced directly across simulated days 1/5/10/15. Not a rare shape either: SA tenders routinely
+get extended, walked back on an admin correction, then re-extended to the same final date.
+
+**Fix:** the fallback key now buckets by the day the change was detected, before the value. Still
+correctly dedupes the one real scenario the mechanism exists for (two runs racing against the same
+stale, not-yet-persisted snapshot, necessarily same-day) without collapsing two genuinely separate
+occurrences of the same value that are days or weeks apart. A literal same-day flip-flop to the
+exact same value would still dedupe - an accepted, narrower trade-off against the larger fix a
+proper per-event history lookup in both stores would need.
+
+**Verification:** new `engine/discovery/test_tender_changes.py` - 4 tests, 8 checks, all passing:
+the exact oscillation bug (day 15's previously-dropped event now reported), a same-day retry
+still reporting nothing extra, two different tenders never colliding on the same new value, and
+the `sources_disagree` branch independently re-verified with the same fix. Full regression:
+`test_gov_sources.py` and `test_digest_live.py` both clean, unchanged. Full detail:
+`QA-Edge-Case-Findings.md`, "twenty-sixth run" (Finding 24).
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-fourth run): the one remaining
+"GitHub-runner-only" CI failure was a brittle test assertion, not an environment difference
+
+Picked up the sibling pass's "twenty-second run" (Findings 21/22: a real race condition and a CI
+config bug that hid ~20 test files behind "skipped" - `bridge-worker-ci.yml` had been red on 52 of
+its last 53 runs, unnoticed all along) and its one still-open item: `test_extract_cv_fields.py`'s
+`naledi_cv.pdf via pdftotext -layout` check, left diagnosed-but-unfixed as "a GitHub Actions
+runner-specific difference I can't reproduce here."
+
+**Finding 23 (fixed, moderate):** pulled the actual job log for the failing check rather than
+re-trusting the "can't reproduce" write-up. The check was a bare `"TMRA/2019/04" in t` substring
+test with NO whitespace normalisation, despite its own neighbouring comment claiming quotes "are
+also matched with whitespace removed." `extract_cv_fields.py` already has the real matcher this
+comment was describing - `evidence_in_text()`, explicitly built to tolerate exactly this ("a quote
+wrapped mid-token by a narrow table column") - just never applied to this one smoke-test
+assertion. A different LibreOffice point release on GitHub's runner wrapping the same table cell
+a few pixels differently was never an unreproducible environment quirk; it was a test checking
+something more exact than production itself requires. Fixed by routing the check through
+`evidence_in_text()` instead of a bare `in`. Confirmed this doesn't just paper over real
+corruption first: tested the matcher against genuinely-missing text (rejected), the documented
+benign wrap (tolerated), and a wrong-but-similar number (rejected) before trusting it.
+
+**Verification:** `python3 engine/cv/test_extract_cv_fields.py` - `ALL PASSED` locally (installed
+the missing `anthropic` package first; unrelated to this fix). `test_poll_loop.py` unaffected,
+still 5/5. **Confirmed on the real run** (`mcp__github__actions_get`, run id `39255442921`,
+commit `ec7e49b`): `"conclusion":"success"` - `bridge-worker-ci.yml`'s first fully green run in
+the project's history (run #56; the prior 52 of 53 were all `failure`). Both its `smoke-test` and
+`container-build` jobs passed. Full detail: `QA-Edge-Case-Findings.md`, "twenty-fourth run"
+(Finding 23).
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-fifth run): the last known CI gap is closed, independently re-confirmed - and a trivial navigability fix
+
+Orientation: three new commits since the last pass. `c22ef0c` (one-line jump-nav link for the new
+general-tender Pack Review, gated the same way the existing "Pack" link already is) - trivial,
+correct, confirmed by reading the diff and re-running typecheck/lint/build. `ec7e49b` and `27ec5c2`
+together close out the one remaining item from my own twenty-second-run write-up: the
+`test_extract_cv_fields.py` check I had diagnosed as "passes reliably in this sandbox... a GitHub
+Actions runner-specific difference I can't reproduce."
+
+**Root cause, now correctly identified by the sibling session:** the check was never actually
+environment-specific - it was a bare `"TMRA/2019/04" in t` substring test with no whitespace
+normalisation at all, despite its own adjacent comment claiming otherwise. `extract_cv_fields.py`
+already has the real, production-used tolerant matcher this comment described -
+`evidence_in_text()`, the same function real CV-extraction quote-verification runs on every
+AI-proposed field - just never applied to this one test assertion. A different LibreOffice point
+release on GitHub's runner wrapping the same table cell a few pixels differently was a real
+difference, but the test was checking something stricter than production itself ever requires of
+real data.
+
+**Independently re-verified, not trusted:** read `evidence_in_text()`/`_norm()` in
+`extract_cv_fields.py` in full - a genuine three-tier matcher (exact normalised match, then a
+letters+digits-squeezed match gated at ≥8 characters to avoid trivial over-matching, then a
+4+-character-chunk match) - not a weakening invented just to make this test pass. Ran my own three
+cases directly against it, independent of the commit's own claimed verification: a genuinely
+unrelated text block is correctly rejected; the documented benign table-wrap is correctly
+tolerated; a wrong-but-similar reference number (`TMRA/2019/99` vs `TMRA/2019/04`) is correctly
+rejected, not loosely accepted. Ran `engine/cv/test_extract_cv_fields.py` directly myself -
+`ALL PASSED` (after restoring this sandbox's own `anthropic` package, which had gone missing from
+this environment since an earlier pass - unrelated to this fix, a purely local gap).
+
+**Confirmed the real-GitHub-green claim myself, not just read it:** pulled run id `39255442921`
+directly (`mcp__github__actions_get` + `list_workflow_jobs`) - `smoke-test` and `container-build`
+both `conclusion: success`, and checked every one of the 26 individual steps in `smoke-test`
+(not just the job's own rolled-up conclusion): all 26 read `success`. This is a complete,
+step-by-step confirmation, not just a green badge - `bridge-worker-ci.yml` is now a real signal
+for the first time in this project's history. `c22ef0c`'s own `app-ci.yml` run (id `39253082886`)
+is also confirmed green.
+
+No issues found in any of the three commits. No action needed.
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-third run): two well-built, independently re-verified commits - no issues found
+
+Orientation: two new commits since the last pass, both from the sibling session that's been
+working the `01PAw7oeNsQgNdYpS5qH2b1R` thread (`0f7b0ee` - real columns + a CIDB name-mismatch
+warning for the six previously-orphaned onboarding-scan fields, migration `0069`; `dce0fc4` -
+confirm-before-compile Pack Review for general/non-SANRAL tenders, reusing the SANRAL pattern and
+`pack_review_confirmations` (`0059`) with no new table). Both already carry thorough,
+well-evidenced write-ups of their own in this file and in `QA-Edge-Case-Findings.md` - this entry
+is my own independent re-verification, not a restatement.
+
+**Migration `0069`:** set up scratch Postgres, replayed all 69 migrations clean. Read the full
+file - purely additive `companies` columns, correctly reasoned RLS exemption (already covered by
+the existing "members can select/update" policy, `0001`), correctly reasoned decision to keep
+bank fields off `bank_accounts` (`0050`) rather than the more-restricted table the original
+finding suggested, since `account_number` there is `NOT NULL` and the scan never extracts one.
+Read `onboardingScan.ts`'s `VAULT_FIELD_COLUMNS` wiring and `cidbNameMismatchWarning()` in full -
+simple, bounded, correctly non-blocking - and confirmed `review.tsx`/`page.tsx` actually thread
+`companyLegalName` through to it, not just call it with a stray argument. Ran
+`onboardingScan.test.ts` directly: 18/18 pass.
+
+**`dce0fc4` (general-tender Pack Review):** read all six new/changed files in full. Confirmed
+`general-pack-review-logic.ts`'s classifiers are pure and correctly mirror the SANRAL precedent
+where the two are genuinely alike (and correctly diverge where general tenders really are
+different - no provenance/default-signer machinery). Specifically checked the gate itself
+(`general-actions.ts`'s `requestJob()`): only applies to `kind === "generate_pack"`, not to
+requirements extraction, and correctly scoped by both `tender_id` and `company_id` against
+`pack_review_confirmations`. Checked `general-pack-review-data.ts`'s one query that filters only
+by `tender_id` (the "reviewed so far" read) isn't a cross-tenant gap: RLS's own
+`is_company_member(company_id)` policy on `pack_review_confirmations` is the actual enforcement
+boundary regardless of the query's own filters, same as everywhere else in this codebase - a
+non-issue, not flagged further. Ran `general-pack-review-logic.test.ts` directly: 16/16 pass.
+
+**Whole-tree verification:** `npm run typecheck`/`lint`/`build` clean from a fresh `.next` state;
+every one of the 10 `*.test.ts` files in `app/` run directly, all clean. Confirmed on GitHub's own
+infrastructure, not assumed: both commits' `app-ci.yml` runs (ids `39244779779`, `39244948058`)
+read `conclusion: success`. `bridge-worker-ci.yml` correctly did not trigger for either (neither
+touches `engine/**`) - its last run stays the one already-known, already-flagged
+`test_extract_cv_fields.py` failure from the twenty-second run, unchanged by this pass.
+
+No issues found in either commit. No action needed.
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-second run): `bridge-worker-ci.yml` has been red on GitHub since nearly the start of this project, unnoticed
+
+Orientation: two new commits since the last pass (`6aa0e00`, finishing the cool-white palette
+rollout on `/admin`'s CV/document stats cards - independently swept the whole `app/app` tree for
+every old hex value afterward, confirmed clean; `2351570`, the `run_bridges.py --script` fix
+above). Read both in full, re-ran the relevant test files myself. No issues in either on their own.
+
+**Finding 21 (severe, structural - the single biggest finding of this standing-review rotation
+so far): checked `bridge-worker-ci.yml`'s actual run history on GitHub for the first time, rather
+than trusting each commit's own "CI clean" claim.** Of the last 15 runs (`mcp__github__actions_list`),
+**all 15 showed `conclusion: failure`.** Paged back through the workflow's full history (53 runs):
+**52 of 53 failed** - every run from run #2 onward, with the sole exception of run #1 (the very
+first commit that created this CI job) and one cancelled run. Every single "CI clean" or "all
+tests pass" claim in every commit message and every prior pass entry in this file, for the entire
+life of this project's Python engine, was describing a session's own **local** run - the actual
+GitHub Actions badge has been red almost the entire time, and nobody - no session, including me
+across twenty-one prior passes - had ever actually looked.
+
+Pulled job logs (`mcp__github__get_job_logs`) for failures spread across the whole history and
+found **two distinct, unrelated root causes**, both genuine, neither previously diagnosed:
+
+1. **`test_poll_loop.py::test_runner_drives_bridges_and_stops_on_sigterm` - a real race condition,
+   fixed and verified.** This test starts two `run_bridges.py` subprocesses against the same fake
+   Supabase stub: `p` (a long-interval loop meant only to prove a bridge that exits non-zero is
+   logged and survives, started with no `--bridge`) and `p_cv` (a short, tight-window loop with
+   `--bridge cv` meant to prove the CV bridge fulfils job `r1`). Before the sibling pass's own
+   `resolve_bridge_names` fix (twenty-first run, above) a bare `--script` with no `--bridge`
+   resolved to `names=[]` - so `p` ran ONLY the broken script. That fix correctly makes `--script`
+   additive, matching this file's own documented contract - but as a direct, unavoidable
+   consequence, `p` now ALSO runs every registered bridge on its own first cycle, including the
+   real "cv" bridge, racing `p_cv`'s own dedicated cycle for the SAME job `r1` against the SAME
+   fake instance. Whichever process's cv-bridge subprocess wins the atomic claim builds it; the
+   loser finds nothing and never logs `"cv: [ready] r1"` - the exact assertion this test makes -
+   even though `status_of(fake, "r1") == "ready"` (an earlier assertion) still passes, since `r1`
+   really was built, just not by the process this test is checking. **Reproduced directly: ~40-57%
+   failure rate across 12 local runs before the fix** (confirmed NOT a timing/slowness issue first -
+   widening the interval from 2s/2-cycles to 5s/3-cycles made no difference at all, still failing
+   with "0 bridge pass(es) with activity" every time, which is what actually pointed at a structural
+   race rather than a slow LibreOffice startup). **Fixed** by scoping `p` to `--bridge onboarding`
+   (a registered bridge unrelated to CV job state) instead of no `--bridge` at all, so `p`'s own
+   cycle never touches `generated_cvs`. **Verified: 20/20 clean runs, 0 failures**, across two
+   separate batches, after the fix - versus the measured 40-57% failure rate before it.
+2. **`test_extract_cv_fields.py`'s `naledi_cv.pdf via pdftotext -layout` check - diagnosed, NOT
+   fixed, flagged honestly.** Separately responsible for several of the 52 failures (seen directly
+   in job logs from both the most recent run and one from 2026-10-18, identical failure both
+   times). The check asserts specific substrings ("20169999", "University of Cape Town",
+   "TMRA/2019/04") survive a DOCX -> LibreOffice -> PDF -> `pdftotext -layout` round trip - **passes
+   reliably every time I ran it in this sandbox** (same LibreOffice 24.2.7.2 / poppler 24.02.0),
+   so this looks like a difference specific to GitHub's own `ubuntu-24.04` runner image (font
+   substitution, a different LibreOffice point release from whatever its own apt mirror resolves
+   to that day, or similar) that this sandbox cannot reproduce or iterate against. Not fixed this
+   pass - flagged for whoever next has reason to dig into the actual GitHub Actions runner
+   environment directly (e.g. by adding a debug step that prints `soffice --version`/`pdftotext -v`
+   to a CI run and comparing against this sandbox's versions above).
+
+**Finding 22 (fixed, equally structural): one failing step was hiding ~20 other test files from
+ever running at all, not just failing - a second, compounding reason the red streak went
+unnoticed.** Pushed the Finding-21 fix and checked the real run on GitHub rather than assuming it
+went green (`mcp__github__actions_list`/`get_job_logs`, run id `39237891716`): still
+`conclusion: failure` - but this time because `test_extract_cv_fields.py` (cause 2 above, already
+known and unfixed) failed, confirming cause 1's own fix is sound. The real discovery was in the
+job's step list: `bridge-worker-ci.yml`'s 23 test steps run sequentially in ONE job with no
+`continue-on-error`/`if` guards - GitHub Actions' own default is to stop a job dead at its first
+failing step and mark every step after it `skipped`. Since the CV-extraction step (step 6 of 23)
+has been failing nearly every run since it was added, steps 7 through 26 - the polling-loop test,
+taxonomy, award outcomes/prices, both discovery-fanout tests, the daily digest, tender updates,
+gov sources, cross-tenant isolation, system alerts, the form-field audit, and more - **have never
+actually executed in CI, not failed, never even run**, this entire project's history. Confirmed
+directly in this run's own step list: step 7 ("Polling-loop smoke test", the step containing my
+own Finding-21 fix) reads `"status":"completed","conclusion":"skipped"` - meaning even this pass's
+own verified fix has still never been confirmed by a real GitHub Actions run, only by 20 local
+runs in this sandbox.
+
+**Fixed:** added `if: ${{ !cancelled() }}` to every test step in the job (not the checkout/
+setup-python/base-install steps, which genuinely must block everything if they themselves fail) -
+the standard GitHub Actions idiom for "run this step regardless of an earlier step's failure,
+but still let the job's overall conclusion reflect every step's own result." Nothing about any
+test itself changed; this only stops one failure from masking twenty others. Documented directly
+in the workflow file's own header comment for whoever next reads it. YAML validated
+(`python3 -c "import yaml; yaml.safe_load(...)"`) before committing.
+
+**Confirmed on the actual next run (`mcp__github__actions_list`/`list_workflow_jobs`, run id
+`39238384524`), not assumed:** for the first time in this project's history, every one of the 23
+test steps' own individual result is now visible. Exactly as predicted - step 6
+(`test_extract_cv_fields.py`, cause 2) is the only one still red - and, critically, **steps 7
+through 26 (the 20 previously-hidden test files, including step 7's own `test_poll_loop.py` - this
+pass's own Finding-21 fix) all read `conclusion: success`.** This is the first real confirmation,
+ever, that taxonomy, award outcomes/prices, the general engine (both its own test files),
+discovery fan-out, discovery downgrades, the daily digest, tender updates, gov sources, company
+letters, SANRAL Form B7, cross-tenant isolation, reminder seen-stores, system alerts and the
+form-field audit all actually pass on real GitHub Actions infrastructure - not just in whichever
+session's own local sandbox last ran them. `container-build` (the separate job) was already
+green and still is.
+
+**What this means going forward:** CI for the Python engine side of this project was not a
+reliable pass/fail signal for most of its life, for two compounding reasons that are now both
+addressed: a real race condition (cause 1, fixed and now GitHub-confirmed) and a CI job structure
+that hid every other test's result behind one known failure's "skipped" status (also fixed). One
+genuine gap remains open: `test_extract_cv_fields.py`'s LibreOffice-rendering difference (cause 2)
+- still unreproducible in this sandbox, still needs someone with direct GitHub Actions runner
+access to root-cause. From here on, `bridge-worker-ci.yml`'s step list is a real signal again:
+treat a red step 6 as the known, already-written-up issue, and treat a red ANY OTHER step as a
+genuine new regression worth investigating immediately, since that is no longer physically
+impossible for GitHub Actions to have shown you.
+
+## This pass (2026-10-19, standing QA/robustness review - twenty-first run): `run_bridges.py`'s
+own documented usage example silently stopped every real bridge from running
+
+Picked up the sibling pass's "twentieth run" (migration `0068` verification and, importantly,
+Finding 20 - migrations `0063`-`0068` aren't yet applied to the live Supabase project, already
+confirmed by a real production error; needs Sarel directly, not re-flagging here). Picked
+`engine/worker/run_bridges.py` for this run - "worker/job-queue" had only been verified once
+before (eighth run, confirming a non-bug), never a dedicated adversarial pass, and it's the one
+script every bridge's production job fulfillment depends on (the container's `CMD` is just
+`run_bridges.py --loop`).
+
+**Finding 21 (fixed, severe):** `main()`'s bridge-name resolution read `args.bridge or ([] if
+args.script else sorted(BRIDGES))`. Giving `--script` without `--bridge` - exactly this file's
+own Usage example, `--loop --script engine/some/other_bridge.py` - resolved to `names = []`:
+**none** of the 5 registered bridges (`cv`, `cv_extract`, `pack`, `general`, `onboarding`) ran,
+directly contradicting the module's own docstring ("and any other one can be added with
+`--script PATH`" - added, not "replace everything"). Not live-broken today (production's `CMD`
+never passes `--script`), but anyone following this file's own documented example to add a
+one-off custom bridge alongside the real ones would have silently stopped all CV generation,
+pack generation, onboarding scanning and non-SANRAL extraction, with no error and no alert - just
+an absence of log lines. Fixed by extracting the resolution into
+`resolve_bridge_names(bridge_arg)` (`bridge_arg or sorted(BRIDGES)`, `--script` no longer
+participates in the decision at all) and calling it from `main()`.
+
+**Verification:** reproduced the bug directly against the real `BRIDGES` dict before fixing.
+New unit test `test_script_flag_is_additive()` in `test_poll_loop.py`; full suite (5 checks,
+including the pre-existing real-subprocess `run_bridges.py` test, which also exercises `--script`
+without `--bridge`) passes before and after, same timing. Ran the fixed CLI directly end-to-end
+too, not just the unit tests. `test_system_alerts.py` unaffected. Full detail:
+`QA-Edge-Case-Findings.md`, "twenty-first run."
+
+## This pass (2026-10-19, standing QA/robustness review - twentieth run): migration 0068 verified, a stale migration-number reference fixed, and a confirmed live/committed schema gap
+
+Orientation: 4 new commits since the last pass (`fd7b9c4` the `--no-fetch-documents` fix,
+`edaa9cd` CV/document stats migration `0068` + admin UI, `0f47c70` the full cream→white palette
+rewrite across 64 files, `8146259` sign-out + raw-SQL-error-leak fix + 2 leftover cream
+`ScrollFade` colors). Independently re-verified `fd7b9c4` rather than trusted: confirmed
+`gov_sources.releases_for_watch()` already had a `with_documents` kwarg the digest just never
+passed, ran `engine/notify/test_digest_live.py` directly - `0 failure(s)`.
+
+**`0068` (CV/document stats) - set up scratch Postgres, replayed all 68 migrations clean, then
+tested the function directly rather than trusting "confirmed no logical overlap" from the commit
+message:** a non-admin authenticated user gets no row (correctly gated by `is_platform_admin()`,
+same pattern as `0064`); a user added to `platform_admins` gets a row with hand-verified correct
+counts (1 CV upload, 2 generated CVs both ready, 2 open tenders with a tender-specific CV, 1 with
+`tender_documents` on file, 1 without). No security or correctness issue found in the SQL itself.
+
+**Finding 19 (fixed, minor): stale migration-number reference in `app/app/admin/page.tsx`.**
+`edaa9cd`'s own message explains the function was renamed from the originally-authored `0066` to
+`0068` mid-PR (another migration had already claimed `0066` on `main` by the time it landed) - but
+the renumber only touched the SQL file. The admin page's own code comment and, more importantly,
+its **user-facing text on `/admin` itself** ("See migration 0068 for exactly what each number
+counts") still said `0066` - which is actually this session's own, unrelated trigger-bug fix.
+Anyone who followed that pointer, Sarel included, would land on the wrong file. Fixed both
+occurrences; swept the rest of the batch for the same mistake (`grep` for `0066` across
+`app/app`), found none.
+
+**Finding 20 (not a code bug - a real operational gap, needs Sarel): migrations `0063`-`0068` are
+committed but evidence says not yet applied to the live Supabase project.** `8146259`'s own commit
+message reports tonight's live E2E walkthrough hit a raw Postgres error on the Tender Workspace -
+`column tender_packs.project_completed_at does not exist`. That column only exists from `0065`
+onward; its absence on the live database is direct, first-hand evidence the live project is still
+at or near `0062` (the cutoff Sarel confirmed applying, per Known-gaps item 9 above), five
+migrations behind what's on `main`. The commit fixed the symptom (no more raw SQL leaked to the
+user - generic message + server-side log) but not the cause: the won-project CV-sync feature, the
+super-admin customer/CV-stats console, and the opening-reminder task kind are still live-broken or
+inert until these are actually run against the real project. Written up in Known-gaps item 9
+(narrowed) rather than as a new numbered gap, since it's the same "committed vs. actually live"
+distinction that gap already tracks - this is the first concrete, dated confirmation of it since
+`0062`. Nothing here is new schema risk on this end (`0066` already fixes the one bug that would
+have shipped broken; `0001`→`0068` replays clean) - purely Sarel's own apply-it-live step, which
+no session in this sandbox can do without his live credentials.
+
+Full detail of `fd7b9c4`'s own fix: `QA-Edge-Case-Findings.md`, "nineteenth run," entry below.
 
 ## This pass (2026-10-19, standing QA/robustness review - nineteenth run): `--no-fetch-documents`
 promised "much faster" and quietly wasn't
@@ -2486,3 +4513,179 @@ input). `npm run typecheck` and `npm run lint` clean across the whole `app/` tre
 compiles and type-checks cleanly, then fails at the same pre-existing `/login` prerender (no
 Supabase credentials in this sandbox) - unrelated to this change, same standing gap as every other
 entry in this file. Nothing verified against a live Supabase project or a live Anthropic API call.
+
+### Pack Review for general (non-SANRAL) tenders (2026-10-19)
+
+A standing QA finding noted that SANRAL's Pack Review (`0059`, 2026-10-18 above) had no
+equivalent for general tenders - those route through `engine/general/`,
+`general-workspace.tsx` and `requestGeneralPack()`/`generate_pack`, with no confirm-before-compile
+step before that button's job gets queued. This task built that equivalent, reusing the SANRAL
+pattern rather than duplicating it.
+
+**What's actually different about a general tender (confirmed by reading the real code, not
+assumed):** no Form B7, no two-envelope structure. People are matched to roles via
+`person_role_eligibility` tags (`0016`/`0031` - any number of people per role) rather than
+SANRAL's one-person-per-position `tender_pack_assignments`; CVs for a tagged role come from the
+same `generated_cvs`(`status='ready'`)/`cv_uploads` lookup `engine/general/process_general_jobs.py`'s
+own `gather_pack_inputs()` does when it actually builds the pack, kept in sync so the review
+screen never promises a CV the pack itself can't find. What this tender's forms/documents/
+questions actually are is read per-tender from `tenders.document_requirements`
+(`engine/general/requirements.py`'s manifest), not from a fixed SANRAL-style list - so "form
+answers" here means the manifest's own `questions`/`company_fields`, and the signatory is just
+another `type: "person"` question (same `signatory_person_id` field-key convention as SANRAL,
+no region/industry/discipline default-signer suggestion - that's SANRAL's `signatory_scopes`,
+`0061` - so there is no fallback to pre-select, only chosen-or-not).
+
+**Built:** `general-pack-review-logic.ts` - pure classifiers for what's different
+(`answerStatus`, `roleStatus`, `signatureAnswerStatus`, `localityStatus`), importing only the
+`ReviewStatus`/`ChecklistStatus` *types* from `pack-review-logic.ts` (fully erased, no runtime
+coupling) rather than re-exporting its runtime helpers - `docItemStatus`/`fieldStatus` are
+imported directly from `pack-review-logic.ts` by callers instead, since a runtime
+`export ... from` here breaks Node's own module resolution when the test file is run directly
+(`node --experimental-strip-types`, no bundler) even though it works fine under Next's bundler -
+found by actually running the new test, not assumed. `general-pack-review-data.ts`
+(`loadGeneralPackReviewSnapshot`, React `cache()`) assembles the live snapshot: company
+details/tender questions/signature, supporting documents (reusing `checkReturnable()` from
+`lib/generalTender.ts` - the exact function `general-workspace.tsx` itself uses, not re-derived),
+roles & CVs (`person_role_eligibility`), company experience evidence (`findMatchingExperience()` +
+`evaluateEvidence()`, same as `general-workspace.tsx`), and office location (`matchLocality()`).
+Same per-item try/catch error isolation as `pack-review-data.ts` - one bad section renders
+"couldn't load this section" instead of crashing the card. `general-pack-review.tsx` renders it
+as its own card (`#general-pack-review`), mounted inside `GeneralTenderWorkspace`
+(`general-workspace.tsx`) directly above its "Generate the pack" section - same
+`<details>`-per-section, status-pill, "Change"-link-to-anchor, "I've reviewed this" shape as
+SANRAL's `pack-review.tsx`, reusing `PackChecklist`/`ChecklistRow` (`pack-checklist.tsx`, already
+generic, not SANRAL-specific) unmodified.
+
+**Data model: no new table.** `pack_review_confirmations` (`0059`) is schema-generic - just
+`(company_id, tender_id, reviewed_at, reviewed_by)` - so it's reused as-is for general tenders;
+no migration added by this task. `general-pack-review-actions.ts`'s `confirmGeneralPackReview()`
+upserts the same row `pack-review-actions.ts`'s `confirmPackReview()` does for SANRAL (kept as a
+separate action only because the redirect anchor differs, `#general-pack-review` vs
+`#pack-review`, and that file is SANRAL-only by repo convention).
+
+**Wiring:** `requestGeneralPack()` (`general-actions.ts`, via the shared `requestJob()` it and
+`requestRequirementsExtraction()` both call) now requires a `pack_review_confirmations` row to
+exist before it will insert a `generate_pack` job - additive to every existing check in that
+function (a tender with unanswered questions or missing documents still generates a draft with
+blanks, by design; this only blocks an *unreviewed* compile, the same scope SANRAL's own gate
+has).
+
+**Verified:** `general-pack-review-logic.test.ts` (same `node --experimental-strip-types --test`
+pattern, run from a bracket-free temp copy since Node's own `--test` glob matcher cannot handle
+the literal `[id]` path segment - confirmed by reproducing the same 0-tests-collected result on
+the untouched SANRAL `pack-review-logic.test.ts` run the same way, so it's a Node/shell quirk, not
+a regression) - 16 cases including the two required scenarios (everything confirmed = all green;
+missing signatory / nobody tagged for a role / no local office = the right mixed statuses), all
+passing; the existing `pack-review-logic.test.ts` still passes unchanged (35/35 across both files
+together). `npm run typecheck` (`tsc --noEmit`) and `npx eslint` clean on every new/changed file
+and the whole `app/` tree. Nothing verified against a live Supabase project.
+
+**Not done / open for Sarel:** per-person professional registrations (SACNASP/SAGC/catalog bodies)
+that `general-workspace.tsx` shows are not repeated as separate review items here (same rationale
+SANRAL's own review uses for ECSA/SACPCMP counts: those are company-aggregate facts, already
+implicitly covered, not a separate confirm-or-change decision). The SANRAL Pack Review screen and
+its logic/data/actions/test files (`pack-review*.ts(x)`) were not touched at all by this task.
+
+### Admin review of discovered opportunities + real requirements extraction + confidence (2026-10-19)
+
+Sarel, same day, two messages: (1) "In the admin panel I need to be able to review what came in
+and if our engines understand and interpret and can compile each one"; (2), relayed mid-build,
+"run our engines to unpack the specs and requirements and make the list of everything that is
+needed and make sure we have an engine that perfectly understands how to complete, build and
+compile each one and indicate the confidence level, I then need to review and help improve the
+confidence levels." A separate concurrent task was building a permanent document-download engine
+for discovered tenders (`discovered_opportunity_documents`, migration `0071`) - this task reused
+that store rather than duplicating it, and deliberately touched none of `engine/discovery/*.py`'s
+own download logic.
+
+**What "can our engine understand and interpret and compile this" honestly means pre-pursue:** a
+discovered opportunity has no uploaded/opened documents until a company "pursues" it
+(`pursue_discovered_opportunity`, `0024`/`0051`) and goes through intake
+(`engine/intake/classify_tender.py`). Before that, nothing here fakes a real compile check -
+`lib/compileReadiness.ts`'s `assessCompileReadiness()` looks only at what Discovery already
+recorded (document_urls, categories, reasons, score_outlook, source) and returns one of three
+honest states: `flagged` (no documents listed / SANRAL source / unrecognised category / no
+scoring signal at all), `needs_documents` (nothing wrong, but genuinely unknown), or `looks_ready`
+(a document title matches a known SANRAL workbook naming pattern - explicitly a filename guess,
+never a real open-and-check).
+
+**Real requirements extraction, once documents exist:** `engine/discovery/opportunity_requirements.py`
+runs the SAME classifier a real intake uses (`classify_tender.classify_documents()` /
+`check_fingerprint()`) against whatever `discovered_opportunity_documents` actually has downloaded
+for a release, and writes one shared row per `release_key` into the new
+`discovered_opportunity_requirements` table (migration `0072`) - route, family, the real
+fingerprint status against the stored baseline, which required SANRAL documents are missing, and
+any unreadable workbook. A general (non-SANRAL) release gets a shallow, honest answer only (route
+classified, no fabricated itemised list - the real general-tender requirement list needs
+`engine/general/requirements.py`'s LLM-backed pass, deliberately not run speculatively for every
+discovered release). SANRAL releases never get a row (SANRAL's reCAPTCHA v3 wall means nothing is
+ever auto-downloaded for them - confirmed in the document-download task's own migration).
+
+**Confidence (not binary):** `assessCompileConfidence()` (same file) computes a 0-100 number from
+named, weighted signals - base 20; +10 documents listed; +10 category recognised; +10 scoring
+signal present; then, only once requirements were actually extracted (capped at 40 otherwise):
++35 SANRAL family matched / +15 general route classified; +20 fingerprint matches the baseline or
+-40 if it mismatches/errors; -10 per missing required document (capped at -30); -25 an unreadable
+document; -15 a failed download. Every weight is named in the function's own comment so Sarel can
+sanity-check the logic line by line, not just trust a number. `effectiveConfidence()` lets Sarel's
+own correction always win over the computed value.
+
+**Sarel's review/override:** `platform_admin_override_opportunity_confidence(opportunity_id,
+override_level, note)` (migration `0072`, `is_platform_admin()` + `SECURITY DEFINER`, same pattern
+as every other platform-admin RPC since `0064`) writes `confidence_override`/
+`confidence_override_note` directly on the `discovered_opportunities` row - a plain correction +
+note, not a training/feedback pipeline, and never silently recomputed over (the computed number
+lives in a different table entirely).
+
+**Built:** `/admin/discovered-opportunities` (`app/app/admin/discovered-opportunities/page.tsx`,
+`OpportunityTable.tsx`, `OpportunityRow.tsx`, `actions.ts`) - every company's
+`discovered_opportunities` row via `platform_admin_discovered_opportunities()` (migration `0072`,
+left-joined to `discovered_opportunity_requirements`), with basic client-side filter/sort (status,
+source, company, sort by newest/closing-soonest/lowest-confidence) using the same
+expand-to-detail row pattern as `CustomerRow.tsx`/`SystemAlertRow.tsx` - no new filter convention
+invented for a dataset this size. Nav links added to `/admin`, `/admin/customers`,
+`/admin/settings`. `lib/compileReadiness.ts` holds every pure classifier (readiness, confidence,
+override-merge) and is the single place that turns raw fields into a status/number - the page and
+the SQL function do no classification of their own.
+
+**Data model:** migration `0072` - `platform_admin_discovered_opportunities()` (extended to carry
+the requirements-extraction and confidence-override fields), the new
+`discovered_opportunity_requirements` table (one shared row per `release_key`, readable by any
+authenticated user, written only by `opportunity_requirements.py` via the service role - same
+shared/public shape as `discovered_opportunity_documents`), and
+`confidence_override`/`confidence_override_note`/`confidence_overridden_at`/
+`confidence_overridden_by` columns + the override RPC on `discovered_opportunities` itself.
+Numbered `0072` after two live collisions with a concurrent background task's own migration
+(`0070`, then `0071`) in this shared working directory - re-checked against the actual files on
+disk each time, not just a `git fetch` (confirmed stale/cached in this environment during this
+same task - a fresh clone to a scratch directory was needed to see the real `origin/main`).
+
+**Verified:** `python3 engine/discovery/test_opportunity_requirements.py` - all checks pass
+against real committed sample documents (`templates/samples/R.396-010-2025.1F_ran.xlsm` +
+its Financial Submission workbook + the three A-Forms `.docx` under `templates/forms/`, and
+`templates/general_samples/treasury_rt83`), run through an in-memory fake of the Supabase
+PostgREST + Storage API (same `Fake` shape as `test_download_discovered_documents.py`): no
+documents at all -> no row written (absence is the "not_downloaded" state, never a fabricated
+row); every download failed -> a row is written with route/family left null; a real SANRAL R.396
+set with everything present -> route/family/fingerprint all genuinely computed, nothing missing;
+the same set with two forms removed -> `missing` lists exactly those two; a real general-tender
+document set and a PDF-only release both classify without raising and without fabricating a
+route. `node --experimental-strip-types --test app/lib/compileReadiness.test.ts` - 14/14 pass
+(every flagged/needs_documents/looks_ready branch, the 40-point cap before requirements exist, a
+matched SANRAL family + ok fingerprint scoring high, a fingerprint mismatch dragging the score
+down hard even with a matched family, the missing-document penalty and its -30 cap, general
+scoring lower than a matched SANRAL route, and the override always winning over the computed
+value). `npx tsc --noEmit` and `npx eslint` clean on every new/changed file. Nothing verified
+against a live Supabase project, a live Next.js render of the new page, or a live Anthropic API
+call (same standing gap as every other entry in this file).
+
+**Not done / open for Sarel:** `opportunity_requirements.py` is a standalone script, not wired
+into any scheduled run (unlike `download_discovered_documents.py`, which the concurrent task
+wired into `watch_new_tenders.py`) - it needs to be run by hand or added to that same schedule
+before "requirements extraction" fills in automatically for new releases; this task deliberately
+did not touch `engine/discovery/watch_new_tenders.py` itself (owned by the concurrent
+document-download task) to avoid colliding on that file. The general-route requirement list stays
+shallow by design (see above) - if Sarel wants a real itemised general-tender requirement list at
+discovery time, that needs `engine/general/requirements.py`'s LLM pass run speculatively, which
+has its own cost/design tradeoffs not decided here.

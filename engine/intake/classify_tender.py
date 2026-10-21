@@ -71,9 +71,17 @@ SANRAL_HINT_RE = re.compile(r"south\s+african\s+national\s+roads\s+agency|\bSANR
 # THE TENDERER", A-Forms "Part T2: Returnable Schedules" + "FORM A2: CERTIFICATE
 # OF AUTHORITY FOR SIGNATORY".
 SANRAL_DOCX = [
-    ("c111_form_of_offer", re.compile(r"C\s*1\.1\.1\s+FORM\s+OF\s+OFFER", re.IGNORECASE)),
-    ("c123_contract_data", re.compile(r"C\s*1\.2\.3\s+CONTRACT\s+DATA", re.IGNORECASE)),
-    ("a_forms", re.compile(r"Part\s+T2\s*:\s*Returnable\s+Schedules|FORM\s+A2\s*:\s*CERTIFICATE\s+OF\s+AUTHORITY", re.IGNORECASE)),
+    # \.? after the leading letter: the real R.396-010-2025/1F heading (cited
+    # above) has no period ("C1.1.1"), but "C.1.1.1"/"A.2" is an equally
+    # plausible, entirely normal way to write the same form code, and the
+    # no-period patterns below silently failed to recognise it at all - QA
+    # audit 2026-10-20 ("enterprise readiness" pass), confirmed directly:
+    # a real .docx headed "C.1.1.1 FORM OF OFFER" produced zero trace
+    # anywhere (no note, not in sanral_files), not even the corrupt-file
+    # note this same loop already gives an unreadable document.
+    ("c111_form_of_offer", re.compile(r"C\.?\s*1\.1\.1\s+FORM\s+OF\s+OFFER", re.IGNORECASE)),
+    ("c123_contract_data", re.compile(r"C\.?\s*1\.2\.3\s+CONTRACT\s+DATA", re.IGNORECASE)),
+    ("a_forms", re.compile(r"Part\s+T2\s*:\s*Returnable\s+Schedules|FORM\s+A\.?2\s*:\s*CERTIFICATE\s+OF\s+AUTHORITY", re.IGNORECASE)),
 ]
 SANRAL_DOC_LABEL = {
     "technical_xlsm": "Technical Submission workbook (.xlsm)",
@@ -234,7 +242,9 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
         elif fmt == "docx" and not d.get("unreadable"):
             try:
                 head = _docx_head(local)
-            except Exception:
+            except Exception as e:
+                notes.append(f"{d['name']}: could not be opened as a Word document ({e}) - "
+                              "re-download it and add it again.")
                 continue
             for doc_type, pat in SANRAL_DOCX:
                 if pat.search(head):
@@ -246,11 +256,31 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
     families = sorted({c[2] for c in tech})
     files, registered = {}, []
     for doc_type, cands in candidates.items():
+        # More than one document matched the same doc_type: prefer the most
+        # recently modified file as a best-effort signal (a draft kept
+        # alongside the final copy is usually the older file on disk), but
+        # this is still a guess, not a confirmed choice - QA audit
+        # 2026-10-20 found the previous tie-break (first in doc_entries,
+        # which collect_documents() feeds in alphabetical filename order)
+        # picked "Old_Draft_Form_Offer.docx" over "Zfinal_Form_Offer.docx"
+        # purely because "O" < "Z", with no regard for which was actually
+        # right. Still only a note, never a block - one ambiguous document
+        # must not stop the whole intake - but the wording below says
+        # plainly that this was picked arbitrarily and must be checked by a
+        # person, not "remove the others if wrong" (easy to skim past).
+        if len(cands) > 1:
+            try:
+                cands = sorted(cands, key=lambda c: os.path.getmtime(c[1]), reverse=True)
+            except OSError:
+                pass  # mtime unavailable - keep collect_documents()'s own order
         files[doc_type] = cands[0][1]
         registered.append({"doc_type": doc_type, "label": SANRAL_DOC_LABEL[doc_type], "document": cands[0][0]})
         if len(cands) > 1:
-            notes.append(f"More than one {SANRAL_DOC_LABEL[doc_type]} was uploaded ({', '.join(c[0] for c in cands)}) - "
-                         f"used {cands[0][0]}. Remove the others if that's the wrong one.")
+            notes.append(f"AMBIGUOUS - more than one {SANRAL_DOC_LABEL[doc_type]} was uploaded "
+                         f"({', '.join(c[0] for c in cands)}). {cands[0][0]} was picked (most recently modified, "
+                         "if that could be determined - otherwise arbitrarily), but this was NOT confirmed as the "
+                         "correct one. A person must check which file is right and remove the others before relying "
+                         "on this tender's SANRAL pack.")
 
     if tech:
         family = tech[0][2]

@@ -88,16 +88,16 @@ export function PositionPersonSelect({
           {alternatives
             .filter((s) => s.id !== confirmedPersonId)
             .map((s) => (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", fontSize: 12, color: "#16233B", borderTop: "1px solid #F0EEE6", paddingTop: 4 }}>
+              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", fontSize: 12, color: "#16233B", borderTop: "1px solid #ECEEF1", paddingTop: 4 }}>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ fontWeight: 600 }}>Alternative: {s.name}</span>
-                  <span style={{ color: s.specialismWarning ? "#B91C1C" : "#6B6758" }}> - {s.why}</span>
+                  <span style={{ color: s.specialismWarning ? "#B91C1C" : "#5B6472" }}> - {s.why}</span>
                 </div>
                 <button
                   type="button"
                   disabled={isPending}
                   onClick={() => choose(s.id)}
-                  style={{ minHeight: 32, padding: "0 10px", borderRadius: 7, background: "#FFFFFF", color: "#16233B", fontSize: 11, fontWeight: 600, border: "1px solid #E5E1D5", cursor: isPending ? "default" : "pointer", whiteSpace: "nowrap" }}
+                  style={{ minHeight: 32, padding: "0 10px", borderRadius: 7, background: "#FFFFFF", color: "#16233B", fontSize: 11, fontWeight: 600, border: "1px solid #E3E6EA", cursor: isPending ? "default" : "pointer", whiteSpace: "nowrap" }}
                 >
                   Use
                 </button>
@@ -106,7 +106,7 @@ export function PositionPersonSelect({
         </div>
       )}
       {!suggestions.scored && (
-        <div style={{ fontSize: 11, color: "#9A9684" }}>
+        <div style={{ fontSize: 11, color: "#8A93A0" }}>
           A suggestion appears once the pack builder has scored your people against this position.
         </div>
       )}
@@ -119,7 +119,7 @@ export function PositionPersonSelect({
           minHeight: 36,
           padding: "0 8px",
           borderRadius: 7,
-          border: confirmedPersonId ? "1px solid #E5E1D5" : "1px solid #D97706",
+          border: confirmedPersonId ? "1px solid #E3E6EA" : "1px solid #D97706",
           background: "#FFFFFF",
           color: "#16233B",
           fontSize: 12,

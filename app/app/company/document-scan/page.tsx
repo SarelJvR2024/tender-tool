@@ -29,7 +29,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
   if (!membership) redirect("/onboarding");
   const companyId = membership.company_id as string;
 
-  const [{ data: pending }, { data: principals }, { data: people }, { count: queuedCount }] = await Promise.all([
+  const [{ data: pending }, { data: principals }, { data: people }, { count: queuedCount }, { data: company }] = await Promise.all([
     supabase
       .from("onboarding_document_results")
       .select("id, document_kind, document_kind_reason, fields, warnings, text_method, model, created_at, onboarding_uploads(original_filename)")
@@ -43,6 +43,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
       .select("id", { count: "exact", head: true })
       .eq("company_id", companyId)
       .in("status", ["classification_requested", "classifying"]),
+    supabase.from("companies").select("legal_name").eq("id", companyId).maybeSingle(),
   ]);
 
   // "handed-off" means confirmCvHandoff just inserted a cv_uploads row for
@@ -113,7 +114,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
 
       <Card title={`To review (${pending?.length ?? 0})`}>
         {(pending ?? []).length === 0 ? (
-          <div style={{ fontSize: 13, color: "#6B6758" }}>Nothing waiting for review right now.</div>
+          <div style={{ fontSize: 13, color: "#5B6472" }}>Nothing waiting for review right now.</div>
         ) : (
           (pending ?? []).map((row) => {
             const upload = row.onboarding_uploads as unknown as { original_filename: string } | null;
@@ -124,6 +125,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
                 filename={upload?.original_filename ?? "document"}
                 principals={principals ?? []}
                 people={people ?? []}
+                companyLegalName={company?.legal_name ?? null}
               />
             );
           })

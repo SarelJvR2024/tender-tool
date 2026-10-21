@@ -9,7 +9,7 @@ import { addTenderComment, deleteTenderComment } from "./comment-actions";
  * it (app/lib/tenderActivity.ts says which, and what each can't say).
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
 // Newest first; the rest behind "Show all", so a long-running tender doesn't
 // add a page of history to an already long workspace.
@@ -20,11 +20,11 @@ const CATEGORY_DOT: Record<ActivityCategory, string> = {
   task: "#16233B",
   stage: "#16233B",
   positions: "#15803D",
-  template: "#6B6758",
-  pack: "#6B6758",
-  cv: "#6B6758",
-  answers: "#6B6758",
-  tender: "#6B6758",
+  template: "#5B6472",
+  pack: "#5B6472",
+  cv: "#5B6472",
+  answers: "#5B6472",
+  tender: "#5B6472",
   update: "#B45309",
 };
 
@@ -107,7 +107,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
   for (const r of (labelsRes.data ?? []) as { user_id: string; label: string }[]) labels.set(r.user_id, r.label);
   const actorName = (a: ActivityActor | null): string | null => {
     if (!a) return null;
-    if (a.kind === "system") return "Tender Tool";
+    if (a.kind === "system") return "Tender Ready";
     if (a.kind === "other_company") return "Another company on this tender";
     if (!a.userId) return "A former member";
     if (a.userId === user.id) return "You";
@@ -124,7 +124,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
           </span>
         )}
       </div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
         Internal notes for your team, and what has happened on this tender, newest first. Only people in your
         company see these. Status and stage changes show their latest change only - earlier ones aren&apos;t kept.
       </div>
@@ -139,7 +139,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
           maxLength={4000}
           rows={3}
           placeholder="e.g. Client confirmed the briefing is non-compulsory - spoke to Thandi on the phone"
-          style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 13, fontFamily: "inherit", resize: "vertical" }}
+          style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", resize: "vertical" }}
         />
         <div>
           <button
@@ -158,14 +158,14 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
       )}
 
       {entries.length === 0 ? (
-        <div style={{ fontSize: 12, color: "#9A9684", borderTop: "1px solid #F0EEE6", paddingTop: 10 }}>Nothing recorded yet.</div>
+        <div style={{ fontSize: 12, color: "#8A93A0", borderTop: "1px solid #ECEEF1", paddingTop: 10 }}>Nothing recorded yet.</div>
       ) : (
         <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
           {shown.map((e) => {
             const who = actorName(e.actor);
             const own = e.category === "note" && e.actor?.kind === "user" && e.actor.userId === user.id;
             return (
-              <li key={e.key} style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid #F0EEE6" }}>
+              <li key={e.key} style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid #ECEEF1" }}>
                 <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 100, marginTop: 5, background: CATEGORY_DOT[e.category] }} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
@@ -175,19 +175,19 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
                         {who ? e.text.charAt(0).toLowerCase() + e.text.slice(1) : e.text}
                       </span>
                     </div>
-                    <time dateTime={e.at} style={{ fontSize: 11, color: "#9A9684", whiteSpace: "nowrap" }}>{formatActivityTime(e.at)}</time>
+                    <time dateTime={e.at} style={{ fontSize: 11, color: "#8A93A0", whiteSpace: "nowrap" }}>{formatActivityTime(e.at)}</time>
                   </div>
                   {e.body && (
-                    <div style={{ marginTop: 4, padding: "8px 11px", borderRadius: 8, background: "#F6F5F1", border: "1px solid #E5E1D5", fontSize: 13, color: "#16233B", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    <div style={{ marginTop: 4, padding: "8px 11px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E3E6EA", fontSize: 13, color: "#16233B", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
                       {e.body}
                     </div>
                   )}
-                  {e.detail && <div style={{ fontSize: 12, color: "#6B6758", marginTop: 2, wordBreak: "break-word" }}>{e.detail}</div>}
+                  {e.detail && <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2, wordBreak: "break-word" }}>{e.detail}</div>}
                   {own && e.commentId && (
                     <form action={deleteTenderComment} style={{ marginTop: 4 }}>
                       <input type="hidden" name="tender_id" value={tenderId} />
                       <input type="hidden" name="comment_id" value={e.commentId} />
-                      <button type="submit" style={{ background: "none", border: "none", padding: 0, fontSize: 11, fontWeight: 600, color: "#9A9684", cursor: "pointer" }}>
+                      <button type="submit" style={{ background: "none", border: "none", padding: 0, fontSize: 11, fontWeight: 600, color: "#8A93A0", cursor: "pointer" }}>
                         Delete note
                       </button>
                     </form>

@@ -32,6 +32,11 @@ export type ManifestForm = {
   quote: string | null;
   from_ocr?: boolean; // the quote came from OCR'd text (engine/ocr/scan_ocr.py, experimental)
   editions: { document: string; format: string; editable: boolean }[];
+  // How strong the regex/heuristic match behind this item was (0-100) -
+  // engine/general/requirements.py, not an LLM call (see that module's own
+  // comment). Absent on manifests extracted before that work shipped.
+  confidence?: number;
+  confidence_reason?: string;
 };
 
 // EXPERIMENTAL OCR: set on a manifest document when some/all of its text was
@@ -56,6 +61,9 @@ export type ManifestReturnable = {
   document: string;
   quote: string;
   from_ocr?: boolean;
+  // See ManifestForm.confidence - same meaning, same engine.
+  confidence?: number;
+  confidence_reason?: string;
 };
 
 export type ManifestQuestion = {
@@ -89,17 +97,19 @@ export type RequirementManifest = {
     // set when the engine can type the company details onto this form (CIDB
     // Compulsory Enterprise Questionnaire, Form of Offer signatory block)
     overlay?: { code: string; document: string; page: number; fills: string; by_hand: string };
+    confidence?: number;
+    confidence_reason?: string;
   }[];
   returnables: ManifestReturnable[];
-  roles: { role_code: string; mentions: number; document: string; quote: string; from_ocr?: boolean }[];
+  roles: { role_code: string; mentions: number; document: string; quote: string; from_ocr?: boolean; confidence?: number; confidence_reason?: string }[];
   // 0040 / audit Q5: per-person registrations this tender requires that are
   // not on every person's record (requirements.py find_person_registrations).
   // Absent when the tender doesn't ask - the People page then keeps the
   // SACNASP / SAGC fields out of the way.
   // plus the 0050 catalog bodies SACAP / SACPLAN / SACQSP / SACPVP / PSIRA.
-  person_registrations?: { body: RequiredBody; mentions: number; document: string; quote: string; from_ocr?: boolean }[];
-  cidb: { grading: string; quote: string } | null;
-  briefing: { compulsory: boolean; quote: string } | null;
+  person_registrations?: { body: RequiredBody; mentions: number; document: string; quote: string; from_ocr?: boolean; confidence?: number; confidence_reason?: string }[];
+  cidb: { grading: string; quote: string; confidence?: number; confidence_reason?: string } | null;
+  briefing: { compulsory: boolean; quote: string; confidence?: number; confidence_reason?: string } | null;
   scoring: {
     preference_system: { system: string; reason?: string };
     functionality: { present?: boolean | null; threshold?: number | null; reason?: string };

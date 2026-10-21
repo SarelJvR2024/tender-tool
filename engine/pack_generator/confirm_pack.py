@@ -13,6 +13,14 @@ import json
 import yaml
 import datetime
 
+# Worker container has no TZ set (defaults UTC) - naive date.today() would be
+# one calendar day behind real SAST time during 00:00-01:59 SAST, the same
+# bug class fixed this session in watch_deadlines.py/daily_digest.py. Lower
+# stakes here (only affects the pack's own "generated on" provenance stamp,
+# not a due-date decision), but fixed for consistency while touching this
+# file for the enterprise-readiness audit (2026-10-20).
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
 # people.employment_status (0036) -> the label Form B1's dropdown uses.
 EMPLOYMENT_LABEL = {
     "full_time_employee": "Key Person is a full time employee of the tenderer",
@@ -127,7 +135,7 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
     pack = {
         "_provenance": {
             "generated_by": "engine/pack_generator (suggest_pack.py + confirm_pack.py)",
-            "generated_date": datetime.date.today().isoformat(),
+            "generated_date": datetime.datetime.now(SAST).date().isoformat(),
             "confirmed_by": selections["confirmed_by"],
             "confirmed_date": selections["confirmed_date"],
             "overrides": [f"{code}: suggested {s}, confirmed {c} instead" for code, s, c in overrides]

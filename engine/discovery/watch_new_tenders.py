@@ -15,8 +15,20 @@ was scored against config/klipcorp_profile.json and every result attached to
 (assess_tender.read_release) and that reading is scored separately for each
 company (assess_tender.score_release), so the same tender can be a strong fit
 for one company and not a fit for another. Each company's report-worthy
-verdict becomes its own discovered_opportunities row
-(seed_supabase_opportunities.py).
+verdict becomes its own discovered_opportunities row: main() calls
+seed_supabase_opportunities.seed() itself in Supabase mode (unless --no-seed),
+so a scheduled run of this script alone is enough to populate /discovery -
+see --no-seed's help for the one case where you'd still run
+seed_supabase_opportunities.py by hand against --out instead.
+
+main() also calls download_discovered_documents.download_for_releases()
+itself (unless --no-download-documents), right after seeding: every
+document on this run's discovered releases is downloaded and permanently
+stored (discovered_opportunity_documents / the 'discovered-tender-documents'
+bucket, migration 0071) - automatically, at discovery time, for every
+source except SANRAL (reCAPTCHA v3 wall - see that script's docstring and
+migration 0071's header). Idempotent across runs: a document already on
+file is never re-downloaded.
 
 Why this exists: Sarel cannot auto-download SANRAL's own tender documents
 (gated behind a name/company/email form plus a CAPTCHA - see
@@ -104,6 +116,9 @@ import gov_sources
 import assess_tender
 import company_profiles
 import discovery_downgrades
+import seed_supabase_opportunities
+import download_discovered_documents
+import source_http as sh  # SAST - see both date.today() fixes below
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "alerts"))
 import system_alerts  # noqa: E402
 
@@ -247,7 +262,7 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
     `seen`. A seen-store entry written before the fan-out (no "companies"
     key) was scored against one shared profile file, not any company's own
     rows, so it is scored again for every company."""
-    today = (today or datetime.date.today()).isoformat()
+    today = (today or datetime.datetime.now(sh.SAST).date()).isoformat()
     fps = {c["key"]: company_profiles.profile_fingerprint(c["profile"]) for c in companies}
     out = []
     for r in releases:
@@ -370,6 +385,15 @@ def main():
                      help="also report needs_review verdicts, not just strong_fit/possible - noisy on the "
                           "unfiltered national feed (confirmed: 72 of 74 on a real run were irrelevant "
                           "categories), use for a manual sweep, not the automated daily alert")
+    ap.add_argument("--no-seed", action="store_true",
+                     help="don't write the report-worthy releases to discovered_opportunities (Supabase mode "
+                          "only - this is the step that actually makes them show up on /discovery; skip it "
+                          "only for a dry run or when you'll seed --out separately with seed_supabase_opportunities.py)")
+    ap.add_argument("--no-download-documents", action="store_true",
+                     help="don't download and permanently store this run's documents to "
+                          "discovered_opportunity_documents / the 'discovered-tender-documents' bucket "
+                          "(migration 0071, Supabase mode only - every source except SANRAL, which stays "
+                          "a human click-through). Skip only for a dry run.")
     args = ap.parse_args()
 
     report_worthy = REPORT_WORTHY_VERDICTS_WIDE if args.include_needs_review else REPORT_WORTHY_VERDICTS
@@ -380,7 +404,7 @@ def main():
         print("  No companies to score for - nothing to do.")
         return []
 
-    today = datetime.date.today()
+    today = datetime.datetime.now(sh.SAST).date()
     date_from = (today - datetime.timedelta(days=args.days)).isoformat()
     date_to = today.isoformat()
     if args.sources == "ocds":
@@ -396,6 +420,19 @@ def main():
         names = gov_sources.ALL_SOURCES if args.sources == "all" else [x.strip() for x in args.sources.split(",")]
         print(f"Reading government tender sources: {', '.join(names)}...")
         normalized, res = gov_sources.releases_for_watch(names)
+        if res.get("errors"):
+            # gov_sources.fetch_all() already isolates one source's own
+            # failure from the rest (confirmed: a 5xx/timeout/429 there
+            # degrades to a WARNING print and that source's releases are
+            # simply missing from this run) - but nothing downstream of it
+            # ever reads res["errors"], so a whole source silently failing
+            # (or being rate-limited) was invisible outside this script's
+            # own stdout. One summary alert per run, not one per source.
+            failed = ", ".join(sorted(res["errors"]))
+            system_alerts.record(
+                "discovery",
+                f"{len(res['errors'])} government source(s) failed this run and were skipped: {failed}",
+                "warning", detail=str(res["errors"]))
         if not args.no_track_changes:
             # Same read, so one scheduled run covers both: what is new
             # (below) and what changed on every listing (cancellations,
@@ -454,6 +491,39 @@ def main():
         with open(args.out, "w") as f:
             json.dump(new_releases, f, indent=2)
         print(f"\nWrote {args.out}")
+
+    if client is not None and not args.no_seed:
+        # This is the step that actually puts a release on /discovery - a
+        # watch run that scores and reports but never calls this leaves
+        # every report-worthy match sitting unseen in company_results,
+        # never a discovered_opportunities row (Sarel, 2026-10-19: "why is
+        # nothing being pulled into our system"). Previously a human had to
+        # run seed_supabase_opportunities.py by hand against --out; doing it
+        # here means a scheduled watch run alone is enough.
+        written = seed_supabase_opportunities.seed(client, new_releases)
+        total = sum(written.values())
+        print(f"\nSeeded {total} discovered_opportunities row(s) across {len(written)} compan"
+              f"{'y' if len(written) == 1 else 'ies'}: " + ", ".join(f"{k}: {v}" for k, v in written.items()))
+    elif client is None and new_releases and not args.no_seed:
+        print("\n(Local --profile run - no Supabase company to seed discovered_opportunities for. "
+              "Run without --profile, or seed --out with seed_supabase_opportunities.py separately.)")
+
+    if client is not None and new_releases and not args.no_download_documents:
+        # Permanently downloads/stores every document on this run's discovered
+        # releases (every source except SANRAL - see migration 0071 and
+        # download_discovered_documents.py's own docstring), idempotent across
+        # runs. Independent of --no-seed: documents are stored even on a run
+        # that skips writing discovered_opportunities, so a later --no-seed
+        # re-seed from --out still finds the documents already on file.
+        print("\nDownloading and storing this run's documents (discovered_opportunity_documents)...")
+        doc_summary = download_discovered_documents.download_for_releases(new_releases, client)
+        print(f"  {doc_summary['downloaded']} document(s) downloaded and stored, "
+              f"{doc_summary['skipped_existing']} already on file, "
+              f"{doc_summary['skipped_no_url']} need a human click-through (no direct URL), "
+              f"{doc_summary['failed']} failed.")
+    elif client is None and new_releases and not args.no_download_documents:
+        print("\n(Local --profile run - no Supabase to store discovered_opportunity_documents in. "
+              "Run without --profile, or download --out separately with download_discovered_documents.py.)")
 
     return new_releases
 

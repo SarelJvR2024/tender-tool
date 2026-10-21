@@ -3,7 +3,7 @@ import { expiryStatus } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
 import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
-import { SiteNav } from "../../_components/SiteNav";
+import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { CvExtractionReview } from "./cv-review";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
@@ -129,10 +129,10 @@ type Project = {
 
 const field: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px",
-  borderRadius: 9, border: "1px solid #E5E1D5", fontSize: 14, fontFamily: "system-ui, sans-serif",
+  borderRadius: 9, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "system-ui, sans-serif",
   color: "#16233B", background: "#FFFFFF",
 };
-const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#6B6758", marginBottom: 4, display: "block" };
+const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#5B6472", marginBottom: 4, display: "block" };
 
 // Same badge shape and colours as the Document Vault (app/app/company/page.tsx).
 function ExpiryBadge({ status }: { status?: { label: string; bg: string; color: string } }) {
@@ -164,7 +164,7 @@ function PersonJumpLink({ href, label }: { href: string; label: string }) {
         textDecoration: "none",
         background: "#FFFFFF",
         color: "#16233B",
-        border: "1px solid #E5E1D5",
+        border: "1px solid #E3E6EA",
         whiteSpace: "nowrap",
       }}
     >
@@ -190,11 +190,11 @@ function ConditionalRegistration({
   const key = body.toLowerCase() as "sacnasp" | "sagc";
   const listId = `${key}-categories`;
   return (
-    <div style={{ border: "1px solid #F0EEE6", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>
+    <div style={{ border: "1px solid #ECEEF1", borderRadius: 9, padding: "10px 12px", marginBottom: 12 }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
-        {body} <span style={{ fontWeight: 400, color: "#6B6758" }}>- {info.name}</span>
+        {body} <span style={{ fontWeight: 400, color: "#5B6472" }}>- {info.name}</span>
       </div>
-      <div style={{ fontSize: 11, color: askedBy.length ? "#B45309" : "#9A9684", margin: "2px 0 8px" }}>
+      <div style={{ fontSize: 11, color: askedBy.length ? "#B45309" : "#8A93A0", margin: "2px 0 8px" }}>
         {askedBy.length
           ? `Asked for by ${askedBy.slice(0, 4).join(", ")}${askedBy.length > 4 ? ` and ${askedBy.length - 4} more` : ""}.`
           : `Only some tenders ask for this, ${info.example}.`}
@@ -349,7 +349,7 @@ export default async function PersonDetailPage({
   const expiryByBody = Object.fromEntries(credentialExpiries(person ?? {}).map((c) => [c.body, c.status]));
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", fontFamily: "system-ui, sans-serif", background: "#F6F5F1" }}>
+    <AppShell>
       <style>{`
         @media (max-width: 600px) {
           .person-grid-2 { grid-template-columns: 1fr !important; }
@@ -359,13 +359,11 @@ export default async function PersonDetailPage({
         }
       `}</style>
 
-      <SiteNav active="people" />
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box" }}>
+      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
           {isNew ? "Add person" : person!.name}
         </h1>
-        <div style={{ fontSize: 13, color: "#6B6758", marginBottom: 16 }}>
+        <div style={{ fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
           Real ID and registration numbers are stored for official SANRAL forms only - handle with care.
         </div>
 
@@ -382,7 +380,7 @@ export default async function PersonDetailPage({
               gap: 6,
               overflowX: "auto",
               WebkitOverflowScrolling: "touch",
-              background: "#F6F5F1",
+              background: "#FFFFFF",
               padding: "8px 2px",
               marginBottom: 12,
             }}
@@ -420,10 +418,10 @@ export default async function PersonDetailPage({
           />
         ))}
 
-        <form action={savePerson} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "18px 16px", marginBottom: 20 }}>
+        <form action={savePerson} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "18px 16px", marginBottom: 20 }}>
           <input type="hidden" name="id" value={isNew ? "new" : person!.id} />
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>
             Identity
           </div>
           <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -447,7 +445,7 @@ export default async function PersonDetailPage({
             <Field><label style={label}>Email</label><input style={field} type="email" name="email" defaultValue={person?.email ?? ""} /></Field>
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px" }}>
             Registrations
           </div>
           <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -488,15 +486,15 @@ export default async function PersonDetailPage({
               </>
             );
           })()}
-          <div style={{ fontSize: 12, color: "#9A9684", marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: "#8A93A0", marginBottom: 10 }}>
             Enter the date from the registration certificate or renewal notice. It drives the expiry
             badge here and the renewal reminder (60 days ahead, and again if it lapses).
           </div>
 
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px" }}>
             Qualifications
           </div>
-          <div style={{ fontSize: 12, color: "#9A9684", marginBottom: 10 }}>
+          <div style={{ fontSize: 12, color: "#8A93A0", marginBottom: 10 }}>
             Years of experience is never stored here - the pack-matching engine computes it
             from the initial-qualification date relative to each tender&apos;s own closing date.
             {yearsFromInitial !== null && ` (As of today, that would be about ${yearsFromInitial} years.)`}
@@ -515,7 +513,7 @@ export default async function PersonDetailPage({
             type="submit"
             style={{
               marginTop: 8, minHeight: 44, padding: "0 20px", borderRadius: 10,
-              background: "#16233B", color: "#FFFFFF", fontWeight: 600, fontSize: 14,
+              background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 14,
               border: "none", cursor: "pointer",
             }}
           >
@@ -524,9 +522,9 @@ export default async function PersonDetailPage({
         </form>
 
         {!isNew && person?.signatory_capacity && (
-          <div id="signatory-scope" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
+          <div id="signatory-scope" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
             <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Signatory scope (optional)</div>
-            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
               A region and/or industry/discipline this person usually signs for - e.g. &quot;Western Cape&quot;, or a
               discipline such as roads/civil. This only SUGGESTS {person!.name} as the default pick on a matching
               tender&apos;s &quot;Who signs this bid&quot; selector - the company can still choose anyone with a
@@ -535,7 +533,7 @@ export default async function PersonDetailPage({
             {signatoryScopes.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
                 {signatoryScopes.map((s) => (
-                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#16233B", border: "1px solid #F0EEE6", borderRadius: 8, padding: "6px 10px" }}>
+                  <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#16233B", border: "1px solid #ECEEF1", borderRadius: 8, padding: "6px 10px" }}>
                     <span style={{ flex: 1 }}>
                       {[s.region, s.industry_tag ? taxonomyLabel(taxonomy, s.industry_tag) : null, s.discipline_tag ? taxonomyLabel(taxonomy, s.discipline_tag) : null]
                         .filter(Boolean)
@@ -598,11 +596,11 @@ export default async function PersonDetailPage({
           (() => {
             const shown = catalogBodiesShown;
             return (
-              <div id="registrations-asked" style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>
+              <div id="registrations-asked" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 16px", marginBottom: 20 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 }}>
                   Other registrations a tender asks for
                 </div>
-                <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
+                <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
                   Shown only because a tender on the system asks for the body, or {person!.name} already holds it. Kept in the
                   company&apos;s registrations list (<Link href="/company/registrations" style={{ color: "#D97706" }}>Company &gt; Registrations</Link>),
                   which also sends the renewal reminder.
@@ -612,17 +610,17 @@ export default async function PersonDetailPage({
                   const mine = heldCatalog.filter((h) => h.slug === catalogSlug(b));
                   const asked = askedFor[b];
                   return (
-                    <div key={b} style={{ border: "1px solid #F0EEE6", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>
+                    <div key={b} style={{ border: "1px solid #ECEEF1", borderRadius: 9, padding: "10px 12px", marginBottom: 10 }}>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
-                        {b} <span style={{ fontWeight: 400, color: "#6B6758" }}>- {info.name}</span>
+                        {b} <span style={{ fontWeight: 400, color: "#5B6472" }}>- {info.name}</span>
                       </div>
-                      <div style={{ fontSize: 11, color: asked.length ? "#B45309" : "#9A9684", margin: "2px 0 8px" }}>
+                      <div style={{ fontSize: 11, color: asked.length ? "#B45309" : "#8A93A0", margin: "2px 0 8px" }}>
                         {asked.length
                           ? `Asked for by ${asked.slice(0, 4).join(", ")}${asked.length > 4 ? ` and ${asked.length - 4} more` : ""}.`
                           : `Held - no open tender asks for it right now.`}
                       </div>
                       {mine.map((h) => {
-                        const st = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Renewal date not on file", bg: "#F0EEE6", color: "#6B6758" };
+                        const st = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Renewal date not on file", bg: "#ECEEF1", color: "#5B6472" };
                         return (
                           <div key={h.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12, color: "#16233B", marginBottom: 6 }}>
                             <span>{h.category || "Registration"}{h.registration_number ? ` ${h.registration_number}` : ""}{h.expiry_date ? `, valid to ${h.expiry_date}` : ""}</span>
@@ -678,8 +676,8 @@ export default async function PersonDetailPage({
             <h2 id="roles" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
               Tender roles this CV qualifies for
             </h2>
-            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
-              Your company decides which tender roles {person!.name}&apos;s CV fits - Tender Tool uses this tag on each
+            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+              Your company decides which tender roles {person!.name}&apos;s CV fits - Tender Ready uses this tag on each
               tender&apos;s compliance check instead of guessing from years of experience or registration. The roles are the
               ones real tenders ask for: SANRAL&apos;s Book 1 key-person codes (a Design Specialist is tendered per
               specialism) and the key personnel other buyers name. Hover a role to see which tender it came from.
@@ -694,7 +692,7 @@ export default async function PersonDetailPage({
                 Couldn&apos;t load role options — try again shortly.
               </div>
             ) : (
-              <form action={saveRoleEligibility} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", marginBottom: 24 }}>
+              <form action={saveRoleEligibility} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginBottom: 24 }}>
                 <input type="hidden" name="person_id" value={person!.id} />
                 <div style={{ fontSize: 12, color: "#16233B", marginBottom: 8 }}>
                   {taggedRoles.size === 0
@@ -706,7 +704,7 @@ export default async function PersonDetailPage({
                   if (familyRoles.length === 0) return null;
                   const count = familyRoles.filter((r) => taggedRoles.has(r.code)).length;
                   return (
-                    <details key={family} open={count > 0 || family === "sanral_consultant"} style={{ borderTop: "1px solid #F0EEE6", padding: "8px 0" }}>
+                    <details key={family} open={count > 0 || family === "sanral_consultant"} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0" }}>
                       <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#16233B" }}>
                         {ROLE_FAMILY_LABEL[family] ?? family}
                         {count > 0 && <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "#15803D", background: "#DCFCE7", borderRadius: 100, padding: "2px 8px" }}>{count} tagged</span>}
@@ -717,7 +715,7 @@ export default async function PersonDetailPage({
                             <input type="checkbox" name="role_code" value={r.code} defaultChecked={taggedRoles.has(r.code)} style={{ marginTop: 3, width: 16, height: 16, flexShrink: 0 }} />
                             <span>
                               {r.title}
-                              {r.registration_body && <span style={{ color: "#9A9684", fontSize: 11 }}> · {r.registration_body}</span>}
+                              {r.registration_body && <span style={{ color: "#8A93A0", fontSize: 11 }}> · {r.registration_body}</span>}
                             </span>
                           </label>
                         ))}
@@ -737,7 +735,7 @@ export default async function PersonDetailPage({
             <h2 id="cv-documents" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
               CV documents
             </h2>
-            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
               Upload {person!.name}&apos;s CV once. Choose <strong>use as-is</strong> to attach
               the exact file to submissions with no AI involvement, or{" "}
               <strong>AI-extract</strong> to have the qualifications, registrations and projects read off the CV for
@@ -748,7 +746,7 @@ export default async function PersonDetailPage({
             <form
               action={uploadCv}
               encType="multipart/form-data"
-              style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", marginBottom: 16 }}
+              style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginBottom: 16 }}
             >
               <input type="hidden" name="person_id" value={person!.id} />
               <Field>
@@ -782,13 +780,13 @@ export default async function PersonDetailPage({
             {cvUploads.length > 0 && (
               <div style={{ marginBottom: 16 }}>
                 {cvUploads.map((u) => {
-                  const st = CV_UPLOAD_STATUS_LABEL[u.status] ?? { label: u.status, bg: "#F0EEE6", color: "#6B6758" };
+                  const st = CV_UPLOAD_STATUS_LABEL[u.status] ?? { label: u.status, bg: "#ECEEF1", color: "#5B6472" };
                   const url = signedUrls[u.storage_path];
                   return (
-                    <div key={u.id} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "10px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div key={u.id} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "10px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{u.original_filename}</div>
-                        <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 2 }}>
                           {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {new Date(u.created_at).toLocaleDateString()}
                         </div>
                         {u.status === "extraction_failed" && u.extraction_error && (
@@ -813,18 +811,18 @@ export default async function PersonDetailPage({
 
             {generatedCvs.length > 0 && (
               <div style={{ marginBottom: 20 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#9A9684", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
                   Standard generated CVs
                 </div>
-                <div style={{ fontSize: 11, color: "#9A9684", marginBottom: 8 }}>
+                <div style={{ fontSize: 11, color: "#8A93A0", marginBottom: 8 }}>
                   Generated automatically, usually within a few minutes — refresh to check.
                 </div>
                 {generatedCvs.map((g) => {
-                  const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#F0EEE6", color: "#6B6758" };
+                  const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#ECEEF1", color: "#5B6472" };
                   const docxUrl = g.storage_path_docx ? signedUrls[g.storage_path_docx] : null;
                   const pdfUrl = g.storage_path_pdf ? signedUrls[g.storage_path_pdf] : null;
                   return (
-                    <div key={g.id} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "10px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div key={g.id} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "10px 16px", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
                           {CV_FORMAT_LABEL[g.format] ?? g.format} · {g.detail}
@@ -849,19 +847,19 @@ export default async function PersonDetailPage({
             <h2 id="projects" style={{ fontSize: 16, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>
               Project / reference history
             </h2>
-            <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 12 }}>
+            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
               Used by the pack-matching engine to score this person against a tender&apos;s key positions
               (see engine/pack_generator/suggest_pack.py).
             </div>
 
             {projects.length === 0 && (
-              <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", fontSize: 13, color: "#6B6758", marginBottom: 16 }}>
+              <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
                 No project history on file yet for {person!.name}.
               </div>
             )}
 
             {projects.map((proj) => (
-              <div key={proj.id} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "12px 16px", marginBottom: 10 }}>
+              <div key={proj.id} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "12px 16px", marginBottom: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                   <div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B", whiteSpace: "pre-line" }}>{proj.client_and_number}</div>
@@ -869,7 +867,7 @@ export default async function PersonDetailPage({
                       {proj.position_held || proj.position_code || "Position not set"}
                       {proj.value_rm != null && ` · R${proj.value_rm}m`}
                     </div>
-                    <div style={{ fontSize: 11, color: "#9A9684", marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 2 }}>
                       {proj.start_date ?? "?"} – {proj.end_date ?? "ongoing"}
                       {proj.contact_match_confidence && ` · referee match: ${proj.contact_match_confidence}`}
                     </div>
@@ -892,7 +890,7 @@ export default async function PersonDetailPage({
               <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#D97706", padding: "8px 0" }}>
                 + Add a project to this person&apos;s history
               </summary>
-              <form action={saveProject} style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 11, padding: "14px 16px", marginTop: 8 }}>
+              <form action={saveProject} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginTop: 8 }}>
                 <input type="hidden" name="person_id" value={person!.id} />
                 <div className="person-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <Field><label style={label}>Client and contract number *</label><input style={field} name="client_and_number" placeholder={"e.g. ACSA (OR Tambo)\\nORT5737/2018/RFP"} required /></Field>
@@ -945,6 +943,6 @@ export default async function PersonDetailPage({
           </>
         )}
       </div>
-    </div>
+    </AppShell>
   );
 }

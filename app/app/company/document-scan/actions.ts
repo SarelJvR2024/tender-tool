@@ -77,7 +77,10 @@ export async function registerOnboardingBatch(input: {
     }));
   if (rows.length === 0) return { error: "Choose at least one file to upload." };
   const { error } = await supabase.from("onboarding_uploads").insert(rows);
-  if (error) return { error: error.message };
+  if (error) {
+    console.error("onboarding_uploads insert failed", error);
+    return { error: "Could not register these uploads - try again. If it keeps happening, let us know." };
+  }
   revalidatePath(BACK);
   return { ok: true, batchId: input.batchId };
 }
@@ -91,9 +94,15 @@ async function copyBetweenBuckets(
   contentType: string,
 ): Promise<string | null> {
   const { data: blob, error: dlErr } = await supabase.storage.from(fromBucket).download(fromPath);
-  if (dlErr || !blob) return `Could not read the uploaded file: ${dlErr?.message ?? "not found"}`;
+  if (dlErr || !blob) {
+    console.error("onboarding document download failed", fromPath, dlErr);
+    return "Could not read the uploaded file - try again. If it keeps happening, let us know.";
+  }
   const { error: upErr } = await supabase.storage.from(toBucket).upload(toPath, blob, { contentType });
-  if (upErr) return `Could not file the document: ${upErr.message}`;
+  if (upErr) {
+    console.error("onboarding document copy-upload failed", toPath, upErr);
+    return "Could not file the document - try again. If it keeps happening, let us know.";
+  }
   return null;
 }
 
@@ -113,7 +122,10 @@ async function loadPendingResult(supabase: SupabaseClient, companyId: string, re
     .select("id, company_id, onboarding_upload_id, document_kind, fields, review_status, onboarding_uploads(storage_path, original_filename)")
     .eq("id", resultId)
     .maybeSingle();
-  if (error) fail(error.message);
+  if (error) {
+    console.error("onboarding_document_results select failed", error);
+    fail("Could not load this document - try again. If it keeps happening, let us know.");
+  }
   if (!row || row.company_id !== companyId) fail("That document wasn't found.");
   if (row.review_status !== "pending_review") fail("This document was already reviewed.");
   return row as unknown as ResultRow;
@@ -171,8 +183,9 @@ export async function confirmVaultDocument(formData: FormData) {
 
   const { error } = await supabase.from("companies").update(update).eq("id", companyId);
   if (error) {
+    console.error("companies update failed for onboarding document", error);
     await supabase.storage.from(VAULT_BUCKET).remove([destPath]);
-    fail(error.message);
+    fail("Could not file this document - try again. If it keeps happening, let us know.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
   await markApplied(supabase, resultId!, userId, { table: "companies", column: docColumn, fields: appliedFields });
@@ -221,8 +234,9 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
   };
   const { data: inserted, error } = await supabase.from("experience_items").insert(row).select("id").single();
   if (error) {
+    console.error("experience_items insert failed for onboarding document", error);
     await supabase.storage.from("experience-documents").remove([destPath]);
-    fail(error.message);
+    fail("Could not file this document - try again. If it keeps happening, let us know.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
   await markApplied(supabase, resultId!, userId, { table: "experience_items", id: inserted!.id });
@@ -296,8 +310,9 @@ export async function confirmCvHandoff(formData: FormData) {
     mode: "ai_extract", status: "extraction_requested", uploaded_by: userId,
   }).select("id").single();
   if (error) {
+    console.error("cv_uploads insert failed for onboarding document", error);
     await supabase.storage.from("cv-documents").remove([destPath]);
-    fail(error.message);
+    fail("Could not file this CV - try again. If it keeps happening, let us know.");
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
   await markApplied(supabase, resultId!, userId, { handed_off_to: "cv_uploads", id: cvUpload!.id });

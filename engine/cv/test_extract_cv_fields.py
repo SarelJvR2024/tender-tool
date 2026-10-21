@@ -115,8 +115,18 @@ def test_text_extraction(tmp):
         r = x.read_cv_text(p, tmp)
         t = r["text"]
         # LibreOffice's PDF wraps the narrow table column mid-token ("TMRA/2019/04" / "4") - real
-        # behaviour of PDF CVs, which is why quotes are also matched with whitespace removed.
-        check("20169999" in t and "University of Cape Town" in t and "TMRA/2019/04" in t,
+        # behaviour of PDF CVs, which is why quotes are also matched with whitespace removed. That
+        # claim used to be aspirational only - this check did a bare `"TMRA/2019/04" in t`, with no
+        # normalisation at all, so it was exactly as brittle to a LibreOffice point release wrapping
+        # the same table cell a few pixels differently as the comment above it said it wasn't. This
+        # is the real, previously-undiagnosed cause of bridge-worker-ci.yml's "GitHub-runner-only"
+        # failure on this exact check (QA-Edge-Case-Findings.md, 2026-10-19) - reusing
+        # evidence_in_text(), the same production-tested, wrap-tolerant matcher real CV extraction
+        # already verifies every quote against, rather than a second, less tolerant check invented
+        # just for this test.
+        norm_t = x._norm(t)
+        check(x.evidence_in_text("20169999", norm_t) and x.evidence_in_text("University of Cape Town", norm_t)
+              and x.evidence_in_text("TMRA/2019/04", norm_t),
               f"{os.path.basename(p)} via {r['method']}: registration, institution and table cell all read")
         redacted, ids = x.find_and_redact_sa_ids(t)
         check(ids == [SYNTH_ID] and SYNTH_ID not in redacted, f"{os.path.basename(p)}: SA ID found locally and removed")
@@ -394,6 +404,29 @@ def test_ocr(docx_path, tmp):
     check(r["method"] == f"OCR ({r['ocr']['engine']}) - image upload" and "20169999" in r["text"], "image upload read by OCR")
 
 
+def test_sa_id_redaction_line_break():
+    """Finding (2026-10-21): the separator between an ID's 6/4/3 digit groups
+    only matched a literal space or hyphen - but test_text_extraction()'s own
+    comment above already confirms real PDF CVs get mid-token line-wraps
+    from a narrow table column (the same artifact this test exercises for an
+    ID specifically). Neither half of a line-split ID is 13 digits on its
+    own, so the whole number passed through completely unredacted and would
+    have reached the Anthropic API verbatim - the exact failure this
+    module's "found locally and redacted BEFORE any text leaves this
+    machine" promise exists to prevent."""
+    print("7. SA ID redaction survives a mid-number line break (narrow table-cell PDF wrap)")
+    line_split = f"ID Number: {SYNTH_ID[:6]}\n{SYNTH_ID[6:10]}\n{SYNTH_ID[10:]}\nName: Jane Doe"
+    redacted, ids = x.find_and_redact_sa_ids(line_split)
+    check(ids == [SYNTH_ID] and SYNTH_ID not in redacted.replace("\n", ""),
+          "an ID split across line breaks is still found and redacted, not leaked")
+    # Mirror case: two genuinely UNRELATED digit runs that happen to sit on
+    # either side of a line break must NOT be fused into a fake ID - proves
+    # the fix isn't over-broad.
+    unrelated = "Phone: 011555\n1234 ext 99"
+    redacted2, ids2 = x.find_and_redact_sa_ids(unrelated)
+    check(redacted2 == unrelated and ids2 == [], "unrelated digits split by a line break are never fused into a false ID")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="cv_extract_test_")
     try:
@@ -403,6 +436,7 @@ def main():
         test_llm_call()
         test_queue(docx_path, tmp)
         test_ocr(docx_path, tmp)
+        test_sa_id_redaction_line_break()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{'ALL PASSED' if not FAILS else f'{len(FAILS)} FAILED'}")

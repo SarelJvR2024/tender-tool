@@ -162,7 +162,27 @@ def fill_contract_data(src_dir, out_dir, comp, signatory, key_persons, log):
         label = row.cells[0].text.strip()
         code = _row_code(label)
         if code is None:
-            continue  # "Alternate to ... (if applicable)" - optional, left blank as before
+            # _row_code() returns None for two different reasons that must
+            # not be treated the same: a genuinely optional "Alternate to
+            # ... (if applicable)" row (left blank, as before - no trace
+            # needed, this is the documented, intended shape of the form),
+            # versus a real key-position row whose title just doesn't match
+            # anything in POSITION_TITLES (a future SANRAL tender introducing
+            # a title this dict doesn't recognise yet). The second case used
+            # to be silently skipped too - identical to the first - so the
+            # row would ship blank in the real submission with NOTHING in
+            # the provenance report telling anyone to fill it by hand. Found
+            # during this session's enterprise-readiness audit: a brand-new
+            # company's very first tender would hit this with no warning at
+            # all, since admin_harness.py's own baseline-diff treats a first
+            # run as "clean, baseline stored" unconditionally.
+            if re.sub(r"\s+", " ", label.lower()).startswith("alternate"):
+                continue
+            log.missing(f"c123.key_person_row_{row_idx}",
+                        f"'{label}' doesn't match any known SANRAL key-position title - "
+                        "this row was left blank. Check the position list in fill_docx_forms.py's "
+                        "POSITION_TITLES and add it if this is a real, currently-used title.")
+            continue
         if row_idx not in rows:
             log.missing(f"c123.key_person_row_{row_idx}",
                         f"No key person confirmed for '{label}' in this pack - fill the name by hand."

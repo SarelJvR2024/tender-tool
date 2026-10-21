@@ -1,0 +1,50 @@
+# One-off manual check: can a GitHub Actions runner reach the 3 direct-site
+# readers added 2026-10-21 (Lephalale, Kouga, Vaal Central Water)? All three
+# were built and verified against real saved/fetched pages from this
+# project's own dev sandbox, and all three were reachable from there without
+# the kind of outright blocking randwater.py hit (see
+# test-randwater-reachability.yml) - but a GitHub Actions runner is still a
+# different network path, and this is how that gets confirmed rather than
+# assumed, same discipline as every other direct-site reader this session.
+#
+# This is why none of the three is in gov_sources.ALL_SOURCES yet (see that
+# file's own comment) - a green run here is real evidence it's safe to add.
+#
+# lephalale.py also needs `pdftotext` (poppler-utils) on the runner itself,
+# unlike every other reader so far (pure standard library) - installed
+# below, the same package engine/worker/Dockerfile already installs for the
+# real production worker.
+#
+# workflow_dispatch only - never runs on a schedule, a human triggers it on
+# purpose to answer this one question.
+
+name: test-new-readers-reachability
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  try-fetch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install poppler-utils (pdftotext, needed by lephalale.py only)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends poppler-utils
+
+      - name: Try fetching and parsing Lephalale Local Municipality's own tenders page
+        run: python3 engine/discovery/lephalale.py
+
+      - name: Try fetching and parsing Kouga Local Municipality's own open-tenders listing
+        run: python3 engine/discovery/kouga.py
+
+      - name: Try fetching and parsing Vaal Central Water Board's own tenders page
+        run: python3 engine/discovery/vaal_central_water.py

@@ -8,8 +8,43 @@
  * so it can be covered without a live database.
  */
 
+// Type-only import, fully erased by `node --experimental-strip-types` (no
+// runtime module resolution at all - confirmed empirically, same reason
+// general-pack-review-logic.ts's own `import type { ReviewStatus }` from
+// this file works) - reuses bid-task-status.ts's own type rather than
+// re-declaring an identical one, without creating a real runtime dependency
+// on that file (which itself imports the "@/" alias, unresolvable here -
+// see "Verify/Provide/Fix grouping" in app/AGENTS.md).
+import type { BidTaskStatus } from "./bid-task-status";
+
 export type ReviewStatus = "confirmed" | "needs_input" | "assumed_default" | "warning" | "missing";
 export type ChecklistStatus = "included" | "included_warning" | "not_included";
+
+/**
+ * Collapses this screen's 5-way ReviewStatus down to the Product promise's
+ * own 3-way Verify/Provide/Fix grouping (app/AGENTS.md), for Pill rendering
+ * only - the 5-way vocabulary itself, and every function above/below that
+ * returns it, is unchanged (their own tests still key off it directly).
+ *
+ * - "missing" -> Fix everywhere it's produced: no confirmed key person, no
+ *   signatory, an unanswered mandatory Form B7, a mandatory-and-disqualifying
+ *   locality miss - never an optional gap.
+ * - "warning" -> Provide: always a softer, non-disqualifying concern (a
+ *   role-fit mismatch, a B7 plan note, no signatory capacity on file, a
+ *   non-disqualifying locality miss) - never what actually blocks compiling.
+ * - "confirmed" and "assumed_default" -> Verify (an AI-filled or defaulted
+ *   value, confirmed or not).
+ * - "needs_input" -> Provide for every producer except signatureStatus's own
+ *   "nobody chosen, but a suggested default exists" case, which is really
+ *   Verify-unconfirmed (a default WAS picked) under the wrong label - a
+ *   known mislabeling in that one function, not fixed here to keep this
+ *   pass presentation-only; see app/AGENTS.md.
+ */
+export function reviewStatusToBidTask(status: ReviewStatus): BidTaskStatus {
+  if (status === "missing") return "fix";
+  if (status === "confirmed" || status === "assumed_default") return "verify";
+  return "provide"; // needs_input, warning
+}
 
 /** A simple "is this company field on file" classification, used for the company-data section. */
 export function fieldStatus(value: unknown, required = true): { status: ReviewStatus; note: string | null } {

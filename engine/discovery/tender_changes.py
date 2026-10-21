@@ -98,9 +98,54 @@ def snapshot_of(r):
 
 
 def _event(r, change_type, summary, old=None, new=None, when=None, evidence=None, key_extra=None):
-    key = r.get("ocid") or f"{r.get('source')}:{r.get('contract_number')}"
+    ocid, contract_number = r.get("ocid"), r.get("contract_number")
+    if not ocid and not contract_number:
+        # No real identity for this release at all - r.get("ocid") or
+        # f"{source}:{contract_number}" used to fall through to the literal
+        # string "<source>:None" here, which is IDENTICAL across every such
+        # release from that source (confirmed reachable: cidb_tenders.py,
+        # eskom_bulletin.py and transnet_etenders.py can all produce a
+        # release with contract_number=None from a blank/missing scraped
+        # field). Two completely unrelated tenders would then silently
+        # overwrite each other's change-tracking under one shared key, and a
+        # later run could fabricate a bogus title/date-changed event by
+        # diffing the survivor's new state against the other tender's old
+        # snapshot. watch_new_tenders.release_key() and
+        # download_discovered_documents.release_key() already treat "both
+        # missing" as no key at all and skip - matching that convention here
+        # instead of inventing a new fallback key.
+        return None
+    key = ocid or f"{r.get('source')}:{contract_number}"
+    if key_extra is None:
+        # A mutable field (closing/briefing date, title, a cross-source
+        # disagreement) can genuinely revisit an earlier value: extended
+        # B, reverted to A, extended to B again - three separate, real,
+        # newsworthy changes. Keying only on `new` made the third one
+        # collide with the first's dedupe_key and silently dropped it as
+        # "already reported" (QA-Edge-Case-Findings.md, 2026-10-19 -
+        # reproduced directly: a tender's closing date going A->B->A->B
+        # across 4 runs only ever reported the first two changes, not the
+        # fourth, identical-looking-but-genuinely-new extension). Bucketing
+        # by the minute this run saw it still dedupes the one case this
+        # mechanism actually exists for - calling detect()/save() again
+        # before the first call's save() persisted (watch_new_tenders.py/
+        # daily_digest.py both call tender_changes.run() once per scheduled
+        # run, so a second call racing the same stale snapshot means an
+        # operator or a retry-on-failure wrapper re-ran the same script
+        # within seconds to a couple of minutes, never literally a whole
+        # calendar day later) - without needing a whole day's width, which
+        # would itself collide on a genuine third occurrence of the same
+        # value reverted/re-set more than once within one calendar day
+        # (confirmed by reproducing it: day-bucketing silently dropped a
+        # third same-day A->B->A->B flip the exact same way the original
+        # bug dropped a weeks-apart one). Minute-width keeps the real
+        # protection this exists for while making that residual collision
+        # need two genuinely separate occurrences within the same single
+        # minute, rather than the same calendar day, to still happen.
+        minute = datetime.datetime.now(sh.SAST).strftime("%Y-%m-%dT%H:%M")
+        key_extra = f"{minute}:{json.dumps(new, sort_keys=True, default=str)}"
     return {
-        "dedupe_key": f"{key}|{change_type}|{key_extra if key_extra is not None else json.dumps(new, sort_keys=True, default=str)}"[:600],
+        "dedupe_key": f"{key}|{change_type}|{key_extra}"[:600],
         "release_key": key, "ocid": r.get("ocid"), "source": r.get("source") or "unknown",
         "contract_number": r.get("contract_number"), "buyer": r.get("buyer"), "title": r.get("title"),
         "change_type": change_type, "summary": summary, "old_value": old, "new_value": new,
@@ -305,6 +350,12 @@ def detect(releases, snapshots, cancelled=(), notices=(), first_run_late_docs=Tr
     (events, new_snapshots) - new_snapshots replaces/extends the store."""
     events, new_snaps, fresh = [], {}, []
     for r in releases:
+        if not r.get("ocid") and not r.get("contract_number"):
+            # Same reasoning as _event()'s own guard above: no real identity
+            # to track this release's snapshot/diff under at all - skip it
+            # rather than colliding with every other such release from the
+            # same source under "<source>:None".
+            continue
         key = r.get("ocid") or f"{r.get('source')}:{r.get('contract_number')}"
         try:
             prev = snapshots.get(key)
@@ -336,6 +387,11 @@ def detect(releases, snapshots, cancelled=(), notices=(), first_run_late_docs=Tr
     events += relistings(releases)
     events += eskom_notices(notices, releases)
     events += portal_bidders(portal_closed)
+    # _event() returns None for a release with no real ocid/contract_number
+    # (see its own guard) - absorb that here once, regardless of which
+    # helper above produced it, rather than needing every one of this
+    # function's ~13 call sites to check individually.
+    events = [e for e in events if e is not None]
     seen, unique = set(), []
     for e in events:
         if e["dedupe_key"] not in seen:

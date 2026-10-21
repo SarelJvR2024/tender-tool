@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { KIND_LABELS, parseHolder, type RegistrationScope } from "@/lib/registrations";
+import { safeFileName } from "@/lib/safeFileName";
 
 // Held registrations (0050). The 0050 trigger is the authority on scope
 // (company / person / both), stored_in types, and same-company holders; these
@@ -69,10 +70,13 @@ export async function saveHeldRegistration(formData: FormData) {
   if (file && file.size > 0 && heldId) {
     if (file.size > MAX_UPLOAD_BYTES) fail("File is larger than 4.4 MB - scan it at a lower resolution or compress the PDF.", `#r-${heldId}`);
     const { data: existing } = await supabase.from("held_registrations").select("storage_path").eq("id", heldId).maybeSingle();
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const safeName = safeFileName(file.name);
     const path = `${companyId}/registrations/${heldId}/${randomUUID()}-${safeName}`;
     const { error: upErr } = await supabase.storage.from(VAULT_BUCKET).upload(path, file, { contentType: file.type || "application/octet-stream" });
-    if (upErr) fail(`Saved, but the file could not be uploaded: ${upErr.message}`, `#r-${heldId}`);
+    if (upErr) {
+      console.error("held registration certificate upload failed", file.name, upErr);
+      fail(`Saved, but ${file.name} could not be uploaded - try again. If it keeps happening, let us know.`, `#r-${heldId}`);
+    }
     const { error } = await supabase.from("held_registrations").update({ storage_path: path, original_filename: file.name }).eq("id", heldId);
     if (error) {
       await supabase.storage.from(VAULT_BUCKET).remove([path]);
@@ -92,7 +96,10 @@ export async function deleteHeldRegistration(formData: FormData) {
   if (!id) redirect(BACK);
   const { data: existing } = await supabase.from("held_registrations").select("storage_path").eq("id", id).maybeSingle();
   const { error } = await supabase.from("held_registrations").delete().eq("id", id);
-  if (error) fail(error.message);
+  if (error) {
+    console.error("held_registrations delete failed", error);
+    fail("Could not delete this registration - try again. If it keeps happening, let us know.");
+  }
   if (existing?.storage_path) await supabase.storage.from(VAULT_BUCKET).remove([existing.storage_path]);
   revalidatePath(BACK);
   redirect(`${BACK}?saved=removed`);
@@ -101,7 +108,7 @@ export async function deleteHeldRegistration(formData: FormData) {
 /**
  * A company adds a registration type the shared catalog doesn't have yet.
  * It is private to the company (owner_company_id); the shared catalog is
- * maintained by Tender Tool (service role), like discipline_categories.
+ * maintained by Tender Ready (service role), like discipline_categories.
  */
 export async function addRegistrationType(formData: FormData) {
   const companyId = await requireCompanyId();
@@ -128,7 +135,12 @@ export async function addRegistrationType(formData: FormData) {
     owner_company_id: companyId,
     asked_for_by: str(formData, "asked_for_by"),
   });
-  if (error) fail(error.message.includes("registration_types_company_slug") ? "You already added a registration with that name." : error.message, "#catalog");
+  if (error) {
+    if (!error.message.includes("registration_types_company_slug")) console.error("registration_types insert failed", error);
+    fail(error.message.includes("registration_types_company_slug")
+      ? "You already added a registration with that name."
+      : "Could not add this registration type - try again. If it keeps happening, let us know.", "#catalog");
+  }
   revalidatePath(BACK);
   redirect(`${BACK}?saved=type#add`);
 }

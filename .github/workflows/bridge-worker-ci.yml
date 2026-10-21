@@ -19,6 +19,30 @@
 # under load, and in a public repo they switch themselves off after 60 days with
 # no commits. The production worker is the always-on container. Full reasoning
 # and evidence: docs/specs/Automated-Fulfillment-Deployment.md.
+#
+# Every test step below (2026-10-19) carries `if: ${{ !cancelled() }}` so one
+# step's failure no longer skips every step after it - GitHub Actions' own
+# default is to stop a job dead at its first failing step, which meant one
+# known, separate issue (a LibreOffice-rendering difference this runner has in
+# test_extract_cv_fields.py, QA-Edge-Case-Findings.md twenty-second run) was
+# silently preventing ~20 other, unrelated regression test files from ever
+# running on this job at all - not failing, never even executing - for most of
+# this project's history. The job's overall conclusion still reports failure
+# if any one step fails; only the "stop everything after the first failure"
+# behaviour is turned off, so every test's own real pass/fail is now visible.
+#
+# tenant-isolation-db (2026-10-20): engine/security/test_tenant_isolation.py
+# has a Part 2 that replays every migration against a real Postgres and
+# checks RLS + the tt_check_same_company trigger under actual enforcement -
+# the layer that caught 0065/0066's trigger bug - but it only ran when a
+# human set TENANT_PSQL by hand, so it had never once run in CI. This job
+# gives it a real `services: postgres` container, replays app/supabase/
+# migrations/*.sql on top of the minimal Supabase auth/storage stand-in in
+# engine/security/scratch_supabase_stub.sql (engine/security/replay_schema.sh
+# does both, in order, on a fresh database), points TENANT_PSQL at it, and
+# runs the real script - so Part 2 now genuinely executes, and fails the job
+# if it reports any failure, on every push that touches the engine or a
+# migration.
 name: bridge-worker-ci
 
 on:
@@ -30,6 +54,7 @@ on:
       - "templates/general_samples/**"
       - "fingerprints/**"
       - "config/discipline_taxonomy.json"
+      - "app/supabase/migrations/**"
       - ".dockerignore"
       - ".github/workflows/bridge-worker-ci.yml"
   workflow_dispatch:
@@ -59,78 +84,147 @@ jobs:
           pip install -r engine/worker/requirements.txt
 
       - name: CV bridge self-test (row adapters -> generate_cv.py)
+        if: ${{ !cancelled() }}
         run: python3 engine/cv/process_cv_jobs.py --self-test --out-dir "$RUNNER_TEMP/cv-self-test"
 
       - name: CV AI-extraction - text step, failure modes, checks, queue, OCR of a scan (no API key, no secrets)
+        if: ${{ !cancelled() }}
         run: |
           sudo apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-eng tesseract-ocr-osd
           pip install jsonschema  # test only: checks the test-double answer against the output schema
           python3 engine/cv/test_extract_cv_fields.py
 
       - name: Polling-loop smoke test (fake Supabase, no secrets)
+        if: ${{ !cancelled() }}
         run: python3 engine/worker/test_poll_loop.py
 
       - name: Deadline reminders - escalation and closing-date awareness (in-memory rows)
+        if: ${{ !cancelled() }}
         run: python3 engine/compliance/test_watch_deadlines_urgency.py
 
       - name: Per-person registration expiry reminders + digest routing (in-memory rows)
+        if: ${{ !cancelled() }}
         run: python3 engine/compliance/test_watch_person_credentials.py
 
       - name: SACNASP / SAGC registration expiry reminders (in-memory rows)
+        if: ${{ !cancelled() }}
         run: python3 engine/compliance/test_watch_conditional_registrations.py
 
       - name: Discipline taxonomy - seed validates, real tenders sorted, fit scoring, growth without a migration
+        if: ${{ !cancelled() }}
         run: |
           python3 engine/discovery/taxonomy.py check
           python3 engine/discovery/test_taxonomy.py
 
       - name: Award outcomes - parsing of eTenders/SANRAL award records (offline fixtures)
+        if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_award_outcomes.py
 
       - name: Award prices - published outcomes merged per tender, winner placed, honest data notes (real records)
+        if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_award_prices.py
 
       - name: General engine - bridge end to end (fake Supabase, real tender documents)
+        if: ${{ !cancelled() }}
         run: |
           sudo apt-get install -y --no-install-recommends poppler-utils
           pip install reportlab  # test fixtures only
           python3 engine/general/test_general_bridge.py
 
       - name: General engine - requirement manifests of the sample tenders
+        if: ${{ !cancelled() }}
         run: python3 engine/general/general_harness.py --no-pack --store "$RUNNER_TEMP/general-harness"
 
       - name: Discovery fan-out - same tender scored per company (real sample PDFs)
+        if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_discovery_fanout.py
 
       - name: Discovery downgrades - a re-score that makes a verdict worse is flagged (real sample PDFs)
+        if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_discovery_downgrades.py
 
       - name: Daily digest live mode - per-company scoring and per-company sections (in-memory rows, real sample PDFs)
+        if: ${{ !cancelled() }}
         run: python3 engine/notify/test_digest_live.py
 
       - name: Tender updates - addenda classified from real documents, watch end to end, pursuers only (in-memory rows)
+        if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_tender_updates.py
 
       - name: Government sources + listing changes - portal/Eskom/Transnet/Cape Town readers, SANRAL dual-id merge, cancellations and date moves (real trimmed rows, offline)
+        if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_gov_sources.py
 
       - name: Company letters - uploaded as-is / own guideline / not set up (docx read-back)
+        if: ${{ !cancelled() }}
         run: python3 engine/test_company_documents.py "$RUNNER_TEMP/company-documents"
 
       - name: SANRAL Form B7 - category + matrix from the real templates, applicability, fill read-back
+        if: ${{ !cancelled() }}
         run: python3 engine/test_sanral_b7.py
 
       - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
+        if: ${{ !cancelled() }}
         run: python3 engine/security/test_tenant_isolation.py
 
       - name: Reminder seen stores in the database, not state/*.json (in-memory REST client)
+        if: ${{ !cancelled() }}
         run: python3 engine/compliance/test_reminder_seen_db.py
 
       - name: System alerts - real bridges fed malformed jobs, worker failure, check_system_alerts.py (fake Supabase)
+        if: ${{ !cancelled() }}
         run: python3 engine/alerts/test_system_alerts.py
 
       - name: Form-field audit - no Klipcorp-shaped default on any SANRAL/general form field (real templates, un-Klipcorp-like company)
+        if: ${{ !cancelled() }}
         run: python3 engine/test_form_field_audit.py
+
+  tenant-isolation-db:
+    # Part 2 of engine/security/test_tenant_isolation.py: real RLS + the
+    # tt_check_same_company trigger, enforced by an actual Postgres with
+    # every migration replayed - not the in-memory Part 1 above. See the
+    # header comment at the top of this file.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd=pg_isready
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Postgres client + engine Python deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          pip install -r engine/worker/requirements.txt
+
+      - name: Create a fresh scratch database
+        run: psql -h 127.0.0.1 -U postgres -d postgres -c "create database tenant_iso;"
+
+      - name: Replay every migration (0001..latest) onto the minimal Supabase auth/storage stand-in
+        run: engine/security/replay_schema.sh -h 127.0.0.1 -U postgres -d tenant_iso
+
+      - name: Cross-tenant isolation Part 2 - real RLS + tt_check_same_company on the replayed schema
+        env:
+          TENANT_PSQL: "psql -h 127.0.0.1 -U postgres -d tenant_iso"
+        run: python3 engine/security/test_tenant_isolation.py
 
   container-build:
     runs-on: ubuntu-24.04

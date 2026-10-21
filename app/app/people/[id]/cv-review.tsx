@@ -20,9 +20,9 @@ import {
  */
 
 const NAVY = "#16233B";
-const MUTED = "#6B6758";
-const FAINT = "#9A9684";
-const BORDER = "#E5E1D5";
+const MUTED = "#5B6472";
+const FAINT = "#8A93A0";
+const BORDER = "#E3E6EA";
 
 const input: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", minHeight: 40, padding: "0 10px",
@@ -129,7 +129,7 @@ export function CvExtractionReview({
                 ];
                 const shownNow = now == null || now === "" ? "-" : f.kind === "secret" ? "on file (hidden)" : now;
                 return (
-                  <div key={f.key} className="cvx-row" style={{ display: "grid", gridTemplateColumns: "28px 150px 1fr 1fr", gap: 8, alignItems: "start", padding: "8px 0", borderTop: "1px solid #F0EEE6" }}>
+                  <div key={f.key} className="cvx-row" style={{ display: "grid", gridTemplateColumns: "28px 150px 1fr 1fr", gap: 8, alignItems: "start", padding: "8px 0", borderTop: "1px solid #ECEEF1" }}>
                     <input type="checkbox" name={`use_${f.key}`} defaultChecked={defaultTick} disabled={same} aria-label={`Save ${f.label}`} style={{ width: 18, height: 18, marginTop: 10 }} />
                     <div style={{ fontSize: 13, fontWeight: 600, color: NAVY, paddingTop: 10 }}>{f.label}</div>
                     <div>
@@ -168,7 +168,7 @@ export function CvExtractionReview({
                 <input type="checkbox" name={`p${i}_use`} defaultChecked={proj.verified && !dup} style={{ width: 18, height: 18 }} />
                 Add this project
                 {!proj.verified && <span style={chip("#FEF3C7", "#B45309")}>check</span>}
-                {dup && <span style={chip("#F0EEE6", MUTED)}>already on file?</span>}
+                {dup && <span style={chip("#ECEEF1", MUTED)}>already on file?</span>}
               </label>
               <div className="cvx-proj" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <div style={{ gridColumn: "1 / -1" }}>
@@ -196,7 +196,7 @@ export function CvExtractionReview({
         )}
 
         {(proposal.other_registrations ?? []).length > 0 && (
-          <div style={{ background: "#F6F5F1", borderRadius: 9, padding: "9px 12px", margin: "10px 0 0", fontSize: 12, color: MUTED }}>
+          <div style={{ background: "#FFFFFF", borderRadius: 9, padding: "9px 12px", margin: "10px 0 0", fontSize: 12, color: MUTED }}>
             <strong style={{ color: NAVY }}>Also on the CV, not saved</strong> (there&apos;s no field for these yet):{" "}
             {proposal.other_registrations.map((r) => [r.body, r.level, r.number].filter(Boolean).join(" ")).join("; ")}.
           </div>

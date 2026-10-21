@@ -58,6 +58,27 @@ export async function requestTenderCv(formData: FormData) {
     redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Confirm a key person for this position before generating a tender-specific CV.")}`);
   }
 
+  // Duplicate-request guard (enterprise-readiness audit, 2026-10-20): nothing
+  // stopped a user submitting this repeatedly (one click or scripted),
+  // queueing unlimited CV-generation jobs on a worker pool shared across
+  // every company. This check handles the common case with a clear message;
+  // migration 0075's partial unique index is the real backstop against the
+  // race window between this SELECT and the INSERT below.
+  const { data: pending } = await supabase
+    .from("generated_cvs")
+    .select("id")
+    .eq("person_id", personId)
+    .eq("tender_pack_id", tenderPackId)
+    .eq("position_code", positionCode)
+    .eq("format", format)
+    .eq("detail", detail)
+    .in("status", ["requested", "generating"])
+    .limit(1)
+    .maybeSingle();
+  if (pending) {
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("A CV for this person and position is already being generated - check back shortly.")}`);
+  }
+
   const { error } = await supabase.from("generated_cvs").insert({
     company_id: companyId,
     person_id: personId,
@@ -70,7 +91,13 @@ export async function requestTenderCv(formData: FormData) {
     requested_by: user?.id ?? null,
   });
   if (error) {
-    redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}`);
+    if (error.code === "23505") {
+      // The unique index (migration 0075) caught a genuine race the SELECT
+      // above missed - same outcome as detecting it up front.
+      redirect(`/tenders/${tenderId}?error=${encodeURIComponent("A CV for this person and position is already being generated - check back shortly.")}`);
+    }
+    console.error("generated_cvs insert failed", error);
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not request this CV - try again. If it keeps happening, let us know.")}`);
   }
 
   revalidatePath(`/tenders/${tenderId}`);
@@ -168,7 +195,10 @@ export async function requestSubmissionPack(formData: FormData) {
       { company_id: companyId, tender_id: tenderId, field_key: "signatory_person_id", value: signatoryId, answered_by: user?.id ?? null },
       { onConflict: "company_id,tender_id,field_key" },
     );
-    if (ansErr) fail(ansErr.message);
+    if (ansErr) {
+      console.error("tender_answers upsert failed for signatory", ansErr);
+      fail("Could not save the signatory - try again. If it keeps happening, let us know.");
+    }
   }
 
   const { error } = await supabase.from("pack_generation_jobs").insert({
@@ -190,7 +220,10 @@ export async function requestSubmissionPack(formData: FormData) {
     reviewed_by: reviewRow?.reviewed_by ?? null,
     requested_by: user?.id ?? null,
   });
-  if (error) fail(error.message);
+  if (error) {
+    console.error("pack_generation_jobs insert failed", error);
+    fail("Could not request this submission pack - try again. If it keeps happening, let us know.");
+  }
   // Pipeline board (0021): asking for a pack means we're bidding.
   await advanceFoundToBidding(supabase, tenderPackId!);
 
@@ -254,7 +287,8 @@ export async function addTenderTask(formData: FormData) {
     created_by: user?.id ?? null,
   });
   if (error) {
-    redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}`);
+    console.error("tender_tasks insert failed", error);
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not add this task - try again. If it keeps happening, let us know.")}`);
   }
 
   revalidatePath(`/tenders/${tenderId}`);
@@ -416,7 +450,8 @@ export async function setTenderReminder(formData: FormData) {
     { onConflict: "company_id,tender_id,kind" },
   );
   if (error) {
-    redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}#tasks-milestones`);
+    console.error("tender_tasks upsert failed", error);
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not save this reminder - try again. If it keeps happening, let us know.")}#tasks-milestones`);
   }
 
   revalidatePath(`/tenders/${tenderId}`);
@@ -468,7 +503,10 @@ export async function syncWonProjectToTeam(formData: FormData) {
     .eq("id", tenderPackId!)
     .eq("company_id", companyId)
     .maybeSingle();
-  if (packErr) fail(packErr.message);
+  if (packErr) {
+    console.error("tender_packs select failed for won-project sync", packErr);
+    fail("Could not load this tender pack - try again. If it keeps happening, let us know.");
+  }
   if (!packRow || packRow.tender_id !== tenderId) fail("Tender pack not found.");
   if (packRow!.pipeline_stage !== "won") fail("This tender hasn't been marked Won on the pipeline board yet.");
 
@@ -481,7 +519,10 @@ export async function syncWonProjectToTeam(formData: FormData) {
     })
     .eq("id", tenderPackId!)
     .eq("company_id", companyId);
-  if (updErr) fail(updErr.message);
+  if (updErr) {
+    console.error("tender_packs update failed for won-project sync", updErr);
+    fail("Could not save the completed-project details - try again. If it keeps happening, let us know.");
+  }
 
   const [{ data: assignmentRows }, { data: tenderRow }, { data: reqRows }] = await Promise.all([
     supabase.from("tender_pack_assignments").select("position_code, confirmed_person_id").eq("tender_pack_id", tenderPackId!),
@@ -510,7 +551,10 @@ export async function syncWonProjectToTeam(formData: FormData) {
   const stale = staleSyncedProjectRows(confirmed, existingSynced ?? []);
   if (stale.length > 0) {
     const { error: staleErr } = await supabase.from("projects").delete().in("id", stale.map((row) => row.id));
-    if (staleErr) fail(staleErr.message);
+    if (staleErr) {
+      console.error("projects delete failed for won-project sync", staleErr);
+      fail("Could not update project history - try again. If it keeps happening, let us know.");
+    }
   }
 
   if (confirmed.length > 0) {
@@ -527,7 +571,10 @@ export async function syncWonProjectToTeam(formData: FormData) {
     const { error: syncErr } = await supabase
       .from("projects")
       .upsert(rows, { onConflict: "person_id,source_tender_pack_id,position_code" });
-    if (syncErr) fail(syncErr.message);
+    if (syncErr) {
+      console.error("projects upsert failed for won-project sync", syncErr);
+      fail("Could not update project history - try again. If it keeps happening, let us know.");
+    }
 
     // CV-feeding history lives on each person's own People page -
     // revalidate every synced person's page, same precedent as

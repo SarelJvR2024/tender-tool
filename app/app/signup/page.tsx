@@ -3,15 +3,20 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { AuthShell } from "../_components/AuthShell";
-
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 360, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
-const LABEL: React.CSSProperties = { display: "block", fontSize: 12, fontWeight: 600, color: "#16233B", marginBottom: 4, textAlign: "left" };
-const INPUT: React.CSSProperties = { width: "100%", minHeight: 40, padding: "0 12px", borderRadius: 8, border: "1px solid #E5E1D5", fontSize: 14, boxSizing: "border-box", marginBottom: 14 };
-const PRIMARY_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", borderRadius: 8, border: "none", background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, cursor: "pointer", boxSizing: "border-box" };
+import { PasswordInput } from "../_components/PasswordInput";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const MIN_PASSWORD_LENGTH = 8;
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function AuthCard({ children }: { children: React.ReactNode }) {
+  return <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-9 text-center shadow-sm">{children}</div>;
+}
 
 // Same reasoning as app/app/login/page.tsx: read `next` off window.location
 // rather than useSearchParams(), to avoid a Suspense-boundary requirement.
@@ -26,6 +31,7 @@ export default function SignUpPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<{ email?: string; password?: string; confirmPassword?: string }>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -50,18 +56,19 @@ export default function SignUpPage() {
     };
   }, []);
 
+  function validate(): boolean {
+    const next: typeof fieldErrors = {};
+    if (!EMAIL_PATTERN.test(email.trim())) next.email = "Enter a valid email address.";
+    if (password.length < MIN_PASSWORD_LENGTH) next.password = `At least ${MIN_PASSWORD_LENGTH} characters.`;
+    if (password !== confirmPassword) next.confirmPassword = "Passwords don't match.";
+    setFieldErrors(next);
+    return Object.keys(next).length === 0;
+  }
+
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-
-    if (password.length < MIN_PASSWORD_LENGTH) {
-      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Passwords don't match.");
-      return;
-    }
+    if (!validate()) return;
 
     setPending(true);
     const supabase = createClient();
@@ -91,15 +98,15 @@ export default function SignUpPage() {
   if (submitted) {
     return (
       <AuthShell>
-        <div style={CARD}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Check your email</h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
-            We&apos;ve sent a confirmation link to <strong>{email}</strong>. Click it to activate your account and sign in.
+        <AuthCard>
+          <h1 className="mb-2.5 font-display text-lg font-medium text-foreground">Check your email</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            We&apos;ve sent a confirmation link to <strong className="text-foreground">{email}</strong>. Click it to activate your account and sign in.
           </p>
-          <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
+          <Link href="/login" className="mt-6 inline-block text-sm font-medium text-foreground hover:underline">
             &larr; Back to sign in
           </Link>
-        </div>
+        </AuthCard>
       </AuthShell>
     );
   }
@@ -107,52 +114,84 @@ export default function SignUpPage() {
   if (signupsEnabled === false) {
     return (
       <AuthShell>
-        <div style={CARD}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Sign-ups are paused</h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
-            Tender Tool isn&apos;t taking new accounts right now. Already have one?
+        <AuthCard>
+          <h1 className="mb-2.5 font-display text-lg font-medium text-foreground">Sign-ups are paused</h1>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Tender Ready isn&apos;t taking new accounts right now. Already have one?
           </p>
-          <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
+          <Link href="/login" className="mt-6 inline-block text-sm font-medium text-foreground hover:underline">
             &larr; Back to sign in
           </Link>
-        </div>
+        </AuthCard>
       </AuthShell>
     );
   }
 
   return (
     <AuthShell>
-      <div style={CARD}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Create your account</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 28px" }}>Start tracking and preparing tenders</p>
+      <AuthCard>
+        <h1 className="mb-1 font-display text-xl font-medium text-foreground">Create your account</h1>
+        <p className="mb-7 text-sm text-muted-foreground">Start tracking and preparing tenders</p>
 
-        <form onSubmit={handleSubmit}>
-          <label style={LABEL} htmlFor="email">Email</label>
-          <input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} style={INPUT} />
+        <form onSubmit={handleSubmit} noValidate>
+          <div className="mb-3.5 text-left">
+            <Label htmlFor="email" className="mb-1.5">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              aria-invalid={!!fieldErrors.email}
+              className="h-11"
+            />
+            {fieldErrors.email && <p className="mt-1 text-xs text-destructive">{fieldErrors.email}</p>}
+          </div>
 
-          <label style={LABEL} htmlFor="password">Password</label>
-          <input id="password" type="password" required autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} value={password} onChange={(e) => setPassword(e.target.value)} style={INPUT} />
+          <div className="mb-3.5 text-left">
+            <Label htmlFor="password" className="mb-1.5">Password</Label>
+            <PasswordInput
+              id="password"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              aria-invalid={!!fieldErrors.password}
+            />
+            {fieldErrors.password && <p className="mt-1 text-xs text-destructive">{fieldErrors.password}</p>}
+          </div>
 
-          <label style={LABEL} htmlFor="confirmPassword">Confirm password</label>
-          <input id="confirmPassword" type="password" required autoComplete="new-password" minLength={MIN_PASSWORD_LENGTH} value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} style={INPUT} />
+          <div className="mb-1 text-left">
+            <Label htmlFor="confirmPassword" className="mb-1.5">Confirm password</Label>
+            <PasswordInput
+              id="confirmPassword"
+              autoComplete="new-password"
+              minLength={MIN_PASSWORD_LENGTH}
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              aria-invalid={!!fieldErrors.confirmPassword}
+            />
+            {fieldErrors.confirmPassword && <p className="mt-1 text-xs text-destructive">{fieldErrors.confirmPassword}</p>}
+          </div>
 
-          {error && <p style={{ color: "#B91C1C", fontSize: 12, textAlign: "left", margin: "-6px 0 14px" }}>{error}</p>}
+          {error && <p className="mt-3 text-left text-xs text-destructive">{error}</p>}
 
-          <button type="submit" disabled={pending} style={{ ...PRIMARY_BUTTON, opacity: pending ? 0.6 : 1 }}>
+          <Button type="submit" disabled={pending} className="mt-4 h-11 w-full">
+            {pending && <Loader2 className="size-4 animate-spin" />}
             {pending ? "Creating account..." : "Create account"}
-          </button>
+          </Button>
         </form>
 
-        <p style={{ marginTop: 16, fontSize: 11, color: "#9A9684" }}>
+        <p className="mt-4 text-[11px] text-muted-foreground">
           By creating an account you agree to our{" "}
-          <Link href="/privacy" style={{ color: "#6B6758", textDecoration: "underline" }}>privacy notice</Link>.
+          <Link href="/privacy" className="underline hover:text-foreground">privacy notice</Link>.
         </p>
 
-        <p style={{ marginTop: 12, fontSize: 12, color: "#6B6758" }}>
+        <p className="mt-3 text-xs text-muted-foreground">
           Already have an account?{" "}
-          <Link href={next === "/dashboard" ? "/login" : `/login?next=${encodeURIComponent(next)}`} style={{ color: "#16233B", fontWeight: 600, textDecoration: "none" }}>Sign in</Link>
+          <Link href={next === "/dashboard" ? "/login" : `/login?next=${encodeURIComponent(next)}`} className="font-medium text-foreground hover:underline">Sign in</Link>
         </p>
-      </div>
+      </AuthCard>
     </AuthShell>
   );
 }

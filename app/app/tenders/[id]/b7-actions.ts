@@ -51,7 +51,10 @@ export async function saveSubcontractingPlan(formData: FormData) {
     },
     { onConflict: "company_id,tender_id" },
   );
-  if (error) back(`error=${encodeURIComponent(error.message)}`);
+  if (error) {
+    console.error("tender_subcontracting_plans upsert failed", error);
+    back(`error=${encodeURIComponent("Could not save Form B7 - try again. If it keeps happening, let us know.")}`);
+  }
 
   revalidatePath(`/tenders/${tenderId}`);
   back("saved=b7");
@@ -63,7 +66,10 @@ export async function clearSubcontractingPlan(formData: FormData) {
   if (!tenderId) redirect("/tenders");
   const supabase = await createClient();
   const { error } = await supabase.from("tender_subcontracting_plans").delete().eq("company_id", companyId).eq("tender_id", tenderId);
-  if (error) redirect(`/tenders/${tenderId}?error=${encodeURIComponent(error.message)}#form-b7`);
+  if (error) {
+    console.error("tender_subcontracting_plans delete failed", error);
+    redirect(`/tenders/${tenderId}?error=${encodeURIComponent("Could not clear Form B7 - try again. If it keeps happening, let us know.")}#form-b7`);
+  }
   revalidatePath(`/tenders/${tenderId}`);
   redirect(`/tenders/${tenderId}?saved=b7#form-b7`);
 }

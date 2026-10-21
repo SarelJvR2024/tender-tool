@@ -46,6 +46,8 @@ import tempfile
 import argparse
 import urllib.request
 import urllib.error
+import queue
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from score_outlook import estimate_score_outlook, PROVINCES  # noqa: E402
@@ -78,19 +80,109 @@ JV_RE = re.compile(r"joint\s*venture", re.IGNORECASE)
 BRIEFING_RE = re.compile(r"compulsory\s*(?:clarification\s*)?brief", re.IGNORECASE)
 
 
+MAX_DOCUMENT_BYTES = 100 * 1024 * 1024  # 100MB - real tender documents are
+# single-digit MB; neither urlopen() nor this function ever checked a size
+# at all before reading a whole response into memory, so a buyer's server
+# (misconfigured, or serving something that isn't a document) returning a
+# multi-GB body within the timeout window would be read entirely before
+# anything noticed - a real OOM risk for this worker. Reject rather than
+# silently truncate: a partial file saved as if complete is worse than none.
+
+
+def _read_bounded(r, max_bytes=MAX_DOCUMENT_BYTES):
+    """Reads at most max_bytes+1 bytes from an open response, raising if the
+    real body is larger - a Content-Length header is checked first (fails
+    fast without reading anything), but the bounded read() is what actually
+    enforces the cap, since Content-Length can be absent or simply wrong."""
+    declared = r.headers.get("Content-Length")
+    if declared:
+        try:
+            declared_n = int(declared)
+        except ValueError:
+            declared_n = None  # not parseable - the bounded read below is authoritative anyway
+        if declared_n is not None and declared_n > max_bytes:
+            raise ValueError(f"declared Content-Length {declared} exceeds the {max_bytes}-byte cap")
+    data = r.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise ValueError(f"response exceeds the {max_bytes}-byte cap (stopped at {len(data)} bytes)")
+    return data
+
+
+def _download_to_tempfile(url, timeout, result_q, abandoned):
+    """abandoned: set by fetch_pdf_text once it has given up waiting (past the
+    wall-clock deadline) - this thread keeps running regardless (it is not
+    cancellable), so it must clean up its own temp file itself in that case
+    rather than queueing a path nobody will ever read and ask to delete."""
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp_path = tmp.name
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                tmp.write(_read_bounded(r))
+        if abandoned.is_set():
+            os.unlink(tmp_path)
+            return
+        result_q.put(("ok", tmp_path))
+    except Exception as e:
+        # A failed download (dead link, 404, connection refused, a genuine
+        # per-read socket timeout) still created the temp file on disk before
+        # urlopen ever ran - confirmed live: every such failure leaked one
+        # empty/partial file into /tmp forever, never cleaned up. Across a
+        # discovery pipeline that treats dead links as routine (0071's own
+        # header: "dead link, timeout, corrupt file, 404 ... never silently
+        # dropped and never retried"), that is a slow, unbounded disk leak.
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+        if not abandoned.is_set():
+            result_q.put(("error", e))
+
+
 def fetch_pdf_text(url, timeout=30):
     """Returns (text, fetch_error). A failed download or a non-PDF/corrupt file
     degrades to ("", <reason>) rather than raising - one bad document link on a
     public buyer's own site must not take out the whole assessment run, only
-    that release's document-confirmed signals."""
+    that release's document-confirmed signals.
+
+    Confirmed live 2026-10-19: urlopen's own `timeout` only bounds each
+    individual socket read, not the download as a whole - a server that
+    trickles data in just under that interval per read (or hangs after
+    headers without ever closing the connection) can make r.read() block
+    indefinitely with no exception ever raised, hanging this single-threaded
+    pipeline forever on one bad host (confirmed: a live run sat on one open
+    socket for over 90 minutes with zero progress). The download itself runs
+    in a worker thread with a hard wall-clock deadline (timeout + 15s grace)
+    enforced by .result(timeout=...), which is the only way to bound total
+    time regardless of how the far side behaves."""
+    # A plain daemon thread, not ThreadPoolExecutor/concurrent.futures: a
+    # Future's worker thread is NOT daemonic, so an abandoned one (still
+    # stuck reading from the same bad host) would keep the whole
+    # watch_new_tenders.py process alive at exit, waiting to join it -
+    # trading "hangs mid-run" for "hangs at the very end" instead of fixing
+    # it. daemon=True means the interpreter can exit with this thread still
+    # running; its one leaked socket is reclaimed by the OS when the
+    # process actually exits.
+    deadline = timeout + 15
+    result_q = queue.Queue(maxsize=1)
+    abandoned = threading.Event()
+    t = threading.Thread(target=_download_to_tempfile, args=(url, timeout, result_q, abandoned), daemon=True)
+    t.start()
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                tmp.write(r.read())
-            path = tmp.name
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as e:
-        return "", f"could not download document: {e}"
+        status, value = result_q.get(timeout=deadline)
+    except queue.Empty:
+        abandoned.set()
+        return "", f"could not download document: stalled past {deadline}s (no response, or a trickling/hung connection)"
+    if status == "error":
+        if isinstance(value, (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError)):
+            # ValueError here is _read_bounded()'s own MAX_DOCUMENT_BYTES
+            # rejection - an oversized/lying response degrades the same way
+            # as any other failed download, never crashes the caller.
+            return "", f"could not download document: {value}"
+        raise value
+    path = value
     try:
         out = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True,
                               timeout=30, text=True)

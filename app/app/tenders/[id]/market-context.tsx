@@ -33,8 +33,8 @@ import {
  * Public data only, read through RLS; every number carries its sample size.
  */
 
-const card: CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
-const muted: CSSProperties = { fontSize: 12, color: "#6B6758" };
+const card: CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const muted: CSSProperties = { fontSize: 12, color: "#5B6472" };
 const h3: CSSProperties = { fontSize: 14, fontWeight: 700, color: "#16233B", margin: "14px 0 6px" };
 
 type Facts = { id: string; buyer: string | null; family: string | null };
@@ -146,7 +146,7 @@ function MarketTrendBlock({ trend, tags, valueBand }: { trend: MarketTrend; tags
           Winning B-BBEE level, {bbbeeTotal} award{bbbeeTotal === 1 ? "" : "s"}: {bbbeeEntries.map(([level, n]) => `${level} (${n})`).join(", ")}.
         </div>
       )}
-      <div style={{ fontSize: 11, color: "#9A9684", marginTop: 8 }}>
+      <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 8 }}>
         Historical reference only, from past published outcomes - not a prediction or a recommended price. Trailing 24 months,
         competitive awards only.
       </div>
@@ -164,7 +164,7 @@ function tenderCategories(sector: string | null, discovered: string[] | null, is
   if (sector) return [sector];
   const known = (discovered ?? []).filter((c) => !c.startsWith("uncategorized") && taxonomy.categories.some((t) => t.slug === c));
   if (known.length) return known.slice(0, 2);
-  // The SANRAL families Tender Tool fills are its consultant tenders.
+  // The SANRAL families Tender Ready fills are its consultant tenders.
   return isSanral ? ["consulting_engineering"] : [];
 }
 
@@ -192,7 +192,7 @@ function ThisTender({ outcome, position, submitted, stage, inclVat }: { outcome:
 
       {p.of >= 2 && <BidStrip position={p} winnerName={winner?.name ?? null} />}
 
-      <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 8, background: p.found === "name_and_price" ? "#F0FDF4" : p.found === "not_found" ? "#F6F5F1" : "#FFFBEB", fontSize: 13, color: "#16233B" }}>
+      <div style={{ marginTop: 8, padding: "10px 12px", borderRadius: 8, background: p.found === "name_and_price" ? "#F0FDF4" : p.found === "not_found" ? "#FFFFFF" : "#FFFBEB", fontSize: 13, color: "#16233B" }}>
         <div style={{ fontWeight: 600 }}>{FOUND_LABEL[p.found]}</div>
         {p.entry && p.rank !== null && (
           <div style={{ marginTop: 4 }}>
@@ -229,10 +229,10 @@ function ThisTender({ outcome, position, submitted, stage, inclVat }: { outcome:
           {outcome.data_notes.map((n) => <li key={n}>{n}</li>)}
         </ul>
       )}
-      <div style={{ fontSize: 11, color: "#9A9684", marginTop: 8 }}>
+      <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 8 }}>
         Source: {outcome.sources.map((s) => SOURCE_LABEL[s] ?? s).join("; ")}
         {outcome.source_urls.map((u, i) => (
-          <a key={u} href={u} target="_blank" rel="noreferrer" style={{ color: "#6B6758", marginLeft: 6 }}>[{i + 1}]</a>
+          <a key={u} href={u} target="_blank" rel="noreferrer" style={{ color: "#5B6472", marginLeft: 6 }}>[{i + 1}]</a>
         ))}
         {outcome.attribution && <div>{outcome.attribution}</div>}
         <div>Read {new Date(outcome.refreshed_at).toLocaleDateString("en-ZA")}. Amounts as published; VAT basis is not stated by the buyer.</div>
@@ -265,8 +265,8 @@ function BidStrip({ position, winnerName }: { position: OwnPosition; winnerName:
   return (
     <figure style={{ margin: "10px 0 0" }}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label={`${f.amounts.length} priced bids from ${formatRand(lo)} to ${formatRand(hi)}`} style={{ display: "block", maxWidth: W }}>
-        <line x1={pad} x2={W - pad} y1={H - 2} y2={H - 2} stroke="#E5E1D5" strokeWidth={1} />
-        {medianX !== null && <line x1={medianX} x2={medianX} y1={4} y2={H - 2} stroke="#9A9684" strokeWidth={1.5} strokeDasharray="4 4" />}
+        <line x1={pad} x2={W - pad} y1={H - 2} y2={H - 2} stroke="#E3E6EA" strokeWidth={1} />
+        {medianX !== null && <line x1={medianX} x2={medianX} y1={4} y2={H - 2} stroke="#8A93A0" strokeWidth={1.5} strokeDasharray="4 4" />}
         {dots.map((d, i) => {
           const isYou = you !== null && d.a === you;
           const isWin = win !== null && d.a === win;
@@ -280,12 +280,12 @@ function BidStrip({ position, winnerName }: { position: OwnPosition; winnerName:
         })}
       </svg>
       {/* Axis labels in HTML, not SVG text: the strip scales down to a third on a phone and SVG text would shrink with it. */}
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: "#6B6758", fontVariantNumeric: "tabular-nums", marginTop: 2 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, color: "#5B6472", fontVariantNumeric: "tabular-nums", marginTop: 2 }}>
         <span>lowest {formatRand(lo)}</span>
         {f.median !== null && <span>median {formatRand(f.median)} (dashed)</span>}
         <span>highest {formatRand(hi)}</span>
       </div>
-      <figcaption style={{ fontSize: 11, color: "#6B6758", display: "flex", gap: 14, flexWrap: "wrap" }}>
+      <figcaption style={{ fontSize: 11, color: "#5B6472", display: "flex", gap: 14, flexWrap: "wrap" }}>
         <span><Dot fill="#B8B4A6" /> other bids</span>
         {you !== null && <span><Dot fill="#16233B" /> your bid</span>}
         {win !== null && <span><Dot fill="#FFFFFF" stroke="#D97706" /> winning bid</span>}
@@ -301,8 +301,8 @@ function Dot({ fill, stroke }: { fill: string; stroke?: string }) {
 function Register({ outcome, position }: { outcome: TenderOutcome; position: OwnPosition }) {
   const cols = Math.max(1, outcome.register_columns);
   const rows = [...outcome.bidders].sort((a, b) => (a.amounts[position.column]?.amount_zar ?? Infinity) - (b.amounts[position.column]?.amount_zar ?? Infinity));
-  const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#6B6758", padding: "6px 8px", borderBottom: "1px solid #E5E1D5", whiteSpace: "nowrap" };
-  const td: CSSProperties = { fontSize: 12, color: "#16233B", padding: "6px 8px", borderBottom: "1px solid #F0EEE6", verticalAlign: "top" };
+  const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#5B6472", padding: "6px 8px", borderBottom: "1px solid #E3E6EA", whiteSpace: "nowrap" };
+  const td: CSSProperties = { fontSize: 12, color: "#16233B", padding: "6px 8px", borderBottom: "1px solid #ECEEF1", verticalAlign: "top" };
   return (
     <details style={{ marginTop: 10 }}>
       <summary style={{ fontSize: 12, fontWeight: 600, color: "#16233B", cursor: "pointer" }}>
@@ -332,7 +332,7 @@ function Register({ outcome, position }: { outcome: TenderOutcome; position: Own
                     {b.amounts[c]?.amount_zar ? formatRand(b.amounts[c].amount_zar) : b.amounts[c]?.amount_raw || "-"}
                   </td>
                 ))}
-                <td style={{ ...td, color: "#6B6758" }}>{[b.bbbee, b.notes].filter(Boolean).join("; ") || ""}</td>
+                <td style={{ ...td, color: "#5B6472" }}>{[b.bbbee, b.notes].filter(Boolean).join("; ") || ""}</td>
               </tr>
             ))}
           </tbody>
@@ -354,8 +354,8 @@ function SegmentTable({ segments: allSegments, results: allResults }: { segments
     </div>
   );
   if (segments.length === 0) return <>{smallNote}{allResults.some((r) => r.error) && <div style={{ ...muted, color: "#B91C1C" }}>Could not read: {allResults.find((r) => r.error)?.error}</div>}</>;
-  const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#6B6758", padding: "6px 8px", borderBottom: "1px solid #E5E1D5" };
-  const td: CSSProperties = { fontSize: 12, color: "#16233B", padding: "6px 8px", borderBottom: "1px solid #F0EEE6", verticalAlign: "top" };
+  const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#5B6472", padding: "6px 8px", borderBottom: "1px solid #E3E6EA" };
+  const td: CSSProperties = { fontSize: 12, color: "#16233B", padding: "6px 8px", borderBottom: "1px solid #ECEEF1", verticalAlign: "top" };
   return (
     <>
       {smallNote}
@@ -368,12 +368,12 @@ function SegmentTable({ segments: allSegments, results: allResults }: { segments
             </tr>
           </thead>
           <tbody>
-            <MetricRow label="Published results compared" results={results} cell={(b) => <>{b.n} tender{b.n === 1 ? "" : "s"}{b.dateFrom && <div style={{ fontSize: 10, color: "#9A9684" }}>{b.dateFrom.slice(0, 7)} to {b.dateTo?.slice(0, 7)}</div>}<Strength n={b.n} /></>} td={td} />
-            <MetricRow label="Priced bids per tender" results={results} n={(b) => b.bidders.n} cell={(b) => <>median {fmt(b.bidders.median)}<div style={{ fontSize: 10, color: "#9A9684" }}>middle half {fmt(b.bidders.p25)}-{fmt(b.bidders.p75)}</div></>} td={td} />
+            <MetricRow label="Published results compared" results={results} cell={(b) => <>{b.n} tender{b.n === 1 ? "" : "s"}{b.dateFrom && <div style={{ fontSize: 10, color: "#8A93A0" }}>{b.dateFrom.slice(0, 7)} to {b.dateTo?.slice(0, 7)}</div>}<Strength n={b.n} /></>} td={td} />
+            <MetricRow label="Priced bids per tender" results={results} n={(b) => b.bidders.n} cell={(b) => <>median {fmt(b.bidders.median)}<div style={{ fontSize: 10, color: "#8A93A0" }}>middle half {fmt(b.bidders.p25)}-{fmt(b.bidders.p75)}</div></>} td={td} />
             <MetricRow label="Lowest bid won" results={results} n={(b) => b.lowestWon.n} cell={(b) => <>{b.lowestWon.won} of {b.lowestWon.n}</>} td={td} />
             <MetricRow label="Winning bid vs median bid" results={results} n={(b) => b.winnerVsMedian.n} cell={(b) => <>{ratioText(b.winnerVsMedian.median)}</>} td={td} />
-            <MetricRow label="Contract size awarded" results={results} n={(b) => b.contractSize.n} cell={(b) => <>{formatRand(b.contractSize.p25)} - {formatRand(b.contractSize.p75)}<div style={{ fontSize: 10, color: "#9A9684" }}>middle half; median {formatRand(b.contractSize.median)}</div></>} td={td} />
-            <MetricRow label="Different winners" results={results} n={(b) => b.winners.n} cell={(b) => <>{b.winners.distinct} firms won {b.winners.n}{b.winners.top3Share !== null && <div style={{ fontSize: 10, color: "#9A9684" }}>top 3 won {Math.round(b.winners.top3Share * 100)}%</div>}</>} td={td} />
+            <MetricRow label="Contract size awarded" results={results} n={(b) => b.contractSize.n} cell={(b) => <>{formatRand(b.contractSize.p25)} - {formatRand(b.contractSize.p75)}<div style={{ fontSize: 10, color: "#8A93A0" }}>middle half; median {formatRand(b.contractSize.median)}</div></>} td={td} />
+            <MetricRow label="Different winners" results={results} n={(b) => b.winners.n} cell={(b) => <>{b.winners.distinct} firms won {b.winners.n}{b.winners.top3Share !== null && <div style={{ fontSize: 10, color: "#8A93A0" }}>top 3 won {Math.round(b.winners.top3Share * 100)}%</div>}</>} td={td} />
           </tbody>
         </table>
       </div>
@@ -389,13 +389,13 @@ function SegmentTable({ segments: allSegments, results: allResults }: { segments
 function MetricRow({ label, results, cell, n, td }: { label: string; results: { b: Benchmark }[]; cell: (b: Benchmark) => ReactNode; n?: (b: Benchmark) => number; td: CSSProperties }) {
   return (
     <tr>
-      <td style={{ ...td, color: "#6B6758", fontWeight: 600 }}>{label}</td>
+      <td style={{ ...td, color: "#5B6472", fontWeight: 600 }}>{label}</td>
       {results.map(({ b }, i) => {
         const k = n ? n(b) : b.n;
         const s = sampleStrength(k);
         return (
           <td key={i} style={td}>
-            {s === "too_few" && n ? <span style={{ color: "#9A9684" }}>too few to say ({k})</span> : cell(b)}
+            {s === "too_few" && n ? <span style={{ color: "#8A93A0" }}>too few to say ({k})</span> : cell(b)}
             {n && s === "thin" && <div style={{ fontSize: 10, color: "#B45309" }}>thin: {k} tenders</div>}
           </td>
         );
@@ -407,7 +407,7 @@ function MetricRow({ label, results, cell, n, td }: { label: string; results: { 
 function Strength({ n }: { n: number }) {
   const s = sampleStrength(n);
   if (s === "fair") return null;
-  return <div style={{ fontSize: 10, color: s === "thin" ? "#B45309" : "#9A9684" }}>{s === "thin" ? "thin sample - indicative only" : "too few to benchmark"}</div>;
+  return <div style={{ fontSize: 10, color: s === "thin" ? "#B45309" : "#8A93A0" }}>{s === "thin" ? "thin sample - indicative only" : "too few to benchmark"}</div>;
 }
 
 function fmt(v: number | null): string {

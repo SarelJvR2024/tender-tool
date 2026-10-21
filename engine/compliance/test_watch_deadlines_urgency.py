@@ -17,7 +17,11 @@ Supabase. Each check is a behaviour a real person relies on:
      document reported once at 60 days was never reported when it lapsed);
   4. a closing milestone 3 days out is reported, and reported again once it
      is overdue;
-  5. a second run on the same day reports nothing new (no daily spam).
+  5. a second run on the same day reports nothing new (no daily spam);
+  6. a document ALREADY inside the 60-day window is not ALSO reported under
+     the "lapses before closing" framing just because a pursued tender
+     happens to close after it too (Finding 33, 2026-10-20) - one fact,
+     one reminder.
 
 Usage: python3 engine/compliance/test_watch_deadlines_urgency.py
 """
@@ -90,7 +94,8 @@ def check(cond, msg):
 def run(seen, today):
     docs = wd.find_due_documents("u", "k", seen, today, wd.DEFAULT_DOC_LEAD_DAYS)
     tasks = wd.find_due_tasks("u", "k", seen, today, wd.DEFAULT_TASK_LEAD_DAYS)
-    before = wd.find_documents_lapsing_before_closing("u", "k", seen, today) if hasattr(wd, "find_documents_lapsing_before_closing") else []
+    before = wd.find_documents_lapsing_before_closing("u", "k", seen, today, wd.DEFAULT_DOC_LEAD_DAYS) \
+        if hasattr(wd, "find_documents_lapsing_before_closing") else []
     return docs, tasks, before
 
 
@@ -109,6 +114,11 @@ def main():
           "TCS PIN (90 days, outside the 60-day window) reported because it lapses before RT83-2026 closes (day 100)")
     check(not any(b["field"] == "sars_tcs_pin_expiry" and b["tender_id"] == "t1" for b in before),
           "...but not against R.396 (closes day 3, PIN still valid)")
+    check(not any(b["field"] == "coid_letter_of_good_standing_expiry" for b in before),
+          "COID (30 days, already inside the 60-day window, also before RT83-2026's day-100 closing) is NOT "
+          "duplicated here under a 'lapses before closing' framing - find_due_documents() already reported it "
+          "(Finding 33: this used to fire for ANY document inside the normal window too, giving the same fact "
+          "two different-looking reminders)")
     check(any(t["task_id"] == "task1" and t["status"] == "due_soon" for t in tasks), "closing milestone 3 days out reported")
 
     docs2, tasks2, before2 = run(seen, TODAY)

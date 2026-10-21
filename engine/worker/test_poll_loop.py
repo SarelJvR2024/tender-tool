@@ -16,6 +16,11 @@ What it proves:
   4. run_bridges.py drives the CV bridge, skips the not-yet-landed pack
      bridge with a log line, survives a bridge that exits non-zero, and stops
      cleanly on SIGTERM.
+  5. --script is additive: giving it without --bridge still runs every
+     registered bridge (QA-Edge-Case-Findings.md, 2026-10-19 - it used to
+     silently run ONLY the --script path and skip cv/cv_extract/pack/
+     general/onboarding entirely, exactly the module's own documented
+     Usage example `--loop --script engine/some/other_bridge.py`).
 
 Usage: python3 engine/worker/test_poll_loop.py   (exit 0 = all passed)
 """
@@ -34,6 +39,7 @@ sys.path.insert(0, os.path.join(REPO_ROOT, "engine", "cv"))
 
 from fake_supabase import FakeSupabase  # noqa: E402
 from poll_loop import poll_forever  # noqa: E402
+import run_bridges  # noqa: E402
 
 CV_BRIDGE = os.path.join(REPO_ROOT, "engine", "cv", "process_cv_jobs.py")
 RUNNER = os.path.join(HERE, "run_bridges.py")
@@ -183,7 +189,18 @@ def test_runner_drives_bridges_and_stops_on_sigterm():
         with open(broken, "w") as f:
             f.write("import sys\nprint('cannot reach queue')\nsys.exit(2)\n")
 
-        p = subprocess.Popen([sys.executable, RUNNER, "--loop", "--interval", "60", "--script", broken],
+        # --bridge onboarding (not cv): since --script is additive (2026-10-19 fix,
+        # resolve_bridge_names below) a bare --script with no --bridge now also runs
+        # every registered bridge, including the real "cv" one - which would race
+        # p_cv's own dedicated --bridge cv cycle for the SAME job r1 against the
+        # same fake instance. Caught directly: before this line was added, this test
+        # failed intermittently (p's own concurrent cv-bridge pass sometimes claimed
+        # r1 first, so p_cv's pass found nothing and never logged "cv: [ready] r1",
+        # even though status_of(fake, "r1") still read "ready" - r1 WAS built, just
+        # not by the process this assertion checks). Scoping p to a bridge that
+        # never touches generated_cvs removes the race entirely.
+        p = subprocess.Popen([sys.executable, RUNNER, "--loop", "--interval", "60",
+                             "--bridge", "onboarding", "--script", broken],
                              env=env_for(fake), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
         # The pack/general/cv_extract bridges have all landed since this test was written, so the
         # "bridge not present yet" path is exercised with a deliberately missing --script instead.
@@ -213,9 +230,33 @@ def test_runner_drives_bridges_and_stops_on_sigterm():
         fake.stop()
 
 
+def test_script_flag_is_additive():
+    # The real bug, reproduced at the unit level (fast, no subprocess): the
+    # old `args.bridge or ([] if args.script else sorted(BRIDGES))` made
+    # --script without --bridge resolve to names=[] - NONE of the 5
+    # registered bridges ran, only the --script path. --script must only
+    # ever ADD scripts, never remove the default set.
+    assert run_bridges.resolve_bridge_names(None) == sorted(run_bridges.BRIDGES), \
+        "no --bridge/--script at all: every registered bridge runs"
+    names_with_script_only = run_bridges.resolve_bridge_names(None)
+    assert names_with_script_only == sorted(run_bridges.BRIDGES), \
+        "giving --script alone (bridge_arg still None) must not shrink the default set"
+    scripts = run_bridges.resolve_scripts(names_with_script_only, ["/tmp/some_custom_bridge.py"])
+    labels = [label for label, _ in scripts]
+    assert set(sorted(run_bridges.BRIDGES)) <= set(labels), \
+        f"every registered bridge must still be in the resolved script list, got {labels}"
+    assert "some_custom_bridge.py" in labels, "the --script addition must still be included"
+
+    # --bridge still narrows to just the named bridge(s) when explicitly given.
+    assert run_bridges.resolve_bridge_names(["cv"]) == ["cv"], \
+        "--bridge cv must narrow to only cv, same as before this fix"
+    print("PASS run_bridges.py: --script is additive, --bridge still narrows when given")
+
+
 if __name__ == "__main__":
     test_poll_forever_unit()
     test_claim_is_atomic()
     test_cv_bridge_loop_end_to_end()
     test_runner_drives_bridges_and_stops_on_sigterm()
+    test_script_flag_is_additive()
     print("All bridge-loop smoke tests passed.")

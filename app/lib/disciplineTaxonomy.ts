@@ -1,4 +1,4 @@
-// Tender Tool's own discipline / category list (migration 0040,
+// Tender Ready's own discipline / category list (migration 0040,
 // discipline_categories). Sarel, 2026-10-17: "There is no standard list ...
 // build our own list ... a list that we're gonna have to maintain and build."
 // It is a table, not a code constant: a category added to the table
@@ -6,7 +6,7 @@
 // suggestions, the pricing sector list - with no deploy and no migration.
 //
 // Two levels: a group (parent_slug null) and its disciplines. The 7 keys
-// Tender Tool started with are group slugs, so old tags still resolve.
+// Tender Ready started with are group slugs, so old tags still resolve.
 // Evidence for the seed: docs/specs/Discipline-Taxonomy-Findings.md.
 
 import type { SupabaseClient } from "@supabase/supabase-js";

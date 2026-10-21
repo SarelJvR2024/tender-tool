@@ -24,7 +24,7 @@ export function ToolsHeader({ showBackLink = true }: { showBackLink?: boolean } 
             <div style={{ width: 26, height: 26, borderRadius: 6, background: "#D97706", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 13, color: "#16233B" }}>
               T
             </div>
-            <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Tool</div>
+            <div style={{ fontWeight: 600, fontSize: 15 }}>Tender Ready</div>
           </Link>
         )}
         <Link
@@ -80,7 +80,7 @@ export function OtherTools({ except }: { except: string }) {
               padding: "7px 14px",
               borderRadius: 100,
               background: "#FFFFFF",
-              border: "1px solid #E5E1D5",
+              border: "1px solid #E3E6EA",
               color: "#16233B",
               fontSize: 12,
               fontWeight: 600,

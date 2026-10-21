@@ -70,9 +70,10 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
   const briefingOnFile = (tender?.briefing_date as string | null) ?? null;
 
   if (error) {
+    console.error("tender_watched_documents select failed", tenderId, error);
     return (
-      <div style={{ background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 12, color: "#B91C1C" }}>
-        Could not check this tender for addenda and updates: {error.message}
+      <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 12, color: "#B91C1C" }}>
+        Couldn&apos;t check this tender for addenda and updates - try refreshing. If it keeps happening, let us know.
       </div>
     );
   }
@@ -91,7 +92,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
           {addenda > 0 ? ` · ${addenda} addend${addenda === 1 ? "um" : "a"}` : ""}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#6B6758", margin: "4px 0 10px" }}>
+      <div style={{ fontSize: 12, color: "#5B6472", margin: "4px 0 10px" }}>
         The buyer published these after this tender was first found. Read each one before you submit - an addendum
         usually has to be acknowledged in the bid.
       </div>
@@ -104,12 +105,12 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
           const applied = appliedLine(changes.closing_date);
           const briefing = changes.briefing;
           return (
-            <li key={u.id} style={{ borderTop: "1px solid #F0EEE6", padding: "10px 0" }}>
+            <li key={u.id} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
                 <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: style.bg, color: style.color }}>
                   {u.kind ? UPDATE_KIND_LABEL[u.kind] : "New document"} · {style.label}
                 </span>
-                <span style={{ fontSize: 11, color: "#9A9684" }}>
+                <span style={{ fontSize: 11, color: "#8A93A0" }}>
                   Found {formatActivityTime(u.first_seen_at)} · {u.source === "sanral_page" ? "SANRAL tender page" : "eTenders"}
                 </span>
               </div>
@@ -146,7 +147,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                       borderRadius: 8,
                       fontSize: 13,
                       fontWeight: 600,
-                      background: closing.tone === "good" ? "#DCFCE7" : closing.tone === "bad" ? "#FEE2E2" : "#F6F5F1",
+                      background: closing.tone === "good" ? "#DCFCE7" : closing.tone === "bad" ? "#FEE2E2" : "#FFFFFF",
                       color: closing.tone === "good" ? "#15803D" : closing.tone === "bad" ? "#B91C1C" : "#16233B",
                     }}
                   >
@@ -179,7 +180,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                       ? "Briefing session cancelled or no longer compulsory."
                       : `Briefing moved${briefing.previous_date ? ` from ${formatDay(briefing.previous_date)}` : ""} to ${formatDay(briefing.date)}${briefing.time ? ` ${briefing.time}` : ""}.`}
                     {briefing.applied && (
-                      <div style={{ fontSize: 12, color: "#6B6758", marginTop: 2 }}>
+                      <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2 }}>
                         {briefing.accepted_at
                           ? `Accepted by ${acceptedBy(briefing)} on ${formatActivityTime(briefing.accepted_at)} - the briefing date and the “Briefing session” task now show it.`
                           : "The briefing date on file and the “Briefing session” task have been updated."}
@@ -202,7 +203,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                 <Quote key={o.quote} label={OTHER_KIND_LABEL[o.kind] ?? o.kind} text={o.quote} />
               ))}
 
-              <div style={{ marginTop: 6, fontSize: 11, color: "#9A9684" }}>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#8A93A0" }}>
                 {u.read_basis ? BASIS_LABEL[u.read_basis] : null}
                 {u.read_error ? ` · ${u.read_error}` : null}
               </div>
@@ -246,14 +247,14 @@ function DateDisagreement({
         {rows.map((r) => (
           <div
             key={r.label}
-            style={{ flex: "1 1 150px", minWidth: 0, background: "#FFFFFF", border: `1px solid ${r.strong ? "#D97706" : "#E5E1D5"}`, borderRadius: 8, padding: "7px 10px" }}
+            style={{ flex: "1 1 150px", minWidth: 0, background: "#FFFFFF", border: `1px solid ${r.strong ? "#D97706" : "#E3E6EA"}`, borderRadius: 8, padding: "7px 10px" }}
           >
-            <div style={{ fontSize: 11, color: "#6B6758" }}>{r.label}</div>
+            <div style={{ fontSize: 11, color: "#5B6472" }}>{r.label}</div>
             <div style={{ fontSize: 14, fontWeight: 700, color: "#16233B" }}>{r.value}</div>
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginTop: 8 }}>{note}</div>
+      <div style={{ fontSize: 12, color: "#5B6472", marginTop: 8 }}>{note}</div>
       {form ? (
         <form action={acceptTenderUpdateDate} style={{ marginTop: 8 }}>
           <input type="hidden" name="tender_id" value={form.tenderId} />
@@ -267,7 +268,7 @@ function DateDisagreement({
           </button>
         </form>
       ) : (
-        <div style={{ fontSize: 12, color: "#9A9684", marginTop: 6 }}>Only a company working on this tender can accept this date.</div>
+        <div style={{ fontSize: 12, color: "#8A93A0", marginTop: 6 }}>Only a company working on this tender can accept this date.</div>
       )}
     </div>
   );
@@ -275,7 +276,7 @@ function DateDisagreement({
 
 function Quote({ text, label }: { text: string; label?: string }) {
   return (
-    <div style={{ marginTop: 5, padding: "6px 10px", borderLeft: "3px solid #E5E1D5", background: "#FAFAF7", fontSize: 12, color: "#6B6758", wordBreak: "break-word" }}>
+    <div style={{ marginTop: 5, padding: "6px 10px", borderLeft: "3px solid #E3E6EA", background: "#FAFAF7", fontSize: 12, color: "#5B6472", wordBreak: "break-word" }}>
       {label && <span style={{ fontWeight: 700, color: "#16233B" }}>{label}: </span>}
       &ldquo;{text}&rdquo;
     </div>

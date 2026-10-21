@@ -91,7 +91,16 @@ def process_upload(url, key, upload, client_factory=cd.default_llm_client):
     work_dir = tempfile.mkdtemp(prefix="onboarding_classify_")
     try:
         sp = upload.get("storage_path") or ""
-        if not sp.startswith(f"{upload['company_id']}/") or ".." in sp or "//" in sp:
+        # ".." as a whole path SEGMENT (real traversal, e.g. "co1/../co2/x.pdf")
+        # rather than ".." as a bare substring: the upload form's own
+        # safeFileName() (app/lib/onboardingScan.ts) keeps dots in a filename
+        # unchanged, so a perfectly legitimate file like "Report..final.pdf"
+        # (a double dot before the extension - a common, harmless filename
+        # shape) used to trip this check and get rejected with this exact
+        # "isn't in your company's own storage folder" message, even though
+        # it WAS uploaded to the right company's folder. Confirmed live
+        # 2026-10-20.
+        if not sp.startswith(f"{upload['company_id']}/") or ".." in sp.split("/") or "//" in sp:
             raise cd.ClassificationFailed("This upload's file isn't in your company's own storage folder, so it "
                                           "wasn't read. Upload it again.")
         client = client_factory()  # SetupError here leaves the job queued

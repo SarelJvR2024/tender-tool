@@ -1003,3 +1003,21 @@ Sarel's instruction: compete harder on marketing than TenderFlow, with more freq
 **Open question added for Sarel (extends 7.3):** are you willing to post about 1x/week on LinkedIn — real findings, repurposed from onboarding calls and compliance-report findings? This is the single highest-leverage, lowest-cost move found against TenderFlow's marketing — no competitor checked has any social presence at all.
 
 **Not verified:** independent review-site data for TenderFlow (none found either way — flagged as an absence, not a finding). Sources: tenderflow.co.za pages (fetched 18 Oct 2026), $100M Leads transcripts via podscripts.co, secondary Hormozi-cadence summaries via pulserevops.com/ampifire.com (flagged as secondary, not his own words), enca.com sponsored-content piece (re-check: that piece names AITenders/Tactical, not TenderFlow itself).
+
+---
+
+## 13. Roadmap item (added 20 Oct 2026, Sarel): analyze each tender's own scope, for pricing and market-trend use
+
+**The idea, in Sarel's own words:** analyze the scope of each tender — understand what the project and the tender are actually about — so that understanding can feed pricing strategy and market-trend analysis. **How exactly this gets used is deliberately still open** - recorded here as a roadmap item, not a spec, so the idea isn't lost before the detail is worked out.
+
+**What exists today that this would build on, not replace:** migration `0062` + `app/lib/marketTrendLogic.ts` already compute market-trend signals, but only from **tags and award outcomes** (discipline/industry tags on a tender, compared against past awards with the same tags - "how do awards in this tag-space usually go"). That's a statistical signal from metadata, never a read of what a given tender's own project actually *is*. This roadmap item is a different, deeper layer: actually understanding each tender's real scope (the nature of the work, its scale, what it involves) from its own content - likely its title/description and documents - not just the tags someone assigned it.
+
+**Why this is plausible, not speculative:** the engine already does exactly this kind of content-understanding work elsewhere - `engine/general/requirements.py`'s new confidence-scored extraction (this session) reads real document text to identify what's being asked for, and CV field extraction already uses the same real-content-reading approach for a different kind of document. Scope analysis for pricing/market-trend purposes would be the same category of capability, aimed at a different question ("what is this project actually about") rather than "what does this tender require from a bidder."
+
+**Left genuinely open, on purpose, not guessed at here:**
+- What "scope" output looks like (a short summary? a set of extracted facts - value band, discipline, project type, location? both?)
+- Where it's computed (at discovery time for every tender, or only for tenders a company actually pursues - a real cost/volume tradeoff, discovery already reads thousands of tenders a day)
+- How it actually feeds pricing strategy specifically - this product's own pricing (section 4) or a customer's bid pricing - and how it feeds market-trend analysis beyond what `marketTrendLogic.ts` already does
+- Whether this needs AI extraction (cost, like CV extraction already has - see `Known gaps` in `System-Status.md` on AI-extraction cost/accuracy being unmeasured) or can work from structured fields/regex the way `requirements.py` mostly does
+
+**Next step, when this is picked up:** scope a small pass the same way `requirements.py`'s confidence work was scoped - name the real question it answers, check what data's already available (tags, descriptions, the documents Discovery already fetches) before reaching for AI extraction, and verify against real tenders before building anything.

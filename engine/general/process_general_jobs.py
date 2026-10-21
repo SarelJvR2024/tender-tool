@@ -109,6 +109,15 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
+# SAST (UTC+2) - calendar-day fallback ONLY (see _within() below). _now()
+# above stays true UTC on purpose: it timestamps real DB rows
+# (downloaded_at/analysed_at/started_at/completed_at), where the correct
+# value is the real instant, not a shifted one. Same local-constant
+# convention as watch_deadlines.py/generate_cv.py, not a cross-directory
+# import.
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
+
 class Supabase:
     """The slice of PostgREST + Storage this bridge needs, over urllib (same
     env vars and service-role bypass as every other engine/ writer)."""
@@ -358,6 +367,28 @@ def own_pack(client, job):
     return rows[0] if rows else None
 
 
+def recent_corrections(client, limit=5):
+    """Up to `limit` of the most recent admin corrections/false-positives
+    (requirement_extraction_reviews, migration 0074) - the input to
+    requirements.extract_requirements()'s past_corrections honesty check (see
+    that function's own module comment for exactly what this can and can't
+    do: "most recent N corrections globally" is the simple, cheap heuristic
+    used here, not a buyer- or form-specific lookup - requirements.py's own
+    matching on item identity still narrows it to something relevant).
+    Best-effort: a lookup failure must never block a real extraction."""
+    try:
+        out = client._req("GET", "/rest/v1/requirement_extraction_reviews"
+                           "?select=item_snapshot,verdict,corrected_value"
+                           "&verdict=in.(corrected,false_positive)"
+                           f"&order=created_at.desc&limit={int(limit)}")
+        rows = json.loads(out) if out else []
+    except Exception:
+        return []
+    return [{"item_type": (r.get("item_snapshot") or {}).get("item_type"),
+             "item_snapshot": r.get("item_snapshot") or {},
+             "verdict": r.get("verdict"), "corrected_value": r.get("corrected_value")} for r in rows]
+
+
 def run_extraction(client, job, work_root, fetch=None):
     """The intake + requirements step every tender's documents go through,
     however the tender arrived (Discovery, or a manual load - 0024).
@@ -387,7 +418,7 @@ def run_extraction(client, job, work_root, fetch=None):
         raise JobRefusal("No tender documents could be downloaded" + (": " + "; ".join(notes) if notes else " - no document links on file."))
     shutil.rmtree(scratch, ignore_errors=True)
     manifest = req.extract_requirements(dirs, work_dir=scratch, source_label=tender.get("ocid") or tender.get("slug"),
-                                        keep_text=True)
+                                        keep_text=True, past_corrections=recent_corrections(client), buyer=tender.get("buyer"))
     all_text = manifest.get("_all_text") or ""
     decision = intake.classify_documents(manifest["documents"], tender.get("buyer"), all_text)
     readable = [d for d in manifest["documents"] if d["chars"] > 0 and not d["unreadable"]]
@@ -520,10 +551,18 @@ def _within(item, rule, closing):
     if rule.get("window_years"):
         if not comp_day:
             return False
+        # A missing/unreadable closing date falls back to today (Finding 9c)
+        # - "today" must be the real SAST calendar day, not _now()'s UTC one:
+        # during the 00:00-01:59 SAST window UTC "today" is still yesterday,
+        # which would move the window-years cutoff a day early and let a
+        # stale Experience Library row (completed exactly one day too long
+        # ago) through as recent-enough evidence - confirmed live by mocking
+        # that window and reproducing the wrong True (QA pass, 2026-10-21).
+        today_sast = datetime.datetime.now(SAST).date().isoformat()
         try:
-            ref = datetime.date.fromisoformat(str(closing or _now())[:10])
+            ref = datetime.date.fromisoformat(str(closing or today_sast)[:10])
         except ValueError:
-            ref = datetime.date.fromisoformat(_now()[:10])
+            ref = datetime.date.fromisoformat(today_sast)
         if comp_day < _years_before(ref, int(rule["window_years"])):
             return False
     return True
@@ -686,6 +725,39 @@ def run_pack(client, job, work_root, fetch=None):
 # Job loop
 # ---------------------------------------------------------------------------
 
+STALE_AFTER_MINUTES = 60  # same threshold as process_cv_jobs.py / process_pack_jobs.py's
+                          # own fail_stale_jobs() - a worker killed mid-job (OOM, host
+                          # crash, container restart) otherwise leaves this row in
+                          # 'generating' forever with no retry and no trace (confirmed
+                          # this queue had no stale-job recovery at all, unlike its two
+                          # sibling queues on the same pack_generation_jobs table).
+
+
+def fail_stale_jobs(client, now=None):
+    """A worker killed mid-job leaves its row in 'generating' forever - started_at
+    (already set by process_job's own claim, no migration needed) makes that
+    detectable here, mirroring process_pack_jobs.py's own fail_stale_jobs()
+    exactly, just scoped to engine='general' on the same shared table. Deliberately
+    not re-queued: a job that crashed the worker once would crash it again in a loop,
+    same rule the other two queues already follow."""
+    now = now or datetime.datetime.now(datetime.timezone.utc)
+    cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
+    for job in client.select(JOBS_TABLE, {"status": "generating", "engine": ENGINE}):
+        started = job.get("started_at")
+        if started and datetime.datetime.fromisoformat(started.replace("Z", "+00:00")) < cutoff:
+            client.update(JOBS_TABLE, {"id": job["id"], "status": "generating"}, {
+                "status": "failed", "completed_at": _now(),
+                "error_message": f"The general engine stopped mid-job (no result after {STALE_AFTER_MINUTES} "
+                                 "minutes). Nothing was produced - request it again."})
+            print(f"[failed] {job['id']}: stale 'generating' since {started}")
+            system_alerts.record("general", f"A general engine job was stuck in 'generating' for over "
+                                            f"{STALE_AFTER_MINUTES} minutes (the worker died mid-job) and was "
+                                            "marked failed", "error",
+                                 context={"job_id": job["id"], "kind": job.get("kind"),
+                                          "company_id": job.get("company_id"), "tender_id": job.get("tender_id"),
+                                          "started_at": started})
+
+
 def process_job(client, job, work_root, fetch=None):
     claimed = client.update(JOBS_TABLE, {"id": job["id"], "status": "requested", "engine": ENGINE},
                             {"status": "generating", "started_at": _now()})
@@ -718,6 +790,7 @@ def process_job(client, job, work_root, fetch=None):
 
 
 def poll_once(client, work_root, fetch=None):
+    fail_stale_jobs(client)
     jobs = client.select(JOBS_TABLE, {"engine": ENGINE, "status": "requested"}, order="requested_at.asc")
     if not jobs:
         print("No pending general engine jobs.")

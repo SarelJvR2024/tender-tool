@@ -1,92 +1,95 @@
+import { FileCheck2, AlarmClock, ShieldCheck } from "lucide-react";
 import { Logo } from "./Logo";
+import { StatusBadge } from "@/components/tt/status-badge";
 
 const PROOF_POINTS = [
-  "Checks every contents entry against its real page number before the pack is built",
-  "Builds your full SANRAL submission pack - forms, financials and CVs",
-  "Flags every expired, missing or mismatched document before you submit",
+  { icon: ShieldCheck, text: "Checks every contents entry against its real page number before the pack is built" },
+  { icon: FileCheck2, text: "Builds your full SANRAL submission pack - forms, financials and CVs" },
+  { icon: AlarmClock, text: "Flags every expired, missing or mismatched document before you submit" },
 ];
 
 /**
- * Shared split-screen shell for /login, /signup, /forgot-password and
- * /reset-password - replaces the plain centered-card look all four had
- * (flagged directly as "bland and boring"). Left panel carries the brand
- * and the one-line promise from the landing page hero, so a visitor who
- * clicked through from there sees the same product, not a different one;
- * right panel is whatever that specific page needs (its own form/card).
- *
- * No new dependency: still inline CSSProperties everywhere, like the rest
- * of this codebase. The one thing inline styles can't do - hiding the left
- * panel below a breakpoint - is handled by the single <style> block below,
- * not by introducing Tailwind or CSS modules here.
+ * A small, static preview of the real dashboard look (navy ink, status
+ * chips, a deadline) - not a screenshot image (none exists to drop in here),
+ * but built from the same tt/ components a visitor sees seconds after
+ * signing in, so the promise and the product are visibly the same thing.
+ */
+function ProductPreview() {
+  return (
+    <div className="w-full max-w-[360px] rounded-xl border border-white/10 bg-white/[0.04] p-4 shadow-lg backdrop-blur-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <span className="font-display text-sm font-medium text-white">Tenders</span>
+        <span className="rounded-md bg-accent px-2.5 py-1 text-[11px] font-semibold text-accent-foreground">Load a tender</span>
+      </div>
+      <div className="mb-3 grid grid-cols-3 gap-2">
+        {[
+          { label: "Tracked", value: "12" },
+          { label: "Complete", value: "7" },
+          { label: "Due soon", value: "2" },
+        ].map((s) => (
+          <div key={s.label} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
+            <div className="text-[10px] text-white/50">{s.label}</div>
+            <div className="font-display text-lg font-medium text-white">{s.value}</div>
+          </div>
+        ))}
+      </div>
+      <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-mono text-[10px] text-white/70">SANRAL/NRA/2026/014</span>
+          <StatusBadge status="ready">Complete</StatusBadge>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-mono text-[10px] text-white/70">SANRAL/NRA/2026/022</span>
+          <StatusBadge status="needs-docs">Needs documents</StatusBadge>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Shared split-screen shell for /login, /signup, /forgot-password,
+ * /reset-password and /onboarding. Left panel carries the brand promise
+ * (so a visitor who clicked through from the landing page sees the same
+ * product, not a different one); right panel is whatever that page needs.
+ * The right panel sets its own content width (a 360px auth card, or the
+ * onboarding wizard's wider one) - this shell only centers it.
  */
 export function AuthShell({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ minHeight: "100vh", display: "flex" }}>
-      <style>{`
-        @media (max-width: 860px) {
-          .auth-left-panel { display: none; }
-          .auth-right-panel { flex: 1 1 100% !important; }
-        }
-      `}</style>
-
-      <div
-        className="auth-left-panel"
-        style={{
-          flex: "0 0 44%",
-          minWidth: 360,
-          maxWidth: 560,
-          background: "#16233B",
-          position: "relative",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: "center",
-          padding: "56px 56px",
-          boxSizing: "border-box",
-        }}
-      >
-        {/* A large, faint version of the mark itself as texture - not a
-            stock photo, not a gradient blob, just the product's own shape
-            oversized and cropped into the corner. */}
-        <div style={{ position: "absolute", right: -90, bottom: -90, opacity: 0.08, pointerEvents: "none" }}>
+    <div className="flex min-h-screen">
+      <div className="hidden w-[44%] min-w-[360px] max-w-[560px] shrink-0 flex-col justify-center overflow-hidden bg-foreground px-14 py-14 md:flex relative">
+        {/* A large, faint version of the mark itself as texture - not a stock
+            photo, not a gradient blob, just the product's own shape oversized
+            and cropped into the corner. */}
+        <div className="pointer-events-none absolute -bottom-24 -right-24 opacity-[0.07]">
           <Logo size={420} variant="light" />
         </div>
 
-        <div style={{ position: "relative", zIndex: 1, fontFamily: "system-ui, sans-serif" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 40 }}>
+        <div className="relative z-10">
+          <div className="mb-10 flex items-center gap-3">
             <Logo size={36} variant="light" />
-            <span style={{ fontSize: 17, fontWeight: 700, color: "#F6F5F1" }}>Tender Tool</span>
+            <span className="text-lg font-semibold text-white">Tender Ready</span>
           </div>
 
-          <h1 style={{ fontSize: 28, fontWeight: 700, color: "#F6F5F1", margin: "0 0 16px", lineHeight: 1.3, maxWidth: 420 }}>
-            Find government tenders, build complete submissions, never miss a deadline.
+          <h1 className="mb-6 max-w-[420px] font-display text-[28px] font-medium leading-[1.25] text-white">
+            Win more tenders. <span className="text-accent">Miss fewer deadlines.</span>
           </h1>
 
-          <ul style={{ listStyle: "none", margin: "32px 0 0", padding: 0, display: "flex", flexDirection: "column", gap: 14 }}>
-            {PROOF_POINTS.map((point) => (
-              <li key={point} style={{ display: "flex", alignItems: "flex-start", gap: 10, fontSize: 13.5, color: "rgba(246, 245, 241, 0.8)" }}>
-                <span style={{ color: "#D97706", fontWeight: 700, marginTop: 1 }}>&#10003;</span>
-                {point}
+          <ul className="mb-9 flex flex-col gap-3.5">
+            {PROOF_POINTS.map(({ icon: Icon, text }) => (
+              <li key={text} className="flex items-start gap-2.5 text-[13.5px] text-white/75">
+                <Icon className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
+                {text}
               </li>
             ))}
           </ul>
+
+          <ProductPreview />
         </div>
       </div>
 
-      <div
-        className="auth-right-panel"
-        style={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "#F6F5F1",
-          padding: 16,
-          boxSizing: "border-box",
-        }}
-      >
-        {children}
-      </div>
+      <div className="flex flex-1 items-center justify-center bg-background p-4">{children}</div>
     </div>
   );
 }

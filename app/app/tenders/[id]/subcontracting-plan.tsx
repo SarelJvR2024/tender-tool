@@ -12,13 +12,13 @@ import { B7_CATEGORY_BANDS, B7_POLICY_MIN_PCT } from "@/lib/sanralB7";
  * submission pack hard-stops when B7 applies and this is unanswered.
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
 const BADGE: Record<string, { label: string; bg: string; color: string }> = {
   required: { label: "Required", bg: "#FEE2E2", color: "#B91C1C" },
   unknown: { label: "Can't rule out - answer it", bg: "#FEF3C7", color: "#B45309" },
-  not_required: { label: "Not required", bg: "#F0EEE6", color: "#6B6758" },
-  waived: { label: "Waived by this tender", bg: "#F0EEE6", color: "#6B6758" },
+  not_required: { label: "Not required", bg: "#ECEEF1", color: "#5B6472" },
+  waived: { label: "Waived by this tender", bg: "#ECEEF1", color: "#5B6472" },
 };
 
 export async function SubcontractingPlan({ tenderId, saved }: { tenderId: string; saved: boolean }) {
@@ -35,7 +35,7 @@ export async function SubcontractingPlan({ tenderId, saved }: { tenderId: string
           {badge.label}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#6B6758", marginBottom: 10 }}>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
         SANRAL makes subcontracting at least {B7_POLICY_MIN_PCT}% of the contract to Targeted Enterprises (black-owned EME or
         QSE consulting firms, B-BBEE level 1 or 2) a contract condition, depending on the contract value and your size:
         under R6m - QSE and Generic firms; R6m-R25m - Generic firms only; over R25m - everyone. Only you can say who you
@@ -44,8 +44,8 @@ export async function SubcontractingPlan({ tenderId, saved }: { tenderId: string
 
       <div
         style={{
-          background: s.applies.needsPlan && !answered ? "#FEF3C7" : "#F6F5F1",
-          border: `1px solid ${s.applies.needsPlan && !answered ? "#F5D08A" : "#E5E1D5"}`,
+          background: s.applies.needsPlan && !answered ? "#FEF3C7" : "#FFFFFF",
+          border: `1px solid ${s.applies.needsPlan && !answered ? "#F5D08A" : "#E3E6EA"}`,
           borderRadius: 9,
           padding: "10px 14px",
           marginBottom: 12,
@@ -62,13 +62,13 @@ export async function SubcontractingPlan({ tenderId, saved }: { tenderId: string
           {/[.!?]["']?$/.test(s.applies.reason) ? "" : "."}
         </div>
         {!category && (
-          <div style={{ marginTop: 4, color: "#6B6758" }}>
+          <div style={{ marginTop: 4, color: "#5B6472" }}>
             The category comes from SANRAL&apos;s own Technical Submission workbook (SETUP sheet) once it is uploaded under Blank
             tender templates above - the contract value itself is never guessed.
           </div>
         )}
         {s.applies.status === "not_required" && !answered && (
-          <div style={{ marginTop: 4, color: "#6B6758" }}>
+          <div style={{ marginTop: 4, color: "#5B6472" }}>
             Form B7 is left out of the pack, with this reason on its checklist. If you subcontract anyway (SANRAL scores the
             percentage under functionality), give your plan below and it is filled in.
           </div>
@@ -97,7 +97,7 @@ export async function SubcontractingPlan({ tenderId, saved }: { tenderId: string
       {answered && (
         <form action={clearSubcontractingPlan} style={{ marginTop: 8 }}>
           <input type="hidden" name="tender_id" value={tenderId} />
-          <button type="submit" style={{ background: "none", border: "none", padding: 0, color: "#6B6758", fontSize: 12, textDecoration: "underline", cursor: "pointer" }}>
+          <button type="submit" style={{ background: "none", border: "none", padding: 0, color: "#5B6472", fontSize: 12, textDecoration: "underline", cursor: "pointer" }}>
             Clear this answer{s.updatedAt ? ` (saved ${new Date(s.updatedAt).toLocaleDateString()})` : ""}
           </button>
         </form>

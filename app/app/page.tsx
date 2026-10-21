@@ -13,16 +13,16 @@ import { createClient } from "@/lib/supabase/server";
 export const instant = false;
 
 export const metadata = {
-  title: "Tender Tool - SANRAL submission packs, built and checked page by page",
+  title: "Tender Ready - SANRAL submission packs, built and checked page by page",
   description:
-    "Tender Tool turns your company documents, people and past-project evidence into SANRAL's complete technical and financial envelope packs - checked page by page against the tender's own rules. No AI blabber, nothing missing, nothing expired.",
+    "Tender Ready turns your company documents, people and past-project evidence into SANRAL's complete technical and financial envelope packs - checked page by page against the tender's own rules. No AI blabber, nothing missing, nothing expired.",
 };
 
 const NAVY = "#16233B";
 const AMBER = "#D97706";
-const CREAM = "#F6F5F1";
-const INK_MUTED = "#6B6758";
-const BORDER = "#E5E1D5";
+const CREAM = "#FFFFFF";
+const INK_MUTED = "#5B6472";
+const BORDER = "#E3E6EA";
 
 const CARD: React.CSSProperties = { background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "24px 22px", boxSizing: "border-box" };
 const SECTION: React.CSSProperties = { maxWidth: 1040, margin: "0 auto", padding: "64px 20px", boxSizing: "border-box" };
@@ -41,7 +41,7 @@ const DIFFERENTIATION = [
     body: "Write your methodology and executive summary for you. Every bid starts to read the same - and SANRAL's own workbooks and SBD forms aren't something an AI narrative tool fills at all.",
   },
   {
-    title: "Tender Tool",
+    title: "Tender Ready",
     body: "Reads the tender's own rules, fills SANRAL's workbooks and the standard SBD/MBD forms from your real company data, and shows you exactly what's missing before you submit. Your words stay yours.",
     highlight: true,
   },
@@ -110,7 +110,7 @@ export default async function Home() {
             <div style={{ width: 28, height: 28, borderRadius: 6, background: AMBER, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, color: NAVY, flexShrink: 0 }}>
               T
             </div>
-            <div style={{ fontWeight: 600, fontSize: 16 }}>Tender Tool</div>
+            <div style={{ fontWeight: 600, fontSize: 16 }}>Tender Ready</div>
           </Link>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <Link href="/tools" style={{ color: "rgba(255,255,255,0.75)", fontSize: 13, textDecoration: "none", padding: "8px 4px" }}>
@@ -148,7 +148,7 @@ export default async function Home() {
       {/* Differentiation band */}
       <section style={SECTION}>
         <h2 style={H2}>Not another tender alert, not another AI proposal writer</h2>
-        <p style={LEDE}>South African tender software mostly does one of two things. Tender Tool does the part neither one does.</p>
+        <p style={LEDE}>South African tender software mostly does one of two things. Tender Ready does the part neither one does.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
           {DIFFERENTIATION.map((d) => (
             <div
@@ -194,7 +194,7 @@ export default async function Home() {
       <section style={SECTION}>
         <h2 style={H2}>No customers yet. Here&apos;s what to check instead of a testimonial</h2>
         <p style={LEDE}>
-          Tender Tool is new. Rather than a quote from someone you&apos;ve never met, here are specific,
+          Tender Ready is new. Rather than a quote from someone you&apos;ve never met, here are specific,
           falsifiable claims you can check yourself in the pack it builds.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 680, margin: "0 auto 32px" }}>
@@ -284,7 +284,7 @@ export default async function Home() {
 
       {/* Footer */}
       <footer style={{ padding: "24px 20px", textAlign: "center" }}>
-        <p style={{ fontSize: 12, color: INK_MUTED, margin: "0 0 8px" }}>Tender Tool - built for South African construction and engineering firms bidding public-sector tenders.</p>
+        <p style={{ fontSize: 12, color: INK_MUTED, margin: "0 0 8px" }}>Tender Ready - built for South African construction and engineering firms bidding public-sector tenders.</p>
         <Link href="/privacy" style={{ fontSize: 12, color: INK_MUTED, textDecoration: "underline" }}>
           Privacy notice
         </Link>
