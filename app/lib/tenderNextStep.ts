@@ -1,30 +1,8 @@
 import { loadTenderCompliance, packReadiness } from "@/app/tenders/[id]/compliance-data";
 import { loadGeneralPackReviewSnapshot } from "@/app/tenders/[id]/general-pack-review-data";
-import { SANRAL_CONVENTIONAL_FAMILY } from "./tenderCompliance";
+import { SANRAL_CONVENTIONAL_FAMILY, SHORT_ACTION_FOR_FORM } from "./tenderCompliance";
 
 export type NextStep = { label: string; href: string };
-
-// Short, verb-first text for each SANRAL doc-item form code (lib/tenderCompliance.ts's
-// own `form` field) - the compliance report's own label for each item is a full
-// catalog sentence (e.g. "Standard declarations (debt, fronting, litigation, SBD 4,
-// POPIA, past SCM practices, addenda, commitments...)"), too long for a one-line
-// dashboard row. This is a presentation-only rephrasing, not a different source of
-// truth - which item is missing/to-confirm still comes from packReadiness() itself.
-const SHORT_ACTION_FOR_FORM: Record<string, string> = {
-  A2: "Confirm signatory authority",
-  "A4-A23": "Complete the SBD 4 declarations",
-  A7: "Confirm CSD registration",
-  A9: "Confirm SARS tax compliance",
-  A12: "Upload B-BBEE certificate",
-  A17: "Upload PI insurance certificate",
-  A18: "Upload bank confirmation letter",
-  A20: "Upload COID letter",
-  B4: "Upload ISO 9001 certificate",
-  B6: "Confirm past performance",
-  "C1.1.1": "Sign the Form of Offer",
-  "C2.4": "Confirm pricing",
-  Briefing: "Confirm briefing attendance",
-};
 
 function shortLabelFor(itemLabel: string): string {
   // itemLabel here is one of packReadiness()'s already-formatted "FORM label..."
