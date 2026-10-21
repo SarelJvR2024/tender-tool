@@ -71,6 +71,14 @@ EXPECTED = {
                           "typed_keys": ["sbd1.name_of_bidder", "ceq.name_of_enterprise", "ceq.company_registration_number",
                                          "form_of_offer.tenderer"]},
     "eskom_e3689": {"suite": None, "auto": [], "by_hand_fill": [], "returnables": [], "buyer_forms_any": ["nec3_contract", "form_of_offer"]},
+    # Finding 40 (QA-Edge-Case-Findings.md): ESKOM's own "Form A" (Supplier
+    # Quality Management form) was named in requirements.py's own docstring
+    # as one of ESKOM's forms but nothing ever matched it - confirmed on this
+    # real ESKOM tender (E3703CXMWP, checked 2026-10-21), which asks for it by
+    # name 11 times across its documents. buyer_forms_any pins specifically
+    # that this regression stays caught, not just "some buyer form or other".
+    "eskom_e3703cxmwp": {"suite": None, "auto": [], "by_hand_fill": [], "returnables": ["bbbee_proof", "cidb", "cipc_documents", "financial_statements"],
+                         "roles": ["contractor.project_manager"], "buyer_forms_any": ["eskom_form_a"]},
 }
 
 ANSWERS = {

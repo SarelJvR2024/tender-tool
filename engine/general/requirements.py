@@ -716,6 +716,16 @@ IN_TEXT_BUYER_FORMS = [
     ("certificate_of_authority", "Certificate / resolution of authority for signatory",
      r"(?:CERTIFICATE|RESOLUTION)\s+OF\s+AUTHORITY"),
     ("declaration_of_shareholding", "Declaration of Shareholding and Directorship", r"DECLARATION\s+OF\s+SHAREHOLDING"),
+    # ESKOM's own Supplier Quality Management form - confirmed from a real
+    # ESKOM tender (E3703CXMWP, 2026-10-21): "complete, sign and return Form A
+    # with the other returnables", repeated across 6 documents, never
+    # surfaced before this - requirements.py's own docstring already named
+    # "Form A" as one of ESKOM's own forms, but nothing matched it. "Form A"
+    # alone is too generic a string to match safely (any buyer could have an
+    # unrelated "Form A") - anchored on the parenthetical that names what it
+    # actually is, which recurs on every real mention in the corpus.
+    ("eskom_form_a", "Form A (Supplier Quality Management)",
+     r"FORM\s+A\s*\(\s*(?:ENQUIRY|TENDER)\s*(?:AND|/)?\s*CONTRACT\s*(?:AND|/)?\s*QUALITY\s+REQUIREMENTS\s+FOR\s+SUPPLIER\s+QUALITY\s+MANAGEMENT"),
 ]
 
 

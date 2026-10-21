@@ -6,6 +6,27 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Phase 2 started, 2026-10-21 ~06:30 UTC: verifying the requirements engine against REAL current
+tenders, not just the curated samples.** Per Sarel's own sequencing ("once [the reader-building
+phase is] done... go through each tender advertised and make sure our engines understand the tender
+requirements 100%"), and since 3+ standing check-ins passed with no reply on the open municipality-
+sweep question, made the call to proceed rather than wait indefinitely - flagged, not hidden.
+Method: pulled a real, randomly-sampled batch of 12 currently-advertised eTenders tenders (diverse
+buyers - national departments, municipalities, SOEs), downloaded each one's actual real documents
+(not an AI summary), ran them through the real `extract_requirements()`, and investigated every
+thin or unexpected result rather than assuming it was correct. **Found and fixed a real gap
+(Finding 40, `docs/specs/QA-Edge-Case-Findings.md`)**: an ESKOM tender named its own "Form A"
+(Supplier Quality Management form) as a mandatory returnable 11 times across its documents - a form
+`requirements.py`'s own docstring already named as ESKOM's, but nothing in the code ever matched
+it. Fixed, and the real 7-document corpus is now a permanent `general_harness.py` regression sample
+(`templates/general_samples/eskom_e3703cxmwp/`) - verified the regression test actually catches the
+bug (reverted the fix, confirmed the harness goes red, restored, confirmed clean). 11 of the 12
+sampled tenders turned out fine on inspection (either correctly flagged as unreadable/incomplete, or
+genuinely had nothing more to extract) - one confirmed real bug in a random dozen. **Not yet done**:
+this was one batch of 12 out of 2,200+ tenders on eTenders alone; the same method needs repeating
+across more, larger, more varied batches before "100%" is a defensible claim rather than a direction
+of travel - continuing this in further standing passes.
+
 **Standing review pass, 2026-10-21 ~04:15 UTC**: orientation via `git log` found one sibling-session
 commit since the last pass (`e5b6ae0`, a different Claude session, "Finding 39" - a naive-UTC date
 bug in `pdf_merge.expiry_warning()` that could silently miss an EXPIRED flag on a document during

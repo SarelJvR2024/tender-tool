@@ -2633,3 +2633,51 @@ exercise the surrounding pack-assembly code show no regression.
 
 **Still deferred:** `etenders_national.py`/`gov_sources.py`'s self-healing discovery-window
 instances, logged above rather than fixed this run.
+
+### Finding 40 (CONFIRMED, FIXED, moderate - a real ESKOM form named in the docs never matched)
+
+**Where:** `engine/general/requirements.py`, `IN_TEXT_BUYER_FORMS`.
+
+**Context:** Sarel asked (2026-10-20/21) to go through advertised tenders and make sure the
+requirements engine understands each one's requirements, not just the curated samples already in
+`templates/general_samples/`. Ran a real, randomly-sampled batch of 12 currently-advertised eTenders
+tenders (diverse buyers: national departments, municipalities, SOEs) through the real
+`extract_requirements()`, downloading each one's actual published documents first - not an
+AI-summarized read, the real files. 11 of 12 ran cleanly (no crash, no silent empty result); most of
+the "thin" results turned out to be correct, not bugs (one eTenders listing genuinely has only the
+advert, not the full tender; one tender routes submission entirely through SAP Ariba with no
+document-based requirements at all; one PDF is a genuine scanned image with no text layer, correctly
+flagged unreadable rather than guessed).
+
+**What was tested:** One ESKOM tender (E3703CXMWP, "NMC/RMC Atmos Maintenance and Support", 7 real
+documents) came back with almost nothing extracted - no SBD/MBD forms (correct, ESKOM doesn't use
+them), but also none of ESKOM's own forms, despite `requirements.py`'s own module docstring
+explicitly naming "Form A" as one of them. Searched the real document text directly: "Form A
+(Enquiry/Contract/Quality Requirements for Supplier Quality Management)" is named 11 times across
+the corpus, including "The existing and/or potential suppliers must complete, sign and return Form
+A with the other returnables as listed in the List of Tender Returnable documents" - a real,
+explicit, mandatory returnable with no corresponding entry in `IN_TEXT_BUYER_FORMS` at all. A bidder
+using this engine today would submit without it and never know it was asked for.
+
+**Fix:** added `eskom_form_a` to `IN_TEXT_BUYER_FORMS`, anchored on the parenthetical that actually
+names the form (`FORM\s+A\s*\(\s*(?:ENQUIRY|TENDER)\s*(?:AND|/)?\s*CONTRACT\s*(?:AND|/)?\s*QUALITY\s+
+REQUIREMENTS\s+FOR\s+SUPPLIER\s+QUALITY\s+MANAGEMENT`) rather than bare "Form A" - that string alone
+is too generic and would false-positive on any other buyer's unrelated "Form A".
+
+**Verification:** the real 7-document corpus is now committed as a new `general_harness.py` sample,
+`templates/general_samples/eskom_e3703cxmwp/` (provenance recorded in `sources.json`, same PDDL
+licence/convention as every other sample there), with an `EXPECTED` entry pinning
+`buyer_forms_any: ["eskom_form_a"]` plus the real returnables found (`bbbee_proof`, `cidb`,
+`cipc_documents`, `financial_statements`) and role (`contractor.project_manager`).
+**Proved the regression test actually catches the bug**: reverted the fix, ran
+`general_harness.py --only eskom_e3703cxmwp` - 1 failed ("none of the buyer forms ['eskom_form_a']
+found"), all 7 company baselines flagged `changed ['buyer_forms']`; restored the fix, re-ran - clean
+again, baseline established for all 7 test companies. Full `general_harness.py` (all 10 samples x 7
+companies, including pack builds) and `test_requirements.py` both still pass with no regression
+elsewhere.
+
+**Broader context, not yet acted on:** this was one random sample of 12 current tenders out of
+2,200+ on eTenders alone (plus every direct-site reader this session has built). One confirmed gap
+found this way in a random dozen suggests more exist; this verification approach (real current
+tenders, real documents, run through the real engine, investigate every thin/empty/unexpected
+result rather than assume it's correct) is the one to keep using, not a one-off.
