@@ -2739,3 +2739,43 @@ failed exactly as predicted (`FAIL ... [('Nala', 'Kannaland')]`); restored the f
 clean again. Ran `test_discovery_fanout.py`, `test_discovery_downgrades.py` and `test_taxonomy.py`
 (all depend on `score_outlook.py` indirectly) for regression safety - all still pass. `python3 -m
 py_compile` clean on both changed files.
+
+### Finding 42 (CONFIRMED, NOT FIXED - architectural, flagged for Sarel's call)
+
+**Where:** `engine/general/requirements.py`'s document-classification/extraction path (no single
+function - this is a shape of document the whole pipeline assumes doesn't exist).
+
+**Context:** continuing phase 2 (verifying the requirements engine against real current tenders,
+per Sarel's own instruction) - a second real random batch of 15 more advertised eTenders tenders.
+14 of 15 behaved reasonably on inspection; one surfaced a real, more serious issue than Finding 40.
+
+**What was found:** City of Tshwane Metropolitan Municipality's own eTenders listing for
+`GPM 08-2026/27` ("long-term lease and development of the following council owned [property]")
+links to a single PDF, "Notice 6 of 2026/27" - which is not that tender's own document at all, but
+a **combined bulletin listing 6 unrelated tenders together** (GPM 06, 08, 14, 15, 17, 18), each its
+own row in a table, all sharing one PDF. Confirmed directly in the real text: "CIDB grading 3ME" and
+"CIDB grading 6CE" appear only in GPM 18's and an unrelated "WSBU 01" tender's own rows - nowhere in
+GPM 08's own row (a property lease, which has no CIDB angle at all). Running this PDF through
+`extract_requirements()` for GPM 08 surfaces `returnable cidb required` anyway, because the engine
+has no concept of "this specific tender's own section of a document that covers several tenders" -
+it reads the whole file as one document and attributes everything in it to whichever tender is
+being processed. **A bidder pursuing GPM 08 would be told a CIDB grading is required when it is
+not, and conversely would never be told what GPM 08 itself actually needs**, since its own row
+("long-term lease and development... following council owned [properties]") isn't the kind of text
+`find_returnables()`/`find_roles()` look for at all.
+
+**Scope, not yet established:** how common this is across buyers beyond City of Tshwane wasn't
+checked this pass - municipalities publishing a single "Notice N of FY" PDF covering several
+tenders at once, rather than one document per tender, may or may not be common; this is one
+confirmed instance, not a surveyed pattern.
+
+**Why not fixed here:** this isn't a one-line regex gap like Finding 40 - it needs either (a)
+detecting a "combined multi-tender bulletin" shape (several distinct reference numbers, each with
+its own row of facts, in one document) and declining to extract tender-specific requirements from
+it at all (safer, but loses real information for buyers who genuinely do this for every tender), or
+(b) row/section-scoped extraction that isolates the specific tender's own text before running
+`find_returnables()`/`find_roles()`/CIDB/briefing detection against it (more accurate, meaningfully
+harder - requires associating a reference number with its own table row or paragraph span, which
+nothing in this engine does today). Both are real architectural changes, not a quick patch - flagged
+to Sarel directly rather than rushed, same discipline as the daily-digest timeout question in
+`System-Status.md`.

@@ -6,6 +6,25 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~08:20 UTC**: orientation via `git log` found one sibling-session
+commit (`24c47ba`, a different Claude session, "Finding 41" - two unrelated real municipalities,
+Nala and Kannaland, could falsely match on locality because the substring check stripped spaces
+before comparing; independently re-verified, not just trusted: `python3
+engine/discovery/test_score_outlook.py` genuinely passes, 5/5, including a full ~140-municipality
+sweep for any other such collision). QA re-confirmed sound across `engine/discovery/`'s test suite.
+
+**Continued phase 2 with a second real batch (15 more advertised tenders, same method as below) and
+found a more serious, NOT-yet-fixed issue: Finding 42
+(`docs/specs/QA-Edge-Case-Findings.md`).** City of Tshwane publishes some tenders' only document as
+a combined bulletin PDF covering several unrelated tenders in one file (confirmed: GPM 08-2026/27, a
+property lease, shares a PDF with GPM 06/14/15/17/18 and an unrelated WSBU 01 - each its own row).
+The engine has no concept of "this tender's own row in a shared document" - it attributes
+everything in the file to whichever tender is being processed, so GPM 08 was shown a CIDB grading
+requirement that actually belongs to a different tender in the same PDF, while its own real
+requirement (the lease/property terms) was never surfaced at all. **This is a real architectural
+gap, not a quick regex fix like Finding 40** - flagged to Sarel directly rather than rushed; scope
+(how common this bulletin-PDF shape is beyond City of Tshwane) is not yet established either.
+
 **Phase 2 started, 2026-10-21 ~06:30 UTC: verifying the requirements engine against REAL current
 tenders, not just the curated samples.** Per Sarel's own sequencing ("once [the reader-building
 phase is] done... go through each tender advertised and make sure our engines understand the tender
