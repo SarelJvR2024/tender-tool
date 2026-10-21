@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { formatRand, median } from "@/lib/dealEconomics";
@@ -11,13 +10,17 @@ import { bestOutcome, firmsMet, loadOutcomesForTenders, ownPosition, sampleStren
  * often on those registers. Only the company's own tenders - no other
  * tender's register is shown here. Design + coverage caveats:
  * docs/specs/Award-Price-Analysis-Findings.md.
+ *
+ * Design-system audit fix (2026-10-21): converted from inline-CSSProperties
+ * stale hex to Tailwind + design tokens. Both tables keep plain horizontal
+ * scroll on mobile (not converted to a stacked card list) - this is
+ * secondary, below-the-fold market context rather than the screen's main
+ * per-tender record, which is the pricing table above it; see
+ * app/AGENTS.md for why only that one and the Bids list view got the full
+ * card treatment.
  */
 
 export type PricedTender = { tenderId: string; contractNo: string | null; title: string; price: number | null };
-
-const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#5B6472", padding: "8px 10px", borderBottom: "1px solid #E3E6EA", whiteSpace: "nowrap" };
-const td: CSSProperties = { fontSize: 13, color: "#16233B", padding: "8px 10px", borderBottom: "1px solid #ECEEF1", verticalAlign: "top" };
-const num: CSSProperties = { ...td, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" };
 
 export async function MarketComparison({ tenders }: { tenders: PricedTender[] }) {
   const supabase = await createClient();
@@ -40,21 +43,21 @@ export async function MarketComparison({ tenders }: { tenders: PricedTender[] })
   const firms = firmsMet(placed.map((m) => ({ outcome: m.outcome, position: m.position }))).filter((f) => f.met >= 2).slice(0, 12);
 
   return (
-    <div id="market" style={{ marginTop: 24 }}>
-      <h2 style={{ fontSize: 15, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>How your prices compared with the published results</h2>
-      <p style={{ fontSize: 12, color: "#5B6472", margin: "0 0 10px" }}>
+    <div id="market" className="mt-6">
+      <h2 className="mb-1 text-base font-semibold text-foreground">How your prices compared with the published results</h2>
+      <p className="mb-2.5 text-xs text-muted-foreground">
         Matched to SANRAL&apos;s opening registers / award notices and the eTenders Awarded tab. Most buyers publish only the
         winner, or nothing, so expect only some of your tenders here.
       </p>
-      {error && <p style={{ fontSize: 12, color: "#B91C1C" }}>Could not read published results: {error}</p>}
+      {error && <p className="text-xs text-destructive">Could not read published results: {error}</p>}
 
       {matched.length === 0 ? (
-        <div style={{ background: "#FFFFFF", border: "1px dashed #E3E6EA", borderRadius: 11, padding: 18, fontSize: 13, color: "#5B6472" }}>
+        <div className="rounded-lg border border-dashed border-border bg-card p-4.5 text-sm text-muted-foreground">
           None of your {tenders.length} priced tender{tenders.length === 1 ? "" : "s"} has a published bidders list or award yet.
         </div>
       ) : (
         <>
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "12px 16px", marginBottom: 12, fontSize: 13, color: "#16233B", lineHeight: 1.6 }}>
+          <div className="mb-3 rounded-lg border border-border bg-card px-4 py-3 text-sm leading-relaxed text-foreground">
             <strong>{matched.length}</strong> of your {tenders.length} priced tenders have a published result; you are on the register of{" "}
             <strong>{placed.length}</strong> ({confirmed.length} by name and price, {placed.length - confirmed.length} by name or price only - check those).
             {placed.length > 0 && (
@@ -65,42 +68,42 @@ export async function MarketComparison({ tenders }: { tenders: PricedTender[] })
               </>
             )}
             {sampleStrength(placed.length) !== "fair" && (
-              <div style={{ fontSize: 11, color: "#B45309" }}>Based on {placed.length} tender{placed.length === 1 ? "" : "s"} - too few for a pattern; read each row on its own.</div>
+              <div className="text-xs text-warning">Based on {placed.length} tender{placed.length === 1 ? "" : "s"} - too few for a pattern; read each row on its own.</div>
             )}
           </div>
 
-          <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, marginBottom: 16 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
+          <div className="mb-4 overflow-x-auto rounded-lg border border-border bg-card" style={{ WebkitOverflowScrolling: "touch" }}>
+            <table className="w-full min-w-[860px] border-collapse">
               <thead>
-                <tr>
-                  <th style={th}>Tender</th>
-                  <th style={{ ...th, textAlign: "right" }}>Your price</th>
-                  <th style={th}>Placed</th>
-                  <th style={{ ...th, textAlign: "right" }}>vs lowest</th>
-                  <th style={{ ...th, textAlign: "right" }}>vs median</th>
-                  <th style={{ ...th, textAlign: "right" }}>vs winner</th>
-                  <th style={th}>Result</th>
+                <tr className="border-b border-border text-left text-xs font-semibold whitespace-nowrap text-muted-foreground">
+                  <th className="px-2.5 py-2">Tender</th>
+                  <th className="px-2.5 py-2 text-right">Your price</th>
+                  <th className="px-2.5 py-2">Placed</th>
+                  <th className="px-2.5 py-2 text-right">vs lowest</th>
+                  <th className="px-2.5 py-2 text-right">vs median</th>
+                  <th className="px-2.5 py-2 text-right">vs winner</th>
+                  <th className="px-2.5 py-2">Result</th>
                 </tr>
               </thead>
               <tbody>
                 {matched.map(({ t, outcome, position: p }) => (
-                  <tr key={t.tenderId}>
-                    <td style={{ ...td, maxWidth: 240 }}>
-                      <Link href={`/tenders/${t.tenderId}#market`} style={{ color: "#16233B", textDecoration: "none" }}>
-                        {t.contractNo && <div style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600 }}>{t.contractNo}</div>}
-                        <div style={{ fontSize: 12 }}>{t.title}</div>
+                  <tr key={t.tenderId} className="border-b border-border/60 text-sm align-top last:border-0">
+                    <td className="max-w-[240px] px-2.5 py-2">
+                      <Link href={`/tenders/${t.tenderId}#market`} className="text-foreground no-underline hover:underline">
+                        {t.contractNo && <div className="font-mono text-[11px] font-semibold">{t.contractNo}</div>}
+                        <div className="text-xs">{t.title}</div>
                       </Link>
                     </td>
-                    <td style={num}>{formatRand(p.price)}</td>
-                    <td style={td}>
-                      {p.entry && p.rank !== null ? `${p.rank} of ${p.of}` : <span style={{ color: "#8A93A0" }}>not on register</span>}
-                      {p.found === "name" || p.found === "price" || p.found === "similar_name" ? <div style={{ fontSize: 10, color: "#B45309" }}>by {p.found === "similar_name" ? "similar name" : p.found} only - check</div> : null}
-                      {outcome.register_columns > 1 && <div style={{ fontSize: 10, color: "#8A93A0" }}>batch: {p.field.label}</div>}
+                    <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-foreground">{formatRand(p.price)}</td>
+                    <td className="px-2.5 py-2 text-foreground">
+                      {p.entry && p.rank !== null ? `${p.rank} of ${p.of}` : <span className="text-muted-foreground">not on register</span>}
+                      {p.found === "name" || p.found === "price" || p.found === "similar_name" ? <div className="text-[10px] text-warning">by {p.found === "similar_name" ? "similar name" : p.found} only - check</div> : null}
+                      {outcome.register_columns > 1 && <div className="text-[10px] text-muted-foreground">batch: {p.field.label}</div>}
                     </td>
-                    <td style={num}>{p.rank === 1 ? "lowest" : signedPct(p.vsLowPct)}</td>
-                    <td style={num}>{signedPct(p.vsMedianPct)}</td>
-                    <td style={num}>{p.youWon ? "won" : signedPct(p.vsWinnerPct)}</td>
-                    <td style={{ ...td, fontSize: 12 }}>
+                    <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-foreground">{p.rank === 1 ? "lowest" : signedPct(p.vsLowPct)}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-foreground">{signedPct(p.vsMedianPct)}</td>
+                    <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-foreground">{p.youWon ? "won" : signedPct(p.vsWinnerPct)}</td>
+                    <td className="px-2.5 py-2 text-xs text-foreground">
                       {outcome.status === "awarded" ? <>Awarded to {outcome.winner_name}{outcome.winner_amount_zar ? ` (${formatRand(outcome.winner_amount_zar)})` : ""}</> : "Register out, not awarded yet"}
                     </td>
                   </tr>
@@ -109,30 +112,30 @@ export async function MarketComparison({ tenders }: { tenders: PricedTender[] })
             </table>
           </div>
 
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Firms you have bid against most</h3>
-          <p style={{ fontSize: 12, color: "#5B6472", margin: "0 0 8px" }}>
+          <h3 className="mb-1 text-sm font-semibold text-foreground">Firms you have bid against most</h3>
+          <p className="mb-2 text-xs text-muted-foreground">
             From the published registers of tenders you bid on, only. Names as the buyer typed them, so one firm can appear under two spellings.
           </p>
           {firms.length === 0 ? (
-            <div style={{ fontSize: 12, color: "#5B6472" }}>No firm appears on more than one of your published registers yet.</div>
+            <div className="text-xs text-muted-foreground">No firm appears on more than one of your published registers yet.</div>
           ) : (
-            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 520 }}>
+            <div className="overflow-x-auto rounded-lg border border-border bg-card" style={{ WebkitOverflowScrolling: "touch" }}>
+              <table className="w-full min-w-[520px] border-collapse">
                 <thead>
-                  <tr>
-                    <th style={th}>Firm</th>
-                    <th style={{ ...th, textAlign: "right" }}>Tenders met</th>
-                    <th style={{ ...th, textAlign: "right" }}>They won</th>
-                    <th style={{ ...th, textAlign: "right" }}>You priced lower</th>
+                  <tr className="border-b border-border text-left text-xs font-semibold whitespace-nowrap text-muted-foreground">
+                    <th className="px-2.5 py-2">Firm</th>
+                    <th className="px-2.5 py-2 text-right">Tenders met</th>
+                    <th className="px-2.5 py-2 text-right">They won</th>
+                    <th className="px-2.5 py-2 text-right">You priced lower</th>
                   </tr>
                 </thead>
                 <tbody>
                   {firms.map((f) => (
-                    <tr key={f.name}>
-                      <td style={td}>{f.name}</td>
-                      <td style={num}>{f.met}</td>
-                      <td style={num}>{f.theyWon}</td>
-                      <td style={num}>{f.compared ? `${f.youLower} of ${f.compared}` : "-"}</td>
+                    <tr key={f.name} className="border-b border-border/60 text-sm last:border-0">
+                      <td className="px-2.5 py-2 text-foreground">{f.name}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-foreground">{f.met}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-foreground">{f.theyWon}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-foreground">{f.compared ? `${f.youLower} of ${f.compared}` : "-"}</td>
                     </tr>
                   ))}
                 </tbody>
