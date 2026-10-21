@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "./dates";
+import { DEADLINE_WINDOW_DAYS } from "./deadlineReminders";
 
 export type AppNotification = {
   id: string;
@@ -15,7 +16,10 @@ export type AppNotification = {
 // DeadlineChip "soon" band for tenders - these are read-only glances at
 // data the vault and dashboard already track, not a new source of truth.
 const DOCUMENT_WINDOW_DAYS = 60;
-const DEADLINE_WINDOW_DAYS = 14;
+// DEADLINE_WINDOW_DAYS itself now lives in ./deadlineReminders (re-exported
+// here for every existing caller of this module) - see that file's own
+// comment for why.
+export { DEADLINE_WINDOW_DAYS };
 
 function severityFor(daysLeft: number): "destructive" | "warning" {
   return daysLeft < 0 ? "destructive" : "warning";
