@@ -81,6 +81,21 @@ section-label signal for current-vs-expired).** Both remain confirmed real eTend
 independently: Overstrand 1 of many duplicated, Knysna 0 duplicated) but neither was built this
 round - a correction is recorded directly in that file rather than left standing uncorrected.
 
+**The seventh pass (North West/Northern Cape/remaining Limpopo-Mpumalanga-Gauteng) malfunctioned and
+was stopped, not completed (2026-10-21, ~02:15 UTC).** It ran over 2 hours (its two siblings each
+took 2-4 minutes) and its final captured output was nonsensical, narrating in this session's own
+reporting voice rather than returning research findings - it never wrote its output file. No harm
+done: checked `git log` and working tree directly after stopping it, confirmed nothing was committed
+or pushed by it (the sibling CV-fix commit `f89b8a8` that landed around the same time is a genuine,
+independently-verified different session, not this fork). **Municipality coverage stands at roughly
+85 of 257**, with three full rounds now showing clearly diminishing returns (round 3's ~24
+municipalities across 4 sub-passes produced zero clean, immediately-buildable new reader candidates
+- Ulundi, Overstrand and Knysna are all real gaps but each has a real structural problem, same as
+Mbombela/Polokwane). Judgment call, not yet put to Sarel: treat the municipality sweep as reasonably
+concluded for now rather than dispatch an eighth multi-hour pass for ~170 still-uncovered,
+mostly-small municipalities with a demonstrated low hit rate - flagged to him directly since this is
+a "how thorough is thorough enough" call, not a technical one.
+
 Last full pass: 2026-10-20, ~22:11 UTC — fifty-second standing QA run: independently verified two
 substantial batches of sibling work rather than trusting either's own claims. First, the UI/UX
 redesign's first 3 real prompts landed (`ee60823`/`f5e5a6f`/`6787cf3` - shadcn/ui + oklch design-token
