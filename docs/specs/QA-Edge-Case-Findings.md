@@ -2500,3 +2500,56 @@ have to re-discover them: `cv/generate_cv.py:307`, `pack_generator/suggest_pack.
 `company_documents.py:298`, `fingerprint.py:181`, `discovery/etenders_national.py:275`,
 `discovery/gov_sources.py:205`, `pack/harness_pack.py:93`, `pack/pdf_merge.py:118`,
 `pack/assemble_pack.py:506`, `pack/process_pack_jobs.py:862`.
+
+## 2026-10-21 (fifty-third run): CV engine - closing out one of last cycle's own deferred items, with an actual rounding-boundary trigger confirmed, not assumed
+
+**Why this area:** CV engine was the one remaining area without a fresh adversarial pass of my
+own this session (the enterprise audit covered `generate_cv.py`/`process_cv_jobs.py` for path
+traversal, raw-error leaks, null crashes and a control-character failure already). Rather than
+re-tread that ground, closed out `cv/generate_cv.py:307` - one of the 10 naive `date.today()`
+instances the fifty-first run's own repo-wide grep found and deliberately deferred, on the
+reasoning that each needed its own look before deciding whether fixing it was worth the churn.
+Took that look.
+
+### Finding 38 (CONFIRMED, FIXED, moderate - a real, narrow rounding-boundary trigger, not a hypothetical one)
+
+**Where:** `engine/cv/generate_cv.py`, `build_sanral_keyperson()`'s Form B2.1 fallback date.
+
+**What was tested:** when a CV is built outside a specific tender context (the standard,
+non-tender CV path), the "years of relevant experience" figure is computed "as of today" using
+`datetime.date.today()` - the same naive-UTC bug class as Finding 37, but feeding a rounded
+numeric computation (`suggest_pack.years_experience_at()`: `round((closing_date - grad).days /
+365.25)`) rather than a simple date-string comparison. A one-day shift from the timezone bug only
+changes the OUTPUT when the true value sits within about 1/365.25 of a half-integer rounding
+boundary - so, unlike Finding 37 (which fires for ANY document expiring on the real SAST today,
+a daily-occurring trigger), this needed checking whether a real trigger date actually exists, not
+assuming one does from the bug class alone. Wrote a direct search across 60 years of possible
+`initial_graduated` dates comparing the naive-UTC and correct-SAST computations under a simulated
+clock inside the bad window (UTC 2026-10-20 23:30 = SAST 2026-10-21 01:30): confirmed 60 real
+trigger dates in that 60-year span (one date per year, drifting slightly with leap years - e.g.
+`initial_graduated = "2026-04-21"` flips `0` -> `1`). Not a one-in-a-million theoretical edge
+case - a real person whose qualification date happens to land on the one calendar day per year
+this flips would get the wrong number printed on an actual generated CV, specifically during a CV
+build that happens to fall in a 2-hour window once a day.
+
+**Fix:** added the same local `SAST` constant pattern as Finding 37 (and `watch_deadlines.py`
+before it) to `generate_cv.py`; the fallback `closing_date` is now
+`datetime.datetime.now(SAST).date()`.
+
+**Verification:** re-ran the direct 60-year search against the fixed computation - confirmed the
+simulated-clock SAST date now matches the real SAST date exactly. Added a new test to
+`engine/cv/test_generate_cv.py`: runs the REAL `build_sanral_keyperson()` with a person whose
+`initial_graduated` is the confirmed trigger date (`2026-04-21`) and the system clock
+monkeypatched into the bad window, and checks the actual provenance-logged years figure. **Proved
+the test actually catches the regression** (first attempt didn't - monkeypatching only
+`datetime.datetime.now` missed a reverted-to-`date.today()` code path entirely, a real near-miss
+in the test's own design, caught by deliberately reverting the fix and seeing `0 failure(s)`
+instead of the expected failure; fixed the test to patch `datetime.date.today` too, re-reverted
+the fix, confirmed the corrected test now fails exactly as expected, restored the fix, confirmed
+clean). Ran `engine/cv/test_extract_cv_fields.py` and `process_cv_jobs.py --self-test` (the real
+end-to-end CV-generation smoke test) for regression safety - both still pass. `python3 -m
+py_compile` clean.
+
+**Still deferred, unchanged:** the other 9 naive `date.today()` instances from the fifty-first
+run's own list - each would need the same "does a real trigger actually exist" check before
+fixing, not assumed from the bug class alone.

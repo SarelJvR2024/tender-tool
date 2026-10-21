@@ -128,6 +128,53 @@ def test_control_characters_are_stripped_not_crashed_on():
         check("a control character in profile text does not crash docx generation", False, f"{type(e).__name__}: {e}")
 
 
+def test_years_experience_uses_sast_not_naive_utc_today():
+    print("Form B2.1: years-of-experience fallback 'as of today' uses SAST, not a naive UTC date")
+    # Finding (2026-10-21): the standard (non-tender) CV path's fallback
+    # "as of today" date was a naive datetime.date.today() - a bridge worker
+    # container has no TZ set and runs in UTC by default, so this is one
+    # calendar day behind real SAST for the 00:00-01:59 SAST window every
+    # day (same bug class as Finding 37, engine/fill_a_forms.py). Fed
+    # straight into suggest_pack.years_experience_at()'s rounded year count
+    # (round((closing_date - grad).days / 365.25)) - a one-day shift flips
+    # the rounded figure whenever a person's initial_graduated date sits
+    # near the rounding boundary. "2026-04-21" is confirmed (by direct
+    # search) to be exactly such a date for this SAST/UTC pair. Simulates
+    # the system clock at UTC 2026-10-20 23:30 (= SAST 2026-10-21 01:30,
+    # inside the bad window) by monkeypatching datetime.datetime.now,
+    # restored immediately after.
+    import datetime as real_datetime
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = real_datetime.datetime(2026, 10, 20, 23, 30, tzinfo=real_datetime.timezone.utc)
+            return base.astimezone(tz) if tz else base
+
+    class FixedDate(real_datetime.date):
+        @classmethod
+        def today(cls):
+            # What a naive datetime.date.today() would read under the same
+            # fake UTC clock as FixedDateTime above - patched too so this
+            # test still catches a regression to the OLD naive form, not
+            # just a hypothetical one that happens to keep using datetime.now.
+            return real_datetime.date(2026, 10, 20)
+
+    profile = {"company": {"legal_name": "Test Co", "cipc_registration_number": "", "registered_address": ""}}
+    person = {"name": "Test Person", "role": "Engineer",
+              "qualifications": {"initial_graduated": "2026-04-21"}, "projects": []}
+    real_dt, real_date = gc.datetime.datetime, gc.datetime.date
+    gc.datetime.datetime, gc.datetime.date = FixedDateTime, FixedDate
+    try:
+        log = ProvenanceLog(source="test")
+        gc.build_sanral_keyperson(profile, person, "p1", "summary", None, None, log)
+    finally:
+        gc.datetime.datetime, gc.datetime.date = real_dt, real_date
+    entry = next(e for e in log.entries if e["field_key"] == "cv.b21.years_of_relevant_experience")
+    check("years-of-experience is computed from the real SAST date (1), not the naive UTC one (0)",
+          entry["value"] == "1", entry)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -135,6 +182,7 @@ def main():
     test_person_name_cannot_escape_out_dir_via_path_traversal()
     test_null_projects_and_qualifications_degrade_instead_of_crashing()
     test_control_characters_are_stripped_not_crashed_on()
+    test_years_experience_uses_sast_not_naive_utc_today()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

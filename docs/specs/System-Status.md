@@ -463,6 +463,32 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-21, standing QA/robustness review - fifty-third run): closed one of last cycle's own deferred naive-UTC-date instances, with a real trigger date confirmed rather than assumed
+
+Orientation: CV engine - the one remaining area without a fresh pass of my own this session.
+Closed out `cv/generate_cv.py:307`, one of the 10 naive `date.today()` instances the fifty-first
+run's own grep found and deferred pending "does this one actually matter" checks.
+
+**Finding 38 (fixed, moderate - a real, narrow trigger confirmed, not assumed):** the standard
+CV path's "years of relevant experience" fallback used `date.today()` feeding a ROUNDED
+computation (`round(days / 365.25)`), unlike Finding 37's simple date comparison - a one-day
+shift only changes the output near a rounding boundary. Searched 60 years of possible graduation
+dates under the simulated bad-window clock and found 60 real trigger dates (one per year) where
+the figure actually flips (e.g. `initial_graduated = "2026-04-21"` flips 0 -> 1) - confirming a
+real, if narrow, consequence rather than a purely theoretical one.
+
+**Fix:** same local `SAST` constant pattern as Finding 37.
+
+**Verification:** new test in `test_generate_cv.py` running the real `build_sanral_keyperson()`
+against the confirmed trigger date with the clock monkeypatched into the bad window. Caught a real
+flaw in its own first draft along the way: patching only `datetime.datetime.now` missed the
+reverted-code case entirely (0 failures when a failure was expected) - fixed the test to also
+patch `datetime.date.today`, then confirmed it genuinely fails pre-fix and passes post-fix.
+`test_extract_cv_fields.py` and the real `process_cv_jobs.py --self-test` end-to-end smoke test
+both still pass. `python3 -m py_compile` clean.
+
+Full detail: `QA-Edge-Case-Findings.md`, "fifty-third run" (Finding 38).
+
 ## This pass (2026-10-20, standing QA/robustness review - fifty-first run): the same naive-UTC "today" bug the enterprise audit fixed elsewhere was still open in two legal-document compliance checks - fixed
 
 Orientation: SANRAL pack engine - the remaining area not yet given a fresh pass of my own this
