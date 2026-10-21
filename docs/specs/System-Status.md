@@ -885,6 +885,59 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-21, standing QA/robustness review - fifty-ninth run): the naive-UTC-"today" bug class, not yet swept in engine/general/, could let a general-pack experience-recency check pass stale evidence
+
+Orientation: rotated to worker/job-queue, then found the actual bug one layer down in
+`engine/general/process_general_jobs.py` - the general (non-SANRAL) pack bridge, whose
+`_within()` experience-recency filter had never been checked against the SAST-vs-UTC bug class
+Findings 37-39 (this session) already swept in `fill_a_forms.py`/`fill_sbd_docx.py`/
+`generate_cv.py`/`pdf_merge.py`/`process_pack_jobs.py`.
+
+**Finding 48 (CONFIRMED, FIXED, moderate).** `_within()`'s `window_years` recency rule falls back
+to "today" when a tender's `closing_date` is missing (Finding 9c, an earlier pass) - but it got
+"today" from this module's own `_now()` helper, `datetime.datetime.now(datetime.timezone.utc)`.
+During the 00:00-01:59 SAST window, that's one calendar day behind real SAST "today", which moves
+the recency cutoff a day early and can let a stale Experience Library row through as
+recent-enough evidence for a tender's own "last N years" requirement - the opposite direction from
+Findings 37-39 (there, a compliance warning went missing; here, a company's own pack could
+over-claim compliance it doesn't have). Reproduced against the real `_within()` (not a
+reimplementation): closing=None, a `{"window_years": 5}` rule, an experience row dated
+2021-10-20, clock mocked to 2026-10-20T22:30:00+00:00 (00:30 SAST on 2026-10-21) - real SAST
+today's 5-year cutoff is 2021-10-21, so this row is genuinely too old, but the old code returned
+`True` (included).
+
+**Fix:** `_now()` itself untouched (it also timestamps real DB rows - `downloaded_at`/
+`analysed_at`/`started_at`/`completed_at` - where a true UTC instant is correct, not a shifted
+one). Added a local `SAST` constant (same per-file-local convention as `watch_deadlines.py`) and
+pointed only `_within()`'s own "today" fallback at `datetime.datetime.now(SAST).date()`.
+
+**Verified the regression test actually catches the bug:** new
+`test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()` in
+`engine/general/test_process_general_jobs.py` (plus a boundary check that an item exactly on the
+real cutoff day stays included). Reverted the fix (`git stash`): the new check failed with
+exactly the predicted wrong `True`; restored it: `0 failure(s)`. Re-ran
+`test_general_bridge.py`/`test_requirements.py`/`test_submission_plan.py` too: all clean, no
+interaction with the private-document-path, role-classification or submission-plan-status logic
+those cover.
+
+**Also checked this pass, no bug:** `engine/worker/poll_loop.py`/`run_bridges.py`'s
+`TimeoutExpired` handling (`(e.stdout or b"") + (e.stderr or b"")` after a hung bridge subprocess
+is killed) looked fragile reading it cold - `subprocess.run(..., text=True)` plus a timeout could
+plausibly hand back `str`, not `bytes`, making that concatenation raise `TypeError` inside the
+very except-block meant to keep one hung bridge from taking down the others. Reproduced directly
+(three cases: stdout-only, both streams, neither) on this environment's real Python (3.13.16):
+`TimeoutExpired.stdout`/`.stderr` are consistently `bytes`-or-`None` even with `text=True`, so the
+existing `isinstance(out, bytes)` guard already covers it. Logged so a future pass doesn't
+re-spend time on the same dead end, and because this would change on an older CPython where that
+attribute's type is known to have been inconsistent - worth a second look if the worker's own
+Python version ever changes (`engine/worker/Dockerfile`).
+Also checked and found clean: `registration_reminders.py`'s `_mark_company()` seen-key patching
+(keys match `_expiry_window()`'s own format exactly), `find_due_registrations()`'s id-sorting
+(every id column it sorts is `not null` in `0050_principals_registrations_properties.sql`), and
+`send_digest_emails.py`/`daily_digest.py`'s `build_digest_for_person()` (the `reassessed_tenders`
+`i["opportunity_id"]` bare-key access looked unguarded, but `discovery_downgrades.
+pending_digest_downgrades()` always sets it from the row's own primary key).
+
 ## This pass (2026-10-21, standing QA/robustness review - fifty-eighth run): the offline key-person suggestion could silently disagree with the live Tender Workspace for the identical tied-score candidates
 
 Orientation: `suggest_pack.py` (Step 2 of the SANRAL pipeline, zero test file) shares its

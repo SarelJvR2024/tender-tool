@@ -3105,3 +3105,53 @@ redesign), plus several confirmed-correctly-handled edge cases this batch specif
 adverts beyond a single page, buyer-regret-letter-only listings, scanned documents, a mixed
 buyer-reference + genuine-ask document landing on the right answer for the wrong displayed
 reason).**
+
+### Finding 48 (CONFIRMED, FIXED, moderate - a general-pack experience-recency check could pass stale evidence)
+
+**Where:** `engine/general/process_general_jobs._within()`, the filter the general (non-SANRAL)
+pack bridge applies to every Experience Library row before offering it as evidence for a tender's
+`window_years` recency rule (e.g. "only projects completed in the last 5 years"). When the
+tender's own `closing_date` is missing or unreadable, `_within()` falls back to "today" as the
+reference point (Finding 9c, an earlier pass) - but it got "today" from this module's own `_now()`
+helper, which is `datetime.datetime.now(datetime.timezone.utc)`: the same naive-UTC-"today" bug
+class this session already fixed in `fill_a_forms.py`/`fill_sbd_docx.py`/`generate_cv.py`/
+`pdf_merge.py`/`process_pack_jobs.py` (Findings 37-39), just not yet swept in `engine/general/`.
+During the 00:00-01:59 SAST window (22:00-23:59 UTC the day before - worker containers have no TZ
+set, so `datetime.now(utc)` is correct UTC but SAST is UTC+2), `_now()`'s calendar day is one day
+behind the real SAST day.
+
+**What was tested:** called the real `process_general_jobs._within()` (not a reimplementation)
+with `closing=None` (a tender with no closing date on file - plausible: `tenders.closing_date` is
+nullable in `0001_init_schema.sql`/`0004_discovery.sql`), a `{"window_years": 5}` rule, and an
+Experience Library row dated `2021-10-20`, with `datetime.datetime.now` mocked to
+`2026-10-20T22:30:00+00:00` (= 00:30 SAST on 2026-10-21). Real SAST "today" is 2026-10-21, so a
+5-year window's cutoff is 2021-10-21 - this row is genuinely one day too old and should be
+excluded. Before the fix: `_within()` returned `True` (included) - `_now()`'s UTC-today
+(2026-10-20) put the cutoff at 2021-10-20, exactly on this row's date, so `comp_day < cutoff` was
+False. After the fix: `False`, correctly excluded.
+
+**Why this is the opposite direction from Findings 37-39, and still real:** those findings were
+about a compliance warning silently going missing (document shown as current when it had
+expired). This one is a company's own submitted pack being allowed to cite experience evidence
+that is actually outside the tender's own recency requirement as if it were inside it - a
+compliance-risk-in-the-other-direction, surfaced only in a roughly 2-hour daily window and only
+for tenders with no closing date recorded plus a `window_years` rule, which is why it reads
+"moderate" rather than "severe" like Finding 37's (narrower combination of conditions, but a real,
+reachable one, not contrived).
+
+**Fix:** `_now()` itself is untouched - it is also used to timestamp real DB rows
+(`downloaded_at`/`analysed_at`/`started_at`/`completed_at`), where the correct value is a true UTC
+instant, not a shifted one, so changing it there would have been its own new bug. Added a local
+`SAST = datetime.timezone(datetime.timedelta(hours=2))` constant (same per-file convention as
+`watch_deadlines.py`, not a cross-directory import) and changed only `_within()`'s own "today"
+fallback to `datetime.datetime.now(SAST).date().isoformat()`.
+
+**Verified the test actually catches the regression:** `engine/general/test_process_general_jobs.py`
+got a new `test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()` (plus a second
+check that an item exactly on the real cutoff day stays included, so the fix didn't over-correct).
+Reverted `process_general_jobs.py`'s diff (`git stash`), re-ran: the new check failed with exactly
+the predicted wrong `True`, the rest of the suite (including the pre-existing `fail_stale_jobs()`
+test) stayed green; restored the fix (`git stash pop`), re-ran: `0 failure(s)`. Also re-ran
+`test_general_bridge.py`, `test_requirements.py`, and `test_submission_plan.py`: all still pass
+(no interaction with the private-document-path / role-classification / submission-plan-status
+logic those cover).

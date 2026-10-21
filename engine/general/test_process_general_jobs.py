@@ -53,7 +53,7 @@ def iso(dt):
     return dt.isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
-def main():
+def test_fail_stale_jobs_recovers_a_stuck_general_job():
     print("fail_stale_jobs(): a general-engine job stuck in 'generating' is recovered")
     now = datetime.datetime(2026, 10, 20, 12, 0, 0, tzinfo=datetime.timezone.utc)
     stale_started = now - datetime.timedelta(minutes=90)  # past STALE_AFTER_MINUTES=60
@@ -94,6 +94,51 @@ def main():
           by_id["job-ready"]["status"] == "ready", by_id["job-ready"])
     check("exactly one alert was recorded, for the one genuinely stale job",
           len(alerts) == 1 and alerts[0][0][0] == "general", alerts)
+
+
+class FixedDateTime(datetime.datetime):
+    """Freezes datetime.datetime.now() to a given instant, same pattern as
+    engine/pack/test_pdf_merge.py / engine/cv/test_generate_cv.py's own
+    FixedDateTime - needed to land squarely inside the 00:00-01:59 SAST
+    window (22:00-23:59 UTC the day before)."""
+    _frozen = None
+
+    @classmethod
+    def now(cls, tz=None):
+        base = cls._frozen
+        return base.astimezone(tz) if tz is not None else base.replace(tzinfo=None)
+
+
+def test_within_missing_closing_date_uses_real_sast_today_not_naive_utc():
+    print("\n_within(): a window_years rule with no tender closing date must use the real "
+          "SAST calendar day, not _now()'s UTC one, during the 00:00-01:59 SAST window")
+    # 00:30 SAST on 2026-10-21 == 22:30 UTC on 2026-10-20 (QA Finding, 2026-10-21: process_general_jobs.py's
+    # own _now() is correctly UTC for its OTHER job - timestamping real DB rows - but _within() reused it
+    # as a calendar-day fallback too, which is one day behind real SAST "today" in exactly this window).
+    FixedDateTime._frozen = datetime.datetime(2026, 10, 20, 22, 30, 0, tzinfo=datetime.timezone.utc)
+    real_datetime = pgj.datetime.datetime
+    pgj.datetime.datetime = FixedDateTime
+    try:
+        rule = {"window_years": 5}
+        # Real SAST today is 2026-10-21, so a 5-year window's cutoff is 2021-10-21.
+        # This item is dated exactly ONE DAY before that cutoff - genuinely outside the
+        # window - but lands exactly ON the buggy, one-day-early UTC cutoff (2021-10-20),
+        # so the old code wrongly let it through as "recent enough".
+        stale_item = {"id": "exp-stale", "completion_date": "2021-10-20"}
+        check("a tender with no closing date, during the 00:00-01:59 SAST window, still excludes "
+              "experience older than the real (SAST) window cutoff",
+              pgj._within(stale_item, rule, None) is False)
+        # One day younger - genuinely inside the real window either way - must stay included.
+        fresh_item = {"id": "exp-fresh", "completion_date": "2021-10-21"}
+        check("an item exactly on the REAL cutoff day is still included (fix didn't over-correct)",
+              pgj._within(fresh_item, rule, None) is True)
+    finally:
+        pgj.datetime.datetime = real_datetime
+
+
+def main():
+    test_fail_stale_jobs_recovers_a_stuck_general_job()
+    test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

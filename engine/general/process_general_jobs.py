@@ -109,6 +109,15 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
 
 
+# SAST (UTC+2) - calendar-day fallback ONLY (see _within() below). _now()
+# above stays true UTC on purpose: it timestamps real DB rows
+# (downloaded_at/analysed_at/started_at/completed_at), where the correct
+# value is the real instant, not a shifted one. Same local-constant
+# convention as watch_deadlines.py/generate_cv.py, not a cross-directory
+# import.
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
+
 class Supabase:
     """The slice of PostgREST + Storage this bridge needs, over urllib (same
     env vars and service-role bypass as every other engine/ writer)."""
@@ -542,10 +551,18 @@ def _within(item, rule, closing):
     if rule.get("window_years"):
         if not comp_day:
             return False
+        # A missing/unreadable closing date falls back to today (Finding 9c)
+        # - "today" must be the real SAST calendar day, not _now()'s UTC one:
+        # during the 00:00-01:59 SAST window UTC "today" is still yesterday,
+        # which would move the window-years cutoff a day early and let a
+        # stale Experience Library row (completed exactly one day too long
+        # ago) through as recent-enough evidence - confirmed live by mocking
+        # that window and reproducing the wrong True (QA pass, 2026-10-21).
+        today_sast = datetime.datetime.now(SAST).date().isoformat()
         try:
-            ref = datetime.date.fromisoformat(str(closing or _now())[:10])
+            ref = datetime.date.fromisoformat(str(closing or today_sast)[:10])
         except ValueError:
-            ref = datetime.date.fromisoformat(_now()[:10])
+            ref = datetime.date.fromisoformat(today_sast)
         if comp_day < _years_before(ref, int(rule["window_years"])):
             return False
     return True
