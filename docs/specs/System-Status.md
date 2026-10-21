@@ -6,6 +6,49 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**PR #20 ("Team invites + employee role") merged, 2026-10-21 ~23:05 UTC** (`b2174a7`) - open 2+ days,
+explicitly flagged by its own author as security-sensitive and needing a careful read before
+merging. Sarel: "I want to keep the employee role." Rebased onto current main (167 commits of drift
+since the PR branched - `SiteNav`, the nav component it modified, had been deleted and replaced by
+`AppShell`/`AppSidebar` in that time), migration renumbered `0065` -> `0077` (main's own `0065`/`0067`
+had since been taken by other work), and reviewed properly rather than merged as a rubber stamp:
+
+- **Found 16 more company-scoped tables with zero employee-role restriction** - audited every table
+  in the schema carrying an `is_company_member(...)`-style policy against this migration's own
+  coverage, rather than trusting the original PR's list at face value. Real gaps included
+  `tender_answers` (holds `total_bid_price` and every uploaded compliance document - squarely
+  "pricing... and other people's records", the exact thing this role exists to keep an employee
+  away from), `tender_subcontracting_plans`, `field_provenance`, `discovered_opportunities`, and 12
+  others. Added as the migration's own "Part D", same additive-only RESTRICTIVE-policy pattern the
+  original author's own Part C already used.
+- **Actually ran this against a real Postgres** - this environment has one (`service postgresql
+  start`, confirmed root access, unlike the original author's own sandbox which had none available
+  at all). Replayed every migration (`engine/security/replay_schema.sh`) and ran
+  `test_tenant_isolation.py`'s Part 2 with `TENANT_PSQL` set, including case `[18]` (the employee-role
+  test) - **never executed before this**, confirmed by the original PR's own honest admission it
+  couldn't run it. Caught a real bug doing this: `tender_engine_jobs` is a `security_invoker` VIEW
+  over `pack_generation_jobs`, not a table - `CREATE POLICY` on it fails outright (and isn't needed;
+  the view already inherits the base table's own RLS transitively). **All 237 checks pass clean on a
+  fresh replay.**
+- **`my-cv/page.tsx` still imported the deleted `SiteNav`** - would have been a build-breaking crash
+  the moment anyone visited that route. Ported the employee nav cutdown to the current system
+  instead: `AppSidebar` (the sidebar itself), `CommandPalette` (Cmd/Ctrl+K would otherwise let an
+  employee jump straight past the sidebar restriction to any page or tender search - RLS blocks the
+  data either way, but a search that can only ever come back empty is confusing, same reasoning as
+  the sidebar's own), and `AvatarMenu`'s "Profile" link (now points at `/my-cv` for an employee,
+  since `/company` is RLS-blocked for them entirely).
+- 3 small merge conflicts from the 167-commit drift (the `SiteNav` modify/delete, `company/page.tsx`'s
+  one new "Team" tile, `login`/`signup`'s `next`-param-preserving links) resolved by re-applying this
+  PR's own intent against the CURRENT file structure, not by blindly picking a side.
+- Full validation, all clean: the real-Postgres RLS suite (237/237), a full repo-wide Python test
+  sweep, `npx vitest run` (53/53), `typecheck`, `lint`, and a real `rm -rf .next && npm run build` -
+  not skipped, since this mounts 3 new routes into the live app.
+
+This is the kind of review this project's own standing discipline exists for: the original PR's own
+author was honest about what they couldn't verify, and that gap turned out to hide 16 more real
+access-control omissions plus one syntax bug - none of it guessed, all of it checked against the
+real schema and a real database before merging.
+
 **Standing review pass, 2026-10-21 ~22:25 UTC**: orientation via `git log` found no sibling commits
 since the last pass (this session's own Finding 47 fix was the most recent). Full QA re-confirmed
 sound: every `test_*.py` repo-wide, `npx vitest run` (53/53), `typecheck`/`lint`, and a real

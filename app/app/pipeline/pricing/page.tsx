@@ -1,5 +1,6 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import Link from "next/link";
+import { ClipboardList } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { loadDisciplineTaxonomy, taxonomyGroups } from "@/lib/disciplineTaxonomy";
 import { STAGE_META, type PipelineStage } from "@/lib/pipeline";
@@ -19,6 +20,10 @@ import {
 import { AppShell } from "../../_components/AppShell";
 import { EconomicsForm, type CreditPerson } from "../economics-form";
 import { MarketComparison } from "./market-comparison";
+import { EmptyState } from "@/components/tt/empty-state";
+import { ErrorState } from "@/components/tt/error-state";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 // Per-company data under RLS on every request (same as /pipeline).
 export const instant = false;
@@ -56,12 +61,20 @@ function shortDate(d: string | null): string {
   return d ? new Date(d).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" }) : "-";
 }
 
+const selectClass = "min-h-11 w-full max-w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+
 /**
  * Pricing history (feature list item 27, with item 26's credit alongside):
  * the company's OWN submitted prices across its tenders, filterable and
  * grouped by tender type, client and sector. Internal pricing intelligence
  * for the company - never customer- or buyer-facing. A filtered table plus a
  * per-group summary (count, low / median / high, won value); not a BI tool.
+ *
+ * Design-system audit fix (2026-10-21): converted from inline-CSSProperties
+ * stale hex to Tailwind + design tokens, fixed the stale "Pipeline" label
+ * (this screen is "Bids" everywhere else in the app now), and the main
+ * "Tenders" table becomes a stacked card list on mobile instead of a
+ * squeezed 10-column table.
  */
 export default async function PricingHistoryPage({
   searchParams,
@@ -69,6 +82,28 @@ export default async function PricingHistoryPage({
   searchParams: Promise<{ type?: string; client?: string; sector?: string; outcome?: string; group?: string; error?: string }>;
 }) {
   const sp = await searchParams;
+
+  try {
+    return await renderPricingHistory(sp);
+  } catch (e) {
+    console.error("pricing history page failed to load", e);
+    return (
+      <AppShell>
+        <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6 sm:px-8">
+          <ErrorState
+            action={
+              <Link href="/pipeline/pricing" className={buttonVariants({ variant: "outline", className: "min-h-11" })}>
+                Retry
+              </Link>
+            }
+          />
+        </div>
+      </AppShell>
+    );
+  }
+}
+
+async function renderPricingHistory(sp: { type?: string; client?: string; sector?: string; outcome?: string; group?: string; error?: string }) {
   const group: GroupKey = sp.group === "client" || sp.group === "sector" ? sp.group : "type";
   const outcome = (OUTCOMES as readonly string[]).includes(sp.outcome ?? "") ? (sp.outcome as (typeof OUTCOMES)[number]) : "all";
 
@@ -161,55 +196,44 @@ export default async function PricingHistoryPage({
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
   const mixedVat = new Set(rows.map((r) => r.inclVat)).size > 1;
 
-  const select: CSSProperties = { minHeight: 36, padding: "0 8px", borderRadius: 7, border: "1px solid #E3E6EA", background: "#FFFFFF", fontSize: 13, color: "#16233B", maxWidth: "100%" };
-  const th: CSSProperties = { textAlign: "left", fontSize: 11, fontWeight: 700, color: "#5B6472", padding: "8px 10px", borderBottom: "1px solid #E3E6EA", whiteSpace: "nowrap" };
-  const td: CSSProperties = { fontSize: 13, color: "#16233B", padding: "8px 10px", borderBottom: "1px solid #ECEEF1", verticalAlign: "top" };
-  const num: CSSProperties = { ...td, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" };
-  // The "Tenders" table below is 10 columns wide (minWidth: 980) and scrolls
-  // sideways on a phone - without a frozen first column, scrolling right to
-  // see Price/Credit/Commission/Edit loses track of which tender the row
-  // even is. Pins the identifying column in place, same idea as a frozen
-  // header column in a spreadsheet.
-  const stickyCol: CSSProperties = { position: "sticky", left: 0, zIndex: 1, background: "#FFFFFF", boxShadow: "2px 0 4px rgba(22,35,59,0.06)" };
-
   return (
     <AppShell>
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <Link href="/pipeline" style={{ fontSize: 13, color: "#5B6472", textDecoration: "none" }}>← Bids</Link>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "6px 0 4px" }}>Pricing history</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
+      <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6 sm:px-8">
+        <Link href="/pipeline" className="min-h-11 content-center text-sm text-muted-foreground no-underline hover:underline">← Bids</Link>
+        <h1 className="mt-1.5 mb-1 font-display text-xl font-medium text-foreground sm:text-2xl">Pricing history</h1>
+        <p className="mb-4 text-sm text-muted-foreground">
           What you have submitted at, by tender type, client and sector, and how it compared with the published results. Internal only: nothing here goes into a submission pack.
         </p>
 
         {(error || sp.error) && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {error ? "Couldn't load pricing history - try refreshing. If it keeps happening, let us know." : sp.error}
           </div>
         )}
 
         {unpriced.length > 0 && (
-          <div style={{ background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#92400E" }}>
+          <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
             {unpriced.length} submitted tender{unpriced.length === 1 ? " has" : "s have"} no price recorded yet:{" "}
             {unpriced.map((r) => r.contractNo || r.title).join(", ")}. Record it on the{" "}
-            <Link href="/pipeline" style={{ color: "#D97706", fontWeight: 600 }}>Pipeline</Link> card.
+            <Link href="/pipeline" className="font-semibold text-accent">Bids</Link> card.
           </div>
         )}
 
-        <form method="get" style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "end", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: 12, marginBottom: 16 }}>
+        <form method="get" className="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-border bg-card p-3">
           <Filter label="Tender type">
-            <select name="type" defaultValue={sp.type ?? ""} style={select}>
+            <select name="type" defaultValue={sp.type ?? ""} className={selectClass}>
               <option value="">All types</option>
               {types.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </Filter>
           <Filter label="Client">
-            <select name="client" defaultValue={sp.client ?? ""} style={select}>
+            <select name="client" defaultValue={sp.client ?? ""} className={selectClass}>
               <option value="">All clients</option>
               {clients.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </Filter>
           <Filter label="Sector">
-            <select name="sector" defaultValue={sp.sector ?? ""} style={select}>
+            <select name="sector" defaultValue={sp.sector ?? ""} className={selectClass}>
               <option value="">All sectors</option>
               {taxonomyGroups(taxonomy).map(({ group, children }) => (
                 <optgroup key={group.slug} label={group.label}>
@@ -221,7 +245,7 @@ export default async function PricingHistoryPage({
             </select>
           </Filter>
           <Filter label="Outcome">
-            <select name="outcome" defaultValue={outcome} style={select}>
+            <select name="outcome" defaultValue={outcome} className={selectClass}>
               <option value="all">Any outcome</option>
               <option value="submitted">Awaiting outcome</option>
               <option value="won">Won</option>
@@ -229,114 +253,126 @@ export default async function PricingHistoryPage({
             </select>
           </Filter>
           <Filter label="Group by">
-            <select name="group" defaultValue={group} style={select}>
+            <select name="group" defaultValue={group} className={selectClass}>
               {(Object.keys(GROUPS) as GroupKey[]).map((g) => <option key={g} value={g}>{GROUPS[g]}</option>)}
             </select>
           </Filter>
-          <button type="submit" style={{ minHeight: 36, padding: "0 16px", border: "none", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+          <button type="submit" className="min-h-11 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground">
             Apply
           </button>
-          <Link href="/pipeline/pricing" style={{ fontSize: 12, color: "#5B6472", alignSelf: "center" }}>Clear</Link>
+          <Link href="/pipeline/pricing" className="min-h-11 content-center text-xs text-muted-foreground">Clear</Link>
         </form>
 
         {priced.length === 0 ? (
-          <div style={{ background: "#FFFFFF", border: "1px dashed #E3E6EA", borderRadius: 11, padding: 24, textAlign: "center", fontSize: 13, color: "#5B6472" }}>
-            No submitted prices recorded yet. Open &ldquo;Price &amp; credit&rdquo; on a Bidding, Submitted, Won or Lost card on the{" "}
-            <Link href="/pipeline" style={{ color: "#D97706", fontWeight: 600 }}>Pipeline</Link>.
+          <div className="rounded-lg border border-dashed border-border bg-card">
+            <EmptyState
+              icon={ClipboardList}
+              title="No priced tenders yet"
+              description={
+                <>
+                  Open &ldquo;Price &amp; credit&rdquo; on a Bidding, Submitted, Won or Lost card on <Link href="/pipeline" className="font-semibold text-accent">Bids</Link>.
+                </>
+              }
+            />
           </div>
         ) : rows.length === 0 ? (
-          <div style={{ background: "#FFFFFF", border: "1px dashed #E3E6EA", borderRadius: 11, padding: 24, textAlign: "center", fontSize: 13, color: "#5B6472" }}>
-            No priced tenders match these filters.
+          <div className="rounded-lg border border-dashed border-border bg-card">
+            <EmptyState icon={ClipboardList} title="No matches" description="No priced tenders match these filters." />
           </div>
         ) : (
           <>
-            <h2 style={{ fontSize: 15, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>By {GROUPS[group].toLowerCase()}</h2>
+            <h2 className="mb-2 text-base font-semibold text-foreground">By {GROUPS[group].toLowerCase()}</h2>
             {mixedVat && (
-              <p style={{ fontSize: 12, color: "#B45309", margin: "0 0 8px" }}>
+              <p className="mb-2 text-xs text-warning">
                 These rows mix VAT-inclusive and VAT-exclusive prices; the summary adds them as typed.
               </p>
             )}
-            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, marginBottom: 20 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="mb-5 overflow-x-auto rounded-lg border border-border bg-card" style={{ WebkitOverflowScrolling: "touch" }}>
+              <table className="w-full min-w-[640px] border-collapse">
                 <thead>
-                  <tr>
-                    <th style={th}>{GROUPS[group]}</th>
-                    <th style={{ ...th, textAlign: "right" }}>Tenders</th>
-                    <th style={{ ...th, textAlign: "right" }}>Lowest</th>
-                    <th style={{ ...th, textAlign: "right" }}>Median</th>
-                    <th style={{ ...th, textAlign: "right" }}>Highest</th>
-                    <th style={{ ...th, textAlign: "right" }}>Won / decided</th>
-                    <th style={{ ...th, textAlign: "right" }}>Won value</th>
+                  <tr className="border-b border-border text-left text-xs font-semibold whitespace-nowrap text-muted-foreground">
+                    <th className="px-2.5 py-2">{GROUPS[group]}</th>
+                    <th className="px-2.5 py-2 text-right">Tenders</th>
+                    <th className="px-2.5 py-2 text-right">Lowest</th>
+                    <th className="px-2.5 py-2 text-right">Median</th>
+                    <th className="px-2.5 py-2 text-right">Highest</th>
+                    <th className="px-2.5 py-2 text-right">Won / decided</th>
+                    <th className="px-2.5 py-2 text-right">Won value</th>
                   </tr>
                 </thead>
                 <tbody>
                   {summary.map((g) => (
-                    <tr key={g.name}>
-                      <td style={{ ...td, fontWeight: 600 }}>{g.name}</td>
-                      <td style={num}>{g.count}</td>
-                      <td style={num}>{formatRand(g.low)}</td>
-                      <td style={num}>{formatRand(g.mid)}</td>
-                      <td style={num}>{formatRand(g.high)}</td>
-                      <td style={num}>{g.decided ? `${g.won} / ${g.decided}` : "-"}</td>
-                      <td style={num}>{g.won ? formatRand(g.wonValue) : "-"}</td>
+                    <tr key={g.name} className="border-b border-border/60 text-sm text-foreground last:border-0">
+                      <td className="px-2.5 py-2 font-semibold">{g.name}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap">{g.count}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap">{formatRand(g.low)}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap">{formatRand(g.mid)}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap">{formatRand(g.high)}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap">{g.decided ? `${g.won} / ${g.decided}` : "-"}</td>
+                      <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap">{g.won ? formatRand(g.wonValue) : "-"}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
 
-            <h2 style={{ fontSize: 15, fontWeight: 700, color: "#16233B", margin: "0 0 8px" }}>
+            <h2 className="mb-2 text-base font-semibold text-foreground">
               Tenders ({rows.length})
             </h2>
-            <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11 }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+
+            {/* Desktop/tablet: the full 10-column table, side-scrolling with
+                a sticky identifying column. Mobile: a stacked card per
+                tender - a 10-column table squeezed to a phone cuts content
+                off (design-system audit fix, 2026-10-21). */}
+            <div className="hidden overflow-x-auto rounded-lg border border-border bg-card md:block" style={{ WebkitOverflowScrolling: "touch" }}>
+              <table className="w-full min-w-[980px] border-collapse">
                 <thead>
-                  <tr>
-                    <th style={{ ...th, ...stickyCol }}>Tender</th>
-                    <th style={th}>Client</th>
-                    <th style={th}>Type</th>
-                    <th style={th}>Sector</th>
-                    <th style={th}>Outcome</th>
-                    <th style={th}>Submitted</th>
-                    <th style={{ ...th, textAlign: "right" }}>Price</th>
-                    <th style={th}>Credit</th>
-                    <th style={th}>Commission</th>
-                    <th style={th}>Edit</th>
+                  <tr className="border-b border-border text-left text-xs font-semibold whitespace-nowrap text-muted-foreground">
+                    <th className="sticky left-0 z-1 bg-card px-2.5 py-2 shadow-[2px_0_4px_oklch(0.2393_0.0581_256.7_/_6%)]">Tender</th>
+                    <th className="px-2.5 py-2">Client</th>
+                    <th className="px-2.5 py-2">Type</th>
+                    <th className="px-2.5 py-2">Sector</th>
+                    <th className="px-2.5 py-2">Outcome</th>
+                    <th className="px-2.5 py-2">Submitted</th>
+                    <th className="px-2.5 py-2 text-right">Price</th>
+                    <th className="px-2.5 py-2">Credit</th>
+                    <th className="px-2.5 py-2">Commission</th>
+                    <th className="px-2.5 py-2">Edit</th>
                   </tr>
                 </thead>
                 <tbody>
                   {rows.map((r) => {
                     const meta = STAGE_META[r.stage];
                     return (
-                      <tr key={r.tenderId}>
-                        <td style={{ ...td, ...stickyCol, maxWidth: 260 }}>
-                          <Link href={`/tenders/${r.tenderId}`} style={{ color: "#16233B", textDecoration: "none" }}>
-                            {r.contractNo && <div style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600 }}>{r.contractNo}</div>}
-                            <div style={{ fontSize: 12 }}>{r.title}</div>
+                      <tr key={r.tenderId} className="border-b border-border/60 text-sm align-top last:border-0">
+                        <td className="sticky left-0 z-1 max-w-[260px] bg-card px-2.5 py-2 shadow-[2px_0_4px_oklch(0.2393_0.0581_256.7_/_6%)]">
+                          <Link href={`/tenders/${r.tenderId}`} className="text-foreground no-underline hover:underline">
+                            {r.contractNo && <div className="font-mono text-[11px] font-semibold">{r.contractNo}</div>}
+                            <div className="text-xs">{r.title}</div>
                           </Link>
                         </td>
-                        <td style={td}>{r.client}</td>
-                        <td style={{ ...td, whiteSpace: "nowrap" }}>{r.type}</td>
-                        <td style={td}>
+                        <td className="px-2.5 py-2 text-foreground">{r.client}</td>
+                        <td className="px-2.5 py-2 whitespace-nowrap text-foreground">{r.type}</td>
+                        <td className="px-2.5 py-2 text-foreground">
                           {sectorLabel(r.sector, taxonomy)}
-                          {r.sectorDerived && <div style={{ fontSize: 10, color: "#8A93A0" }}>suggested</div>}
+                          {r.sectorDerived && <div className="text-[10px] text-muted-foreground">suggested</div>}
                         </td>
-                        <td style={td}>
-                          <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: meta.bg, color: meta.color }}>
+                        <td className="px-2.5 py-2">
+                          <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold", meta.chipClass)}>
                             {r.stage === "submitted" ? "Awaiting" : meta.label}
                           </span>
                         </td>
-                        <td style={{ ...td, whiteSpace: "nowrap" }}>{shortDate(r.submittedAt)}</td>
-                        <td style={num}>
+                        <td className="px-2.5 py-2 whitespace-nowrap text-foreground">{shortDate(r.submittedAt)}</td>
+                        <td className="px-2.5 py-2 text-right tabular-nums whitespace-nowrap text-foreground">
                           {formatRand(r.price)}
-                          {!r.inclVat && <div style={{ fontSize: 10, color: "#8A93A0" }}>excl. VAT</div>}
+                          {!r.inclVat && <div className="text-[10px] text-muted-foreground">excl. VAT</div>}
                         </td>
-                        <td style={td}>{r.person ?? "-"}</td>
-                        <td style={td}>
+                        <td className="px-2.5 py-2 text-foreground">{r.person ?? "-"}</td>
+                        <td className="px-2.5 py-2 text-foreground">
                           {r.commission ?? "-"}
-                          {r.pack.commission_note && <div style={{ fontSize: 11, color: "#5B6472" }}>{r.pack.commission_note}</div>}
+                          {r.pack.commission_note && <div className="text-xs text-muted-foreground">{r.pack.commission_note}</div>}
                         </td>
-                        <td style={{ ...td, minWidth: 220 }}>
+                        <td className="min-w-[220px] px-2.5 py-2">
                           <EconomicsForm tenderId={r.tenderId} economics={r.pack} people={people} defaultSector={r.defaultSector} taxonomy={taxonomy} returnTo="pricing" toggleLabel="Edit" />
                         </td>
                       </tr>
@@ -344,6 +380,44 @@ export default async function PricingHistoryPage({
                   })}
                 </tbody>
               </table>
+            </div>
+
+            <div className="flex flex-col gap-2 md:hidden">
+              {rows.map((r) => {
+                const meta = STAGE_META[r.stage];
+                return (
+                  <div key={r.tenderId} className="rounded-lg border border-border bg-card p-3">
+                    <Link href={`/tenders/${r.tenderId}`} className="block text-inherit no-underline">
+                      {r.contractNo && <div className="font-mono text-xs font-semibold text-foreground">{r.contractNo}</div>}
+                      <div className="text-sm font-medium text-foreground">{r.title}</div>
+                    </Link>
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                      <span className={cn("inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold", meta.chipClass)}>
+                        {r.stage === "submitted" ? "Awaiting" : meta.label}
+                      </span>
+                      <span className="text-xs text-muted-foreground">{r.client}</span>
+                      <span className="text-xs text-muted-foreground">· {r.type}</span>
+                    </div>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+                      <span className="font-semibold text-foreground">
+                        {formatRand(r.price)}
+                        {!r.inclVat && " (excl. VAT)"}
+                      </span>
+                      <span className="text-muted-foreground">Submitted {shortDate(r.submittedAt)}</span>
+                      {r.person && <span className="text-muted-foreground">Credit: {r.person}</span>}
+                    </div>
+                    {(r.commission || r.pack.commission_note) && (
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Commission: {r.commission ?? "-"}
+                        {r.pack.commission_note ? ` · ${r.pack.commission_note}` : ""}
+                      </div>
+                    )}
+                    <div className="mt-2 border-t border-border pt-2">
+                      <EconomicsForm tenderId={r.tenderId} economics={r.pack} people={people} defaultSector={r.defaultSector} taxonomy={taxonomy} returnTo="pricing" toggleLabel="Edit" />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
 
             {/* Published registers / awards for these tenders (0044). */}
@@ -357,7 +431,7 @@ export default async function PricingHistoryPage({
 
 function Filter({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, fontWeight: 600, color: "#5B6472", minWidth: 0, maxWidth: "100%" }}>
+    <label className="flex min-w-0 max-w-full flex-col gap-1 text-xs font-semibold text-muted-foreground">
       {label}
       {children}
     </label>
