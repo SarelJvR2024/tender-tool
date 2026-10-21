@@ -27,6 +27,8 @@ import { OcrNotice, OCR_TAG } from "./ocr-notice";
 import { PackChecklist, checklistOf } from "./pack-checklist";
 import { PrivateDocuments, type PrivateDoc } from "./private-documents";
 import { GeneralPackReview } from "./general-pack-review";
+import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
+import { computeTenderReadiness } from "./tender-readiness";
 
 /**
  * Non-SANRAL tender preparation (Sarel, 2026-10-16: "keep working on
@@ -154,6 +156,11 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const qStates = questionStates(manifest.questions, answers, company);
   const cStates = companyFieldStates(manifest.company_fields, company);
   const needAnswer = qStates.filter((s) => !s.answered && !s.q.optional).length + cStates.filter((s) => !s.answered && !s.f.optional).length;
+  // Verify/Provide/Fix (app/AGENTS.md): same gate as SANRAL's submission-pack.tsx,
+  // reusing the exact same cached snapshot GeneralPackReview itself reads.
+  const generalReviewSnapshot = await loadGeneralPackReviewSnapshot(tenderId);
+  const generalFixCount = generalReviewSnapshot.mapped ? computeTenderReadiness(generalReviewSnapshot.sections).fix.length : 0;
+  const generalDisabledReason = generalFixCount > 0 ? `Fix ${generalFixCount} item${generalFixCount === 1 ? "" : "s"} first - see the Pack review above` : null;
   const docsMissing = returnables.filter((r) => r.status === "missing").length;
   const autoForms = manifest.forms.filter((f) => f.status === "auto");
   const byHandForms = manifest.forms.filter((f) => f.status === "by_hand");
@@ -545,7 +552,18 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         {(!latestPack || latestPack.status === "ready" || latestPack.status === "failed") && (
           <form action={requestGeneralPack}>
             <input type="hidden" name="tender_id" value={tenderId} />
-            <button type="submit" style={primaryBtn}>{latestPack ? "Generate a new pack" : "Generate submission pack"}</button>
+            <button
+              type="submit"
+              disabled={!!generalDisabledReason}
+              title={generalDisabledReason ?? undefined}
+              style={{ ...primaryBtn, ...(generalDisabledReason ? { background: "#8A93A0", cursor: "not-allowed" } : {}) }}
+            >
+              {latestPack ? "Generate a new pack" : "Generate submission pack"}
+            </button>
+            {/* title= (hover) doesn't reach touch devices - same reason as visible text. */}
+            {generalDisabledReason && (
+              <div style={{ fontSize: 11, color: "#B45309", marginTop: 6 }}>{generalDisabledReason}</div>
+            )}
           </form>
         )}
         {packJobs.map((j) => {
