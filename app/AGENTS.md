@@ -8,6 +8,16 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+## Product promise
+
+Tender Ready is "your tender department, without hiring one". Users are directors and managers of small South African companies with little or no tender staff. The product finds tenders, assesses fit and compliance with AI, and assembles the full submission from the company vault. The user should only verify AI-filled content, provide pricing and signatures, and fix flagged compliance gaps.
+
+Design rules that follow from this:
+1. Never ask the user to type information that already exists in the company vault, people/CVs or experience records. Prefill it and show a "Verify" state.
+2. Every bid screen groups tasks into three types: Verify (AI filled, green when confirmed), Provide (only the user can supply: pricing, signatures, missing docs, amber), Fix (disqualification risks, red, with a one-line reason and a fix action).
+3. Every screen belongs to one stage: Find, Decide, Build, Submit, Track.
+4. UI copy is plain South African English using tender terms (tender, bid, briefing session, CSD, B-BBEE, CIDB grade, SBD forms). Avoid "workflow", "entity", "artefact", "pipeline item".
+
 ## Design system decisions
 
 - Direction is "confident & premium": deep navy ink, one blue accent, neutral soft grey canvas (no cream or beige anywhere), Fraunces for display/headings, Inter Tight for UI/body - see app/globals.css for the full token set. (Originally a warm off-white canvas with a gold accent - replaced 2026-10-21, see "Color scheme update" below.)
