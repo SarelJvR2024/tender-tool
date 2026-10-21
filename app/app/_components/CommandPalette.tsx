@@ -13,7 +13,7 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
-import { ADMIN_NAV_ITEM, NAV_ITEMS } from "./nav-items";
+import { ADMIN_NAV_ITEM, EMPLOYEE_NAV_ITEMS, NAV_ITEMS } from "./nav-items";
 import { searchTenders, type TenderSearchResult } from "./search-tenders";
 
 /**
@@ -22,13 +22,21 @@ import { searchTenders, type TenderSearchResult } from "./search-tenders";
  * numbers aren't a fixed list that could ever be preloaded. shouldFilter is
  * off throughout - cmdk's own fuzzy filter would otherwise re-filter (and
  * sometimes hide) the server's own already-matched tender rows.
+ *
+ * isEmployee (migration 0067): the sidebar's own nav cutdown means nothing
+ * if Cmd/Ctrl+K can still jump straight to every page and search every
+ * tender - RLS blocks the underlying data either way, but offering a search
+ * that can only ever come back empty is confusing, same reasoning as the
+ * sidebar's own comment (nav-items.ts).
  */
 export function CommandPalette({
   isPlatformAdmin,
+  isEmployee,
   open,
   onOpenChange,
 }: {
   isPlatformAdmin: boolean;
+  isEmployee: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -50,6 +58,7 @@ export function CommandPalette({
   }
 
   useEffect(() => {
+    if (isEmployee) return;
     const q = query.trim();
     if (q.length < 2) return;
     const id = ++requestId.current;
@@ -60,15 +69,15 @@ export function CommandPalette({
       });
     }, 200);
     return () => clearTimeout(handle);
-  }, [query]);
+  }, [query, isEmployee]);
 
-  const items = isPlatformAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
+  const items = isEmployee ? EMPLOYEE_NAV_ITEMS : isPlatformAdmin ? [...NAV_ITEMS, ADMIN_NAV_ITEM] : NAV_ITEMS;
   const needle = query.trim().toLowerCase();
   const pageMatches = needle ? items.filter((item) => item.label.toLowerCase().includes(needle)) : items;
-  const actionMatches = !needle || "load a tender manually".includes(needle);
+  const actionMatches = !isEmployee && (!needle || "load a tender manually".includes(needle));
   // Derived, not stored: avoids a synchronous setResults([]) in the effect
   // above just to hide stale rows once the query drops below 2 characters.
-  const displayedResults = needle.length < 2 ? [] : results;
+  const displayedResults = isEmployee || needle.length < 2 ? [] : results;
 
   function go(href: string) {
     handleOpenChange(false);
