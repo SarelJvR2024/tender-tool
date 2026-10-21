@@ -1,22 +1,18 @@
-import type { CSSProperties } from "react";
 import { taxonomyGroups, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
 import { commissionText, formatRand, sectorLabel, toNumber, type PackEconomics, type PriceSector } from "@/lib/dealEconomics";
 import { saveTenderEconomics } from "./actions";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 export type CreditPerson = { id: string; name: string };
 
-const label: CSSProperties = { display: "block", fontSize: 11, fontWeight: 600, color: "#5B6472", margin: "8px 0 3px" };
-const input: CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  minHeight: 36,
-  padding: "0 8px",
-  borderRadius: 7,
-  border: "1px solid #E3E6EA",
-  background: "#FFFFFF",
-  fontSize: 13,
-  color: "#16233B",
-};
+// Matches shadcn Input's own look (no shadcn Select exists in this repo -
+// same convention company vault's EditForm already set, app/AGENTS.md
+// "Company vault: shell"). Bumped to min-h-11 for this app's 40-44px
+// touch-target convention, same reasoning as every other migrated form.
+const selectClass = "min-h-11 w-full rounded-lg border border-input bg-transparent px-2.5 py-1 text-xs text-foreground outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 /**
  * "Price & credit" (items 26/27, migration 0034): the company's own submitted
@@ -25,6 +21,9 @@ const input: CSSProperties = {
  * editable, since the final figure often differs from the first one typed.
  * Collapsed by default into a one-line summary, so the board stays scannable.
  * Plain server-rendered form (no client JS), same as the stage buttons.
+ *
+ * Design-system audit fix (2026-10-21): converted from inline-CSSProperties
+ * stale hex to Tailwind + design tokens.
  */
 export function EconomicsForm({
   tenderId,
@@ -39,9 +38,9 @@ export function EconomicsForm({
   tenderId: string;
   economics: PackEconomics | null;
   people: CreditPerson[];
-  defaultSector: PriceSector | null;
   // The live discipline list (0040) - the sector options, grouped.
   taxonomy: DisciplineTaxonomy;
+  defaultSector: PriceSector | null;
   returnTo?: "pipeline" | "pricing";
   // Open with an amber "Record the submitted price" call to action (a
   // submitted/won/lost card that has no price yet).
@@ -66,100 +65,96 @@ export function EconomicsForm({
         : null;
 
   return (
-    <details style={{ marginTop: 8 }}>
+    <details className="mt-2">
       <summary
-        style={{
-          cursor: "pointer",
-          listStyle: "revert",
-          fontSize: 12,
-          fontWeight: 600,
-          color: summary ? "#16233B" : prompt ? "#D97706" : "#5B6472",
-          minHeight: 28,
-          lineHeight: "28px",
-        }}
+        className={cn(
+          "min-h-7 cursor-pointer text-xs font-semibold",
+          summary ? "text-foreground" : prompt ? "text-warning" : "text-muted-foreground",
+        )}
       >
         {toggleLabel ?? summary ?? (prompt ? "Record the submitted price" : "Price & credit")}
       </summary>
       {!toggleLabel && (commission || economics?.commission_note) && (
-        <div style={{ fontSize: 11, color: "#5B6472", margin: "2px 0 0" }}>
+        <div className="mt-0.5 text-[11px] text-muted-foreground">
           Commission: {commission ?? "-"}
           {economics?.commission_note ? ` · ${economics.commission_note}` : ""}
         </div>
       )}
 
-      <form action={saveTenderEconomics} style={{ marginTop: 4 }}>
+      <form action={saveTenderEconomics} className="mt-1 flex flex-col gap-2.5">
         <input type="hidden" name="tender_id" value={tenderId} />
         <input type="hidden" name="return_to" value={returnTo} />
 
-        <label style={label} htmlFor={`price-${tenderId}`}>Submitted price (R)</label>
-        <input
-          id={`price-${tenderId}`}
-          name="price"
-          inputMode="decimal"
-          placeholder="e.g. 1 250 000"
-          defaultValue={price !== null ? String(price) : ""}
-          style={input}
-        />
-        <select name="incl_vat" defaultValue={economics?.submitted_price_incl_vat === false ? "excl" : "incl"} style={{ ...input, marginTop: 6 }}>
-          <option value="incl">Including VAT</option>
-          <option value="excl">Excluding VAT</option>
-        </select>
-
-        <label style={label} htmlFor={`person-${tenderId}`}>Credit for the submission</label>
-        <select id={`person-${tenderId}`} name="person_id" defaultValue={economics?.submitted_by_person_id ?? ""} style={input}>
-          <option value="">Nobody yet</option>
-          {people.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-
-        <label style={label}>Commission / revenue share</label>
-        <div style={{ display: "flex", gap: 6 }}>
-          <select name="commission_kind" defaultValue={kind} style={{ ...input, width: "auto", flex: "0 0 auto" }}>
-            <option value="none">None</option>
-            <option value="percent">%</option>
-            <option value="amount">R</option>
-          </select>
-          <input
-            name="commission_value"
+        <div>
+          <Label htmlFor={`price-${tenderId}`} className="mb-1 text-[11px] font-semibold text-muted-foreground">Submitted price (R)</Label>
+          <Input
+            id={`price-${tenderId}`}
+            name="price"
             inputMode="decimal"
-            aria-label="Commission value"
-            defaultValue={amount !== null ? String(amount) : pct !== null ? String(pct) : ""}
-            style={{ ...input, flex: 1, minWidth: 0 }}
+            placeholder="e.g. 1 250 000"
+            defaultValue={price !== null ? String(price) : ""}
+            className="min-h-11 text-xs"
           />
+          <select name="incl_vat" defaultValue={economics?.submitted_price_incl_vat === false ? "excl" : "incl"} className={cn(selectClass, "mt-1.5")}>
+            <option value="incl">Including VAT</option>
+            <option value="excl">Excluding VAT</option>
+          </select>
         </div>
-        <input name="commission_note" placeholder="Note, e.g. paid on award only" defaultValue={economics?.commission_note ?? ""} style={{ ...input, marginTop: 6 }} />
 
-        <label style={label} htmlFor={`sector-${tenderId}`}>Sector</label>
-        <select id={`sector-${tenderId}`} name="sector" defaultValue={sector ?? ""} style={input}>
-          <option value="">Unclassified</option>
-          {taxonomyGroups(taxonomy).map(({ group, children }) => (
-            <optgroup key={group.slug} label={group.label}>
-              <option value={group.slug}>{group.label} (general)</option>
-              {children.map((c) => (
-                <option key={c.slug} value={c.slug}>
-                  {c.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        {!economics?.price_sector && defaultSector && (
-          <div style={{ fontSize: 10, color: "#8A93A0", marginTop: 2 }}>Suggested: {sectorLabel(defaultSector, taxonomy)} (from Discovery / tender family)</div>
-        )}
+        <div>
+          <Label htmlFor={`person-${tenderId}`} className="mb-1 text-[11px] font-semibold text-muted-foreground">Credit for the submission</Label>
+          <select id={`person-${tenderId}`} name="person_id" defaultValue={economics?.submitted_by_person_id ?? ""} className={selectClass}>
+            <option value="">Nobody yet</option>
+            {people.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
-        <label style={label} htmlFor={`note-${tenderId}`}>Pricing note</label>
-        <input id={`note-${tenderId}`} name="price_note" placeholder="e.g. final after clarification 3" defaultValue={economics?.price_note ?? ""} style={input} />
+        <div>
+          <Label className="mb-1 text-[11px] font-semibold text-muted-foreground">Commission / revenue share</Label>
+          <div className="flex gap-1.5">
+            <select name="commission_kind" defaultValue={kind} className={cn(selectClass, "w-auto shrink-0")}>
+              <option value="none">None</option>
+              <option value="percent">%</option>
+              <option value="amount">R</option>
+            </select>
+            <Input name="commission_value" inputMode="decimal" aria-label="Commission value" defaultValue={amount !== null ? String(amount) : pct !== null ? String(pct) : ""} className="min-h-11 min-w-0 flex-1 text-xs" />
+          </div>
+          <Input name="commission_note" placeholder="Note, e.g. paid on award only" defaultValue={economics?.commission_note ?? ""} className="mt-1.5 min-h-11 text-xs" />
+        </div>
 
-        <button
-          type="submit"
-          style={{ marginTop: 10, minHeight: 44, width: "100%", border: "none", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-        >
-          Save price & credit
-        </button>
-        <div style={{ fontSize: 10, color: "#8A93A0", marginTop: 4 }}>Internal only - never goes into a submission pack.</div>
+        <div>
+          <Label htmlFor={`sector-${tenderId}`} className="mb-1 text-[11px] font-semibold text-muted-foreground">Sector</Label>
+          <select id={`sector-${tenderId}`} name="sector" defaultValue={sector ?? ""} className={selectClass}>
+            <option value="">Unclassified</option>
+            {taxonomyGroups(taxonomy).map(({ group, children }) => (
+              <optgroup key={group.slug} label={group.label}>
+                <option value={group.slug}>{group.label} (general)</option>
+                {children.map((c) => (
+                  <option key={c.slug} value={c.slug}>
+                    {c.label}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          {!economics?.price_sector && defaultSector && (
+            <div className="mt-0.5 text-[10px] text-muted-foreground">Suggested: {sectorLabel(defaultSector, taxonomy)} (from Discovery / tender family)</div>
+          )}
+        </div>
+
+        <div>
+          <Label htmlFor={`note-${tenderId}`} className="mb-1 text-[11px] font-semibold text-muted-foreground">Pricing note</Label>
+          <Input id={`note-${tenderId}`} name="price_note" placeholder="e.g. final after clarification 3" defaultValue={economics?.price_note ?? ""} className="min-h-11 text-xs" />
+        </div>
+
+        <Button type="submit" className="min-h-11 w-full text-xs font-semibold">
+          Save price &amp; credit
+        </Button>
+        <div className="text-[10px] text-muted-foreground">Internal only - never goes into a submission pack.</div>
       </form>
     </details>
   );
