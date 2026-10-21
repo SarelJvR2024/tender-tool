@@ -6,6 +6,14 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Reachability workflow added and triggered, 2026-10-21 ~14:30 UTC**
+(`.github/workflows/test-new-readers-reachability.yml`, `48bbec4`) - same precedent as
+`test-randwater-reachability.yml`: a `workflow_dispatch`-only check of whether a real GitHub
+Actions runner (not just this dev sandbox) can reach Lephalale, Kouga, and Vaal Central Water.
+Triggered immediately after pushing (run id `39600219996`, in progress at time of writing) rather
+than leaving it dormant - this is the one piece of evidence still missing before any of the three
+can go into `gov_sources.ALL_SOURCES`. Will report the real result once the run finishes.
+
 **Standing review pass, 2026-10-21 ~14:15 UTC**: orientation via `git log` found no sibling-session
 commits since the last pass. A real limitation of phase 2's own method, worth naming plainly: every
 batch sampled so far hit "Tesseract OCR is not installed on this worker" on every scanned document -
