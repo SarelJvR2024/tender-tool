@@ -2,8 +2,9 @@ import Link from "next/link";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { confirmGeneralPackReview } from "./general-pack-review-actions";
 import { PackChecklist } from "./pack-checklist";
-import type { ReviewStatus } from "./pack-review-logic";
+import { reviewStatusToBidTask, type ReviewStatus } from "./pack-review-logic";
 import { matchStrengthStatus } from "./general-pack-review-logic";
+import type { BidTaskStatus } from "./bid-task-status";
 
 /**
  * General (non-SANRAL) tender Pack Review: the confirm-before-compile
@@ -28,16 +29,22 @@ import { matchStrengthStatus } from "./general-pack-review-logic";
 
 const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
-const STATUS_STYLE: Record<ReviewStatus, { label: string; bg: string; color: string }> = {
-  confirmed: { label: "Confirmed", bg: "#DCFCE7", color: "#15803D" },
-  needs_input: { label: "Needs input", bg: "#FEF3C7", color: "#B45309" },
-  assumed_default: { label: "Assumed default", bg: "#FEF3C7", color: "#B45309" },
-  warning: { label: "Warning", bg: "#FEE2E2", color: "#B91C1C" },
-  missing: { label: "Missing", bg: "#FEE2E2", color: "#B91C1C" },
+// The Product promise's own Verify/Provide/Fix grouping (app/AGENTS.md),
+// collapsed from this screen's 5-way ReviewStatus via pack-review-logic.ts's
+// reviewStatusToBidTask() - see that function's own comment for exactly
+// which of the 5 values becomes which of these 3. Duplicated from
+// pack-review.tsx rather than shared, same as this file's own header
+// comment already explains for its styling in general ("not imported from
+// there since that file is SANRAL-only by convention and exports no shared
+// components").
+const TASK_STYLE: Record<BidTaskStatus, { label: string; bg: string; color: string }> = {
+  verify: { label: "Verify", bg: "#DCFCE7", color: "#15803D" },
+  provide: { label: "Provide", bg: "#FEF3C7", color: "#B45309" },
+  fix: { label: "Fix", bg: "#FEE2E2", color: "#B91C1C" },
 };
 
 function Pill({ status }: { status: ReviewStatus }) {
-  const s = STATUS_STYLE[status];
+  const s = TASK_STYLE[reviewStatusToBidTask(status)];
   return (
     <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: s.bg, color: s.color, whiteSpace: "nowrap" }}>
       {s.label}

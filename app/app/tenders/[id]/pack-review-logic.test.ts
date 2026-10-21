@@ -22,6 +22,7 @@ import {
   humanizeFieldKey,
   positionStatus,
   provenanceStatus,
+  reviewStatusToBidTask,
   signatureStatus,
 } from "./pack-review-logic.ts";
 
@@ -130,6 +131,14 @@ test("humanizeFieldKey drops the owning-script prefix and title-cases the rest",
   assert.equal(humanizeFieldKey("a_forms.A8.litigation"), "A8 Litigation");
   assert.equal(humanizeFieldKey("financial_hours.Roadworks.A.PL"), "Roadworks A PL");
   assert.equal(humanizeFieldKey("signatory_person_id"), "Signatory Person Id");
+});
+
+test("reviewStatusToBidTask: confirmed and assumed_default are Verify, missing is Fix, needs_input and warning are Provide", () => {
+  assert.equal(reviewStatusToBidTask("confirmed"), "verify");
+  assert.equal(reviewStatusToBidTask("assumed_default"), "verify");
+  assert.equal(reviewStatusToBidTask("missing"), "fix");
+  assert.equal(reviewStatusToBidTask("needs_input"), "provide");
+  assert.equal(reviewStatusToBidTask("warning"), "provide");
 });
 
 // --- Scenario coverage required by the build task -------------------------
