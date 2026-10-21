@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FolderOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { captureExperience } from "./actions";
@@ -10,24 +11,36 @@ import {
   labelFor,
   type ExperienceItem,
 } from "@/lib/experience";
+import { PageHeader } from "@/components/tt/page-header";
+import { EmptyState } from "@/components/tt/empty-state";
+import { Button } from "@/components/ui/button";
 
 // Per-request, under RLS - same escape hatch as people/page.tsx.
 export const instant = false;
 
-const field: React.CSSProperties = {
-  width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px",
-  borderRadius: 9, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "system-ui, sans-serif",
-  color: "#16233B", background: "#FFFFFF",
+const fieldClass =
+  "min-h-11 w-full rounded-lg border border-input bg-card px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const labelClass = "mb-1 block text-xs font-semibold text-muted-foreground";
+const gridClass = "grid grid-cols-1 gap-3 sm:grid-cols-2";
+const cardClass = "mb-4 rounded-xl border border-border bg-card p-4";
+
+type Tone = "success" | "warning" | "muted";
+const TONE_CLASS: Record<Tone, string> = {
+  success: "border-success/20 bg-success/10 text-success",
+  warning: "border-warning/20 bg-warning/10 text-warning",
+  muted: "border-muted-foreground/20 bg-muted text-muted-foreground",
 };
-const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#5B6472", marginBottom: 4, display: "block" };
 
-const GREEN = { bg: "#DCFCE7", color: "#15803D" };
-const AMBER = { bg: "#FEF3C7", color: "#B45309" };
-const GREY = { bg: "#ECEEF1", color: "#5B6472" };
-
-function Chip({ text, tone }: { text: string; tone: { bg: string; color: string } }) {
+// Verify/Provide/Fix (app/AGENTS.md's product promise): "Needs tagging" and
+// "No document" are genuine Provide-type gaps (an untagged or document-less
+// item counts toward nothing until it's tagged/supplied) - relabelled with
+// the real vocabulary. "Tagged"/"Rated X" describe a completed state with
+// no outstanding action, so they stay plain descriptive chips (tone only,
+// no Verify/Provide/Fix word) rather than being forced to say "Verify" for
+// something that's already done and needs no further confirmation.
+function Chip({ text, tone }: { text: string; tone: Tone }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: tone.bg, color: tone.color, whiteSpace: "nowrap" }}>
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${TONE_CLASS[tone]}`}>
       {text}
     </span>
   );
@@ -53,6 +66,7 @@ export default async function ExperiencePage({
     .select("*")
     .order("completion_date", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false });
+  if (loadError) console.error("experience_items select failed", loadError);
   const all = (rows ?? []) as ExperienceItem[];
   const companyId = all[0]?.company_id ?? null;
 
@@ -98,64 +112,54 @@ export default async function ExperiencePage({
 
   return (
     <AppShell>
-      <style>{`
-        @media (max-width: 600px) {
-          .exp-grid-2 { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
-
-      <div style={{ flex: 1, padding: "24px 16px 40px", maxWidth: 900, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: 0 }}>Company experience</h1>
-        <div style={{ fontSize: 13, color: "#5B6472", marginTop: 2, marginBottom: 16 }}>
-          Reference letters, performance reports, completion certificates, close-out reports and award
-          letters that prove what the company has delivered. Upload the document, then tag what it shows
-          so tenders can be matched against it.
-        </div>
+      <div className="mx-auto w-full max-w-[900px] flex-1 px-4 py-6 pb-10">
+        <PageHeader
+          className="mb-4"
+          title="Company experience"
+          description="Reference letters, performance reports, completion certificates, close-out reports and award letters that prove what the company has delivered. Upload the document, then tag what it shows so tenders can be matched against it."
+        />
 
         {(errorParam || loadError || filterError) && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {errorParam ? decodeURIComponent(errorParam) : `Could not load experience: ${loadError?.message ?? filterError}`}
           </div>
         )}
 
         {/* Readiness against the one experience requirement seen in real tenders */}
-        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginBottom: 16, display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ maxWidth: 520 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#16233B" }}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-card p-4">
+          <div className="max-w-[520px]">
+            <div className="text-sm font-semibold text-foreground">
               Past-performance evidence: {b6Ready} of 3
             </div>
-            <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2 }}>
+            <div className="mt-0.5 text-xs text-muted-foreground">
               SANRAL Form B6 (15 of 100 functionality points) asks for 3 completed projects of similar
               scope in the last 10 years, each with a signed reference letter or CIDB performance report.
               Fewer means a sworn affidavit and a default &quot;Adequate&quot; score.
             </div>
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <Chip text={b6Ready >= 3 ? "Enough on file" : `${3 - Math.min(b6Ready, 3)} more needed`} tone={b6Ready >= 3 ? GREEN : AMBER} />
-            {untagged.length > 0 && <Chip text={`${untagged.length} need tagging`} tone={AMBER} />}
+          <div className="flex flex-wrap gap-2">
+            <Chip text={b6Ready >= 3 ? "Enough on file" : `Provide - ${3 - Math.min(b6Ready, 3)} more needed`} tone={b6Ready >= 3 ? "success" : "warning"} />
+            {untagged.length > 0 && <Chip text={`Provide - ${untagged.length} need tagging`} tone="warning" />}
           </div>
         </div>
 
         {/* Step 1: capture */}
-        <form
-          action={captureExperience}
-          style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", marginBottom: 20 }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 10 }}>
+        <form action={captureExperience} className={cardClass}>
+          <div className="mb-2.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
             Add experience
           </div>
-          <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className={gridClass}>
             <div>
-              <label style={label}>Project name *</label>
-              <input style={field} name="project_name" required placeholder="As the client's letter names it" />
+              <label className={labelClass}>Project name *</label>
+              <input className={fieldClass} name="project_name" required placeholder="As the client's letter names it" />
             </div>
             <div>
-              <label style={label}>Document type *</label>
+              <label className={labelClass}>Document type *</label>
               {/* No pre-selected type (form-field audit 2026-10-18): it used to
                   default to "Reference letter", which SANRAL's Form B6 scores -
                   a completion certificate left on the default was counted as
                   scoreable evidence. */}
-              <select style={field} name="document_type" defaultValue="" required>
+              <select className={fieldClass} name="document_type" defaultValue="" required>
                 <option value="" disabled>Choose…</option>
                 {DOCUMENT_TYPES.map((d) => (
                   <option key={d.value} value={d.value}>{d.label}</option>
@@ -163,36 +167,35 @@ export default async function ExperiencePage({
               </select>
             </div>
           </div>
-          <div style={{ marginTop: 12 }}>
-            <label style={label}>Document (PDF, Word or scan - up to 4.4 MB)</label>
-            <input style={{ ...field, paddingTop: 10 }} type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
+          <div className="mt-3">
+            <label className={labelClass}>Document (PDF, Word or scan - up to 4.4 MB)</label>
+            <input className={`${fieldClass} pt-2.5`} type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
           </div>
-          <button
-            type="submit"
-            style={{ marginTop: 12, minHeight: 44, padding: "0 18px", borderRadius: 10, background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}
-          >
+          <Button type="submit" variant="accent" size="lg" className="mt-3 min-h-11 px-5">
             Upload &amp; tag
-          </button>
+          </Button>
         </form>
 
         {/* Discipline filter - runs experience_matches() */}
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+        <div className="mb-3 flex flex-wrap gap-1.5">
           <FilterLink href="/experience" active={!activeDiscipline} text="All" />
           {disciplineOptions.map((v) => (
             <FilterLink key={v} href={`/experience?discipline=${encodeURIComponent(v)}`} active={activeDiscipline === v} text={labelOf(v)} />
           ))}
         </div>
         {activeDiscipline && (
-          <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+          <div className="mb-2.5 text-xs text-muted-foreground">
             Tagged items matching {labelOf(activeDiscipline)}{taxonomyGroups(taxonomy).some((g) => g.group.slug === activeDiscipline) ? " (any discipline in this group)" : ""} - the same query a tender check uses. Untagged uploads never count.
           </div>
         )}
 
-        {shown.length === 0 && (
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", fontSize: 13, color: "#5B6472" }}>
-            {activeDiscipline
-              ? "No tagged experience in this discipline yet."
-              : "No experience on file yet. Start with the reference letters and completion certificates you already have."}
+        {shown.length === 0 && !loadError && (
+          <div className="rounded-xl border border-border bg-card">
+            <EmptyState
+              icon={FolderOpen}
+              title={activeDiscipline ? "No tagged experience in this discipline yet" : "No experience on file yet"}
+              description={activeDiscipline ? undefined : "Start with the reference letters and completion certificates you already have."}
+            />
           </div>
         )}
 
@@ -208,12 +211,9 @@ function FilterLink({ href, active, text }: { href: string; active: boolean; tex
   return (
     <Link
       href={href}
-      style={{
-        display: "inline-flex", alignItems: "center", minHeight: 32, padding: "0 12px", borderRadius: 100,
-        fontSize: 12, fontWeight: 600, textDecoration: "none",
-        background: active ? "#16233B" : "#FFFFFF", color: active ? "#FFFFFF" : "#16233B",
-        border: active ? "1px solid #16233B" : "1px solid #E3E6EA",
-      }}
+      className={`inline-flex min-h-11 items-center rounded-full border px-3 text-xs font-semibold no-underline ${
+        active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground"
+      }`}
     >
       {text}
     </Link>
@@ -230,37 +230,37 @@ function ExperienceRow({ item: e, url, labelOf }: { item: ExperienceItem; url?: 
   ].filter(Boolean);
 
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "12px 16px", marginBottom: 10 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div style={{ minWidth: 0, flex: "1 1 320px" }}>
-          <Link href={`/experience/${e.id}`} style={{ fontSize: 14, fontWeight: 700, color: "#16233B", textDecoration: "none" }}>
+    <div className="mb-2.5 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-start justify-between gap-2.5">
+        <div className="min-w-0 flex-[1_1_320px]">
+          <Link href={`/experience/${e.id}`} className="text-sm font-bold text-foreground no-underline">
             {e.project_name}
           </Link>
-          <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
+          <div className="mt-0.5 text-xs text-muted-foreground">
             {labelFor(DOCUMENT_TYPES, e.document_type)}
             {meta.length > 0 && ` · ${meta.join(" · ")}`}
           </div>
           {e.tagged_at && e.disciplines.length > 0 && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
               {e.disciplines.map((d) => (
-                <Chip key={d} text={labelOf(d)} tone={GREY} />
+                <Chip key={d} text={labelOf(d)} tone="muted" />
               ))}
             </div>
           )}
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <div className="flex flex-wrap items-center gap-2.5">
           {!e.tagged_at ? (
-            <Chip text="Needs tagging" tone={AMBER} />
+            <Chip text="Provide - needs tagging" tone="warning" />
           ) : e.performance_rating ? (
-            <Chip text={`Rated ${e.performance_rating}`} tone={e.performance_rating === "poor" ? AMBER : GREEN} />
+            <Chip text={`Rated ${e.performance_rating}`} tone={e.performance_rating === "poor" ? "warning" : "success"} />
           ) : (
-            <Chip text="Tagged" tone={GREEN} />
+            <Chip text="Tagged" tone="success" />
           )}
-          {!e.storage_path && <Chip text="No document" tone={AMBER} />}
+          {!e.storage_path && <Chip text="Provide - no document" tone="warning" />}
           {url && (
-            <a href={url} style={{ fontSize: 12, fontWeight: 600, color: "#D97706" }}>Download</a>
+            <a href={url} className="text-xs font-semibold text-accent">Download</a>
           )}
-          <Link href={`/experience/${e.id}`} style={{ fontSize: 12, fontWeight: 600, color: "#D97706" }}>
+          <Link href={`/experience/${e.id}`} className="text-xs font-semibold text-accent">
             {e.tagged_at ? "Edit tags" : "Tag now"}
           </Link>
         </div>

@@ -6,6 +6,54 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~22:20 UTC: two sessions independently built PayFast billing -
+closed the duplicate, flagging a real pricing conflict for Sarel.** Orientation (`git log` since the
+last pass) found `PR #60` ("PayFast sandbox billing + Resend transactional email", migration `0078`)
+had just merged to `main` (Sarel merged it himself) - at the same time, this session's own billing
+work (also migration `0078`, different content, own open PR #57) was sitting unmerged. Compared both
+in full before acting:
+
+- **#60 (now in `main`) is the better-verified implementation of the two on the PayFast mechanics
+  specifically**: it found and read PayFast's own official open-source SDK
+  (`github.com/PayFast/payfast-php-sdk`) and byte-verified its signature algorithm against a **real
+  recorded fixture from that SDK's own test suite** - stronger evidence than this session's own
+  cross-referenced-but-unconfirmed third-party sources. It also walked a real local-Postgres
+  lifecycle (trial -> checkout -> ITN -> active/past_due) and attempted (but could not complete) a
+  live sandbox checkout, honestly documented as such.
+- **This session's closed #57 had one real thing #60 doesn't**: usage/seat gating wired into
+  pack-request actions and team-invite creation. #60's `company_subscriptions` carries no
+  `max_users`/`max_packs_per_month` columns at all - its own `app/AGENTS.md` entry flags per-plan
+  gating as explicitly deferred, "a genuine hard lock-out once lapsed" not yet built. **Still open,
+  not ported** - doing so means first resolving which pricing/plan scheme is real (next point), since
+  the limits are meaningless without real per-tier numbers.
+- **A genuine, unresolved pricing conflict, surfaced independently by both pieces of work, not
+  guessed at by either**: this session's billing build was written against the exact 4-tier
+  structure Sarel gave directly in this session's own chat (Starter R1,490 / Professional R2,990 /
+  Business R4,990 / Enterprise custom, full copy for each tier). #60's own brief named a *different*
+  4-tier scheme (Starter/Professional/**Roads & Civils**/Enterprise "from R9,500") that also doesn't
+  match this session's figures - and #60 chose to trust neither brief, instead keeping what's
+  actually live on `app/page.tsx` today: **Tender Watch (free) / Tender Pro (R1,490) / SANRAL Pro
+  (R3,950)**, which also matches `docs/strategy/Marketing-Pricing-Strategy.md`. **Three different
+  pricing schemes have now surfaced across sessions for the same product.** Not resolved here -
+  this is a real-money decision, Sarel's call, not something to silently pick. Whichever is correct,
+  `app/page.tsx`'s `PRICING_TIERS`, `lib/billing.ts`'s plan tiers/prices, and the still-open usage-
+  gating work above all need to agree with it.
+- **Closed PR #57** (comment left explaining why, branch left in place, not deleted) rather than
+  merge a second, conflicting billing system on top of one Sarel already reviewed and merged himself.
+- **Documentation-discipline gap, worth naming plainly**: #60's own very thorough work-log lives only
+  in `app/AGENTS.md`, never in this file - the first and only billing-related entry in
+  System-Status.md is this one. Every other major feature landed this week (PR #20, the design-system
+  migration sub-PRs) has an entry here; this is the one exception found so far.
+- **Full QA re-confirmed sound on `main` as of this pass**: `npm install` (local `node_modules` was
+  stale, not a real bug - `resend` is a real, present dependency once installed), `npm run
+  typecheck`/`lint` clean, `npx vitest run` (74/74, including #60's own 11 PayFast signature tests),
+  every `*.test.ts` run individually the way CI actually invokes them (not `node --test`'s own glob,
+  which silently reports 0 tests for several files here - a real gotcha for anyone replicating CI by
+  hand, not a bug in the files themselves), a full repo-wide Python `test_*.py` sweep (46 files, all
+  clean), a real `rm -rf .next && npm run build` (clean, mounts #60's new routes), a fresh 69-migration
+  replay, and the full real-Postgres tenant-isolation suite (237/237 - confirms #60's new tables don't
+  disturb PR #20's own employee-role isolation).
+
 **PR #20 ("Team invites + employee role") merged, 2026-10-21 ~23:05 UTC** (`b2174a7`) - open 2+ days,
 explicitly flagged by its own author as security-sensitive and needing a careful read before
 merging. Sarel: "I want to keep the employee role." Rebased onto current main (167 commits of drift

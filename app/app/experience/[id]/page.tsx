@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AlertTriangle, FileX } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
@@ -13,27 +14,38 @@ import {
   disciplineLabel,
   type ExperienceItem,
 } from "@/lib/experience";
+import { EmptyState } from "@/components/tt/empty-state";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 // Per-request, under RLS - same escape hatch as people/[id]/page.tsx.
 export const instant = false;
 
-const field: React.CSSProperties = {
-  width: "100%", boxSizing: "border-box", minHeight: 44, padding: "0 12px",
-  borderRadius: 9, border: "1px solid #E3E6EA", fontSize: 14, fontFamily: "system-ui, sans-serif",
-  color: "#16233B", background: "#FFFFFF",
+const fieldClass =
+  "min-h-11 w-full rounded-lg border border-input bg-card px-2.5 text-sm text-foreground outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
+const labelClass = "mb-1 block text-xs font-semibold text-muted-foreground";
+const hintClass = "mt-0.5 text-[11px] text-muted-foreground";
+const sectionTitleClass = "mt-4 mb-2.5 text-xs font-bold tracking-wide text-muted-foreground uppercase first:mt-0";
+const checkLabelClass = "flex min-h-9 cursor-pointer items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm text-foreground";
+const gridClass = "grid grid-cols-1 gap-3 sm:grid-cols-2";
+const cardClass = "mb-4 rounded-xl border border-border bg-card p-4";
+
+type Tone = "success" | "warning" | "destructive" | "muted";
+const TONE_CLASS: Record<Tone, string> = {
+  success: "border-success/20 bg-success/10 text-success",
+  warning: "border-warning/20 bg-warning/10 text-warning",
+  destructive: "border-destructive/20 bg-destructive/10 text-destructive",
+  muted: "border-muted-foreground/20 bg-muted text-muted-foreground",
 };
-const label: React.CSSProperties = { fontSize: 12, fontWeight: 600, color: "#5B6472", marginBottom: 4, display: "block" };
-const hint: React.CSSProperties = { fontSize: 11, color: "#8A93A0", marginTop: 3 };
-const sectionTitle: React.CSSProperties = {
-  fontSize: 12, fontWeight: 700, color: "#8A93A0", textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 10px",
-};
-const checkLabel: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 8, minHeight: 36, padding: "0 12px", borderRadius: 9,
-  border: "1px solid #E3E6EA", fontSize: 13, color: "#16233B", background: "#FFFFFF", cursor: "pointer",
-};
+function Pill({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${TONE_CLASS[tone]}`}>
+      {children}
+    </span>
+  );
+}
 
 function Field({ children }: { children: React.ReactNode }) {
-  return <div style={{ marginBottom: 12 }}>{children}</div>;
+  return <div className="mb-3">{children}</div>;
 }
 
 export default async function ExperienceDetailPage({
@@ -47,25 +59,49 @@ export default async function ExperienceDetailPage({
   const { error: errorParam, saved, captured, suggested } = await searchParams;
   const supabase = await createClient();
 
-  const { data } = await supabase.from("experience_items").select("*").eq("id", id).maybeSingle();
+  const { data, error: itemError } = await supabase.from("experience_items").select("*").eq("id", id).maybeSingle();
+  if (itemError) console.error("experience_items select failed for detail page", itemError);
   const item = data as ExperienceItem | null;
   const taxonomy = await loadDisciplineTaxonomy(supabase);
   const customTags = (item?.disciplines ?? []).filter((t) => !isTaxonomySlug(taxonomy, t));
   // 0054 (audit O2): this company's suggestions to promote its own tags to
-  // the shared list - pending, approved or rejected, with Sarel's note.
+  // the shared list - pending, approved or rejected, with Sarel's note. This
+  // is its own 3-state review workflow, not a Verify/Provide/Fix bid task
+  // (nothing here blocks or helps a bid - it's a request to Tender Ready's
+  // catalog team) - kept as its own named vocabulary, just token-painted.
   type Suggestion = { id: string; slug: string; status: "pending" | "approved" | "rejected"; review_note: string | null };
   const { data: suggestionRows } =
     customTags.length > 0
       ? await supabase.from("discipline_category_suggestions").select("id, slug, status, review_note").in("slug", customTags).order("created_at", { ascending: false })
       : { data: [] };
   const suggestionFor = (slug: string) => ((suggestionRows ?? []) as Suggestion[]).find((s) => s.slug === slug) ?? null;
+  const SUGGESTION_TONE: Record<Suggestion["status"], Tone> = { pending: "warning", approved: "success", rejected: "muted" };
+  const SUGGESTION_LABEL: Record<Suggestion["status"], string> = {
+    pending: "Suggested - waiting for review",
+    approved: "Added to the shared list",
+    rejected: "Not added",
+  };
 
   if (!item) {
     return (
-      <div style={{ padding: 32, fontFamily: "system-ui, sans-serif" }}>
-        <p style={{ color: "#B91C1C" }}>Experience item not found, or you don&apos;t have access to it.</p>
-        <Link href="/experience">← Back to Experience</Link>
-      </div>
+      <AppShell>
+        <div className="mx-auto w-full max-w-[760px] flex-1 px-4 py-10">
+          <EmptyState
+            icon={itemError ? AlertTriangle : FileX}
+            title={itemError ? "Couldn't load this experience item" : "Experience item not found"}
+            description={
+              itemError
+                ? "Something went wrong reading this record - try refreshing. If it keeps happening, let us know."
+                : "This item may have been removed, or you don't have access to it."
+            }
+            action={
+              <Link href="/experience" className={buttonVariants({ variant: "outline" })}>
+                Back to Experience
+              </Link>
+            }
+          />
+        </div>
+      </AppShell>
     );
   }
 
@@ -77,23 +113,17 @@ export default async function ExperienceDetailPage({
 
   return (
     <AppShell>
-      <style>{`
-        @media (max-width: 600px) {
-          .exp-grid-2 { grid-template-columns: 1fr !important; }
-        }
-      `}</style>
-
-      <div style={{ flex: 1, padding: "24px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <Link href="/experience" style={{ fontSize: 13, color: "#5B6472", textDecoration: "none" }}>← Company experience</Link>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "8px 0 4px" }}>{item.project_name}</h1>
-        <div style={{ fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
+      <div className="mx-auto w-full max-w-[760px] flex-1 px-4 py-6 pb-10">
+        <Link href="/experience" className="text-sm text-muted-foreground no-underline">← Company experience</Link>
+        <h1 className="mt-2 mb-1 font-display text-xl font-medium text-foreground">{item.project_name}</h1>
+        <div className="mb-4 text-sm text-muted-foreground">
           {item.original_filename ? (
             <>
               {item.original_filename}
               {fileUrl && (
                 <>
                   {" · "}
-                  <a href={fileUrl} style={{ color: "#D97706", fontWeight: 600 }}>Open document</a>
+                  <a href={fileUrl} className="font-semibold text-accent">Open document</a>
                 </>
               )}
             </>
@@ -103,94 +133,94 @@ export default async function ExperienceDetailPage({
         </div>
 
         {captured === "1" && !item.tagged_at && (
-          <div style={{ background: "#FEF3C7", border: "1px solid #FCD34D", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B45309" }}>
-            Uploaded. Now tag what this document shows - it won&apos;t count towards any tender until it&apos;s tagged.
+          <div className="mb-4 rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-warning">
+            Uploaded. Provide the tags next - it won&apos;t count towards any tender until it&apos;s tagged.
           </div>
         )}
         {suggested === "1" && (
-          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+          <div className="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">
             Suggested for the shared discipline list. It is reviewed before anything is added - you&apos;ll see the outcome here.
           </div>
         )}
         {saved === "1" && (
-          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+          <div className="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">
             Tags saved.
           </div>
         )}
         {errorParam && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {decodeURIComponent(errorParam)}
           </div>
         )}
 
-        <form action={saveExperienceTags} style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "18px 16px", marginBottom: 16 }}>
+        <form action={saveExperienceTags} className={cardClass}>
           <input type="hidden" name="id" value={item.id} />
 
-          <div style={{ ...sectionTitle, marginTop: 0 }}>The document</div>
-          <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field><label style={label}>Project name *</label><input style={field} name="project_name" defaultValue={item.project_name} required /></Field>
+          <div className={sectionTitleClass}>The document</div>
+          <div className={gridClass}>
+            <Field><label className={labelClass}>Project name *</label><input className={fieldClass} name="project_name" defaultValue={item.project_name} required /></Field>
             <Field>
-              <label style={label}>Document type *</label>
-              <select style={field} name="document_type" defaultValue={item.document_type}>
+              <label className={labelClass}>Document type *</label>
+              <select className={fieldClass} name="document_type" defaultValue={item.document_type}>
                 {DOCUMENT_TYPES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
               </select>
             </Field>
             <Field>
-              <label style={label}>Rating on the document</label>
-              <select style={field} name="performance_rating" defaultValue={item.performance_rating ?? ""}>
+              <label className={labelClass}>Rating on the document</label>
+              <select className={fieldClass} name="performance_rating" defaultValue={item.performance_rating ?? ""}>
                 <option value="">Not rated</option>
                 {PERFORMANCE_RATINGS.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
               </select>
-              <div style={hint}>Reference letters and CIDB reports carry one - SANRAL scores it 1/3/4/5.</div>
+              <div className={hintClass}>Reference letters and CIDB reports carry one - SANRAL scores it 1/3/4/5.</div>
             </Field>
             <Field>
-              <label style={label}>{item.storage_path ? "Replace document" : "Attach document"}</label>
-              <input style={{ ...field, paddingTop: 10 }} type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
+              <label className={labelClass}>{item.storage_path ? "Replace document" : "Attach document"}</label>
+              <input className={`${fieldClass} pt-2.5`} type="file" name="file" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
             </Field>
           </div>
 
-          <div style={sectionTitle}>Client</div>
-          <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field><label style={label}>Client name</label><input style={field} name="client_name" defaultValue={item.client_name ?? ""} placeholder="e.g. Airports Company South Africa" /></Field>
-            <Field><label style={label}>Contract number</label><input style={field} name="contract_number" defaultValue={item.contract_number ?? ""} /></Field>
+          <div className={sectionTitleClass}>Client</div>
+          <div className={gridClass}>
+            <Field><label className={labelClass}>Client name</label><input className={fieldClass} name="client_name" defaultValue={item.client_name ?? ""} placeholder="e.g. Airports Company South Africa" /></Field>
+            <Field><label className={labelClass}>Contract number</label><input className={fieldClass} name="contract_number" defaultValue={item.contract_number ?? ""} /></Field>
             <Field>
-              <label style={label}>Client type</label>
-              <select style={field} name="client_type" defaultValue={item.client_type ?? ""}>
+              <label className={labelClass}>Client type</label>
+              <select className={fieldClass} name="client_type" defaultValue={item.client_type ?? ""}>
                 <option value="">Not set</option>
                 {CLIENT_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
-              <div style={hint}>SANRAL&apos;s client codes - scored on Forms B1/B2.</div>
+              <div className={hintClass}>SANRAL&apos;s client codes - scored on Forms B1/B2.</div>
             </Field>
           </div>
 
-          <div style={sectionTitle}>What the work was</div>
-          <label style={label}>Discipline * <span style={{ fontWeight: 400 }}>(tick all that apply - tenders are matched on this)</span></label>
-          <div style={hint}>
+          <div className={sectionTitleClass}>What the work was</div>
+          <label className={labelClass}>Discipline * <span className="font-normal">(tick all that apply - tenders are matched on this)</span></label>
+          <div className={hintClass}>
             Tender Ready&apos;s own discipline list, built from real tenders and growing as new kinds of tender come in. Ticking a
             whole group (e.g. Roads, bridges &amp; civil works) matches the disciplines in it, except the ones marked
             &quot;tick on its own&quot; - a whole-group tick is too broad to call those a fit (Professional &amp; consulting
             services doesn&apos;t make a firm a property valuer). Tick one of those itself if the company does that work.
             {taxonomy.source === "fallback" && ` (Showing the original 7 groups only - the full list couldn't be read: ${taxonomy.error}.)`}
           </div>
-          <div style={{ margin: "6px 0 12px" }}>
+          <div className="my-2.5">
             {taxonomyGroups(taxonomy).map(({ group, children }) => {
               const ticked = [group, ...children].filter((c) => item.disciplines.includes(c.slug)).length;
               return (
-                <details key={group.slug} open={ticked > 0} style={{ borderTop: "1px solid #ECEEF1", padding: "6px 0" }}>
-                  <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#16233B", minHeight: 32, display: "flex", alignItems: "center", gap: 8 }}>
+                <details key={group.slug} open={ticked > 0} className="border-t border-border py-1.5 first:border-t-0">
+                  <summary className="flex min-h-11 cursor-pointer items-center gap-2 text-sm font-semibold text-foreground">
                     {group.label}
-                    {ticked > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: "#15803D", background: "#DCFCE7", borderRadius: 100, padding: "2px 8px" }}>{ticked} ticked</span>}
+                    {ticked > 0 && <span className="rounded-full bg-success/10 px-2 py-0.5 text-[11px] font-bold text-success">{ticked} ticked</span>}
                   </summary>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-                    <label style={{ ...checkLabel, fontWeight: 600 }}>
+                  <div className="mt-1.5 flex flex-wrap gap-2">
+                    <label className={`${checkLabelClass} font-semibold`}>
                       <input type="checkbox" name="disciplines" value={group.slug} defaultChecked={item.disciplines.includes(group.slug)} />
                       Whole group: {group.label.toLowerCase()}
                     </label>
                     {children.map((c) => (
-                      <label key={c.slug} style={checkLabel}>
+                      <label key={c.slug} className={checkLabelClass}>
                         <input type="checkbox" name="disciplines" value={c.slug} defaultChecked={item.disciplines.includes(c.slug)} />
                         {c.label}
-                        {c.matched_by_group_tag === false && <span style={{ fontSize: 11, color: "#8A93A0" }}>(tick on its own)</span>}
+                        {c.matched_by_group_tag === false && <span className="text-[11px] text-muted-foreground">(tick on its own)</span>}
                       </label>
                     ))}
                   </div>
@@ -198,10 +228,10 @@ export default async function ExperienceDetailPage({
               );
             })}
             {customTags.length > 0 && (
-              <div style={{ borderTop: "1px solid #ECEEF1", paddingTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: "#5B6472", alignSelf: "center" }}>Your own tags:</span>
+              <div className="flex flex-wrap gap-2 border-t border-border pt-2">
+                <span className="self-center text-xs text-muted-foreground">Your own tags:</span>
                 {customTags.map((v) => (
-                  <label key={v} style={checkLabel}>
+                  <label key={v} className={checkLabelClass}>
                     <input type="checkbox" name="disciplines" value={v} defaultChecked />
                     {disciplineLabel(v)}
                   </label>
@@ -210,70 +240,67 @@ export default async function ExperienceDetailPage({
             )}
           </div>
           <Field>
-            <label style={label}>Other disciplines <span style={{ fontWeight: 400 }}>(optional, comma-separated)</span></label>
-            <input style={field} name="other_disciplines" placeholder="e.g. Hydrographic survey, Heritage conservation" />
-            <div style={hint}>For work the list doesn&apos;t cover yet. It is saved as your own tag; the list itself is reviewed and extended as new kinds of tender come in, so also tick the closest listed discipline if there is one.</div>
+            <label className={labelClass}>Other disciplines <span className="font-normal">(optional, comma-separated)</span></label>
+            <input className={fieldClass} name="other_disciplines" placeholder="e.g. Hydrographic survey, Heritage conservation" />
+            <div className={hintClass}>For work the list doesn&apos;t cover yet. It is saved as your own tag; the list itself is reviewed and extended as new kinds of tender come in, so also tick the closest listed discipline if there is one.</div>
           </Field>
-          <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className={gridClass}>
             <Field>
-              <label style={label}>Project type</label>
-              <input style={field} name="project_type" list="sanral-project-types" defaultValue={item.project_type ?? ""} placeholder="e.g. DS, RRM, MP/MS" />
+              <label className={labelClass}>Project type</label>
+              <input className={fieldClass} name="project_type" list="sanral-project-types" defaultValue={item.project_type ?? ""} placeholder="e.g. DS, RRM, MP/MS" />
               <datalist id="sanral-project-types">
                 {SANRAL_PROJECT_TYPES.map((p) => <option key={p.code} value={p.code}>{`${p.label} (${p.appliesTo.join("; ")})`}</option>)}
               </datalist>
-              <div style={hint}>SANRAL&apos;s code where it applies; plain words for other clients.</div>
+              <div className={hintClass}>SANRAL&apos;s code where it applies; plain words for other clients.</div>
             </Field>
-            <Field><label style={label}>Value (R million)</label><input style={field} type="number" step="0.01" min="0" name="value_rm" defaultValue={item.value_rm ?? ""} /></Field>
+            <Field><label className={labelClass}>Value (R million)</label><input className={fieldClass} type="number" step="0.01" min="0" name="value_rm" defaultValue={item.value_rm ?? ""} /></Field>
           </div>
           <Field>
-            <label style={label}>Scope in a line</label>
-            <input style={field} name="scope_summary" defaultValue={item.scope_summary ?? ""} placeholder="e.g. Crack sealing, pothole and edge repair on N1 section 5" />
-            <div style={hint}>Tenders ask for &quot;projects of similar scope&quot; - this is what gets compared.</div>
+            <label className={labelClass}>Scope in a line</label>
+            <input className={fieldClass} name="scope_summary" defaultValue={item.scope_summary ?? ""} placeholder="e.g. Crack sealing, pothole and edge repair on N1 section 5" />
+            <div className={hintClass}>Tenders ask for &quot;projects of similar scope&quot; - this is what gets compared.</div>
           </Field>
-          <label style={label}>Services delivered <span style={{ fontWeight: 400 }}>(CIDB project stages)</span></label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+          <label className={labelClass}>Services delivered <span className="font-normal">(CIDB project stages)</span></label>
+          <div className="mb-3 flex flex-wrap gap-2">
             {SERVICE_STAGES.map((s) => (
-              <label key={s.value} style={checkLabel}>
+              <label key={s.value} className={checkLabelClass}>
                 <input type="checkbox" name="service_stages" value={s.value} defaultChecked={item.service_stages.includes(s.value)} />
                 {s.label}
               </label>
             ))}
           </div>
 
-          <div style={sectionTitle}>Dates</div>
-          <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field><label style={label}>Start date</label><input style={field} type="date" name="start_date" defaultValue={item.start_date ?? ""} /></Field>
+          <div className={sectionTitleClass}>Dates</div>
+          <div className={gridClass}>
+            <Field><label className={labelClass}>Start date</label><input className={fieldClass} type="date" name="start_date" defaultValue={item.start_date ?? ""} /></Field>
             <Field>
-              <label style={label}>Completion date</label>
-              <input style={field} type="date" name="completion_date" defaultValue={item.completion_date ?? ""} />
-              <div style={hint}>Leave blank if not completed - SANRAL only counts work completed in the last 10 years.</div>
+              <label className={labelClass}>Completion date</label>
+              <input className={fieldClass} type="date" name="completion_date" defaultValue={item.completion_date ?? ""} />
+              <div className={hintClass}>Leave blank if not completed - SANRAL only counts work completed in the last 10 years.</div>
             </Field>
           </div>
 
-          <div style={sectionTitle}>Contactable reference</div>
-          <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <Field><label style={label}>Name &amp; position</label><input style={field} name="reference_contact_name" defaultValue={item.reference_contact_name ?? ""} /></Field>
-            <Field><label style={label}>Phone</label><input style={field} name="reference_contact_phone" defaultValue={item.reference_contact_phone ?? ""} /></Field>
-            <Field><label style={label}>Email</label><input style={field} type="email" name="reference_contact_email" defaultValue={item.reference_contact_email ?? ""} /></Field>
+          <div className={sectionTitleClass}>Contactable reference</div>
+          <div className={gridClass}>
+            <Field><label className={labelClass}>Name &amp; position</label><input className={fieldClass} name="reference_contact_name" defaultValue={item.reference_contact_name ?? ""} /></Field>
+            <Field><label className={labelClass}>Phone</label><input className={fieldClass} name="reference_contact_phone" defaultValue={item.reference_contact_phone ?? ""} /></Field>
+            <Field><label className={labelClass}>Email</label><input className={fieldClass} type="email" name="reference_contact_email" defaultValue={item.reference_contact_email ?? ""} /></Field>
           </div>
 
           <Field>
-            <label style={label}>Notes</label>
-            <textarea name="notes" defaultValue={item.notes ?? ""} rows={2} style={{ ...field, padding: "10px 12px", resize: "vertical" }} />
+            <label className={labelClass}>Notes</label>
+            <textarea name="notes" defaultValue={item.notes ?? ""} rows={2} className={`${fieldClass} resize-y py-2.5`} />
           </Field>
 
-          <button
-            type="submit"
-            style={{ minHeight: 44, padding: "0 20px", borderRadius: 10, background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 14, border: "none", cursor: "pointer" }}
-          >
+          <Button type="submit" variant="accent" size="lg" className="min-h-11 px-5">
             Save tags
-          </button>
+          </Button>
         </form>
 
         {customTags.length > 0 && (
-          <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "16px 16px", marginBottom: 16 }}>
-            <div style={{ ...sectionTitle, marginTop: 0 }}>Your own tags and the shared list</div>
-            <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+          <div className={cardClass}>
+            <div className={`${sectionTitleClass} mt-0`}>Your own tags and the shared list</div>
+            <div className="mb-2.5 text-xs text-muted-foreground">
               These tags aren&apos;t on Tender Ready&apos;s shared discipline list, so Discovery doesn&apos;t sort tenders into them. If
               other companies would use one too, suggest it: Tender Ready reviews every suggestion before anything is added. The
               reviewer sees your company name, the tag, your note and this project&apos;s name.
@@ -281,60 +308,50 @@ export default async function ExperienceDetailPage({
             {customTags.map((t) => {
               const sug = suggestionFor(t);
               return (
-                <div key={t} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0" }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{disciplineLabel(t)}</span>
-                    <span style={{ fontFamily: "monospace", fontSize: 11, color: "#8A93A0" }}>{t}</span>
-                    {sug && (
-                      <span
-                        style={{
-                          fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 100,
-                          background: sug.status === "pending" ? "#FEF3C7" : sug.status === "approved" ? "#DCFCE7" : "#FEE2E2",
-                          color: sug.status === "pending" ? "#B45309" : sug.status === "approved" ? "#15803D" : "#B91C1C",
-                        }}
-                      >
-                        {sug.status === "pending" ? "Suggested - waiting for review" : sug.status === "approved" ? "Added to the shared list" : "Not added"}
-                      </span>
-                    )}
+                <div key={t} className="border-t border-border py-2.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-foreground">{disciplineLabel(t)}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">{t}</span>
+                    {sug && <Pill tone={SUGGESTION_TONE[sug.status]}>{SUGGESTION_LABEL[sug.status]}</Pill>}
                   </div>
-                  {sug?.review_note && <div style={{ fontSize: 12, color: "#4B5563", marginTop: 4 }}>Reviewer&apos;s note: {sug.review_note}</div>}
+                  {sug?.review_note && <div className="mt-1 text-xs text-muted-foreground">Reviewer&apos;s note: {sug.review_note}</div>}
                   {sug?.status === "pending" && (
-                    <form action={withdrawSuggestion} style={{ marginTop: 6 }}>
+                    <form action={withdrawSuggestion} className="mt-1.5">
                       <input type="hidden" name="id" value={sug.id} />
                       <input type="hidden" name="item_id" value={item.id} />
-                      <button type="submit" style={{ minHeight: 36, padding: "0 12px", borderRadius: 9, background: "#FFFFFF", color: "#5B6472", fontWeight: 600, fontSize: 12, border: "1px solid #E3E6EA", cursor: "pointer" }}>
+                      <Button type="submit" variant="outline" size="sm" className="min-h-9 px-3">
                         Withdraw the suggestion
-                      </button>
+                      </Button>
                     </form>
                   )}
                   {(!sug || sug.status === "rejected") && (
-                    <details style={{ marginTop: 6 }}>
-                      <summary style={{ cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#D97706", minHeight: 32 }}>
+                    <details className="mt-1.5">
+                      <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-accent">
                         {sug ? "Suggest it again" : "Suggest this as a shared category"}
                       </summary>
-                      <form action={suggestSharedCategory} style={{ marginTop: 6 }}>
+                      <form action={suggestSharedCategory} className="mt-1.5">
                         <input type="hidden" name="item_id" value={item.id} />
                         <input type="hidden" name="slug" value={t} />
-                        <div className="exp-grid-2" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                        <div className={gridClass}>
                           <Field>
-                            <label style={label}>Name it as it should appear</label>
-                            <input style={field} name="label" defaultValue={disciplineLabel(t)} required />
+                            <label className={labelClass}>Name it as it should appear</label>
+                            <input className={fieldClass} name="label" defaultValue={disciplineLabel(t)} required />
                           </Field>
                           <Field>
-                            <label style={label}>Which group it belongs in (your best guess)</label>
-                            <select style={field} name="parent_slug" defaultValue="">
+                            <label className={labelClass}>Which group it belongs in (your best guess)</label>
+                            <select className={fieldClass} name="parent_slug" defaultValue="">
                               <option value="">Not sure</option>
                               {taxonomyGroups(taxonomy).map(({ group }) => <option key={group.slug} value={group.slug}>{group.label}</option>)}
                             </select>
                           </Field>
                         </div>
                         <Field>
-                          <label style={label}>What kind of work it covers (optional)</label>
-                          <input style={field} name="note" placeholder="e.g. Hydrographic surveys of dams and harbours for DWS and TNPA" />
+                          <label className={labelClass}>What kind of work it covers (optional)</label>
+                          <input className={fieldClass} name="note" placeholder="e.g. Hydrographic surveys of dams and harbours for DWS and TNPA" />
                         </Field>
-                        <button type="submit" style={{ minHeight: 40, padding: "0 16px", borderRadius: 9, background: "#D97706", color: "#FFFFFF", fontWeight: 600, fontSize: 13, border: "none", cursor: "pointer" }}>
+                        <Button type="submit" variant="default" size="default" className="min-h-10 px-4">
                           Send for review
-                        </button>
+                        </Button>
                       </form>
                     </details>
                   )}
@@ -348,7 +365,7 @@ export default async function ExperienceDetailPage({
           <input type="hidden" name="id" value={item.id} />
           <ConfirmSubmitButton
             confirmMessage="Remove this experience item? This can't be undone."
-            style={{ minHeight: 44, padding: "0 16px", borderRadius: 10, background: "#FEE2E2", color: "#B91C1C", fontWeight: 600, fontSize: 13, border: "1px solid #FCA5A5", cursor: "pointer" }}
+            className="min-h-11 cursor-pointer rounded-lg border border-destructive/30 bg-destructive/10 px-4 text-xs font-semibold text-destructive"
           >
             Remove this item
           </ConfirmSubmitButton>
