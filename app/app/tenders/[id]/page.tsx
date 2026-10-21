@@ -19,6 +19,8 @@ import {
 import { AppShell } from "../../_components/AppShell";
 import { ScrollFade } from "../../_components/ScrollFade";
 import { SubmissionPack } from "./submission-pack";
+import { CvCompare } from "./cv-compare";
+import { CoverPagePreview } from "./cover-page-preview";
 import { PackReview } from "./pack-review";
 import { IntakeCard } from "./intake-card";
 import { ActivityLog } from "./activity-log";
@@ -499,6 +501,7 @@ export default async function TenderWorkspacePage({
                 <div style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 6, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                     {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
+                    {showSubmissionPack && <JumpLink href="#cover-page" label="Cover page" />}
                     {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" variant="primary" />}
                     {(isSanralFamily || isGeneralFamily) && <JumpLink href="#disqualification-guard" label="Guard" />}
                     {isGeneralFamily && <JumpLink href="#submission-plan" label="Plan" />}
@@ -712,13 +715,17 @@ export default async function TenderWorkspacePage({
                           {req?.position_description && (
                             <div style={{ fontSize: 12, color: "#5B6472", marginTop: 1 }}>{req.position_description}</div>
                           )}
-                          <div style={{ fontSize: 12, color: confirmedId ? "#15803D" : "#B45309", marginTop: 2, fontWeight: 600 }}>
-                            {confirmedId
-                              ? `Confirmed: ${a?.people?.name ?? peopleName.get(confirmedId) ?? "person on file"}`
-                              : "Not confirmed yet"}
-                          </div>
-                          {roleCode && tagged.length === 0 && (
-                            <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 2 }}>
+                          {confirmedId ? (
+                            <div style={{ fontSize: 12, color: "#15803D", marginTop: 2, fontWeight: 600 }}>
+                              Confirmed: {a?.people?.name ?? peopleName.get(confirmedId) ?? "person on file"}
+                            </div>
+                          ) : (
+                            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FEE2E2", color: "#B91C1C", borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700, marginTop: 4 }}>
+                              Fix: no key person confirmed - blocks the submission pack
+                            </div>
+                          )}
+                          {!confirmedId && roleCode && tagged.length === 0 && (
+                            <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 4 }}>
                               No one is tagged as fitting {roleTitles.get(roleCode) ?? code} yet (People page).
                             </div>
                           )}
@@ -756,6 +763,7 @@ export default async function TenderWorkspacePage({
                               Generate tender-specific CV
                             </button>
                           </form>
+                          <CvCompare tenderId={id} positionCode={code} personId={confirmedId} />
                         </div>
                       )}
                       {positionJobs.length > 0 && (
@@ -784,6 +792,16 @@ export default async function TenderWorkspacePage({
                   );
                 })}
               </div>
+            )}
+
+            {showSubmissionPack && (
+              <CoverPagePreview
+                contractNo={tenderFacts.contract_no}
+                nraReference={tenderFacts.nra_reference}
+                description={tenderFacts.description}
+                buyer={tenderFacts.buyer}
+                closingDate={tenderFacts.closing_date}
+              />
             )}
 
             {/* The tender's blank SANRAL templates, uploaded by hand (0025). */}
