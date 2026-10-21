@@ -6,6 +6,12 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-21 ~22:25 UTC**: orientation via `git log` found no sibling commits
+since the last pass (this session's own Finding 47 fix was the most recent). Full QA re-confirmed
+sound: every `test_*.py` repo-wide, `npx vitest run` (53/53), `typecheck`/`lint`, and a real
+`npm run build` (the Bids pipeline board redesign, `#45`, landed just before this pass and rebuilds
+clean). Nothing new to fix or flag this pass.
+
 **Finding 47 fixed, 2026-10-21 ~22:25 UTC** (`5928abe`) - the "needs a buyer-name-aware redesign,
 not forced" gap flagged earlier this same day is now closed. `extract_requirements()`/`find_roles()`
 both gained an optional `buyer` param; a "&lt;buyer name&gt; Contract/Project Manager" mention (the
