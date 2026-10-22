@@ -384,7 +384,8 @@ pass's own direct vendor-site searches and fetches, not secondary sources.
 **Stopping here rather than chaining another overnight pass**: the single biggest named gap
 (competitive landscape) is now filled with real, multi-source data, and the one major finding
 (positioning needed correcting — several competitors DO have AI features) has been folded into both
-Part 1 and Part 3. What remains open (the pricing conflict, BidsStack's TenderScout price, the tier-
-distribution assumption) isn't something another research pass can resolve — the first needs Sarel's
-decision, the other two need real product/trial data that doesn't exist yet. This document is ready
-to present as a solid first draft, with its one real blocker clearly flagged rather than buried.
+Part 1 and Part 3. The pricing conflict is resolved (Sarel confirmed directly, 2026-10-22; PR #71
+reconciled the homepage and billing code to match — see the flag at the top of this document). What
+remains open (BidsStack's TenderScout price, the tier-distribution assumption) isn't something another
+research pass can resolve — both need real product/trial data that doesn't exist yet. This document is
+ready to present as a solid first draft, with no open blocker left.
