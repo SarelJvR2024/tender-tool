@@ -5300,3 +5300,53 @@ document-download task) to avoid colliding on that file. The general-route requi
 shallow by design (see above) - if Sarel wants a real itemised general-tender requirement list at
 discovery time, that needs `engine/general/requirements.py`'s LLM pass run speculatively, which
 has its own cost/design tradeoffs not decided here.
+
+---
+
+**Sarel's call on SANRAL's data terms, 2026-10-22 ~20:05 UTC - resolved, recorded here per this
+file's own discipline.** `public_tender_outcomes`' migration comment and
+`Award-Outcomes-Findings.md` §6 both flagged the same open question: SANRAL's site terms say "no
+charge ... upon any recipient of the material," and showing SANRAL-sourced rows to **paying**
+customers (rather than just using the data for Klipcorp's own bidding) was explicitly left as
+"an open decision for Sarel." Sarel resolved it directly (verbatim): "lets build the analysis
+feature including sanral data for now. there is alot of analysis we can build based on all
+tenders which include sanrla and other tenders. assessming tenders, scope, freuecny, wining
+biders amoutns, awards vs tender etc start building what you can." Read as: fine to show inside
+the signed-in, paying app for a customer's own bidding decisions; still not resolved for the
+separate "use case beyond the bidder" idea (selling access to non-bidders, e.g. suppliers wanting
+to know who won) - that's a different audience/product idea per the Deep-Dive doc, not covered by
+this instruction, and stays an open decision if anyone builds it later.
+
+**Built the same session: Market Intelligence (`app/app/market-intelligence/page.tsx`, PR TBD on
+branch `feature/market-intelligence`).** A market-wide view across every `public_tender_outcomes`
+row (SANRAL + eTenders, ~6,000+ rows and growing from the backfill below) - deliberately separate
+from `/analytics`' "Pricing trends" section, which stays scoped to one company's own matched bids
+(that page's own AGENTS.md entry had explicitly flagged a market-wide rollup as "a reasonable
+follow-up, not attempted here" - this is that follow-up). Tender frequency by month, winning-bid-
+vs-field stats (lowest-bid-won rate, winner-vs-median), and breakdowns by industry/discipline,
+buyer and province - all via `lib/marketPricing.ts`'s existing `benchmark()`, extended with three
+new pure functions (`tenderFrequencyTrend`, `byCategory`, `byBuyer`/`byProvince`, 9 new tests in
+the new `marketPricing.spec.ts`) and a plain unscoped `loadMarketOutcomes()` read (no company
+join - this table is shared/authenticated-readable). Same `MIN_SAMPLE`-gating discipline as
+`/analytics`; one scope limit stated honestly on the page itself rather than faked: "winner vs.
+the field" compares the winning bid to the OTHER BIDS on the SAME tender, not to a published
+budget/estimate (that comparison, `loadMarketTrend()`, only exists for tenders a company has
+tracked and enriched with a value band - most of this backfilled universe has no such estimate).
+Also added the real `province` column (migration `0053`) to the `TenderOutcome` TS type and
+`OUTCOME_COLUMNS` - it existed in the database but was missing from the type, caught while
+building this. Verified: `npm run typecheck` (clean), `npm run lint` (0 errors), `npx vitest run`
+(115/115, 9 new), `npm run build` (clean, builds as a dynamic route). Not verified: rendered
+against live data in a browser (same standing gap as every other authenticated page in this file -
+this environment has no live Supabase session).
+
+**Two real bugs found and fixed in the running SANRAL/eTenders backfill while building the above**
+(both on `main` via PR #98 and a second PR on branch `fix/portal-first-seen-keys`): (1) the
+eTenders portal fetch (`fetch_portal_awarded()`) was never chunked like the SANRAL lists were -
+one giant fetch, written to Supabase only at the very end - and this sandbox's container restarted
+mid-run three times, losing 100% of portal progress each time; fixed by making it resumable
+chunk-by-chunk, same pattern as the SANRAL list fetch (PR #89). (2) `store_award_outcomes.merge()`
+only set `first_seen_at` when a tender already existed in Supabase, so a batch mixing a brand-new
+tender with an already-known one crashed with PostgREST's `PGRST102 "All object keys must match"`
+- hit live on chunk 7 of the re-run. Fixed by always setting `first_seen_at`, with a regression
+test. Backfill relaunched after each fix; see git log / PR #98 / #99 for the full detail rather
+than duplicating it here.

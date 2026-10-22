@@ -1,4 +1,4 @@
-import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, Zap, FileUser, CreditCard, BarChart3, type LucideIcon } from "lucide-react";
+import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, Zap, FileUser, CreditCard, BarChart3, TrendingUp, type LucideIcon } from "lucide-react";
 
 export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: string };
 
@@ -23,6 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/discovery", label: "Opportunities", icon: Compass },
   { href: "/pipeline", label: "Bids", icon: Gavel },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
+  { href: "/market-intelligence", label: "Market intelligence", icon: TrendingUp },
   { href: "/sanral-schedules", label: "SANRAL schedules", icon: Zap },
   { href: "/company", label: "Company vault", icon: Vault },
   { href: "/billing", label: "Billing", icon: CreditCard },
