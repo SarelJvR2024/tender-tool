@@ -982,3 +982,80 @@ confirmed the new `/billing` matcher entry (`/billing/:path*`) does not and cann
 `/api/billing/checkout` or `/api/billing/payfast/itn` (different path prefix entirely -
 `/api/billing/...` does not start with `/billing`), so the PayFast checkout flow and webhook are
 untouched.
+
+### Spec v3 Batch 2: shared document intake foundation
+
+Batch 0's audit found the engine spec §4/§17 asks for already exists and works correctly - the
+bulk AI document-scan pipeline (`/company/document-scan`, migration 0063: upload -> OCR/AI
+classification -> a review-and-confirm screen that never silently overwrites a verified field -
+only a ticked field is written). The real gap was that 12+ other upload sites each had their own
+separate, dumber `<input type="file">` with no classification or review step at all - Company
+vault's own 7-row `DocumentRow.tsx` being the clearest example: choosing a file there wrote
+straight to the matching `companies.*` column with zero review, the exact "silent overwrite" §4/§17
+forbids.
+
+This batch did NOT rebuild the extraction engine - it extracted the GENERIC parts of
+`document-scan/upload-form.tsx` into two shared, reusable pieces, then wired exactly one additional
+real surface through the existing engine, per the spec's own "demonstrate one full real
+extraction/save/readback before propagating it everywhere" instruction (Batch 4 does the rest:
+People, Experience).
+
+- **New `app/app/_components/document-intake/uploadBatch.ts`** - the per-file upload engine,
+  extracted with one real behaviour fix: the original `uploadAll()` rolled back and discarded
+  every ALREADY-SUCCEEDED file in a batch the moment any ONE file failed, then aborted the whole
+  batch with a single generic error - directly against spec v3 §17's "a failed file must not
+  discard successfully received files." Rewritten so each file's outcome
+  (`queued`/`uploading`/`uploaded`/`failed`) is independent; a sibling's failure never touches
+  another file's state. Pure reducer functions (`markUploading`, `applyUploadResult`,
+  `partitionBatch`) are unit-tested directly (`uploadBatch.test.ts`, 5 tests) without needing a
+  DOM or a real Supabase call - same pattern as `onboardingScan.test.ts`.
+- **New `app/app/_components/document-intake/FileDropzone.tsx`** - the generic drag-drop +
+  click-to-choose UI (spec v3 O12: "one 'Add documents' control... Drag-and-drop is equally
+  supported"), with a `compact` mode for a single row inside a longer list (Company vault) versus
+  the full dashed panel for a dedicated upload page (document-scan). `validateFiles()` is the pure
+  extension/size/empty-file check, also unit-testable without rendering anything.
+- **`document-scan/upload-form.tsx`** now composes these two pieces instead of its own copy.
+  One deliberate behaviour change beyond the bug fix: registering a batch for AI classification is
+  no longer its own manual "Upload N documents" click - it happens automatically the moment every
+  file in that drop finishes uploading (spec v3 §17: "Starting upload after selection is
+  automatic"). The only button left in this component is the failed-file retry action.
+- **New `app/app/company/_components/VaultDocumentUploader.tsx`** - the new path for 6 of
+  `DocumentRow.tsx`'s 7 rows (`cidb`, `sars_tcs_pin`, `pi_insurance`, `iso_9001`, `bank_letter`,
+  `bee_proof`). Upload -> real AI classification (same engine, same `registerOnboardingBatch`
+  action, unchanged) -> the existing `/company/document-scan` review screen, where only a ticked
+  field is written (that gating logic - `confirmVaultDocument` in `document-scan/actions.ts` - was
+  already correct and needed no change; the fix was routing DocumentRow's upload through it at
+  all). `coid` (COID Letter of Good Standing) deliberately keeps the old direct-upload form,
+  unchanged: it has no entry anywhere in `onboardingScan.ts`'s `DocumentKind` enum or
+  `classify_documents.py`'s own kind list, and adding one means teaching the Python classifier a
+  new kind plus a new `document_kind` check-constraint value (migration 0063) - a schema/engine
+  change this batch's ground rules leave for a separate, explicitly-approved pass, not something to
+  fold in quietly. New `lib/vaultDocuments.ts` export `VAULT_KIND_TO_DOCUMENT_KIND` records exactly
+  which 6 are mapped, with its own tests (`vaultDocuments.test.ts`, 4 tests) pinning that `coid` is
+  deliberately absent and that nothing is silently unmapped.
+- **Byproduct, not the batch's goal**: the 6 upgraded rows can now accept up to 25 MB per file
+  (document-scan's own limit) instead of the old 4.4 MB `uploadVaultDocument` cap - that cap only
+  existed because a Server Action's request body is capped at 4.5 MB on Vercel, and these rows no
+  longer go through a Server Action for the file itself (straight-to-Storage from the browser, same
+  as document-scan). `coid` is unchanged and stays at 4.4 MB. Found and fixed in self-review round
+  2: the section's own shared caption still claimed a blanket "4.4 MB each" for all 7 rows after
+  this change, which was now wrong for 6 of them.
+
+**Self-review (3 rounds)**: round 1 confirmed every existing `onboardingScan.test.ts` /
+`document-scan` behaviour is unchanged (19 pre-existing tests still pass, `confirmVaultDocument`
+and the whole classify/review/confirm chain untouched) and added 9 new tests for the two new pieces;
+confirmed `DocumentRow.tsx` has exactly one real consumer (`ComplianceDocumentsSection.tsx` - a
+grep hit in `properties/page.tsx` turned out to be an unrelated type also named
+`PropertyDocumentRow`, not this component). Round 2 caught the stale 4.4 MB caption above. Round 3
+re-ran the full `npm run verify` + `vitest` + `node:test` suite clean after the fix.
+
+**Not tested, reported rather than faked**: same limitation as Batch 1 - this sandbox's
+credential-generation tools (Admin API magic-link sign-in) are blocked by its own safety
+classifier, and the demo account's real password isn't committed anywhere this session can read, so
+nobody has actually seen `VaultDocumentUploader` or the updated `upload-form.tsx` rendered and
+clicked inside a real authenticated session. What WAS verified live: both touched routes
+(`/company`, `/company/document-scan`) compile and correctly 307-redirect a signed-out request to
+`/login` with no console error (`npm run build`'s own route table shows both compiling as Partial
+Prerender routes with no prerender failure), and a standalone `react-dom/server` static render of
+`FileDropzone` in both its full and `compact` modes produces the expected markup with no runtime
+error - real evidence the component tree itself is sound, short of an actual click-through.
