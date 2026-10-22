@@ -438,7 +438,7 @@ def fetch_sanral_outcomes(list_key, limit=40, pause=1.0, start_page=1):
         })
         time.sleep(pause)
     return {"list": slug, "total_filtered": total_filtered, "rows_listed": len(rows),
-            "fetched": len(records), "failed": failed, "records": records}
+            "fetched": len(records), "failed": failed, "records": records, "next_page": next_page}
 
 
 # ---------------------------------------------------------------- report
