@@ -47,15 +47,31 @@ import { computeTenderReadiness } from "./tender-readiness";
  *  5. Generate the pack - a request for engine/general/process_general_jobs.py.
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
-const STATUS_STYLE: Record<ComplianceStatus, { label: string; bg: string; color: string }> = {
-  have: { label: "On file", bg: "#DCFCE7", color: "#15803D" },
-  missing: { label: "Don't have", bg: "#FEE2E2", color: "#B91C1C" },
-  check: { label: "Confirm by hand", bg: "#FEF3C7", color: "#B45309" },
+// These 4 reusable CSSProperties constants use the var(--token) CSS-variable
+// pattern (company/_components/ui.tsx's own established convention) rather
+// than Tailwind className - too many spread call sites across this file to
+// convert without a disproportionately large diff for a color-only pass
+// (design-system color migration, batch 4, app/AGENTS.md).
+const card: React.CSSProperties = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+const STATUS_STYLE: Record<ComplianceStatus, { label: string; className: string }> = {
+  have: { label: "On file", className: "bg-success/10 text-success" },
+  missing: { label: "Don't have", className: "bg-destructive/10 text-destructive" },
+  check: { label: "Confirm by hand", className: "bg-warning/10 text-warning" },
 };
-const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 10px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" };
-const primaryBtn: React.CSSProperties = { minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" };
-const secondaryBtn: React.CSSProperties = { minHeight: 34, padding: "0 12px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E3E6EA", color: "#16233B", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
+const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 13, fontFamily: "inherit", background: "var(--card)", color: "var(--foreground)" };
+const primaryBtn: React.CSSProperties = { minHeight: 40, padding: "0 16px", borderRadius: 8, background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" };
+const secondaryBtn: React.CSSProperties = { minHeight: 34, padding: "0 12px", borderRadius: 8, background: "var(--card)", border: "1px solid var(--border)", color: "var(--foreground)", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" };
+
+// Mirrors lib/generalTender.ts's JOB_STATUS_STYLE semantics (queued/working
+// -> warning, ready -> success, failed -> destructive) as Tailwind classes -
+// kept local rather than changing that shared hex-based export, which
+// intake-card.tsx still reads directly (its own JOB_BADGE_CLASS, batch 2).
+const JOB_BADGE_CLASS: Record<string, string> = {
+  requested: "bg-warning/10 text-warning",
+  generating: "bg-warning/10 text-warning",
+  ready: "bg-success/10 text-success",
+  failed: "bg-destructive/10 text-destructive",
+};
 
 type Person = PersonCredentialFields & { id: string; name: string; signatory_capacity: string | null; role: string | null };
 
@@ -119,16 +135,16 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       <div id="general-preparation" style={card}>
         <SectionTitle title="Tender preparation" />
         {savedNote && <SavedBanner text={savedNote} />}
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           This isn&apos;t a SANRAL tender, so what it needs is read from <strong>its own documents</strong> - every buyer sets its own
           forms and returnable list (some use National Treasury&apos;s SBD forms, municipalities the MBD twin, ESKOM its own).
           Nothing is listed here until those documents have been read.
         </div>
         {extractJob && extractJob.status !== "ready" ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#16233B" }}>
-            <Chip {...JOB_STATUS_STYLE[extractJob.status]} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--foreground)" }}>
+            <Chip label={JOB_STATUS_STYLE[extractJob.status].label} className={JOB_BADGE_CLASS[extractJob.status]} />
             {extractJob.status === "failed"
-              ? <span style={{ color: "#B91C1C" }}>Couldn&apos;t read the documents: {extractJob.error_message}</span>
+              ? <span style={{ color: "var(--destructive)" }}>Couldn&apos;t read the documents: {extractJob.error_message}</span>
               : <span>Reading {docUrls.length} published document{docUrls.length === 1 ? "" : "s"}{privateDocs.length > 0 ? ` and ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"}` : ""} - requested {new Date(extractJob.requested_at).toLocaleString()}.</span>}
           </div>
         ) : null}
@@ -139,7 +155,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
               {extractJob ? "Try reading the documents again" : "Read this tender's documents"}
             </button>
             {docUrls.length === 0 && privateDocs.length === 0 && (
-              <div style={{ fontSize: 11, color: "#B91C1C", marginTop: 6 }}>
+              <div style={{ fontSize: 11, color: "var(--destructive)", marginTop: 6 }}>
                 No document links are on file for this tender{isShared ? " - add your own copy under Your private documents above" : ""}.
               </div>
             )}
@@ -238,12 +254,12 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
           <SectionTitle title="What this tender needs" />
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {needAnswer > 0 ? <Chip label={`${needAnswer} to answer`} bg="#FEF3C7" color="#B45309" /> : <Chip label="All questions answered" bg="#DCFCE7" color="#15803D" />}
-            {docsMissing > 0 && <Chip label={`${docsMissing} document${docsMissing === 1 ? "" : "s"} missing`} bg="#FEE2E2" color="#B91C1C" />}
+            {needAnswer > 0 ? <Chip label={`${needAnswer} to answer`} className="bg-warning/10 text-warning" /> : <Chip label="All questions answered" className="bg-success/10 text-success" />}
+            {docsMissing > 0 && <Chip label={`${docsMissing} document${docsMissing === 1 ? "" : "s"} missing`} className="bg-destructive/10 text-destructive" />}
           </div>
         </div>
         {savedNote && <SavedBanner text={savedNote} />}
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           Read from {manifest.documents.length} {readingIsPrivate ? "" : "published "}document{manifest.documents.length === 1 ? "" : "s"}
           {readingIsPrivate ? ` (including your ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"})` : ""}
           {tender.buyer ? ` by ${tender.buyer}` : ""} on {new Date(manifest.extracted_at).toLocaleDateString()}.{" "}
@@ -259,7 +275,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         </div>
 
         {manifest.gaps.length > 0 && (
-          <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "9px 12px", marginBottom: 12, fontSize: 12, color: "#92400E" }}>
+          <div className="border border-warning/40 bg-warning/10 text-warning" style={{ borderRadius: 9, padding: "9px 12px", marginBottom: 12, fontSize: 12 }}>
             <div style={{ fontWeight: 700, marginBottom: 3 }}>What Tender Ready can&apos;t do for this tender</div>
             <ul style={{ margin: 0, paddingLeft: 18 }}>
               {manifest.gaps.map((g, i) => <li key={i}>{g}</li>)}
@@ -274,13 +290,13 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             {manifest.forms.map((f) => {
               const st = FORM_STATUS_STYLE[f.status];
               return (
-                <div key={f.code} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div key={f.code} style={{ borderTop: "1px solid var(--border)", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                   <div style={{ minWidth: 0, flex: "1 1 300px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                       <FormTag text={f.label} />
-                      <span style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{f.title}</span>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{f.title}</span>
                     </div>
-                    <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3 }}>{f.reason}</div>
+                    <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 3 }}>{f.reason}</div>
                   </div>
                   <Chip {...st} />
                 </div>
@@ -293,51 +309,51 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           <>
             <SubTitle text="The buyer's own forms" />
             {manifest.buyer_forms.map((b) => (
-              <div key={b.key} style={{ borderTop: "1px solid #ECEEF1", padding: "7px 0", fontSize: 12, color: "#16233B", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div key={b.key} style={{ borderTop: "1px solid var(--border)", padding: "7px 0", fontSize: 12, color: "var(--foreground)", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                 <span style={{ minWidth: 0, flex: "1 1 280px", wordBreak: "break-word" }}>
-                  {b.label}{b.document && b.document !== b.label ? <span style={{ color: "#8A93A0" }}> - in {b.document}</span> : null}
-                  {b.overlay && <span style={{ display: "block", color: "#4B5563", marginTop: 2 }}>{b.reason}</span>}
+                  {b.label}{b.document && b.document !== b.label ? <span style={{ color: "var(--muted-foreground)" }}> - in {b.document}</span> : null}
+                  {b.overlay && <span style={{ display: "block", color: "var(--muted-foreground)", marginTop: 2 }}>{b.reason}</span>}
                 </span>
-                {b.overlay ? <Chip label="Typed onto the PDF" bg="#DCFCE7" color="#15803D" /> : <Chip label="Complete by hand" bg="#FEF3C7" color="#B45309" />}
+                {b.overlay ? <Chip label="Typed onto the PDF" className="bg-success/10 text-success" /> : <Chip label="Complete by hand" className="bg-warning/10 text-warning" />}
               </div>
             ))}
           </>
         )}
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, fontSize: 12, color: "#4B5563" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, fontSize: 12, color: "var(--muted-foreground)" }}>
           {manifest.scoring.preference_system.system && manifest.scoring.preference_system.system !== "not_found" && (
-            <Chip label={`Preference: ${manifest.scoring.preference_system.system}`} bg="#ECEEF1" color="#16233B" />
+            <Chip label={`Preference: ${manifest.scoring.preference_system.system}`} className="bg-muted text-foreground" />
           )}
-          {manifest.scoring.functionality.threshold ? <Chip label={`Functionality minimum ${manifest.scoring.functionality.threshold}`} bg="#ECEEF1" color="#16233B" /> : null}
-          {manifest.cidb && <Chip label={`CIDB ${manifest.cidb.grading}`} bg="#ECEEF1" color="#16233B" />}
-          {manifest.briefing?.compulsory && <Chip label="Compulsory briefing" bg="#FEE2E2" color="#B91C1C" />}
+          {manifest.scoring.functionality.threshold ? <Chip label={`Functionality minimum ${manifest.scoring.functionality.threshold}`} className="bg-muted text-foreground" /> : null}
+          {manifest.cidb && <Chip label={`CIDB ${manifest.cidb.grading}`} className="bg-muted text-foreground" />}
+          {manifest.briefing?.compulsory && <Chip label="Compulsory briefing" className="bg-destructive/10 text-destructive" />}
         </div>
       </div>
 
       {/* 2. Supporting documents */}
       <div id="general-documents" style={card}>
         <SectionTitle title="Supporting documents" />
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 8 }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 8 }}>
           Each one is named in this tender&apos;s documents (hover the row for the exact words). Checked against your{" "}
-          <Link href="/company" style={{ color: "#D97706", fontWeight: 600 }}>company vault</Link> on the closing date; anything the vault has no
+          <Link href="/company" style={{ color: "var(--accent)", fontWeight: 600 }}>company vault</Link> on the closing date; anything the vault has no
           place for can be uploaded for this tender only.
         </div>
-        {returnables.length === 0 && <div style={{ fontSize: 12, color: "#8A93A0" }}>No supporting documents named in the readable text.</div>}
+        {returnables.length === 0 && <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>No supporting documents named in the readable text.</div>}
         {returnables.map((r) => {
           const st = STATUS_STYLE[r.status];
           return (
-            <div key={r.key} title={r.quote} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0" }}>
+            <div key={r.key} title={r.quote} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
                 <div style={{ minWidth: 0, flex: "1 1 280px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>
                     {r.label}
-                    {r.strength === "mentioned" && <span style={{ fontWeight: 500, color: "#8A93A0" }}> - mentioned, may not be required</span>}
+                    {r.strength === "mentioned" && <span style={{ fontWeight: 500, color: "var(--muted-foreground)" }}> - mentioned, may not be required</span>}
                   </div>
-                  <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>{r.detail}</div>
-                  <div style={{ fontSize: 11, color: "#8A93A0", fontStyle: "italic", marginTop: 2, wordBreak: "break-word" }}>{r.from_ocr ? OCR_TAG : ""}&ldquo;{r.quote.slice(0, 160)}{r.quote.length > 160 ? "…" : ""}&rdquo;</div>
+                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>{r.detail}</div>
+                  <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontStyle: "italic", marginTop: 2, wordBreak: "break-word" }}>{r.from_ocr ? OCR_TAG : ""}&ldquo;{r.quote.slice(0, 160)}{r.quote.length > 160 ? "…" : ""}&rdquo;</div>
                 </div>
                 <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                  {r.expiring && <Chip label="Renew soon" bg="#FEF3C7" color="#B45309" />}
+                  {r.expiring && <Chip label="Renew soon" className="bg-warning/10 text-warning" />}
                   <Chip {...st} />
                 </div>
               </div>
@@ -347,11 +363,11 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                     <form action={uploadTenderDocument} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                       <input type="hidden" name="tender_id" value={tenderId} />
                       <input type="hidden" name="returnable_key" value={r.key} />
-                      <input type="file" name="file" required accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" aria-label={`Upload ${r.label}`} style={{ fontSize: 12, color: "#16233B", maxWidth: "100%" }} />
+                      <input type="file" name="file" required accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" aria-label={`Upload ${r.label}`} style={{ fontSize: 12, color: "var(--foreground)", maxWidth: "100%" }} />
                       <button type="submit" style={secondaryBtn}>{r.upload ? "Replace" : "Upload for this tender"}</button>
                     </form>
                   )}
-                  {r.vaultLink && <Link href="/company" style={{ fontSize: 12, color: "#D97706", fontWeight: 600 }}>Fix in the vault</Link>}
+                  {r.vaultLink && <Link href="/company" style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>Fix in the vault</Link>}
                 </div>
               )}
             </div>
@@ -362,12 +378,12 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       {/* 3. Questions only you can answer */}
       <div id="general-questions" style={card}>
         <SectionTitle title="Questions only you can answer" />
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           Only what this tender&apos;s forms ask that isn&apos;t already on file. Company details are saved to your company, so the next tender
           has them. Anything left blank is left blank on the form and listed as &quot;by hand&quot; in the pack - never guessed.
         </div>
         {qStates.length === 0 && cStates.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#8A93A0" }}>This tender&apos;s forms need nothing beyond what&apos;s on file.</div>
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>This tender&apos;s forms need nothing beyond what&apos;s on file.</div>
         ) : (
           <form action={saveGeneralAnswers}>
             <input type="hidden" name="tender_id" value={tenderId} />
@@ -377,8 +393,8 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginBottom: 6 }}>
                   {cStates.map(({ f, value }) => (
                     <label key={f.key} style={{ display: "block" }} title={f.help}>
-                      <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>
-                        {f.label}{f.optional ? <span style={{ fontWeight: 400, color: "#8A93A0" }}> (optional)</span> : null}
+                      <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>
+                        {f.label}{f.optional ? <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}> (optional)</span> : null}
                       </span>
                       <input name={`c:${f.column}`} defaultValue={value ?? ""} style={input} type={f.column === "email" ? "email" : "text"} />
                     </label>
@@ -390,17 +406,17 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
               <div key={group}>
                 <SubTitle text={group} />
                 {qStates.filter((s) => s.q.group === group).map(({ q, value, answered, defaultValue }) => (
-                  <div key={q.key} style={{ borderTop: "1px solid #ECEEF1", padding: "9px 0" }}>
+                  <div key={q.key} style={{ borderTop: "1px solid var(--border)", padding: "9px 0" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
                       <div style={{ minWidth: 0, flex: "1 1 300px" }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{q.label}</div>
-                        <div style={{ fontSize: 11, color: "#5B6472", marginTop: 2 }}>{q.help}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{q.label}</div>
+                        <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{q.help}</div>
                       </div>
-                      {answered ? <Chip label="Answered" bg="#DCFCE7" color="#15803D" /> : q.optional ? <Chip label="Optional" bg="#ECEEF1" color="#5B6472" /> : <Chip label="Needs your answer" bg="#FEF3C7" color="#B45309" />}
+                      {answered ? <Chip label="Answered" className="bg-success/10 text-success" /> : q.optional ? <Chip label="Optional" className="bg-muted text-muted-foreground" /> : <Chip label="Needs your answer" className="bg-warning/10 text-warning" />}
                     </div>
                     <div style={{ marginTop: 6 }}>
                       {q.type === "yes_no" && (
-                        <div style={{ display: "flex", gap: 14, fontSize: 13, color: "#16233B" }}>
+                        <div style={{ display: "flex", gap: 14, fontSize: 13, color: "var(--foreground)" }}>
                           {(["no", "yes"] as const).map((v) => (
                             <label key={v} style={{ display: "inline-flex", alignItems: "center", gap: 6, minHeight: 32 }}>
                               <input type="radio" name={`q:${q.key}`} value={v} defaultChecked={(value ?? defaultValue) === v} />
@@ -421,7 +437,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                         </select>
                       )}
                       {q.type === "person" && value && !people.find((p) => p.id === value)?.signatory_capacity && (
-                        <div style={{ fontSize: 11, color: "#B45309", marginTop: 4 }}>
+                        <div style={{ fontSize: 11, color: "var(--warning)", marginTop: 4 }}>
                           This person has no signatory capacity on file - add it on their People page so SBD 1 / SBD 4 can show it.
                         </div>
                       )}
@@ -449,15 +465,15 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                 const valid = holders.filter((p) => !p.expiry || validityAtClosing(p.expiry, closingDate).status === "have");
                 const st = valid.length > 0 ? STATUS_STYLE.have : holders.length > 0 ? STATUS_STYLE.check : STATUS_STYLE.missing;
                 return (
-                  <div key={pr.body} title={pr.quote} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div key={pr.body} title={pr.quote} style={{ borderTop: "1px solid var(--border)", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                     <div style={{ minWidth: 0, flex: "1 1 280px" }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{pr.body} registration ({REGISTRATION_BODY_INFO[pr.body].name})</div>
-                      <div style={{ fontSize: 12, color: "#4B5563" }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{pr.body} registration ({REGISTRATION_BODY_INFO[pr.body].name})</div>
+                      <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
                         {holders.length > 0
                           ? `On file: ${holders.map((p) => `${p.name}${p.category ? ` (${p.category})` : ""}${p.expiry ? `, valid to ${p.expiry}` : ", renewal date not on file"}`).join("; ")}`
                           : `Nobody has a ${pr.body} registration on file - add it on the person's page (it shows there now that this tender asks for it)${isCatalogBody(pr.body) ? " or under Company > Registrations" : ""}.`}
                       </div>
-                      <div style={{ fontSize: 11, color: "#8A93A0", fontStyle: "italic", wordBreak: "break-word" }}>{pr.from_ocr ? OCR_TAG : ""}&ldquo;{pr.quote.slice(0, 150)}…&rdquo;</div>
+                      <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontStyle: "italic", wordBreak: "break-word" }}>{pr.from_ocr ? OCR_TAG : ""}&ldquo;{pr.quote.slice(0, 150)}…&rdquo;</div>
                     </div>
                     <Chip {...st} label={valid.length > 0 ? "On file" : holders.length > 0 ? "Lapses before closing" : "Not on file"} />
                   </div>
@@ -469,13 +485,13 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             <>
               <SubTitle text="Roles this tender names" />
               {roleRowsForTender.map(({ mr, role, tagged }) => (
-                <div key={mr.role_code} title={mr.quote} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div key={mr.role_code} title={mr.quote} style={{ borderTop: "1px solid var(--border)", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
                   <div style={{ minWidth: 0, flex: "1 1 280px" }}>
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{role?.title ?? mr.role_code}</div>
-                    <div style={{ fontSize: 12, color: "#4B5563" }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{role?.title ?? mr.role_code}</div>
+                    <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
                       {tagged.length > 0 ? `Tagged for this role: ${tagged.map((p) => p.name).join(", ")}` : "Nobody tagged for this role yet - tag CVs on the People page."}
                     </div>
-                    <div style={{ fontSize: 11, color: "#8A93A0", fontStyle: "italic", wordBreak: "break-word" }}>{mr.from_ocr ? OCR_TAG : ""}&ldquo;{mr.quote.slice(0, 150)}…&rdquo;</div>
+                    <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontStyle: "italic", wordBreak: "break-word" }}>{mr.from_ocr ? OCR_TAG : ""}&ldquo;{mr.quote.slice(0, 150)}…&rdquo;</div>
                   </div>
                   <Chip {...(tagged.length > 0 ? STATUS_STYLE.have : STATUS_STYLE.missing)} label={tagged.length > 0 ? "Someone tagged" : "Nobody tagged"} />
                 </div>
@@ -485,19 +501,19 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           {chosen && (
             <>
               <SubTitle text="Company experience this tender accepts" />
-              <div style={{ fontSize: 12, color: "#16233B", marginBottom: 4 }}>
+              <div style={{ fontSize: 12, color: "var(--foreground)", marginBottom: 4 }}>
                 {describeRule(chosen.rule)}{chosen.rule.scope ? ` - scope: ${chosen.rule.scope}` : ""}.
               </div>
-              <div style={{ fontSize: 11, color: "#5B6472", fontStyle: "italic", marginBottom: 6, wordBreak: "break-word" }}>&ldquo;{chosen.rule.quote}&rdquo;</div>
-              {experience?.error && <div style={{ fontSize: 12, color: "#92400E" }}>Couldn&apos;t read the Experience Library ({experience.error}).</div>}
+              <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontStyle: "italic", marginBottom: 6, wordBreak: "break-word" }}>&ldquo;{chosen.rule.quote}&rdquo;</div>
+              {experience?.error && <div style={{ fontSize: 12, color: "var(--warning)" }}>Couldn&apos;t read the Experience Library ({experience.error}).</div>}
               {evidenceEval && (
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 12, color: "#4B5563", flex: "1 1 280px" }}>
-                    {evidenceEval.qualifying} item(s) in your <Link href="/experience" style={{ color: "#D97706", fontWeight: 600 }}>Experience Library</Link> count
+                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", flex: "1 1 280px" }}>
+                    {evidenceEval.qualifying} item(s) in your <Link href="/experience" style={{ color: "var(--accent)", fontWeight: 600 }}>Experience Library</Link> count
                     {experience && experience.items.length > evidenceEval.qualifying ? `; ${experience.items.length - evidenceEval.qualifying} more are a document type this tender doesn't accept` : ""}.
                     {" "}Similar scope is for you to judge - all disciplines are counted here.
                     {experience?.items.filter((i) => acceptedDocTypes(chosen.rule).has(i.document_type)).slice(0, 5).map((i) => (
-                      <div key={i.id} style={{ fontSize: 11, color: "#5B6472" }}>- {i.project_name} ({labelFor(DOCUMENT_TYPES, i.document_type)})</div>
+                      <div key={i.id} style={{ fontSize: 11, color: "var(--muted-foreground)" }}>- {i.project_name} ({labelFor(DOCUMENT_TYPES, i.document_type)})</div>
                     ))}
                   </div>
                   <Chip {...STATUS_STYLE[evidenceEval.status]} />
@@ -512,14 +528,14 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                 const m = matchLocality(locRows, offices);
                 const st = m.status === "matched" ? STATUS_STYLE.have : m.status === "no_match" ? STATUS_STYLE.missing : STATUS_STYLE.check;
                 return (
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", fontSize: 12, color: "#4B5563" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", fontSize: 12, color: "var(--muted-foreground)" }}>
                     <span style={{ flex: "1 1 280px" }}>{locRows.map((r) => `${r.area} ${r.points}`).join(" · ")} - {m.reason}</span>
                     <Chip {...st} label={m.status === "matched" ? `${m.points} pts` : m.status === "no_match" ? "0 pts" : "Unknown"} />
                   </div>
                 );
               })()}
               {mandatory && (
-                <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 6 }}>
+                <div style={{ fontSize: 12, color: "var(--destructive)", marginTop: 6 }}>
                   <strong>Mandatory:</strong> a local office in {mandatory.area}{mandatory.disqualifies ? " - non-responsive without one" : ""}.{" "}
                   {matchLocality([{ area: mandatory.area, level: "municipality", province: null, points: 0, system: null, kind: "specific_goals" }], offices).status === "matched" ? "You have one on file." : "None on file."}
                 </div>
@@ -537,15 +553,15 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       <div id="general-pack" style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
           <SectionTitle title="Submission pack" />
-          {latestPack && <Chip {...JOB_STATUS_STYLE[latestPack.status]} />}
+          {latestPack && <Chip label={JOB_STATUS_STYLE[latestPack.status].label} className={JOB_BADGE_CLASS[latestPack.status]} />}
         </div>
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           One ordered PDF: contents page, the forms filled from your data and answers, a completion guide for every form that has to be
           done by hand, your vault documents, this tender&apos;s uploads, accepted experience evidence and the CVs of the people tagged for its
           roles. Built by Tender Ready&apos;s document engine (it can&apos;t run in the browser), so it appears here a minute or two after you ask.
         </div>
         {needAnswer > 0 && (
-          <div style={{ fontSize: 12, color: "#B45309", marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: "var(--warning)", marginBottom: 8 }}>
             {needAnswer} question{needAnswer === 1 ? "" : "s"} still unanswered - you can still generate a draft; those fields are left blank and listed.
           </div>
         )}
@@ -556,33 +572,33 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
               type="submit"
               disabled={!!generalDisabledReason}
               title={generalDisabledReason ?? undefined}
-              style={{ ...primaryBtn, ...(generalDisabledReason ? { background: "#8A93A0", cursor: "not-allowed" } : {}) }}
+              style={{ ...primaryBtn, ...(generalDisabledReason ? { background: "var(--muted-foreground)", cursor: "not-allowed" } : {}) }}
             >
               {latestPack ? "Generate a new pack" : "Generate submission pack"}
             </button>
             {/* title= (hover) doesn't reach touch devices - same reason as visible text. */}
             {generalDisabledReason && (
-              <div style={{ fontSize: 11, color: "#B45309", marginTop: 6 }}>{generalDisabledReason}</div>
+              <div style={{ fontSize: 11, color: "var(--warning)", marginTop: 6 }}>{generalDisabledReason}</div>
             )}
           </form>
         )}
         {packJobs.map((j) => {
           const st = JOB_STATUS_STYLE[j.status];
           return (
-            <div key={j.id} style={{ borderTop: "1px solid #ECEEF1", marginTop: 10, paddingTop: 10 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: "#5B6472" }}>
+            <div key={j.id} style={{ borderTop: "1px solid var(--border)", marginTop: 10, paddingTop: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--muted-foreground)" }}>
                 <span>Requested {new Date(j.requested_at).toLocaleString()}</span>
-                <Chip {...st} />
+                <Chip label={st.label} className={JOB_BADGE_CLASS[j.status]} />
                 {j.page_count ? <span>{j.page_count} pages</span> : null}
-                {j.storage_path_pdf && signed[j.storage_path_pdf] && <a href={signed[j.storage_path_pdf]} style={{ color: "#D97706", fontWeight: 600 }}>Download PDF</a>}
-                {Object.entries(j.output_files ?? {}).map(([name, p]) => signed[p] ? <a key={name} href={signed[p]} style={{ color: "#D97706", fontWeight: 600 }}>{name}</a> : null)}
+                {j.storage_path_pdf && signed[j.storage_path_pdf] && <a href={signed[j.storage_path_pdf]} style={{ color: "var(--accent)", fontWeight: 600 }}>Download PDF</a>}
+                {Object.entries(j.output_files ?? {}).map(([name, p]) => signed[p] ? <a key={name} href={signed[p]} style={{ color: "var(--accent)", fontWeight: 600 }}>{name}</a> : null)}
               </div>
-              {j.error_message && <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 4 }}>{j.error_message}</div>}
+              {j.error_message && <div style={{ fontSize: 12, color: "var(--destructive)", marginTop: 4 }}>{j.error_message}</div>}
               {j === latestPack && j.manifest && (
-                <div style={{ marginTop: 8, fontSize: 12, color: "#4B5563" }}>
+                <div style={{ marginTop: 8, fontSize: 12, color: "var(--muted-foreground)" }}>
                   {(j.manifest.by_hand ?? []).length > 0 && (
                     <>
-                      <div style={{ fontWeight: 700, color: "#B45309", marginBottom: 2 }}>Still to do by hand ({j.manifest.by_hand!.length})</div>
+                      <div style={{ fontWeight: 700, color: "var(--warning)", marginBottom: 2 }}>Still to do by hand ({j.manifest.by_hand!.length})</div>
                       <ul style={{ margin: "0 0 6px", paddingLeft: 18 }}>
                         {j.manifest.by_hand!.slice(0, 12).map((b, i) => <li key={i}>{b.title} - {b.reason}</li>)}
                       </ul>
@@ -594,7 +610,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             </div>
           );
         })}
-        <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 10 }}>
+        <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 10 }}>
           Signature, date and prices are never typed in for you.{" "}
           {answerByKey.get("total_bid_price")?.value ? "Your total bid price answer is written on SBD 1." : ""}
         </div>
@@ -604,20 +620,20 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
 }
 
 function SectionTitle({ title }: { title: string }) {
-  return <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>{title}</div>;
+  return <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", marginBottom: 2 }}>{title}</div>;
 }
 
 function SubTitle({ text }: { text: string }) {
-  return <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", margin: "12px 0 4px" }}>{text}</div>;
+  return <div style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground)", margin: "12px 0 4px" }}>{text}</div>;
 }
 
 function FormTag({ text }: { text: string }) {
-  return <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, color: "#16233B", background: "#ECEEF1", borderRadius: 100, padding: "2px 7px" }}>{text}</span>;
+  return <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, color: "var(--foreground)", background: "var(--muted)", borderRadius: 100, padding: "2px 7px" }}>{text}</span>;
 }
 
-function Chip({ label, bg, color }: { label: string; bg: string; color: string }) {
+function Chip({ label, className }: { label: string; className: string }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color, whiteSpace: "nowrap" }}>
+    <span className={className} style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
       {label}
     </span>
   );
@@ -625,7 +641,7 @@ function Chip({ label, bg, color }: { label: string; bg: string; color: string }
 
 function SavedBanner({ text }: { text: string }) {
   return (
-    <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "8px 12px", margin: "6px 0 10px", fontSize: 12, color: "#15803D", fontWeight: 600 }}>
+    <div className="border border-success/40 bg-success/10 text-success" style={{ borderRadius: 9, padding: "8px 12px", margin: "6px 0 10px", fontSize: 12, fontWeight: 600 }}>
       {text}
     </div>
   );

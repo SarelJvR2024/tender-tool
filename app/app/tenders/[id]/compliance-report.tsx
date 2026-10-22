@@ -22,10 +22,10 @@ import { matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/local
  */
 
 
-const STATUS_STYLE: Record<ComplianceStatus, { label: string; bg: string; color: string }> = {
-  have: { label: "On file", bg: "#DCFCE7", color: "#15803D" },
-  missing: { label: "Don't have", bg: "#FEE2E2", color: "#B91C1C" },
-  check: { label: "Confirm by hand", bg: "#FEF3C7", color: "#B45309" },
+const STATUS_STYLE: Record<ComplianceStatus, { label: string; className: string }> = {
+  have: { label: "On file", className: "bg-success/10 text-success" },
+  missing: { label: "Don't have", className: "bg-destructive/10 text-destructive" },
+  check: { label: "Confirm by hand", className: "bg-warning/10 text-warning" },
 };
 
 // The Product promise's Verify/Provide/Fix grouping (app/AGENTS.md), applied
@@ -33,13 +33,17 @@ const STATUS_STYLE: Record<ComplianceStatus, { label: string; bg: string; color:
 // classifyComplianceItem(). Kept separate from STATUS_STYLE above, which
 // still drives Key people & Locality's own have/missing/check chips -
 // those haven't been migrated to this grouping yet.
-const TASK_STYLE: Record<BidTaskStatus, { title: string; bg: string; color: string }> = {
-  fix: { title: "Fix", bg: "#FEE2E2", color: "#B91C1C" },
-  provide: { title: "Provide", bg: "#FEF3C7", color: "#B45309" },
-  verify: { title: "Verify", bg: "#DCFCE7", color: "#15803D" },
+const TASK_STYLE: Record<BidTaskStatus, { title: string; className: string }> = {
+  fix: { title: "Fix", className: "bg-destructive/10 text-destructive" },
+  provide: { title: "Provide", className: "bg-warning/10 text-warning" },
+  verify: { title: "Verify", className: "bg-success/10 text-success" },
 };
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+// Uses the var(--token) CSS-variable pattern (company/_components/ui.tsx's
+// own established convention) rather than Tailwind className - too many
+// spread call sites across this file to convert without a disproportionately
+// large diff for a color-only pass (design-system color migration, batch 4).
+const card: React.CSSProperties = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
 export async function ComplianceReport({ tenderId }: { tenderId: string }) {
   const data = await loadTenderCompliance(tenderId);
@@ -49,7 +53,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
     return (
       <div style={card}>
         <SectionTitle title="Compliance check" />
-        <div style={{ fontSize: 12, color: "#5B6472" }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
           Required documents are only mapped for SANRAL Conventional Consultant tenders so far
           {family ? ` - this one is "${family}"` : ""}. Other buyers each set their own returnable list, so
           nothing is claimed here until this tender&apos;s list has been read.
@@ -91,14 +95,14 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
       {/* Required documents */}
       <div id="compliance-check" style={card}>
         <SectionTitle title="Compliance check - required documents" />
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
           SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria, checked against your
           company vault on the closing date. <strong>Fix</strong> items would disqualify the bid at Stage 2 if left as is.{" "}
           <strong>Provide</strong> items only you can supply. <strong>Verify</strong> items are already filled from your
           vault - just confirm them.
         </div>
         {fixCount > 0 && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#B91C1C", fontWeight: 600 }}>
+          <div className="border border-destructive/40 bg-destructive/10 text-destructive" style={{ borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, fontWeight: 600 }}>
             {fixCount} requirement{fixCount === 1 ? "" : "s"} would disqualify this bid at Stage 2 - fix {fixCount === 1 ? "it" : "them"} before you submit.
           </div>
         )}
@@ -107,13 +111,13 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
             const rows = tasks.filter((t) => t.task.status === g.status);
             const st = TASK_STYLE[g.status];
             return (
-              <div key={g.status} style={{ border: "1px solid #E3E6EA", borderRadius: 11, padding: "12px 14px", minWidth: 0 }}>
+              <div key={g.status} style={{ border: "1px solid var(--border)", borderRadius: 11, padding: "12px 14px", minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{st.title}</div>
-                  <CountBadge count={rows.length} bg={st.bg} color={st.color} />
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{st.title}</div>
+                  <CountBadge count={rows.length} className={st.className} />
                 </div>
                 {rows.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "#8A93A0", paddingTop: 6 }}>{g.empty}</div>
+                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", paddingTop: 6 }}>{g.empty}</div>
                 ) : (
                   rows.map(({ item, task }) => <BidTaskRow key={item.key} item={item} task={task} />)
                 )}
@@ -126,22 +130,19 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
       {/* Key people & CVs */}
       <div id="key-people" style={card}>
         <SectionTitle title="Key people & CVs" />
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           Whether each position is filled by someone <strong>your company has tagged</strong> as fitting that role (set on
           the person&apos;s People page - Tender Ready doesn&apos;t guess role fit), with the C3.1.11 minimums checked
           against the records on file as a cross-check, the CV on file and the tender-specific CV status.
         </div>
         {/* Whose C3.1.11 table the minimums come from - same banner pattern as the experience-evidence rule. */}
         <div
-          style={{
-            background: ownMinimums && assumedPositions.length === 0 ? "#FFFFFF" : "#FEF3C7",
-            border: `1px solid ${ownMinimums && assumedPositions.length === 0 ? "#E3E6EA" : "#F5D08A"}`,
-            borderRadius: 9,
-            padding: "9px 12px",
-            margin: "0 0 10px",
-            fontSize: 12,
-            color: ownMinimums && assumedPositions.length === 0 ? "#16233B" : "#92400E",
-          }}
+          className={
+            ownMinimums && assumedPositions.length === 0
+              ? "border border-border bg-card text-foreground"
+              : "border border-warning/40 bg-warning/10 text-warning"
+          }
+          style={{ borderRadius: 9, padding: "9px 12px", margin: "0 0 10px", fontSize: 12 }}
         >
           {ownMinimums ? (
             <>
@@ -160,12 +161,12 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
                 tenders set different registrations and years (N.011-010-2027-1F wants Pr Eng only for the Contract Engineer and 10-15
                 years for the RE). Run engine/seed_tender_evaluation_rules.py with this tender&apos;s Book 2/3 to replace them.
               </div>
-              {keyPersonMinimums?.reason && <div style={{ marginTop: 3, color: "#5B6472" }}>Last read: {keyPersonMinimums.reason}</div>}
+              {keyPersonMinimums?.reason && <div style={{ marginTop: 3, color: "var(--muted-foreground)" }}>Last read: {keyPersonMinimums.reason}</div>}
             </>
           )}
         </div>
         {positionRows.length === 0 && (
-          <div style={{ fontSize: 12, color: "#8A93A0" }}>
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
             No key positions recorded for this tender yet - they come from the tender pack once it&apos;s created.
           </div>
         )}
@@ -173,23 +174,23 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
           const minSt = STATUS_STYLE[p.min.status];
           const fitSt = STATUS_STYLE[p.fit.status];
           return (
-            <div key={p.code} style={{ borderTop: "1px solid #ECEEF1", padding: "11px 0" }}>
+            <div key={p.code} style={{ borderTop: "1px solid var(--border)", padding: "11px 0" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>
                     {p.code}
-                    {p.req?.position_description ? <span style={{ fontWeight: 500, color: "#5B6472" }}> - {p.req.position_description}</span> : null}
+                    {p.req?.position_description ? <span style={{ fontWeight: 500, color: "var(--muted-foreground)" }}> - {p.req.position_description}</span> : null}
                   </div>
-                  <div style={{ fontSize: 12, color: "#4B5563", marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>
                     {p.person
                       ? p.person.name
                       : p.suggested
                         ? `Not confirmed (suggested: ${p.suggested.name})`
                         : "No key person confirmed"}
                   </div>
-                  {p.fit.roleTitle && <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 2 }}>Role: {p.fit.roleTitle}</div>}
+                  {p.fit.roleTitle && <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>Role: {p.fit.roleTitle}</div>}
                   {p.min.requirement && (
-                    <div style={{ fontSize: 11, color: p.min.source === "assumed" ? "#B45309" : "#8A93A0", marginTop: 2 }}>
+                    <div style={{ fontSize: 11, color: p.min.source === "assumed" ? "var(--warning)" : "var(--muted-foreground)", marginTop: 2 }}>
                       {p.min.source === "assumed" ? "Assumed rule - needs: " : "Needs: "}
                       {p.min.requirement}
                     </div>
@@ -197,38 +198,35 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
                 </div>
                 <Chip
                   label={`Role fit: ${p.fit.status === "have" ? "tagged" : p.fit.status === "missing" ? "unfilled" : "confirm"}`}
-                  bg={fitSt.bg}
-                  color={fitSt.color}
+                  className={fitSt.className}
                 />
               </div>
-              <div style={{ fontSize: 12, color: p.fit.status === "missing" ? "#B91C1C" : "#16233B", marginTop: 4 }}>{p.fit.detail}</div>
+              <div style={{ fontSize: 12, color: p.fit.status === "missing" ? "var(--destructive)" : "var(--foreground)", marginTop: 4 }}>{p.fit.detail}</div>
               {p.person && (
-                <div style={{ fontSize: 11, color: p.min.status === "missing" ? "#B91C1C" : "#5B6472", marginTop: 3 }}>
+                <div style={{ fontSize: 11, color: p.min.status === "missing" ? "var(--destructive)" : "var(--muted-foreground)", marginTop: 3 }}>
                   Cross-check from records on file (minimum {minSt.label === "On file" ? "met" : minSt.label === "Don't have" ? "not met" : "unconfirmed"}): {p.min.detail}
                 </div>
               )}
               {p.person && (
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
                   {p.cv ? (
-                    <Chip label={`CV on file (${p.cv.mode === "as_is" ? "Use as-is" : "AI-extract"})`} bg="#DCFCE7" color="#15803D" />
+                    <Chip label={`CV on file (${p.cv.mode === "as_is" ? "Use as-is" : "AI-extract"})`} className="bg-success/10 text-success" />
                   ) : (
-                    <Chip label="No CV uploaded" bg="#FEE2E2" color="#B91C1C" />
+                    <Chip label="No CV uploaded" className="bg-destructive/10 text-destructive" />
                   )}
                   {p.tenderCv ? (
                     <Chip
                       label={`Tender CV: ${p.tenderCv.status}`}
-                      bg={p.tenderCv.status === "ready" ? "#DCFCE7" : p.tenderCv.status === "failed" ? "#FEE2E2" : "#FEF3C7"}
-                      color={p.tenderCv.status === "ready" ? "#15803D" : p.tenderCv.status === "failed" ? "#B91C1C" : "#B45309"}
+                      className={p.tenderCv.status === "ready" ? "bg-success/10 text-success" : p.tenderCv.status === "failed" ? "bg-destructive/10 text-destructive" : "bg-warning/10 text-warning"}
                     />
                   ) : (
-                    <Chip label="Tender CV not requested" bg="#FEF3C7" color="#B45309" />
+                    <Chip label="Tender CV not requested" className="bg-warning/10 text-warning" />
                   )}
                   <Chip
                     label={`${p.personProjects.length} project${p.personProjects.length === 1 ? "" : "s"} for Form B1/B2`}
-                    bg={p.personProjects.length >= 3 ? "#DCFCE7" : "#FEF3C7"}
-                    color={p.personProjects.length >= 3 ? "#15803D" : "#B45309"}
+                    className={p.personProjects.length >= 3 ? "bg-success/10 text-success" : "bg-warning/10 text-warning"}
                   />
-                  {p.asg?.specialism_warning && <Chip label="Specialism not evidenced" bg="#FEF3C7" color="#B45309" />}
+                  {p.asg?.specialism_warning && <Chip label="Specialism not evidenced" className="bg-warning/10 text-warning" />}
                 </div>
               )}
             </div>
@@ -275,36 +273,36 @@ function ScoreEstimate({
   ];
   const outlookStyle =
     estimate.outlook === "clears"
-      ? { bg: "#DCFCE7", color: "#15803D", label: "Clears threshold" }
+      ? { className: "bg-success/10 text-success", label: "Clears threshold" }
       : estimate.outlook === "cannot_clear"
-        ? { bg: "#FEE2E2", color: "#B91C1C", label: "Below threshold" }
-        : { bg: "#FEF3C7", color: "#B45309", label: "Depends on unknowns" };
+        ? { className: "bg-destructive/10 text-destructive", label: "Below threshold" }
+        : { className: "bg-warning/10 text-warning", label: "Depends on unknowns" };
   const fmt = (r: Range) => (r.min === r.max ? `${r.min}` : `${r.min}-${r.max}`);
 
   return (
     <div id="score-estimate" style={card}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
         <SectionTitle title="Functionality score estimate" />
-        <Chip label={outlookStyle.label} bg={outlookStyle.bg} color={outlookStyle.color} />
+        <Chip label={outlookStyle.label} className={outlookStyle.className} />
       </div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
         SANRAL&apos;s published consultant scoring (Annexure A), applied to the people on this tender. Ranges, not a single
         number, wherever the input isn&apos;t known.
       </div>
 
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: "#16233B" }}>{fmt(estimate.total)}</span>
-        <span style={{ fontSize: 12, color: "#5B6472" }}>of 100 · minimum {estimate.threshold} to reach price evaluation{estimate.thresholdSource === "assumed" ? " (assumed - not read from this tender)" : " (from this tender's documents)"}</span>
+        <span style={{ fontSize: 22, fontWeight: 700, color: "var(--foreground)" }}>{fmt(estimate.total)}</span>
+        <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>of 100 · minimum {estimate.threshold} to reach price evaluation{estimate.thresholdSource === "assumed" ? " (assumed - not read from this tender)" : " (from this tender's documents)"}</span>
       </div>
       <RangeBar range={estimate.total} max={100} threshold={estimate.threshold} />
-      <div style={{ fontSize: 12, color: "#16233B", margin: "8px 0 12px" }}>{estimate.outlookText}</div>
+      <div style={{ fontSize: 12, color: "var(--foreground)", margin: "8px 0 12px" }}>{estimate.outlookText}</div>
 
       {rows.map((r) => (
-        <div key={r.label} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0" }}>
+        <div key={r.label} style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{r.label}</span>
-            <span style={{ fontSize: 12, color: "#4B5563" }}>
-              {fmt(r.range)} of {r.max} <span style={{ color: "#8A93A0" }}>· {r.note}</span>
+            <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{r.label}</span>
+            <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+              {fmt(r.range)} of {r.max} <span style={{ color: "var(--muted-foreground)" }}>· {r.note}</span>
             </span>
           </div>
           <RangeBar range={r.range} max={r.max} />
@@ -312,13 +310,13 @@ function ScoreEstimate({
       ))}
 
       {estimate.positions.some((p) => p.notes.length > 0) && (
-        <ul style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 11, color: "#5B6472" }}>
+        <ul style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 11, color: "var(--muted-foreground)" }}>
           {estimate.positions.flatMap((p) => p.notes.map((n, i) => <li key={`${p.positionCode}-${i}`}>{p.positionCode}: {n}</li>))}
         </ul>
       )}
 
-      <div style={{ borderTop: "1px solid #ECEEF1", marginTop: 10, paddingTop: 10, fontSize: 12, color: "#5B6472" }}>
-        <strong style={{ color: "#16233B" }}>After functionality:</strong> price (80 or 90 points) is scored against the lowest
+      <div style={{ borderTop: "1px solid var(--border)", marginTop: 10, paddingTop: 10, fontSize: 12, color: "var(--muted-foreground)" }}>
+        <strong style={{ color: "var(--foreground)" }}>After functionality:</strong> price (80 or 90 points) is scored against the lowest
         acceptable bid, so it can&apos;t be estimated before closing. Specific goals at SANRAL follow the B-BBEE level table
         {beeLevel
           ? ` - level ${beeLevel} on file gives ${beeLevel === 1 ? "the full 10 of 10 (90/10) or 20 of 20 (80/20)" : "points per SANRAL's table"}${
@@ -350,21 +348,18 @@ function ExperienceSection({
   const { rule, source } = chosen;
   const ruleBox = (
     <div
-      style={{
-        background: source === "tender_document" ? "#FFFFFF" : "#FEF3C7",
-        border: `1px solid ${source === "tender_document" ? "#E3E6EA" : "#F5D08A"}`,
-        borderRadius: 9,
-        padding: "9px 12px",
-        margin: "6px 0 10px",
-        fontSize: 12,
-        color: source === "tender_document" ? "#16233B" : "#92400E",
-      }}
+      className={
+        source === "tender_document"
+          ? "border border-border bg-card text-foreground"
+          : "border border-warning/40 bg-warning/10 text-warning"
+      }
+      style={{ borderRadius: 9, padding: "9px 12px", margin: "6px 0 10px", fontSize: 12 }}
     >
       <div style={{ fontWeight: 700, marginBottom: 2 }}>
         {source === "tender_document" ? "What this tender accepts as proof (read from its own document)" : "Assumed rule - this tender's own evidence rule hasn't been read yet"}
       </div>
       <div>{describeRule(rule)}{rule.scope ? ` - scope: ${rule.scope}` : ""}.</div>
-      <div style={{ fontStyle: "italic", color: "#5B6472", marginTop: 3, wordBreak: "break-word" }}>&ldquo;{rule.quote}&rdquo;</div>
+      <div style={{ fontStyle: "italic", color: "var(--muted-foreground)", marginTop: 3, wordBreak: "break-word" }}>&ldquo;{rule.quote}&rdquo;</div>
       {source === "assumed" && (
         <div style={{ marginTop: 3 }}>
           This is SANRAL&apos;s Form B6 pattern, not a fact about this tender. Run engine/seed_tender_evaluation_rules.py on
@@ -376,9 +371,9 @@ function ExperienceSection({
   );
   if (!available) {
     return (
-      <div id="company-experience" style={{ ...card, background: "#FFFBEB", border: "1px dashed #F5D08A" }}>
+      <div id="company-experience" className="rounded-xl border border-dashed border-warning/40 bg-warning/10" style={{ padding: "18px 20px", marginBottom: 16 }}>
         <SectionTitle title="Company experience" />
-        <div style={{ fontSize: 12, color: "#92400E" }}>Couldn&apos;t read the Experience Library ({error}).</div>
+        <div className="text-warning" style={{ fontSize: 12 }}>Couldn&apos;t read the Experience Library ({error}).</div>
         {ruleBox}
       </div>
     );
@@ -393,26 +388,25 @@ function ExperienceSection({
         <SectionTitle title="Company experience" />
         <Chip
           label={need ? `${qualifying.length} of ${need} qualifying` : `${qualifying.length} qualifying`}
-          bg={ok ? "#DCFCE7" : qualifying.length > 0 ? "#FEF3C7" : "#FEE2E2"}
-          color={ok ? "#15803D" : qualifying.length > 0 ? "#B45309" : "#B91C1C"}
+          className={ok ? "bg-success/10 text-success" : qualifying.length > 0 ? "bg-warning/10 text-warning" : "bg-destructive/10 text-destructive"}
         />
       </div>
-      <div style={{ fontSize: 12, color: "#5B6472" }}>
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
         Tagged {disciplines.map((d) => disciplineLabel(d).toLowerCase()).join(" / ")} projects (the disciplines of this tender&apos;s key positions) in your Experience Library
         {rule.window_years ? ` completed within ${rule.window_years} years of` : " up to"}
         {closingDate ? ` ${new Date(closingDate).toLocaleDateString()}` : " closing"}.
       </div>
       {ruleBox}
       {items.length === 0 && (
-        <div style={{ fontSize: 12, color: "#B91C1C" }}>
-          None tagged yet. <Link href="/experience" style={{ color: "#D97706", fontWeight: 600 }}>Add experience</Link>.
+        <div style={{ fontSize: 12, color: "var(--destructive)" }}>
+          None tagged yet. <Link href="/experience" style={{ color: "var(--accent)", fontWeight: 600 }}>Add experience</Link>.
         </div>
       )}
       {items.map((i) => (
-        <div key={i.id} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div key={i.id} style={{ borderTop: "1px solid var(--border)", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{i.project_name}</div>
-            <div style={{ fontSize: 11, color: "#5B6472" }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{i.project_name}</div>
+            <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>
               {labelFor(DOCUMENT_TYPES, i.document_type)}
               {i.client_name ? ` · ${i.client_name}` : ""}
               {i.completion_date ? ` · completed ${new Date(i.completion_date).toLocaleDateString()}` : ""}
@@ -420,12 +414,12 @@ function ExperienceSection({
           </div>
           {accepted.has(i.document_type) ? (
             isScoreableEvidence(i.document_type) && !i.performance_rating ? (
-              <Chip label="Counts - rating not tagged" bg="#FEF3C7" color="#B45309" />
+              <Chip label="Counts - rating not tagged" className="bg-warning/10 text-warning" />
             ) : (
-              <Chip label={i.performance_rating ? `Counts - rated ${i.performance_rating}` : "Counts"} bg="#DCFCE7" color="#15803D" />
+              <Chip label={i.performance_rating ? `Counts - rated ${i.performance_rating}` : "Counts"} className="bg-success/10 text-success" />
             )
           ) : (
-            <Chip label="Not accepted by this tender" bg="#ECEEF1" color="#5B6472" />
+            <Chip label="Not accepted by this tender" className="bg-muted text-muted-foreground" />
           )}
         </div>
       ))}
@@ -443,7 +437,7 @@ function LocalitySection({ rules, offices }: { rules: EvaluationRules | null; of
     <div id="locality" style={card}>
       <SectionTitle title="Office location (locality)" />
       {!rules ? (
-        <div style={{ fontSize: 12, color: "#5B6472" }}>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
           This tender&apos;s document hasn&apos;t been read for locality rows yet, so office-location points aren&apos;t checked.
           {offices.length === 0 ? " No office locations on file either - add them on the Company page." : ""}
         </div>
@@ -461,20 +455,20 @@ function LocalitySection({ rules, offices }: { rules: EvaluationRules | null; of
             // the same softer amber as "unconfirmed" rather than a new tone.
             const st = m.status === "matched" ? STATUS_STYLE.have : STATUS_STYLE.check;
             return (
-              <div key={kind} style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0" }}>
+              <div key={kind} style={{ borderTop: "1px solid var(--border)", padding: "8px 0" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>
                     {kind === "specific_goals" ? "Specific-goals points" : "Functionality criterion"}:{" "}
                     {kindRows.map((r) => `${r.area} ${r.points}${r.system ? ` (${r.system})` : ""}`).join(" · ")}
                   </span>
-                  <Chip label={m.status === "matched" ? `${m.points} pts` : m.status === "no_match" ? "0 pts" : "Unknown"} bg={st.bg} color={st.color} />
+                  <Chip label={m.status === "matched" ? `${m.points} pts` : m.status === "no_match" ? "0 pts" : "Unknown"} className={st.className} />
                 </div>
-                <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3 }}>{m.reason}</div>
+                <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 3 }}>{m.reason}</div>
               </div>
             );
           })}
           {mand && (
-            <div style={{ borderTop: "1px solid #ECEEF1", padding: "8px 0", fontSize: 12, color: "#B91C1C" }}>
+            <div style={{ borderTop: "1px solid var(--border)", padding: "8px 0", fontSize: 12, color: "var(--destructive)" }}>
               <strong>Mandatory:</strong> a local office in {mand.area}
               {mand.disqualifies ? " - non-responsive without one" : ""}.{" "}
               {matchLocality([{ area: mand.area, level: "municipality", province: null, points: 0, system: null, kind: "specific_goals" }], offices).status === "matched"
@@ -492,11 +486,11 @@ function RangeBar({ range, max, threshold }: { range: Range; max: number; thresh
   const lo = Math.max(0, Math.min(100, (range.min / max) * 100));
   const hi = Math.max(0, Math.min(100, (range.max / max) * 100));
   return (
-    <div style={{ position: "relative", height: 8, background: "#ECEEF1", borderRadius: 100 }}>
-      <div style={{ position: "absolute", left: 0, width: `${lo}%`, top: 0, bottom: 0, background: "#16233B", borderRadius: 100 }} />
-      <div style={{ position: "absolute", left: `${lo}%`, width: `${Math.max(hi - lo, 0)}%`, top: 0, bottom: 0, background: "#16233B", opacity: 0.25, borderRadius: 100 }} />
+    <div style={{ position: "relative", height: 8, background: "var(--border)", borderRadius: 100 }}>
+      <div style={{ position: "absolute", left: 0, width: `${lo}%`, top: 0, bottom: 0, background: "var(--foreground)", borderRadius: 100 }} />
+      <div style={{ position: "absolute", left: `${lo}%`, width: `${Math.max(hi - lo, 0)}%`, top: 0, bottom: 0, background: "var(--foreground)", opacity: 0.25, borderRadius: 100 }} />
       {threshold !== undefined && (
-        <div title={`Threshold ${threshold}`} style={{ position: "absolute", left: `${(threshold / max) * 100}%`, top: -3, bottom: -3, width: 2, background: "#D97706" }} />
+        <div title={`Threshold ${threshold}`} style={{ position: "absolute", left: `${(threshold / max) * 100}%`, top: -3, bottom: -3, width: 2, background: "var(--accent)" }} />
       )}
     </div>
   );
@@ -504,21 +498,21 @@ function RangeBar({ range, max, threshold }: { range: Range; max: number; thresh
 
 function BidTaskRow({ item, task }: { item: ComplianceItem; task: ReturnType<typeof classifyComplianceItem> }) {
   return (
-    <div style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
+    <div style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, color: "#16233B", background: "#ECEEF1", borderRadius: 100, padding: "2px 7px" }}>{item.form}</span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{item.label}</span>
+        <span style={{ fontFamily: "monospace", fontSize: 10, fontWeight: 700, color: "var(--foreground)", background: "var(--muted)", borderRadius: 100, padding: "2px 7px" }}>{item.form}</span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{item.label}</span>
         {/* Fix rows already say "disqualifies" via the Fix column itself - no need to repeat MANDATORY there. */}
-        {task.status !== "fix" && item.mandatory && <span style={{ fontSize: 10, fontWeight: 700, color: "#8A93A0" }}>MANDATORY</span>}
-        {item.expiring && <Chip label="Renew soon" bg="#FEF3C7" color="#B45309" />}
-        {item.expiredCopy && <Chip label="Expired copy in pack - replace" bg="#FEE2E2" color="#B91C1C" />}
+        {task.status !== "fix" && item.mandatory && <span style={{ fontSize: 10, fontWeight: 700, color: "var(--muted-foreground)" }}>MANDATORY</span>}
+        {item.expiring && <Chip label="Renew soon" className="bg-warning/10 text-warning" />}
+        {item.expiredCopy && <Chip label="Expired copy in pack - replace" className="bg-destructive/10 text-destructive" />}
       </div>
-      <div style={{ fontSize: 12, color: "#4B5563", marginTop: 3, wordBreak: "break-word" }}>{task.reason}</div>
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 3, wordBreak: "break-word" }}>{task.reason}</div>
       <div style={{ marginTop: 5 }}>
         {task.confirmed ? (
-          <Chip label="Confirmed" bg="#DCFCE7" color="#15803D" />
+          <Chip label="Confirmed" className="bg-success/10 text-success" />
         ) : (
-          <Link href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: task.status === "fix" ? "#B91C1C" : "#B45309" }}>
+          <Link href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: task.status === "fix" ? "var(--destructive)" : "var(--warning)" }}>
             {task.fixLabel} →
           </Link>
         )}
@@ -528,20 +522,20 @@ function BidTaskRow({ item, task }: { item: ComplianceItem; task: ReturnType<typ
 }
 
 function SectionTitle({ title }: { title: string }) {
-  return <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>{title}</div>;
+  return <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", marginBottom: 2 }}>{title}</div>;
 }
 
-function CountBadge({ count, bg, color }: { count: number; bg: string; color: string }) {
+function CountBadge({ count, className }: { count: number; className: string }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 20, height: 20, padding: "0 6px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: bg, color }}>
+    <span className={className} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 20, height: 20, padding: "0 6px", borderRadius: 100, fontSize: 11, fontWeight: 700 }}>
       {count}
     </span>
   );
 }
 
-function Chip({ label, bg, color }: { label: string; bg: string; color: string }) {
+function Chip({ label, className }: { label: string; className: string }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color, whiteSpace: "nowrap" }}>
+    <span className={className} style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
       {label}
     </span>
   );
