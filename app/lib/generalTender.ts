@@ -262,11 +262,15 @@ export function companyFieldStates(fields: ManifestCompanyField[], company: Gene
   });
 }
 
-export const FORM_STATUS_STYLE: Record<ManifestForm["status"], { label: string; bg: string; color: string }> = {
-  auto: { label: "Filled for you", bg: "#DCFCE7", color: "#15803D" },
-  attach: { label: "From the vault", bg: "#DCFCE7", color: "#15803D" },
-  by_hand: { label: "Complete by hand", bg: "#FEF3C7", color: "#B45309" },
-  overlay: { label: "Typed onto the PDF", bg: "#DCFCE7", color: "#15803D" },
+// Tailwind classes, not hex - confirmed single real code consumer
+// (general-workspace.tsx; submission-plan-logic.ts/.spec.ts only mention
+// this export in comments), so safe to convert directly (design-system
+// color migration, batch 4, app/AGENTS.md).
+export const FORM_STATUS_STYLE: Record<ManifestForm["status"], { label: string; className: string }> = {
+  auto: { label: "Filled for you", className: "bg-success/10 text-success" },
+  attach: { label: "From the vault", className: "bg-success/10 text-success" },
+  by_hand: { label: "Complete by hand", className: "bg-warning/10 text-warning" },
+  overlay: { label: "Typed onto the PDF", className: "bg-success/10 text-success" },
 };
 
 export type EngineJob = {

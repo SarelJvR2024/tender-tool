@@ -8,6 +8,8 @@ import { getNotifications } from "@/lib/notifications";
 import { nextStepFor } from "@/lib/tenderNextStep";
 import { ACTIVE_PURSUIT_STAGES } from "@/lib/discoveryReassessment";
 import { loadDocumentExpiryOverview } from "@/lib/documentExpiry";
+import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
+import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
 import { PageHeader } from "@/components/tt/page-header";
 import { StatCard } from "@/components/tt/stat-card";
 import { StatusBadge, type TenderStatus } from "@/components/tt/status-badge";
@@ -133,7 +135,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ data: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }] = await Promise.all([
+  const [{ data: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary] = await Promise.all([
     supabase
       .from("tenders")
       .select("id, contract_no, nra_reference, description, closing_date, source, family, tender_packs(status, pipeline_stage)")
@@ -147,7 +149,8 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
       .in("verdict", ["strong_fit", "possible", "needs_review"])
       .order("first_seen", { ascending: false })
       .limit(5),
-    supabase.from("companies").select("legal_name, csd_trading_name").maybeSingle(),
+    supabase.from("companies").select("legal_name, csd_trading_name, savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
+    fetchSavingsCounterSummary(supabase),
   ]);
 
   if (error) console.error("tenders select failed for dashboard", error);
@@ -240,6 +243,17 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
       { key: "bee", label: "B-BBEE certificate on file", done: bee?.satisfied ?? false, href: bee?.href ?? "/onboarding?step=2" },
       { key: "tax_pin", label: "Tax clearance (SARS TCS PIN) on file", done: !!taxRow && taxRow.status !== "missing", href: "/company#compliance-documents" },
       { key: "people_cvs", label: "At least one person with a CV uploaded", done: readiness.peopleWithCvCount >= 1, href: "/onboarding?step=4" },
+      {
+        key: "savings_baseline",
+        label: "Your time/cost baseline confirmed (for the savings counter)",
+        // There's no separate "confirmed" flag - the two columns are always
+        // non-null with real defaults (0085) - so this reads as "done" once
+        // either default (20 hours, R450) has been changed to the
+        // company's own real number, same spirit as the other items here
+        // ("on file" rather than merely "has a value").
+        done: companyRow?.savings_baseline_hours_per_tender !== 20 || companyRow?.savings_baseline_hourly_cost_zar !== 450,
+        href: "/company#savings-baseline",
+      },
     ];
   }
 
@@ -276,6 +290,10 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
           <StatCard label="Packs ready" value={packsReadyCount} tone="success" />
           <StatCard label="Closing this week" value={closingThisWeekCount} tone={closingThisWeekCount > 0 ? "warning" : "default"} />
           <StatCard label="Documents expiring" value={documentsExpiringCount} tone={documentsExpiringCount > 0 ? "destructive" : "default"} />
+        </div>
+
+        <div className="mb-5">
+          <SavingsCounterCard summary={savingsSummary} />
         </div>
 
         {isNewCompany ? (

@@ -39,7 +39,7 @@ export default async function CompanyPage({
   const { data: company, error: loadError } = await supabase
     .from("companies")
     .select(
-      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, cidb_grading, cidb_expiry, cidb_document_path, cidb_registration_number, cidb_contractor_name, bee_entity_name, bank_confirmation_bank_name, bank_confirmation_account_holder, iso_9001_certified_entity_name, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work, head_office, other_offices, ecsa_registered_staff_count, sacpcmp_registered_staff_count, total_employees, typical_jv_share_pct"
+      "id, legal_name, csd_trading_name, cipc_registration_number, vat_number, income_tax_number, paye_number, csd_supplier_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, registered_address, postal_address, bank_name, bank_branch_code, coid_letter_document_path, cidb_grading, cidb_expiry, cidb_document_path, cidb_registration_number, cidb_contractor_name, bee_entity_name, bank_confirmation_bank_name, bank_confirmation_account_holder, iso_9001_certified_entity_name, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path, how_we_work, head_office, other_offices, ecsa_registered_staff_count, sacpcmp_registered_staff_count, total_employees, typical_jv_share_pct, savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar"
     )
     .single();
 
@@ -141,6 +141,7 @@ export default async function CompanyPage({
     { href: "#compliance-documents", label: "Documents", complete: complianceDocumentsComplete },
     { href: "#company-identity", label: "Identity", complete: identityComplete },
     { href: "#size-offices", label: "Size & offices" },
+    { href: "#savings-baseline", label: "Time & cost saved" },
     { href: "#how-we-work", label: "How we work" },
     { href: "#bee-cidb", label: "BEE & CIDB", complete: beeCidbComplete },
     { href: "#bank-details", label: "Bank details" },

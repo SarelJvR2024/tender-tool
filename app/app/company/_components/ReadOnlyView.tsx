@@ -2,6 +2,7 @@ import { expiryStatus } from "@/lib/dates";
 import { BANK_LETTER_RENEW_SOON_DAYS } from "@/lib/vaultDocuments";
 import { CompanyIdentitySection } from "./CompanyIdentitySection";
 import { SizeOfficesSection } from "./SizeOfficesSection";
+import { SavingsBaselineSection } from "./SavingsBaselineSection";
 import { HowWeWorkSection } from "./HowWeWorkSection";
 import { ComplianceDocumentsSection } from "./ComplianceDocumentsSection";
 import { BeeCidbSection } from "./BeeCidbSection";
@@ -28,9 +29,9 @@ export function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrl
     expiryStatus(company.bank_confirmation_letter_valid_until, BANK_LETTER_RENEW_SOON_DAYS),
     expiryStatus(company.bee_proof_expiry),
   ];
-  const expiredCount = docStatuses.filter((s) => s.color === "#B91C1C").length;
-  const renewSoonCount = docStatuses.filter((s) => s.color === "#B45309").length;
-  const notOnFileCount = docStatuses.filter((s) => !s.color || s.color === "#5B6472").length;
+  const expiredCount = docStatuses.filter((s) => s.tone === "destructive").length;
+  const renewSoonCount = docStatuses.filter((s) => s.tone === "warning").length;
+  const notOnFileCount = docStatuses.filter((s) => s.tone === "muted").length;
   const allGood = expiredCount === 0 && renewSoonCount === 0 && notOnFileCount === 0;
 
   return (
@@ -44,6 +45,7 @@ export function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrl
 
       <CompanyIdentitySection company={company} />
       <SizeOfficesSection company={company} />
+      <SavingsBaselineSection company={company} />
       <HowWeWorkSection company={company} />
       <ComplianceDocumentsSection company={company} docUrls={docUrls} />
       <BeeCidbSection company={company} />

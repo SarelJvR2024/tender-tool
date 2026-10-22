@@ -112,8 +112,8 @@ export default async function PrincipalsPage({ searchParams }: { searchParams: P
 
       {(missingIds > 0 || missingConsent > 0) && principals.length > 0 && (
         <div className="mb-3.5 flex flex-wrap gap-2">
-          {missingIds > 0 && <Chip status={{ label: `${missingIds} director${missingIds === 1 ? "" : "s"} without a certified ID copy`, bg: "#FEF3C7", color: "#B45309" }} />}
-          {missingConsent > 0 && <Chip status={{ label: `${missingConsent} without a POPIA consent date`, bg: "#FEF3C7", color: "#B45309" }} />}
+          {missingIds > 0 && <Chip status={{ label: `${missingIds} director${missingIds === 1 ? "" : "s"} without a certified ID copy`, tone: "warning" }} />}
+          {missingConsent > 0 && <Chip status={{ label: `${missingConsent} without a POPIA consent date`, tone: "warning" }} />}
         </div>
       )}
 
@@ -180,14 +180,14 @@ function PrincipalCard({
           {tags.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1.5">
               {tags.map((t) => (
-                <Chip key={t} status={{ label: t, bg: "#E0E7FF", color: "#16233B" }} />
+                <Chip key={t} status={{ label: t, tone: "accent" }} />
               ))}
             </div>
           )}
         </div>
         <div className="flex flex-col items-end gap-1.5">
           {natural && p.role !== "shareholder" && <Chip status={cert} />}
-          {natural && !p.popia_consent_on && <Chip status={{ label: "POPIA consent not recorded", bg: "#FEF3C7", color: "#B45309" }} />}
+          {natural && !p.popia_consent_on && <Chip status={{ label: "POPIA consent not recorded", tone: "warning" }} />}
         </div>
       </div>
       {warnings.map((w) => (

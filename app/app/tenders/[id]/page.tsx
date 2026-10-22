@@ -117,20 +117,20 @@ type GeneratedCv = {
   error_message: string | null;
 };
 
-const GENERATED_CV_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
-  requested: { label: "Requested", bg: "#FEF3C7", color: "#B45309" },
-  generating: { label: "Generating…", bg: "#FEF3C7", color: "#B45309" },
-  ready: { label: "Ready", bg: "#DCFCE7", color: "#15803D" },
-  failed: { label: "Failed", bg: "#FEE2E2", color: "#B91C1C" },
+const GENERATED_CV_STATUS_LABEL: Record<string, { label: string; className: string }> = {
+  requested: { label: "Requested", className: "bg-warning/10 text-warning" },
+  generating: { label: "Generating…", className: "bg-warning/10 text-warning" },
+  ready: { label: "Ready", className: "bg-success/10 text-success" },
+  failed: { label: "Failed", className: "bg-destructive/10 text-destructive" },
 };
 
 // tender_packs.status is a flat enum ('suggested' | 'confirmed' | 'filled') -
 // there's no multi-stage workflow modeled in the schema, so this is an honest
 // single badge rather than an invented stepper UI.
-const PACK_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
-  suggested: { label: "Suggested - not yet confirmed", bg: "#FEF3C7", color: "#B45309" },
-  confirmed: { label: "Confirmed", bg: "#DCFCE7", color: "#15803D" },
-  filled: { label: "Filled", bg: "#DCFCE7", color: "#15803D" },
+const PACK_STATUS_LABEL: Record<string, { label: string; className: string }> = {
+  suggested: { label: "Suggested - not yet confirmed", className: "bg-warning/10 text-warning" },
+  confirmed: { label: "Confirmed", className: "bg-success/10 text-success" },
+  filled: { label: "Filled", className: "bg-success/10 text-success" },
 };
 
 // field_key is a dotted path like "a_forms.A8.litigation" or
@@ -409,36 +409,43 @@ export default async function TenderWorkspacePage({
         {tenderFacts && (
           <>
             {/* Tender facts */}
-            <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
                 <div>
-                  <div style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: "#16233B" }}>{tenderFacts.contract_no ?? "No contract number"}</div>
-                  <div style={{ fontSize: 11, color: "#8A93A0" }}>{tenderFacts.nra_reference ?? "No NRA reference"}</div>
+                  <div style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{tenderFacts.contract_no ?? "No contract number"}</div>
+                  <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{tenderFacts.nra_reference ?? "No NRA reference"}</div>
                 </div>
                 {packStatus && (
-                  <span style={{ display: "inline-flex", alignItems: "center", padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: packStatus.bg, color: packStatus.color, whiteSpace: "nowrap" }}>
+                  <span className={packStatus.className} style={{ display: "inline-flex", alignItems: "center", padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
                     {packStatus.label}
                   </span>
                 )}
               </div>
-              <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 2px", lineHeight: 1.35 }}>
+              <h1 style={{ fontSize: 18, fontWeight: 700, color: "var(--foreground)", margin: "0 0 2px", lineHeight: 1.35 }}>
                 {tenderFacts.description ?? "Untitled tender"}
               </h1>
-              <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 8 }}>
+              <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 8 }}>
                 {tenderFacts.buyer ?? "No client on file"}
               </div>
-              <div style={{ fontSize: 13, color: "#5B6472" }}>
+              <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
                 Closes{" "}
                 {tenderFacts.closing_date ? new Date(tenderFacts.closing_date).toLocaleDateString() : "- no closing date on file"}
                 {countdown && (
-                  <span style={{ marginLeft: 8, fontWeight: 600, color: countdown.urgent ? "#B45309" : "#8A93A0" }}>
+                  <span style={{ marginLeft: 8, fontWeight: 600, color: countdown.urgent ? "var(--warning)" : "var(--muted-foreground)" }}>
                     ({countdown.text})
                   </span>
                 )}
               </div>
               {tenderReadiness && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, paddingTop: 10, borderTop: "1px solid #ECEEF1" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
                   <span
+                    className={
+                      tenderReadiness.thingsLeft === 0
+                        ? "bg-success/10 text-success"
+                        : tenderReadiness.fix.length > 0
+                          ? "bg-destructive/10 text-destructive"
+                          : "bg-warning/10 text-warning"
+                    }
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
@@ -449,27 +456,25 @@ export default async function TenderWorkspacePage({
                       borderRadius: "50%",
                       fontSize: 13,
                       fontWeight: 700,
-                      background: tenderReadiness.thingsLeft === 0 ? "#DCFCE7" : tenderReadiness.fix.length > 0 ? "#FEE2E2" : "#FEF3C7",
-                      color: tenderReadiness.thingsLeft === 0 ? "#15803D" : tenderReadiness.fix.length > 0 ? "#B91C1C" : "#B45309",
                     }}
                   >
                     {tenderReadiness.score}
                   </span>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>
                       {tenderReadiness.thingsLeft === 0
                         ? "Ready to submit"
                         : `${tenderReadiness.thingsLeft} thing${tenderReadiness.thingsLeft === 1 ? "" : "s"} left before you can submit`}
                     </div>
-                    <div style={{ fontSize: 11, color: "#8A93A0" }}>Readiness score</div>
+                    <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>Readiness score</div>
                   </div>
                 </div>
               )}
               {tenderFacts.briefing_date && (
-                <div style={{ fontSize: 13, color: "#5B6472", marginTop: 2 }}>
+                <div style={{ fontSize: 13, color: "var(--muted-foreground)", marginTop: 2 }}>
                   Briefing {formatDay(tenderFacts.briefing_date)}
                   {tenderFacts.briefing_time ? ` at ${tenderFacts.briefing_time}` : ""}
-                  <span style={{ color: "#8A93A0" }}> - from the buyer&apos;s addendum (see below)</span>
+                  <span style={{ color: "var(--muted-foreground)" }}> - from the buyer&apos;s addendum (see below)</span>
                 </div>
               )}
 
@@ -478,24 +483,24 @@ export default async function TenderWorkspacePage({
                   - separate from the submission-deadline reminder below,
                   which is "remind us before it's due". */}
               {tenderPack && ["submitted", "won", "lost"].includes(tenderPack.pipeline_stage) && tenderPack.submitted_at && (
-                <div style={{ fontSize: 13, color: "#15803D", fontWeight: 600, marginTop: 6 }}>
+                <div style={{ fontSize: 13, color: "var(--success)", fontWeight: 600, marginTop: 6 }}>
                   Submitted on {new Date(tenderPack.submitted_at).toLocaleDateString()}
                 </div>
               )}
 
               {tenderPack && provenance.length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid #ECEEF1" }}>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
                   {confirmedRows.length > 0 && (
-                    <SummaryChip count={confirmedRows.length} label="confirmed" bg="#DCFCE7" color="#15803D" />
+                    <SummaryChip count={confirmedRows.length} label="confirmed" className="bg-success/10 text-success" />
                   )}
                   {reviewRows.length > 0 && (
-                    <SummaryChip count={reviewRows.length} label="to verify" bg="#DCFCE7" color="#15803D" />
+                    <SummaryChip count={reviewRows.length} label="to verify" className="bg-success/10 text-success" />
                   )}
                   {missingRows.length > 0 && (
-                    <SummaryChip count={missingRows.length} label="to provide" bg="#FEF3C7" color="#B45309" />
+                    <SummaryChip count={missingRows.length} label="to provide" className="bg-warning/10 text-warning" />
                   )}
                   {overdueTaskCount > 0 && (
-                    <SummaryChip count={overdueTaskCount} label={overdueTaskCount === 1 ? "task overdue" : "tasks overdue"} bg="#FEE2E2" color="#B91C1C" />
+                    <SummaryChip count={overdueTaskCount} label={overdueTaskCount === 1 ? "task overdue" : "tasks overdue"} className="bg-destructive/10 text-destructive" />
                   )}
                 </div>
               )}
@@ -544,7 +549,7 @@ export default async function TenderWorkspacePage({
                   position: "sticky",
                   top: 0,
                   zIndex: 5,
-                  background: "#FFFFFF",
+                  background: "var(--card)",
                   padding: "8px 2px",
                   marginBottom: 12,
                 }}
@@ -583,14 +588,14 @@ export default async function TenderWorkspacePage({
             {packError && <ErrorBanner message="Couldn't load this tender's pack. If it keeps happening, let us know." />}
 
             {!tenderPack && !packError && (
-              <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#5B6472", marginBottom: 16 }}>
+              <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "var(--muted-foreground)", marginBottom: 16 }}>
                 No tender pack exists yet for this tender at your company - nothing to review until one is created.
                 {isSanralPackFamily && (
                   <form action={startTenderPack} style={{ marginTop: 12 }}>
                     <input type="hidden" name="tender_id" value={id} />
                     <button
                       type="submit"
-                      style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" }}
+                      style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" }}
                     >
                       Start a pack for this tender
                     </button>
@@ -604,7 +609,7 @@ export default async function TenderWorkspacePage({
                 {provenanceError && <ErrorBanner message="Couldn't load the readiness report. If it keeps happening, let us know." />}
 
                 {provenance.length === 0 && !provenanceError && (
-                  <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "#5B6472" }}>
+                  <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "var(--muted-foreground)" }}>
                     No readiness data recorded yet for this pack.
                   </div>
                 )}
@@ -621,26 +626,25 @@ export default async function TenderWorkspacePage({
                     <ReportCard
                       title="Verify"
                       count={confirmedRows.length + reviewRows.length}
-                      accent="#15803D"
-                      bg="#DCFCE7"
+                      className="bg-success/10 text-success"
                       emptyText="Nothing to verify yet."
                     >
                       {reviewRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid #ECEEF1" }}>
+                        <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid var(--border)" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
                             <ReviewButton fieldKey={row.field_key} />
                           </div>
-                          <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word", marginTop: 2 }}>{row.value ?? "-"}</div>
+                          <div style={{ fontSize: 12, color: "var(--muted-foreground)", wordBreak: "break-word", marginTop: 2 }}>{row.value ?? "-"}</div>
                           {row.reason && (
-                            <div style={{ fontSize: 11, color: "#B45309", marginTop: 3 }}>{row.reason}</div>
+                            <div style={{ fontSize: 11, color: "var(--warning)", marginTop: 3 }}>{row.reason}</div>
                           )}
                         </div>
                       ))}
                       {confirmedRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
-                          <div style={{ fontSize: 12, color: "#4B5563", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
+                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
+                          <div style={{ fontSize: 12, color: "var(--muted-foreground)", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
                         </div>
                       ))}
                     </ReportCard>
@@ -648,15 +652,14 @@ export default async function TenderWorkspacePage({
                     <ReportCard
                       title="Provide"
                       count={missingRows.length}
-                      accent="#B45309"
-                      bg="#FEF3C7"
+                      className="bg-warning/10 text-warning"
                       emptyText="Nothing left for you to supply."
                     >
                       {missingRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid #ECEEF1" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "#16233B" }}>{humanizeFieldKey(row.field_key)}</div>
+                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
                           {row.reason && (
-                            <div style={{ fontSize: 12, color: "#B45309", marginTop: 2 }}>{row.reason}</div>
+                            <div style={{ fontSize: 12, color: "var(--warning)", marginTop: 2 }}>{row.reason}</div>
                           )}
                         </div>
                       ))}
@@ -705,19 +708,19 @@ export default async function TenderWorkspacePage({
             <ActivityLog tenderId={id} showAll={activity === "all"} />
 
             {tenderPack && (positions.length > 0 || isSanralPackFamily) && (
-              <div id="key-positions" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+              <div id="key-positions" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Key positions</div>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)" }}>Key positions</div>
                   {positions.length > 0 && (() => {
                     const open = positions.filter((code) => !assignments.find((a) => a.position_code === code)?.confirmed_person_id).length;
                     return (
-                      <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap", background: open ? "#FEF3C7" : "#DCFCE7", color: open ? "#B45309" : "#15803D" }}>
+                      <span className={open ? "bg-warning/10 text-warning" : "bg-success/10 text-success"} style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
                         {open ? `${open} of ${positions.length} to confirm` : "All confirmed"}
                       </span>
                     );
                   })()}
                 </div>
-                <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+                <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
                   Choose who fills each position on this tender - the submission pack is built with exactly these
                   people and won&apos;t generate until every position has one. Tender Ready suggests the best match among
                   the people tagged on their People page as fitting the role (scored on their qualifications, projects
@@ -727,14 +730,14 @@ export default async function TenderWorkspacePage({
                   records a request, not an instant result.
                 </div>
                 {positions.length === 0 && (
-                  <div style={{ fontSize: 12, color: "#8A93A0", borderTop: "1px solid #ECEEF1", paddingTop: 10 }}>
+                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
                     No positions listed yet. They are read from this tender&apos;s own Technical Submission workbook (its
                     SETUP sheet) - upload it under Blank tender templates below, and they appear here once the pack
                     builder has read it.
                   </div>
                 )}
                 {assignablePeople.length === 0 && positions.length > 0 && (
-                  <div style={{ fontSize: 12, color: "#B45309", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: "var(--warning)", marginBottom: 8 }}>
                     No one is captured on the People page yet - add your key people there first.
                   </div>
                 )}
@@ -755,24 +758,24 @@ export default async function TenderWorkspacePage({
                   });
                   const positionJobs = generatedCvs.filter((g) => g.position_code === code);
                   return (
-                    <div key={code} style={{ borderTop: "1px solid #ECEEF1", padding: "12px 0" }}>
+                    <div key={code} style={{ borderTop: "1px solid var(--border)", padding: "12px 0" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
                         <div style={{ minWidth: 0, flex: "1 1 200px" }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{code}</div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{code}</div>
                           {req?.position_description && (
-                            <div style={{ fontSize: 12, color: "#5B6472", marginTop: 1 }}>{req.position_description}</div>
+                            <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 1 }}>{req.position_description}</div>
                           )}
                           {confirmedId ? (
-                            <div style={{ fontSize: 12, color: "#15803D", marginTop: 2, fontWeight: 600 }}>
+                            <div style={{ fontSize: 12, color: "var(--success)", marginTop: 2, fontWeight: 600 }}>
                               Confirmed: {a?.people?.name ?? peopleName.get(confirmedId) ?? "person on file"}
                             </div>
                           ) : (
-                            <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "#FEE2E2", color: "#B91C1C", borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700, marginTop: 4 }}>
+                            <div className="bg-destructive/10 text-destructive" style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700, marginTop: 4 }}>
                               Fix: no key person confirmed - blocks the submission pack
                             </div>
                           )}
                           {!confirmedId && roleCode && tagged.length === 0 && (
-                            <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 4 }}>
+                            <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>
                               No one is tagged as fitting {roleTitles.get(roleCode) ?? code} yet (People page).
                             </div>
                           )}
@@ -795,17 +798,17 @@ export default async function TenderWorkspacePage({
                             <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
                             <input type="hidden" name="position_code" value={code} />
                             <input type="hidden" name="person_id" value={confirmedId} />
-                            <select name="format" defaultValue="sanral_keyperson" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 8px" }}>
+                            <select name="format" defaultValue="sanral_keyperson" style={{ minHeight: 36, borderRadius: 7, border: "1px solid var(--border)", fontSize: 12, padding: "0 8px" }}>
                               <option value="sanral_keyperson">SANRAL key-person</option>
                               <option value="world_bank">World Bank format</option>
                             </select>
-                            <select name="detail" defaultValue="summary" style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 8px" }}>
+                            <select name="detail" defaultValue="summary" style={{ minHeight: 36, borderRadius: 7, border: "1px solid var(--border)", fontSize: 12, padding: "0 8px" }}>
                               <option value="summary">Summary</option>
                               <option value="detailed">Detailed</option>
                             </select>
                             <button
                               type="submit"
-                              style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                              style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
                             >
                               Generate tender-specific CV
                             </button>
@@ -816,19 +819,19 @@ export default async function TenderWorkspacePage({
                       {positionJobs.length > 0 && (
                         <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                           {positionJobs.map((g) => {
-                            const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, bg: "#ECEEF1", color: "#5B6472" };
+                            const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, className: "bg-muted text-muted-foreground" };
                             return (
-                              <div key={g.id} style={{ fontSize: 11, color: "#5B6472", display: "flex", alignItems: "center", gap: 8 }}>
+                              <div key={g.id} style={{ fontSize: 11, color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: 8 }}>
                                 <span>{g.format} / {g.detail}</span>
-                                <span style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600, background: st.bg, color: st.color }}>
+                                <span className={st.className} style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600 }}>
                                   {st.label}
                                 </span>
-                                {g.error_message && <span style={{ color: "#B91C1C" }}>{g.error_message}</span>}
+                                {g.error_message && <span style={{ color: "var(--destructive)" }}>{g.error_message}</span>}
                                 {g.storage_path_docx && cvSignedUrls[g.storage_path_docx] && (
-                                  <a href={cvSignedUrls[g.storage_path_docx]} style={{ color: "#D97706", fontWeight: 600 }}>Word</a>
+                                  <a href={cvSignedUrls[g.storage_path_docx]} style={{ color: "var(--accent)", fontWeight: 600 }}>Word</a>
                                 )}
                                 {g.storage_path_pdf && cvSignedUrls[g.storage_path_pdf] && (
-                                  <a href={cvSignedUrls[g.storage_path_pdf]} style={{ color: "#D97706", fontWeight: 600 }}>PDF</a>
+                                  <a href={cvSignedUrls[g.storage_path_pdf]} style={{ color: "var(--accent)", fontWeight: 600 }}>PDF</a>
                                 )}
                               </div>
                             );
@@ -905,9 +908,9 @@ function TaskTimeline({
   const addTaskWithId = addTenderTask;
 
   return (
-    <div id="tasks-milestones" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Tasks &amp; milestones</div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+    <div id="tasks-milestones" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", marginBottom: 2 }}>Tasks &amp; milestones</div>
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
         Closing date is seeded automatically, and so is the briefing date once a buyer&apos;s addendum states
         it. The original tender&apos;s briefing, clarification and submission dates aren&apos;t extracted
         automatically yet - add them here when known. Add anything else specific to this
@@ -918,7 +921,7 @@ function TaskTimeline({
       {error && <ErrorBanner message="Couldn't load tasks. If it keeps happening, let us know." />}
 
       {!error && tasks.length === 0 && (
-        <div style={{ fontSize: 12, color: "#8A93A0", padding: "6px 0 12px" }}>No tasks yet.</div>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", padding: "6px 0 12px" }}>No tasks yet.</div>
       )}
 
       {!error && tasks.length > 0 && (
@@ -929,18 +932,18 @@ function TaskTimeline({
             return (
               <div
                 key={t.id}
-                style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: "10px 0", borderTop: "1px solid #ECEEF1" }}
+                style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap", padding: "10px 0", borderTop: "1px solid var(--border)" }}
               >
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{t.description}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>{t.description}</span>
                     {t.kind && (
-                      <span style={{ fontSize: 10, fontWeight: 600, color: "#16233B", background: "#ECEEF1", borderRadius: 100, padding: "2px 8px" }}>
+                      <span className="bg-muted text-foreground" style={{ fontSize: 10, fontWeight: 600, borderRadius: 100, padding: "2px 8px" }}>
                         {KIND_TAG[t.kind] ?? t.kind}
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: overdue ? "#B91C1C" : "#5B6472", marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: overdue ? "var(--destructive)" : "var(--muted-foreground)", marginTop: 2 }}>
                     {t.due_date ? `Due ${new Date(t.due_date).toLocaleDateString()}` : "No due date set"}
                     {left !== null && t.status !== "done" && (
                       <span style={{ marginLeft: 6, fontWeight: 600 }}>
@@ -965,8 +968,8 @@ function TaskTimeline({
           shape is an explicit spec decision, see 0009's header comment). A
           SA public bid often has a separate, scheduled public bid-opening
           event, sometimes days after closing, worth its own reminder. */}
-      <div style={{ borderTop: tasks.length > 0 ? "1px solid #ECEEF1" : undefined, paddingTop: tasks.length > 0 ? 14 : 0, marginBottom: 14 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", marginBottom: 8 }}>Submission &amp; opening</div>
+      <div style={{ borderTop: tasks.length > 0 ? "1px solid var(--border)" : undefined, paddingTop: tasks.length > 0 ? 14 : 0, marginBottom: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "var(--foreground)", marginBottom: 8 }}>Submission &amp; opening</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <ReminderForm
             tenderId={tenderId}
@@ -985,35 +988,35 @@ function TaskTimeline({
         </div>
       </div>
 
-      <form action={addTaskWithId} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #ECEEF1", paddingTop: 14 }}>
+      <form action={addTaskWithId} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid var(--border)", paddingTop: 14 }}>
         <input type="hidden" name="tender_id" value={tenderId} />
         <div style={{ flex: "1 1 220px", minWidth: 180 }}>
-          <label htmlFor="new-task-description" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Add a task</label>
+          <label htmlFor="new-task-description" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Add a task</label>
           <input
             id="new-task-description"
             type="text"
             name="description"
             placeholder="e.g. Confirm subcontractor for electrical works"
             required
-            style={{ width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit" }}
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 13, fontFamily: "inherit" }}
           />
         </div>
         <div>
-          <label htmlFor="new-task-due-date" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Due date</label>
+          <label htmlFor="new-task-due-date" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Due date</label>
           <input
             id="new-task-due-date"
             type="date"
             name="due_date"
-            style={{ minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit" }}
+            style={{ minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 13, fontFamily: "inherit" }}
           />
         </div>
         <div>
-          <label htmlFor="new-task-assigned-to" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Assign to (optional)</label>
+          <label htmlFor="new-task-assigned-to" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Assign to (optional)</label>
           <select
             id="new-task-assigned-to"
             name="assigned_to"
             defaultValue=""
-            style={{ minHeight: 40, padding: "0 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" }}
+            style={{ minHeight: 40, padding: "0 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 13, fontFamily: "inherit", background: "var(--card)", color: "var(--foreground)" }}
           >
             <option value="">Unassigned</option>
             {people.map((p) => (
@@ -1025,7 +1028,7 @@ function TaskTimeline({
         </div>
         <button
           type="submit"
-          style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+          style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
         >
           Add task
         </button>
@@ -1059,23 +1062,23 @@ function ReminderForm({
       <input type="hidden" name="tender_id" value={tenderId} />
       <input type="hidden" name="kind" value={kind} />
       <div style={{ flex: "1 1 220px", minWidth: 180 }}>
-        <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>{label}</label>
+        <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>{label}</label>
         <input
           type="text"
           name="description"
           defaultValue={existing?.description ?? defaultDescription}
           required
-          style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit" }}
+          style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontFamily: "inherit" }}
         />
       </div>
       <div>
-        <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Date</label>
+        <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Date</label>
         <input
           type="date"
           name="due_date"
           defaultValue={existing?.due_date ?? ""}
           required
-          style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit" }}
+          style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontFamily: "inherit" }}
         />
       </div>
       <button
@@ -1084,11 +1087,11 @@ function ReminderForm({
           minHeight: 38,
           padding: "0 14px",
           borderRadius: 8,
-          background: existing ? "#FFFFFF" : "#16233B",
-          color: existing ? "#16233B" : "#FFFFFF",
+          background: existing ? "var(--card)" : "var(--primary)",
+          color: existing ? "var(--foreground)" : "var(--primary-foreground)",
           fontSize: 12,
           fontWeight: 600,
-          border: existing ? "1px solid #E3E6EA" : "none",
+          border: existing ? "1px solid var(--border)" : "none",
           cursor: "pointer",
           whiteSpace: "nowrap",
         }}
@@ -1136,74 +1139,74 @@ function WonProjectCard({
         : "";
 
   return (
-    <div id="won-project" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Won - record the completed project</div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+    <div id="won-project" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)", marginBottom: 2 }}>Won - record the completed project</div>
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
         This updates each confirmed team member&apos;s own project history, so it&apos;s ready the next time you build their CV.
       </div>
 
       {completed && (
-        <div style={{ fontSize: 13, color: "#15803D", fontWeight: 600, marginBottom: 2 }}>
+        <div style={{ fontSize: 13, color: "var(--success)", fontWeight: 600, marginBottom: 2 }}>
           Completed {new Date(tenderPack.project_completed_at!).toLocaleDateString()}
           {completionValue != null && `, valued at R${Number(completionValue).toLocaleString("en-ZA")}m`}
         </div>
       )}
       {completed && tenderPack.project_completion_note && (
-        <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>{tenderPack.project_completion_note}</div>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>{tenderPack.project_completion_note}</div>
       )}
 
       <div style={{ display: "flex", flexDirection: "column", margin: completed ? "10px 0 12px" : "0 0 12px" }}>
         {rows.length === 0 && (
-          <div style={{ fontSize: 12, color: "#8A93A0", padding: "6px 0" }}>No key positions on this pack yet.</div>
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)", padding: "6px 0" }}>No key positions on this pack yet.</div>
         )}
         {rows.map(({ code, name }) => (
-          <div key={code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "6px 0", borderTop: "1px solid #ECEEF1" }}>
-            <span style={{ color: "#16233B", fontWeight: 600 }}>{code}</span>
-            <span style={{ color: name ? "#15803D" : "#B45309", fontWeight: name ? 400 : 600 }}>{name ?? "Not confirmed"}</span>
+          <div key={code} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, padding: "6px 0", borderTop: "1px solid var(--border)" }}>
+            <span style={{ color: "var(--foreground)", fontWeight: 600 }}>{code}</span>
+            <span style={{ color: name ? "var(--success)" : "var(--warning)", fontWeight: name ? 400 : 600 }}>{name ?? "Not confirmed"}</span>
           </div>
         ))}
       </div>
 
       <form
         action={syncWonProjectToTeam}
-        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid #ECEEF1", paddingTop: 12 }}
+        style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end", borderTop: "1px solid var(--border)", paddingTop: 12 }}
       >
         <input type="hidden" name="tender_id" value={tenderId} />
         <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Completion date</label>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Completion date</label>
           <input
             type="date"
             name="project_completed_at"
             defaultValue={tenderPack.project_completed_at ?? ""}
             required
-            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit" }}
+            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontFamily: "inherit" }}
           />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Value (R million)</label>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Value (R million)</label>
           <input
             type="number"
             step="0.01"
             min="0"
             name="project_completion_value_rm"
             defaultValue={defaultValueRm}
-            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit", width: 120 }}
+            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontFamily: "inherit", width: 120 }}
           />
         </div>
         <div style={{ flex: "1 1 220px", minWidth: 180 }}>
-          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#16233B", marginBottom: 4 }}>Note (optional)</label>
+          <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Note (optional)</label>
           <input
             type="text"
             name="project_completion_note"
             defaultValue={tenderPack.project_completion_note ?? ""}
             placeholder="e.g. scope change, variation order, handover detail"
-            style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 12, fontFamily: "inherit" }}
+            style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontFamily: "inherit" }}
           />
         </div>
         <button
           type="submit"
-          style={{ minHeight: 38, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+          style={{ minHeight: 38, padding: "0 16px", borderRadius: 8, background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
         >
           {completed ? "Update & re-sync" : "Record & sync to team"}
         </button>
@@ -1215,9 +1218,9 @@ function WonProjectCard({
 // At-a-glance counts on the facts card, so "is this ready to submit" is
 // answerable without scrolling past Tasks & Key positions to the report
 // cards below - same idea as a compliance dashboard's top-of-page summary.
-function SummaryChip({ count, label, bg, color }: { count: number; label: string; bg: string; color: string }) {
+function SummaryChip({ count, label, className }: { count: number; label: string; className: string }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color }}>
+    <span className={className} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600 }}>
       {count} {label}
     </span>
   );
@@ -1231,6 +1234,7 @@ function JumpLink({ href, label, variant = "default" }: { href: string; label: s
   return (
     <a
       href={href}
+      className={variant === "primary" ? "bg-accent text-accent-foreground border-accent" : "bg-card text-foreground border-border"}
       style={{
         flexShrink: 0,
         display: "inline-flex",
@@ -1242,9 +1246,8 @@ function JumpLink({ href, label, variant = "default" }: { href: string; label: s
         fontWeight: variant === "primary" ? 700 : 600,
         textDecoration: "none",
         whiteSpace: "nowrap",
-        background: variant === "primary" ? "#D97706" : "#FFFFFF",
-        color: variant === "primary" ? "#FFFFFF" : "#16233B",
-        border: variant === "primary" ? "1px solid #D97706" : "1px solid #E3E6EA",
+        borderWidth: 1,
+        borderStyle: "solid",
       }}
     >
       {label}
@@ -1255,14 +1258,14 @@ function JumpLink({ href, label, variant = "default" }: { href: string; label: s
 function ErrorBanner({ message }: { message: string }) {
   return (
     <div
+      className="bg-destructive/10 border-destructive/30 text-destructive"
       style={{
-        background: "#FEE2E2",
-        border: "1px solid #FCA5A5",
+        borderWidth: 1,
+        borderStyle: "solid",
         borderRadius: 9,
         padding: "11px 16px",
         marginBottom: 16,
         fontSize: 13,
-        color: "#B91C1C",
         display: "flex",
         alignItems: "center",
         justifyContent: "space-between",
@@ -1279,28 +1282,26 @@ function ErrorBanner({ message }: { message: string }) {
 function ReportCard({
   title,
   count,
-  accent,
-  bg,
+  className,
   emptyText,
   children,
 }: {
   title: string;
   count: number;
-  accent: string;
-  bg: string;
+  className: string;
   emptyText: string;
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "14px 16px", minWidth: 0 }}>
+    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 11, padding: "14px 16px", minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{title}</div>
-        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 20, height: 20, padding: "0 6px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: bg, color: accent }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{title}</div>
+        <span className={className} style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 20, height: 20, padding: "0 6px", borderRadius: 100, fontSize: 11, fontWeight: 700 }}>
           {count}
         </span>
       </div>
       {count === 0 ? (
-        <div style={{ fontSize: 12, color: "#8A93A0", paddingTop: 6 }}>{emptyText}</div>
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)", paddingTop: 6 }}>{emptyText}</div>
       ) : (
         <div>{children}</div>
       )}
