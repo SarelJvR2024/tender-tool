@@ -1,10 +1,8 @@
 import Link from "next/link";
 import { WizardShell } from "./WizardShell";
-import { PLAN_LABEL, priceForPlanZar, trialDaysLeft, type CompanySubscriptionRow, type PlanTier } from "@/lib/billing";
+import { PAYABLE_PLAN_TIERS, PLAN_LABEL, priceForPlanZar, trialDaysLeft, type CompanySubscriptionRow } from "@/lib/billing";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-
-const PLANS: PlanTier[] = ["pro", "sanral_pro"];
 
 /**
  * New, additive step (not in the original 5-step wizard) - Sarel's PayFast
@@ -24,12 +22,12 @@ export function Step6({ subscription }: { subscription: CompanySubscriptionRow |
       step={6}
       description={
         daysLeft !== null
-          ? `You're on a free ${daysLeft}-day trial of SANRAL Pro already - subscribe now, or skip and decide later from Billing.`
+          ? `You're on a free ${daysLeft}-day trial of Professional already - subscribe now, or skip and decide later from Billing.`
           : "Subscribe now, or skip and decide later from Billing."
       }
     >
       <div className="mb-5 flex flex-col gap-3">
-        {PLANS.map((plan) => (
+        {PAYABLE_PLAN_TIERS.map((plan) => (
           <div key={plan} className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
             <div>
               <div className="text-sm font-semibold text-foreground">{PLAN_LABEL[plan]}</div>
@@ -37,7 +35,7 @@ export function Step6({ subscription }: { subscription: CompanySubscriptionRow |
             </div>
             <Link
               href={`/api/billing/checkout?plan=${plan}&interval=monthly`}
-              className={cn(buttonVariants({ variant: plan === "sanral_pro" ? "accent" : "outline" }), "h-10 shrink-0")}
+              className={cn(buttonVariants({ variant: plan === "professional" ? "accent" : "outline" }), "h-10 shrink-0")}
             >
               Subscribe
             </Link>

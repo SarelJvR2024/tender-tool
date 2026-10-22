@@ -6,6 +6,64 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
+is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
+R2,990/Business R4,990/Enterprise - that one's correct") - the full reconciliation (migration `0083`,
+real usage-limit gating, the homepage/billing-page rewrite) is written up in detail and verified
+against a real Postgres, but it's sitting on **PR #71** (draft), not yet in `main` - this file's own
+"current real state" promise means not claiming it's done here until that PR actually merges. `main`
+itself is unchanged since the last pass (no new commits); full re-verification: `typecheck`/`lint`
+clean, `npx vitest run` (77/77 - PR #71's own 4 new cases aren't in this count yet, correctly), a real
+`rm -rf .next && npm run build` clean. Nothing new to flag beyond watching PR #71 to merge.
+
+**Pricing conflict resolved, 2026-10-22 ~08:15 UTC - Sarel confirmed directly: "Starter R1,490/
+Professional R2,990/Business R4,990/Enterprise - that one's correct."** Reconciled every place the
+old, unconfirmed watch/pro/sanral_pro scheme (R0/R1,490/R3,950, from `app/page.tsx`'s pre-existing
+`PRICING_TIERS`, PR #60's own best-effort pick when it had two conflicting briefs and no live source
+to trust) was still live:
+
+- **Migration `0083_finalize_pricing_tiers_and_usage_limits.sql`**: renames `plan_tier` to
+  `starter`/`professional`/`business`/`enterprise` (remapping any existing rows - none expected, this
+  schema has never run against a live Supabase project), and - closing the gap `app/AGENTS.md`'s own
+  "PayFast billing" entry flagged as deliberately deferred future work - adds real `max_users`/
+  `max_packs_per_month` columns, a `current_period_start` column (0078 never had one; without it
+  there's no way to know where "this billing period" starts), `tt_plan_limits()` (the one place the
+  per-tier numbers live in SQL), and two new gating functions: `company_packs_this_period()` and
+  `company_can_request_pack()` (the trial's one-pack-total cap, or an active plan's monthly
+  allowance - the single source of truth both pack-request actions now call before inserting a job).
+  `start_company_trial()`/`start_payfast_checkout()`/`apply_payfast_itn()` (including its Finding
+  51/52 rescue path) all updated to the new tier names and to set/restore the new limit columns.
+- **Verified against a real Postgres, not just read**: fresh 73-migration replay (clean), the full
+  real-Postgres tenant-isolation suite (237/237, confirms the rename doesn't disturb PR #20's
+  employee-role isolation), and a focused 8-check behavioral script covering the exact scenarios that
+  matter here - trial defaults to Professional/5/15, the trial's one-pack-total cap, each self-serve
+  tier's checkout setting the right limits, Enterprise correctly rejected from self-serve checkout, a
+  successful ITN activating with the right limits AND `current_period_start` set, pack-counting
+  correctly scoped to the new period (not counting a pack from before it), and - a direct regression
+  check on Finding 51/52's own rescue logic under the new tier names - a stale `FAILED` for a
+  superseded attempt still correctly rejected, leaving the already-active subscription untouched.
+- **Usage gating, built for the first time**: `requestSubmissionPack()` (`actions.ts`) and
+  `requestJob()`'s `generate_pack` path (`general-actions.ts`) both now call
+  `company_can_request_pack()` before inserting a job; `createInvite()` (`company/team/actions.ts`)
+  now checks the seat cap (members + pending invites) before creating an invite. None of this existed
+  before this pass - "the pricing structure" and "the limits it implies are actually enforced" were
+  two different, separately-tracked gaps.
+- **`app/page.tsx`'s `PRICING_TIERS`** rewritten with Sarel's own verbatim tier copy (the real
+  per-tier bullets, not the placeholder wording this array carried since before the conflict), now 4
+  cards (was 3) with Enterprise routing to a `mailto:` contact link rather than `/signup`.
+  `lib/billing.ts`'s `PLAN_LIMITS`/`PLAN_MONTHLY_ZAR` and migration `0083`'s `tt_plan_limits()` are
+  the two other copies of these same numbers - three total, deliberately never imported across the
+  app/database boundary, each one's own test/replay is what catches drift, not a shared import.
+- **Full QA**: `npx tsc --noEmit`, `eslint`, `npx vitest run` (80/80, including 4 new `billing.spec.ts`
+  cases), every `*.test.ts` individually (CI's real invocation), a full Python `test_*.py` sweep, and
+  a real `rm -rf .next && npm run build` - all clean.
+- **Not done / open for Sarel**: the marketing plan (`docs/strategy/Marketing-GTM-Plan.md`, PR #58)
+  still needs its own "pricing conflict" flag replaced with a plain confirmation - separate, small
+  follow-up commit on that same branch, not bundled into this one. PayFast's own native recurring-
+  billing fields (`subscription_type`/`frequency`/`billing_date`/`cycles`, already wired up in PR
+  #60's checkout route) are unaffected by this rename - their own correctness was never this pass's
+  concern.
+
 **Standing review pass, 2026-10-22 ~06:17 UTC: quiet pass, full QA sweep clean.** Orientation found
 one routine design-token migration PR (#70, cover-page preview) merged since the last pass - no
 overlap with anything else in flight. Only PR #58 (marketing plan) remains open. Pricing-conflict
@@ -1083,6 +1141,38 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-fourth run): the brand-new per-plan bid-pack quota could be bypassed entirely by requesting faster than a worker finishes
+
+Orientation: synced a large batch landing the FINAL pricing resolution (migration `0083`:
+Starter/Professional/Business/Enterprise, real `max_users`/`max_packs_per_month` usage gating -
+closing the "deliberately deferred" gap `app/AGENTS.md` had flagged across several prior passes)
+plus a routine design-token PR (#72). Went straight at the brand-new usage-gating functions -
+exactly the "just landed, largely untested" shape this rotation keeps finding real bugs in.
+
+**Finding 53 (CONFIRMED, FIXED, severe).** `company_can_request_pack()`/`company_packs_this_period()`
+(0083) only counted `status = 'ready'` (completed) bid packs - a job sitting `requested`/
+`generating` (the normal state between insert and an async worker finishing it, which can take
+well over the worker's own ~30s poll interval) was invisible to the gate. Reproduced against a
+real local Postgres running 0083's exact functions: a trialing company (one pack total, ever)
+requesting 5 different tenders' packs in a row got `true` all 5 times and all 5 jobs inserted; an
+active Starter plan (5/month) let 8 through. Each of those is real, chargeable work the moment a
+worker claims it (LibreOffice, Anthropic API calls) - a direct cost-control bypass on the exact
+feature the new pricing exists to meter, reachable by ordinary multi-tender usage, not a timing
+attack.
+
+**Fix:** new migration `0084_pack_quota_counts_in_flight_jobs.sql` - both functions now count
+`requested`/`generating`/`ready` together, excluding only `failed` (so a worker crash never costs
+the company its own quota).
+
+**Verified against a real database, including the "doesn't over-correct" case:** re-ran both
+flood scenarios post-fix - trial correctly capped at exactly 1, Starter at exactly 5 - then
+confirmed a legitimate retry after a failure still works (marking a job `failed` immediately
+re-opens the gate; one `ready` + one `failed` + three still `requested` out of a 5-cap still
+correctly allows a 6th request).
+
+**Regression:** no TypeScript file changed - full app suite (`npx vitest run`): 8 files, 80
+tests, unchanged.
 
 ## This pass (2026-10-22, standing QA/robustness review - sixty-third run): closed the residual PayFast edge case a sibling pass flagged on Finding 51
 

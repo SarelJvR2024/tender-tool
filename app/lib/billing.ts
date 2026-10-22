@@ -2,19 +2,22 @@
 // unit-tested (billing.spec.ts), same "one pure core, read by every surface"
 // convention as lib/readiness.ts and lib/documentExpiry.ts.
 //
-// Prices are copied from app/page.tsx's own PRICING_TIERS - the ONLY
-// numbers this file is allowed to agree with. An earlier research pass for
-// this piece of work named a different 4-tier scheme (Starter/Professional/
-// Roads & Civils/Enterprise) that does not exist anywhere in this
-// codebase - confirmed by reading app/page.tsx itself and
-// docs/strategy/Marketing-Pricing-Strategy.md (the actual pricing research
-// behind the real PRICING_TIERS), neither of which has ever named those 4
-// tiers or those prices. Per this piece's own scope boundary ("do not
-// touch app/page.tsx... leaving [PRICING_TIERS] exactly as currently
-// written for you to make true"), this file matches the real, current
-// PRICING_TIERS - see app/AGENTS.md's own dated entry for this discrepancy.
+// Pricing confirmed by Sarel directly (2026-10-22, in chat) after a real
+// conflict surfaced across sessions: Starter R1,490/mo, Professional
+// R2,990/mo ("the plan most companies start on"), Business R4,990/mo,
+// Enterprise (custom, priced on request - never self-serve). Full feature
+// parity across every tier - plans differ only by seat count (max_users)
+// and monthly bid-pack volume (max_packs_per_month), both now real,
+// enforced limits (migration 0083 closes the gap this file's own earlier
+// header comment, and app/AGENTS.md, flagged as deliberately deferred).
+//
+// PLAN_LIMITS is mirrored in (and cross-checked by this file's own test
+// against) migration 0083's tt_plan_limits() SQL function - the two are
+// never imported across the app/database boundary, same "two copies,
+// checked against each other" convention this file's pricing already used
+// for app/page.tsx.
 
-export const PLAN_TIERS = ["watch", "pro", "sanral_pro"] as const;
+export const PLAN_TIERS = ["starter", "professional", "business", "enterprise"] as const;
 export type PlanTier = (typeof PLAN_TIERS)[number];
 
 export const BILLING_INTERVALS = ["monthly", "yearly"] as const;
@@ -25,34 +28,50 @@ export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];
 
 export const TRIAL_DAYS = 14;
 
-// The trial defaults every new company onto the full product (Sarel's own
-// "full access" wording for the trial), not the free Watch tier - a trial
-// of the free tier would show nothing worth trialing.
-export const TRIAL_DEFAULT_PLAN: PlanTier = "sanral_pro";
+// The trial defaults every new company onto Professional - "the plan most
+// companies start on" (Sarel's own wording) - rather than Starter or
+// Business, since every tier now has identical feature access and there's
+// no more "default to the premium tier so they see everything" reasoning
+// (that only applied under the old watch/pro/sanral_pro scheme, where Watch
+// was genuinely limited). The one real trial limit stays a single bid pack
+// total, enforced in SQL by company_can_request_pack() - not a function of
+// this constant.
+export const TRIAL_DEFAULT_PLAN: PlanTier = "professional";
 
 export const PLAN_LABEL: Record<PlanTier, string> = {
-  watch: "Tender Watch",
-  pro: "Tender Pro",
-  sanral_pro: "SANRAL Pro",
+  starter: "Starter",
+  professional: "Professional",
+  business: "Business",
+  enterprise: "Enterprise",
 };
 
-// Rand, excl. VAT - app/page.tsx's PRICING_TIERS, re-typed as numbers here
-// so this file can do arithmetic with them (that page keeps its own
-// display strings, e.g. "R1,490", unchanged - no shared import, since that
-// page is explicitly off-limits for this piece and the two are checked
-// against each other by this file's own test, not a runtime import).
-export const PLAN_MONTHLY_ZAR: Record<PlanTier, number> = {
-  watch: 0,
-  pro: 1490,
-  sanral_pro: 3950,
+// Rand, excl. VAT. Enterprise is null - priced on request, never a fixed
+// number.
+export const PLAN_MONTHLY_ZAR: Record<PlanTier, number | null> = {
+  starter: 1490,
+  professional: 2990,
+  business: 4990,
+  enterprise: null,
 };
 
-// Only these two are ever something to actually subscribe/pay for - Watch
-// is free and needs no PayFast checkout at all.
-export const PAYABLE_PLAN_TIERS: readonly PlanTier[] = ["pro", "sanral_pro"];
+export type PlanLimits = { maxUsers: number | null; maxPacksPerMonth: number | null };
 
-export function isPayablePlan(plan: PlanTier): boolean {
-  return PAYABLE_PLAN_TIERS.includes(plan);
+// null/null for enterprise - scoped and quoted per customer, not a fixed
+// self-serve number.
+export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
+  starter: { maxUsers: 2, maxPacksPerMonth: 5 },
+  professional: { maxUsers: 5, maxPacksPerMonth: 15 },
+  business: { maxUsers: 10, maxPacksPerMonth: 30 },
+  enterprise: { maxUsers: null, maxPacksPerMonth: null },
+};
+
+// Only these three are ever something to actually subscribe/pay for via
+// PayFast - Enterprise is priced on request (contact us), never a
+// self-serve checkout.
+export const PAYABLE_PLAN_TIERS = ["starter", "professional", "business"] as const satisfies readonly PlanTier[];
+
+export function isPayablePlan(plan: PlanTier): plan is (typeof PAYABLE_PLAN_TIERS)[number] {
+  return (PAYABLE_PLAN_TIERS as readonly PlanTier[]).includes(plan);
 }
 
 // "Yearly billing at 2 months free": paying for 10 months' worth up front
@@ -63,15 +82,19 @@ export function yearlyPriceZar(monthlyZar: number): number {
   return monthlyZar * 10;
 }
 
-export function priceForPlanZar(plan: PlanTier, interval: BillingInterval): number {
-  const monthly = PLAN_MONTHLY_ZAR[plan];
+// Payable tiers only - Enterprise has no fixed price (PLAN_MONTHLY_ZAR.enterprise
+// is null) and is never passed here; callers that iterate pricing cards
+// branch on isPayablePlan() first, same as the checkout route and /billing
+// page already do.
+export function priceForPlanZar(plan: (typeof PAYABLE_PLAN_TIERS)[number], interval: BillingInterval): number {
+  const monthly = PLAN_MONTHLY_ZAR[plan] as number;
   return interval === "yearly" ? yearlyPriceZar(monthly) : monthly;
 }
 
 // PayFast wants a plain string with exactly 2 decimal places, e.g. "1490.00" -
 // never thousands separators (app/page.tsx's own "R1,490" display string
 // would be rejected by PayFast's own amount validation).
-export function priceForPayfastAmount(plan: PlanTier, interval: BillingInterval): string {
+export function priceForPayfastAmount(plan: (typeof PAYABLE_PLAN_TIERS)[number], interval: BillingInterval): string {
   return priceForPlanZar(plan, interval).toFixed(2);
 }
 
@@ -80,6 +103,8 @@ export type CompanySubscriptionRow = {
   billingInterval: BillingInterval;
   status: SubscriptionStatus;
   trialEndsAt: string | null;
+  maxUsers: number | null;
+  maxPacksPerMonth: number | null;
 };
 
 // A stored "trialing" status doesn't flip to "past_due" by itself the
@@ -95,11 +120,12 @@ export function effectiveSubscriptionStatus(sub: CompanySubscriptionRow, now: Da
   return sub.status;
 }
 
-// The one honest first-cut enforcement rule this piece builds (see
-// app/AGENTS.md): trialing/active keep full access; past_due/cancelled
-// (including a trial that lapsed with no payment on file) show a banner,
-// not a silent lock-out and not silent continued access either. No
-// per-feature/per-tier gating here - flagged as future work.
+// trialing/active keep full access; past_due/cancelled (including a trial
+// that lapsed with no payment on file) show a banner, not a silent
+// lock-out and not silent continued access either. Per-tier usage gating
+// (seats, bid packs/month) is separate and real now - company_can_request_pack()
+// and the seat check in app/company/team/actions.ts (migration 0083) - this
+// function is about the SUBSCRIPTION's own state, not a specific limit.
 export function isSubscriptionLapsed(sub: CompanySubscriptionRow, now: Date = new Date()): boolean {
   const status = effectiveSubscriptionStatus(sub, now);
   return status === "past_due" || status === "cancelled";

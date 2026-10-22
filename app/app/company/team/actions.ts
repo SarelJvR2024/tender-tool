@@ -41,6 +41,20 @@ export async function createInvite(formData: FormData) {
   if (!role || !ROLES.includes(role)) fail("Choose a role for this invite.");
   const linkedPersonId = str(formData, "linked_person_id");
 
+  // Billing (0083): a plan's "N people" is a seat cap - count existing
+  // members plus already-pending invites (not yet redeemed) against it,
+  // same seat-counting logic whatever role is being added.
+  const { data: sub } = await supabase.from("company_subscriptions").select("max_users").eq("company_id", companyId).maybeSingle();
+  if (sub?.max_users !== null && sub?.max_users !== undefined) {
+    const [{ count: memberCount }, { count: pendingCount }] = await Promise.all([
+      supabase.from("company_members").select("id", { count: "exact", head: true }).eq("company_id", companyId),
+      supabase.from("company_invites").select("id", { count: "exact", head: true }).eq("company_id", companyId).is("accepted_at", null),
+    ]);
+    if ((memberCount ?? 0) + (pendingCount ?? 0) >= sub.max_users) {
+      fail(`Your plan allows ${sub.max_users} people - upgrade on the Billing page to add more.`);
+    }
+  }
+
   const { error } = await supabase.from("company_invites").insert({
     company_id: companyId,
     email: str(formData, "email"),
