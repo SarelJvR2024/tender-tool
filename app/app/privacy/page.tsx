@@ -107,8 +107,7 @@ export default function PrivacyPage() {
             Every customer&apos;s data is scoped by row-level security in the database, not only by the app&apos;s
             interface - meaning even a direct database query from one company&apos;s session cannot read another
             company&apos;s rows. File storage paths are similarly confined to each company&apos;s own folder. These
-            protections were independently audited and are covered by an automated test suite that runs on every
-            change to the database.
+            protections are covered by an automated test suite that runs on every change to the database.
           </p>
         </div>
 
@@ -117,9 +116,8 @@ export default function PrivacyPage() {
           <p className="text-sm leading-relaxed text-warning">
             In the interest of being straightforward rather than overstating where things stand: we have not yet
             registered an Information Officer with the Information Regulator, finalised a data retention period for
-            generated documents, or confirmed the hosting region for every provider above. None of these affect how
-            your data is protected today - the technical safeguards above are already built and tested - but we are
-            completing this paperwork and will update this notice as each item is finished.
+            generated documents, or confirmed the hosting region for every provider above. We are completing this
+            paperwork and will update this notice as each item is finished.
           </p>
         </div>
 
