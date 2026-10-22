@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Check, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { Logo } from "./_components/Logo";
+import { LogoLockup } from "./_components/Logo";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -129,9 +129,8 @@ export default async function Home() {
       {/* Header + hero */}
       <header className="bg-foreground">
         <div className="mx-auto flex max-w-[1040px] flex-wrap items-center justify-between gap-3 px-5 py-4">
-          <Link href="/" className="flex items-center gap-3 text-white no-underline">
-            <Logo size={28} variant="light" />
-            <span className="text-base font-semibold">Tender Ready</span>
+          <Link href="/" className="flex items-center text-white no-underline">
+            <LogoLockup height={26} surface="dark" />
           </Link>
           <div className="flex items-center gap-2.5">
             <Link href="/tools" className="inline-flex min-h-11 items-center px-1 text-[13px] text-white/75 no-underline hover:text-white">

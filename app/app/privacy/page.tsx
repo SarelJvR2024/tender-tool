@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Logo } from "../_components/Logo";
+import { LogoLockup } from "../_components/Logo";
 
 export const metadata = {
   title: "Privacy notice - Tender Ready",
@@ -25,9 +25,8 @@ export default function PrivacyPage() {
     <div className="min-h-screen bg-background">
       <div className="bg-foreground px-5 py-4">
         <div className="mx-auto flex max-w-[760px] items-center justify-between">
-          <Link href="/" className="flex items-center gap-3 text-white no-underline">
-            <Logo size={28} variant="light" />
-            <span className="text-base font-semibold">Tender Ready</span>
+          <Link href="/" className="flex items-center text-white no-underline">
+            <LogoLockup height={26} surface="dark" />
           </Link>
           <Link href="/signup" className="inline-flex min-h-11 items-center text-[13px] font-semibold text-accent no-underline">
             Start free &rarr;
