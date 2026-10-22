@@ -152,6 +152,48 @@ def part1():
           sao.without_typos([37099037.38, 38015435.0, 39057887.0, 391453554.20]) == [37099037.38, 38015435.0, 39057887.0])
     check("names compare without legal-form noise", sao.norm_name("Klipcorp Pty Ltd") == sao.norm_name("KLIPCORP (PTY) LTD") == "KLIPCORP")
 
+    # A real full backfill run (2026-10-22) crashed store() outright on a
+    # numeric field overflow in winner_vs_median (0053's own numeric(8,4) -
+    # max ~9999.9999): without_typos() screens the general bid list before
+    # the median is taken, but never the winner's OWN recorded amount - a
+    # handful of tiny erroneous "priced" entries (placeholder amounts like
+    # R1/R2/R3, seen on real portal rows) drag the median down, and even a
+    # perfectly legitimate winner amount then divides out to a ratio the
+    # column can't hold. This reproduces that shape directly through merge(),
+    # not just without_typos() in isolation.
+    overflow_part = {
+        "source": "etenders_portal", "source_url": "https://example/overflow-case", "attribution": None,
+        "reference": "RFQ-OVERFLOW-1", "title": "Overflow regression case", "buyer": "Test Buyer",
+        "ocid": "ocds-test-overflow", "procurement_type": None, "province": None,
+        "closing_date": None, "award_date": None,
+        "winner": "Winner Firm", "winner_amount_zar": 5_000_000.0, "winner_count": 1,
+        "bidders": [
+            {"name": "Firm A", "amounts": [{"column": "Amount", "amount_zar": 1.0, "amount_raw": None}]},
+            {"name": "Firm B", "amounts": [{"column": "Amount", "amount_zar": 2.0, "amount_raw": None}]},
+            {"name": "Firm C", "amounts": [{"column": "Amount", "amount_zar": 3.0, "amount_raw": None}]},
+            {"name": "Winner Firm", "amounts": [{"column": "Amount", "amount_zar": 5_000_000.0, "amount_raw": None}]},
+        ],
+        "bidders_source": "etenders_bidders", "register_columns": 1, "notes": [],
+        "competitive": True,
+    }
+    overflow_row = sao.merge("ocid:ocds-test-overflow", [overflow_part])
+    check("winner's own amount, not just the general list, is checked against the outlier bound",
+          overflow_row["winner_vs_median"] is None and overflow_row["winner_rank"] is None
+          and overflow_row["lowest_bid_won"] is None
+          and any("winner's own recorded amount" in n for n in overflow_row["data_notes"]),
+          f"{overflow_row['winner_vs_median']!r} {overflow_row['data_notes']}")
+    normal_part = {
+        **overflow_part, "source_url": "https://example/normal-case", "ocid": "ocds-test-normal",
+        "winner": "Firm D", "winner_amount_zar": 42_000.0,
+        "bidders": [
+            {"name": "Firm A", "amounts": [{"column": "Amount", "amount_zar": 40_000.0, "amount_raw": None}]},
+            {"name": "Firm B", "amounts": [{"column": "Amount", "amount_zar": 41_000.0, "amount_raw": None}]},
+            {"name": "Firm D", "amounts": [{"column": "Amount", "amount_zar": 42_000.0, "amount_raw": None}]},
+        ],
+    }
+    check("...and a column-legal case still computes normally (not over-suppressed)",
+          sao.merge("ocid:ocds-test-normal", [normal_part])["winner_vs_median"] is not None)
+
 
 # ------------------------------------------------------------------ Part 2
 

@@ -310,9 +310,24 @@ def merge(key, parts, existing_first_seen=None):
         row["median_bid_zar"] = round(statistics.median(s), 2)
         if wi is not None and bidders[wi]["amounts"] and bidders[wi]["amounts"][0]["amount_zar"]:
             wa = bidders[wi]["amounts"][0]["amount_zar"]
-            row["winner_rank"] = 1 + sum(1 for a in s if a < wa)
-            row["winner_vs_median"] = round(wa / row["median_bid_zar"], 4)
-            row["lowest_bid_won"] = row["winner_rank"] == 1
+            # A real backfill run crashed the whole store() on a numeric
+            # overflow: without_typos() (above) screens the general bid
+            # list before the median is taken, but never the WINNER's own
+            # amount - a typo'd winner amount (e.g. a missing decimal, an
+            # OCR/parsing slip) could still divide out to a ratio
+            # winner_vs_median's own numeric(8,4) column (0053) can't hold
+            # (max ~9999.9999), and with fewer than 3 bids without_typos()
+            # doesn't filter anything at all, so this isn't only a
+            # never-happens case. Same OUTLIER_FACTOR bound as the general
+            # list, applied to the winner's own amount specifically.
+            if row["median_bid_zar"] / OUTLIER_FACTOR <= wa <= row["median_bid_zar"] * OUTLIER_FACTOR:
+                row["winner_rank"] = 1 + sum(1 for a in s if a < wa)
+                row["winner_vs_median"] = round(wa / row["median_bid_zar"], 4)
+                row["lowest_bid_won"] = row["winner_rank"] == 1
+            else:
+                notes.append(f"The winner's own recorded amount is more than {OUTLIER_FACTOR}x away from the "
+                             "median bid (most likely a typing error on the register) - left out of the "
+                             "field-wide numbers, shown as published.")
     if not row["competitive"]:
         notes.append(f"The buyer recorded this as '{row['procurement_type']}' - no open price competition.")
     row["bidders"] = bidders
