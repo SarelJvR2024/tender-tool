@@ -48,39 +48,47 @@ export async function CvCompare({ tenderId, positionCode, personId }: { tenderId
     });
   }
 
+  const actionLinkClass = "text-xs font-semibold text-foreground underline underline-offset-2 hover:text-accent";
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 8 }}>
-      <div style={{ border: "1px solid #E3E6EA", borderRadius: 9, padding: "8px 10px", minWidth: 0 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: "#5B6472", letterSpacing: 0.3, marginBottom: 2 }}>ORIGINAL (as uploaded)</div>
+    <div className="mt-2 grid grid-cols-2 gap-2.5">
+      <div className="min-w-0 rounded-lg border border-border px-2.5 py-2">
+        <div className="mb-0.5 text-[10px] font-bold tracking-wide text-muted-foreground uppercase">Original (as uploaded)</div>
         {original ? (
           <>
-            <div style={{ fontSize: 12, color: "#16233B", wordBreak: "break-word" }}>{original.original_filename}</div>
+            <div className="text-xs break-words text-foreground">{original.original_filename}</div>
             {signed[original.storage_path] && (
-              <a href={signed[original.storage_path]} style={{ fontSize: 12, color: "#D97706", fontWeight: 600 }}>Download</a>
+              <a href={signed[original.storage_path]} className={actionLinkClass}>
+                Download
+              </a>
             )}
           </>
         ) : (
-          <div style={{ fontSize: 12, color: "#8A93A0" }}>No CV uploaded yet.</div>
+          <div className="text-xs text-muted-foreground">No CV uploaded yet.</div>
         )}
-        <div style={{ marginTop: 4 }}>
-          <Link href={`/people/${personId}#cv-documents`} style={{ fontSize: 11, color: "#5B6472", textDecoration: "underline" }}>
+        <div className="mt-1">
+          <Link href={`/people/${personId}#cv-documents`} className="text-[11px] text-muted-foreground underline underline-offset-2">
             Edit on People page
           </Link>
         </div>
       </div>
-      <div style={{ border: "1px solid #E3E6EA", borderRadius: 9, padding: "8px 10px", minWidth: 0 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: "#5B6472", letterSpacing: 0.3, marginBottom: 2 }}>TAILORED (this tender)</div>
+      <div className="min-w-0 rounded-lg border border-border px-2.5 py-2">
+        <div className="mb-0.5 text-[10px] font-bold tracking-wide text-muted-foreground uppercase">Tailored (this tender)</div>
         {tailored ? (
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <div className="flex flex-wrap gap-2.5">
             {tailored.storage_path_pdf && signed[tailored.storage_path_pdf] && (
-              <a href={signed[tailored.storage_path_pdf]} style={{ fontSize: 12, color: "#D97706", fontWeight: 600 }}>PDF</a>
+              <a href={signed[tailored.storage_path_pdf]} className={actionLinkClass}>
+                PDF
+              </a>
             )}
             {tailored.storage_path_docx && signed[tailored.storage_path_docx] && (
-              <a href={signed[tailored.storage_path_docx]} style={{ fontSize: 12, color: "#D97706", fontWeight: 600 }}>Word</a>
+              <a href={signed[tailored.storage_path_docx]} className={actionLinkClass}>
+                Word
+              </a>
             )}
           </div>
         ) : (
-          <div style={{ fontSize: 12, color: "#8A93A0" }}>Not generated yet - use &quot;Generate tender-specific CV&quot; above.</div>
+          <div className="text-xs text-muted-foreground">Not generated yet - use &quot;Generate tender-specific CV&quot; above.</div>
         )}
       </div>
     </div>
