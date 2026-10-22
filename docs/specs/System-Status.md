@@ -6,6 +6,15 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-22 ~02:12 UTC: quiet pass, full QA sweep clean.** Orientation found
+Finding 50 fixed and merged since the last pass (deadline-reminder emails silently skipping every
+company but one per tender - migration `0080`) plus a routine design-token migration PR (#69) - both
+from other sessions, no overlap with anything else in flight. Only PR #58 (marketing plan) remains
+open. Pricing-conflict flag from two passes ago is still unresolved, still Sarel's call. Full
+re-verification: `typecheck`/`lint` clean, `npx vitest run` (77/77), every `*.test.ts` individually
+clean, full Python `test_*.py` sweep clean, real `rm -rf .next && npm run build` clean. Nothing new
+to flag.
+
 **Standing review pass, 2026-10-22 ~00:12 UTC: quiet pass, full QA sweep clean.** Orientation found
 PR #63 (onboarding Step 3/4 Continue-button fix) and #67 (Experience design-token migration sub-PR
 5/5) merged since the last pass - both routine, no overlap with anything else in flight. Only PR #58
