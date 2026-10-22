@@ -458,22 +458,51 @@ export default async function PersonDetailPage({
             <Field><label className={labelClass}>Email</label><input className={fieldClass} type="email" name="email" defaultValue={person?.email ?? ""} /></Field>
           </div>
 
-          <div className={`${sectionLabelClass} mt-4`}>Registrations</div>
-          <div className={gridClass}>
-            <Field><label className={labelClass}>ECSA level</label><input className={fieldClass} name="ecsa_level" defaultValue={person?.ecsa_level ?? ""} placeholder="e.g. Professional Engineer" /></Field>
-            <Field><label className={labelClass}>ECSA number</label><input className={fieldClass} name="ecsa_number" defaultValue={person?.ecsa_number ?? ""} /></Field>
-            <Field><label className={labelClass}>ECSA registration date</label><input className={fieldClass} type="date" name="ecsa_date" defaultValue={person?.ecsa_date ?? ""} /></Field>
-            <Field>
-              <label className={labelClass}>ECSA valid until / renewal due <ExpiryBadge status={expiryByBody.ECSA} /></label>
-              <input className={fieldClass} type="date" name="ecsa_expiry" defaultValue={person?.ecsa_expiry ?? ""} />
-            </Field>
-            <Field><label className={labelClass}>SACPCMP number</label><input className={fieldClass} name="sacpcmp_number" defaultValue={person?.sacpcmp_number ?? ""} /></Field>
-            <Field><label className={labelClass}>SACPCMP registration date</label><input className={fieldClass} type="date" name="sacpcmp_date" defaultValue={person?.sacpcmp_date ?? ""} /></Field>
-            <Field>
-              <label className={labelClass}>SACPCMP valid until / renewal due <ExpiryBadge status={expiryByBody.SACPCMP} /></label>
-              <input className={fieldClass} type="date" name="sacpcmp_expiry" defaultValue={person?.sacpcmp_expiry ?? ""} />
-            </Field>
-          </div>
+          <div className={`${sectionLabelClass} mt-4`}>Memberships and professional registrations</div>
+          {(() => {
+            // Spec v3 O23: ECSA/SACPCMP used to render unconditionally on
+            // every person, the exact "ECSA as the universal category"
+            // problem the spec calls out - a non-engineering company's staff
+            // saw two engineering-only registration bodies forced on them by
+            // default, same as SANRAL's ECSA requirement, even with nothing
+            // to enter. SACNASP/SAGC/the catalog bodies already solved this
+            // correctly (shown only if held or a tender asks); ECSA/SACPCMP
+            // now follow the same "shown if already held, else collapsed"
+            // rule. expiryByBody already carries an entry only when held or
+            // an expiry is on file (credentialExpiries(), line ~385) - the
+            // exact signal this needs, no new lookup required. Deliberately
+            // NOT wired to registrationsAskedFor() like SACNASP/SAGC are -
+            // that needs its own tender-side "does this position need an
+            // engineer" signal, a separate piece of work, not silently
+            // bundled into this one.
+            const ecsaOrSacpcmpHeld = "ECSA" in expiryByBody || "SACPCMP" in expiryByBody;
+            const fields = (
+              <div className={gridClass}>
+                <Field><label className={labelClass}>ECSA level</label><input className={fieldClass} name="ecsa_level" defaultValue={person?.ecsa_level ?? ""} placeholder="e.g. Professional Engineer" /></Field>
+                <Field><label className={labelClass}>ECSA number</label><input className={fieldClass} name="ecsa_number" defaultValue={person?.ecsa_number ?? ""} /></Field>
+                <Field><label className={labelClass}>ECSA registration date</label><input className={fieldClass} type="date" name="ecsa_date" defaultValue={person?.ecsa_date ?? ""} /></Field>
+                <Field>
+                  <label className={labelClass}>ECSA valid until / renewal due <ExpiryBadge status={expiryByBody.ECSA} /></label>
+                  <input className={fieldClass} type="date" name="ecsa_expiry" defaultValue={person?.ecsa_expiry ?? ""} />
+                </Field>
+                <Field><label className={labelClass}>SACPCMP number</label><input className={fieldClass} name="sacpcmp_number" defaultValue={person?.sacpcmp_number ?? ""} /></Field>
+                <Field><label className={labelClass}>SACPCMP registration date</label><input className={fieldClass} type="date" name="sacpcmp_date" defaultValue={person?.sacpcmp_date ?? ""} /></Field>
+                <Field>
+                  <label className={labelClass}>SACPCMP valid until / renewal due <ExpiryBadge status={expiryByBody.SACPCMP} /></label>
+                  <input className={fieldClass} type="date" name="sacpcmp_expiry" defaultValue={person?.sacpcmp_expiry ?? ""} />
+                </Field>
+              </div>
+            );
+            if (ecsaOrSacpcmpHeld) return fields;
+            return (
+              <details className="mb-2.5">
+                <summary className="flex min-h-11 cursor-pointer items-center py-1.5 text-xs font-semibold text-accent">
+                  + Add an ECSA or SACPCMP registration - only engineering-registered staff need these
+                </summary>
+                {fields}
+              </details>
+            );
+          })()}
           {(() => {
             const shown = CONDITIONAL_BODIES.filter((b) => (person && holdsRegistration(person, b)) || askedFor[b].length > 0);
             const hidden = CONDITIONAL_BODIES.filter((b) => !shown.includes(b));

@@ -23,7 +23,18 @@ import { uploadBatch, partitionBatch, type FileUploadState } from "../../_compon
  * finished uploading. The only button in this component is the recovery
  * action for a failed file - never a second generic "Upload" button.
  */
-export function UploadForm({ companyId }: { companyId: string }) {
+export function UploadForm({
+  companyId,
+  redirectTo = "/company/document-scan?saved=uploaded",
+  title,
+  hint,
+}: {
+  companyId: string;
+  /** Where to send the user once every file in a drop has registered for AI review. Spec v3 Batch 4: reused as-is from Experience, which stays on its own page instead of bouncing to /company/document-scan. */
+  redirectTo?: string;
+  title?: string;
+  hint?: string;
+}) {
   const [states, setStates] = useState<FileUploadState[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -46,7 +57,7 @@ export function UploadForm({ companyId }: { companyId: string }) {
         return;
       }
       setStates((prev) => prev.filter((s) => !succeeded.some((ok) => ok.file === s.file)));
-      router.push("/company/document-scan?saved=uploaded");
+      router.push(redirectTo);
       router.refresh();
     });
   }
@@ -66,8 +77,11 @@ export function UploadForm({ companyId }: { companyId: string }) {
   return (
     <div>
       <FileDropzone
-        title="Drop a folder's worth of documents here, or click to choose"
-        hint="CIDB certificate, B-BBEE certificate/affidavit, SARS TCS PIN letter, ID documents, CVs, bank confirmation letter, PI insurance, ISO 9001 certificate, project reference letters - whatever you already have, one upload at a time or all at once. PDF, Word or an image, up to 25 MB each."
+        title={title ?? "Drop a folder's worth of documents here, or click to choose"}
+        hint={
+          hint ??
+          "CIDB certificate, B-BBEE certificate/affidavit, SARS TCS PIN letter, ID documents, CVs, bank confirmation letter, PI insurance, ISO 9001 certificate, project reference letters - whatever you already have, one upload at a time or all at once. PDF, Word or an image, up to 25 MB each."
+        }
         acceptedExtensions={ACCEPTED_EXTENSIONS}
         multiple
         disabled={pending}

@@ -1128,3 +1128,105 @@ Screen 2 -> upload/skip -> Home as a real user. This is a significant UX restruc
 that previously worked end-to-end; the structural checks above (build success, middleware behavior,
 every stale link found and fixed, existing tests still green) are real evidence, but they are not the
 same as watching a real signed-in walkthrough.
+
+## Spec v3 Batch 4: Experience's shared intake + ECSA/SACPCMP no longer universal (O23, O24)
+
+Two independent pieces - see the PR for why they aren't split in two, if they are.
+
+### Part A: Experience leads with upload through the existing engine
+
+Confirmed before writing anything: the AI extraction spec v3 §8/§17 wants for reference letters
+already exists and already works - `experience_reference_letter` has been a real `DOCUMENT_KINDS`
+entry with its own field set (`onboardingScan.ts`) and its own confirm action
+(`confirmExperienceReferenceLetter`, `company/document-scan/actions.ts`, files straight into
+`experience_items`) since migration 0063. The gap the audit found was real but narrower than it
+looked: `/experience`'s own "Add experience" form never offered a path INTO that engine - it had its
+own separate upload, with zero extraction, always.
+
+Fixed by giving `/experience` a real entry point into the SAME engine, not a second one:
+- `UploadForm` (`company/document-scan/upload-form.tsx`) gained three optional props -
+  `redirectTo`, `title`, `hint` - all defaulting to its exact previous hardcoded values, so its one
+  existing caller (`company/document-scan/page.tsx`) and Batch 3's `AddDocumentsScreen` are
+  byte-identical in behaviour. Experience passes `redirectTo="/experience?uploaded=1"` so the user
+  never leaves the page.
+- `DocumentReviewCard` (`company/document-scan/review.tsx`) gained an optional `returnTo` prop; when
+  set, a hidden `return_to` field rides along with every one of its forms (confirm/skip/discard).
+- `confirmExperienceReferenceLetter`, `confirmVaultDocument`, `confirmIdDocument`, `confirmCvHandoff`,
+  `skipOnboardingDocument`, `discardOnboardingDocument` (`company/document-scan/actions.ts`) all now
+  read that optional `return_to` via a new `backTo()` helper and redirect there instead of the
+  hardcoded `/company/document-scan`, falling back to the old constant when it's absent - every
+  existing caller (Company vault's own document-scan page) omits it, so their behaviour is
+  unchanged. `backTo()` only honours a same-origin relative path (`startsWith("/")`, rejects
+  `//host` protocol-relative forms) - this is user-supplied form data landing in a `redirect()` call,
+  so it gets the same open-redirect guard any such value needs.
+- `/experience/page.tsx` now queries its own `company_id` via the real `company_members` lookup
+  every other signed-in page uses (it used to read `all[0]?.company_id` from the experience list
+  itself - null for exactly the brand-new company with nothing in the Library yet, the one case this
+  feature matters most for), lists its own `onboarding_document_results` pending rows filtered to
+  `document_kind = 'experience_reference_letter'`, and renders them with the same
+  `DocumentReviewCard` Company vault's document-scan page uses - `returnTo="/experience"`, `principals`/
+  `people` passed as `[]` since this kind's render path never reads them. The pre-existing manual
+  "Add experience" form stays, relabelled "Enter a project manually" - the explicit secondary
+  alternative spec §8 asks for, not removed.
+
+**Known, inherited limitations - not introduced by this batch, not silently claimed fixed**:
+`confirmExperienceReferenceLetter` always INSERTS a new `experience_items` row; it has no "does this
+project already exist, is this an update" conflict-detection, and it never splits one uploaded
+document into several proposed projects even when the letter plausibly describes more than one.
+Spec §8/§17 asks for both. Building either is new engine capability (deciding whether this and an
+existing row are "the same project", or segmenting one PDF into N proposed records), not a UI wiring
+job - exactly the kind of thing this batch's own instructions said not to invent from scratch.
+Flagging it here rather than claiming full compliance.
+
+### Part B: ECSA/SACPCMP stop being the universal category (O23)
+
+**No schema change needed or made** - checked first, as instructed. The company-level
+`registration_types`/`held_registrations` catalog (0050) already supports a `person_id`
+(`loadHeldCatalogRegistrations` already queries it by person), and five bodies (SACAP, SACPLAN,
+SACQSP, SACPVP, PSIRA) already use it person-scoped with zero changes needed. ECSA and SACPCMP
+already have their own dedicated `people` columns (`ecsa_*`/`sacpcmp_*`, migration 0035) - exactly
+the same shape SACNASP/SAGC already use successfully as "conditional" bodies. The actual gap: ECSA
+and SACPCMP were the only two bodies in the whole registrations system that were NEVER conditional -
+`/people/[id]/page.tsx` rendered their 6 fields unconditionally on every person, and `/people/page.tsx`
+put a warning chip ("No ECSA on file") on every person lacking one, in both cases regardless of
+whether the company does engineering work or any tender asks for it at all. That's the literal "ECSA
+as the universal category" the spec names.
+
+**Deliberately did NOT touch** `CONDITIONAL_BODIES`/`ConditionalBody`/`bodyKeys()`/`isColumnBody()`
+(`lib/personCredentials.ts`) or anything importing them for compliance purposes
+(`lib/tenderCompliance.ts`, `lib/generalTender.ts`, `tenders/[id]/compliance-data.ts`,
+`tenders/[id]/general-workspace.tsx`) - `bodyKeys()`'s `${k}_category` pattern doesn't hold for ECSA
+(`ecsa_level`, not `ecsa_category`) or SACPCMP (no category field at all), so forcing them into that
+exact mechanism would have broken it for both; more importantly, those four files are compliance-
+/readiness-adjacent, and the ground rule for every batch tonight is not to touch tender-assessment
+surface without Sarel's own review, schema change or not. Scoped down to a change that provably
+cannot affect them:
+- `/people/[id]/page.tsx`: ECSA/SACPCMP's 6 fields now render inside the exact same `<details>`
+  disclosure pattern SACNASP/SAGC already use, shown by default only when `expiryByBody` already has
+  an `ECSA`/`SACPCMP` entry (i.e. `credentialExpiries()` - existing, unchanged - found the person
+  already holds one or has an expiry on file). A collapsed `<details>` still submits its fields
+  normally on save (confirmed: HTML form fields inside a closed `<details>` are NOT excluded from
+  `FormData`, only visually hidden) - `savePerson` needed no changes.
+  Section heading renamed "Registrations" -> "Memberships and professional registrations".
+- `/people/page.tsx`: dropped the unconditional "No ECSA on file" warning chip entirely - the
+  positive "ECSA: <level>" chip (shown only when actually held) already existed and is unchanged.
+- **Deliberately NOT done**: wiring ECSA into `registrationsAskedFor()`/`AskedFor` the way
+  SACNASP/SAGC/catalog bodies are (so a SANRAL tender asking for a Professional Engineer would
+  auto-reveal the disclosure). That needs a new "does this position need ECSA" signal on the tender
+  side - compliance-adjacent surface, out of this batch's safe scope. Today, ECSA/SACPCMP show
+  automatically only when already held; a user adding a brand-new engineer must open the disclosure
+  themselves. Noted as a real, smaller follow-up, not silently solved.
+
+**Tested**: `npm run verify` 0 errors (same 3 pre-existing unrelated warnings), `npx vitest run`
+115/115, full `node:test` sweep 76/76 (no count change - this batch is composition/conditional
+rendering, no new pure-function logic to unit test). Live dev server + curl: `/experience`,
+`/people/[id]`, `/company/document-scan` all still correctly 307-redirect an unauthenticated request
+to `/login` (middleware untouched by this batch). Confirmed via grep that every existing caller of
+`UploadForm`/`DocumentReviewCard` (`company/document-scan/page.tsx`, Batch 3's `AddDocumentsScreen`)
+omits every new optional prop, so their behaviour is provably unchanged, not just assumed so.
+
+**Not tested, reported rather than faked**: same sandbox credential-generation limitation as every
+batch tonight - nobody has actually uploaded a real reference letter through `/experience` or toggled
+the ECSA disclosure in a real browser session. The build compiling `/experience` and `/people/[id]`
+as working dynamic routes, the existing test suites staying green, and the explicit non-regression
+check above are real evidence; they are not the same as a real signed-in click-through.

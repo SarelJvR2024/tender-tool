@@ -143,12 +143,15 @@ export function DocumentReviewCard({
   principals,
   people,
   companyLegalName,
+  returnTo,
 }: {
   result: OnboardingResult;
   filename: string;
   principals: { id: string; full_name: string }[];
   people: { id: string; name: string }[];
   companyLegalName?: string | null;
+  /** Spec v3 Batch 4: when this card is embedded somewhere other than /company/document-scan (e.g. /experience), send the user back there instead of the default page. Omit to keep the existing behaviour exactly as-is. */
+  returnTo?: string;
 }) {
   const kind = result.document_kind;
   const editableFields = KIND_FIELDS[kind].filter((f) => !READ_ONLY_FIELDS.has(f) && result.fields[f]);
@@ -225,6 +228,7 @@ export function DocumentReviewCard({
             )}
             <form action={discardOnboardingDocument} className="inline">
               <input type="hidden" name="result_id" value={result.id} />
+              {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
               <Button type="submit" variant="destructive" size="lg" className="min-h-11 px-4">Discard - not needed</Button>
             </form>
           </div>
@@ -232,6 +236,7 @@ export function DocumentReviewCard({
       ) : (
         <form action={confirmAction} className="mt-3">
           <input type="hidden" name="result_id" value={result.id} />
+          {returnTo && <input type="hidden" name="return_to" value={returnTo} />}
           <ReadOnlyFields kind={kind} fields={result.fields} />
 
           {kind === "id_document" && (

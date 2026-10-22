@@ -50,6 +50,18 @@ function num(formData: FormData, key: string): number | null {
   return Number.isNaN(n) ? null : n;
 }
 
+// Spec v3 Batch 4: a page embedding DocumentReviewCard somewhere other than
+// /company/document-scan (e.g. /experience) can ask to be returned to
+// instead, via a hidden return_to field alongside result_id - see
+// review.tsx's own returnTo prop. Every existing caller omits it, so every
+// existing redirect/revalidate target is unchanged. Only a same-origin
+// relative path is honoured (an open-redirect guard - this is user-supplied
+// form data, never trusted as-is).
+function backTo(formData: FormData): string {
+  const v = str(formData, "return_to");
+  return v && v.startsWith("/") && !v.startsWith("//") ? v : BACK;
+}
+
 /**
  * Registers one batch of already-uploaded files (the browser uploads
  * straight to the 'onboarding-documents' bucket first - see upload-form.tsx
@@ -189,8 +201,9 @@ export async function confirmVaultDocument(formData: FormData) {
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
   await markApplied(supabase, resultId!, userId, { table: "companies", column: docColumn, fields: appliedFields });
-  revalidatePath(BACK);
-  redirect(`${BACK}?saved=filed`);
+  const back = backTo(formData);
+  revalidatePath(back);
+  redirect(`${back}?saved=filed`);
 }
 
 // ---------------------------------------------------------------------------
@@ -240,8 +253,9 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
   await markApplied(supabase, resultId!, userId, { table: "experience_items", id: inserted!.id });
-  revalidatePath(BACK);
-  redirect(`${BACK}?saved=filed#experience-items-note`);
+  const back = backTo(formData);
+  revalidatePath(back);
+  redirect(back === BACK ? `${back}?saved=filed#experience-items-note` : `${back}?saved=filed`);
 }
 
 // ---------------------------------------------------------------------------
@@ -276,8 +290,9 @@ export async function confirmIdDocument(formData: FormData) {
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
   await markApplied(supabase, resultId!, null, { table: "company_principals", id: principalId, column: "certified_id_path" });
-  revalidatePath(BACK);
-  redirect(`${BACK}?saved=filed`);
+  const back = backTo(formData);
+  revalidatePath(back);
+  redirect(`${back}?saved=filed`);
 }
 
 // ---------------------------------------------------------------------------
@@ -316,8 +331,9 @@ export async function confirmCvHandoff(formData: FormData) {
   }
   await supabase.storage.from(ONBOARDING_BUCKET).remove([upload!.storage_path]);
   await markApplied(supabase, resultId!, userId, { handed_off_to: "cv_uploads", id: cvUpload!.id });
-  revalidatePath(BACK);
-  redirect(`${BACK}?saved=handed-off#cv-handoff-note`);
+  const back = backTo(formData);
+  revalidatePath(back);
+  redirect(back === BACK ? `${back}?saved=handed-off#cv-handoff-note` : `${back}?saved=handed-off`);
 }
 
 // ---------------------------------------------------------------------------
@@ -333,8 +349,9 @@ export async function skipOnboardingDocument(formData: FormData) {
   if (!resultId) fail("Missing document.");
   const result = await loadPendingResult(supabase, companyId, resultId!);
   await supabase.from("onboarding_document_results").update({ review_status: "skipped" }).eq("id", result.id);
-  revalidatePath(BACK);
-  redirect(`${BACK}?saved=skipped`);
+  const back = backTo(formData);
+  revalidatePath(back);
+  redirect(`${back}?saved=skipped`);
 }
 
 export async function discardOnboardingDocument(formData: FormData) {
@@ -345,6 +362,7 @@ export async function discardOnboardingDocument(formData: FormData) {
   const upload = result.onboarding_uploads;
   await supabase.from("onboarding_document_results").update({ review_status: "discarded" }).eq("id", result.id);
   if (upload?.storage_path) await supabase.storage.from(ONBOARDING_BUCKET).remove([upload.storage_path]);
-  revalidatePath(BACK);
-  redirect(`${BACK}?saved=discarded`);
+  const back = backTo(formData);
+  revalidatePath(back);
+  redirect(`${back}?saved=discarded`);
 }

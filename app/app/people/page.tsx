@@ -44,12 +44,19 @@ function Chip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
 // vocabulary as the rest of the vault (lib/documentExpiry.ts), deliberately
 // NOT forced into Verify/Provide/Fix (app/AGENTS.md argues for this
 // pattern elsewhere; these are a renewal-date state, not a bid task).
+//
+// Spec v3 O23: used to warn "No ECSA on file" on EVERY person on EVERY
+// company's roster who lacked one, regardless of whether that company does
+// engineering work at all or any tender they're working needs it - the
+// clearest version of "ECSA as the universal category" in the whole app,
+// since it was visible on the main People list by default. SACNASP/SAGC and
+// the catalog bodies never warned on absence like this; ECSA now matches
+// them - a chip only when actually held, nothing implying a gap that may
+// not exist for this company.
 function registrationSummary(p: PersonRow): { label: string; tone: Tone }[] {
   const tags: { label: string; tone: Tone }[] = [];
   if (p.ecsa_level) {
     tags.push({ label: `ECSA: ${p.ecsa_level}`, tone: "success" });
-  } else {
-    tags.push({ label: "No ECSA on file", tone: "warning" });
   }
   if (p.sacpcmp_number) {
     tags.push({ label: "SACPCMP registered", tone: "success" });
