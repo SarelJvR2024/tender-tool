@@ -4,6 +4,7 @@ import {
   extraCapacity,
   formatRand,
   hoursSavedForTender,
+  resolveBaseline,
   stepAlreadyCounted,
 } from "./savingsCounter";
 
@@ -87,6 +88,41 @@ describe("formatRand - Rand rounding and SA thousands formatting (§9.3/§6: spa
 
   it("has no separator under a thousand", () => {
     expect(formatRand(999.4)).toBe("R999");
+  });
+});
+
+describe("resolveBaseline - distinguishing the company's own confirmed baseline from the §18 placeholder default (spec v3 §18, Sarel's own 2026-10-22 answer: never present 20h/R450 as fact)", () => {
+  it("uses the company's own confirmed values and flags isDefault false when both are set", () => {
+    expect(resolveBaseline(30, 600)).toEqual({ hoursPerTender: 30, hourlyCostZar: 600, isDefault: false });
+  });
+
+  it("falls back to 20h/R450 and flags isDefault true when both are unset (null)", () => {
+    expect(resolveBaseline(null, null)).toEqual({ hoursPerTender: 20, hourlyCostZar: 450, isDefault: true });
+  });
+
+  it("falls back and flags isDefault true when both are unset (undefined)", () => {
+    expect(resolveBaseline(undefined, undefined)).toEqual({ hoursPerTender: 20, hourlyCostZar: 450, isDefault: true });
+  });
+
+  it("flags isDefault true when only hours is confirmed but cost is not - a partial baseline is still not a confirmed one", () => {
+    const r = resolveBaseline(30, null);
+    expect(r.isDefault).toBe(true);
+    expect(r.hoursPerTender).toBe(30);
+    expect(r.hourlyCostZar).toBe(450);
+  });
+
+  it("flags isDefault true when only cost is confirmed but hours is not", () => {
+    const r = resolveBaseline(null, 600);
+    expect(r.isDefault).toBe(true);
+    expect(r.hoursPerTender).toBe(20);
+    expect(r.hourlyCostZar).toBe(600);
+  });
+
+  it("treats a confirmed zero as a real confirmed value, not a missing one", () => {
+    // 0 is a legitimate (if unusual) confirmed hourly cost/hours value -
+    // `== null` only catches null/undefined, never 0, so this must NOT
+    // silently fall back to the default.
+    expect(resolveBaseline(0, 0)).toEqual({ hoursPerTender: 0, hourlyCostZar: 0, isDefault: false });
   });
 });
 

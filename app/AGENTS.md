@@ -1290,3 +1290,103 @@ same sandbox limitation as every batch tonight. The collapsing logic (`openPosit
 `missingRows.length === 0 && reviewRows.length === 0`) was verified by reading the exact same
 variables the pre-existing, already-tested facts-card summary chips use - not a new computation -
 but nobody has seen the collapsed/expanded states actually render against real data.
+
+## Spec v3 Batch 6: savings/founding-rate/digest truthfulness
+
+Four items from the spec's own Batch 6 scope (§18/§19/§16.K), each closed with a different outcome -
+fixed, already correct, or a documented gap, not all silently claimed as "done":
+
+1. **Savings default labeling (§18, Sarel's own 2026-10-22 answer)** - fixed, and a real bug found
+   along the way. `fetchSavingsCounterSummary()` (the Home/Analytics card) used to read
+   `savings_baseline_hours_per_tender`/`_hourly_cost_zar` straight off the `companies` row with no
+   fallback at all - an unconfirmed baseline (`null`) was cast straight to `number`, and
+   `hoursSavedForTender`'s own `Math.max(0, null)` guard silently resolved to a 0-hour cap, so a
+   company that had done real counted work but never visited the baseline field saw "0h / R0
+   saved", not even the documented 20h/R450 placeholder. Meanwhile `fetchTenderSavingsBreakdown()`
+   (the per-tender "how we worked this out" panel) had its OWN separate `?? 20`/`?? 450`, with no
+   way for the UI to tell confirmed and default apart, and no way for the two surfaces to agree on
+   which case they were even in.
+   Fixed with one new pure function, `resolveBaseline()` (`lib/savingsCounter.ts`, 6 new
+   `.spec.ts` tests), that both call sites now use instead of their own separate handling. Returns
+   `{ hoursPerTender, hourlyCostZar, isDefault }` - `isDefault` true unless BOTH values are
+   confirmed (a confirmed `0` is accepted as real, not treated as missing - `== null`, not falsy).
+   Both `SavingsCounterSummary` and `fetchTenderSavingsBreakdown()`'s return type gained a
+   `usingDefaultBaseline` field; `savings-counter-card.tsx` and `submission-pack.tsx`'s "How we
+   worked this out" panel now show two genuinely different sentences depending on which case
+   applies - "Using a default estimate (20h/R450 per tender) - we don't have your own numbers yet"
+   vs. "Estimated from your own confirmed baseline." The calculation itself (`hoursSavedForTender`/
+   `aggregateSavings`/`extraCapacity`) is untouched - confirmed by every pre-existing test in
+   `savingsCounter.spec.ts` still passing unmodified.
+
+2. **Founding-rate homepage claim** - fixed. `app/page.tsx`'s Founding Firms Programme paragraph
+   used to promise "the first 10 firms... a locked founding rate" - a hard count and a rate
+   commitment with no mechanism anywhere in this app to track or honour either (confirmed again
+   this pass: no founding-firm intake table, no per-customer locked-price flag). Reworded to keep
+   the founding-customer framing (true: an early customer gets more of Sarel's own direct attention
+   right now than one joining later will) without the count or the rate promise - "Early customers
+   get more of our attention while we build out the rest." The CTA itself was already fixed in an
+   earlier pass (links to plain `/signup`, labeled "Get in touch", not "Apply as a founding firm").
+
+3. **Analytics vs. Home consistency (§16.K)** - checked, already correct, nothing to fix. Both
+   `dashboard/page.tsx` and `analytics/page.tsx` call the exact same `fetchSavingsCounterSummary()`
+   and render the result through the exact same `SavingsCounterCard` - they cannot drift because
+   they're not two implementations of the same number, they're one. Checked the rest of each
+   page's own stats for an overlapping metric name that could visibly contradict itself (Home:
+   "Active bids"/"Packs ready"/"Closing this week"/"Documents expiring"; Analytics: "Submitted to
+   date"/"Total submitted value"/win-loss trend) - no shared metric besides savings exists on both
+   pages at all, so there's no second divergence risk to fix.
+
+4. **Email audit (§19)** - the TypeScript side (`lib/emailTemplates.ts`: welcome + deadline-reminder
+   emails) was already correct - "Tender Ready" identity throughout, real per-item deep links
+   (`/tenders/${tenderId}`), no old branding found. The daily digest is NOT sent from TypeScript at
+   all, though - it's `engine/notify/send_digest_emails.py` (Python, triggered by
+   `.github/workflows/daily-digest.yml`), confirmed via its own module docstring and
+   `daily_digest.py`'s doc comment. Checked the CURRENT file rather than assuming the spec's cited
+   "known uploaded-snapshot issue" was already fixed - it was not:
+   - **Old "Tender Tool" branding**: present live in `DEFAULT_FROM`, the subject line, and the
+     body greeting (3 occurrences). Fixed to "Tender Ready" in all three.
+   - **Dropped dates**: `render_text()` showed only each item's title/description, no date at all.
+     Fixed with a new `_item_date()` helper checking every date key this script's sections are
+     CONFIRMED to use (traced key-by-key in `watch_deadlines.py`/`daily_digest.py`'s own
+     dict-building code): `closing_date` (new_tenders/submission_due), `expiry_date`
+     (document_expiry, both "document" and "person_credential" item types), `due_date`
+     (tender_tasks), `updated_at` (readiness_changes). Verified against a REAL generated fixture
+     (ran `test_digest_live.py`, fed its own written `digest.json` into
+     `send_digest_emails.py --dry-run`), not just a hand-written example - caught and fixed a real
+     miss this way (`expiry_date` wasn't in the first version of the key list, confirmed by
+     tracing `find_due_documents()`'s actual dict shape, not guessed).
+   - **Dropped links**: fixed with one link at the end of every digest email -
+     `{APP_URL}/dashboard`, reusing the exact same `APP_URL` env var name/fallback
+     `scripts/send-deadline-reminders.ts` already established, rather than inventing a second
+     convention.
+   - **Honest, documented gap, not silently left as "done"**: per-item deep links (spec's own "one
+     primary action to the exact signed-in item") were NOT built for each of the 8 section types'
+     own different destinations (`new_tenders` -> Discovery, `tender_tasks` -> a specific tender,
+     `listing_changes`/`tender_updates`/`reassessed_tenders` -> unverified routes). Doing that
+     correctly needs each section's actual item shape and real route individually confirmed, which
+     is its own piece of work, not something to guess at under tonight's time budget and risk a
+     wrong/broken link going out in a real customer email. One safe generic dashboard link now,
+     real per-item links as a flagged follow-up.
+   - Digest opt-in/opt-out (`set_my_daily_digest_opt_in`, `app/company/digestActions.ts`) and
+     no-duplicate-send guarantees (`daily_digest.py`'s own seen-store) were already correct and
+     untouched - confirmed by reading, not re-verified with new tests, since this batch didn't
+     touch that code.
+
+Python side has no automated test for `send_digest_emails.py` itself (confirmed: neither
+`test_digest_live.py` nor `test_digest_opt_in.py` imports it - its own docstring calls itself "the
+missing send step" the rest of this test suite predates). Verified instead by: `python3 -m
+py_compile` (syntax), a smoke test against a hand-built digest dict, and the real fixture run above.
+Both pre-existing Python test files (`test_digest_live.py`, `test_digest_opt_in.py`) still pass
+unchanged (0 failures each) - confirms nothing this batch touched broke the digest-building logic
+upstream of the sender.
+
+**Tested (TypeScript)**: `npm run verify` 0 errors, `npx vitest run` 121/121 (115 pre-existing + 6
+new `resolveBaseline` tests), full `node:test` sweep 76/76 unchanged - run both ways (`tsx --test`
+and the real CI invocation, `node --experimental-strip-types` per file directly). Live dev server +
+curl against the real homepage confirmed the new founding-rate copy renders and the old "first 10
+firms"/"locked founding rate" text is gone.
+
+**Not tested**: an actual signed-in render of the savings card's two different messages (same
+sandbox credential limitation as every batch tonight) - verified instead by reading
+`resolveBaseline()`'s own unit tests and the component's conditional, not a screenshot of both
+states.
