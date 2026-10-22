@@ -383,6 +383,8 @@ def main():
     ap.add_argument("--department", type=int, default=None)
     ap.add_argument("--sanral-lists", default="awarded,closed")
     ap.add_argument("--sanral-limit", type=int, default=40)
+    ap.add_argument("--sanral-start-page", type=int, default=1,
+                     help="resume a chunked backfill from this page (page_size 50) instead of the newest tender")
     ap.add_argument("--dry-run", action="store_true", help="print a summary and the rows, write nothing")
     ap.add_argument("--out", default=None, help="with --dry-run: write the merged rows here")
     args = ap.parse_args()
@@ -396,7 +398,8 @@ def main():
             raw, _, _ = ao.fetch_portal_awarded(args.limit, args.department)
             report["portal"] = {"records": [ao.normalize_portal_award(r) for r in raw]}
         if args.source in ("sanral", "both"):
-            report["sanral"] = {k: ao.fetch_sanral_outcomes(k.strip(), args.sanral_limit)
+            report["sanral"] = {k: ao.fetch_sanral_outcomes(k.strip(), args.sanral_limit,
+                                                            start_page=args.sanral_start_page)
                                 for k in args.sanral_lists.split(",") if k.strip()}
         parts += parts_from_report(report)
     if not parts:

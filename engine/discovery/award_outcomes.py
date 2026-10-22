@@ -356,14 +356,23 @@ def fetch_portal_awarded(limit=200, department=None, page_size=25, pause=0.5):
     return rows[:limit], total, skipped
 
 
-def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=3):
+def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=3, start_page=1):
     """Rows of one SANRAL public list, newest first, until `want` rows (or the
     end). Pages come back shorter than page_size (observed: 25/36/10 rows for
     pageSize=40, total_filtered 90), so keep paging until a page brings
     nothing new. A dropped connection is retried, then ends the list early
-    with what was read (seen 2026-10-17: one reset killed a whole run)."""
+    with what was read (seen 2026-10-17: one reset killed a whole run).
+
+    `start_page` resumes a backfill from a later page instead of always
+    re-reading from the newest tender: a full backfill of a large list
+    (the SANRAL closed list alone holds 5,546 tenders) can't safely fetch
+    every detail page (fetch_sanral_outcomes's own 1s/page pause) in one run,
+    so a caller runs this in bounded chunks, each one storing its own rows
+    before the next chunk starts - never fetching one giant batch and only
+    writing at the very end, which would lose everything if the process
+    were stopped partway through."""
     seen, out, total_filtered = set(), [], None
-    for page in range(1, max_pages + 1):
+    for page in range(start_page, start_page + max_pages):
         if want is not None and len(out) >= want:
             break
         rows = None
@@ -388,9 +397,17 @@ def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=
     return out, total_filtered
 
 
-def fetch_sanral_outcomes(list_key, limit=40, pause=1.0):
+def fetch_sanral_outcomes(list_key, limit=40, pause=1.0, start_page=1):
     slug = SANRAL_LISTS[list_key]
-    rows, total_filtered = fetch_sanral_list(slug, want=limit)
+    # fetch_sanral_list's own max_pages defaults to 40 (* page_size 50 = 2000
+    # rows), silently truncating a full backfill asking for more than that
+    # (the SANRAL closed list alone holds 5,546). Pages also come back
+    # shorter than page_size sometimes (fetch_sanral_list's own docstring),
+    # so size generously rather than exactly. `start_page` resumes a chunked
+    # backfill (see fetch_sanral_list's own docstring) - `limit` is this
+    # chunk's own size, not the grand total.
+    max_pages = max(40, -(-limit // 50) + 20)
+    rows, total_filtered = fetch_sanral_list(slug, want=limit, max_pages=max_pages, start_page=start_page)
     records, failed = [], []
     for row in rows[:limit]:
         try:
