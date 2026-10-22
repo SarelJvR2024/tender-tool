@@ -140,6 +140,12 @@ export default function BeePreferencePointsClient() {
               </div>
             )
           )}
+          {!result.error && result.data && (
+            <p className="mt-2.5 text-[11px] leading-relaxed text-muted-foreground">
+              The B-BBEE specific-goals points above use the common Treasury SBD 6.1 table - each buyer sets its own
+              specific goals (reg 3(1)), so check the actual tender&apos;s own preference schedule before relying on this.
+            </p>
+          )}
         </div>
 
         <div className={CARD}>
@@ -177,10 +183,7 @@ export default function BeePreferencePointsClient() {
 
         <p className="mt-6 text-[11px] leading-relaxed text-muted-foreground">
           Source: Preferential Procurement Regulations, 2022 (GG 47452, Notice 2721 of 4 Nov 2022) regs 4-5 for the
-          price-points formula and the R50 million threshold. The PPR 2022 itself sets no fixed B-BBEE points table -
-          each organ of state defines its own specific goals (reg 3(1)) - so the level table above is the common
-          Treasury SBD 6.1 table most buyers (including SANRAL) publish unchanged, not a legal guarantee for every
-          tender. Always check the actual tender document&apos;s own SBD 6.1/preference schedule. Not legal advice.
+          price-points formula and the R50 million threshold. Not legal advice.
         </p>
       </main>
     </div>
