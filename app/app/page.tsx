@@ -353,7 +353,7 @@ export default async function Home() {
           <p className="mb-2.5 text-xl font-semibold leading-snug text-white">
             We don&apos;t promise to write your bid.
           </p>
-          <p className="mb-7 text-xl font-semibold leading-snug text-accent">
+          <p className="mb-7 text-xl font-semibold leading-snug text-white">
             We promise nothing in it is missing, expired, or mis-filed.
           </p>
           <Link href="/signup" className={buttonVariants({ variant: "accent", size: "lg", className: "min-h-11 px-6" })}>
