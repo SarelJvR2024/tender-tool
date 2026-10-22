@@ -11,11 +11,11 @@ import {
   signCheckoutFields,
   type PayfastFields,
 } from "@/lib/payfast";
-import { priceForPayfastAmount, type BillingInterval, type PlanTier } from "@/lib/billing";
+import { PLAN_LABEL, priceForPayfastAmount, type BillingInterval, type PlanTier } from "@/lib/billing";
 
 
 /**
- * GET /api/billing/checkout?plan=pro|sanral_pro&interval=monthly|yearly
+ * GET /api/billing/checkout?plan=starter|professional|business&interval=monthly|yearly
  *
  * Returns a self-submitting HTML form (PayFast's own documented onsite/
  * process pattern - their "process" endpoint is a page, not a JSON API) that
@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
   const plan = request.nextUrl.searchParams.get("plan") as PlanTier | null;
   const interval = (request.nextUrl.searchParams.get("interval") as BillingInterval | null) ?? "monthly";
 
-  if (plan !== "pro" && plan !== "sanral_pro") {
+  if (plan !== "starter" && plan !== "professional" && plan !== "business") {
     return NextResponse.redirect(new URL("/billing?error=Choose+a+plan+to+subscribe+to.", request.url));
   }
   if (interval !== "monthly" && interval !== "yearly") {
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
 
   const origin = request.nextUrl.origin;
   const amount = priceForPayfastAmount(plan, interval);
-  const planLabel = plan === "pro" ? "Tender Pro" : "SANRAL Pro";
+  const planLabel = PLAN_LABEL[plan];
 
   const fields: PayfastFields = {
     merchant_id: payfastMerchantId(),

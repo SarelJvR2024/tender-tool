@@ -174,7 +174,7 @@ export function verifyItnSignature(rawBody: string, receivedSignature: string): 
   return expected.toLowerCase() === receivedSignature.toLowerCase();
 }
 
-export type PlanAndInterval = { planTier: "pro" | "sanral_pro"; billingInterval: "monthly" | "yearly" };
+export type PlanAndInterval = { planTier: "starter" | "professional" | "business"; billingInterval: "monthly" | "yearly" };
 
 /** custom_str2 encodes "plan:interval" - our own compact format, not PayFast's; parsed back out by the ITN handler. */
 export function encodePlanInterval(plan: PlanAndInterval): string {
@@ -184,7 +184,7 @@ export function encodePlanInterval(plan: PlanAndInterval): string {
 export function decodePlanInterval(value: string | null | undefined): PlanAndInterval | null {
   if (!value) return null;
   const [planTier, billingInterval] = value.split(":");
-  if (planTier !== "pro" && planTier !== "sanral_pro") return null;
+  if (planTier !== "starter" && planTier !== "professional" && planTier !== "business") return null;
   if (billingInterval !== "monthly" && billingInterval !== "yearly") return null;
   return { planTier, billingInterval };
 }

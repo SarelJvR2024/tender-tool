@@ -3,14 +3,15 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { fetchCompanySubscription } from "@/lib/companySubscription";
 import {
+  PAYABLE_PLAN_TIERS,
   PLAN_LABEL,
+  PLAN_LIMITS,
   effectiveSubscriptionStatus,
   isSubscriptionLapsed,
   priceForPlanZar,
   trialDaysLeft,
   yearlyPriceZar,
   type BillingInterval,
-  type PlanTier,
 } from "@/lib/billing";
 import { PageHeader } from "@/components/tt/page-header";
 import { SectionCard } from "@/components/tt/section-card";
@@ -21,10 +22,16 @@ import { cn } from "@/lib/utils";
 // every other RLS-scoped page in this app.
 export const instant = false;
 
-const PLAN_FEATURES: Record<PlanTier, string[]> = {
-  watch: ["Discovery, fit verdict and score outlook", "Vault with expiry, view only", "1 compliance report a month"],
-  pro: ["Everything in Watch, plus reminders", "General pack: SBD/MBD fill, merged pack (6/month)", "Experience Library and CV library", "Pipeline, tasks and role-based digest"],
-  sanral_pro: ["Everything in Pro, no pack limit", "SANRAL workbook fill, both envelopes", "Done-with-you onboarding"],
+type PayablePlan = (typeof PAYABLE_PLAN_TIERS)[number];
+
+// Every plan gets every engine - no feature gating (Sarel's own framing:
+// "nothing is held back for a bigger plan"). Plans differ only by seats
+// and bid-pack volume, both read straight from PLAN_LIMITS below, never
+// hardcoded a second time here.
+const PLAN_DESCRIPTION: Record<PayablePlan, string> = {
+  starter: "For the owner or director who handles tenders personally.",
+  professional: "For a company that tenders most weeks and can't afford to miss a closing date.",
+  business: "For a team running several bids at once, or several branches.",
 };
 
 export default async function BillingPage({
@@ -39,6 +46,17 @@ export default async function BillingPage({
   const status = subscription ? effectiveSubscriptionStatus(subscription) : null;
   const lapsed = subscription ? isSubscriptionLapsed(subscription) : false;
   const daysLeft = subscription ? trialDaysLeft(subscription) : null;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user?.id ?? "").maybeSingle();
+  const companyId = membership?.company_id as string | undefined;
+
+  const [{ count: memberCount }, { data: packsThisPeriod }] = await Promise.all([
+    companyId ? supabase.from("company_members").select("id", { count: "exact", head: true }).eq("company_id", companyId) : Promise.resolve({ count: null }),
+    companyId && status === "active" ? supabase.rpc("company_packs_this_period", { p_company_id: companyId }) : Promise.resolve({ data: null }),
+  ]);
 
   return (
     <AppShell>
@@ -86,13 +104,38 @@ export default async function BillingPage({
           ) : (
             <p className="text-sm text-muted-foreground">No subscription found for your company yet.</p>
           )}
+          {subscription && (
+            <div className="mt-4 grid gap-3 border-t border-border pt-4 text-sm text-muted-foreground sm:grid-cols-2">
+              <div>
+                Team: <span className="font-medium text-foreground">{memberCount ?? 0}</span> of{" "}
+                {subscription.maxUsers ?? "unlimited"}
+              </div>
+              <div>
+                Bid packs this period:{" "}
+                <span className="font-medium text-foreground">{status === "active" ? ((packsThisPeriod as number | null) ?? 0) : "—"}</span> of{" "}
+                {status === "trialing" ? "1 (trial)" : subscription.maxPacksPerMonth ?? "unlimited"}
+              </div>
+            </div>
+          )}
         </SectionCard>
 
         <h2 className="mb-3 font-display text-lg font-medium text-foreground">Plans</h2>
-        <div className="grid gap-4 sm:grid-cols-3">
-          {(["watch", "pro", "sanral_pro"] as const).map((plan) => (
+        <p className="mb-3 text-xs text-muted-foreground">
+          Every plan gets every engine - no feature is held back for a bigger plan. Plans differ only by how many people and how many bid packs a month.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {PAYABLE_PLAN_TIERS.map((plan) => (
             <PlanCard key={plan} plan={plan} currentPlan={subscription?.planTier} />
           ))}
+          <SectionCard title="Enterprise" description="Priced on request">
+            <p className="mb-4 text-sm text-muted-foreground">
+              For organisations with their own tender function, multiple entities or specific reporting needs. We scope users,
+              volume, integrations and training with you and quote accordingly.
+            </p>
+            <a href="mailto:hello@tendertool.co.za?subject=Enterprise%20plan" className={buttonVariants({ variant: "outline", className: "h-11 w-full" })}>
+              Contact us
+            </a>
+          </SectionCard>
         </div>
 
         <p className="mt-6 text-xs text-muted-foreground">
@@ -108,45 +151,40 @@ export default async function BillingPage({
   );
 }
 
-function PlanCard({ plan, currentPlan }: { plan: PlanTier; currentPlan?: PlanTier }) {
+function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: string }) {
   const monthly = priceForPlanZar(plan, "monthly");
   const yearly = yearlyPriceZar(monthly);
   const isCurrent = plan === currentPlan;
+  const limits = PLAN_LIMITS[plan];
 
   return (
     <SectionCard
-      className={cn(plan === "sanral_pro" && "border-2 border-accent")}
+      className={cn(plan === "professional" && "border-2 border-accent")}
       title={PLAN_LABEL[plan]}
       description={
-        plan === "watch" ? (
-          "Free"
-        ) : (
-          <>
-            <span className="text-2xl font-semibold text-foreground">R{monthly.toLocaleString("en-ZA")}</span>
-            <span className="text-sm text-muted-foreground">/month</span>
-          </>
-        )
+        <>
+          <span className="text-2xl font-semibold text-foreground">R{monthly.toLocaleString("en-ZA")}</span>
+          <span className="text-sm text-muted-foreground">/month</span>
+        </>
       }
     >
+      <p className="mb-3 text-sm text-muted-foreground">{PLAN_DESCRIPTION[plan]}</p>
       <ul className="mb-4 space-y-1.5 text-sm text-muted-foreground">
-        {PLAN_FEATURES[plan].map((f) => (
-          <li key={f}>&bull; {f}</li>
-        ))}
+        <li>&bull; {limits.maxUsers} people</li>
+        <li>&bull; {limits.maxPacksPerMonth} bid packs a month</li>
+        <li>&bull; Every AI engine - nothing held back</li>
+        {plan === "professional" && <li className="font-medium text-accent">&bull; The plan most companies start on</li>}
       </ul>
-      {plan !== "watch" ? (
-        <div className="flex flex-col gap-2">
-          <CheckoutLink plan={plan} interval="monthly" disabled={isCurrent} label={`Subscribe monthly - R${monthly.toLocaleString("en-ZA")}`} />
-          <CheckoutLink
-            plan={plan}
-            interval="yearly"
-            disabled={isCurrent}
-            label={`Subscribe yearly - R${yearly.toLocaleString("en-ZA")} (2 months free)`}
-            variant="outline"
-          />
-        </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">Your 14-day trial already gives you the full product - Watch is where things land afterwards if you don&apos;t choose a paid plan.</p>
-      )}
+      <div className="flex flex-col gap-2">
+        <CheckoutLink plan={plan} interval="monthly" disabled={isCurrent} label={`Subscribe monthly - R${monthly.toLocaleString("en-ZA")}`} />
+        <CheckoutLink
+          plan={plan}
+          interval="yearly"
+          disabled={isCurrent}
+          label={`Subscribe yearly - R${yearly.toLocaleString("en-ZA")} (2 months free)`}
+          variant="outline"
+        />
+      </div>
       {isCurrent && <p className="mt-2 text-xs font-medium text-accent">Your current plan</p>}
     </SectionCard>
   );
@@ -159,7 +197,7 @@ function CheckoutLink({
   label,
   variant = "accent",
 }: {
-  plan: "pro" | "sanral_pro";
+  plan: PayablePlan;
   interval: BillingInterval;
   disabled?: boolean;
   label: string;

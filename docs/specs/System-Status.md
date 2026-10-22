@@ -16,6 +16,54 @@ itself is unchanged since the last pass (no new commits); full re-verification: 
 clean, `npx vitest run` (77/77 - PR #71's own 4 new cases aren't in this count yet, correctly), a real
 `rm -rf .next && npm run build` clean. Nothing new to flag beyond watching PR #71 to merge.
 
+**Pricing conflict resolved, 2026-10-22 ~08:15 UTC - Sarel confirmed directly: "Starter R1,490/
+Professional R2,990/Business R4,990/Enterprise - that one's correct."** Reconciled every place the
+old, unconfirmed watch/pro/sanral_pro scheme (R0/R1,490/R3,950, from `app/page.tsx`'s pre-existing
+`PRICING_TIERS`, PR #60's own best-effort pick when it had two conflicting briefs and no live source
+to trust) was still live:
+
+- **Migration `0083_finalize_pricing_tiers_and_usage_limits.sql`**: renames `plan_tier` to
+  `starter`/`professional`/`business`/`enterprise` (remapping any existing rows - none expected, this
+  schema has never run against a live Supabase project), and - closing the gap `app/AGENTS.md`'s own
+  "PayFast billing" entry flagged as deliberately deferred future work - adds real `max_users`/
+  `max_packs_per_month` columns, a `current_period_start` column (0078 never had one; without it
+  there's no way to know where "this billing period" starts), `tt_plan_limits()` (the one place the
+  per-tier numbers live in SQL), and two new gating functions: `company_packs_this_period()` and
+  `company_can_request_pack()` (the trial's one-pack-total cap, or an active plan's monthly
+  allowance - the single source of truth both pack-request actions now call before inserting a job).
+  `start_company_trial()`/`start_payfast_checkout()`/`apply_payfast_itn()` (including its Finding
+  51/52 rescue path) all updated to the new tier names and to set/restore the new limit columns.
+- **Verified against a real Postgres, not just read**: fresh 73-migration replay (clean), the full
+  real-Postgres tenant-isolation suite (237/237, confirms the rename doesn't disturb PR #20's
+  employee-role isolation), and a focused 8-check behavioral script covering the exact scenarios that
+  matter here - trial defaults to Professional/5/15, the trial's one-pack-total cap, each self-serve
+  tier's checkout setting the right limits, Enterprise correctly rejected from self-serve checkout, a
+  successful ITN activating with the right limits AND `current_period_start` set, pack-counting
+  correctly scoped to the new period (not counting a pack from before it), and - a direct regression
+  check on Finding 51/52's own rescue logic under the new tier names - a stale `FAILED` for a
+  superseded attempt still correctly rejected, leaving the already-active subscription untouched.
+- **Usage gating, built for the first time**: `requestSubmissionPack()` (`actions.ts`) and
+  `requestJob()`'s `generate_pack` path (`general-actions.ts`) both now call
+  `company_can_request_pack()` before inserting a job; `createInvite()` (`company/team/actions.ts`)
+  now checks the seat cap (members + pending invites) before creating an invite. None of this existed
+  before this pass - "the pricing structure" and "the limits it implies are actually enforced" were
+  two different, separately-tracked gaps.
+- **`app/page.tsx`'s `PRICING_TIERS`** rewritten with Sarel's own verbatim tier copy (the real
+  per-tier bullets, not the placeholder wording this array carried since before the conflict), now 4
+  cards (was 3) with Enterprise routing to a `mailto:` contact link rather than `/signup`.
+  `lib/billing.ts`'s `PLAN_LIMITS`/`PLAN_MONTHLY_ZAR` and migration `0083`'s `tt_plan_limits()` are
+  the two other copies of these same numbers - three total, deliberately never imported across the
+  app/database boundary, each one's own test/replay is what catches drift, not a shared import.
+- **Full QA**: `npx tsc --noEmit`, `eslint`, `npx vitest run` (80/80, including 4 new `billing.spec.ts`
+  cases), every `*.test.ts` individually (CI's real invocation), a full Python `test_*.py` sweep, and
+  a real `rm -rf .next && npm run build` - all clean.
+- **Not done / open for Sarel**: the marketing plan (`docs/strategy/Marketing-GTM-Plan.md`, PR #58)
+  still needs its own "pricing conflict" flag replaced with a plain confirmation - separate, small
+  follow-up commit on that same branch, not bundled into this one. PayFast's own native recurring-
+  billing fields (`subscription_type`/`frequency`/`billing_date`/`cycles`, already wired up in PR
+  #60's checkout route) are unaffected by this rename - their own correctness was never this pass's
+  concern.
+
 **Standing review pass, 2026-10-22 ~06:17 UTC: quiet pass, full QA sweep clean.** Orientation found
 one routine design-token migration PR (#70, cover-page preview) merged since the last pass - no
 overlap with anything else in flight. Only PR #58 (marketing plan) remains open. Pricing-conflict

@@ -119,14 +119,14 @@ describe("verifyItnSignature against PayFast's own official recorded fixture", (
 
 describe("encodePlanInterval / decodePlanInterval", () => {
   it("round-trips", () => {
-    const encoded = encodePlanInterval({ planTier: "sanral_pro", billingInterval: "yearly" });
-    expect(encoded).toBe("sanral_pro:yearly");
-    expect(decodePlanInterval(encoded)).toEqual({ planTier: "sanral_pro", billingInterval: "yearly" });
+    const encoded = encodePlanInterval({ planTier: "business", billingInterval: "yearly" });
+    expect(encoded).toBe("business:yearly");
+    expect(decodePlanInterval(encoded)).toEqual({ planTier: "business", billingInterval: "yearly" });
   });
 
   it("rejects an unknown plan or interval rather than guessing", () => {
-    expect(decodePlanInterval("watch:monthly")).toBeNull(); // watch is free, never a PayFast plan
-    expect(decodePlanInterval("pro:weekly")).toBeNull();
+    expect(decodePlanInterval("enterprise:monthly")).toBeNull(); // enterprise is priced on request, never a self-serve PayFast checkout
+    expect(decodePlanInterval("starter:weekly")).toBeNull();
     expect(decodePlanInterval(null)).toBeNull();
   });
 });
