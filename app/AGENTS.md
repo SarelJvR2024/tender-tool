@@ -1230,3 +1230,63 @@ batch tonight - nobody has actually uploaded a real reference letter through `/e
 the ECSA disclosure in a real browser session. The build compiling `/experience` and `/people/[id]`
 as working dynamic routes, the existing test suites staying green, and the explicit non-regression
 check above are real evidence; they are not the same as a real signed-in click-through.
+
+### Spec v3 Batch 5: tender workspace layout (`/tenders/[id]`, 12,755px single scroll)
+
+Batch 0's audit measured `/tenders/[id]` at 12,755px tall, one unbroken scroll - the underlying
+compliance/pricing/readiness logic is correct (confirmed again here: every pre-existing
+`*-logic.test.ts`/`*.spec.ts` under this directory passes unchanged, byte-for-byte), the problem is
+purely that every section - "report card" ready or not, blocker or pure history - renders fully
+expanded, every time, with no structure beyond a sticky jump-nav row of anchor links.
+
+**What changed** (`page.tsx` only - `compliance-report.tsx`, `general-workspace.tsx`,
+`submission-pack.tsx`, `pack-review.tsx` and every `*-logic.ts` file are untouched, so both the
+SANRAL and general workflows' own actual content is identical to before):
+
+- New `collapsible-section.tsx`: a plain `<details>/<summary>` wrapper, no client JS, no persisted
+  state (the `open` prop is per-page-load only - deliberately not written anywhere, so this stays
+  presentation-only with no schema change, per this batch's own ground rule).
+- **Persistent header** (spec §16.E: "tender title/reference, client, deadline... blockers... Do not
+  bury blockers in a hidden tab"): a slim row added above the existing sticky jump-nav, in the same
+  `position: sticky` wrapper so both scroll together - title/contract number, countdown, and the
+  confirmed/review/provide/overdue/open-positions counts the facts card below already computes
+  (`confirmedRows`/`reviewRows`/`missingRows`/`overdueTaskCount`/`openPositionsCount` - the last one
+  hoisted out of an inline IIFE that used to compute it only for one badge, now reused in two
+  places). No new data read - same values, now also visible while scrolled past the facts card.
+- **Key positions**: collapses to a one-line "All N confirmed" summary only when
+  `openPositionsCount === 0` - an unconfirmed position still renders its red "Fix: no key person
+  confirmed - blocks the submission pack" badge exactly as before and keeps the section fully open,
+  since that's a real blocker, never buried.
+- **Readiness report** (the Verify/Provide grid): collapses to "All confirmed" only when both
+  `missingRows` and `reviewRows` are empty - any real Provide/Verify work keeps it open exactly as
+  before.
+- **Deliberately NOT collapsed**: `MarketContext` and `ActivityLog` - both already render their own
+  `id="market"`/`id="activity"` anchor div internally (for the jump-nav's existing `#market`/
+  `#activity` links). Wrapping them in another `<details>` would mean either a duplicate `id` (two
+  elements sharing one id - invalid HTML) or editing those two components to accept an "embedded,
+  skip your own id" prop - a reasonable future change, but out of this batch's time/risk budget
+  tonight; noted here as a real, smaller follow-up rather than silently left undocumented.
+
+**Before/after page height**: NOT independently measured against a real populated tender - the same
+sandbox credential-generation limitation every batch tonight has hit (no way to sign in as the
+seeded demo company here) applies to Playwright/`scrollHeight` measurement too, so reporting a
+specific before/after number would be fabricated precision. What IS verifiable: the two sections
+collapsed by default when complete (Key positions, Readiness report) are exactly the two
+`id="..."` targets the audit's own jump-nav row links to, and each can run to several hundred to
+well over a thousand pixels on a mature/near-ready tender (Key positions renders one ~150-250px row
+per position; the Readiness grid's "Verify" card lists every confirmed field). Collapsing both to a
+single summary line each, on a tender that's actually ready to submit (the exact state where
+scrolling through confirmed-already content is pure waste), is a real, structural reduction - just
+not a number honestly claimed without having seen it render.
+
+**Tested**: `npm run verify` 0 errors (same 3 pre-existing unrelated warnings), `npm run build`
+compiles `/tenders/[id]` clean, `npx vitest run` 115/115 and full `node:test` 76/76 - every
+pre-existing tender/compliance/pricing/readiness test passes unchanged, confirming no calculation
+was touched. Live dev server + curl: `/tenders/new` still correctly 307-redirects an unauthenticated
+request to `/login` (middleware untouched); public routes unaffected.
+
+**Not tested, reported rather than faked**: an actual signed-in render of `/tenders/[id]` itself -
+same sandbox limitation as every batch tonight. The collapsing logic (`openPositionsCount === 0`,
+`missingRows.length === 0 && reviewRows.length === 0`) was verified by reading the exact same
+variables the pre-existing, already-tested facts-card summary chips use - not a new computation -
+but nobody has seen the collapsed/expanded states actually render against real data.

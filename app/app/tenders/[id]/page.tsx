@@ -40,6 +40,7 @@ import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { computeTenderReadiness } from "./tender-readiness";
 import { DisqualificationGuard } from "./disqualification-guard";
 import { SubmissionPlanView } from "./submission-plan-view";
+import { CollapsibleSection } from "./collapsible-section";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -304,6 +305,9 @@ export default async function TenderWorkspacePage({
     new Set([...requirementRows.map((r) => r.position_code), ...assignments.map((a) => a.position_code)]),
   ).sort();
   const peopleName = new Map(assignablePeople.map((p) => [p.id, p.name]));
+  // Hoisted so both the sticky summary header and the Key positions section
+  // itself (further down) can use the same count without computing it twice.
+  const openPositionsCount = positions.filter((code) => !assignments.find((a) => a.position_code === code)?.confirmed_person_id).length;
 
   const countdown = closingCountdown(tenderFacts?.closing_date ?? null);
   const packStatus = tenderPack ? PACK_STATUS_LABEL[tenderPack.status] : null;
@@ -554,6 +558,45 @@ export default async function TenderWorkspacePage({
                   marginBottom: 12,
                 }}
               >
+                {/* Spec v3 §16.E/§29: "Persistent context: tender title/
+                    reference, client, deadline, current step, blockers...
+                    Do not bury blockers in a hidden tab." The facts card
+                    above already shows all of this, but it scrolls away -
+                    this slim row repeats only the part that matters while
+                    scrolling (title, countdown, confirmed/review/provide/
+                    overdue counts), reusing the exact same values the facts
+                    card and JumpLink row already compute; no new data read. */}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 10,
+                    flexWrap: "wrap",
+                    paddingBottom: 6,
+                    marginBottom: 6,
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, overflow: "hidden" }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {tenderFacts.contract_no ?? tenderFacts.description ?? "Untitled tender"}
+                    </span>
+                    {countdown && (
+                      <span style={{ fontSize: 11, fontWeight: 600, color: countdown.urgent ? "var(--warning)" : "var(--muted-foreground)", whiteSpace: "nowrap" }}>
+                        {countdown.text}
+                      </span>
+                    )}
+                  </div>
+                  {tenderPack && provenance.length > 0 && (
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                      {missingRows.length > 0 && <SummaryChip count={missingRows.length} label="to provide" className="bg-warning/10 text-warning" />}
+                      {reviewRows.length > 0 && <SummaryChip count={reviewRows.length} label="to verify" className="bg-success/10 text-success" />}
+                      {overdueTaskCount > 0 && <SummaryChip count={overdueTaskCount} label={overdueTaskCount === 1 ? "overdue" : "overdue"} className="bg-destructive/10 text-destructive" />}
+                      {openPositionsCount > 0 && <SummaryChip count={openPositionsCount} label="positions open" className="bg-destructive/10 text-destructive" />}
+                    </div>
+                  )}
+                </div>
                 <div style={{ position: "relative" }}>
                   <div style={{ display: "flex", gap: 6, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
                     {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
@@ -614,16 +657,22 @@ export default async function TenderWorkspacePage({
                   </div>
                 )}
 
-                {provenance.length > 0 && (
-                  <div id="readiness-report" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14, marginBottom: 16 }}>
-                    {/* Verify/Provide, the Product promise's own grouping (app/AGENTS.md) -
-                        "Already confirmed" and "Please review" merged into one Verify card
-                        (AI-filled, green once confirmed - same pattern compliance-report.tsx
-                        uses) since both are the same type of task, just at different points
-                        of being confirmed. "Needs your input" is Provide, not Fix: a missing
-                        intake fact isn't a disqualification risk the way a missing mandatory
-                        compliance document is, so it's recolored amber, not red. */}
-                    <ReportCard
+                {provenance.length > 0 && (() => {
+                  // Spec v3 Batch 5: once there's nothing left to review or
+                  // provide, this grid is just a read-only list of already-
+                  // confirmed facts - a safe collapse-by-default candidate.
+                  // Any review/missing row (real work to do) keeps it open,
+                  // same rule as Key positions above.
+                  const grid = (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
+                      {/* Verify/Provide, the Product promise's own grouping (app/AGENTS.md) -
+                          "Already confirmed" and "Please review" merged into one Verify card
+                          (AI-filled, green once confirmed - same pattern compliance-report.tsx
+                          uses) since both are the same type of task, just at different points
+                          of being confirmed. "Needs your input" is Provide, not Fix: a missing
+                          intake fact isn't a disqualification risk the way a missing mandatory
+                          compliance document is, so it's recolored amber, not red. */}
+                      <ReportCard
                       title="Verify"
                       count={confirmedRows.length + reviewRows.length}
                       className="bg-success/10 text-success"
@@ -663,9 +712,20 @@ export default async function TenderWorkspacePage({
                           )}
                         </div>
                       ))}
-                    </ReportCard>
-                  </div>
-                )}
+                      </ReportCard>
+                    </div>
+                  );
+                  const nothingOutstanding = missingRows.length === 0 && reviewRows.length === 0;
+                  return nothingOutstanding ? (
+                    <CollapsibleSection id="readiness-report" title="Readiness report" defaultOpen={false} closedSummary="All confirmed">
+                      {grid}
+                    </CollapsibleSection>
+                  ) : (
+                    <div id="readiness-report" style={{ marginBottom: 16 }}>
+                      {grid}
+                    </div>
+                  );
+                })()}
               </>
             )}
 
@@ -707,28 +767,39 @@ export default async function TenderWorkspacePage({
             {/* Notes + one chronological history of this tender (item 15; tender_comments, 0033). */}
             <ActivityLog tenderId={id} showAll={activity === "all"} />
 
-            {tenderPack && (positions.length > 0 || isSanralPackFamily) && (
-              <div id="key-positions" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)" }}>Key positions</div>
-                  {positions.length > 0 && (() => {
-                    const open = positions.filter((code) => !assignments.find((a) => a.position_code === code)?.confirmed_person_id).length;
-                    return (
-                      <span className={open ? "bg-warning/10 text-warning" : "bg-success/10 text-success"} style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                        {open ? `${open} of ${positions.length} to confirm` : "All confirmed"}
-                      </span>
-                    );
-                  })()}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
-                  Choose who fills each position on this tender - the submission pack is built with exactly these
-                  people and won&apos;t generate until every position has one. Tender Ready suggests the best match among
-                  the people tagged on their People page as fitting the role (scored on their qualifications, projects
-                  and years against the position), with up to two alternatives - confirm it, or pick anyone else from the
-                  list. Once confirmed, you can request the tender-customized CV
-                  (requirement-matching cover page); that is fulfilled out-of-band by engine/cv/process_cv_jobs.py, so it
-                  records a request, not an instant result.
-                </div>
+            {tenderPack && (positions.length > 0 || isSanralPackFamily) && (() => {
+              // Spec v3 Batch 5 (§16.E/§29): "Completed groups can compact;
+              // blockers remain discoverable." An unconfirmed position is
+              // literally rendered as a red "Fix: no key person confirmed"
+              // badge below - a real blocker, so this section only collapses
+              // once there are none left. Same list/content either way;
+              // only the outer wrapper and whether it starts open differ.
+              const allConfirmed = positions.length > 0 && openPositionsCount === 0;
+              const header = (
+                <>
+                  {!allConfirmed && (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)" }}>Key positions</div>
+                      {positions.length > 0 && (
+                        <span className="bg-warning/10 text-warning" style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+                          {openPositionsCount} of {positions.length} to confirm
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
+                    Choose who fills each position on this tender - the submission pack is built with exactly these
+                    people and won&apos;t generate until every position has one. Tender Ready suggests the best match among
+                    the people tagged on their People page as fitting the role (scored on their qualifications, projects
+                    and years against the position), with up to two alternatives - confirm it, or pick anyone else from the
+                    list. Once confirmed, you can request the tender-customized CV
+                    (requirement-matching cover page); that is fulfilled out-of-band by engine/cv/process_cv_jobs.py, so it
+                    records a request, not an instant result.
+                  </div>
+                </>
+              );
+              const body = (
+                <>
                 {positions.length === 0 && (
                   <div style={{ fontSize: 12, color: "var(--muted-foreground)", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
                     No positions listed yet. They are read from this tender&apos;s own Technical Submission workbook (its
@@ -841,8 +912,20 @@ export default async function TenderWorkspacePage({
                     </div>
                   );
                 })}
-              </div>
-            )}
+                </>
+              );
+              return allConfirmed ? (
+                <CollapsibleSection id="key-positions" title="Key positions" defaultOpen={false} closedSummary={`All ${positions.length} confirmed`}>
+                  {header}
+                  {body}
+                </CollapsibleSection>
+              ) : (
+                <div id="key-positions" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+                  {header}
+                  {body}
+                </div>
+              );
+            })()}
 
             {showSubmissionPack && (
               <CoverPagePreview
