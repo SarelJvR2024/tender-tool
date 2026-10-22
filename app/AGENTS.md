@@ -616,7 +616,7 @@ Calculation-and-display only, per the spec's own ground rule 0 - no engine rules
 - **Where steps are recorded**: `submission-pack.tsx` (SANRAL workspace) records all six steps the first time a pack job reaches `status: "ready"` - by that point the compliance check, vault documents, CV tailoring, cover page and SANRAL schedule are all genuinely bundled into the one generated PDF, so this is the single safe, already-rendered moment to count all six at once, rather than scattering `recordSavingsStep()` calls across every individual action file this pass didn't have the budget to audit one-by-one. **`general-workspace.tsx`'s equivalent general-tender pack completion is NOT wired up yet** - deliberately left for a follow-up pass rather than touching a file batch 4 of the color-migration initiative had just finished migrating, to avoid colliding with that very recent change.
 - **Display surfaces**: the Home cockpit (`app/dashboard/page.tsx`) gets a new `SavingsCounterCard` (`components/tt/savings-counter-card.tsx`) right under the stat row, with the exact empty state the spec asks for ("Finish your first bid to see your savings.") when nothing's been counted yet; a 6th setup-checklist item ("Your time/cost baseline confirmed") reads as done once either baseline value differs from its default, since there's no separate "confirmed" flag. `submission-pack.tsx`'s pack-ready state now shows "About X hours saved (R Y)" plus a collapsible "How we worked this out" breakdown, replacing the old generic, unsupported "Time saved: usually 6-8 hours by hand" line from the earlier item-2 pass - the new figure is the company's own real baseline-driven number, not a blanket marketing claim. The pricing page (`app/page.tsx`) gets a `SavingsCalculator` (`components/tt/savings-calculator.tsx`) - a live, client-side estimate (tenders/month × hours/tender × hourly cost) compared against the Professional plan's real price, reusing `lib/billing.ts`'s existing `PLAN_MONTHLY_ZAR.professional` rather than a 4th hardcoded copy of that number (same "checked against each other, never imported" convention `app/page.tsx`'s own `PRICING_TIERS` comment already documents).
 - **Baseline fields, editable in both places §9.1 names**: onboarding step 2 (`Step2.tsx`) and Company vault's new "Time and cost saved" section (`EditForm.tsx`/`SavingsBaselineSection.tsx`, `#savings-baseline` anchor) both go through the same shared `buildCompanyUpdate()` (`lib/companyProfileUpdate.ts`) - unlike every other numeric field there, a blank submission is refused rather than written as null (these columns have no "not recorded" state to fall back to), handled by a small dedicated `BLANK_NOT_ALLOWED` set rather than touching the generic blank-becomes-null loop every other numeric field relies on.
-- **No dedicated "money" design-system token exists** - the locked §2 table calls for "one dedicated accent colour, used only for Rand amounts" but it was never actually added to `globals.css`. Rather than invent one outside this feature's own scope, every Rand figure here reuses the existing `text-accent` blue. Flagging for whoever next works on §2's own token set.
+- **No dedicated "money" design-system token exists** - the locked §2 table calls for "one dedicated accent colour, used only for Rand amounts" but it was never actually added to `globals.css`. Rather than invent one outside this feature's own scope, every Rand figure here reuses the existing `text-accent` blue. Flagging for whoever next works on §2's own token set. **Fixed in the standing UI/UX review pass below** - see "Dedicated `money` design-system token".
 - Verified `npm run verify` (clean build/typecheck/lint), `npx vitest run` (100/100 - 80 existing + 20 new, all green), full `node:test` sweep (11 files, all green). No screenshot of the Home counter card or the final-review breakdown - both need a live, signed-in Supabase session this environment's placeholder credentials can't provide (same documented limitation as every signed-in-only surface this whole initiative has hit); the pricing-page calculator is reachable without one and was screenshotted at 1440px/390px.
 
 ## Design-system color migration, batch 6: company/people cluster, actually final this time (2026-10-22, spec §2)
@@ -631,3 +631,46 @@ A second, previously-undiscovered hex cluster, surfaced by batch 5's own closing
 - **Final sweep, this time actually checked before claiming completion**: `grep -rlE "#[0-9A-Fa-f]{3,6}" app lib --include="*.tsx" --include="*.ts"` still returns 21 files, but every one is a false positive on manual inspection - anchor hrefs (`#bee-cidb`, `#r-${id}`, `#add`), an HTML warning-triangle entity (`&#9888;`), an order-number string in a payfast test fixture (`"Order #000000020"`), header comments documenting a PRIOR migration (`AdminNav.tsx`, `app/admin/*`, `app/tools/cidb-grade/CidbGradeClient.tsx` - the same false-positive pattern batch 1 already found and excluded), or `app/app/tenders/[id]/page.tsx` itself (batch 5's own target, not yet merged into this branch at the time this sweep ran - will resolve on rebase). `lib/generalTender.ts`'s `JOB_STATUS_STYLE` and `lib/emailTemplates.ts` remain the two deliberate, already-documented exceptions.
 - Verified `npm run verify` (clean build/typecheck/lint), `npx vitest run` (80/80), full `node:test` sweep (11 files, all green). No screenshot - every one of these ten files renders only behind a signed-in Supabase session (`/people`, `/people/[id]`, `/company/registrations`, `/company/properties`, `/company/principals` all call `createClient()`/read the authenticated user), the same documented limitation as the rest of this initiative; confirmed by checking each file's own auth call before writing this line, not assumed.
 - **This closes the color-migration initiative for real** - between batch 5 (tender workspace `page.tsx`) and this batch, every genuine hex cluster this session's own repeated closing-sweep discipline could find is now gone. If a third cluster turns up, the pattern to follow is the same one that caught these two: never write "initiative complete" without running the repo-wide grep yourself and manually excluding every false positive first.
+
+## Standing UI/UX review pass: dedicated `money` design-system token (2026-10-22)
+
+Highest-value fix found this pass: the locked §2 design system names "Money figures - one dedicated
+accent colour, used only for Rand amounts" as its own row, separate from the blue brand accent, but
+that token was never actually added - every Rand figure in the app had been inconsistently reusing
+whatever was at hand (`text-foreground` on the pricing cards, `text-accent` blue on the savings
+counter card and calculator, `text-success` green inherited from its surrounding banner on the
+submission-pack breakdown). Three different treatments for the same semantic concept, none of them
+the dedicated color the spec actually calls for.
+
+- **Added `--money`/`--money-foreground` to `globals.css`** (light + dark, registered in the
+  `@theme inline` block as `text-money`/`bg-money` etc.) - a violet (`#7C3AED` light, `#A78BFA`
+  dark), chosen deliberately outside every other semantic hue already in use (navy ink, blue
+  accent, green success, amber warning, red destructive, blue info) so a Rand figure reads as its
+  own category rather than borrowing a color that already means something else.
+- **Applied consistently**: the pricing page's per-tier price (not the "Priced on request" custom
+  tier - that's not a Rand amount), the Home cockpit's savings counter card (both the this-month and
+  all-time Rand lines), the pricing-page savings calculator's "Rand saved a year" stat (renamed its
+  `accent` prop to `money` for clarity), and the submission-pack "About X hours saved (R Y)"
+  breakdown (wrapped just the Rand parenthetical, keeping the hours portion in the surrounding
+  success-tint styling it already had).
+- Updated the `money`-token gap note left in this file's own §9 savings-counter entry to point here
+  rather than leaving it stale.
+- **Found a second, duplicate instance of a spec violation already fixed once elsewhere**: while
+  checking `/billing` (the real in-app subscription page) for its own Rand display, found it still
+  said "The plan most companies start on" on the Professional card - the exact phrase spec §5
+  explicitly forbids ("Never 'Most popular' or 'The plan most companies start on'"), already fixed
+  on the public pricing page (`app/page.tsx`) in an earlier pass but missed here since that pass only
+  touched the marketing homepage, not the real billing page users actually subscribe from. Fixed the
+  same way: "For companies tendering regularly". Also applied `text-money` to `/billing`'s own
+  monthly-price display, same fix as the marketing pricing cards. Grepped the rest of the repo for
+  the same forbidden phrase afterward - the only other hit is a header comment in `lib/billing.ts`
+  documenting Sarel's own verbatim pricing confirmation, not live copy, left alone.
+- Verified `npm run verify` (clean), `npx vitest run` (100/100, no logic touched - this is styling
+  only), full `node:test` sweep (all green). Screenshot at 1440px/390px: the pricing page (both the
+  tier cards and the savings calculator) - reachable without a live Supabase session; `/billing`, the
+  Home counter card and the submission-pack breakdown all need a signed-in session this environment's
+  placeholder credentials can't provide, same documented limitation as every other signed-in-only
+  surface.
+- **Not touched this pass**: a broader sweep for every other Rand-amount display in the app (invoice-
+  style line items, if any exist beyond the five surfaces checked here) - worth a follow-up pass if
+  more turn up.

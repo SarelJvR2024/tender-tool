@@ -49,6 +49,8 @@
   --color-success-foreground: var(--success-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-money: var(--money);
+  --color-money-foreground: var(--money-foreground);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -122,6 +124,18 @@
   --destructive-foreground: oklch(1 0 0);
   --info: oklch(0.4949 0.1244 253.2); /* #2563A6 */
   --info-foreground: oklch(1 0 0);
+
+  /* Locked design system (§2, Tender-Ready-Claude-Spec_v1.md): "Money figures -
+     one dedicated accent colour, used only for Rand amounts" - deliberately a
+     different hue from --accent (the one blue reserved for buttons/links/the
+     screen's single highlighted action) and from --success (green, a pass/fail
+     verdict), so a Rand figure reads as its own category at a glance rather
+     than borrowing a color that already means something else. A violet sits
+     outside every other semantic hue in this palette (navy ink, blue accent,
+     green/amber/red status, blue info) - #7C3AED, the same family Tender
+     Ready's own chart/categorical set already avoids reusing. */
+  --money: oklch(0.5086 0.2302 302.8); /* #7C3AED */
+  --money-foreground: oklch(1 0 0);
 
   --border: oklch(0.9053 0.0052 247.9); /* #DDE0E3 - neutral grey, not the old cream border */
   --input: var(--border);
@@ -198,6 +212,12 @@
   --destructive-foreground: oklch(0.2021 0.034 265.5);
   --info: oklch(0.6353 0.1211 250.0); /* #4C8FD1 */
   --info-foreground: oklch(0.2021 0.034 265.5);
+
+  /* Lighter than the light-mode --money for contrast against the dark navy
+     card/background, same relationship every other semantic token already
+     has between its light and dark variant. */
+  --money: oklch(0.7169 0.1763 302.9); /* #A78BFA */
+  --money-foreground: oklch(0.2021 0.034 265.5);
 
   --border: oklch(0.3356 0.0523 265.9); /* #2A3652 */
   --input: var(--border);
