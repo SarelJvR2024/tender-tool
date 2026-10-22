@@ -1266,6 +1266,33 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-22, standing QA/robustness review - sixty-eighth run): real CI was red on `main` for 3 consecutive pushes - fixed
+
+Orientation: synced a very large batch (live-infra handover closed - migrations 0077-0085
+confirmed live, SANRAL award backfill resumability fixes, Market Intelligence, several spec v3
+batches: onboarding collapse, shared document intake, Experience/people/intake, a middleware
+auth-gap hotfix, Microsoft SSO, analytics page, no-signup demo). Before picking a rotation area,
+ran the full local suite as always - and, suspicious of how large and fast this batch landed,
+checked the real GitHub Actions history for `app-ci.yml` rather than assuming green.
+
+**Finding 55 (CONFIRMED, FIXED, severe).** `app-ci` has been `failure` on `main` for the last 3
+pushes running (#114 "Spec v3 Batch 2" onward) - genuinely broken, not a local-only or
+environment-specific issue like Finding 54. `app/_components/document-intake/uploadBatch.ts` (the
+new shared upload engine) imported via the `@/lib/...` Next.js path alias, which the workflow's
+own "run every `*.test.ts` file directly via plain Node" step can't resolve - confirmed by pulling
+the real failing job's log, not just reproducing it locally.
+
+**Fix:** changed the two imports to plain relative paths with explicit `.ts` extensions, matching
+the convention every other currently-passing `*.test.ts`-covered module already follows.
+
+**Verified by replicating every real CI step locally:** typecheck, lint, all 13 `*.test.ts` files
+run individually the same way CI runs them (all pass, including the 5 that were failing), the
+full vitest suite (115/115, unchanged), and a real `npm run build` (clean).
+
+Picked this up instead of a fresh rotation area because real CI, red on `main`, is a higher
+priority than searching for a new adversarial case - the same discipline this session already
+applies when babysitting a PR, applied here to the standing branch itself.
+
 ## This pass (2026-10-22, standing QA/robustness review - sixty-seventh run): rotated back to SANRAL pack (engine/) - thorough review, no new bug found this time
 
 Orientation: re-checked the "Resume here" live handover first (per `CLAUDE.md`'s own standing

@@ -1,7 +1,13 @@
 "use client";
 
-import { createClient } from "@/lib/supabase/client";
-import { safeFileName } from "@/lib/onboardingScan";
+// Plain relative imports with explicit extensions, not the "@/lib/..." alias
+// - this module is loaded directly by uploadBatch.test.ts via plain Node
+// (node --experimental-strip-types, no bundler, no tsconfig path mapping),
+// same constraint lib/deadlineReminders.ts's own header comment documents.
+// The alias broke app-ci.yml's own "run every *.test.ts file directly" step
+// (confirmed live: 3 consecutive red runs on main - QA pass, 2026-10-22).
+import { createClient } from "../../../lib/supabase/client.ts";
+import { safeFileName } from "../../../lib/onboardingScan.ts";
 
 // Shared document-intake upload engine (spec v3 Batch 2). Extracted from
 // app/app/company/document-scan/upload-form.tsx's original uploadAll(), with

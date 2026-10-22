@@ -3462,3 +3462,37 @@ this suite's own correctness never depends on what a given machine happens to ha
 (`git stash`): the exact same 2 failures reappeared against this environment's real passphrase;
 restored the fix: `11/11` pass. Full app suite (`npx vitest run`): 8 files, 80 tests, all pass.
 `npm run typecheck` and `eslint` on the touched file: clean.
+
+### Finding 55 (CONFIRMED, FIXED, severe - real CI was red on `main` for 3 consecutive pushes)
+
+**Where:** `app/app/_components/document-intake/uploadBatch.ts` (spec v3 Batch 2's new shared
+upload engine) used the `@/lib/...` path alias to import `createClient`/`safeFileName` - a Next.js
+tsconfig path mapping that only the bundler understands, not plain Node.
+
+**What was tested:** `.github/workflows/app-ci.yml`'s own "Run every `*.test.ts` file directly"
+step runs each file with `node --experimental-strip-types "$f"`, no bundler - the exact constraint
+`lib/deadlineReminders.ts`'s own header comment already documents for this project
+("scripts/send-deadline-reminders.ts ... needs to import this constant, and lib/notifications.ts
+has its own ... import that direct node execution can't resolve"). `uploadBatch.test.ts` imports
+only pure functions from `uploadBatch.ts`, but importing ANY name from a module makes Node
+evaluate the whole file - including its top-level `import { createClient } from "@/lib/supabase/client"`,
+which Node's own resolver can't follow at all (`Cannot find package '@/lib'`). Checked the real
+GitHub Actions history (not assumed): `app-ci` was `conclusion: "failure"` on the last 3 pushes to
+`main` (runs #114, #115, #116 - "Spec v3 Batch 2" onward), each failing on this exact file with
+this exact error, confirmed by pulling the real job log.
+
+**Fix:** changed `uploadBatch.ts`'s two imports to plain relative imports with explicit `.ts`
+extensions (`../../../lib/supabase/client.ts`, `../../../lib/onboardingScan.ts`), matching the
+convention every other currently-passing `*.test.ts`-covered module in this repo already follows
+(e.g. `general-pack-review-logic.test.ts` imports `"./pack-review-logic.ts"` the same way).
+
+**Verified by replicating every real CI step locally, not just the one that was failing:**
+`npm run typecheck` (clean), `eslint` on the touched file (clean), every one of the 13
+`*.test.ts` files run individually via `node --experimental-strip-types` (all 13 pass, including
+`uploadBatch.test.ts`'s own 5 tests), the full `npx vitest run` (11 files, 115 tests, unchanged),
+and `npm run build` (completes cleanly).
+
+**Why severe despite being a one-line import fix:** this is real CI, genuinely red on `main`
+right now (not a hypothetical or an environment-specific false failure like Finding 54) - every
+push since "Spec v3 Batch 2" landed has been failing the one check that's supposed to catch
+exactly this kind of regression before it reaches `main`.
