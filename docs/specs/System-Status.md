@@ -6,6 +6,12 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-22 ~06:17 UTC: quiet pass, full QA sweep clean.** Orientation found
+one routine design-token migration PR (#70, cover-page preview) merged since the last pass - no
+overlap with anything else in flight. Only PR #58 (marketing plan) remains open. Pricing-conflict
+flag is still unresolved, still Sarel's call. Full re-verification: `typecheck`/`lint` clean,
+`npx vitest run` (77/77), a real `rm -rf .next && npm run build` clean. Nothing new to flag.
+
 **Standing review pass, 2026-10-22 ~04:12 UTC: independently verified Finding 51's PayFast fix, one
 minor residual edge case noted (not blocking).** Orientation found Finding 51 fixed and merged since
 the last pass (`daaad75`) - a real, severe gap: a genuinely successful PayFast payment whose
