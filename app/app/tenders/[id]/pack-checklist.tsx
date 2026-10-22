@@ -1,3 +1,5 @@
+import { BidTaskBadge, type BidTaskBadgeStatus } from "@/components/tt/bid-task-badge";
+
 /**
  * The checklist that ships with every generated pack (Sarel, 2026-10-17:
  * "With each tender pack you need to create a check of whats included and
@@ -46,51 +48,53 @@ export function checklistOf(manifest: ManifestLike | null | undefined): Checklis
   return rows;
 }
 
-// Fix(red) > Provide(amber) severity, matching the rest of this screen's
-// Verify/Provide/Fix vocabulary (app/AGENTS.md): a document missing from the
-// pack entirely is the real gap (closer to Fix), while one included but
+// Fix(red) > Provide(amber) > Verify(green) severity, matching the rest of
+// this screen's Verify/Provide/Fix vocabulary (app/AGENTS.md): a document
+// missing from the pack entirely is the real gap (Fix), one included but
 // flagged with a warning is merely something to look at before you submit
-// (closer to Provide) - the opposite of how these two were first colored.
-const STYLE: Record<ChecklistRow["status"], { label: string; bg: string; color: string }> = {
-  included: { label: "Included", bg: "#DCFCE7", color: "#15803D" },
-  included_warning: { label: "Included - warning", bg: "#FEF3C7", color: "#B45309" },
-  not_included: { label: "Not included", bg: "#FEE2E2", color: "#B91C1C" },
+// (Provide), and one cleanly included needs no further action (Verify).
+const STATUS_META: Record<ChecklistRow["status"], { label: string; badge: BidTaskBadgeStatus; noteClass: string }> = {
+  included: { label: "Included", badge: "verify", noteClass: "text-success" },
+  included_warning: { label: "Included - warning", badge: "provide", noteClass: "text-warning" },
+  not_included: { label: "Not included", badge: "fix", noteClass: "text-destructive" },
 };
 
 export function PackChecklist({ rows, title = "What's in this pack" }: { rows: ChecklistRow[]; title?: string }) {
   if (rows.length === 0) return null;
   const n = (s: ChecklistRow["status"]) => rows.filter((r) => r.status === s).length;
   return (
-    <details open={n("included_warning") + n("not_included") > 0} style={{ marginTop: 8, border: "1px solid #E3E6EA", borderRadius: 9, background: "#FFFFFF" }}>
-      <summary style={{ cursor: "pointer", padding: "8px 12px", fontSize: 12, fontWeight: 700, color: "#16233B", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        <span>{title}: {rows.length} documents</span>
-        <Chip {...STYLE.included} label={`${n("included")} included`} />
-        {n("included_warning") > 0 && <Chip {...STYLE.included_warning} label={`${n("included_warning")} with a warning`} />}
-        {n("not_included") > 0 && <Chip {...STYLE.not_included} label={`${n("not_included")} not included`} />}
+    <details open={n("included_warning") + n("not_included") > 0} className="mt-2 rounded-lg border border-border bg-card">
+      <summary className="flex cursor-pointer flex-wrap items-center gap-1.5 px-3 py-2 text-xs font-bold text-foreground">
+        <span>
+          {title}: {rows.length} documents
+        </span>
+        <BidTaskBadge status="verify">{`${n("included")} included`}</BidTaskBadge>
+        {n("included_warning") > 0 && <BidTaskBadge status="provide">{`${n("included_warning")} with a warning`}</BidTaskBadge>}
+        {n("not_included") > 0 && <BidTaskBadge status="fix">{`${n("not_included")} not included`}</BidTaskBadge>}
       </summary>
-      <div style={{ padding: "0 12px 10px" }}>
+      <div className="px-3 pb-2.5">
         {(n("included_warning") > 0 || n("not_included") > 0) && (
-          <div style={{ fontSize: 11, color: "#5B6472", marginBottom: 6 }}>
+          <div className="mb-1.5 text-[11px] text-muted-foreground">
             Deal with every warning and every missing document before you submit. The same checklist is on the pack&apos;s
             contents page.
           </div>
         )}
         {rows.map((r, i) => {
           const head = i === 0 || rows[i - 1].envelope !== r.envelope ? r.envelope : null;
-          const st = STYLE[r.status];
+          const meta = STATUS_META[r.status];
           return (
             <div key={`${r.envelope}-${r.no}-${r.title}`}>
-              {head && <div style={{ fontSize: 10, fontWeight: 700, color: "#5B6472", letterSpacing: 0.3, marginTop: 8, textTransform: "uppercase" }}>{head}</div>}
-              <div style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "5px 0", borderTop: "1px solid #E3E6EA", fontSize: 12 }}>
-                <span style={{ flex: "0 0 auto", marginTop: 1 }}>
-                  <Chip {...st} />
+              {head && <div className="mt-2 text-[10px] font-bold tracking-wide text-muted-foreground uppercase">{head}</div>}
+              <div className="flex items-start gap-2 border-t border-border py-1.5 text-xs">
+                <span className="mt-px shrink-0">
+                  <BidTaskBadge status={meta.badge}>{meta.label}</BidTaskBadge>
                 </span>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ color: "#16233B", fontWeight: 600, wordBreak: "break-word" }}>
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold break-words text-foreground">
                     {r.title}
-                    {r.pages && <span style={{ color: "#8A93A0", fontWeight: 400 }}> · p{r.pages}</span>}
+                    {r.pages && <span className="font-normal text-muted-foreground"> · p{r.pages}</span>}
                   </div>
-                  {r.note && <div style={{ color: st.color, wordBreak: "break-word" }}>{r.note}</div>}
+                  {r.note && <div className={`break-words ${meta.noteClass}`}>{r.note}</div>}
                 </div>
               </div>
             </div>
@@ -98,13 +102,5 @@ export function PackChecklist({ rows, title = "What's in this pack" }: { rows: C
         })}
       </div>
     </details>
-  );
-}
-
-function Chip({ label, bg, color }: { label: string; bg: string; color: string }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color, whiteSpace: "nowrap" }}>
-      {label}
-    </span>
   );
 }
