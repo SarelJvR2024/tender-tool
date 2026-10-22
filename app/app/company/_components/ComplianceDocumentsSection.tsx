@@ -113,9 +113,9 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
         />
       </div>
       <div className="mt-2.5 text-xs text-muted-foreground">
-        Uploads up to 4.4 MB each (PDF, Word or image). A QSE or EME sworn affidavit is recorded as B-BBEE proof, but check
-        each tender&apos;s own rule: SANRAL&apos;s Form A12 asks for a SANAS verification certificate and accepts an affidavit
-        only from an EME with annual revenue under R1.8 million.
+        PDF, Word or an image, up to 25 MB each - except the COID letter above, which is capped at 4.4 MB. A QSE or EME sworn
+        affidavit is recorded as B-BBEE proof, but check each tender&apos;s own rule: SANRAL&apos;s Form A12 asks for a SANAS
+        verification certificate and accepts an affidavit only from an EME with annual revenue under R1.8 million.
       </div>
     </VaultSection>
   );
