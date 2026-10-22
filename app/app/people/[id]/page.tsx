@@ -169,13 +169,6 @@ function ExpiryBadge({ status }: { status?: { label: string; tone: Tone } }) {
   );
 }
 
-function toneFromChip(status: { label: string; bg: string; color: string }): Tone {
-  if (status.color === "#15803D") return "success";
-  if (status.color === "#B45309") return "warning";
-  if (status.color === "#B91C1C") return "destructive";
-  return "muted";
-}
-
 function Field({ children }: { children: React.ReactNode }) {
   return <div className="mb-3">{children}</div>;
 }
@@ -389,7 +382,7 @@ export default async function PersonDetailPage({
 
   const yearsFromInitial = yearsSince(person?.initial_graduated ?? null);
   const expiryByBody = Object.fromEntries(
-    credentialExpiries(person ?? {}).map((c) => [c.body, { label: c.status.label, tone: toneFromChip(c.status) }]),
+    credentialExpiries(person ?? {}).map((c) => [c.body, { label: c.status.label, tone: c.status.tone as Tone }]),
   );
 
   return (
@@ -624,7 +617,8 @@ export default async function PersonDetailPage({
                           : `Held - no open tender asks for it right now.`}
                       </div>
                       {mine.map((h) => {
-                        const st = h.expiry_date ? toneFromChip(expiryStatus(h.expiry_date)) : "muted";
+                        // expiryStatus() only ever returns the 4-value subset Tone covers here (never "accent").
+                        const st = h.expiry_date ? (expiryStatus(h.expiry_date).tone as Tone) : "muted";
                         const stLabel = h.expiry_date ? expiryStatus(h.expiry_date).label : "Renewal date not on file";
                         return (
                           <div key={h.id} className="mb-1.5 flex flex-wrap items-center gap-2 text-xs text-foreground">

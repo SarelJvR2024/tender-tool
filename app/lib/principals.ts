@@ -150,12 +150,12 @@ export function isBlack(race: string | null): boolean {
 // Company-Master-Data-List.md §3.1. The strictest common window shown here is
 // 3 months; each tender's own rule decides.
 export function certificationStatus(certifiedOn: string | null, hasCopy: boolean, today = new Date()) {
-  if (!hasCopy) return { label: "No certified copy", bg: "#F0EEE6", color: "#6B6758" };
-  if (!certifiedOn) return { label: "Certification date not recorded", bg: "#FEF3C7", color: "#B45309" };
+  if (!hasCopy) return { label: "No certified copy", tone: "muted" as const };
+  if (!certifiedOn) return { label: "Certification date not recorded", tone: "warning" as const };
   const days = Math.floor((today.getTime() - new Date(certifiedOn).getTime()) / 86400000);
-  if (days <= 90) return { label: `Certified ${days} days ago`, bg: "#DCFCE7", color: "#15803D" };
-  if (days <= 180) return { label: `Certified ${days} days ago - too old for 3-month tenders`, bg: "#FEF3C7", color: "#B45309" };
-  return { label: `Certified ${days} days ago - recertify`, bg: "#FEE2E2", color: "#B91C1C" };
+  if (days <= 90) return { label: `Certified ${days} days ago`, tone: "success" as const };
+  if (days <= 180) return { label: `Certified ${days} days ago - too old for 3-month tenders`, tone: "warning" as const };
+  return { label: `Certified ${days} days ago - recertify`, tone: "destructive" as const };
 }
 
 /** Mismatches between what the person typed and what their ID number encodes. */

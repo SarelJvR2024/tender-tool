@@ -62,7 +62,7 @@ export function credentialExpiries(p: PersonCredentialFields): CredentialExpiry[
     if (!held && !expiry) continue;
     const status = expiry
       ? expiryStatus(expiry)
-      : { label: "Renewal date not on file", bg: "#F0EEE6", color: "#6B6758" };
+      : { label: "Renewal date not on file", tone: "muted" as const };
     out.push({ body: c.body, expiry, status });
   }
   return out;

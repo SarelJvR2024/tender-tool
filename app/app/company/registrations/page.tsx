@@ -97,8 +97,8 @@ export default async function RegistrationsPage({ searchParams }: { searchParams
 
       {!loadError && (expired > 0 || soon > 0) && (
         <div className="mb-3.5 flex flex-wrap gap-2">
-          {expired > 0 && <Chip status={{ label: `${expired} expired`, bg: "#FEE2E2", color: "#B91C1C" }} />}
-          {soon > 0 && <Chip status={{ label: `${soon} renewing soon`, bg: "#FEF3C7", color: "#B45309" }} />}
+          {expired > 0 && <Chip status={{ label: `${expired} expired`, tone: "destructive" }} />}
+          {soon > 0 && <Chip status={{ label: `${soon} renewing soon`, tone: "warning" }} />}
         </div>
       )}
 
@@ -205,7 +205,7 @@ function HeldRow({
   holders: Holder[];
   types: { value: string; label: string }[];
 }) {
-  const status = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Expiry not recorded", bg: "#ECEEF1", color: "#5B6472" };
+  const status = h.expiry_date ? expiryStatus(h.expiry_date) : { label: "Expiry not recorded", tone: "muted" as const };
   const name = h.original_filename ?? filenameFromPath(h.storage_path);
   return (
     <div id={`r-${h.id}`} className="border-t border-border py-3">

@@ -29,12 +29,15 @@ export function closingDayOf(closingDate: string | null): string | null {
   return new Date(t.getTime() + 2 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-export type StatusChip = { label: string; bg: string; color: string };
-
-const GREEN = { bg: "#DCFCE7", color: "#15803D" };
-const AMBER = { bg: "#FEF3C7", color: "#B45309" };
-const RED = { bg: "#FEE2E2", color: "#B91C1C" };
-const GREY = { bg: "#F0EEE6", color: "#6B6758" };
+// Tone carries the status directly - no literal hex anywhere in this app
+// (design-system color migration, spec §2). Previously this type held a
+// literal {bg, color} hex pair and every renderer matched against those
+// exact strings to recover a tone - fragile (silently fell through to
+// "muted" if a hex value ever drifted) and exactly the hard-coded-colour
+// pattern §2 forbids. "accent" is for a plain informational tag (e.g. a
+// person's role tags), not a pass/fail judgement like the other four.
+export type ChipTone = "success" | "warning" | "destructive" | "muted" | "accent";
+export type StatusChip = { label: string; tone: ChipTone };
 
 // Shared rule, driven directly by the real incident this exists to prevent:
 // the CLI engine flagging a COID Letter of Good Standing as "expired" on
@@ -43,8 +46,8 @@ const GREY = { bg: "#F0EEE6", color: "#6B6758" };
 // no date on file = grey/unknown (never treated as expired).
 export function expiryStatus(dateStr: string | null, renewSoonWithinDays = 60): StatusChip {
   const left = daysUntil(dateStr);
-  if (left === null) return { label: "Not on file", ...GREY };
-  if (left < 0) return { label: "Expired", ...RED };
-  if (left <= renewSoonWithinDays) return { label: "Renew soon", ...AMBER };
-  return { label: "Current", ...GREEN };
+  if (left === null) return { label: "Not on file", tone: "muted" };
+  if (left < 0) return { label: "Expired", tone: "destructive" };
+  if (left <= renewSoonWithinDays) return { label: "Renew soon", tone: "warning" };
+  return { label: "Current", tone: "success" };
 }

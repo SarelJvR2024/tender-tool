@@ -32,13 +32,6 @@ const TONE_CLASS: Record<Tone, string> = {
   muted: "border-muted-foreground/20 bg-muted text-muted-foreground",
 };
 
-function toneFromChip(status: { color: string }): Tone {
-  if (status.color === "#15803D") return "success";
-  if (status.color === "#B45309") return "warning";
-  if (status.color === "#B91C1C") return "destructive";
-  return "muted";
-}
-
 function Chip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
   return (
     <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${TONE_CLASS[tone]}`}>
@@ -64,7 +57,8 @@ function registrationSummary(p: PersonRow): { label: string; tone: Tone }[] {
   // Registration expiry badges (0035), same colours and 60-day threshold as
   // the Document Vault's expiry badges (app/lib/dates.ts expiryStatus).
   for (const c of credentialExpiries(p)) {
-    tags.push({ label: credentialChipLabel(c), tone: toneFromChip(c.status) });
+    // credentialExpiries()'s status only ever carries the 4-value subset Tone covers here (never "accent").
+    tags.push({ label: credentialChipLabel(c), tone: c.status.tone as Tone });
   }
   return tags;
 }
