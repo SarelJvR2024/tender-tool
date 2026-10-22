@@ -6,6 +6,64 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Cover letter / methodology statement generator built, 2026-10-22 ~10:30 UTC - on `feature/
+narrative-document-generator`, not yet merged.** Sarel asked directly: "lets buil a cover letter
+and methodology generator engin... it may NEVER generate the ame or similar versions for two
+companies then theymight both get disqualified." This directly reopens a decision made five days
+earlier (`docs/specs/Company-Voice-Audit.md`, 2026-10-17): AI-drafted executive summaries/
+methodology were cut from scope for the exact same reason Sarel now named - confirmed before any
+code was written (`AskUserQuestion`): build a full, ready-to-use draft anyway, but with a
+mechanical similarity check across companies for the same tender, plus an export/hand-edit-in-
+Word/re-upload path so nothing ships without a human reading and owning the words.
+
+- **Engine** (`engine/narrative/` - see its own `README.md` for full detail): `build_prompt.py`
+  (hard rules - never invent a fact, preserve `how_we_work`'s own phrasing, names and forbids
+  generic filler, ties length/detail/visual to the company's style choices), `uniqueness.py` (the
+  anti-collusion safeguard - stdlib `difflib`, `SIMILARITY_FLAG_THRESHOLD = 0.6`), `build_docx.py`
+  (real, editable `.docx`, 5 color themes, 3 visual-richness levels), `generate_narrative.py` (the
+  orchestrator - one structured-output Anthropic call, same `call_llm` convention as
+  `extract_cv_fields.py`; a draft scoring too similar gets **exactly one** automatic regeneration
+  with an explicit distinctness instruction, then is honestly flagged if still similar - never
+  silently shipped, never retried a third time), `process_narrative_jobs.py` (the Supabase polling
+  bridge, same shape as `process_cv_jobs.py`/`process_pack_jobs.py`).
+- **Data model**: migration `0085_narrative_documents.sql` (renumbered from `0084` mid-pass - `main`
+  advanced with its own unrelated `0084_pack_quota_counts_in_flight_jobs.sql` while this was being
+  built; caught by re-fetching `main` before branching, not after). Same request/fulfil shape as
+  `pack_generation_jobs`/`generated_cvs`: `status` `requested`→`generating`→`ready`/`failed`,
+  `style_length`/`style_detail`/`style_visual`/`style_color` captured at request time,
+  `similarity_score`/`similarity_flagged`/`regenerated_for_distinctness` recording the uniqueness
+  check's own result, `final_storage_path`/`final_original_filename`/`final_uploaded_at` for the
+  re-uploaded human-edited version (which, not `generated_storage_path`, is what anything
+  downstream should treat as real). RLS: tenant isolation plus the same employee-has-no-access
+  RESTRICTIVE policy `0077` established for every other company-business table - the cross-tenant
+  read the uniqueness check needs is only ever done by the service-role worker, never granted to
+  any client role.
+- **Built**: `app/app/tenders/[id]/narrative-documents.tsx` (a card on the Tender Workspace,
+  guidance textarea + style pickers per document kind, the same poll-via-`router.refresh()`
+  convention `AutoRefresh`/`submission-pack.tsx` already use, a plainly-worded warning banner when
+  a draft is still flagged after its one retry, a re-upload control for the final edited Word
+  doc) and `narrative-actions.ts` (`requestNarrativeDocument`/`uploadNarrativeFinal` - only ever
+  insert/update rows, same as every other action in this directory). Applies to any tender, SANRAL
+  or general family, not gated on a confirmed tender pack.
+- **Verified**: fresh 75-migration replay (clean) and the full real-Postgres tenant-isolation suite
+  (`ALL PASSED`) against a scratch Postgres with the renumbered migration; all 6
+  `engine/narrative/test_*.py` files pass (0 failures each, including a dedicated
+  `test_process_narrative_jobs.py` added specifically because that bridge script had shipped with
+  zero test coverage); the full repo-wide Python sweep (50 `engine/**/test_*.py` files) unaffected;
+  `tsc --noEmit`, `eslint`, `npx vitest run` (80/80), and `npm run build` all clean.
+- **Not done / open for Sarel**: no live Supabase run and no real Anthropic API call anywhere in
+  this work - no `ANTHROPIC_API_KEY` and no live Supabase project exist in this sandbox (the same
+  standing gap as every other entry in this file); every check above is against stubs/a scratch
+  Postgres, genuinely verifying the prompt/docx/uniqueness logic and the schema/RLS/UI, not the
+  real end-to-end "generate a real draft from a real company's real data" path. Not wired into
+  submission-pack assembly (`assemble_pack.py`/`build_general_pack.py`) - a deliberate scope cut,
+  flagged rather than built, since it touches two separate pack-assembly engines and a product
+  decision about where this belongs in each pack's own document order. `load_key_people` picks this
+  company's own named people with a role on file rather than the people specifically confirmed for
+  this one tender (`tender_pack_assignments` is SANRAL-specific; general-family tenders have no
+  equivalent concept yet) - a named, deliberate simplification, see the README. Not yet merged -
+  sitting on `feature/narrative-document-generator`, no PR opened yet.
+
 **Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
 is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
 R2,990/Business R4,990/Enterprise - that one's correct") - the full reconciliation (migration `0083`,
