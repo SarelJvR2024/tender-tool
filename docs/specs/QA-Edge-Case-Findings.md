@@ -3423,3 +3423,42 @@ its own quota.
 
 **Regression:** no TypeScript file changed (same contained, SQL-only blast radius as Findings
 51/52) - full app suite (`npx vitest run`): 8 files, 80 tests, unchanged and still passing.
+
+### Finding 54 (CONFIRMED, FIXED, moderate - the PayFast signature test suite was not isolated from the real environment's own secrets)
+
+**Where:** `app/lib/payfast.spec.ts`'s `verifyItnSignature` tests - including the one that
+reproduces PayFast's own official recorded ITN signature fixture from their open-source SDK's test
+suite (the strongest available confirmation that this file's byte-for-byte PHP-`urlencode`
+encoding is correct).
+
+**What was tested:** `verifyItnSignature()` reads `payfastPassphrase()`, which reads
+`process.env.PAYFAST_PASSPHRASE` directly - every fixture in this test file (including PayFast's
+own real recorded signature) was computed assuming NO passphrase, matching PayFast's sandbox
+default. None of the tests isolate themselves from the ambient environment. Caught live, not
+hypothetically: this session's own environment has a real, non-empty `PAYFAST_PASSPHRASE`
+configured (along with a real-looking `merchant_id`/`merchant_key` distinct from PayFast's generic
+published test credentials - almost certainly a real PayFast *sandbox merchant* account Sarel
+registered, not the shared universal test account) - running `npx vitest run` on main, as-is,
+failed 2 of `payfast.spec.ts`'s 11 tests, including the PayFast-SDK-fixture one, purely because
+the test never cleared the real passphrase before asserting against a no-passphrase fixture. Not a
+code bug in `verifyItnSignature()` itself - the production code correctly uses whatever passphrase
+is actually configured - but a real test-isolation gap that would give a false failure in ANY
+environment with a real sandbox passphrase set (a developer's own `.env.local`, or any CI
+pipeline that happens to inject these secrets), exactly the kind of thing that wastes real time
+chasing a "regression" that isn't one.
+
+**Checked whether this currently breaks the real GitHub Actions CI:** read `.github/workflows/
+app-ci.yml` in full - its own header comment states "All of it secret-free... no Supabase env
+vars", and the workflow declares no `env:`/`secrets:` block at all, so GitHub Actions injects
+nothing into `process.env` for this job. Confirmed this is NOT currently failing real CI - it is
+specific to any environment (like this one) that has real PayFast secrets configured for other,
+legitimate reasons (manual sandbox testing, engine scripts).
+
+**Fix:** `payfast.spec.ts` now stubs `PAYFAST_PASSPHRASE` to empty via `vi.stubEnv()` in a
+`beforeEach`, restored via `vi.unstubAllEnvs()` in `afterEach` - standard Vitest env isolation, so
+this suite's own correctness never depends on what a given machine happens to have configured.
+
+**Verified the fix actually isolates, not just happens to pass once:** reverted `payfast.spec.ts`
+(`git stash`): the exact same 2 failures reappeared against this environment's real passphrase;
+restored the fix: `11/11` pass. Full app suite (`npx vitest run`): 8 files, 80 tests, all pass.
+`npm run typecheck` and `eslint` on the touched file: clean.

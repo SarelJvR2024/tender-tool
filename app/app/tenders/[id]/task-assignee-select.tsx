@@ -35,19 +35,7 @@ export function TaskAssigneeSelect({
           reassignTenderTask(taskId, tenderId, e.target.value || null);
         })
       }
-      style={{
-        minHeight: 30,
-        padding: "0 8px",
-        borderRadius: 7,
-        border: "1px solid #E3E6EA",
-        background: "#FFFFFF",
-        color: "#16233B",
-        fontSize: 11,
-        fontWeight: 600,
-        cursor: isPending ? "default" : "pointer",
-        opacity: isPending ? 0.6 : 1,
-        maxWidth: 160,
-      }}
+      className={`min-h-[30px] max-w-[160px] rounded-md border border-border bg-card px-2 text-[11px] font-semibold text-foreground ${isPending ? "cursor-default opacity-60" : "cursor-pointer"}`}
     >
       <option value="">Unassigned</option>
       {people.map((p) => (

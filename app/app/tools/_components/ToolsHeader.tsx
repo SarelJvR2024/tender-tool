@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LogoLockup } from "../../_components/Logo";
 
 // Shared header for the individual free-tool pages (deadline calculator,
 // CIDB grade, B-BBEE preference points, B6 estimator). Before this, every
@@ -9,8 +10,15 @@ import Link from "next/link";
 // "Try a free tool first" button sends people to.
 // `showBackLink` (default true, matching the four tool pages) renders the
 // "<- Free tools" link on the left. The index page itself has nowhere to
-// go back to, so it passes false to get the logo + wordmark instead - the
-// same blue-badge "T" mark the rest of the public site uses.
+// go back to, so it passes false to get the real brand lockup instead.
+//
+// Logo fixed (2026-10-22, standing UI/UX pass): this header still had its
+// own hand-coded "T" badge - a leftover from before the real brand asset
+// pack existed (PR #75, same day), which replaced the Logo component and
+// every other public-page header but never touched this file. A visitor
+// who reached a free tool directly (search, a shared link) saw a
+// different brand than every other page - now uses the same LogoLockup
+// every other dark-surface header already renders.
 //
 // Design-system migration (2026-10-21): was raw inline-CSSProperties with
 // the old Civic Navy (#16233B) / gold accent (#D97706) pairing, from
@@ -29,11 +37,8 @@ export function ToolsHeader({ showBackLink = true }: { showBackLink?: boolean } 
             &larr; Free tools
           </Link>
         ) : (
-          <Link href="/" className="flex w-fit items-center gap-3 text-white no-underline">
-            <div className="flex size-[26px] items-center justify-center rounded-md bg-accent text-[13px] font-bold text-accent-foreground">
-              T
-            </div>
-            <div className="text-[15px] font-semibold">Tender Ready</div>
+          <Link href="/" className="flex w-fit items-center text-white no-underline">
+            <LogoLockup height={24} surface="dark" />
           </Link>
         )}
         <Link

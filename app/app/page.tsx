@@ -4,6 +4,7 @@ import { Check, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { LogoLockup } from "./_components/Logo";
 import { buttonVariants } from "@/components/ui/button";
+import { SavingsCalculator } from "@/components/tt/savings-calculator";
 import { cn } from "@/lib/utils";
 
 // This is the product's landing page, not a static marketing page: a
@@ -53,7 +54,7 @@ const PROOF_POINTS = [
   },
   {
     claim: "If SANRAL changes a template, the fill stops. It never guesses at a form it doesn't recognise.",
-    note: "fingerprint.py compares every template against its last known baseline before touching it.",
+    note: "Every template is compared against its last known baseline before anything is touched.",
   },
   {
     claim: "\"Not included, and why\" is printed in the pack itself - signatures, pricing, and anything only you can provide.",
@@ -77,25 +78,39 @@ const FREE_TOOLS = [
 // them again in SQL - three copies, deliberately never imported across the
 // app/database boundary, each checked against the others rather than
 // shared, same convention this array has used since it first existed.
+// Every plan includes every capability (app/AGENTS.md positioning rule) -
+// plans differ only in users and bid packs a month, so the feature list is
+// shown once, shared across all tiers, rather than split into per-tier
+// bullets that would wrongly imply CV tailoring, cover pages or SANRAL
+// automation are locked to a higher plan.
+const INCLUDED_IN_EVERY_PLAN = [
+  "Tender discovery, AI compliance and opportunity checks",
+  "Your company vault, with CV tailoring and cover pages",
+  "Buyer-specific form and template completion, where supported",
+  "Built-in SANRAL schedule automation",
+  "Bid pipeline tracking, including win rate",
+  "Email reminders for upcoming deadlines",
+];
+
 const PRICING_TIERS = [
   {
     name: "Starter",
     price: "R1,490",
     cadence: "/month",
-    bullets: ["5 bid packs a month, 2 people", "Tender discovery, AI compliance and opportunity checks", "Your company vault and the bid pipeline", "Every AI engine included - nothing held back"],
+    bullets: ["5 bid packs a month, 2 people"],
   },
   {
     name: "Professional",
     price: "R2,990",
     cadence: "/month",
-    bullets: ["15 bid packs a month, 5 people", "CVs tailored to each tender, cover pages, SANRAL schedule engine", "Analytics: win rate, pricing trends, where you're losing", "The plan most companies start on"],
+    bullets: ["15 bid packs a month, 5 people", "For companies tendering regularly"],
     highlight: true,
   },
   {
     name: "Business",
     price: "R4,990",
     cadence: "/month",
-    bullets: ["30 bid packs a month, 10 people", "Several bids or branches at once, shared pipelines", "Deeper analytics across tenders and competitors", "Priority onboarding and support"],
+    bullets: ["30 bid packs a month, 10 people"],
   },
   {
     name: "Enterprise",
@@ -215,7 +230,7 @@ export default async function Home() {
       <section className="border-y border-border bg-card">
         <div className={SECTION}>
           <h2 className={H2}>What actually comes out the other end</h2>
-          <p className={LEDE}>Not a draft to tidy up. A submission pack, ready to print and sign.</p>
+          <p className={LEDE}>See what Tender Ready checks before you submit - then you give it a final look, price it and sign.</p>
           <div className="mx-auto max-w-[480px] rounded-xl border border-border bg-background p-7">
             <div className="mb-3.5 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
               Inside a generated envelope
@@ -237,10 +252,10 @@ export default async function Home() {
 
       {/* Proof section */}
       <section className={SECTION}>
-        <h2 className={H2}>No customers yet. Here&apos;s what to check instead of a testimonial</h2>
+        <h2 className={H2}>Check it yourself, not a testimonial</h2>
         <p className={LEDE}>
-          Tender Ready is new. Rather than a quote from someone you&apos;ve never met, here are specific,
-          falsifiable claims you can check yourself in the pack it builds.
+          Rather than a quote from someone you&apos;ve never met, here are specific claims you can verify
+          yourself in the pack it builds.
         </p>
         <div className="mx-auto mb-8 flex max-w-[680px] flex-col gap-3">
           {PROOF_POINTS.map((p) => (
@@ -310,6 +325,14 @@ export default async function Home() {
           Excl. VAT. Every plan gets every AI engine - plans differ only in how many people and how many bid packs a month.
           14-day trial, no card needed, with one full bid pack. Pay monthly or annually - annual is 2 months free.
         </p>
+        <div className="mx-auto mb-8 max-w-[680px] rounded-xl border border-border bg-card p-6">
+          <div className="mb-3 text-xs font-semibold tracking-wide text-muted-foreground uppercase">Included in every plan</div>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {INCLUDED_IN_EVERY_PLAN.map((line) => (
+              <CheckItem key={line}>{line}</CheckItem>
+            ))}
+          </div>
+        </div>
         <div className="mx-auto grid max-w-[1100px] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {PRICING_TIERS.map((tier) => {
             const isCustom = tier.name === "Enterprise";
@@ -345,16 +368,19 @@ export default async function Home() {
             );
           })}
         </div>
+        <div className="mt-8">
+          <SavingsCalculator />
+        </div>
       </section>
 
       {/* Final CTA */}
       <section className="bg-foreground">
         <div className="mx-auto max-w-[680px] px-5 py-14 text-center">
           <p className="mb-2.5 text-xl font-semibold leading-snug text-white">
-            We don&apos;t promise to write your bid.
+            Tender Ready compiles your bid from your own company information and flags what&apos;s missing.
           </p>
-          <p className="mb-7 text-xl font-semibold leading-snug text-accent">
-            We promise nothing in it is missing, expired, or mis-filed.
+          <p className="mb-7 text-xl font-semibold leading-snug text-white">
+            You review it, price it and sign.
           </p>
           <Link href="/signup" className={buttonVariants({ variant: "accent", size: "lg", className: "min-h-11 px-6" })}>
             Start free
@@ -364,7 +390,7 @@ export default async function Home() {
 
       {/* Footer */}
       <footer className="px-5 py-6 text-center">
-        <p className="mb-2 text-xs text-muted-foreground">Tender Ready - built for South African construction and engineering firms bidding public-sector tenders.</p>
+        <p className="mb-2 text-xs text-muted-foreground">Tender Ready - built for South African companies that submit tenders.</p>
         <Link href="/privacy" className="text-xs text-muted-foreground underline">
           Privacy notice
         </Link>

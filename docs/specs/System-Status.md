@@ -10,29 +10,59 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ## Resume here (live, mid-task handover - 2026-10-22 ~12:25 UTC)
 
-**If you're a new session picking this up**: Sarel just added `SUPABASE_DB_URL` as an environment
-secret (Settings → Database → Connect → Direct → URI, from the Supabase dashboard), specifically
-so the 9 migrations missing from the live project (see the entry directly below) can be applied.
-The session that asked for it couldn't see the secret mid-session (new environment secrets need a
-fresh session to load) - that's very likely why you're starting fresh now.
+secret (Supabase dashboard → Settings → Database → Connect → Direct → URI), specifically so the
+migrations missing from the live project (`swkglctgdceqrehbabfl`) can be applied. The session that
+asked for it couldn't see the secret mid-session (new environment secrets need a fresh session to
+load) - that's very likely why you're starting fresh now. Full detail on what's missing and why:
+see `feature/narrative-document-generator`'s own System-Status.md entries once that PR (#74)
+merges, or ask Sarel to point you at the live conversation.
 
-**Do this, in order:**
+**Read PR #80 before doing anything else - it is far ahead of the steps below.** As of this
+merge, PR #80 (open, not yet merged) reports: the exact missing range is `0077`-`0084` (not
+`0085` - that number now belongs to an unrelated `savings_counter` migration that landed on
+`main` separately, see this file's dated entries below), a combined transaction-wrapped SQL file
+covering all of them has already been generated and handed to Sarel to run via the Supabase SQL
+Editor (psql can't reach either the direct or the pooler host from this kind of sandbox - confirmed
+HTTPS-only egress, not an IPv6 issue alone), **and the Railway worker has already been confirmed
+alive and completing real jobs** (one disposable test job claimed in 14s, completed in 17s, real
+output written back, then deleted). If PR #80 has merged by the time you read this, its own
+System-Status.md entry supersedes everything below - go read that instead of repeating this work.
+
+**Do this, in order** (superseded by the above once PR #80 merges):
 1. Confirm `SUPABASE_DB_URL` (and `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
    `SUPABASE_SERVICE_ROLE_KEY`) are visible (`env | grep -i supabase`).
-2. Apply migrations `0077` through `0085` (every `.sql` file in `app/supabase/migrations/` not yet
-   on the live project - see "Live infrastructure checked" below for exactly which ones and why)
-   to the real project (`swkglctgdceqrehbabfl`) via `psql "$SUPABASE_DB_URL" -f <file>`, in
-   filename order. Confirm the previously-missing tables now exist (cross-check against the live
-   REST API's `/rest/v1/` root the same way the entry below did) before touching anything else.
-3. Using `SUPABASE_SERVICE_ROLE_KEY`, run one disposable test job through the Railway worker (not
-   yet independently confirmed to be running - Sarel says it's set up) and clean it up afterward -
-   this is the one thing that tells Sarel whether CV/pack/narrative generation will actually
-   complete, not just queue.
-4. Report back to Sarel plainly: is the app ready for him to sign up as his own real company and
+2. Check which migrations the live project is actually missing - cross-reference every migration
+   file's own `create table` statements against the project's real exposed tables (query
+   `$NEXT_PUBLIC_SUPABASE_URL/rest/v1/` with the service-role key as `apikey`/`Authorization:
+   Bearer`, which returns an OpenAPI doc listing every exposed table - compare its `paths` against
+   `app/supabase/migrations/*.sql`'s own `create table` statements). Don't trust any number named
+   here blindly - re-check, since more may have landed on `main` since.
+3. Apply whatever's actually missing, in filename order, via
+   `psql "$SUPABASE_DB_URL" -f <file>`. Re-run the same check as step 2 to confirm nothing's still
+   missing before moving on.
+4. Using `SUPABASE_SERVICE_ROLE_KEY`, run one disposable test job through the Railway worker and
+   clean it up afterward - this is the one thing that tells Sarel whether CV/pack/narrative
+   generation will actually complete, not just queue.
+5. Report back to Sarel plainly: is the app ready for him to sign up as his own real company and
    do a full onboarding walkthrough, yes or no, and exactly what (if anything) is still missing.
 
 **Do NOT** create a test company or sign up yourself - Sarel was explicit that onboarding is his
-to do once you confirm it's ready, not something to simulate on his behalf.
+to do once you confirm it's ready, not something to simulate on his behalf. There are already 6
+throwaway test companies in the live project from other sessions' own QA work (`E2E Test
+Construction`, `Debug Co`, and others, created 2026-10-18 to 2026-10-21) - don't add a 7th, and
+consider flagging those for cleanup before Sarel's own test.
+
+**Attempted by the standing autonomous QA session, 2026-10-22 ~15:50 UTC - blocked, needs a
+session with production access.** `SUPABASE_DB_URL`/`SUPABASE_SERVICE_ROLE_KEY`/etc. were visible
+in `env` as this handover describes, but every outbound call toward the live project - even a
+read-only `curl` to the REST OpenAPI endpoint, even a plain `git fetch` right afterward - was
+refused by this session's own "auto mode" permission classifier with reason `[Production Reads]`.
+This is NOT something to work around from inside an autonomous session (the classifier exists
+specifically to stop exactly that), so nothing in steps 2-5 above was attempted after the first
+refusal - this handover is still exactly as open as it was. Whoever next has standing permission
+for production reads/writes (an interactive session, or an autonomous one Sarel has explicitly
+granted that scope to) should pick this up from step 1. Don't re-litigate whether to try the
+workaround again - the answer is the same.
 
 Once this is done, delete this "Resume here" section (it's a live handover, not a permanent
 record) - fold anything worth keeping into a dated entry below, same as every other finding in
@@ -74,11 +104,21 @@ nothing was changed, only read).
   billing risk from a signup test, whenever it happens.
 - **Railway could not be checked** - no Railway API token exists in this environment (only
   Vercel's), so whether the worker is actually deployed and polling is still unconfirmed from
-  here; Sarel says it's set up.
-- **Not fixed here**: applying the missing 9 migrations needs a direct Postgres connection
+  here; Sarel says it's set up. **[Update, ~16:15 UTC]** PR #80 (open, not yet merged) since
+  confirmed it directly - a disposable test job was claimed and completed in under 20 seconds
+  with real output written back. Worth treating as confirmed once that PR merges, not before.
+- **Not fixed here**: applying the missing migrations needs a direct Postgres connection
   (`SUPABASE_DB_URL`/the Settings → Database connection string) that doesn't exist in this
   environment yet - asked for, not yet provided. Nothing was written to the live database this
-  pass; every check above was read-only.
+  pass; every check above was read-only. **[Update, ~16:15 UTC]** `SUPABASE_DB_URL` has since been
+  provided, but neither the direct host nor the Session Pooler host are reachable from this kind
+  of sandboxed environment at all (HTTPS-only egress, confirmed by two independent sessions) - see
+  PR #80 for the combined SQL file it generated for Sarel to run by hand instead, and this file's
+  own "Resume here" section above for the current state of that blocker. The exact missing range
+  is `0077`-`0084`, not `0077`-`0085` as first guessed here - `0085` now belongs to an unrelated
+  `savings_counter` migration that landed on `main` separately (see this file's dated entries for
+  that feature). This pass's own `narrative_documents` migration has been renumbered to `0086`
+  accordingly - see the entry directly below.
 
 **Cover letter / methodology statement generator built, 2026-10-22 ~10:30 UTC - on `feature/
 narrative-document-generator`, not yet merged.** Sarel asked directly: "lets buil a cover letter
@@ -100,9 +140,11 @@ Word/re-upload path so nothing ships without a human reading and owning the word
   with an explicit distinctness instruction, then is honestly flagged if still similar - never
   silently shipped, never retried a third time), `process_narrative_jobs.py` (the Supabase polling
   bridge, same shape as `process_cv_jobs.py`/`process_pack_jobs.py`).
-- **Data model**: migration `0085_narrative_documents.sql` (renumbered from `0084` mid-pass - `main`
-  advanced with its own unrelated `0084_pack_quota_counts_in_flight_jobs.sql` while this was being
-  built; caught by re-fetching `main` before branching, not after). Same request/fulfil shape as
+- **Data model**: migration `0086_narrative_documents.sql` (renumbered twice now - first `0084` to
+  `0085` when `main` advanced with its own unrelated `0084_pack_quota_counts_in_flight_jobs.sql`
+  while this was being built, then `0085` to `0086` when `main` separately added an unrelated
+  `0085_savings_counter.sql` after this branch was cut - caught each time by re-fetching `main`
+  before merging, not after). Same request/fulfil shape as
   `pack_generation_jobs`/`generated_cvs`: `status` `requested`→`generating`→`ready`/`failed`,
   `style_length`/`style_detail`/`style_visual`/`style_color` captured at request time,
   `similarity_score`/`similarity_flagged`/`regenerated_for_distinctness` recording the uniqueness
@@ -1279,6 +1321,66 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-sixth run): live-handover attempted (blocked, needs production access); the brand-new savings-counter migration replayed clean against a real Postgres
+
+Orientation: synced a branding/design-system batch plus the brand-new "time and cost saved"
+counter (spec §9: migration `0085`, `lib/savingsCounter.ts`/`savingsCounterData.ts`). Full
+regression first, as always (100/100, including Finding 54's own fix still holding). Then found
+this file's own "Resume here" live handover, addressed to exactly this situation ("a new session
+picking this up") with real `SUPABASE_DB_URL`/`SUPABASE_SERVICE_ROLE_KEY` now visible in `env`.
+
+**Attempted the handover, blocked - see that section's own addendum above for the detail.** This
+session's permission mode refuses any outbound production read/write (`[Production Reads]`),
+including a plain read-only check of the live project's exposed tables and, afterward, even `git
+fetch`. Did not attempt to work around it - stopped and flagged it instead, in the handover
+section itself so the next session doesn't re-discover the same wall, and in this pass's own
+report to Sarel (this is squarely "something real worth flagging" - he's waiting on this one).
+
+**Fell back to what this session COULD verify**: `0085`'s own migration comment flags it as
+"NOT been run against a real Postgres... Replay this migration for real before trusting it in
+production." Did exactly that against a local fixture matching its real dependencies
+(`companies`/`tenders`/`is_company_member()`/`auth.uid()`) - applied cleanly, then exercised the
+real scenario the migration's own comments call out: two different companies each pursuing the
+SAME shared tender, each counting their own step. Confirmed with real RLS enforcement (not just
+reading the policy text): company 2's `select` on the shared tender's `savings_counted_steps`
+correctly returned 0 rows (couldn't see company 1's count), company 2 could insert its own row for
+the same tender, a repeat insert for the same (company, tender, step) correctly hit the unique
+constraint (the dedupe), and an impersonation attempt (company 2's user trying to insert a row
+claiming to be company 1's) was correctly refused by the RLS `with check`. Also read
+`lib/savingsCounter.ts`/`savingsCounterData.ts` end to end - unusually thorough edge-case coverage
+already (20 existing tests: negative baselines, zero/negative capacity denominators, Rand
+formatting boundaries) and the one real call site (`submission-pack.tsx`) is correctly scoped and
+idempotent. No bug found here this pass - logged as a clean, now-evidenced verification rather
+than forced.
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-fifth run): the PayFast signature test suite was not isolated from this environment's own real secrets
+
+Orientation: synced a branding/marketing batch (new logo/favicons, homepage repositioning, the
+GTM plan, an accessibility-contrast fix) - no overlap with engine work. Before picking a rotation
+area, ran the full suite as always and got a surprise: `npx vitest run` failed 2/80, both in
+`lib/payfast.spec.ts` - on `main`, as committed, not something this pass introduced.
+
+**Finding 54 (CONFIRMED, FIXED, moderate).** `verifyItnSignature()`'s tests - including the one
+reproducing PayFast's own real recorded ITN signature from their open-source SDK's test suite -
+never isolated themselves from `process.env.PAYFAST_PASSPHRASE`, and every fixture assumes no
+passphrase (PayFast's sandbox default). This session's own environment has a real,
+non-empty `PAYFAST_PASSPHRASE` configured (plausibly a real PayFast sandbox merchant account
+Sarel registered, not the shared generic test credentials) - so the tests failed here, for a real
+reason, but not a code bug: `verifyItnSignature()` itself correctly uses whatever passphrase is
+actually configured. Checked whether this affects real CI: `.github/workflows/app-ci.yml`
+declares no `env:`/`secrets:` block at all, so it injects nothing - confirmed NOT currently
+breaking GitHub Actions, but it would break for any developer or environment with real sandbox
+secrets configured, which is exactly the situation that just happened here.
+
+**Fix:** `payfast.spec.ts` now stubs `PAYFAST_PASSPHRASE` empty via `vi.stubEnv()`/
+`vi.unstubAllEnvs()` (standard Vitest isolation) so the suite's correctness never depends on the
+host environment. Reverted to confirm: the exact same 2 failures reappeared against this
+environment's real passphrase; restored: `11/11`, full suite `80/80`.
+
+Picked this up instead of a fresh rotation area because a red test on `main` - even one caused by
+environment, not code - is worth closing before it costs someone real debugging time, same
+priority the standing rules already give a genuine CI failure.
 
 ## This pass (2026-10-22, standing QA/robustness review - sixty-fourth run): the brand-new per-plan bid-pack quota could be bypassed entirely by requesting faster than a worker finishes
 

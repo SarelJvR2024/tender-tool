@@ -18,8 +18,6 @@ import { uploadTenderTemplate } from "./pack-inputs-actions";
 // another company's.
 type DocRow = { doc_type: string; original_filename: string | null; downloaded_at: string; source: "own" | "buyer" };
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
-
 export async function TenderTemplates({ tenderId, saved }: { tenderId: string; saved: boolean }) {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("tender_document_uploads", { p_tender_id: tenderId });
@@ -28,53 +26,50 @@ export async function TenderTemplates({ tenderId, saved }: { tenderId: string; s
   const missingRequired = TENDER_TEMPLATE_ORDER.filter((t) => TENDER_TEMPLATES[t].required && !rows.has(t));
 
   return (
-    <div id="tender-templates" style={card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Blank tender templates</div>
+    <div id="tender-templates" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+      <div className="mb-0.5 flex flex-wrap items-start justify-between gap-2.5">
+        <div className="text-[15px] font-bold text-foreground">Blank tender templates</div>
         <span
-          style={{
-            display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
-            background: missingRequired.length ? "#FEF3C7" : "#DCFCE7", color: missingRequired.length ? "#B45309" : "#15803D",
-          }}
+          className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${
+            missingRequired.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"
+          }`}
         >
           {missingRequired.length ? `${missingRequired.length} still needed` : "All required on file"}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+      <div className="mb-3 text-xs text-muted-foreground">
         Download this tender&apos;s documents from SANRAL&apos;s tender page (its download form can&apos;t be automated),
         then upload the submission files here exactly as issued. The pack builder fills these copies; uploading the
         Technical workbook is also what lists this tender&apos;s key positions above. Only your company sees and
         uses what you upload here - other companies preparing this tender upload their own copy.
       </div>
 
-      {error && <div style={{ fontSize: 12, color: "#B91C1C", marginBottom: 8 }}>Couldn&apos;t load the templates on file - try refreshing. If it keeps happening, let us know.</div>}
-      {saved && <div style={{ fontSize: 12, color: "#15803D", marginBottom: 8, fontWeight: 600 }}>Template uploaded.</div>}
+      {error && <div className="mb-2 text-xs text-destructive">Couldn&apos;t load the templates on file - try refreshing. If it keeps happening, let us know.</div>}
+      {saved && <div className="mb-2 text-xs font-semibold text-success">Template uploaded.</div>}
 
       {TENDER_TEMPLATE_ORDER.map((type) => {
         const t = TENDER_TEMPLATES[type];
         const row = rows.get(type);
         return (
-          <div key={type} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "10px 0", borderTop: "1px solid #ECEEF1" }}>
-            <div style={{ minWidth: 0, flex: "1 1 240px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 13, fontWeight: 600, color: "#16233B" }}>{t.label}</span>
+          <div key={type} className="flex flex-wrap items-center justify-between gap-2.5 border-t border-border py-2.5">
+            <div className="min-w-0 flex-[1_1_240px]">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[13px] font-semibold text-foreground">{t.label}</span>
                 <span
-                  style={{
-                    fontSize: 10, fontWeight: 600, borderRadius: 100, padding: "2px 8px",
-                    background: row ? "#DCFCE7" : t.required ? "#FEE2E2" : "#ECEEF1",
-                    color: row ? "#15803D" : t.required ? "#B91C1C" : "#5B6472",
-                  }}
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    row ? "bg-success/10 text-success" : t.required ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
+                  }`}
                 >
                   {row ? "On file" : t.required ? "Needed" : "Optional"}
                 </span>
               </div>
-              <div style={{ fontSize: 11, color: "#5B6472", marginTop: 2, wordBreak: "break-word" }}>
+              <div className="mt-0.5 text-[11px] break-words text-muted-foreground">
                 {row
                   ? `${row.source === "buyer" ? "from the buyer's published tender documents" : (row.original_filename ?? "uploaded")} · ${new Date(row.downloaded_at).toLocaleDateString()}`
                   : t.hint}
               </div>
             </div>
-            <form action={uploadTenderTemplate} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <form action={uploadTenderTemplate} className="flex flex-wrap items-center gap-1.5">
               <input type="hidden" name="tender_id" value={tenderId} />
               <input type="hidden" name="doc_type" value={type} />
               <input
@@ -82,11 +77,13 @@ export async function TenderTemplates({ tenderId, saved }: { tenderId: string; s
                 name="file"
                 required
                 accept={`.${t.extension}`}
-                style={{ fontSize: 12, maxWidth: 220, color: "#16233B" }}
+                className="max-w-[220px] text-xs text-foreground"
               />
               <button
                 type="submit"
-                style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: row ? "#FFFFFF" : "#16233B", color: row ? "#16233B" : "#FFFFFF", border: row ? "1px solid #E3E6EA" : "none", fontSize: 12, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap" }}
+                className={`min-h-9 cursor-pointer rounded-md px-3.5 text-xs font-semibold whitespace-nowrap ${
+                  row ? "border border-border bg-card text-foreground" : "bg-foreground text-white"
+                }`}
               >
                 {row?.source === "own" ? "Replace" : row ? "Upload your own" : "Upload"}
               </button>

@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createInvite, revokeInvite, setMemberRole, removeMember } from "./actions";
-import { Card, DangerButton, MUTED, NAVY, Select, SubPage, Submit, Text, fmtDate } from "../_components/ui";
+import { Card, DangerButton, Select, SubPage, Submit, Text, fmtDate } from "../_components/ui";
 
 export const instant = false;
 
@@ -68,20 +68,20 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
     >
       <Card title="Current team">
         {members.length === 0 ? (
-          <div style={{ fontSize: 13, color: MUTED }}>No members yet.</div>
+          <div className="text-[13px] text-muted-foreground">No members yet.</div>
         ) : (
           members.map((m) => (
-            <div key={m.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 0", borderBottom: "1px solid #F0EEE6" }}>
-              <div style={{ fontSize: 13, color: NAVY }}>
+            <div key={m.id} className="flex items-center justify-between gap-2.5 border-b border-border py-2.5">
+              <div className="text-[13px] text-foreground">
                 {labelByUser.get(m.user_id) ?? "A team member"}
-                {m.user_id === user?.id && <span style={{ color: MUTED }}> (you)</span>}
+                {m.user_id === user?.id && <span className="text-muted-foreground"> (you)</span>}
               </div>
               {isAdmin ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <form action={setMemberRole} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div className="flex items-center gap-2">
+                  <form action={setMemberRole} className="flex items-center gap-1.5">
                     <input type="hidden" name="member_id" value={m.id} />
                     <input type="hidden" name="user_id" value={m.user_id} />
-                    <select name="role" defaultValue={m.role} disabled={m.user_id === user?.id} style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12.5, padding: "0 6px" }}>
+                    <select name="role" defaultValue={m.role} disabled={m.user_id === user?.id} className="min-h-9 rounded-md border border-border px-1.5 text-[12.5px]">
                       {ROLES.map((r) => (
                         <option key={r.value} value={r.value}>{r.label}</option>
                       ))}
@@ -97,39 +97,39 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                   )}
                 </div>
               ) : (
-                <span style={{ fontSize: 12, color: MUTED }}>{ROLES.find((r) => r.value === m.role)?.label ?? m.role}</span>
+                <span className="text-xs text-muted-foreground">{ROLES.find((r) => r.value === m.role)?.label ?? m.role}</span>
               )}
             </div>
           ))
         )}
-        {ownerCount <= 1 && <div style={{ fontSize: 11.5, color: MUTED, marginTop: 10 }}>The company always keeps at least one owner.</div>}
+        {ownerCount <= 1 && <div className="mt-2.5 text-[11.5px] text-muted-foreground">The company always keeps at least one owner.</div>}
       </Card>
 
       {isAdmin && (
         <>
           <Card title="Pending invites">
             {invites.length === 0 ? (
-              <div style={{ fontSize: 13, color: MUTED }}>No pending invites.</div>
+              <div className="text-[13px] text-muted-foreground">No pending invites.</div>
             ) : (
               invites.map((inv) => {
                 const link = `${origin}/invite/${inv.token}`;
                 return (
-                  <div key={inv.id} style={{ padding: "10px 0", borderBottom: "1px solid #F0EEE6" }}>
-                    <div style={{ fontSize: 13, color: NAVY, fontWeight: 600 }}>
+                  <div key={inv.id} className="border-b border-border py-2.5">
+                    <div className="text-[13px] font-semibold text-foreground">
                       {ROLES.find((r) => r.value === inv.role)?.label ?? inv.role}
                       {inv.email ? ` - ${inv.email}` : ""}
                       {personName(inv.linked_person_id) ? ` - for ${personName(inv.linked_person_id)}` : ""}
                     </div>
-                    <div style={{ fontSize: 11.5, color: MUTED, margin: "2px 0 6px" }}>
+                    <div className="my-0.5 text-[11.5px] text-muted-foreground">
                       Created {fmtDate(inv.created_at)} - expires {fmtDate(inv.expires_at)}
                     </div>
                     <input
                       readOnly
                       value={link}
                       onFocus={(e) => e.currentTarget.select()}
-                      style={{ width: "100%", boxSizing: "border-box", minHeight: 38, padding: "7px 10px", borderRadius: 7, border: "1px solid #E5E1D5", fontSize: 12.5, fontFamily: "monospace", background: "#F6F5F1", color: NAVY }}
+                      className="w-full rounded-md border border-border bg-muted px-2.5 py-[7px] font-mono text-[12.5px] text-foreground"
                     />
-                    <div style={{ marginTop: 8 }}>
+                    <div className="mt-2">
                       <form action={revokeInvite}>
                         <input type="hidden" name="invite_id" value={inv.id} />
                         <DangerButton confirmMessage="Revoke this invite? The link will stop working.">Revoke</DangerButton>
@@ -143,7 +143,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
 
           <Card title="Invite someone">
             <form action={createInvite} autoComplete="off">
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
                 <Text name="email" label="Email (your own reference - not sent anywhere)" type="text" />
                 <Select name="role" label="Role" defaultValue="member" options={ROLES} required />
                 <Select
@@ -153,7 +153,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                   options={[{ value: "", label: "No - a new team member" }, ...people.map((p) => ({ value: p.id, label: p.name }))]}
                 />
               </div>
-              <div style={{ marginTop: 12 }}>
+              <div className="mt-3">
                 <Submit>Create invite link</Submit>
               </div>
             </form>

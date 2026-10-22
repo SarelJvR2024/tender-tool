@@ -55,49 +55,49 @@ export function PositionPersonSelect({
       : null;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "stretch", flex: "1 1 280px", maxWidth: 420 }}>
+    <div className="flex flex-[1_1_280px] max-w-[420px] flex-col items-stretch gap-2">
       {suggestion && confirmedPersonId !== suggestion.id && (
-        <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "8px 10px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "space-between" }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#B45309", letterSpacing: 0.3 }}>
+        <div className="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[10px] font-bold tracking-wide text-warning">
                 {confirmedPersonId ? "SUGGESTED INSTEAD" : "SUGGESTED"}
               </div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{suggestion.name}</div>
-              <div style={{ fontSize: 11, color: suggestion.specialismWarning ? "#B91C1C" : "#4B5563" }}>{suggestion.why}</div>
+              <div className="text-[13px] font-bold text-foreground">{suggestion.name}</div>
+              <div className={`text-[11px] ${suggestion.specialismWarning ? "text-destructive" : "text-muted-foreground"}`}>{suggestion.why}</div>
             </div>
             <button
               type="button"
               disabled={isPending}
               onClick={() => choose(suggestion.id)}
-              style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: isPending ? "default" : "pointer", opacity: isPending ? 0.6 : 1, whiteSpace: "nowrap" }}
+              className={`min-h-9 rounded-lg border-none bg-foreground px-3.5 text-xs font-semibold whitespace-nowrap text-white ${isPending ? "cursor-default opacity-60" : "cursor-pointer"}`}
             >
               Confirm {suggestion.name.split(" ")[0]}
             </button>
           </div>
           {suggestions.tied && alternatives[0] && (
-            <div style={{ fontSize: 11, color: "#92400E", marginTop: 4 }}>
+            <div className="mt-1 text-[11px] text-warning">
               Same match score as {alternatives[0].name} - put first on years&apos; experience on file. Check which fits better.
             </div>
           )}
-          {basisNote && <div style={{ fontSize: 11, color: "#92400E", marginTop: 4 }}>{basisNote}</div>}
+          {basisNote && <div className="mt-1 text-[11px] text-warning">{basisNote}</div>}
         </div>
       )}
       {alternatives.filter((s) => s.id !== confirmedPersonId).length > 0 && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div className="flex flex-col gap-1">
           {alternatives
             .filter((s) => s.id !== confirmedPersonId)
             .map((s) => (
-              <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", fontSize: 12, color: "#16233B", borderTop: "1px solid #ECEEF1", paddingTop: 4 }}>
-                <div style={{ minWidth: 0 }}>
-                  <span style={{ fontWeight: 600 }}>Alternative: {s.name}</span>
-                  <span style={{ color: s.specialismWarning ? "#B91C1C" : "#5B6472" }}> - {s.why}</span>
+              <div key={s.id} className="flex items-center justify-between gap-2 border-t border-border pt-1 text-xs text-foreground">
+                <div className="min-w-0">
+                  <span className="font-semibold">Alternative: {s.name}</span>
+                  <span className={s.specialismWarning ? "text-destructive" : "text-muted-foreground"}> - {s.why}</span>
                 </div>
                 <button
                   type="button"
                   disabled={isPending}
                   onClick={() => choose(s.id)}
-                  style={{ minHeight: 32, padding: "0 10px", borderRadius: 7, background: "#FFFFFF", color: "#16233B", fontSize: 11, fontWeight: 600, border: "1px solid #E3E6EA", cursor: isPending ? "default" : "pointer", whiteSpace: "nowrap" }}
+                  className={`min-h-8 rounded-md border border-border bg-card px-2.5 text-[11px] font-semibold whitespace-nowrap text-foreground ${isPending ? "cursor-default" : "cursor-pointer"}`}
                 >
                   Use
                 </button>
@@ -106,7 +106,7 @@ export function PositionPersonSelect({
         </div>
       )}
       {!suggestions.scored && (
-        <div style={{ fontSize: 11, color: "#8A93A0" }}>
+        <div className="text-[11px] text-muted-foreground">
           A suggestion appears once the pack builder has scored your people against this position.
         </div>
       )}
@@ -115,18 +115,9 @@ export function PositionPersonSelect({
         value={confirmedPersonId ?? ""}
         disabled={isPending}
         onChange={(e) => choose(e.target.value || null)}
-        style={{
-          minHeight: 36,
-          padding: "0 8px",
-          borderRadius: 7,
-          border: confirmedPersonId ? "1px solid #E3E6EA" : "1px solid #D97706",
-          background: "#FFFFFF",
-          color: "#16233B",
-          fontSize: 12,
-          fontWeight: 600,
-          cursor: isPending ? "default" : "pointer",
-          opacity: isPending ? 0.6 : 1,
-        }}
+        className={`min-h-9 rounded-md border bg-card px-2 text-xs font-semibold text-foreground ${
+          confirmedPersonId ? "border-border" : "border-accent"
+        } ${isPending ? "cursor-default opacity-60" : "cursor-pointer"}`}
       >
         <option value="">{confirmedPersonId ? "Clear - not confirmed" : "Or choose anyone else…"}</option>
         {top.length > 0 && (

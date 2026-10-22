@@ -12,10 +12,9 @@ import { applyPastSubmission } from "./reuse-actions";
  * click. What is reusable at all is decided in app/lib/pastSubmissionReuse.ts.
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
-const button: React.CSSProperties = { minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" };
-const quiet: React.CSSProperties = { ...button, background: "#FFFFFF", color: "#16233B", border: "1px solid #D6D1C2" };
-const row: React.CSSProperties = { padding: "7px 0", borderTop: "1px solid #ECEEF1", fontSize: 12 };
+const buttonClass = "min-h-10 cursor-pointer rounded-lg border-none bg-foreground px-4 text-[13px] font-semibold text-white";
+const quietClass = "min-h-10 cursor-pointer rounded-lg border border-border bg-card px-4 text-[13px] font-semibold text-foreground";
+const rowClass = "border-t border-border py-[7px] text-xs";
 
 function displayValue(value: string, key: string, people: Map<string, string>) {
   if (key === "signatory_person_id") return people.get(value) ?? "person on file";
@@ -59,9 +58,9 @@ export async function ReusePastSubmission({
   const skipped = plan ? [...plan.answers.skip, ...plan.positions.skip] : [];
 
   return (
-    <div id="reuse-past" style={card}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 4 }}>Start from a previous submission</div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+    <div id="reuse-past" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+      <div className="mb-1 text-[15px] font-bold text-foreground">Start from a previous submission</div>
+      <div className="mb-3 text-xs text-muted-foreground">
         Carry over the answers you gave last time that don&apos;t change between tenders
         {flowOf(t.family as string | null) === "sanral" ? " - here, who filled each key position" : " - signatory and the standard declarations"}.
         Your vault documents, experience and CVs are already used on every tender, so there&apos;s nothing to copy for those.
@@ -69,7 +68,7 @@ export async function ReusePastSubmission({
       </div>
 
       {saved === "reuse" && (
-        <div style={{ background: "#DCFCE7", color: "#15803D", borderRadius: 8, padding: "8px 12px", fontSize: 12, fontWeight: 600, marginBottom: 12 }}>
+        <div className="mb-3 rounded-lg bg-success/10 px-3 py-2 text-xs font-semibold text-success">
           {answersCopied + positionsCopied === 0
             ? "Nothing new to carry over - this tender already had those answers."
             : `Carried over ${[
@@ -79,12 +78,12 @@ export async function ReusePastSubmission({
         </div>
       )}
 
-      <form method="get" action={`/tenders/${tenderId}#reuse-past`} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <form method="get" action={`/tenders/${tenderId}#reuse-past`} className="flex flex-wrap items-center gap-2">
         <select
           name="reuse_from"
           aria-label="Tender to reuse answers from"
           defaultValue={reuseFrom ?? past[0].tender_id}
-          style={{ flex: "1 1 260px", minHeight: 40, minWidth: 0, maxWidth: "100%", borderRadius: 8, border: "1px solid #D6D1C2", padding: "0 10px", fontSize: 13, background: "#FFFFFF", color: "#16233B" }}
+          className="min-h-10 min-w-0 max-w-full flex-[1_1_260px] rounded-lg border border-border bg-card px-2.5 text-[13px] text-foreground"
         >
           {past.map((p) => (
             <option key={p.tender_id} value={p.tender_id}>
@@ -93,59 +92,59 @@ export async function ReusePastSubmission({
             </option>
           ))}
         </select>
-        <button type="submit" style={quiet}>Show what carries over</button>
+        <button type="submit" className={quietClass}>Show what carries over</button>
       </form>
 
       {reuseFrom && !plan && (
-        <div style={{ fontSize: 12, color: "#B91C1C", marginTop: 12 }}>That tender can&apos;t be used as a starting point for this one.</div>
+        <div className="mt-3 text-xs text-destructive">That tender can&apos;t be used as a starting point for this one.</div>
       )}
 
       {plan && (
-        <div style={{ marginTop: 14 }}>
+        <div className="mt-3.5">
           {plan.notes.map((n) => (
-            <div key={n} style={{ fontSize: 12, color: "#B45309", marginBottom: 8 }}>{n}</div>
+            <div key={n} className="mb-2 text-xs text-warning">{n}</div>
           ))}
 
           {(plan.answers.copy.length > 0 || plan.positions.copy.length > 0) && (
             <>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#15803D", marginBottom: 2 }}>Will carry over from {plan.source.contract_no ?? "that tender"}</div>
+              <div className="mb-0.5 text-xs font-bold text-success">Will carry over from {plan.source.contract_no ?? "that tender"}</div>
               {plan.answers.copy.map((a) => (
-                <div key={a.key} style={row}>
-                  <div style={{ color: "#16233B" }}>{a.label}</div>
-                  <div style={{ fontWeight: 600, color: "#16233B" }}>{displayValue(a.value, a.key, people)}</div>
-                  <div style={{ fontSize: 11, color: "#8A93A0" }}>{a.why}</div>
+                <div key={a.key} className={rowClass}>
+                  <div className="text-foreground">{a.label}</div>
+                  <div className="font-semibold text-foreground">{displayValue(a.value, a.key, people)}</div>
+                  <div className="text-[11px] text-muted-foreground">{a.why}</div>
                 </div>
               ))}
               {plan.positions.copy.map((p) => (
-                <div key={p.code} style={row}>
-                  <div style={{ color: "#16233B" }}>{p.code}{p.description ? ` - ${p.description}` : ""}</div>
-                  <div style={{ fontWeight: 600, color: "#16233B" }}>{people.get(p.personId) ?? "person on file"}</div>
+                <div key={p.code} className={rowClass}>
+                  <div className="text-foreground">{p.code}{p.description ? ` - ${p.description}` : ""}</div>
+                  <div className="font-semibold text-foreground">{people.get(p.personId) ?? "person on file"}</div>
                 </div>
               ))}
               {plan.flow === "general" && plan.answers.copy.length > 0 && (
-                <div style={{ fontSize: 11, color: "#B45309", marginTop: 6 }}>
+                <div className="mt-1.5 text-[11px] text-warning">
                   The declarations are sworn on the signed forms - read them again before signing, in case anything changed since that tender.
                 </div>
               )}
-              <form action={applyPastSubmission} style={{ marginTop: 12 }}>
+              <form action={applyPastSubmission} className="mt-3">
                 <input type="hidden" name="tender_id" value={tenderId} />
                 <input type="hidden" name="source_tender_id" value={plan.source.tender_id} />
-                <button type="submit" style={button}>Use these</button>
+                <button type="submit" className={buttonClass}>Use these</button>
               </form>
             </>
           )}
 
           {nothingToCopy && plan.notes.length === 0 && (
-            <div style={{ fontSize: 12, color: "#5B6472" }}>Nothing from that tender to carry over to this one.</div>
+            <div className="text-xs text-muted-foreground">Nothing from that tender to carry over to this one.</div>
           )}
 
           {skipped.length > 0 && (
-            <details style={{ marginTop: 12 }}>
-              <summary style={{ fontSize: 12, color: "#5B6472", cursor: "pointer" }}>Not carried over ({skipped.length})</summary>
+            <details className="mt-3">
+              <summary className="cursor-pointer text-xs text-muted-foreground">Not carried over ({skipped.length})</summary>
               {skipped.map((s) => (
-                <div key={s.key} style={row}>
-                  <div style={{ color: "#16233B" }}>{s.label}</div>
-                  <div style={{ fontSize: 11, color: "#8A93A0" }}>{s.reason}</div>
+                <div key={s.key} className={rowClass}>
+                  <div className="text-foreground">{s.label}</div>
+                  <div className="text-[11px] text-muted-foreground">{s.reason}</div>
                 </div>
               ))}
             </details>

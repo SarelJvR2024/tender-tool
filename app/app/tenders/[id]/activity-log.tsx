@@ -9,23 +9,21 @@ import { addTenderComment, deleteTenderComment } from "./comment-actions";
  * it (app/lib/tenderActivity.ts says which, and what each can't say).
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
-
 // Newest first; the rest behind "Show all", so a long-running tender doesn't
 // add a page of history to an already long workspace.
 const FEED_LIMIT = 25;
 
 const CATEGORY_DOT: Record<ActivityCategory, string> = {
-  note: "#D97706",
-  task: "#16233B",
-  stage: "#16233B",
-  positions: "#15803D",
-  template: "#5B6472",
-  pack: "#5B6472",
-  cv: "#5B6472",
-  answers: "#5B6472",
-  tender: "#5B6472",
-  update: "#B45309",
+  note: "bg-accent",
+  task: "bg-foreground",
+  stage: "bg-foreground",
+  positions: "bg-success",
+  template: "bg-muted-foreground",
+  pack: "bg-muted-foreground",
+  cv: "bg-muted-foreground",
+  answers: "bg-muted-foreground",
+  tender: "bg-muted-foreground",
+  update: "bg-warning",
 };
 
 export async function ActivityLog({ tenderId, showAll }: { tenderId: string; showAll: boolean }) {
@@ -115,23 +113,23 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
   };
 
   return (
-    <div id="activity" style={card}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Notes &amp; activity</div>
+    <div id="activity" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+      <div className="mb-0.5 flex flex-wrap items-start justify-between gap-2.5">
+        <div className="text-[15px] font-bold text-foreground">Notes &amp; activity</div>
         {noteCount > 0 && (
-          <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "#FEF3C7", color: "#B45309", whiteSpace: "nowrap" }}>
+          <span className="inline-flex rounded-full bg-warning/10 px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap text-warning">
             {noteCount} note{noteCount === 1 ? "" : "s"}
           </span>
         )}
       </div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+      <div className="mb-3 text-xs text-muted-foreground">
         Internal notes for your team, and what has happened on this tender, newest first. Only people in your
         company see these. Status and stage changes show their latest change only - earlier ones aren&apos;t kept.
       </div>
 
-      <form action={addTenderComment} style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+      <form action={addTenderComment} className="mb-3.5 flex flex-col gap-2">
         <input type="hidden" name="tender_id" value={tenderId} />
-        <label htmlFor="tender-note" style={{ fontSize: 11, fontWeight: 600, color: "#16233B" }}>Add a note</label>
+        <label htmlFor="tender-note" className="text-[11px] font-semibold text-foreground">Add a note</label>
         <textarea
           id="tender-note"
           name="body"
@@ -139,12 +137,12 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
           maxLength={4000}
           rows={3}
           placeholder="e.g. Client confirmed the briefing is non-compulsory - spoke to Thandi on the phone"
-          style={{ width: "100%", boxSizing: "border-box", padding: "9px 11px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", resize: "vertical" }}
+          className="w-full resize-y rounded-lg border border-border px-[11px] py-[9px] font-sans text-sm"
         />
         <div>
           <button
             type="submit"
-            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" }}
+            className="min-h-10 cursor-pointer rounded-lg border-none bg-foreground px-4 text-sm font-semibold text-white"
           >
             Add note
           </button>
@@ -152,42 +150,42 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
       </form>
 
       {failed.length > 0 && (
-        <div style={{ fontSize: 12, color: "#B91C1C", marginBottom: 8 }}>
+        <div className="mb-2 text-xs text-destructive">
           Could not load {failed.join(", ")} - the history below is missing those.
         </div>
       )}
 
       {entries.length === 0 ? (
-        <div style={{ fontSize: 12, color: "#8A93A0", borderTop: "1px solid #ECEEF1", paddingTop: 10 }}>Nothing recorded yet.</div>
+        <div className="border-t border-border pt-2.5 text-xs text-muted-foreground">Nothing recorded yet.</div>
       ) : (
-        <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
+        <ol className="m-0 list-none p-0">
           {shown.map((e) => {
             const who = actorName(e.actor);
             const own = e.category === "note" && e.actor?.kind === "user" && e.actor.userId === user.id;
             return (
-              <li key={e.key} style={{ display: "flex", gap: 10, padding: "10px 0", borderTop: "1px solid #ECEEF1" }}>
-                <span aria-hidden style={{ flexShrink: 0, width: 8, height: 8, borderRadius: 100, marginTop: 5, background: CATEGORY_DOT[e.category] }} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
-                    <div style={{ fontSize: 13, color: "#16233B", minWidth: 0, wordBreak: "break-word" }}>
-                      {who && <span style={{ fontWeight: 700 }}>{who} </span>}
-                      <span style={{ fontWeight: e.category === "note" ? 400 : 600 }}>
+              <li key={e.key} className="flex gap-2.5 border-t border-border py-2.5">
+                <span aria-hidden className={`mt-[5px] size-2 shrink-0 rounded-full ${CATEGORY_DOT[e.category]}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <div className="min-w-0 text-[13px] break-words text-foreground">
+                      {who && <span className="font-bold">{who} </span>}
+                      <span className={e.category === "note" ? "font-normal" : "font-semibold"}>
                         {who ? e.text.charAt(0).toLowerCase() + e.text.slice(1) : e.text}
                       </span>
                     </div>
-                    <time dateTime={e.at} style={{ fontSize: 11, color: "#8A93A0", whiteSpace: "nowrap" }}>{formatActivityTime(e.at)}</time>
+                    <time dateTime={e.at} className="text-[11px] whitespace-nowrap text-muted-foreground">{formatActivityTime(e.at)}</time>
                   </div>
                   {e.body && (
-                    <div style={{ marginTop: 4, padding: "8px 11px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #E3E6EA", fontSize: 13, color: "#16233B", whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    <div className="mt-1 rounded-lg border border-border bg-card px-[11px] py-2 text-[13px] break-words whitespace-pre-wrap text-foreground">
                       {e.body}
                     </div>
                   )}
-                  {e.detail && <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2, wordBreak: "break-word" }}>{e.detail}</div>}
+                  {e.detail && <div className="mt-0.5 text-xs break-words text-muted-foreground">{e.detail}</div>}
                   {own && e.commentId && (
-                    <form action={deleteTenderComment} style={{ marginTop: 4 }}>
+                    <form action={deleteTenderComment} className="mt-1">
                       <input type="hidden" name="tender_id" value={tenderId} />
                       <input type="hidden" name="comment_id" value={e.commentId} />
-                      <button type="submit" style={{ background: "none", border: "none", padding: 0, fontSize: 11, fontWeight: 600, color: "#8A93A0", cursor: "pointer" }}>
+                      <button type="submit" className="cursor-pointer border-none bg-transparent p-0 text-[11px] font-semibold text-muted-foreground">
                         Delete note
                       </button>
                     </form>
@@ -200,7 +198,7 @@ export async function ActivityLog({ tenderId, showAll }: { tenderId: string; sho
       )}
 
       {!showAll && entries.length > FEED_LIMIT && (
-        <a href={`/tenders/${tenderId}?activity=all#activity`} style={{ display: "inline-block", marginTop: 10, fontSize: 12, fontWeight: 600, color: "#D97706" }}>
+        <a href={`/tenders/${tenderId}?activity=all#activity`} className="mt-2.5 inline-block text-xs font-semibold text-accent">
           Show all {entries.length} entries
         </a>
       )}
