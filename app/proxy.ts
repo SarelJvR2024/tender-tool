@@ -10,13 +10,11 @@ import { NextResponse, type NextRequest } from "next/server";
  * (company_members has no row for them - see
  * supabase/migrations/0003_onboarding.sql). Every other route is untouched.
  *
- * Does NOT redirect a member away from /onboarding anymore (it used to) -
- * the 5-step wizard (app/AGENTS.md "Auth + onboarding") keeps gathering
- * compliance/people/preference data at /onboarding?step=2..5 for a while
- * after step 1 already created the company and its company_members row, so
- * "membership exists" can no longer mean "onboarding is done, send them to
- * /dashboard". /onboarding/page.tsx itself decides what to show a member
- * who lands there (the bid-readiness end screen by default).
+ * Does NOT redirect a member away from /onboarding itself - that decision
+ * is left to /onboarding/page.tsx, which knows the difference between its
+ * two real screens (spec v3 Batch 3: Screen 1 creates the company, Screen 2
+ * is the optional "add documents" step right after) and sends a member
+ * anywhere else straight to /dashboard.
  */
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });

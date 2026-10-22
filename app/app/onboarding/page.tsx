@@ -1,22 +1,31 @@
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
-import { fetchCompanySubscription } from "@/lib/companySubscription";
-import { COMPANY_OFFICE_COLUMNS, type CompanyOffice } from "@/lib/locality";
-import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
-import { buttonVariants } from "@/components/ui/button";
 import { AuthShell } from "../_components/AuthShell";
 import { Step1 } from "./_components/Step1";
-import { Step2 } from "./_components/Step2";
-import { Step3 } from "./_components/Step3";
-import { Step4 } from "./_components/Step4";
-import { Step5 } from "./_components/Step5";
-import { Step6 } from "./_components/Step6";
+import { AddDocumentsScreen } from "./_components/AddDocumentsScreen";
 
 // Depends on the signed-in user's session, same reason as dashboard/page.tsx.
 export const instant = false;
 
+/**
+ * Two short screens (spec v3 §3), not a wizard. Screen 1 ("Your company")
+ * creates the company; Screen 2 ("Add documents, or start now") is purely
+ * optional and reuses the existing document-scan upload/classify/review
+ * engine (spec v3 Batch 2, #103).
+ *
+ * This used to branch on a `step` param across 6 steps plus a "done" bid-
+ * readiness end screen that duplicated what Home already shows. Now: no
+ * membership yet -> Screen 1, regardless of the URL (nothing else can
+ * happen before a company exists). Membership exists and the URL explicitly
+ * asks for step=2 -> Screen 2 (the one redirect target Screen 1's own
+ * action produces). Anything else - no param, a stale step=3..6 or
+ * step=done link, gibberish - sends a member who already has a company
+ * straight to Home: onboarding is never a gate once the company exists
+ * (spec v3 O09/O18), and Home's own checklist already prompts for whatever
+ * is still missing (spec v3 §3) - no separate "onboarding complete" screen
+ * needed, and no risk of it ever implying a company is tender-ready just
+ * because these two screens are done.
+ */
 export default async function OnboardingPage({
   searchParams,
 }: {
@@ -29,14 +38,8 @@ export default async function OnboardingPage({
   } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: membership } = await supabase
-    .from("company_members")
-    .select("company_id, daily_digest_opt_in")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const { data: membership } = await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle();
 
-  // Nothing else can happen before a company exists - step 1 regardless of
-  // the URL's own step param.
   if (!membership) {
     return (
       <AuthShell>
@@ -45,83 +48,13 @@ export default async function OnboardingPage({
     );
   }
 
-  const companyId = membership.company_id as string;
-  const step = stepParam === "done" ? "done" : Number(stepParam) >= 2 && Number(stepParam) <= 6 ? Number(stepParam) : "done";
-
-  if (step === 2) {
-    const { data: company } = await supabase
-      .from("companies")
-      .select(
-        "id, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, bee_level, bee_proof_expiry, cidb_grading, cidb_expiry, savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar",
-      )
-      .eq("id", companyId)
-      .single();
+  if (stepParam === "2") {
     return (
       <AuthShell>
-        <Step2 company={company!} error={error} />
+        <AddDocumentsScreen companyId={membership.company_id as string} />
       </AuthShell>
     );
   }
 
-  if (step === 3) {
-    const { data: offices } = await supabase.from("company_offices").select(COMPANY_OFFICE_COLUMNS).eq("company_id", companyId).order("created_at");
-    return (
-      <AuthShell>
-        <Step3 companyId={companyId} offices={(offices ?? []) as CompanyOffice[]} error={error} />
-      </AuthShell>
-    );
-  }
-
-  if (step === 4) {
-    const [{ data: people }, { data: cvs }] = await Promise.all([
-      supabase.from("people").select("id, name, role").eq("company_id", companyId).order("created_at"),
-      supabase.from("cv_uploads").select("person_id").eq("company_id", companyId),
-    ]);
-    const cvPersonIds = new Set((cvs ?? []).map((c) => c.person_id as string));
-    const rows = (people ?? []).map((p) => ({ ...p, hasCv: cvPersonIds.has(p.id) }));
-    return (
-      <AuthShell>
-        <Step4 companyId={companyId} people={rows} error={error} />
-      </AuthShell>
-    );
-  }
-
-  if (step === 5) {
-    return (
-      <AuthShell>
-        <Step5 digestOptIn={membership.daily_digest_opt_in === true} error={error} />
-      </AuthShell>
-    );
-  }
-
-  if (step === 6) {
-    const subscription = await fetchCompanySubscription(supabase);
-    return (
-      <AuthShell>
-        <Step6 subscription={subscription} />
-      </AuthShell>
-    );
-  }
-
-  // step === "done": the bid-readiness end screen, also the default landing
-  // spot for a member who just visits /onboarding with no step param. Same
-  // score (lib/readiness.ts, via lib/companyReadinessData.ts) the dashboard
-  // and Company vault header show - never computed separately here.
-  const readiness = await fetchCompanyReadiness(supabase);
-
-  return (
-    <AuthShell>
-      <div className="w-full max-w-xl">
-        <BidReadinessCard result={readiness} />
-        <div className="mt-5 flex flex-col gap-2.5 sm:flex-row">
-          <Link href="/discovery" className={buttonVariants({ variant: "accent", className: "h-11 flex-1" })}>
-            See matching opportunities
-          </Link>
-          <Link href="/tenders/new" className={buttonVariants({ variant: "outline", className: "h-11 flex-1" })}>
-            Load a tender I already have
-          </Link>
-        </div>
-      </div>
-    </AuthShell>
-  );
+  redirect("/dashboard");
 }

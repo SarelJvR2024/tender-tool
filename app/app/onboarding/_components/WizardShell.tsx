@@ -1,19 +1,15 @@
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
 
-const STEP_TITLES = ["Company basics", "Compliance", "Where you work", "Your people", "What to bid on", "Choose a plan"];
+const STEP_TITLES = ["Your company", "Add documents"];
 export const TOTAL_STEPS = STEP_TITLES.length;
 
 /**
- * Chrome shared by every wizard step: the progress bar, "Step N of 5", the
- * step's own title/description, a Back link (not shown on step 1 - nothing
- * to go back to), and a "Skip for now" link (not shown on step 1 either -
- * the prompt's own rule, since step 1 is what creates the company every
- * later step depends on). Each step supplies its own form and Continue
- * button as `children` - Continue's behavior (what it saves, where it goes)
- * differs enough per step that one shared button here would need as many
- * special cases as the steps themselves.
+ * Chrome shared by both onboarding screens (spec v3 §3: two short screens,
+ * not a long wizard - this used to share 6 steps' worth of Back/Skip
+ * plumbing; neither screen needs either now. Screen 1 creates the company,
+ * so there's nothing to go back to; Screen 2 has its own explicit "Skip for
+ * now" action in its own content, since skipping there means something
+ * specific (go to Home) rather than "advance to the next step").
  */
 export function WizardShell({
   step,
@@ -28,16 +24,8 @@ export function WizardShell({
   return (
     <div className="w-full max-w-xl rounded-xl border border-border bg-card p-8 shadow-sm md:p-10">
       <div className="mb-6">
-        <div className="mb-2 flex items-center justify-between text-xs font-medium text-muted-foreground">
-          <span>
-            Step {step} of {TOTAL_STEPS}
-          </span>
-          {step > 1 && (
-            <Link href={`/onboarding?step=${step - 1}`} className="flex items-center gap-1 hover:text-foreground">
-              <ArrowLeft className="size-3.5" />
-              Back
-            </Link>
-          )}
+        <div className="mb-2 text-xs font-medium text-muted-foreground">
+          Step {step} of {TOTAL_STEPS}
         </div>
         <Progress value={(step / TOTAL_STEPS) * 100} />
       </div>
@@ -47,15 +35,6 @@ export function WizardShell({
       {!description && <div className="mb-6" />}
 
       {children}
-
-      {step > 1 && (
-        <Link
-          href={step === TOTAL_STEPS ? "/onboarding?step=done" : `/onboarding?step=${step + 1}`}
-          className="mt-4 inline-block text-xs font-medium text-muted-foreground hover:text-foreground"
-        >
-          Skip for now
-        </Link>
-      )}
     </div>
   );
 }
