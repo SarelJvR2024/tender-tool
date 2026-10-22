@@ -33,6 +33,7 @@ export type TenderOutcome = {
   title: string | null;
   project_type: string | null;
   procurement_type: string | null;
+  province: string | null;
   categories: string[];
   competitive: boolean;
   status: "register_published" | "awarded";
@@ -60,7 +61,7 @@ export type TenderOutcome = {
 };
 
 export const OUTCOME_COLUMNS =
-  "id, outcome_key, reference, buyer, title, project_type, procurement_type, categories, competitive, status, closing_date, award_date, winner_name, winner_amount_zar, winner_points, winner_count, bidders, bidders_source, register_columns, bidder_count, priced_bidder_count, median_bid_zar, winner_rank, winner_vs_median, lowest_bid_won, winner_match_basis, data_notes, sources, source_urls, attribution, refreshed_at";
+  "id, outcome_key, reference, buyer, title, project_type, procurement_type, province, categories, competitive, status, closing_date, award_date, winner_name, winner_amount_zar, winner_points, winner_count, bidders, bidders_source, register_columns, bidder_count, priced_bidder_count, median_bid_zar, winner_rank, winner_vs_median, lowest_bid_won, winner_match_basis, data_notes, sources, source_urls, attribution, refreshed_at";
 
 /** The per-tender numbers the benchmarks aggregate (no bidder names, no register). */
 export type OutcomeStats = Pick<
@@ -402,4 +403,100 @@ export function signedPct(v: number | null): string {
   if (v === null) return "-";
   if (v === 0) return "same";
   return `${v > 0 ? "+" : ""}${v.toLocaleString("en-ZA", { maximumFractionDigits: 1 })}%`;
+}
+
+// ------------------------------------------------------------ market-wide overview (every public tender, not one company's own)
+//
+// Everything above this scopes public_tender_outcomes to ONE company's own
+// matched tenders (loadOutcomesForTenders() joins through tender_market_outcomes()
+// under the caller's RLS). This section does the opposite on purpose: a plain,
+// unscoped read of the whole shared table - every backfilled SANRAL + eTenders
+// award, regardless of whether any company here ever discovered or bid on it.
+// AGENTS.md's own analytics (spec §10) build explicitly deferred this as "a
+// reasonable follow-up, not attempted here" - Sarel asked for it directly
+// (2026-10-22): "lets build the analysis feature including sanral data ...
+// assessing tenders, scope, frequency, winning bidder amounts, awards vs
+// tender etc."
+//
+// Same honesty rules as the rest of this module: every breakdown carries its
+// own real `n`, benchmark() already refuses to compute a figure it has no
+// support for, and the page decides what to hide below MIN_SAMPLE - nothing
+// here invents a number. One real scope limit, stated plainly rather than
+// faked: "awards vs tender" below means the winning bid against the FIELD OF
+// BIDS on that same tender (winnerVsMedian / lowestWon, both already in
+// Benchmark) - not against a published budget/estimate. A stated-estimate
+// comparison exists (loadMarketTrend() above), but only for tenders a company
+// has actually tracked AND enriched with a value band (tender_scope_records,
+// 0060) - most of this backfilled universe was never discovered by any
+// company here, so has no such estimate to compare against. Showing one
+// would mean inventing it for the vast majority of rows.
+
+export type MarketRow = OutcomeStats & Pick<TenderOutcome, "categories" | "buyer" | "province">;
+export const MARKET_ROW_COLUMNS = `${STATS_COLUMNS}, categories, buyer, province`;
+
+/** Every public_tender_outcomes row (capped), both statuses - register_published
+ * counts toward "tenders seen" even before an award is published. No company
+ * join, no RLS-scoped filter: this table is shared/authenticated-readable (0053). */
+export async function loadMarketOutcomes(supabase: SupabaseClient, limit = 20_000): Promise<{ rows: MarketRow[]; error: string | null }> {
+  const { data, error } = await supabase.from("public_tender_outcomes").select(MARKET_ROW_COLUMNS).limit(limit);
+  return { rows: (data ?? []) as MarketRow[], error: error?.message ?? null };
+}
+
+export type MonthCount = { month: string; count: number };
+
+/** Tenders per calendar month (award_date, falling back to closing_date for
+ * one not yet awarded - same fallback benchmark() uses for its own date
+ * range), oldest first, zero-count months kept so a quiet stretch reads as
+ * quiet - same discipline as analyticsLogic.ts's buildWinLossTrend(). */
+export function tenderFrequencyTrend(rows: readonly Pick<MarketRow, "award_date" | "closing_date">[], monthsBack: number, now: Date): MonthCount[] {
+  const points: MonthCount[] = [];
+  for (let i = monthsBack - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    points.push({ month: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`, count: 0 });
+  }
+  const byMonth = new Map(points.map((p) => [p.month, p]));
+  for (const r of rows) {
+    const date = r.award_date ?? r.closing_date;
+    if (!date) continue;
+    const p = byMonth.get(date.slice(0, 7));
+    if (p) p.count += 1;
+  }
+  return points;
+}
+
+export type Breakdown = { key: string; label: string; n: number; benchmark: Benchmark };
+
+/** Every group's real benchmark, sorted by sample size, largest first - the
+ * page decides how many to show and what to hide below MIN_SAMPLE. */
+function topBreakdown(groups: Map<string, OutcomeStats[]>, labelFor: (key: string) => string): Breakdown[] {
+  return [...groups.entries()]
+    .map(([key, rows]) => ({ key, label: labelFor(key), n: rows.length, benchmark: benchmark(rows) }))
+    .sort((a, b) => b.n - a.n);
+}
+
+/** A tender with 2 categories counts in both groups (array-overlap membership,
+ * same semantics as loadSegment()'s .overlaps() query - a tender genuinely is
+ * both disciplines, not a fraction of each). */
+export function byCategory(rows: MarketRow[], labelFor: (slug: string) => string): Breakdown[] {
+  const groups = new Map<string, MarketRow[]>();
+  for (const r of rows) for (const c of r.categories ?? []) groups.set(c, [...(groups.get(c) ?? []), r]);
+  return topBreakdown(groups, labelFor);
+}
+
+function groupBySingle(rows: MarketRow[], field: "buyer" | "province"): Map<string, MarketRow[]> {
+  const groups = new Map<string, MarketRow[]>();
+  for (const r of rows) {
+    const v = r[field];
+    if (!v) continue;
+    groups.set(v, [...(groups.get(v) ?? []), r]);
+  }
+  return groups;
+}
+
+export function byBuyer(rows: MarketRow[]): Breakdown[] {
+  return topBreakdown(groupBySingle(rows, "buyer"), (k) => k);
+}
+
+export function byProvince(rows: MarketRow[]): Breakdown[] {
+  return topBreakdown(groupBySingle(rows, "province"), (k) => k);
 }
