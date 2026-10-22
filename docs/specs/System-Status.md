@@ -6,6 +6,46 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Live infrastructure checked for the first time, 2026-10-22 ~12:20 UTC - production code is 9
+migrations ahead of the live database.** Sarel confirmed a Supabase project
+(`swkglctgdceqrehbabfl`) and Vercel/Railway are already set up; this is the first pass with
+real credentials for either (`SUPABASE_SERVICE_ROLE_KEY`, both `NEXT_PUBLIC_SUPABASE_*` keys,
+and a `VERCEL_TOKEN`, all present as environment secrets - no DB connection string yet, so
+nothing was changed, only read).
+
+- **Vercel production** (`tender-tool-sarel.vercel.app`) is deployed from `main`'s current tip
+  (`42d9ee2`, confirmed via the Vercel API) with exactly the right three env vars
+  (`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`) pointed
+  at the real Supabase project. The web app side of deployment is genuinely done.
+- **The live database schema stops at migration `0076`.** Cross-referencing every migration's own
+  `create table` statements against the project's real exposed table list (via the REST API's
+  OpenAPI root, service-role key) shows `company_invites` (`0077`), `company_subscriptions`
+  (`0078`), `sent_deadline_reminders` (`0079`), `payfast_payment_attempts` (`0081`), and (not yet
+  mergeable - PR #74) `narrative_documents` (`0085`) all missing - meaning migrations `0077`
+  through `0085` (9 files: company-invites/employee-role RLS, the whole billing/subscription
+  system, PayFast payment tracking, the pricing/usage-limit gating PR #71 just built, the
+  pack-quota fix, and this pass's own narrative generator) have never been applied to the real
+  project. **Production's own code already calls functions and reads tables from that gap** (PR
+  #71's `start_company_trial()`/`company_can_request_pack()` need `company_subscriptions` and
+  `tt_plan_limits()`, neither of which exist yet) - signing up for real right now would very
+  likely fail or behave wrongly partway through trial provisioning, not because anything in this
+  pass is broken, but because the database was never brought forward to match the code that's
+  already live.
+- **Six companies already exist in the real project** - all named like test fixtures (`E2E Test
+  Construction`, `Debug Co`, `E2E Tender Co`, `Fresh Walkthrough Civils`, two more), created
+  2026-10-18 through 2026-10-21 by other sessions' own QA/verification work, not by Sarel. Not
+  urgent, but worth a cleanup pass before Sarel's own onboarding test so his real company isn't
+  sitting next to five throwaway ones in the same dashboard views.
+- **PayFast is confirmed in sandbox mode** (`PAYFAST_MODE=sandbox` in this environment) - no real
+  billing risk from a signup test, whenever it happens.
+- **Railway could not be checked** - no Railway API token exists in this environment (only
+  Vercel's), so whether the worker is actually deployed and polling is still unconfirmed from
+  here; Sarel says it's set up.
+- **Not fixed here**: applying the missing 9 migrations needs a direct Postgres connection
+  (`SUPABASE_DB_URL`/the Settings → Database connection string) that doesn't exist in this
+  environment yet - asked for, not yet provided. Nothing was written to the live database this
+  pass; every check above was read-only.
+
 **Cover letter / methodology statement generator built, 2026-10-22 ~10:30 UTC - on `feature/
 narrative-document-generator`, not yet merged.** Sarel asked directly: "lets buil a cover letter
 and methodology generator engin... it may NEVER generate the ame or similar versions for two
