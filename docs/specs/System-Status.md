@@ -1045,6 +1045,50 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-22, standing QA/robustness review - sixty-first run): a brand-new deadline-reminder email could silently never reach every company but one sharing a tracked tender
+
+Orientation: rotated to compliance/reminders. Synced a large batch of sibling work first (PayFast
+sandbox billing + Resend transactional email, the Company vault design-system migration, team
+invites/RLS work, a PR #63/#62 onboarding fix) - none of it touched the files below. The new
+Resend email work included a brand-new TypeScript deadline-reminder feature
+(`scripts/send-deadline-reminders.ts` + migration `0079`) landed this same batch, scheduled daily
+(`.github/workflows/deadline-reminders.yml`) but inert until `RESEND_API_KEY` is set - exactly the
+kind of untested, just-landed glue code this rotation looks for.
+
+**Finding 50 (CONFIRMED, FIXED, severe).** `tenders` is shared/public (one discovery feed, every
+tenant) and `tender_packs` is `unique (company_id, tender_id)` - more than one company routinely
+tracks the same tender. The script's Supabase embed (`tender_packs!inner(company_id)`) already
+returns every tracking company as an array, but the script read only `[0]` and called
+`record_deadline_reminder_sent` once per TENDER against a dedupe table keyed `(tender_id,
+threshold_days)` - no `company_id` at all. Reproduced against a real local Postgres fixture
+matching 0079's exact schema (not a mock, not just the TS logic): a second company's claim
+attempt for the same tender+threshold the first company already claimed came back `false` - its
+3-day/24-hour reminder would never fire, permanently, for as long as that tender stays open. Not a
+corner case - the ordinary shape of this product's own multi-tenant discovery feed - and once
+`RESEND_API_KEY` is added (imminent, same batch as the rest of the billing/email work), this
+starts silently losing a real notification for real companies with zero alerting (the script only
+logs to a console nobody watches, and never exits non-zero over this).
+
+**Fix:** new migration `0080_sent_deadline_reminders_per_company.sql` - `company_id` added to
+`sent_deadline_reminders`, the unique constraint re-scoped to `(tender_id, company_id,
+threshold_days)`, `record_deadline_reminder_sent()` recreated with a `p_company_id` parameter. A
+pre-existing (pre-0080) row can't be honestly attributed to one company, so it's deleted rather
+than guessed at (confirmed necessary: `set not null` failed loudly against a fixture seeded with
+one such row first, before the delete step was added). Extracted the fan-out itself into a new,
+pure `deadlineReminderCandidates()` in `lib/deadlineReminders.ts` (one entry per tender×company×
+threshold), simplifying the script to call it instead of its own inline chain.
+
+**Verified the regression test actually catches the bug, at two levels:** (1) TypeScript -
+`lib/deadlineReminders.spec.ts`'s new tests. Reverted `deadlineReminderCandidates()` to the exact
+old `[0]` logic: failed with exactly the predicted `["company-a"]` instead of `["company-a",
+"company-b"]`; restored it: clean. (2) Database - applied 0079's real schema to a local Postgres,
+reproduced the second company's claim coming back `false`, applied 0080 on top (including the
+pre-existing-row delete path), confirmed both companies can now independently claim and a
+re-claim of the same (tender, company, threshold) still correctly stays blocked.
+
+**Regression:** full app suite (`npx vitest run`): 8 files, 77 tests, all pass. `npm run
+typecheck` (whole repo) and `eslint` on every touched file: clean.
+
 ## This pass (2026-10-21, standing QA/robustness review - sixtieth run): a real, client-facing generated CV could print the literal word "None"
 
 Orientation: rotated to CV, specifically `process_cv_jobs.py` (the async bridge, never directly

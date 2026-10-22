@@ -3231,3 +3231,56 @@ already fails just that one job cleanly rather than the whole bridge, by the sam
 try/except. `claimed_at`'s `fromisoformat()` parse is unguarded but always fed a value this same
 code just wrote with `_now_iso()`, never client-supplied, so it can't actually receive a malformed
 string.
+
+### Finding 50 (CONFIRMED, FIXED, severe - a brand-new deadline-reminder email could silently never reach every company but one, for any tender tracked by more than one company)
+
+**Where:** `app/scripts/send-deadline-reminders.ts` (the "closing in 3 days / 24 hours" email,
+landed this same batch alongside PayFast/Resend) + `supabase/migrations/0079_sent_deadline_reminders.sql`'s
+`sent_deadline_reminders` table and `record_deadline_reminder_sent()` function.
+
+**What was tested:** `tenders` is the SHARED/PUBLIC table (`0001_init_schema.sql`'s own split -
+one daily-discovery feed serves every tenant) and `tender_packs` is `unique (company_id,
+tender_id)`, not `unique (tender_id)` - so more than one unrelated company routinely tracks the
+exact same public tender. The script's query (`tenders.select(..., tender_packs!inner(company_id))`)
+is a has-many embed: `tender.tender_packs` comes back as the array of EVERY company tracking that
+tender. The script read only `tender.tender_packs[0].company_id` and called
+`record_deadline_reminder_sent(tender_id, threshold)` once per TENDER - and 0079's own dedupe
+table had `unique (tender_id, threshold_days)`, with no `company_id` at all. Reproduced against a
+real local Postgres fixture matching 0079's exact schema (not a mock): seeded 2 real companies
+each with their own `tender_packs` row for the same tender, called
+`record_deadline_reminder_sent()` for the first - `true` (claims it) - then called it again for
+the same tender+threshold (what the second company's own claim attempt would do) - `false`
+("already sent"). The second company's 3-day/24-hour reminder would never fire, for either
+threshold, for as long as that tender stays open - not a corner case, the ordinary shape of this
+product's own multi-tenant discovery feed.
+
+**Why severe despite shipping with `RESEND_API_KEY` never set (so nothing has actually misfired
+yet):** `.github/workflows/deadline-reminders.yml` is already scheduled daily; the moment that key
+is added (which this exact batch's PayFast/Resend work makes imminent), every company sharing a
+tracked tender with another company silently loses this notification, permanently, per tender -
+with no `system_alerts`-style alerting at all to surface it (this script only `console.error`s,
+which nobody watches on a scheduled Action unless it exits non-zero, and this bug never makes it
+exit non-zero).
+
+**Fix:**
+1. New `supabase/migrations/0080_sent_deadline_reminders_per_company.sql`: adds `company_id` to
+   `sent_deadline_reminders`, re-scopes the unique constraint to `(tender_id, company_id,
+   threshold_days)`, and recreates `record_deadline_reminder_sent()` with a `p_company_id`
+   parameter. A pre-existing row (company_id NULL) is deleted rather than guessed at, per this
+   project's own "never guess" rule - confirmed necessary by applying the migration against a
+   fixture with a pre-existing row first (`alter ... set not null` failed loudly, as it should).
+2. Extracted the fan-out itself into a new, pure, unit-testable `deadlineReminderCandidates()` in
+   `lib/deadlineReminders.ts` (one entry per `(tender, company, threshold)`, not per tender), and
+   simplified `send-deadline-reminders.ts` to call it instead of its own inline filter/map chain.
+
+**Verified the regression test actually catches the bug:** new tests in
+`lib/deadlineReminders.spec.ts`. Reverted `deadlineReminderCandidates()` to the exact old `[0]`
+logic: the "not just the first" test failed with exactly the predicted `["company-a"]` instead of
+`["company-a", "company-b"]`; restored it: all 4 tests pass. Separately, verified the DB-level fix
+end to end against a real local Postgres (not just the TypeScript logic): applied 0079's exact
+schema, reproduced the second company's claim being blocked (`false`), applied 0080 on top
+(including the pre-existing-row delete path), and confirmed both companies can now independently
+claim + a re-claim of the same (tender, company, threshold) still correctly stays blocked.
+
+**Regression:** full app test suite (`npx vitest run`): 8 files, 77 tests, all pass.
+`npm run typecheck` (full repo) and `eslint` on every touched file: clean.

@@ -29,17 +29,9 @@
 // it without actually sending would permanently waste it; see main()).
 import { createClient } from "@supabase/supabase-js";
 import { daysUntil } from "../lib/dates.ts";
-import { DEADLINE_WINDOW_DAYS, reminderThresholdFor } from "../lib/deadlineReminders.ts";
+import { deadlineReminderCandidates, type DeadlineReminderTenderRow } from "../lib/deadlineReminders.ts";
 import { deadlineReminderEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
-
-type TenderRow = {
-  id: string;
-  contract_no: string | null;
-  description: string | null;
-  closing_date: string | null;
-  tender_packs: { company_id: string }[];
-};
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -74,11 +66,12 @@ async function main() {
     process.exit(1);
   }
 
-  const candidates = ((tenderRows ?? []) as unknown as TenderRow[])
-    .map((t) => ({ tender: t, daysLeft: daysUntil(t.closing_date) }))
-    .filter((c): c is { tender: TenderRow; daysLeft: number } => c.daysLeft !== null && c.daysLeft <= DEADLINE_WINDOW_DAYS)
-    .map((c) => ({ ...c, threshold: reminderThresholdFor(c.daysLeft) }))
-    .filter((c) => c.threshold !== null);
+  // One entry per (tender, COMPANY, threshold) - tender_packs!inner above is
+  // a has-many embed, so a tender tracked by several companies yields
+  // several entries here, each handled (and dedupe-claimed) independently.
+  // See deadlineReminderCandidates()'s own doc comment for why this can't
+  // just be tender.tender_packs[0] (QA Finding, 2026-10-22).
+  const candidates = deadlineReminderCandidates((tenderRows ?? []) as unknown as DeadlineReminderTenderRow[], daysUntil);
 
   if (candidates.length === 0) {
     console.log("No tenders at a 3-day or 24-hour reminder threshold today.");
@@ -89,16 +82,14 @@ async function main() {
   let skippedAlreadySent = 0;
   let skippedNoOptedInMembers = 0;
 
-  for (const { tender, daysLeft, threshold } of candidates) {
-    const companyId = tender.tender_packs?.[0]?.company_id;
-    if (!companyId) continue;
-
+  for (const { tender, companyId, daysLeft, threshold } of candidates) {
     const { data: claimed, error: claimError } = await supabase.rpc("record_deadline_reminder_sent", {
       p_tender_id: tender.id,
+      p_company_id: companyId,
       p_threshold_days: threshold,
     });
     if (claimError) {
-      console.error(`record_deadline_reminder_sent failed for tender ${tender.id}`, claimError);
+      console.error(`record_deadline_reminder_sent failed for tender ${tender.id}, company ${companyId}`, claimError);
       continue;
     }
     if (!claimed) {
@@ -146,7 +137,7 @@ async function main() {
   }
 
   console.log(
-    `Deadline reminders: ${sent} sent, ${skippedAlreadySent} already sent today, ${skippedNoOptedInMembers} with no opted-in member, out of ${candidates.length} candidate tender/threshold pair(s).`
+    `Deadline reminders: ${sent} sent, ${skippedAlreadySent} already sent today, ${skippedNoOptedInMembers} with no opted-in member, out of ${candidates.length} candidate tender/company/threshold pair(s).`
   );
 }
 
