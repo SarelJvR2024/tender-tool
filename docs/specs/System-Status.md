@@ -8,63 +8,37 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
-## Resume here (live, mid-task handover - 2026-10-22 ~16:10 UTC, updated)
+**Live-infrastructure handover CLOSED, 2026-10-22 ~16:12 UTC - the app is ready for Sarel's own
+real onboarding walkthrough.** Both blockers this handover tracked are resolved:
 
-**One of the two blockers from the last update is now fully resolved - the Railway worker is
-confirmed alive and actually completing jobs, not just queuing them. The other (migrations not yet
-applied) is still open, but is now just a "run this one file" problem, not an environment blocker.**
+1. **Migrations 0077-0085 applied and confirmed live.** Sarel ran the combined, transaction-wrapped
+   SQL file (covering all 9 files, including `0085` which landed on `main` mid-handover) via the
+   Supabase dashboard's SQL Editor. Re-checked the live OpenAPI doc immediately after: all 5 new
+   tables (`company_invites`, `company_subscriptions`, `sent_deadline_reminders`,
+   `payfast_payment_attempts`, `savings_counted_steps`) and all 10 new/changed RPC functions
+   (`start_payfast_checkout`, `apply_payfast_itn`, `company_can_request_pack`,
+   `company_packs_this_period`, `tt_plan_limits`, `redeem_company_invite`, `invite_preview`,
+   `record_deadline_reminder_sent`, `is_employee_in_company`, `own_linked_person_id`) are live.
+   Table count went 58 -> 63, RPC count 42 -> 52, matching exactly what 0077-0085 add - the whole
+   transaction committed, nothing partial.
+2. **Railway worker confirmed completing real jobs** (see the entry immediately above this one for
+   the full detail - inserted a disposable test job, claimed in 14s, completed in 17s, with genuine
+   extraction output written back, not a status flip).
 
-1. **Railway worker: CONFIRMED WORKING, 2026-10-22 ~16:04 UTC.** With Sarel's explicit go-ahead,
-   read `companies` filtered to the project's own known throwaway test rows (`Fresh Walkthrough
-   Civils (Pty) Ltd` and 5 others, all from earlier sessions' QA work - none flagged
-   `is_test_company`, identified by name instead), picked one with an existing `tender_packs` row,
-   and inserted one disposable `pack_generation_jobs` row (`engine: general`, `kind:
-   extract_requirements` - the lightest real job type, no document/storage side effects beyond
-   `tenders.document_requirements`). Requested 16:04:26 UTC - claimed (`generating`) by 16:04:40 (14s
-   later, well inside the worker's own ~30s poll interval) - `ready` by 16:04:43. Verified this was
-   REAL work, not a status flip: `tenders.document_requirements.extracted_at` for that tender reads
-   `2026-10-22T16:04:41Z`, matching the job's own window exactly, with a full genuine extraction
-   payload (`cidb`/`gaps`/`forms`/`roles`/`scoring`/`returnables`/etc.), not a stub. Test row deleted
-   immediately after, confirmed gone. This is independent proof an active worker (presumably the
-   Railway deployment Sarel said he'd set up, though this check can't directly confirm WHICH process
-   claimed it - only that something is polling `pack_generation_jobs` live and completing real
-   `general`-engine work end to end) is running right now against the live project.
-2. **Migrations 0077-0084 still not applied** (re-checked live via the OpenAPI doc immediately
-   before writing this entry - still missing). **No longer an environment blocker**: this session's
-   container cannot reach Postgres directly on port 5432 at all (confirmed two ways - the direct
-   host resolves IPv6-only, and even the IPv4 Session Pooler host times out on a raw TCP connect;
-   this sandbox's egress is HTTPS-only, full stop, not fixable by changing the connection string).
-   The actual unblock: a combined, transaction-wrapped SQL file
-   (`begin;` + all of `0077_company_invites_and_employee_role.sql` through
-   `0084_pack_quota_counts_in_flight_jobs.sql` in filename order + `commit;`) was generated and
-   handed to Sarel to paste into the Supabase dashboard's own SQL Editor (browser-based HTTPS,
-   unaffected by this sandbox's network limits). **Still waiting on Sarel to actually run it** as of
-   this entry.
+**One residual gap, not a blocker for tonight but worth knowing**: the 6 pre-existing throwaway
+test companies (`Fresh Walkthrough Civils`, `Mzansi Roads & Civils`, `Thuso Civils & Projects`,
+`E2E Tender Co`, `Debug Co`, `E2E Test Construction` - all created 2026-10-18 to 2026-10-21, before
+`0078`'s trigger existed) have **zero rows in `company_subscriptions`** - confirmed by querying the
+table directly, empty result. `start_company_trial()` only fires on a NEW company insert, so it
+never retroactively backfilled these. Not a problem for Sarel's own fresh signup tonight (the
+trigger will fire correctly for a brand-new company), but anyone later using one of these 6 for
+billing/usage-gating testing will hit `company_can_request_pack()` returning `false` (fails closed,
+doesn't crash) until a subscription row is backfilled or the company is deleted.
 
-**Once Sarel confirms the SQL ran**: re-check the live OpenAPI doc for `company_invites`/
-`company_subscriptions`/`sent_deadline_reminders`/`payfast_payment_attempts` to confirm all 8
-landed, then report back plainly whether the app is ready for Sarel's own real onboarding
-walkthrough - likely yes at that point, given the worker is now independently confirmed. **Do NOT**
-create a test company or sign up as Sarel - still his own step, not something to simulate on his
-behalf. Don't add a 7th throwaway test company to the 6 already there.
-
-**Migration `0085` now exists on `main` too** (savings-counter feature, landed after this handover
-started - a sibling standing-QA-pass session, blocked from production access by its own permission
-mode, replayed it against a local Postgres fixture instead: applies clean, RLS/dedupe/
-impersonation-guard all correct on a shared-tender scenario - no bug found, not yet run against the
-live project either). **The combined SQL file handed to Sarel above needs regenerating to include
-`0085`** - the version already sent only covers `0077`-`0084`. That same sibling session hit the
-identical "Production Reads" permission-mode wall this handover's own earlier entry describes (its
-own session simply never had the mode switched to allow it, unlike this one) - confirms the
-guardrail behaves consistently, nothing newly learned there.
-
-A loose end from this pass, worth noting for whoever picks it up: Sarel pasted a live Session
-Pooler connection string (including its password) directly into chat mid-task to test it. He was
-told to rotate it (Supabase dashboard → Settings → Database → Reset database password)
-immediately after - **not confirmed done yet**, worth checking rather than assuming.
-
-Once migrations are confirmed applied and this is reported back to Sarel, delete this section and
-fold anything worth keeping into a dated entry below, same as every other finding in this file.
+A loose end from this pass, worth someone actually checking rather than assuming: Sarel pasted a
+live Session Pooler connection string (including its password) directly into chat mid-task to test
+connectivity. He was told to rotate it (Supabase dashboard → Settings → Database → Reset database
+password) - **not independently confirmed done**.
 
 ---
 
