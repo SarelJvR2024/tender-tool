@@ -61,6 +61,7 @@ Usage:
 import argparse
 import datetime
 import html
+import http.client
 import json
 import os
 import re
@@ -299,13 +300,20 @@ def parse_sanral_result_page(body):
 # ---------------------------------------------------------------- fetching
 
 def _get(url, headers, retries=3, backoff=2.0, timeout=60):
+    """A full backfill run against SANRAL's site crashed on an uncaught
+    http.client.IncompleteRead (2026-10-22 - the live site cut a response
+    short mid-chunk) - that exception type isn't a URLError/HTTPError/
+    TimeoutError/ConnectionError, so it wasn't retried, it killed the whole
+    multi-hour process. http.client.HTTPException covers IncompleteRead and
+    its siblings (BadStatusLine, RemoteDisconnected, etc.) the same way."""
     last_err = None
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
                                         timeout=timeout) as r:
                 return r.read()
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError) as e:
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError,
+                http.client.HTTPException) as e:
             last_err = e
             time.sleep(backoff * (attempt + 1))
     raise RuntimeError(f"{url}: failed after {retries} attempts: {last_err}")
@@ -356,15 +364,26 @@ def fetch_portal_awarded(limit=200, department=None, page_size=25, pause=0.5):
     return rows[:limit], total, skipped
 
 
-def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=3):
+def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=3, start_page=1):
     """Rows of one SANRAL public list, newest first, until `want` rows (or the
     end). Pages come back shorter than page_size (observed: 25/36/10 rows for
     pageSize=40, total_filtered 90), so keep paging until a page brings
     nothing new. A dropped connection is retried, then ends the list early
-    with what was read (seen 2026-10-17: one reset killed a whole run)."""
+    with what was read (seen 2026-10-17: one reset killed a whole run).
+
+    `start_page` resumes a backfill from a later page instead of always
+    re-reading from the newest tender: a full backfill of a large list
+    (the SANRAL closed list alone holds 5,546 tenders) can't safely fetch
+    every detail page (fetch_sanral_outcomes's own 1s/page pause) in one run,
+    so a caller runs this in bounded chunks, each one storing its own rows
+    before the next chunk starts - never fetching one giant batch and only
+    writing at the very end, which would lose everything if the process
+    were stopped partway through."""
     seen, out, total_filtered = set(), [], None
-    for page in range(1, max_pages + 1):
+    next_page = start_page
+    for page in range(start_page, start_page + max_pages):
         if want is not None and len(out) >= want:
+            next_page = page
             break
         rows = None
         for attempt in range(retries):
@@ -372,27 +391,44 @@ def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=
                 rows, _, total_filtered = fetch_tenders(page_size=page_size, page_index=page,
                                                         list_slug=list_slug)
                 break
-            except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError) as e:
+            except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError,
+                    http.client.HTTPException) as e:
                 err = e
                 time.sleep(2.0 * (attempt + 1))
         if rows is None:
             print(f"  WARNING: {list_slug} page {page} failed ({err}); keeping {len(out)} rows.",
                   file=sys.stderr)
+            next_page = page  # failed page: a resumed run retries it, not skips it
             break
         new = [r for r in rows if r.get("detail_url") and r["detail_url"] not in seen]
         if not new:
+            next_page = None  # list genuinely exhausted - nothing left to resume
             break
         for r in new:
             seen.add(r["detail_url"])
         out += new
-    return out, total_filtered
+        next_page = page + 1
+    return out, total_filtered, next_page
 
 
-def fetch_sanral_outcomes(list_key, limit=40, pause=1.0):
+def fetch_sanral_outcomes(list_key, limit=40, pause=1.0, start_page=1):
     slug = SANRAL_LISTS[list_key]
-    rows, total_filtered = fetch_sanral_list(slug, want=limit)
+    # fetch_sanral_list's own max_pages defaults to 40 (* page_size 50 = 2000
+    # rows), silently truncating a full backfill asking for more than that
+    # (the SANRAL closed list alone holds 5,546). Pages also come back
+    # shorter than page_size sometimes (fetch_sanral_list's own docstring),
+    # so size generously rather than exactly. `start_page` resumes a chunked
+    # backfill (see fetch_sanral_list's own docstring) - `limit` is this
+    # chunk's own size, not the grand total.
+    max_pages = max(40, -(-limit // 50) + 20)
+    rows, total_filtered, next_page = fetch_sanral_list(slug, want=limit, max_pages=max_pages, start_page=start_page)
     records, failed = [], []
-    for row in rows[:limit]:
+    # Not rows[:limit]: fetch_sanral_list's own `want` check can overshoot by
+    # up to a page's worth of rows (it checks before reading the next page,
+    # not mid-page), and next_page already reflects every row in `rows` as
+    # "listed, resume after here" - truncating here would detail-fetch fewer
+    # rows than that, leaving a silent gap no resumed chunk would ever cover.
+    for row in rows:
         try:
             body = _get(row["detail_url"], {"User-Agent": USER_AGENT}).decode("utf-8", "replace")
         except RuntimeError as e:
@@ -411,7 +447,7 @@ def fetch_sanral_outcomes(list_key, limit=40, pause=1.0):
         })
         time.sleep(pause)
     return {"list": slug, "total_filtered": total_filtered, "rows_listed": len(rows),
-            "fetched": len(records), "failed": failed, "records": records}
+            "fetched": len(records), "failed": failed, "records": records, "next_page": next_page}
 
 
 # ---------------------------------------------------------------- report
