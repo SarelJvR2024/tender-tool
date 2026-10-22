@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { Check } from "lucide-react";
+import { Check, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Logo } from "./_components/Logo";
 import { buttonVariants } from "@/components/ui/button";
@@ -16,10 +16,14 @@ import { cn } from "@/lib/utils";
 // marketing content - that's what's being replaced.)
 export const instant = false;
 
+// Title/description rewritten alongside the hero (see "General-product
+// positioning" below) - the old copy led with SANRAL ("SANRAL submission
+// packs..."), which is exactly what app/AGENTS.md's new positioning rule
+// says not to do at a top level, title tag included.
 export const metadata = {
-  title: "Tender Ready - SANRAL submission packs, built and checked page by page",
+  title: "Tender Ready - Your tender department, without hiring one",
   description:
-    "Tender Ready turns your company documents, people and past-project evidence into SANRAL's complete technical and financial envelope packs - checked page by page against the tender's own rules. No AI blabber, nothing missing, nothing expired.",
+    "Tender Ready assembles your complete bid - compliance checks, company info, CVs and cover pages - from your own documents, then checks it page by page and flags anything that could get you disqualified. Includes built-in SANRAL technical and financial envelope automation.",
 };
 
 const SECTION = "mx-auto max-w-[1040px] px-5 py-16";
@@ -142,13 +146,22 @@ export default async function Home() {
           </div>
         </div>
 
+        {/*
+          General-product positioning (app/AGENTS.md): the hero used to lead
+          with "Your SANRAL technical and financial envelopes..." - framing
+          the whole product as SANRAL-specific. SANRAL automation is one
+          feature, not the product; the hero now sells Tender Ready to any
+          company that submits tenders, with SANRAL repositioned as a named
+          feature in the quiet callout below the CTAs, not the headline.
+        */}
         <div className="mx-auto max-w-[820px] px-5 pb-16 pt-14 text-center">
           <h1 className="mx-auto mb-4.5 max-w-[720px] text-balance font-display text-[clamp(26px,4.5vw,38px)] font-medium leading-[1.25] text-white">
-            Your SANRAL technical and financial envelopes: built, numbered, bookmarked, and checked page by page.
+            Your tender department, without hiring one.
           </h1>
           <p className="mx-auto mb-8 max-w-[640px] text-base leading-relaxed text-white/78">
-            Complete, correct, and yours. Not AI-written - built from your own company documents, people and
-            past-project evidence, with nothing missing, nothing expired, and nothing silently left blank.
+            Tender Ready assembles your complete bid - compliance checks, company info, CVs and cover pages - from
+            your own documents, then checks it page by page and flags anything that could get you disqualified. You
+            verify, price and sign.
           </p>
           <div className="flex flex-wrap justify-center gap-3">
             <Link href="/signup" className={buttonVariants({ variant: "accent", size: "lg", className: "min-h-11 whitespace-nowrap px-6" })}>
@@ -160,6 +173,21 @@ export default async function Home() {
             >
               Try a free tool first
             </Link>
+          </div>
+          {/*
+            SANRAL callout - a named feature, not the promise: deliberately
+            quieter than the hero (a small tinted pill, not a headline-sized
+            claim), brand-blue accent only. No href yet - the public SANRAL
+            landing page this would link to doesn't exist (/sanral-schedules
+            is a signed-in app page behind AppShell, not a marketing page) -
+            link it once that page is built, per this prompt's own instruction
+            to leave it off until then.
+          */}
+          <div className="mt-6 flex justify-center">
+            <div className="inline-flex items-center gap-2 rounded-full border border-accent/40 bg-white/5 px-4 py-2 text-[13px] text-white/90">
+              <Zap className="size-3.5 shrink-0 text-accent" aria-hidden />
+              <span>Built-in SANRAL automation: technical and financial envelopes built, numbered and bookmarked in minutes, not hours.</span>
+            </div>
           </div>
         </div>
       </header>
@@ -225,9 +253,19 @@ export default async function Home() {
         </div>
         <div className="mx-auto max-w-[680px] rounded-xl bg-foreground p-7 text-center">
           <div className="mb-1.5 text-[15px] font-semibold text-white">Founding Firms Programme</div>
+          {/*
+            "SANRAL Pro" (this paragraph's own plan name until now) stopped
+            existing once PR #71 renamed every plan_tier value to
+            Starter/Professional/Business/Enterprise - this was the one
+            place on the public homepage still advertising a plan that no
+            longer exists. Fixed in passing while already editing this
+            section for the SANRAL-positioning pass above; not a reworded
+            promise, the same "top plan, locked rate" offer, just a name
+            that's still real.
+          */}
           <p className="mb-4 text-[13px] leading-relaxed text-white/78">
-            The first 10 firms get SANRAL Pro at a locked founding rate, done-with-you onboarding, and a direct line
-            back to how the product gets built next.
+            The first 10 firms get our top plan at a locked founding rate, done-with-you onboarding, and a direct
+            line back to how the product gets built next.
           </p>
           {/*
             Fix for the audited "Founding Firms" finding: this CTA used to say
