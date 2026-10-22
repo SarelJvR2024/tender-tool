@@ -256,6 +256,7 @@ def merge(key, parts, existing_first_seen=None):
     if winner_part and not amount:
         amount = next((p.get("winner_amount_zar") for p in ordered if p.get("winner_amount_zar")), None)
 
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     row = {
         "outcome_key": key,
         "match_keys": sorted({k for p in ordered for k in award_match_keys(p.get("reference")) + award_match_keys(p.get("title"))}),
@@ -276,10 +277,16 @@ def merge(key, parts, existing_first_seen=None):
         "source_urls": [p["source_url"] for p in ordered if p.get("source_url")],
         "attribution": first("attribution"),
         "parts": {p["source"]: p for p in ordered},
-        "refreshed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "refreshed_at": now_iso,
+        # Always present (never a conditional key) - a batch upsert mixing
+        # new tenders (no existing row yet) with already-seen ones used to
+        # add this key only for the latter, and PostgREST's bulk insert
+        # rejects a JSON array whose objects don't all share the same keys
+        # (PGRST102 "All object keys must match"). Seen live, 2026-10-22:
+        # a chunk of 150 portal rows crashed as soon as it contained even
+        # one genuinely new tender alongside already-known ones.
+        "first_seen_at": existing_first_seen or now_iso,
     }
-    if existing_first_seen:
-        row["first_seen_at"] = existing_first_seen
     cats = [c for c in assess_tender.categorize(row["title"], None) if not c.startswith("uncategorized")]
     row["categories"] = cats
 
