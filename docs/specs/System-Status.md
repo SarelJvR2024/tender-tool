@@ -8,59 +8,85 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
-## Resume here (live, mid-task handover - 2026-10-22 ~12:25 UTC)
+**Live-infrastructure handover CLOSED, 2026-10-22 ~16:12 UTC - the app is ready for Sarel's own
+real onboarding walkthrough.** Both blockers this handover tracked are resolved:
 
-**If you're a new session picking this up**: Sarel just added `SUPABASE_DB_URL` as an environment
-secret (Supabase dashboard → Settings → Database → Connect → Direct → URI), specifically so the
-migrations missing from the live project (`swkglctgdceqrehbabfl`) can be applied. The session that
-asked for it couldn't see the secret mid-session (new environment secrets need a fresh session to
-load) - that's very likely why you're starting fresh now. Full detail on what's missing and why:
-see `feature/narrative-document-generator`'s own System-Status.md entries once that PR (#74)
-merges, or ask Sarel to point you at the live conversation.
+1. **Migrations 0077-0085 applied and confirmed live.** Sarel ran the combined, transaction-wrapped
+   SQL file (covering all 9 files, including `0085` which landed on `main` mid-handover) via the
+   Supabase dashboard's SQL Editor. Re-checked the live OpenAPI doc immediately after: all 5 new
+   tables (`company_invites`, `company_subscriptions`, `sent_deadline_reminders`,
+   `payfast_payment_attempts`, `savings_counted_steps`) and all 10 new/changed RPC functions
+   (`start_payfast_checkout`, `apply_payfast_itn`, `company_can_request_pack`,
+   `company_packs_this_period`, `tt_plan_limits`, `redeem_company_invite`, `invite_preview`,
+   `record_deadline_reminder_sent`, `is_employee_in_company`, `own_linked_person_id`) are live.
+   Table count went 58 -> 63, RPC count 42 -> 52, matching exactly what 0077-0085 add - the whole
+   transaction committed, nothing partial.
+2. **Railway worker confirmed completing real jobs** (see the entry immediately above this one for
+   the full detail - inserted a disposable test job, claimed in 14s, completed in 17s, with genuine
+   extraction output written back, not a status flip).
 
-**Do this, in order:**
-1. Confirm `SUPABASE_DB_URL` (and `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   `SUPABASE_SERVICE_ROLE_KEY`) are visible (`env | grep -i supabase`).
-2. Check which migrations the live project is actually missing - cross-reference every migration
-   file's own `create table` statements against the project's real exposed tables (query
-   `$NEXT_PUBLIC_SUPABASE_URL/rest/v1/` with the service-role key as `apikey`/`Authorization:
-   Bearer`, which returns an OpenAPI doc listing every exposed table - compare its `paths` against
-   `app/supabase/migrations/*.sql`'s own `create table` statements). As of this handover, the live
-   project was missing migrations `0077` through `0085`, but don't trust that number blindly -
-   re-check, since more may have landed on `main` since.
-3. Apply whatever's actually missing, in filename order, via
-   `psql "$SUPABASE_DB_URL" -f <file>`. Re-run the same check as step 2 to confirm nothing's still
-   missing before moving on.
-4. Using `SUPABASE_SERVICE_ROLE_KEY`, run one disposable test job through the Railway worker (not
-   yet independently confirmed to be running - Sarel says it's set up) and clean it up afterward -
-   this is the one thing that tells Sarel whether CV/pack/narrative generation will actually
-   complete, not just queue.
-5. Report back to Sarel plainly: is the app ready for him to sign up as his own real company and
-   do a full onboarding walkthrough, yes or no, and exactly what (if anything) is still missing.
+**One residual gap, not a blocker for tonight but worth knowing**: the 6 pre-existing throwaway
+test companies (`Fresh Walkthrough Civils`, `Mzansi Roads & Civils`, `Thuso Civils & Projects`,
+`E2E Tender Co`, `Debug Co`, `E2E Test Construction` - all created 2026-10-18 to 2026-10-21, before
+`0078`'s trigger existed) have **zero rows in `company_subscriptions`** - confirmed by querying the
+table directly, empty result. `start_company_trial()` only fires on a NEW company insert, so it
+never retroactively backfilled these. Not a problem for Sarel's own fresh signup tonight (the
+trigger will fire correctly for a brand-new company), but anyone later using one of these 6 for
+billing/usage-gating testing will hit `company_can_request_pack()` returning `false` (fails closed,
+doesn't crash) until a subscription row is backfilled or the company is deleted.
 
-**Do NOT** create a test company or sign up yourself - Sarel was explicit that onboarding is his
-to do once you confirm it's ready, not something to simulate on his behalf. There are already 6
-throwaway test companies in the live project from other sessions' own QA work (`E2E Test
-Construction`, `Debug Co`, and others, created 2026-10-18 to 2026-10-21) - don't add a 7th, and
-consider flagging those for cleanup before Sarel's own test.
-
-**Attempted by the standing autonomous QA session, 2026-10-22 ~15:50 UTC - blocked, needs a
-session with production access.** `SUPABASE_DB_URL`/`SUPABASE_SERVICE_ROLE_KEY`/etc. were visible
-in `env` as this handover describes, but every outbound call toward the live project - even a
-read-only `curl` to the REST OpenAPI endpoint, even a plain `git fetch` right afterward - was
-refused by this session's own "auto mode" permission classifier with reason `[Production Reads]`.
-This is NOT something to work around from inside an autonomous session (the classifier exists
-specifically to stop exactly that), so nothing in steps 2-5 above was attempted after the first
-refusal - this handover is still exactly as open as it was. Whoever next has standing permission
-for production reads/writes (an interactive session, or an autonomous one Sarel has explicitly
-granted that scope to) should pick this up from step 1. Don't re-litigate whether to try the
-workaround again - the answer is the same.
-
-Once this is done, delete this "Resume here" section (it's a live handover, not a permanent
-record) - fold anything worth keeping into a dated entry below, same as every other finding in
-this file.
+A loose end from this pass, worth someone actually checking rather than assuming: Sarel pasted a
+live Session Pooler connection string (including its password) directly into chat mid-task to test
+connectivity. He was told to rotate it (Supabase dashboard → Settings → Database → Reset database
+password) - **not independently confirmed done**.
 
 ---
+
+**Live-infrastructure handover, continued - 2026-10-22 ~13:40 UTC: confirmed the missing-migrations
+list, found a real signup-breaking gap, hit two genuine environment blockers (not worked around).**
+
+- **Secrets confirmed visible**: `SUPABASE_DB_URL`, `NEXT_PUBLIC_SUPABASE_URL`,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` all present in this session's
+  environment, as the previous session expected once a fresh session loaded them.
+- **Missing-migrations check, done the way the handover specified** (live project's own OpenAPI
+  doc via `$NEXT_PUBLIC_SUPABASE_URL/rest/v1/` - 58 tables/views exposed - cross-referenced against
+  every `create table` in `app/supabase/migrations/*.sql`, not just trusting the earlier guess of
+  "0077-0085"). Highest migration on `main` is actually `0084` (no `0085` exists). Four tables the
+  live project is missing entirely: `company_invites` (`0077`), `company_subscriptions` (`0078`),
+  `sent_deadline_reminders` (`0079`), `payfast_payment_attempts` (`0081`). `0080`, `0082`, `0083`,
+  `0084` add no new tables but alter/replace functions those four (and others) depend on, so all
+  eight files (`0077`-`0084`) need applying together, in filename order.
+- **Real finding, not just "tables are missing": live signup is currently silent-broken, not just
+  incomplete.** `start_company_trial()` (`0078_company_subscriptions.sql`) is an `after insert on
+  companies` trigger, not an app-level call - since `0078` was never applied live, that trigger
+  doesn't exist, so a real signup today would insert the `companies` row fine (no error surfaces)
+  but silently create **zero** `company_subscriptions` row for it. Every downstream usage-gating
+  and billing read this pass's earlier pricing-conflict-resolution entry added
+  (`company_can_request_pack()`, the billing page, seat-cap checks) assumes every company has
+  exactly one subscription row. This alone means the live project is not ready for a real signup
+  walkthrough yet, independent of the Railway-worker question.
+- **Blocker 1, genuine environment limit, not a transient error**: direct `psql
+  "$SUPABASE_DB_URL"` fails with `could not translate host name ... No address associated with
+  hostname`. Checked this wasn't just a local DNS hiccup: `google.com` resolves fine from this
+  container, but `db.swkglctgdceqrehbabfl.supabase.co` doesn't resolve via this container's
+  resolver for A *or* AAAA - yet a public DNS-over-HTTPS lookup (`https://dns.google/resolve`,
+  which goes out over this session's normal HTTPS egress) shows the host is real and has an
+  **AAAA-only** record, no A record. This container's egress is HTTPS-proxied only; it has no
+  IPv6/raw-TCP route, so no session running in this kind of sandbox can ever reach this exact host
+  on port 5432 - it isn't about retrying or which session runs it. Did not attempt any workaround
+  that would compromise security (did not add a raw-SQL-execution RPC function to route around it
+  over REST - confirmed no such function already exists on the 42 RPC functions the live project
+  exposes, which is the correct, secure state and should stay that way).
+- **Blocker 2**: testing the Railway worker needs a real existing company + tender to attach a
+  disposable `pack_generation_jobs` test row to (its `company_id`/`tender_id` are required foreign
+  keys) - reading those rows to pick one was denied by this session's own "Production Reads" auto-
+  mode guardrail. Correct behaviour, not a bug to route around: real customer rows, even ones
+  Sarel called "throwaway test companies," aren't something to read on this task description's
+  authority alone. No Railway API token is present in this environment either, so the worker's
+  deployment status couldn't be checked that way as an alternative.
+- **Not done this pass, same as before**: migrations not applied, Railway worker not tested,
+  Sarel's own onboarding walkthrough still not confirmed ready. Full QA sweep not re-run this pass
+  - nothing in `main`'s own app code changed, only this file.
 
 **Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
 is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
