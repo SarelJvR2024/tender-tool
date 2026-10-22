@@ -6,6 +6,16 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-22 ~00:12 UTC: quiet pass, full QA sweep clean.** Orientation found
+PR #63 (onboarding Step 3/4 Continue-button fix) and #67 (Experience design-token migration sub-PR
+5/5) merged since the last pass - both routine, no overlap with anything else in flight. Only PR #58
+(this session's own marketing-plan draft) is still open. The pricing-conflict flag from the last pass
+(three different pricing schemes surfaced across sessions - see below) is still unresolved, still
+Sarel's call, nothing new to add. Full re-verification: `npm install` clean, `typecheck`/`lint`
+clean, `npx vitest run` (74/74), every `*.test.ts` individually (CI's real invocation, all clean), a
+full Python `test_*.py` sweep (clean), and a real `rm -rf .next && npm run build` (clean). Nothing
+broken, nothing new to flag.
+
 **Standing review pass, 2026-10-21 ~22:20 UTC: two sessions independently built PayFast billing -
 closed the duplicate, flagging a real pricing conflict for Sarel.** Orientation (`git log` since the
 last pass) found `PR #60` ("PayFast sandbox billing + Resend transactional email", migration `0078`)
