@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
+import { fetchCompanySubscription } from "@/lib/companySubscription";
 import { COMPANY_OFFICE_COLUMNS, type CompanyOffice } from "@/lib/locality";
 import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
 import { buttonVariants } from "@/components/ui/button";
@@ -11,6 +12,7 @@ import { Step2 } from "./_components/Step2";
 import { Step3 } from "./_components/Step3";
 import { Step4 } from "./_components/Step4";
 import { Step5 } from "./_components/Step5";
+import { Step6 } from "./_components/Step6";
 
 // Depends on the signed-in user's session, same reason as dashboard/page.tsx.
 export const instant = false;
@@ -44,7 +46,7 @@ export default async function OnboardingPage({
   }
 
   const companyId = membership.company_id as string;
-  const step = stepParam === "done" ? "done" : Number(stepParam) >= 2 && Number(stepParam) <= 5 ? Number(stepParam) : "done";
+  const step = stepParam === "done" ? "done" : Number(stepParam) >= 2 && Number(stepParam) <= 6 ? Number(stepParam) : "done";
 
   if (step === 2) {
     const { data: company } = await supabase
@@ -86,6 +88,15 @@ export default async function OnboardingPage({
     return (
       <AuthShell>
         <Step5 digestOptIn={membership.daily_digest_opt_in === true} error={error} />
+      </AuthShell>
+    );
+  }
+
+  if (step === 6) {
+    const subscription = await fetchCompanySubscription(supabase);
+    return (
+      <AuthShell>
+        <Step6 subscription={subscription} />
       </AuthShell>
     );
   }

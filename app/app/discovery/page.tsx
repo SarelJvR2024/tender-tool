@@ -21,6 +21,11 @@ import {
   verdictLabel,
   type Downgrade,
 } from "@/lib/discoveryReassessment";
+import { EmptyState } from "@/components/tt/empty-state";
+import { ErrorState } from "@/components/tt/error-state";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Inbox } from "lucide-react";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -58,11 +63,12 @@ type OpportunityRow = Downgrade & {
   etenders_category_check: { status: "agrees" | "differs" | "generic" | "unmapped"; note: string; matching_categories: string[] } | null;
 };
 
-const XREF_STYLE: Record<string, { label: string; bg: string; color: string }> = {
-  agrees: { label: "agrees", bg: "#DCFCE7", color: "#15803D" },
-  differs: { label: "differs - check", bg: "#FEF3C7", color: "#B45309" },
-  generic: { label: "catch-all bucket", bg: "#ECEEF1", color: "#5B6472" },
-  unmapped: { label: "not cross-referenced yet", bg: "#ECEEF1", color: "#5B6472" },
+// Design-system audit fix (2026-10-21): soft-tint token classes, not stale hex.
+const XREF_STYLE: Record<string, { label: string; chipClass: string }> = {
+  agrees: { label: "agrees", chipClass: "bg-success/10 text-success" },
+  differs: { label: "differs - check", chipClass: "bg-warning/10 text-warning" },
+  generic: { label: "catch-all bucket", chipClass: "bg-muted text-muted-foreground" },
+  unmapped: { label: "not cross-referenced yet", chipClass: "bg-muted text-muted-foreground" },
 };
 
 type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed";
@@ -92,20 +98,21 @@ function matchesFilter(verdict: string, filter: VerdictFilter): boolean {
   return verdict === filter;
 }
 
-function verdictChip(verdict: string): { label: string; bg: string; color: string } {
+// Design-system audit fix (2026-10-21): soft-tint token classes, not stale hex.
+function verdictChip(verdict: string): { label: string; chipClass: string } {
   switch (verdict) {
     case "strong_fit":
-      return { label: "Strong fit", bg: "#DCFCE7", color: "#15803D" };
+      return { label: "Strong fit", chipClass: "bg-success/10 text-success" };
     case "possible":
-      return { label: "Possible", bg: "#FEF3C7", color: "#B45309" };
+      return { label: "Possible", chipClass: "bg-warning/10 text-warning" };
     case "needs_review":
-      return { label: "Needs review", bg: "#FEF3C7", color: "#B45309" };
+      return { label: "Needs review", chipClass: "bg-warning/10 text-warning" };
     case "not_a_fit":
-      return { label: "Not a fit", bg: "#FEE2E2", color: "#B91C1C" };
+      return { label: "Not a fit", chipClass: "bg-destructive/10 text-destructive" };
     case "closed":
-      return { label: "Closed", bg: "#F1F5F9", color: "#475569" };
+      return { label: "Closed", chipClass: "bg-muted text-muted-foreground" };
     default:
-      return { label: verdict, bg: "#F1F5F9", color: "#475569" };
+      return { label: verdict, chipClass: "bg-muted text-muted-foreground" };
   }
 }
 
@@ -119,6 +126,27 @@ export default async function DiscoveryPage({
     ? (verdictParam as VerdictFilter)
     : "all";
 
+  try {
+    return await renderDiscovery(activeFilter, actionError);
+  } catch (e) {
+    console.error("discovery page failed to load", e);
+    return (
+      <AppShell>
+        <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6 sm:px-8">
+          <ErrorState
+            action={
+              <Link href="/discovery" className={buttonVariants({ variant: "outline", className: "min-h-11" })}>
+                Retry
+              </Link>
+            }
+          />
+        </div>
+      </AppShell>
+    );
+  }
+}
+
+async function renderDiscovery(activeFilter: VerdictFilter, actionError: string | undefined) {
   const supabase = await createClient();
   const taxonomy = await loadDisciplineTaxonomy(supabase); // category labels (0040)
 
@@ -182,23 +210,11 @@ export default async function DiscoveryPage({
 
   return (
     <AppShell>
-      {/* The right-hand "Closes / action / docs" rail is a fixed flex-basis
-          with flex-shrink: 0 so it keeps its width on desktop - but that same
-          fixed width means that once a card wraps it to its own line on a
-          phone (it always does: 320px + 180px never fits a phone's content
-          width), it stays stuck at 180px on the left with empty space next to
-          it, instead of using the row it has to itself. */}
-      <style>{`
-        @media (max-width: 600px) {
-          .disco-right { flex: 1 1 100% !important; text-align: left !important; }
-        }
-      `}</style>
-
-      <div style={{ flex: 1, padding: "24px 16px", maxWidth: 1240, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", margin: "0 0 16px" }}>
-          <div style={{ flex: "1 1 320px" }}>
-            <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Discovery</h1>
-            <p style={{ fontSize: 13, color: "#5B6472", margin: 0 }}>
+      <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6 sm:px-8">
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1 basis-80">
+            <h1 className="mb-1 font-display text-xl font-medium text-foreground sm:text-2xl">Opportunities</h1>
+            <p className="text-sm text-muted-foreground">
               Government tenders - national, provincial, municipal and state-owned buyers - scored against your company
               profile. Read daily from National Treasury&apos;s eTenders portal (every buyer that publishes there) plus
               SANRAL, Eskom, Transnet and the City of Cape Town&apos;s own sites, with cancellations, moved closing dates
@@ -208,36 +224,28 @@ export default async function DiscoveryPage({
           </div>
           {/* A tender that isn't in this feed (SANRAL's own portal, a forwarded
               RFQ, a buyer not on eTenders) - migration 0024. */}
-          <Link
-            href="/tenders/new"
-            style={{ display: "inline-flex", alignItems: "center", minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#FFFFFF", border: "1px solid #16233B", color: "#16233B", fontSize: 13, fontWeight: 600, textDecoration: "none", whiteSpace: "nowrap" }}
-          >
+          <Link href="/tenders/new" className={buttonVariants({ variant: "outline", className: "min-h-11 shrink-0 whitespace-nowrap" })}>
             Found one elsewhere? Load it manually
           </Link>
         </div>
 
         {error && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
-            {"Couldn't load discovered opportunities - try refreshing. If it keeps happening, let us know."}
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            Couldn&apos;t load discovered opportunities - try refreshing. If it keeps happening, let us know.
           </div>
         )}
         {actionError && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {actionError}
           </div>
         )}
 
         {openDowngrades.length > 0 && (
           <div
-            style={{
-              background: openPursued.length ? "#FEE2E2" : "#FEF3C7",
-              border: `1px solid ${openPursued.length ? "#FCA5A5" : "#FCD34D"}`,
-              borderRadius: 9,
-              padding: "11px 16px",
-              marginBottom: 16,
-              fontSize: 13,
-              color: openPursued.length ? "#B91C1C" : "#B45309",
-            }}
+            className={cn(
+              "mb-4 rounded-lg border px-4 py-3 text-sm",
+              openPursued.length ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-warning/30 bg-warning/10 text-warning",
+            )}
           >
             <strong>
               &#9888; {openDowngrades.length} tender{openDowngrades.length === 1 ? " is" : "s are"} no longer as good a fit as when
@@ -246,76 +254,54 @@ export default async function DiscoveryPage({
             {openPursued.length > 0 && <> - including {openPursued.length} you are working on</>}.{" "}
             {openDowngrades.length === 1 ? "It was" : "They were"} scored again (usually because your company profile changed) and came out
             worse. {openDowngrades.length === 1 ? "It is" : "Each is"} flagged below until someone in your company marks it as seen.{" "}
-            <a href="/discovery?verdict=reassessed" style={{ color: "#16233B", fontWeight: 600 }}>Show re-assessed tenders</a>
+            <a href="/discovery?verdict=reassessed" className="font-semibold text-foreground">Show re-assessed tenders</a>
           </div>
         )}
 
-        <div style={{ position: "relative", marginBottom: 20 }}>
-        <div
-          style={{
-            display: "flex",
-            gap: 8,
-            overflowX: "auto",
-            paddingBottom: 4,
-            WebkitOverflowScrolling: "touch",
-          }}
-        >
-          {FILTERS.map((f) => {
-            const isActive = f.key === activeFilter;
-            return (
-              <a
-                key={f.key}
-                href={f.key === "all" ? "/discovery" : `/discovery?verdict=${f.key}`}
-                style={{
-                  flexShrink: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "7px 14px",
-                  borderRadius: 100,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  textDecoration: "none",
-                  border: isActive ? "1px solid #16233B" : "1px solid #E3E6EA",
-                  background: isActive ? "#16233B" : "#FFFFFF",
-                  color: isActive ? "#FFFFFF" : "#16233B",
-                }}
-              >
-                {f.label}
-                <span
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    minWidth: 18,
-                    height: 18,
-                    padding: "0 5px",
-                    borderRadius: 100,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    background: isActive ? "rgba(255,255,255,0.2)" : "#F1F5F9",
-                    color: isActive ? "#FFFFFF" : "#475569",
-                  }}
+        <div className="relative mb-5">
+          <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
+            {FILTERS.map((f) => {
+              const isActive = f.key === activeFilter;
+              return (
+                <a
+                  key={f.key}
+                  href={f.key === "all" ? "/discovery" : `/discovery?verdict=${f.key}`}
+                  className={cn(
+                    "flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold no-underline",
+                    isActive ? "border-foreground bg-foreground text-background" : "border-border bg-card text-foreground",
+                  )}
                 >
-                  {counts[f.key]}
-                </span>
-              </a>
-            );
-          })}
-        </div>
-        {/* Same unmarked-horizontal-scroll issue as the pipeline board: once
-            the filter chips overflow (any viewport narrower than they are),
-            nothing hints there's more to the right. White fade matches this
-            page's (body-inherited) white background. */}
-        <ScrollFade fadeColor="255, 255, 255" minWidthToHide={900} />
+                  {f.label}
+                  <span
+                    className={cn(
+                      "flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold",
+                      isActive ? "bg-background/20 text-background" : "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {counts[f.key]}
+                  </span>
+                </a>
+              );
+            })}
+          </div>
+          {/* Same unmarked-horizontal-scroll issue as the pipeline board: once
+              the filter chips overflow (any viewport narrower than they are),
+              nothing hints there's more to the right. */}
+          <ScrollFade fadeColor="244, 245, 247" minWidthToHide={900} />
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        <div className="flex flex-col gap-2.5">
           {visibleRows.length === 0 && !error && (
-            <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>
-              {activeFilter !== "all"
-                ? "Nothing matches this filter yet - try \"All\" to see everything scored so far."
-                : "Nothing scored for your company profile yet. The daily scan checks every open tender against it automatically, or you can load a tender you've already found with the button above."}
+            <div className="rounded-lg border border-border bg-card">
+              <EmptyState
+                icon={Inbox}
+                title={activeFilter !== "all" ? "Nothing matches this filter" : "Nothing scored yet"}
+                description={
+                  activeFilter !== "all"
+                    ? "Try \"All\" to see everything scored so far."
+                    : "The daily scan checks every open tender against your company profile automatically, or you can load a tender you've already found with the button above."
+                }
+              />
             </div>
           )}
           {visibleRows.map((o) => {
@@ -329,19 +315,12 @@ export default async function DiscoveryPage({
               <div
                 key={o.id}
                 id={`opp-${o.id}`}
-                style={{
-                  background: "#FFFFFF",
-                  border: open ? `2px solid ${pursuingStage ? "#B91C1C" : "#B45309"}` : "1px solid #E3E6EA",
-                  borderRadius: 11,
-                  padding: "14px 18px",
-                  display: "flex",
-                  flexWrap: "wrap",
-                  gap: 12,
-                  justifyContent: "space-between",
-                  alignItems: "flex-start",
-                }}
+                className={cn(
+                  "flex flex-wrap items-start justify-between gap-3 rounded-xl border bg-card p-3.5 sm:p-4.5",
+                  open ? (pursuingStage ? "border-2 border-destructive" : "border-2 border-warning") : "border-border",
+                )}
               >
-                <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+                <div className="min-w-0 flex-1 basis-80">
                   {open && (
                     <DowngradeFlag
                       opportunityId={o.id}
@@ -352,40 +331,29 @@ export default async function DiscoveryPage({
                       acknowledgedByLabel={null}
                     />
                   )}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-                    <span style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#16233B" }}>
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-xs font-semibold text-foreground">
                       {o.contract_number || "(no reference number)"}
                     </span>
                     {o.source === "manual" && (
-                      <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#ECEEF1", color: "#16233B" }}>Loaded manually</span>
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-foreground">Loaded manually</span>
                     )}
                     {o.source !== "manual" &&
                       listingSourceLabels(o.listing_sources, o.source).map((label) => (
-                        <span key={label} title="Where this tender is listed" style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#ECEEF1", color: "#16233B" }}>
+                        <span key={label} title="Where this tender is listed" className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-foreground">
                           {label}
                         </span>
                       ))}
                     {changes.some((c) => c.change_type === "cancelled") && (
-                      <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 100, background: "#FEE2E2", color: "#B91C1C" }}>Cancelled</span>
+                      <span className="rounded-full bg-destructive/10 px-2.5 py-0.5 text-[11px] font-bold text-destructive">Cancelled</span>
                     )}
-                    <span
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        padding: "3px 10px",
-                        borderRadius: 100,
-                        fontSize: 11,
-                        fontWeight: 600,
-                        background: chip.bg,
-                        color: chip.color,
-                      }}
-                    >
+                    <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold", chip.chipClass)}>
                       {chip.label}
                     </span>
                     {isDowngraded(o) && (
                       <span
                         title="The verdict this tender had before it was re-assessed"
-                        style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: "#FFFFFF", border: "1px solid #E3E6EA", color: "#5B6472", textDecoration: "line-through" }}
+                        className="rounded-full border border-border bg-card px-2 py-0.5 text-[10px] font-semibold text-muted-foreground line-through"
                       >
                         was {verdictLabel(o.downgraded_from)}
                       </span>
@@ -396,44 +364,44 @@ export default async function DiscoveryPage({
                         that matters. A compact copy up here, next to the
                         verdict chip, keeps it reachable without scrolling. */}
                     {o.verdict !== "closed" && !changes.some((c) => c.change_type === "cancelled") && (
-                      <form action={pursueOpportunity} style={{ marginLeft: "auto" }}>
+                      <form action={pursueOpportunity} className="ml-auto">
                         <input type="hidden" name="opportunity_id" value={o.id} />
                         <button
                           type="submit"
-                          style={{ minHeight: 32, padding: "0 10px", borderRadius: 100, background: "#16233B", color: "#FFFFFF", fontSize: 11, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                          className="min-h-11 whitespace-nowrap rounded-full bg-primary px-3 text-[11px] font-semibold text-primary-foreground"
                         >
                           {o.tender_id ? "Open in workspace" : "Prepare this tender"}
                         </button>
                       </form>
                     )}
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 2 }}>
+                  <div className="mb-0.5 text-sm font-semibold text-foreground">
                     {o.title || "(untitled)"}
                   </div>
-                  <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 6 }}>
+                  <div className="mb-1.5 text-xs text-muted-foreground">
                     {o.buyer || "(unknown buyer)"}
-                    {facts && <span style={{ color: "#8A93A0" }}> · {facts}</span>}
+                    {facts && <span> · {facts}</span>}
                   </div>
                   {o.briefing?.date && (
-                    <div style={{ fontSize: 12, color: o.briefing.compulsory ? "#B45309" : "#4B5563", fontWeight: o.briefing.compulsory ? 600 : 400, marginBottom: 6 }}>
+                    <div className={cn("mb-1.5 text-xs", o.briefing.compulsory ? "font-semibold text-warning" : "text-muted-foreground")}>
                       {o.briefing.compulsory ? "Compulsory briefing" : "Briefing"}: {new Date(o.briefing.date).toLocaleString("en-ZA", SAST_DATETIME)}
-                      {o.briefing.venue && <span style={{ fontWeight: 400, color: "#5B6472" }}> · {o.briefing.venue.slice(0, 120)}</span>}
+                      {o.briefing.venue && <span className="font-normal text-muted-foreground"> · {o.briefing.venue.slice(0, 120)}</span>}
                     </div>
                   )}
 
                   {/* What changed on the listing since it was found (0051). Most
                       urgent first; the full list folds away past three. */}
                   {changes.length > 0 && (
-                    <div style={{ margin: "4px 0 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div className="my-1 flex flex-col gap-1">
                       {changes.slice(0, 3).map((c) => {
                         const tone = changeTone(c.change_type);
                         return (
-                          <div key={c.id} style={{ fontSize: 12, padding: "6px 10px", borderRadius: 8, background: tone.bg, border: `1px solid ${tone.border}`, color: tone.color, overflowWrap: "anywhere" }}>
+                          <div key={c.id} className={cn("rounded-lg px-2.5 py-1.5 text-xs break-words", tone.chipClass)}>
                             <strong>{CHANGE_LABELS[c.change_type] ?? c.change_type}</strong>: {c.summary}
                             {c.evidence_url && (
                               <>
                                 {" "}
-                                <a href={c.evidence_url} target="_blank" rel="noopener noreferrer" style={{ color: tone.color, fontWeight: 600 }}>
+                                <a href={c.evidence_url} target="_blank" rel="noopener noreferrer" className="font-semibold underline">
                                   source ↗
                                 </a>
                               </>
@@ -442,11 +410,11 @@ export default async function DiscoveryPage({
                         );
                       })}
                       {changes.length > 3 && (
-                        <details style={{ fontSize: 12, color: "#4B5563" }}>
-                          <summary style={{ cursor: "pointer" }}>{changes.length - 3} more change{changes.length - 3 === 1 ? "" : "s"}</summary>
-                          <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+                        <details className="text-xs text-foreground">
+                          <summary className="min-h-8 cursor-pointer content-center">{changes.length - 3} more change{changes.length - 3 === 1 ? "" : "s"}</summary>
+                          <ul className="mt-1 list-disc pl-4.5">
                             {changes.slice(3).map((c) => (
-                              <li key={c.id} style={{ marginBottom: 2, overflowWrap: "anywhere" }}>
+                              <li key={c.id} className="mb-0.5 break-words">
                                 <strong>{CHANGE_LABELS[c.change_type] ?? c.change_type}</strong>: {c.summary}
                               </li>
                             ))}
@@ -457,19 +425,9 @@ export default async function DiscoveryPage({
                   )}
 
                   {(o.categories ?? []).length > 0 && (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                    <div className="mb-1.5 flex flex-wrap gap-1.5">
                       {(o.categories ?? []).map((c) => (
-                        <span
-                          key={c}
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 600,
-                            padding: "2px 8px",
-                            borderRadius: 100,
-                            background: "#F1F5F9",
-                            color: "#475569",
-                          }}
-                        >
+                        <span key={c} className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
                           {c.startsWith("uncategorized") ? c.replace(/_/g, " ") : taxonomyLabel(taxonomy, c)}
                         </span>
                       ))}
@@ -479,10 +437,10 @@ export default async function DiscoveryPage({
                   {o.etenders_category && (
                     // The buyer's own pick on eTenders, as a cross-reference
                     // only - Tender Ready's categories (above) drive the fit.
-                    <div title={o.etenders_category_check?.note ?? undefined} style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", fontSize: 11, color: "#5B6472", marginBottom: 6 }}>
-                      <span>Buyer&apos;s eTenders category: <span style={{ color: "#16233B", fontWeight: 600 }}>{o.etenders_category}</span></span>
+                    <div title={o.etenders_category_check?.note ?? undefined} className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                      <span>Buyer&apos;s eTenders category: <span className="font-semibold text-foreground">{o.etenders_category}</span></span>
                       {o.etenders_category_check && XREF_STYLE[o.etenders_category_check.status] && (
-                        <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 8px", borderRadius: 100, background: XREF_STYLE[o.etenders_category_check.status].bg, color: XREF_STYLE[o.etenders_category_check.status].color }}>
+                        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", XREF_STYLE[o.etenders_category_check.status].chipClass)}>
                           {XREF_STYLE[o.etenders_category_check.status].label}
                         </span>
                       )}
@@ -495,9 +453,9 @@ export default async function DiscoveryPage({
                   )}
 
                   {(o.reasons ?? []).length > 0 && (
-                    <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "#5B6472" }}>
+                    <ul className="list-disc pl-4.5 text-xs text-muted-foreground">
                       {(o.reasons ?? []).map((r, i) => (
-                        <li key={i} style={{ marginBottom: 2 }}>
+                        <li key={i} className="mb-0.5">
                           {r}
                         </li>
                       ))}
@@ -518,11 +476,11 @@ export default async function DiscoveryPage({
                   {/* Fit (above) answers "is this our kind of work"; this answers
                       "how would we be scored" - kept visibly separate on purpose. */}
                   {(o.score_outlook?.summary ?? []).length > 0 && (
-                    <div style={{ marginTop: 8, padding: "8px 12px", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9 }}>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: "#16233B", marginBottom: 3 }}>How it&apos;s scored</div>
-                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#4B5563" }}>
+                    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2">
+                      <div className="mb-0.5 text-[11px] font-bold text-foreground">How it&apos;s scored</div>
+                      <ul className="list-disc pl-4 text-xs text-muted-foreground">
                         {(o.score_outlook?.summary ?? []).map((line, i) => (
-                          <li key={i} style={{ marginBottom: 2 }}>
+                          <li key={i} className="mb-0.5">
                             {line}
                           </li>
                         ))}
@@ -531,42 +489,32 @@ export default async function DiscoveryPage({
                   )}
                 </div>
 
-                <div className="disco-right" style={{ flex: "0 0 180px", textAlign: "right" }}>
-                  <div style={{ fontSize: 11, color: "#8A93A0", marginBottom: 2 }}>Closes</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: "#16233B", marginBottom: 10 }}>
+                {/* Right rail on desktop (fixed width, right-aligned);
+                    full-width and left-aligned once it wraps to its own line
+                    on a phone, where a fixed 180px rail would otherwise sit
+                    stuck on the left with empty space beside it
+                    (design-system audit fix, 2026-10-21: Tailwind responsive
+                    classes, not a hand-rolled <style> media query). */}
+                <div className="flex-1 basis-full text-left sm:flex-none sm:basis-[180px] sm:text-right">
+                  <div className="mb-0.5 text-[11px] text-muted-foreground">Closes</div>
+                  <div className="mb-2.5 text-sm font-semibold text-foreground">
                     {o.closing_date ? new Date(o.closing_date).toLocaleString("en-ZA", SAST_DATETIME) : "-"}
                   </div>
                   {/* Into the Tender Workspace: what this tender needs, the questions
                       only you can answer, and a generated pack (migration 0018). */}
                   {o.verdict !== "closed" && !changes.some((c) => c.change_type === "cancelled") && (
-                    <form action={pursueOpportunity} style={{ marginBottom: 10 }}>
+                    <form action={pursueOpportunity} className="mb-2.5">
                       <input type="hidden" name="opportunity_id" value={o.id} />
-                      <button
-                        type="submit"
-                        style={{ minHeight: 44, padding: "0 14px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
-                      >
+                      <button type="submit" className="min-h-11 w-full whitespace-nowrap rounded-lg bg-primary px-3.5 text-xs font-semibold text-primary-foreground sm:w-auto">
                         {o.tender_id ? "Open in workspace" : "Prepare this tender"}
                       </button>
                     </form>
                   )}
                   {docs.length === 0 && (
-                    <div style={{ fontSize: 11, color: "#8A93A0" }}>{o.source === "manual" ? "Documents uploaded by you" : "No document URL on file"}</div>
+                    <div className="text-xs text-muted-foreground">{o.source === "manual" ? "Documents uploaded by you" : "No document URL on file"}</div>
                   )}
                   {docs.map((d, i) => (
-                    <a
-                      key={i}
-                      href={d.url!}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        display: "block",
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: "#D97706",
-                        textDecoration: "none",
-                        marginBottom: 4,
-                      }}
-                    >
+                    <a key={i} href={d.url!} target="_blank" rel="noopener noreferrer" className="mb-1 block text-xs font-semibold text-accent no-underline">
                       {d.title || "View document"} ↗
                     </a>
                   ))}

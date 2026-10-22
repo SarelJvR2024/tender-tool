@@ -5,6 +5,7 @@ import { Card } from "@/components/ui/card";
 
 const TONE_CLASS = {
   default: "text-foreground",
+  muted: "text-muted-foreground",
   success: "text-success",
   warning: "text-warning",
   destructive: "text-destructive",
@@ -18,6 +19,9 @@ const TONE_CLASS = {
  * given metric, so pass the label/sign yourself. `tone` colors the big
  * value itself instead - for when the number's own color is the point (a
  * count of things still needing attention), not a separate trend arrow.
+ * `muted` (added for the Admin color-token migration, 2026-10-21) is for a
+ * secondary/contextual count sitting next to a more important one - the
+ * same de-emphasis the old inline-hex admin pages used a dimmer grey for.
  */
 export function StatCard({
   label,

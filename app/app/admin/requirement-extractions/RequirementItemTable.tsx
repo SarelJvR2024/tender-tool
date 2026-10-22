@@ -3,10 +3,7 @@
 import { useMemo, useState } from "react";
 import RequirementItemRow, { type RequirementItemRowData } from "./RequirementItemRow";
 
-const field: React.CSSProperties = {
-  minHeight: 36, padding: "0 10px", borderRadius: 8, border: "1px solid #E3E6EA",
-  fontSize: 12.5, fontFamily: "system-ui, sans-serif", color: "#16233B", background: "#FFFFFF",
-};
+const field = "min-h-11 rounded-lg border border-border bg-card px-2.5 text-[12.5px] text-foreground";
 
 /** Basic client-side filter over the queue - same "state lives in this
  * component" pattern as OpportunityTable, proportionate to a review-queue
@@ -26,8 +23,8 @@ export default function RequirementItemTable({ rows }: { rows: RequirementItemRo
 
   return (
     <div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-        <select value={itemType} onChange={(e) => setItemType(e.target.value)} style={field}>
+      <div className="mb-3 flex flex-wrap gap-2">
+        <select value={itemType} onChange={(e) => setItemType(e.target.value)} className={field}>
           <option value="all">Every item type</option>
           <option value="forms">Forms</option>
           <option value="buyer_forms">Buyer forms</option>
@@ -37,19 +34,19 @@ export default function RequirementItemTable({ rows }: { rows: RequirementItemRo
           <option value="cidb">CIDB</option>
           <option value="briefing">Briefing</option>
         </select>
-        <select value={scope} onChange={(e) => setScope(e.target.value)} style={field}>
+        <select value={scope} onChange={(e) => setScope(e.target.value)} className={field}>
           <option value="all">Shared manifest + private overrides</option>
           <option value="shared">Shared manifest only</option>
           <option value="override">Private overrides only</option>
         </select>
-        <span style={{ fontSize: 12, color: "#8A93A0", alignSelf: "center" }}>
+        <span className="self-center text-xs text-muted-foreground/70">
           {filtered.length} of {rows.length}
         </span>
       </div>
 
-      <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
         {filtered.length === 0 && (
-          <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>No items match these filters.</div>
+          <div className="p-4.5 text-[13px] text-muted-foreground">No items match these filters.</div>
         )}
         {filtered.map((r) => <RequirementItemRow key={r.itemKey + (r.companyId ?? "")} row={r} />)}
       </div>

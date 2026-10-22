@@ -175,6 +175,33 @@ def test_years_experience_uses_sast_not_naive_utc_today():
           entry["value"] == "1", entry)
 
 
+def test_world_bank_project_with_null_fields_does_not_print_the_word_none():
+    print("build_world_bank: an ongoing project (end_date=None) and a missing referee/value "
+          "must not render the literal word 'None' into a real, client-facing CV")
+    # Finding (2026-10-21): dict.get(key, default) only substitutes `default`
+    # when the key is ABSENT, not when it's present with value None -
+    # start_date/end_date/value_rm/contact_name/contact_phone are all
+    # nullable columns (0001_init_schema.sql's projects table), so a real
+    # ongoing project (no end date yet - the single most common real shape,
+    # true for almost any currently-employed person's latest project) or a
+    # referee not yet captured sailed straight through as the bare string
+    # "None" in the generated document. build_sanral_keyperson (same file,
+    # same data) already guards the identical fields with `or` - this
+    # sibling builder didn't.
+    person = {"name": "Jane Doe", "role": "Engineer", "qualifications": {},
+              "projects": [{"client_and_number": "Ongoing Project A/2022", "position_held": "Site Engineer",
+                             "start": "2022-01-01", "end": None, "value_rm": None,
+                             "contact": None, "contact_phone": None}]}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_world_bank(profile, person, "person_1", "full", None, None, log)
+    text = next(p.text for p in doc.paragraphs if "Ongoing Project" in p.text)
+    check("the open-ended project's end date reads '?', not the word 'None'",
+          "None" not in text, text)
+    check("a missing referee still reads 'MISSING', not 'None'", "MISSING" in text, text)
+    check("the start date is still shown correctly", "2022-01-01" in text, text)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -183,6 +210,7 @@ def main():
     test_null_projects_and_qualifications_degrade_instead_of_crashing()
     test_control_characters_are_stripped_not_crashed_on()
     test_years_experience_uses_sast_not_naive_utc_today()
+    test_world_bank_project_with_null_fields_does_not_print_the_word_none()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

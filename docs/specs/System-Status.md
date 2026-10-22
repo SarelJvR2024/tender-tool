@@ -6,6 +6,64 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-22 ~00:12 UTC: quiet pass, full QA sweep clean.** Orientation found
+PR #63 (onboarding Step 3/4 Continue-button fix) and #67 (Experience design-token migration sub-PR
+5/5) merged since the last pass - both routine, no overlap with anything else in flight. Only PR #58
+(this session's own marketing-plan draft) is still open. The pricing-conflict flag from the last pass
+(three different pricing schemes surfaced across sessions - see below) is still unresolved, still
+Sarel's call, nothing new to add. Full re-verification: `npm install` clean, `typecheck`/`lint`
+clean, `npx vitest run` (74/74), every `*.test.ts` individually (CI's real invocation, all clean), a
+full Python `test_*.py` sweep (clean), and a real `rm -rf .next && npm run build` (clean). Nothing
+broken, nothing new to flag.
+
+**Standing review pass, 2026-10-21 ~22:20 UTC: two sessions independently built PayFast billing -
+closed the duplicate, flagging a real pricing conflict for Sarel.** Orientation (`git log` since the
+last pass) found `PR #60` ("PayFast sandbox billing + Resend transactional email", migration `0078`)
+had just merged to `main` (Sarel merged it himself) - at the same time, this session's own billing
+work (also migration `0078`, different content, own open PR #57) was sitting unmerged. Compared both
+in full before acting:
+
+- **#60 (now in `main`) is the better-verified implementation of the two on the PayFast mechanics
+  specifically**: it found and read PayFast's own official open-source SDK
+  (`github.com/PayFast/payfast-php-sdk`) and byte-verified its signature algorithm against a **real
+  recorded fixture from that SDK's own test suite** - stronger evidence than this session's own
+  cross-referenced-but-unconfirmed third-party sources. It also walked a real local-Postgres
+  lifecycle (trial -> checkout -> ITN -> active/past_due) and attempted (but could not complete) a
+  live sandbox checkout, honestly documented as such.
+- **This session's closed #57 had one real thing #60 doesn't**: usage/seat gating wired into
+  pack-request actions and team-invite creation. #60's `company_subscriptions` carries no
+  `max_users`/`max_packs_per_month` columns at all - its own `app/AGENTS.md` entry flags per-plan
+  gating as explicitly deferred, "a genuine hard lock-out once lapsed" not yet built. **Still open,
+  not ported** - doing so means first resolving which pricing/plan scheme is real (next point), since
+  the limits are meaningless without real per-tier numbers.
+- **A genuine, unresolved pricing conflict, surfaced independently by both pieces of work, not
+  guessed at by either**: this session's billing build was written against the exact 4-tier
+  structure Sarel gave directly in this session's own chat (Starter R1,490 / Professional R2,990 /
+  Business R4,990 / Enterprise custom, full copy for each tier). #60's own brief named a *different*
+  4-tier scheme (Starter/Professional/**Roads & Civils**/Enterprise "from R9,500") that also doesn't
+  match this session's figures - and #60 chose to trust neither brief, instead keeping what's
+  actually live on `app/page.tsx` today: **Tender Watch (free) / Tender Pro (R1,490) / SANRAL Pro
+  (R3,950)**, which also matches `docs/strategy/Marketing-Pricing-Strategy.md`. **Three different
+  pricing schemes have now surfaced across sessions for the same product.** Not resolved here -
+  this is a real-money decision, Sarel's call, not something to silently pick. Whichever is correct,
+  `app/page.tsx`'s `PRICING_TIERS`, `lib/billing.ts`'s plan tiers/prices, and the still-open usage-
+  gating work above all need to agree with it.
+- **Closed PR #57** (comment left explaining why, branch left in place, not deleted) rather than
+  merge a second, conflicting billing system on top of one Sarel already reviewed and merged himself.
+- **Documentation-discipline gap, worth naming plainly**: #60's own very thorough work-log lives only
+  in `app/AGENTS.md`, never in this file - the first and only billing-related entry in
+  System-Status.md is this one. Every other major feature landed this week (PR #20, the design-system
+  migration sub-PRs) has an entry here; this is the one exception found so far.
+- **Full QA re-confirmed sound on `main` as of this pass**: `npm install` (local `node_modules` was
+  stale, not a real bug - `resend` is a real, present dependency once installed), `npm run
+  typecheck`/`lint` clean, `npx vitest run` (74/74, including #60's own 11 PayFast signature tests),
+  every `*.test.ts` run individually the way CI actually invokes them (not `node --test`'s own glob,
+  which silently reports 0 tests for several files here - a real gotcha for anyone replicating CI by
+  hand, not a bug in the files themselves), a full repo-wide Python `test_*.py` sweep (46 files, all
+  clean), a real `rm -rf .next && npm run build` (clean, mounts #60's new routes), a fresh 69-migration
+  replay, and the full real-Postgres tenant-isolation suite (237/237 - confirms #60's new tables don't
+  disturb PR #20's own employee-role isolation).
+
 **PR #20 ("Team invites + employee role") merged, 2026-10-21 ~23:05 UTC** (`b2174a7`) - open 2+ days,
 explicitly flagged by its own author as security-sensitive and needing a careful read before
 merging. Sarel: "I want to keep the employee role." Rebased onto current main (167 commits of drift
@@ -986,6 +1044,41 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-21, standing QA/robustness review - sixtieth run): a real, client-facing generated CV could print the literal word "None"
+
+Orientation: rotated to CV, specifically `process_cv_jobs.py` (the async bridge, never directly
+QA'd this session - only its callees `generate_cv.py`/`extract_cv_fields.py` had been). The bridge
+itself (job claiming, stale-job recovery, per-job try/except isolation, POPIA company-scoped
+reads) checked out clean; the real bug was one layer down, in a builder it calls.
+
+**Finding 49 (CONFIRMED, FIXED, moderate).** `generate_cv.build_world_bank()`'s employment-record
+rendering used `proj.get("start", "?")`/`proj.get("end", "?")`/`proj.get("value_rm", "?")`/
+`proj.get("contact", "MISSING")` - `dict.get(key, default)` only substitutes `default` when the
+key is *absent*, never when it's present with value `None`. `start_date`/`end_date`/`value_rm`/
+`contact_name`/`contact_phone` are all nullable columns on `projects` (`0001_init_schema.sql`),
+passed straight through unchanged by `process_cv_jobs.adapt_project_row()`. Reproduced against the
+real function: a person with one ongoing project (`end: None` - true for most currently-employed
+key people's latest role, not a contrived edge case) and no referee/value captured yet generated
+a CV reading `"2022-01-01 to None  —  ...\nPosition: ...    Value: RNonem\nReferee: None  None"` -
+the literal word "None", three times, in a document meant for a real buyer. The sibling builder in
+the same file, `build_sanral_keyperson()`, already guards the identical fields correctly with
+`proj.get(...) or ""` - this one just hadn't been brought in line.
+
+**Fix:** matched `build_sanral_keyperson()`'s own pattern (`or "?"`/`or "MISSING"`/`or ""`, with
+an explicit `is not None` check for `value_rm` since `0` is a real value, not a missing one).
+
+**Verified the regression test actually catches the bug:** new
+`test_world_bank_project_with_null_fields_does_not_print_the_word_none()` in
+`engine/cv/test_generate_cv.py`. Reverted the fix: both "not 'None'" checks failed with exactly
+the predicted string; restored it: `0 failure(s)`. Full `test_generate_cv.py` (now 8 functions)
+and `test_extract_cv_fields.py` stayed clean.
+
+**Also checked this pass, no bug found:** `process_cv_jobs.py`'s `job["format"]` dict-lookup
+builder dispatch has no DB `CHECK` constraint behind it, but an unexpected value already fails
+just that one job (per-job try/except), not the bridge; `claimed_at`'s unguarded
+`fromisoformat()` parse only ever reads a value this same code just wrote with `_now_iso()`,
+never a client-supplied one, so it can't actually receive a malformed string.
 
 ## This pass (2026-10-21, standing QA/robustness review - fifty-ninth run): the naive-UTC-"today" bug class, not yet swept in engine/general/, could let a general-pack experience-recency check pass stale evidence
 

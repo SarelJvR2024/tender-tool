@@ -1,4 +1,4 @@
-import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, Zap, FileUser, type LucideIcon } from "lucide-react";
+import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, Zap, FileUser, CreditCard, type LucideIcon } from "lucide-react";
 
 export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: string };
 
@@ -19,6 +19,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/pipeline", label: "Bids", icon: Gavel },
   { href: "/sanral-schedules", label: "SANRAL schedules", icon: Zap, badge: "Roads & Civils" },
   { href: "/company", label: "Company vault", icon: Vault },
+  { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/people", label: "People & CVs", icon: Users },
   { href: "/experience", label: "Experience", icon: GraduationCap },
   { href: "/tools", label: "Tools", icon: Wrench },

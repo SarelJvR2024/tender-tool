@@ -1,9 +1,10 @@
+import Link from "next/link";
 import { MapPin } from "lucide-react";
 import { PROVINCES, OFFICE_KINDS, type CompanyOffice } from "@/lib/locality";
 import { WizardShell } from "./WizardShell";
 import { Field, SelectField, ComingSoonField, FormError } from "./fields";
 import { saveOfficeStep } from "../actions";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 
 const PROVINCE_OPTIONS = PROVINCES.map((p) => ({ value: p, label: p }));
 
@@ -43,6 +44,12 @@ export function Step3({ companyId, offices, error }: { companyId: string; office
           Add this office
         </Button>
       </form>
+
+      {offices.length > 0 && (
+        <Link href="/onboarding?step=4" className={buttonVariants({ className: "mt-4 h-11 w-full" })}>
+          Continue
+        </Link>
+      )}
 
       <div className="mt-6 border-t border-border pt-5">
         <ComingSoonField

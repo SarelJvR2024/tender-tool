@@ -23,6 +23,11 @@ type CompanyOverviewRow = {
 // it, and how much they've actually done with it - the thing an "Admin"
 // section without it can't answer. Issue review lives at /admin itself
 // (system alerts + harness results); /admin/settings is the other half.
+//
+// Color-token migration (2026-10-21): was raw inline-CSSProperties
+// throughout (navy #16233B, muted #5B6472, border #E3E6EA, error banner
+// #FEE2E2/#FCA5A5/#B91C1C) - now Tailwind + tokens, same mapping as every
+// other admin page in this pass.
 export default async function AdminCustomersPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
   const { error: actionError } = await searchParams;
   const supabase = await createClient();
@@ -44,25 +49,25 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
 
   return (
     <AppShell>
-      <div style={{ padding: "24px 32px", maxWidth: 1000, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
+      <div className="mx-auto w-full max-w-[1000px] p-4 sm:p-6 md:px-8 md:py-6">
         <AdminNav active="customers" />
 
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Customers</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px" }}>
+        <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">Customers</h1>
+        <p className="mb-4 text-[13px] text-muted-foreground">
           Every company signed up to Tender Ready, with how many people they&apos;ve added and tenders they&apos;ve started.{" "}
           {customers.length} compan{customers.length === 1 ? "y" : "ies"}
           {testCount > 0 ? ` (${testCount} marked as test)` : ""}.
         </p>
 
         {(error || actionError) && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 20, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-5 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             {error ? "Couldn't load customers - try refreshing. If it keeps happening, let us know." : actionError}
           </div>
         )}
 
-        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 11, overflow: "hidden" }}>
+        <div className="overflow-hidden rounded-xl border border-border bg-card">
           {customers.length === 0 && !error && (
-            <div style={{ padding: "24px 18px", fontSize: 13, color: "#5B6472" }}>No companies have signed up yet.</div>
+            <div className="p-4.5 text-[13px] text-muted-foreground">No companies have signed up yet.</div>
           )}
           {customers.map((c) => (
             <CustomerRow key={c.id} customer={c} />

@@ -46,10 +46,15 @@ export function checklistOf(manifest: ManifestLike | null | undefined): Checklis
   return rows;
 }
 
+// Fix(red) > Provide(amber) severity, matching the rest of this screen's
+// Verify/Provide/Fix vocabulary (app/AGENTS.md): a document missing from the
+// pack entirely is the real gap (closer to Fix), while one included but
+// flagged with a warning is merely something to look at before you submit
+// (closer to Provide) - the opposite of how these two were first colored.
 const STYLE: Record<ChecklistRow["status"], { label: string; bg: string; color: string }> = {
   included: { label: "Included", bg: "#DCFCE7", color: "#15803D" },
-  included_warning: { label: "Included - warning", bg: "#FEE2E2", color: "#B91C1C" },
-  not_included: { label: "Not included", bg: "#FEF3C7", color: "#B45309" },
+  included_warning: { label: "Included - warning", bg: "#FEF3C7", color: "#B45309" },
+  not_included: { label: "Not included", bg: "#FEE2E2", color: "#B91C1C" },
 };
 
 export function PackChecklist({ rows, title = "What's in this pack" }: { rows: ChecklistRow[]; title?: string }) {
