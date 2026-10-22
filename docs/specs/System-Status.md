@@ -1054,6 +1054,47 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-22, standing QA/robustness review - sixty-second run): a genuinely successful PayFast payment could be charged and then silently never activate the subscription
+
+Orientation: rotated toward intake/onboarding first (classify_tender.py, process_onboarding_jobs.py,
+classify_documents.py) - thorough review, nothing new found (every edge case checked - unreadable
+workbooks, ambiguous-document tie-breaks, SetupError batch-halt behaviour matching
+extract_cv_fields.py's own established convention, zero-page/garbled-text PDFs, duplicate SA-ID
+handling - was already correctly guarded, several with their own prior findings' comments already
+documenting the fix). Pivoted to the other brand-new TypeScript area that landed in the same
+batch as Finding 50's deadline reminders: PayFast sandbox billing - exactly the "freshly landed,
+largely untested glue code" shape that rotation keeps finding real bugs in.
+
+**Finding 51 (CONFIRMED, FIXED, severe).** `company_subscriptions.payfast_m_payment_id` is one
+slot per company, overwritten unconditionally by every `start_payfast_checkout()` call - and
+nothing stops a second checkout before the first payment's ITN arrives (`app/billing`'s
+`CheckoutLink` is a plain link, no debounce, no in-progress state; PayFast ITNs are asynchronous
+by the route handler's own design). Reproduced against a real local Postgres running 0078's exact
+functions: started checkout A, started checkout B before A's ITN arrived (overwriting the tracked
+id), then delivered A's own `COMPLETE` ITN - `apply_payfast_itn()` raised "no subscription
+pending" and the row stayed `trialing`. The customer's card was genuinely charged; nothing
+anywhere in the product noticed (no `system_alerts`-equivalent exists in the TypeScript codebase
+at all - confirmed by grep - so this was invisible beyond a console log on a deployed Vercel app).
+
+**Fix:** new migration `0081_payfast_payment_attempts.sql` - an append-only
+`payfast_payment_attempts` log that `start_payfast_checkout()` now also writes to.
+`apply_payfast_itn()` falls back to it when the primary update finds no row, but only to rescue a
+`COMPLETE` notification - a stale `FAILED` notification for an abandoned, superseded attempt is
+deliberately left alone, so it can never wrongly downgrade an already-active subscription whose
+later attempt already succeeded. Both functions kept their exact signatures - zero TypeScript
+changes needed.
+
+**Verified against a real database at every step, not just by inspection:** reproduced the bug
+pre-fix; applied 0081 and re-ran the identical race - payment A's `COMPLETE` ITN now correctly
+activates the subscription without disturbing the `payfast_m_payment_id` already pointing at B;
+ran B's own `COMPLETE` ITN afterwards (also correct); sent a late, stale `FAILED` notification for
+the abandoned payment A and confirmed the now-`active` subscription was left completely untouched
+- proving the "don't rescue a stale failure" safety rule actually holds, not just reads well.
+
+**Regression:** full app suite (`npx vitest run`): 8 files, 77 tests, unchanged (the fix is
+entirely in the SQL migration layer, on purpose, to keep the blast radius contained - zero
+TypeScript files touched).
+
 ## This pass (2026-10-22, standing QA/robustness review - sixty-first run): a brand-new deadline-reminder email could silently never reach every company but one sharing a tracked tender
 
 Orientation: rotated to compliance/reminders. Synced a large batch of sibling work first (PayFast

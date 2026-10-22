@@ -3284,3 +3284,53 @@ claim + a re-claim of the same (tender, company, threshold) still correctly stay
 
 **Regression:** full app test suite (`npx vitest run`): 8 files, 77 tests, all pass.
 `npm run typecheck` (full repo) and `eslint` on every touched file: clean.
+
+### Finding 51 (CONFIRMED, FIXED, severe - a genuinely successful PayFast payment could be charged and then silently never activate the subscription)
+
+**Where:** `supabase/migrations/0078_company_subscriptions.sql`'s `start_payfast_checkout()` /
+`apply_payfast_itn()` pair, landed this same batch as Finding 50's deadline-reminder work. This
+is the exact function the migration's own header comment calls "the one place in this piece of
+work where correctness really matters (money-adjacent)".
+
+**What was tested:** `company_subscriptions` has `payfast_m_payment_id text unique` - ONE slot per
+company, overwritten unconditionally on every `start_payfast_checkout()` call, on the documented
+assumption that PayFast resends the SAME id on every recurring ITN. Nothing stops a second
+checkout before the first payment's ITN lands: `app/billing`'s `CheckoutLink` is a plain `<Link>`
+with no debounce and no "checkout in progress" state (confirmed by reading it), and PayFast ITNs
+are asynchronous by design (the route handler's own header comment: "PayFast expects a 200
+response and retries on anything else"). Reproduced against a real local Postgres running 0078's
+exact functions (not a mock): seeded one company, called `start_payfast_checkout('pro', ...)` ->
+payment A, then called it again (`'sanral_pro'`, simulating a double-click or a retry before A's
+ITN arrived) -> payment B, which overwrote `payfast_m_payment_id`. Payment A's own ITN then
+arrived with `payment_status=COMPLETE` (a real, successful charge) - `apply_payfast_itn()` raised
+`no subscription pending for this m_payment_id`, and the row stayed `status='trialing'`. The
+customer's card was genuinely charged; the subscription never activated.
+
+**Why severe:** there is no `system_alerts`-equivalent anywhere in the TypeScript codebase
+(confirmed by grep before writing this up) - the route handler only `console.error`s and still
+returns 200 (so PayFast never retries, believing the notification was received). A real charge
+with no activated subscription had **zero visibility anywhere in the product**, not even a log
+line anyone is likely to watch on a deployed Vercel app.
+
+**Fix:** new `supabase/migrations/0081_payfast_payment_attempts.sql` - an append-only
+`payfast_payment_attempts` table (company_id, m_payment_id, created_at) that `start_payfast_checkout()`
+now also writes to (in addition to, never instead of, the existing overwrite). `apply_payfast_itn()`
+falls back to this log when the primary UPDATE finds no row, but **only for a `COMPLETE`
+(successful) notification** - a stale `FAILED` notification for an abandoned, superseded attempt
+is deliberately left alone, since it carries no information worth acting on once the company has
+moved on, and rescuing it could wrongly downgrade an already-active paying customer whose later
+attempt already succeeded. Both functions keep their exact existing signatures - zero changes
+needed in `app/api/billing/payfast/itn/route.ts` or `app/api/billing/checkout/route.ts`.
+
+**Verified against a real database, not just by inspection** (migration applied cleanly on top of
+a fixture replicating 0078's exact schema): (1) reproduced the bug pre-fix as above; (2) applied
+0081, re-ran the identical two-checkout race, confirmed payment A's `COMPLETE` ITN now correctly
+sets `status='active'` with the right `payfast_token`, while `payfast_m_payment_id` stays
+correctly pointed at payment B (not corrupted); (3) ran payment B's own `COMPLETE` ITN
+afterwards - also applied correctly; (4) sent a late, stale `FAILED` notification for the long-
+abandoned payment A - confirmed the already-`active` subscription (now on payment B) was left
+completely untouched, proving the "don't rescue a stale failure" safety rule actually holds.
+
+**Regression:** no TypeScript file changed (the fix is entirely in the SQL migration layer, by
+design, to keep the blast radius contained) - full app suite (`npx vitest run`): 8 files, 77
+tests, unchanged and still passing.
