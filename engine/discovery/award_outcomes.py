@@ -372,8 +372,10 @@ def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=
     writing at the very end, which would lose everything if the process
     were stopped partway through."""
     seen, out, total_filtered = set(), [], None
+    next_page = start_page
     for page in range(start_page, start_page + max_pages):
         if want is not None and len(out) >= want:
+            next_page = page
             break
         rows = None
         for attempt in range(retries):
@@ -387,14 +389,17 @@ def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=
         if rows is None:
             print(f"  WARNING: {list_slug} page {page} failed ({err}); keeping {len(out)} rows.",
                   file=sys.stderr)
+            next_page = page  # failed page: a resumed run retries it, not skips it
             break
         new = [r for r in rows if r.get("detail_url") and r["detail_url"] not in seen]
         if not new:
+            next_page = None  # list genuinely exhausted - nothing left to resume
             break
         for r in new:
             seen.add(r["detail_url"])
         out += new
-    return out, total_filtered
+        next_page = page + 1
+    return out, total_filtered, next_page
 
 
 def fetch_sanral_outcomes(list_key, limit=40, pause=1.0, start_page=1):
@@ -407,9 +412,14 @@ def fetch_sanral_outcomes(list_key, limit=40, pause=1.0, start_page=1):
     # backfill (see fetch_sanral_list's own docstring) - `limit` is this
     # chunk's own size, not the grand total.
     max_pages = max(40, -(-limit // 50) + 20)
-    rows, total_filtered = fetch_sanral_list(slug, want=limit, max_pages=max_pages, start_page=start_page)
+    rows, total_filtered, next_page = fetch_sanral_list(slug, want=limit, max_pages=max_pages, start_page=start_page)
     records, failed = [], []
-    for row in rows[:limit]:
+    # Not rows[:limit]: fetch_sanral_list's own `want` check can overshoot by
+    # up to a page's worth of rows (it checks before reading the next page,
+    # not mid-page), and next_page already reflects every row in `rows` as
+    # "listed, resume after here" - truncating here would detail-fetch fewer
+    # rows than that, leaving a silent gap no resumed chunk would ever cover.
+    for row in rows:
         try:
             body = _get(row["detail_url"], {"User-Agent": USER_AGENT}).decode("utf-8", "replace")
         except RuntimeError as e:
