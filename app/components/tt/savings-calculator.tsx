@@ -41,7 +41,7 @@ export function SavingsCalculator() {
       </div>
       <div className="grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-3">
         <Stat label="Hours saved a year" value={`${Math.round(yearlyHours)}h`} />
-        <Stat label="Rand saved a year" value={formatRand(yearlyRand)} accent />
+        <Stat label="Rand saved a year" value={formatRand(yearlyRand)} money />
         <Stat
           label="Extra tenders a month"
           value={extraTendersPerMonth > 0 ? `+${extraTendersPerMonth}` : "-"}
@@ -70,11 +70,11 @@ function NumberField({ label, value, onChange, min }: { label: string; value: nu
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function Stat({ label, value, money }: { label: string; value: string; money?: boolean }) {
   return (
     <div>
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`font-display text-xl font-medium ${accent ? "text-accent" : "text-foreground"}`}>{value}</div>
+      <div className={`font-display text-xl font-medium ${money ? "text-money" : "text-foreground"}`}>{value}</div>
     </div>
   );
 }

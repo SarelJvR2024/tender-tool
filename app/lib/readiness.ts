@@ -92,7 +92,7 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
     weight: 10,
     satisfied: presence(input.legalName),
     reason: presence(input.legalName) ? undefined : "missing",
-    href: "/onboarding?step=1",
+    href: "/company#company-identity",
   });
 
   criteria.push({
@@ -101,7 +101,7 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
     weight: 15,
     satisfied: presence(input.csdSupplierNumber),
     reason: presence(input.csdSupplierNumber) ? undefined : "missing",
-    href: "/onboarding?step=2",
+    href: "/company#company-identity",
   });
 
   {
@@ -115,7 +115,7 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
       satisfied,
       reason: satisfied ? undefined : !hasPin ? "missing" : expiry.reason ?? "missing",
       daysLeft: hasPin ? expiry.daysLeft : undefined,
-      href: "/onboarding?step=2",
+      href: "/company#compliance-documents",
     });
   }
 
@@ -130,7 +130,7 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
       satisfied,
       reason: satisfied ? undefined : !hasLevel ? "missing" : expiry.reason ?? "missing",
       daysLeft: hasLevel ? expiry.daysLeft : undefined,
-      href: "/onboarding?step=2",
+      href: "/company#bee-cidb",
     });
   }
 
@@ -177,7 +177,7 @@ export function computeBidReadiness(input: ReadinessInput): ReadinessResult {
     weight: 10,
     satisfied: input.peopleWithCvCount >= 2,
     reason: input.peopleWithCvCount >= 2 ? undefined : "missing",
-    href: "/onboarding?step=4",
+    href: "/people",
   });
 
   criteria.push({

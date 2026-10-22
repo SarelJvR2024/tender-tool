@@ -28,11 +28,13 @@ function nextParam(): string {
  * settings before they work - this page alone doesn't do that.
  */
 
-// Flip to true once the Azure provider in Supabase has real Microsoft
-// Entra credentials (Sarel's own Azure app registration, not the Google
-// ones that were pasted in by mistake on 2026-10-18 - that mix-up is what
-// this flag exists to stop a real visitor from hitting again).
-const MICROSOFT_AUTH_READY = false;
+// Was false 2026-10-18 to 2026-10-22: Supabase's Azure provider had
+// Google's credentials pasted into it by mistake, and this flag existed to
+// stop a real visitor hitting that broken path. Fixed 2026-10-22 - a real
+// Microsoft Entra app registration ("Tender Ready", multi-tenant + personal
+// accounts, Supabase's own /auth/v1/callback as the redirect URI) now backs
+// Supabase's Azure provider, tenant set to "common" to match.
+const MICROSOFT_AUTH_READY = true;
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 

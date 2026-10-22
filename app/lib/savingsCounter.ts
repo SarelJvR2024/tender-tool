@@ -88,3 +88,34 @@ export function formatRand(amount: number): string {
   const rounded = Math.max(0, Math.round(amount));
   return "R" + rounded.toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
 }
+
+/**
+ * Spec v3 §18, Sarel's own answer (2026-10-22): no real measured data exists
+ * behind 20h/R450 - it must stay a visibly-flagged proposed default the
+ * user can confirm or change, never presented as fact. `resolveBaseline()`
+ * is the one place that decides "is this company's own confirmed number, or
+ * did we fall back to the placeholder" - every caller (the Home/Analytics
+ * summary, the per-tender breakdown) must use this, not its own silent `??`,
+ * so the two surfaces can't quietly disagree on which case they're in.
+ */
+export const DEFAULT_BASELINE_HOURS_PER_TENDER = 20;
+export const DEFAULT_BASELINE_HOURLY_COST_ZAR = 450;
+
+export type ResolvedBaseline = {
+  hoursPerTender: number;
+  hourlyCostZar: number;
+  /** True when either value came from the placeholder default, not the company's own confirmed baseline. */
+  isDefault: boolean;
+};
+
+export function resolveBaseline(
+  hoursPerTender: number | null | undefined,
+  hourlyCostZar: number | null | undefined,
+): ResolvedBaseline {
+  const isDefault = hoursPerTender == null || hourlyCostZar == null;
+  return {
+    hoursPerTender: hoursPerTender ?? DEFAULT_BASELINE_HOURS_PER_TENDER,
+    hourlyCostZar: hourlyCostZar ?? DEFAULT_BASELINE_HOURLY_COST_ZAR,
+    isDefault,
+  };
+}

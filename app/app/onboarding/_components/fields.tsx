@@ -1,8 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { cn } from "@/lib/utils";
 
-/** Shared field wrapper - label + input + optional helper text, used across every wizard step. */
+/** Shared field wrapper - label + input + optional helper text, used by Screen 1. */
 export function Field({
   name,
   label,
@@ -39,58 +38,6 @@ export function Field({
         className="h-11"
       />
       {helper && <p className="mt-1 text-xs text-muted-foreground">{helper}</p>}
-    </div>
-  );
-}
-
-const selectClassName =
-  "h-11 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
-
-/** Native <select>, styled to match Input - this design system has no shadcn Select yet (the rest of the app uses plain <select> too, e.g. OfficeFields). */
-export function SelectField({
-  name,
-  label,
-  defaultValue,
-  required,
-  options,
-  placeholder = "Choose...",
-  className,
-}: {
-  name: string;
-  label: string;
-  defaultValue?: string | null;
-  required?: boolean;
-  options: readonly { value: string; label: string }[];
-  placeholder?: string;
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-      <Label htmlFor={name} className="mb-1.5">
-        {label}
-        {required && <span className="text-destructive"> *</span>}
-      </Label>
-      <select id={name} name={name} required={required} defaultValue={defaultValue ?? ""} className={cn(selectClassName)}>
-        <option value="" disabled>
-          {placeholder}
-        </option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
-            {o.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-/** A field that exists in the schema but has no manual-edit action yet, or whose data isn't tracked at all - shown, never hidden, so the step's shape stays honest about what's coming. */
-export function ComingSoonField({ label, note }: { label: string; note: string }) {
-  return (
-    <div>
-      <Label className="mb-1.5 text-muted-foreground">{label}</Label>
-      <Input disabled placeholder="Coming soon" className="h-11" />
-      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
     </div>
   );
 }

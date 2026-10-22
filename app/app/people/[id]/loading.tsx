@@ -1,4 +1,4 @@
-import { AppShell } from "../../_components/AppShell";
+import { AppShellSkeleton } from "../../_components/AppShellSkeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionCardSkeleton } from "@/components/tt/skeletons";
 
@@ -9,7 +9,7 @@ import { SectionCardSkeleton } from "@/components/tt/skeletons";
  */
 export default function PersonDetailLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[760px] flex-1 px-4 py-6">
         <Skeleton className="mb-2 h-6 w-48" />
         <Skeleton className="mb-4 h-4 w-80" />
@@ -22,6 +22,6 @@ export default function PersonDetailLoading() {
         <SectionCardSkeleton lines={3} className="mb-5" />
         <SectionCardSkeleton lines={3} />
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

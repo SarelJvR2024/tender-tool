@@ -1,4 +1,4 @@
-import { AppShell } from "../_components/AppShell";
+import { AppShellSkeleton } from "../_components/AppShellSkeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionCardSkeleton } from "@/components/tt/skeletons";
 
@@ -9,7 +9,7 @@ import { SectionCardSkeleton } from "@/components/tt/skeletons";
  */
 export default function PeopleLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[900px] flex-1 px-4 py-6">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div className="space-y-2">
@@ -28,6 +28,6 @@ export default function PeopleLoading() {
           ))}
         </div>
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

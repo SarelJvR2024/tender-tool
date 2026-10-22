@@ -1,4 +1,4 @@
-import { AppShell } from "../_components/AppShell";
+import { AppShellSkeleton } from "../_components/AppShellSkeleton";
 import { StatCardSkeleton, SectionCardSkeleton, TableRowsSkeleton } from "@/components/tt/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function DashboardLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[1240px] flex-1 px-8 py-6">
         <div className="mb-5 flex items-center justify-between gap-3">
           <div className="space-y-2">
@@ -41,6 +41,6 @@ export default function DashboardLoading() {
           <TableRowsSkeleton rows={3} columns={3} />
         </div>
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

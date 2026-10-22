@@ -2,6 +2,7 @@ import Link from "next/link";
 import { FolderOpen } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
+import { AutoRefresh } from "../_components/AutoRefresh";
 import { captureExperience } from "./actions";
 import { expandDisciplines, loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import {
@@ -11,9 +12,18 @@ import {
   labelFor,
   type ExperienceItem,
 } from "@/lib/experience";
+import { UploadForm } from "../company/document-scan/upload-form";
+import { DocumentReviewCard, type OnboardingResult } from "../company/document-scan/review";
 import { PageHeader } from "@/components/tt/page-header";
 import { EmptyState } from "@/components/tt/empty-state";
 import { Button } from "@/components/ui/button";
+
+const UPLOAD_SAVED: Record<string, string> = {
+  uploaded: "Uploaded - being read now; it'll appear below for review once it's ready.",
+  filed: "Saved to the Experience Library - tag it below (or edit the tags any time) so tenders can be matched against it.",
+  skipped: "Marked as needing manual review.",
+  discarded: "Discarded.",
+};
 
 // Per-request, under RLS - same escape hatch as people/page.tsx.
 export const instant = false;
@@ -56,10 +66,23 @@ function yearsAgo(dateStr: string | null): number | null {
 export default async function ExperiencePage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; discipline?: string }>;
+  searchParams: Promise<{ error?: string; discipline?: string; uploaded?: string; saved?: string }>;
 }) {
-  const { error: errorParam, discipline } = await searchParams;
+  const { error: errorParam, discipline, uploaded, saved } = await searchParams;
   const supabase = await createClient();
+
+  // Spec v3 Batch 4: companyId used to come from all[0]?.company_id - null
+  // for exactly the brand-new company with nothing in the Experience
+  // Library yet, which is precisely when "Upload experience documents"
+  // matters most. Same company_members lookup every other signed-in page
+  // under /company and /experience's own actions.ts already use.
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const { data: membership } = user
+    ? await supabase.from("company_members").select("company_id").eq("user_id", user.id).maybeSingle()
+    : { data: null };
+  const companyId = (membership?.company_id as string | undefined) ?? null;
 
   const { data: rows, error: loadError } = await supabase
     .from("experience_items")
@@ -68,7 +91,33 @@ export default async function ExperiencePage({
     .order("created_at", { ascending: false });
   if (loadError) console.error("experience_items select failed", loadError);
   const all = (rows ?? []) as ExperienceItem[];
-  const companyId = all[0]?.company_id ?? null;
+
+  // Reference letters/completion certificates dropped through the shared
+  // AI-classify-and-review engine (spec v3 Batch 2/4) instead of the manual
+  // "Add experience" form below - reusing confirmExperienceReferenceLetter
+  // (app/company/document-scan/actions.ts) unchanged, same as Company
+  // vault's VaultDocumentUploader reuses confirmVaultDocument.
+  let pendingResults: (OnboardingResult & { onboarding_uploads: { original_filename: string } | null })[] = [];
+  let queuedCount = 0;
+  if (companyId) {
+    const [{ data: pending, error: pendingError }, { count }] = await Promise.all([
+      supabase
+        .from("onboarding_document_results")
+        .select("id, document_kind, document_kind_reason, fields, warnings, text_method, model, created_at, onboarding_uploads(original_filename)")
+        .eq("company_id", companyId)
+        .eq("document_kind", "experience_reference_letter")
+        .eq("review_status", "pending_review")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("onboarding_uploads")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .in("status", ["classification_requested", "classifying"]),
+    ]);
+    if (pendingError) console.error("onboarding_document_results select failed (experience)", pendingError);
+    pendingResults = (pending ?? []) as unknown as (OnboardingResult & { onboarding_uploads: { original_filename: string } | null })[];
+    queuedCount = count ?? 0;
+  }
 
   // A discipline filter goes through the same experience_matches() query a
   // tender compliance check would use, so what this page shows is exactly
@@ -143,10 +192,55 @@ export default async function ExperiencePage({
           </div>
         </div>
 
-        {/* Step 1: capture */}
+        {/* Spec v3 §8/§17 (O24): lead with upload through the shared
+            AI-classify-and-review engine (Batch 2/4), not a blank manual
+            form - extraction of client/project/dates/value already exists
+            via confirmExperienceReferenceLetter, this page just didn't offer
+            the path to it. The manual form below stays as the explicit
+            secondary alternative for a project with no document yet. */}
+        {companyId && (
+          <div className={cardClass}>
+            <div className="mb-2.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
+              Upload experience documents
+            </div>
+            <AutoRefresh active={queuedCount > 0} />
+            {(uploaded || saved) && (
+              <div className="mb-3 rounded-lg border border-success/20 bg-success/10 px-3.5 py-2.5 text-sm text-success">
+                {uploaded ? UPLOAD_SAVED.uploaded : (saved && UPLOAD_SAVED[saved]) || saved}
+              </div>
+            )}
+            {queuedCount > 0 && (
+              <div className="mb-3 rounded-lg border border-info/30 bg-info/10 px-3.5 py-2.5 text-sm text-info">
+                {queuedCount} document{queuedCount === 1 ? "" : "s"} still being read - this updates itself automatically.
+              </div>
+            )}
+            <UploadForm
+              companyId={companyId}
+              redirectTo="/experience?uploaded=1"
+              title="Drop reference letters, completion certificates or close-out reports here, or click to choose"
+              hint="Read by AI to pull out the client, project, dates and value, with the exact text it read them from. Nothing is saved until you confirm or correct it below. PDF, Word or an image, up to 25 MB each."
+            />
+            {pendingResults.map((row) => {
+              const upload = row.onboarding_uploads;
+              return (
+                <DocumentReviewCard
+                  key={row.id}
+                  result={row}
+                  filename={upload?.original_filename ?? "document"}
+                  principals={[]}
+                  people={[]}
+                  returnTo="/experience"
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* Manual alternative: a project with no document yet, or a quick
+            hand-typed correction - captureExperience unchanged. */}
         <form action={captureExperience} className={cardClass}>
           <div className="mb-2.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
-            Add experience
+            Enter a project manually
           </div>
           <div className={gridClass}>
             <div>

@@ -182,6 +182,12 @@ export default async function Home() {
               Start free
             </Link>
             <Link
+              href="/demo"
+              className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-lg border border-white/35 px-6 text-[15px] font-semibold text-white no-underline hover:bg-white/10"
+            >
+              See a sample tender
+            </Link>
+            <Link
               href="/tools"
               className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-lg border border-white/35 px-6 text-[15px] font-semibold text-white no-underline hover:bg-white/10"
             >
@@ -268,18 +274,20 @@ export default async function Home() {
         <div className="mx-auto max-w-[680px] rounded-xl bg-foreground p-7 text-center">
           <div className="mb-1.5 text-[15px] font-semibold text-white">Founding Firms Programme</div>
           {/*
-            "SANRAL Pro" (this paragraph's own plan name until now) stopped
-            existing once PR #71 renamed every plan_tier value to
-            Starter/Professional/Business/Enterprise - this was the one
-            place on the public homepage still advertising a plan that no
-            longer exists. Fixed in passing while already editing this
-            section for the SANRAL-positioning pass above; not a reworded
-            promise, the same "top plan, locked rate" offer, just a name
-            that's still real.
+            Spec v3 Batch 6, Sarel's own answer (2026-10-22): this used to
+            promise "the first 10 firms... a locked founding rate" - a hard
+            count and a rate commitment with no mechanism anywhere in the
+            app to track or honour either (no founding-firm intake, no
+            per-customer locked-price flag, nothing). Keeping the founding-
+            customer framing (it's true that an early customer right now
+            gets more of Sarel's own direct attention than one joining
+            later will), but reworded to drop the specific count and the
+            rate promise - soft, not quantified, nothing a prospect could
+            hold the product to that isn't actually built.
           */}
           <p className="mb-4 text-[13px] leading-relaxed text-white/78">
-            The first 10 firms get our top plan at a locked founding rate, done-with-you onboarding, and a direct
-            line back to how the product gets built next.
+            Early customers get more of our attention while we build out the rest - hands-on onboarding, and a
+            direct line back to how the product gets built next.
           </p>
           {/*
             Fix for the audited "Founding Firms" finding: this CTA used to say
@@ -346,7 +354,7 @@ export default async function Home() {
               >
                 <div className="mb-1 text-sm font-semibold text-foreground">{tier.name}</div>
                 <div className="mb-4">
-                  <span className={cn("font-display font-medium text-foreground", isCustom ? "text-[18px]" : "text-[26px]")}>{tier.price}</span>
+                  <span className={cn("font-display font-medium", isCustom ? "text-[18px] text-foreground" : "text-[26px] text-money")}>{tier.price}</span>
                   <span className="text-[13px] text-muted-foreground">{tier.cadence}</span>
                 </div>
                 <div className="mb-5 flex flex-col gap-2">

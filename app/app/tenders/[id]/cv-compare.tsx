@@ -48,6 +48,27 @@ export async function CvCompare({ tenderId, positionCode, personId }: { tenderId
     });
   }
 
+  return (
+    <CvCompareView
+      original={original ? { filename: original.original_filename, href: signed[original.storage_path] } : null}
+      tailored={tailored ? { pdfHref: tailored.storage_path_pdf ? signed[tailored.storage_path_pdf] : undefined, docxHref: tailored.storage_path_docx ? signed[tailored.storage_path_docx] : undefined } : null}
+      personId={personId}
+    />
+  );
+}
+
+export type CvCompareOriginal = { filename: string; href?: string };
+export type CvCompareTailored = { pdfHref?: string; docxHref?: string };
+
+/**
+ * Pure presentational half of CvCompare, split out so the no-signup demo
+ * (spec §6) can render the exact same side-by-side view with hand-built
+ * sample file names instead of real signed storage URLs - no new "looks
+ * similar" mockup component, the one real view, fed data two ways. personId
+ * is optional since the demo has no real /people page to link to.
+ */
+export function CvCompareView({ original, tailored, personId }: { original: CvCompareOriginal | null; tailored: CvCompareTailored | null; personId?: string }) {
+  if (!original && !tailored) return null;
   const actionLinkClass = "text-xs font-semibold text-foreground underline underline-offset-2 hover:text-accent";
 
   return (
@@ -56,9 +77,9 @@ export async function CvCompare({ tenderId, positionCode, personId }: { tenderId
         <div className="mb-0.5 text-[10px] font-bold tracking-wide text-muted-foreground uppercase">Original (as uploaded)</div>
         {original ? (
           <>
-            <div className="text-xs break-words text-foreground">{original.original_filename}</div>
-            {signed[original.storage_path] && (
-              <a href={signed[original.storage_path]} className={actionLinkClass}>
+            <div className="text-xs break-words text-foreground">{original.filename}</div>
+            {original.href && (
+              <a href={original.href} className={actionLinkClass}>
                 Download
               </a>
             )}
@@ -66,26 +87,29 @@ export async function CvCompare({ tenderId, positionCode, personId }: { tenderId
         ) : (
           <div className="text-xs text-muted-foreground">No CV uploaded yet.</div>
         )}
-        <div className="mt-1">
-          <Link href={`/people/${personId}#cv-documents`} className="text-[11px] text-muted-foreground underline underline-offset-2">
-            Edit on People page
-          </Link>
-        </div>
+        {personId && (
+          <div className="mt-1">
+            <Link href={`/people/${personId}#cv-documents`} className="text-[11px] text-muted-foreground underline underline-offset-2">
+              Edit on People page
+            </Link>
+          </div>
+        )}
       </div>
       <div className="min-w-0 rounded-lg border border-border px-2.5 py-2">
         <div className="mb-0.5 text-[10px] font-bold tracking-wide text-muted-foreground uppercase">Tailored (this tender)</div>
         {tailored ? (
           <div className="flex flex-wrap gap-2.5">
-            {tailored.storage_path_pdf && signed[tailored.storage_path_pdf] && (
-              <a href={signed[tailored.storage_path_pdf]} className={actionLinkClass}>
+            {tailored.pdfHref && (
+              <a href={tailored.pdfHref} className={actionLinkClass}>
                 PDF
               </a>
             )}
-            {tailored.storage_path_docx && signed[tailored.storage_path_docx] && (
-              <a href={signed[tailored.storage_path_docx]} className={actionLinkClass}>
+            {tailored.docxHref && (
+              <a href={tailored.docxHref} className={actionLinkClass}>
                 Word
               </a>
             )}
+            {!tailored.pdfHref && !tailored.docxHref && <span className="text-xs text-muted-foreground">Sample - download disabled in this demo</span>}
           </div>
         ) : (
           <div className="text-xs text-muted-foreground">Not generated yet - use &quot;Generate tender-specific CV&quot; above.</div>

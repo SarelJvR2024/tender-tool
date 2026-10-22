@@ -88,11 +88,33 @@ def test_find_winner_still_returns_the_unconfirmed_candidate_for_diagnostics():
           wi == 0 and basis == "name_token", (wi, basis))
 
 
+def test_every_row_in_one_batch_carries_the_same_keys():
+    print("a batch mixing a brand-new tender with an already-seen one must not produce mismatched row keys")
+    new_tender = _part("New Co (Pty) Ltd", bidders=[])
+    new_tender["ocid"], new_tender["title"] = "ocds-new-001", "Brand new tender"
+    seen_tender = _part("Old Co (Pty) Ltd", bidders=[])
+    seen_tender["ocid"], seen_tender["title"] = "ocds-old-001", "Already-seen tender"
+    existing = {sao.outcome_key(seen_tender): {"parts": {}, "first_seen_at": "2026-01-01T00:00:00+00:00"}}
+    rows = sao.build_rows([new_tender, seen_tender], existing)
+    check("build_rows() produced both rows", len(rows) == 2, len(rows))
+    key_sets = [set(r.keys()) for r in rows]
+    check("every row has the exact same set of keys - the real cause of the live "
+          "PGRST102 'All object keys must match' crash (2026-10-22): a conditionally-added "
+          "first_seen_at key made a new tender's row shape differ from an already-seen one's "
+          "in the SAME upsert batch", key_sets[0] == key_sets[1], key_sets)
+    check("the already-seen tender kept its real first_seen_at, not today's date",
+          [r for r in rows if r["outcome_key"] == sao.outcome_key(seen_tender)][0]["first_seen_at"]
+          == "2026-01-01T00:00:00+00:00")
+    check("the brand-new tender got a first_seen_at at all (not missing)",
+          [r for r in rows if r["outcome_key"] == sao.outcome_key(new_tender)][0]["first_seen_at"] is not None)
+
+
 def main():
     test_unrelated_company_sharing_a_first_word_is_not_assumed_the_winner()
     test_exact_name_match_still_sets_the_winner()
     test_amount_match_still_sets_the_winner()
     test_find_winner_still_returns_the_unconfirmed_candidate_for_diagnostics()
+    test_every_row_in_one_batch_carries_the_same_keys()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

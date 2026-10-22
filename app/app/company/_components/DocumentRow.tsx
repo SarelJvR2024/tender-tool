@@ -1,8 +1,9 @@
 import type { StatusChip } from "@/lib/dates";
-import { filenameFromPath, type VaultDocumentKind } from "@/lib/vaultDocuments";
+import { filenameFromPath, VAULT_KIND_TO_DOCUMENT_KIND, type VaultDocumentKind } from "@/lib/vaultDocuments";
 import { uploadVaultDocument } from "../actions";
 import { ChipBadge } from "./shared";
 import { Button } from "@/components/ui/button";
+import { VaultDocumentUploader } from "./VaultDocumentUploader";
 
 /** One vault document: its tracked facts, an expiry chip, a link to the uploaded copy, and an upload/replace form. */
 export function DocumentRow({
@@ -24,6 +25,12 @@ export function DocumentRow({
 }) {
   const upload = uploadVaultDocument.bind(null, companyId);
   const filename = filenameFromPath(path);
+  // Spec v3 Batch 2: the 6 kinds the AI document-scan pipeline already
+  // classifies go through VaultDocumentUploader (upload -> classify ->
+  // review -> confirm, never a silent overwrite). 'coid' has no classifier
+  // entry (see VAULT_KIND_TO_DOCUMENT_KIND's own comment) and keeps the
+  // original direct-upload form below, unchanged.
+  const reviewable = !!VAULT_KIND_TO_DOCUMENT_KIND[kind];
   return (
     <div className="border-t border-border py-3 first:border-t-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -50,20 +57,24 @@ export function DocumentRow({
         </div>
         <ChipBadge status={status} />
       </div>
-      <form action={upload} className="mt-2 flex flex-wrap items-center gap-2">
-        <input type="hidden" name="kind" value={kind} />
-        <input
-          type="file"
-          name="file"
-          required
-          accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-          aria-label={`Upload ${title}`}
-          className="max-w-full text-xs text-foreground"
-        />
-        <Button type="submit" variant="outline" size="sm">
-          {filename ? "Replace" : "Upload"}
-        </Button>
-      </form>
+      {reviewable ? (
+        <VaultDocumentUploader companyId={companyId} title={title} />
+      ) : (
+        <form action={upload} className="mt-2 flex flex-wrap items-center gap-2">
+          <input type="hidden" name="kind" value={kind} />
+          <input
+            type="file"
+            name="file"
+            required
+            accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
+            aria-label={`Upload ${title}`}
+            className="max-w-full text-xs text-foreground"
+          />
+          <Button type="submit" variant="outline" size="sm">
+            {filename ? "Replace" : "Upload"}
+          </Button>
+        </form>
+      )}
     </div>
   );
 }

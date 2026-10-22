@@ -8,65 +8,74 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
-## Resume here (live, mid-task handover - 2026-10-22 ~12:25 UTC)
+**Standing review pass, 2026-10-22 ~22:15 UTC: merged a substantial batch (Spec v3 batches 1-6,
+a real middleware auth gap fix, a real CI-red fix), confirmed no collision with PR #74.** Six
+"Spec v3" batches landed (onboarding collapsed from a 6-step wizard to 2 screens, the tender
+workspace now collapses sections once they're done via a new `CollapsibleSection` component,
+`/tools` became `/toolkit`, experience/people/intake and digest changes, savings-default/
+founding-rate copy fixes). Two real fixes also landed: a middleware auth gap that let
+unauthenticated visitors reach `billing`/`analytics`/`market-intelligence`/`sanral-schedules`
+(closed correctly - restoring intended access, not widening it), and a real CI-red fix (`app-ci`
+had been failing on `main` for 3 consecutive pushes over an unresolvable import alias).
 
-secret (Supabase dashboard → Settings → Database → Connect → Direct → URI), specifically so the
-migrations missing from the live project (`swkglctgdceqrehbabfl`) can be applied. The session that
-asked for it couldn't see the secret mid-session (new environment secrets need a fresh session to
-load) - that's very likely why you're starting fresh now. Full detail on what's missing and why:
-see `feature/narrative-document-generator`'s own System-Status.md entries once that PR (#74)
-merges, or ask Sarel to point you at the live conversation.
+Checked `app/app/tenders/[id]/page.tsx` specifically, since Batch 5 explicitly touches tender
+workspace layout and PR #74 also edits this exact file - it auto-merged with no conflict, and a
+manual check confirmed the result is actually correct, not just conflict-free: the new
+`CollapsibleSection` wrapping only applies to sections whose JSX is built inline in `page.tsx`
+itself (`key-positions`, `readiness-report`), never to sections delegated to a separate async
+component (`submissionPackSection`, `packReviewSection`, and this PR's own
+`narrativeDocumentsSection`) - so leaving `narrativeDocumentsSection` unwrapped isn't an
+inconsistency this pass introduced, it matches every one of its sibling delegated sections
+exactly. `docs/specs/System-Status.md` itself had two real conflicts (stale "Resume here"
+content from before PR #80 merged, superseded rather than preserved; two genuinely additive
+blocks - this branch's own PR #74 entries and `main`'s handover-closure entries - kept both).
 
-**Read PR #80 before doing anything else - it is far ahead of the steps below.** As of this
-merge, PR #80 (open, not yet merged) reports: the exact missing range is `0077`-`0084` (not
-`0085` - that number now belongs to an unrelated `savings_counter` migration that landed on
-`main` separately, see this file's dated entries below), a combined transaction-wrapped SQL file
-covering all of them has already been generated and handed to Sarel to run via the Supabase SQL
-Editor (psql can't reach either the direct or the pooler host from this kind of sandbox - confirmed
-HTTPS-only egress, not an IPv6 issue alone), **and the Railway worker has already been confirmed
-alive and completing real jobs** (one disposable test job claimed in 14s, completed in 17s, real
-output written back, then deleted). If PR #80 has merged by the time you read this, its own
-System-Status.md entry supersedes everything below - go read that instead of repeating this work.
+Full re-verification after this merge: `npm run verify` clean, the full `vitest` suite (121/121,
+not the 80 this file's older entries cite - new specs landed with the merge), all 13 `*.test.ts`
+files run individually matching CI's own real invocation (the thing Finding 55 just fixed) - all
+pass, and the full Python sweep (50 files) clean.
 
-**Do this, in order** (superseded by the above once PR #80 merges):
-1. Confirm `SUPABASE_DB_URL` (and `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   `SUPABASE_SERVICE_ROLE_KEY`) are visible (`env | grep -i supabase`).
-2. Check which migrations the live project is actually missing - cross-reference every migration
-   file's own `create table` statements against the project's real exposed tables (query
-   `$NEXT_PUBLIC_SUPABASE_URL/rest/v1/` with the service-role key as `apikey`/`Authorization:
-   Bearer`, which returns an OpenAPI doc listing every exposed table - compare its `paths` against
-   `app/supabase/migrations/*.sql`'s own `create table` statements). Don't trust any number named
-   here blindly - re-check, since more may have landed on `main` since.
-3. Apply whatever's actually missing, in filename order, via
-   `psql "$SUPABASE_DB_URL" -f <file>`. Re-run the same check as step 2 to confirm nothing's still
-   missing before moving on.
-4. Using `SUPABASE_SERVICE_ROLE_KEY`, run one disposable test job through the Railway worker and
-   clean it up afterward - this is the one thing that tells Sarel whether CV/pack/narrative
-   generation will actually complete, not just queue.
-5. Report back to Sarel plainly: is the app ready for him to sign up as his own real company and
-   do a full onboarding walkthrough, yes or no, and exactly what (if anything) is still missing.
+---
 
-**Do NOT** create a test company or sign up yourself - Sarel was explicit that onboarding is his
-to do once you confirm it's ready, not something to simulate on his behalf. There are already 6
-throwaway test companies in the live project from other sessions' own QA work (`E2E Test
-Construction`, `Debug Co`, and others, created 2026-10-18 to 2026-10-21) - don't add a 7th, and
-consider flagging those for cleanup before Sarel's own test.
+**Microsoft SSO fixed and enabled, 2026-10-22 ~19:00 UTC (PR #91, `app/app/login/page.tsx` +
+`app/app/signup/page.tsx`).** Closes the gap flagged throughout this file since 2026-10-18:
+Supabase's Azure OAuth provider had Google's credentials pasted into it by mistake, so
+`MICROSOFT_AUTH_READY` existed as a `false` flag to hide the "Continue with Microsoft" button
+rather than expose that broken path to a real visitor.
 
-**Attempted by the standing autonomous QA session, 2026-10-22 ~15:50 UTC - blocked, needs a
-session with production access.** `SUPABASE_DB_URL`/`SUPABASE_SERVICE_ROLE_KEY`/etc. were visible
-in `env` as this handover describes, but every outbound call toward the live project - even a
-read-only `curl` to the REST OpenAPI endpoint, even a plain `git fetch` right afterward - was
-refused by this session's own "auto mode" permission classifier with reason `[Production Reads]`.
-This is NOT something to work around from inside an autonomous session (the classifier exists
-specifically to stop exactly that), so nothing in steps 2-5 above was attempted after the first
-refusal - this handover is still exactly as open as it was. Whoever next has standing permission
-for production reads/writes (an interactive session, or an autonomous one Sarel has explicitly
-granted that scope to) should pick this up from step 1. Don't re-litigate whether to try the
-workaround again - the answer is the same.
+Sarel registered a real Microsoft Entra app, walked through step by step and verified together
+rather than just reported as done:
 
-Once this is done, delete this "Resume here" section (it's a live handover, not a permanent
-record) - fold anything worth keeping into a dated entry below, same as every other finding in
-this file.
+- **App registration**: "Tender Ready", created under **`sarel@clev.co.za`** (his own Microsoft
+  account/tenant, `clev.co.za`) - worth knowing for whoever next needs app-registration access in
+  Azure Portal, since it isn't a separate service account.
+- **Supported account types: "Any Entra ID Tenant + Personal Microsoft accounts"** ("All Microsoft
+  account users") - deliberately NOT the default single-tenant option, which would have only
+  allowed `clev.co.za` accounts to sign in rather than any customer's Microsoft account. This is
+  the one step in the whole flow that's easy to get wrong silently (the default selection looks
+  reasonable and would have shipped a Microsoft SSO button that fails for every real customer).
+- **Redirect URI**: Supabase's own `https://swkglctgdceqrehbabfl.supabase.co/auth/v1/callback`.
+- **Client secret**: created with a 2-year expiry - **due around 2028-10-22**. No rotation
+  reminder/scheduled task exists for this yet; whoever's maintaining this project as that date
+  approaches should either rotate it proactively or expect Microsoft SSO to silently start failing
+  for every user the day it lapses (Azure doesn't warn end users, only shows in the Azure Portal
+  app registration's own Certificates & secrets page).
+- **Supabase side** (Authentication → Providers → Azure): real Client ID + Client Secret pasted in
+  (replacing Google's mistakenly-pasted ones), Tenant field set to
+  **`https://login.microsoftonline.com/common`** to match the multi-tenant registration - note this
+  field validates as a URL, not a bare tenant name like `common` alone (caught live during setup,
+  first attempt was rejected).
+
+Also closed in the same pass: `signup/page.tsx` never had Google/Microsoft OAuth at all (only
+email/password, ported late and separately) - added via PR #90, same `MICROSOFT_AUTH_READY` gate,
+merged before this one.
+
+**Open, not this pass's to fix**: the orange Azure Portal warning on the app registration -
+"End users cannot grant consent to newly registered multitenant apps without verified
+publishers" - some companies with stricter Microsoft tenant consent policies may need their own IT
+admin to approve before staff can use "Continue with Microsoft". Fixing it means Microsoft Partner
+Network (MPN) publisher verification, a separate optional step, not required for this to work for
+most users today.
 
 ---
 
@@ -185,6 +194,86 @@ Word/re-upload path so nothing ships without a human reading and owning the word
   pass introduced, and not fixed here (whether to add a `pull_request` trigger - cost of running
   CI on every push to every branch vs. catching a regression before merge - is Sarel's call, not
   a "small and safe" fix to make silently); flagged under "Open items for Sarel's own call" below.
+
+**Live-infrastructure handover CLOSED, 2026-10-22 ~16:12 UTC - the app is ready for Sarel's own
+real onboarding walkthrough.** Both blockers this handover tracked are resolved:
+
+1. **Migrations 0077-0085 applied and confirmed live.** Sarel ran the combined, transaction-wrapped
+   SQL file (covering all 9 files, including `0085` which landed on `main` mid-handover) via the
+   Supabase dashboard's SQL Editor. Re-checked the live OpenAPI doc immediately after: all 5 new
+   tables (`company_invites`, `company_subscriptions`, `sent_deadline_reminders`,
+   `payfast_payment_attempts`, `savings_counted_steps`) and all 10 new/changed RPC functions
+   (`start_payfast_checkout`, `apply_payfast_itn`, `company_can_request_pack`,
+   `company_packs_this_period`, `tt_plan_limits`, `redeem_company_invite`, `invite_preview`,
+   `record_deadline_reminder_sent`, `is_employee_in_company`, `own_linked_person_id`) are live.
+   Table count went 58 -> 63, RPC count 42 -> 52, matching exactly what 0077-0085 add - the whole
+   transaction committed, nothing partial.
+2. **Railway worker confirmed completing real jobs** (see the entry immediately above this one for
+   the full detail - inserted a disposable test job, claimed in 14s, completed in 17s, with genuine
+   extraction output written back, not a status flip).
+
+**One residual gap, not a blocker for tonight but worth knowing**: the 6 pre-existing throwaway
+test companies (`Fresh Walkthrough Civils`, `Mzansi Roads & Civils`, `Thuso Civils & Projects`,
+`E2E Tender Co`, `Debug Co`, `E2E Test Construction` - all created 2026-10-18 to 2026-10-21, before
+`0078`'s trigger existed) have **zero rows in `company_subscriptions`** - confirmed by querying the
+table directly, empty result. `start_company_trial()` only fires on a NEW company insert, so it
+never retroactively backfilled these. Not a problem for Sarel's own fresh signup tonight (the
+trigger will fire correctly for a brand-new company), but anyone later using one of these 6 for
+billing/usage-gating testing will hit `company_can_request_pack()` returning `false` (fails closed,
+doesn't crash) until a subscription row is backfilled or the company is deleted.
+
+A loose end from this pass, worth someone actually checking rather than assuming: Sarel pasted a
+live Session Pooler connection string (including its password) directly into chat mid-task to test
+connectivity. He was told to rotate it (Supabase dashboard → Settings → Database → Reset database
+password) - **not independently confirmed done**.
+
+---
+
+**Live-infrastructure handover, continued - 2026-10-22 ~13:40 UTC: confirmed the missing-migrations
+list, found a real signup-breaking gap, hit two genuine environment blockers (not worked around).**
+
+- **Secrets confirmed visible**: `SUPABASE_DB_URL`, `NEXT_PUBLIC_SUPABASE_URL`,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` all present in this session's
+  environment, as the previous session expected once a fresh session loaded them.
+- **Missing-migrations check, done the way the handover specified** (live project's own OpenAPI
+  doc via `$NEXT_PUBLIC_SUPABASE_URL/rest/v1/` - 58 tables/views exposed - cross-referenced against
+  every `create table` in `app/supabase/migrations/*.sql`, not just trusting the earlier guess of
+  "0077-0085"). Highest migration on `main` is actually `0084` (no `0085` exists). Four tables the
+  live project is missing entirely: `company_invites` (`0077`), `company_subscriptions` (`0078`),
+  `sent_deadline_reminders` (`0079`), `payfast_payment_attempts` (`0081`). `0080`, `0082`, `0083`,
+  `0084` add no new tables but alter/replace functions those four (and others) depend on, so all
+  eight files (`0077`-`0084`) need applying together, in filename order.
+- **Real finding, not just "tables are missing": live signup is currently silent-broken, not just
+  incomplete.** `start_company_trial()` (`0078_company_subscriptions.sql`) is an `after insert on
+  companies` trigger, not an app-level call - since `0078` was never applied live, that trigger
+  doesn't exist, so a real signup today would insert the `companies` row fine (no error surfaces)
+  but silently create **zero** `company_subscriptions` row for it. Every downstream usage-gating
+  and billing read this pass's earlier pricing-conflict-resolution entry added
+  (`company_can_request_pack()`, the billing page, seat-cap checks) assumes every company has
+  exactly one subscription row. This alone means the live project is not ready for a real signup
+  walkthrough yet, independent of the Railway-worker question.
+- **Blocker 1, genuine environment limit, not a transient error**: direct `psql
+  "$SUPABASE_DB_URL"` fails with `could not translate host name ... No address associated with
+  hostname`. Checked this wasn't just a local DNS hiccup: `google.com` resolves fine from this
+  container, but `db.swkglctgdceqrehbabfl.supabase.co` doesn't resolve via this container's
+  resolver for A *or* AAAA - yet a public DNS-over-HTTPS lookup (`https://dns.google/resolve`,
+  which goes out over this session's normal HTTPS egress) shows the host is real and has an
+  **AAAA-only** record, no A record. This container's egress is HTTPS-proxied only; it has no
+  IPv6/raw-TCP route, so no session running in this kind of sandbox can ever reach this exact host
+  on port 5432 - it isn't about retrying or which session runs it. Did not attempt any workaround
+  that would compromise security (did not add a raw-SQL-execution RPC function to route around it
+  over REST - confirmed no such function already exists on the 42 RPC functions the live project
+  exposes, which is the correct, secure state and should stay that way).
+- **Blocker 2**: testing the Railway worker needs a real existing company + tender to attach a
+  disposable `pack_generation_jobs` test row to (its `company_id`/`tender_id` are required foreign
+  keys) - reading those rows to pick one was denied by this session's own "Production Reads" auto-
+  mode guardrail. Correct behaviour, not a bug to route around: real customer rows, even ones
+  Sarel called "throwaway test companies," aren't something to read on this task description's
+  authority alone. No Railway API token is present in this environment either, so the worker's
+  deployment status couldn't be checked that way as an alternative.
+- **Not done this pass, same as before**: migrations not applied, Railway worker not tested,
+  Sarel's own onboarding walkthrough still not confirmed ready. Full QA sweep not re-run this pass
+  - nothing in `main`'s own app code changed, only this file.
 
 **Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
 is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
@@ -1321,6 +1410,76 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-eighth run): real CI was red on `main` for 3 consecutive pushes - fixed
+
+Orientation: synced a very large batch (live-infra handover closed - migrations 0077-0085
+confirmed live, SANRAL award backfill resumability fixes, Market Intelligence, several spec v3
+batches: onboarding collapse, shared document intake, Experience/people/intake, a middleware
+auth-gap hotfix, Microsoft SSO, analytics page, no-signup demo). Before picking a rotation area,
+ran the full local suite as always - and, suspicious of how large and fast this batch landed,
+checked the real GitHub Actions history for `app-ci.yml` rather than assuming green.
+
+**Finding 55 (CONFIRMED, FIXED, severe).** `app-ci` has been `failure` on `main` for the last 3
+pushes running (#114 "Spec v3 Batch 2" onward) - genuinely broken, not a local-only or
+environment-specific issue like Finding 54. `app/_components/document-intake/uploadBatch.ts` (the
+new shared upload engine) imported via the `@/lib/...` Next.js path alias, which the workflow's
+own "run every `*.test.ts` file directly via plain Node" step can't resolve - confirmed by pulling
+the real failing job's log, not just reproducing it locally.
+
+**Fix:** changed the two imports to plain relative paths with explicit `.ts` extensions, matching
+the convention every other currently-passing `*.test.ts`-covered module already follows.
+
+**Verified by replicating every real CI step locally:** typecheck, lint, all 13 `*.test.ts` files
+run individually the same way CI runs them (all pass, including the 5 that were failing), the
+full vitest suite (115/115, unchanged), and a real `npm run build` (clean).
+
+Picked this up instead of a fresh rotation area because real CI, red on `main`, is a higher
+priority than searching for a new adversarial case - the same discipline this session already
+applies when babysitting a PR, applied here to the standing branch itself.
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-seventh run): rotated back to SANRAL pack (engine/) - thorough review, no new bug found this time
+
+Orientation: re-checked the "Resume here" live handover first (per `CLAUDE.md`'s own standing
+instruction to read it before planning work) - still open, still blocked for this session's
+permission mode, nothing new to try (my own prior addendum already says not to re-litigate it).
+Synced a small batch (Google OAuth on signup, a dedicated "money" design-system token) - no
+engine/ changes since my own Finding 49, so rotated deliberately back to a genuine Python engine
+area rather than drifting further into TypeScript/billing territory several cycles running.
+
+Picked SANRAL pack (`engine/pack/assemble_pack.py`, `engine/sanral_fill.py`'s `Workbook.cached()`,
+`engine/sanral_b7.py`) - files not yet given a dedicated look this session. Read closely and
+tried to construct real reproductions for several candidates; none held up as a genuine,
+reachable bug:
+
+- `assemble_pack._excel_date()`'s numeric branch has no guard against a `float('nan')` input
+  (confirmed it crashes with one, directly) - but traced where that value could actually come
+  from (`Workbook.cached()` in `sanral_fill.py`): an Excel error cell (`#REF!` etc.) returns a
+  *string* error code through a different code path, not NaN, and a real XLSX's own `<v>` tag
+  wouldn't normally serialize a literal `"nan"`/`"inf"` string for a numeric cell. No realistic
+  path to this found - logged so a future pass doesn't need to re-investigate from scratch, not
+  fixed.
+- `build_submission_pack()`'s bare `profile["key_people"][0]` (step 6, the authority letter) would
+  crash on an empty list - but `process_pack_jobs.py` (the only real caller) already guards this
+  upstream (`if not signatories: raise ValueError(...)` before `key_people` is ever built), so
+  `key_people` can never actually be empty through the real pipeline. Confirmed, not a live gap.
+- The same naive-UTC `datetime.date.today()` bug class (Findings 37-39/48) is still present once
+  more, in the pack's own cover-page heading (`f"Generated {datetime.date.today().isoformat()}"`)
+  - but it's purely a display label nothing downstream reads back, so per Finding 37's own
+    established precedent (several cosmetic instances deliberately left unfixed that pass), not
+    worth fixing on its own.
+- `pdf_merge.verify_pack()`'s contents-page cross-check uses a plain substring match for a
+  section's page-range (`pages not in flat`), which could in principle miss a wrong page range if
+  it happens to be a substring of an unrelated number nearby - a verification-robustness nit, not
+  a customer-facing bug (it would only matter alongside an independent, compounding bug in the
+  actual page-numbering logic). Noted, not chased further.
+- `sanral_b7.check_plan()`'s percentage/B-BBEE-level/boolean-type validation held up under several
+  constructed adversarial inputs (percentage-as-string, zero-as-error, boolean miscoercion via
+  `_num()`) - all either correctly rejected or not realistically reachable from the real UI.
+
+No TypeScript or Python file changed this pass. Logging this as a genuine clean sweep of a real
+area, not a skipped cycle - the point of writing up what was checked and why nothing panned out
+is so the next pass through SANRAL pack starts further ahead, not from zero.
 
 ## This pass (2026-10-22, standing QA/robustness review - sixty-sixth run): live-handover attempted (blocked, needs production access); the brand-new savings-counter migration replayed clean against a real Postgres
 
@@ -5326,3 +5485,53 @@ document-download task) to avoid colliding on that file. The general-route requi
 shallow by design (see above) - if Sarel wants a real itemised general-tender requirement list at
 discovery time, that needs `engine/general/requirements.py`'s LLM pass run speculatively, which
 has its own cost/design tradeoffs not decided here.
+
+---
+
+**Sarel's call on SANRAL's data terms, 2026-10-22 ~20:05 UTC - resolved, recorded here per this
+file's own discipline.** `public_tender_outcomes`' migration comment and
+`Award-Outcomes-Findings.md` §6 both flagged the same open question: SANRAL's site terms say "no
+charge ... upon any recipient of the material," and showing SANRAL-sourced rows to **paying**
+customers (rather than just using the data for Klipcorp's own bidding) was explicitly left as
+"an open decision for Sarel." Sarel resolved it directly (verbatim): "lets build the analysis
+feature including sanral data for now. there is alot of analysis we can build based on all
+tenders which include sanrla and other tenders. assessming tenders, scope, freuecny, wining
+biders amoutns, awards vs tender etc start building what you can." Read as: fine to show inside
+the signed-in, paying app for a customer's own bidding decisions; still not resolved for the
+separate "use case beyond the bidder" idea (selling access to non-bidders, e.g. suppliers wanting
+to know who won) - that's a different audience/product idea per the Deep-Dive doc, not covered by
+this instruction, and stays an open decision if anyone builds it later.
+
+**Built the same session: Market Intelligence (`app/app/market-intelligence/page.tsx`, PR TBD on
+branch `feature/market-intelligence`).** A market-wide view across every `public_tender_outcomes`
+row (SANRAL + eTenders, ~6,000+ rows and growing from the backfill below) - deliberately separate
+from `/analytics`' "Pricing trends" section, which stays scoped to one company's own matched bids
+(that page's own AGENTS.md entry had explicitly flagged a market-wide rollup as "a reasonable
+follow-up, not attempted here" - this is that follow-up). Tender frequency by month, winning-bid-
+vs-field stats (lowest-bid-won rate, winner-vs-median), and breakdowns by industry/discipline,
+buyer and province - all via `lib/marketPricing.ts`'s existing `benchmark()`, extended with three
+new pure functions (`tenderFrequencyTrend`, `byCategory`, `byBuyer`/`byProvince`, 9 new tests in
+the new `marketPricing.spec.ts`) and a plain unscoped `loadMarketOutcomes()` read (no company
+join - this table is shared/authenticated-readable). Same `MIN_SAMPLE`-gating discipline as
+`/analytics`; one scope limit stated honestly on the page itself rather than faked: "winner vs.
+the field" compares the winning bid to the OTHER BIDS on the SAME tender, not to a published
+budget/estimate (that comparison, `loadMarketTrend()`, only exists for tenders a company has
+tracked and enriched with a value band - most of this backfilled universe has no such estimate).
+Also added the real `province` column (migration `0053`) to the `TenderOutcome` TS type and
+`OUTCOME_COLUMNS` - it existed in the database but was missing from the type, caught while
+building this. Verified: `npm run typecheck` (clean), `npm run lint` (0 errors), `npx vitest run`
+(115/115, 9 new), `npm run build` (clean, builds as a dynamic route). Not verified: rendered
+against live data in a browser (same standing gap as every other authenticated page in this file -
+this environment has no live Supabase session).
+
+**Two real bugs found and fixed in the running SANRAL/eTenders backfill while building the above**
+(both on `main` via PR #98 and a second PR on branch `fix/portal-first-seen-keys`): (1) the
+eTenders portal fetch (`fetch_portal_awarded()`) was never chunked like the SANRAL lists were -
+one giant fetch, written to Supabase only at the very end - and this sandbox's container restarted
+mid-run three times, losing 100% of portal progress each time; fixed by making it resumable
+chunk-by-chunk, same pattern as the SANRAL list fetch (PR #89). (2) `store_award_outcomes.merge()`
+only set `first_seen_at` when a tender already existed in Supabase, so a batch mixing a brand-new
+tender with an already-known one crashed with PostgREST's `PGRST102 "All object keys must match"`
+- hit live on chunk 7 of the re-run. Fixed by always setting `first_seen_at`, with a regression
+test. Backfill relaunched after each fix; see git log / PR #98 / #99 for the full detail rather
+than duplicating it here.

@@ -10,13 +10,11 @@ import { NextResponse, type NextRequest } from "next/server";
  * (company_members has no row for them - see
  * supabase/migrations/0003_onboarding.sql). Every other route is untouched.
  *
- * Does NOT redirect a member away from /onboarding anymore (it used to) -
- * the 5-step wizard (app/AGENTS.md "Auth + onboarding") keeps gathering
- * compliance/people/preference data at /onboarding?step=2..5 for a while
- * after step 1 already created the company and its company_members row, so
- * "membership exists" can no longer mean "onboarding is done, send them to
- * /dashboard". /onboarding/page.tsx itself decides what to show a member
- * who lands there (the bid-readiness end screen by default).
+ * Does NOT redirect a member away from /onboarding itself - that decision
+ * is left to /onboarding/page.tsx, which knows the difference between its
+ * two real screens (spec v3 Batch 3: Screen 1 creates the company, Screen 2
+ * is the optional "add documents" step right after) and sends a member
+ * anywhere else straight to /dashboard.
  */
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -52,7 +50,15 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/people") ||
     path.startsWith("/experience") ||
     path.startsWith("/admin") ||
-    path.startsWith("/my-cv");
+    path.startsWith("/my-cv") ||
+    // spec v3 Batch 1: /toolkit is the signed-in Tools home (see
+    // nav-items.ts). The other four below closed a pre-existing gap found
+    // while reviewing that batch's PR.
+    path.startsWith("/toolkit") ||
+    path.startsWith("/analytics") ||
+    path.startsWith("/billing") ||
+    path.startsWith("/market-intelligence") ||
+    path.startsWith("/sanral-schedules");
 
   if (!user && guarded) {
     const url = request.nextUrl.clone();
@@ -89,5 +95,10 @@ export const config = {
     "/experience/:path*",
     "/admin/:path*",
     "/my-cv/:path*",
+    "/toolkit/:path*",
+    "/analytics/:path*",
+    "/billing/:path*",
+    "/market-intelligence/:path*",
+    "/sanral-schedules/:path*",
   ],
 };

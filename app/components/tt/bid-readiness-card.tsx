@@ -5,13 +5,16 @@ import { cn } from "@/lib/utils";
 import type { ReadinessResult } from "@/lib/readiness";
 
 /**
- * The one place bid-readiness actually renders - Home (large) and the
- * onboarding end screen share this exact component; Company vault (compact)
- * reuses it too even though that page itself hasn't been migrated to the
- * design system yet (same kind of visible seam SiteNav left on every
- * newly-migrated page before it - see app/AGENTS.md - not a bug to chase).
- * The score itself always comes from lib/companyReadinessData.ts, never
- * computed here, so these three surfaces can't quietly disagree.
+ * The one place bid-readiness actually renders - Home (large) and Company
+ * vault (compact) both reuse this exact component, even though Company
+ * vault itself hasn't been migrated to the design system yet (same kind of
+ * visible seam SiteNav left on every newly-migrated page before it - see
+ * app/AGENTS.md - not a bug to chase). The score itself always comes from
+ * lib/companyReadinessData.ts, never computed here, so these two surfaces
+ * can't quietly disagree. (Onboarding used to have a third "done" screen
+ * sharing this same card - removed in spec v3 Batch 3, since it duplicated
+ * Home and risked implying a company was tender-ready just because
+ * onboarding was finished.)
  */
 export function BidReadinessCard({
   result,
@@ -27,7 +30,7 @@ export function BidReadinessCard({
   if (size === "compact") {
     return (
       <Link
-        href="/onboarding?step=done"
+        href="/dashboard"
         className={cn("flex items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-2 text-inherit no-underline hover:bg-muted/50", className)}
       >
         <ProgressRing value={result.percent} size={40} strokeWidth={4} color={ringColor} label={<span className="text-xs font-semibold text-foreground">{result.percent}%</span>} />

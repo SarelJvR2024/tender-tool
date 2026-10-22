@@ -616,7 +616,7 @@ Calculation-and-display only, per the spec's own ground rule 0 - no engine rules
 - **Where steps are recorded**: `submission-pack.tsx` (SANRAL workspace) records all six steps the first time a pack job reaches `status: "ready"` - by that point the compliance check, vault documents, CV tailoring, cover page and SANRAL schedule are all genuinely bundled into the one generated PDF, so this is the single safe, already-rendered moment to count all six at once, rather than scattering `recordSavingsStep()` calls across every individual action file this pass didn't have the budget to audit one-by-one. **`general-workspace.tsx`'s equivalent general-tender pack completion is NOT wired up yet** - deliberately left for a follow-up pass rather than touching a file batch 4 of the color-migration initiative had just finished migrating, to avoid colliding with that very recent change.
 - **Display surfaces**: the Home cockpit (`app/dashboard/page.tsx`) gets a new `SavingsCounterCard` (`components/tt/savings-counter-card.tsx`) right under the stat row, with the exact empty state the spec asks for ("Finish your first bid to see your savings.") when nothing's been counted yet; a 6th setup-checklist item ("Your time/cost baseline confirmed") reads as done once either baseline value differs from its default, since there's no separate "confirmed" flag. `submission-pack.tsx`'s pack-ready state now shows "About X hours saved (R Y)" plus a collapsible "How we worked this out" breakdown, replacing the old generic, unsupported "Time saved: usually 6-8 hours by hand" line from the earlier item-2 pass - the new figure is the company's own real baseline-driven number, not a blanket marketing claim. The pricing page (`app/page.tsx`) gets a `SavingsCalculator` (`components/tt/savings-calculator.tsx`) - a live, client-side estimate (tenders/month × hours/tender × hourly cost) compared against the Professional plan's real price, reusing `lib/billing.ts`'s existing `PLAN_MONTHLY_ZAR.professional` rather than a 4th hardcoded copy of that number (same "checked against each other, never imported" convention `app/page.tsx`'s own `PRICING_TIERS` comment already documents).
 - **Baseline fields, editable in both places §9.1 names**: onboarding step 2 (`Step2.tsx`) and Company vault's new "Time and cost saved" section (`EditForm.tsx`/`SavingsBaselineSection.tsx`, `#savings-baseline` anchor) both go through the same shared `buildCompanyUpdate()` (`lib/companyProfileUpdate.ts`) - unlike every other numeric field there, a blank submission is refused rather than written as null (these columns have no "not recorded" state to fall back to), handled by a small dedicated `BLANK_NOT_ALLOWED` set rather than touching the generic blank-becomes-null loop every other numeric field relies on.
-- **No dedicated "money" design-system token exists** - the locked §2 table calls for "one dedicated accent colour, used only for Rand amounts" but it was never actually added to `globals.css`. Rather than invent one outside this feature's own scope, every Rand figure here reuses the existing `text-accent` blue. Flagging for whoever next works on §2's own token set.
+- **No dedicated "money" design-system token exists** - the locked §2 table calls for "one dedicated accent colour, used only for Rand amounts" but it was never actually added to `globals.css`. Rather than invent one outside this feature's own scope, every Rand figure here reuses the existing `text-accent` blue. Flagging for whoever next works on §2's own token set. **Fixed in the standing UI/UX review pass below** - see "Dedicated `money` design-system token".
 - Verified `npm run verify` (clean build/typecheck/lint), `npx vitest run` (100/100 - 80 existing + 20 new, all green), full `node:test` sweep (11 files, all green). No screenshot of the Home counter card or the final-review breakdown - both need a live, signed-in Supabase session this environment's placeholder credentials can't provide (same documented limitation as every signed-in-only surface this whole initiative has hit); the pricing-page calculator is reachable without one and was screenshotted at 1440px/390px.
 
 ## Design-system color migration, batch 6: company/people cluster, actually final this time (2026-10-22, spec §2)
@@ -631,3 +631,762 @@ A second, previously-undiscovered hex cluster, surfaced by batch 5's own closing
 - **Final sweep, this time actually checked before claiming completion**: `grep -rlE "#[0-9A-Fa-f]{3,6}" app lib --include="*.tsx" --include="*.ts"` still returns 21 files, but every one is a false positive on manual inspection - anchor hrefs (`#bee-cidb`, `#r-${id}`, `#add`), an HTML warning-triangle entity (`&#9888;`), an order-number string in a payfast test fixture (`"Order #000000020"`), header comments documenting a PRIOR migration (`AdminNav.tsx`, `app/admin/*`, `app/tools/cidb-grade/CidbGradeClient.tsx` - the same false-positive pattern batch 1 already found and excluded), or `app/app/tenders/[id]/page.tsx` itself (batch 5's own target, not yet merged into this branch at the time this sweep ran - will resolve on rebase). `lib/generalTender.ts`'s `JOB_STATUS_STYLE` and `lib/emailTemplates.ts` remain the two deliberate, already-documented exceptions.
 - Verified `npm run verify` (clean build/typecheck/lint), `npx vitest run` (80/80), full `node:test` sweep (11 files, all green). No screenshot - every one of these ten files renders only behind a signed-in Supabase session (`/people`, `/people/[id]`, `/company/registrations`, `/company/properties`, `/company/principals` all call `createClient()`/read the authenticated user), the same documented limitation as the rest of this initiative; confirmed by checking each file's own auth call before writing this line, not assumed.
 - **This closes the color-migration initiative for real** - between batch 5 (tender workspace `page.tsx`) and this batch, every genuine hex cluster this session's own repeated closing-sweep discipline could find is now gone. If a third cluster turns up, the pattern to follow is the same one that caught these two: never write "initiative complete" without running the repo-wide grep yourself and manually excluding every false positive first.
+
+## Standing UI/UX review pass: dedicated `money` design-system token (2026-10-22)
+
+Highest-value fix found this pass: the locked §2 design system names "Money figures - one dedicated
+accent colour, used only for Rand amounts" as its own row, separate from the blue brand accent, but
+that token was never actually added - every Rand figure in the app had been inconsistently reusing
+whatever was at hand (`text-foreground` on the pricing cards, `text-accent` blue on the savings
+counter card and calculator, `text-success` green inherited from its surrounding banner on the
+submission-pack breakdown). Three different treatments for the same semantic concept, none of them
+the dedicated color the spec actually calls for.
+
+- **Added `--money`/`--money-foreground` to `globals.css`** (light + dark, registered in the
+  `@theme inline` block as `text-money`/`bg-money` etc.) - a violet (`#7C3AED` light, `#A78BFA`
+  dark), chosen deliberately outside every other semantic hue already in use (navy ink, blue
+  accent, green success, amber warning, red destructive, blue info) so a Rand figure reads as its
+  own category rather than borrowing a color that already means something else.
+- **Applied consistently**: the pricing page's per-tier price (not the "Priced on request" custom
+  tier - that's not a Rand amount), the Home cockpit's savings counter card (both the this-month and
+  all-time Rand lines), the pricing-page savings calculator's "Rand saved a year" stat (renamed its
+  `accent` prop to `money` for clarity), and the submission-pack "About X hours saved (R Y)"
+  breakdown (wrapped just the Rand parenthetical, keeping the hours portion in the surrounding
+  success-tint styling it already had).
+- Updated the `money`-token gap note left in this file's own §9 savings-counter entry to point here
+  rather than leaving it stale.
+- **Found a second, duplicate instance of a spec violation already fixed once elsewhere**: while
+  checking `/billing` (the real in-app subscription page) for its own Rand display, found it still
+  said "The plan most companies start on" on the Professional card - the exact phrase spec §5
+  explicitly forbids ("Never 'Most popular' or 'The plan most companies start on'"), already fixed
+  on the public pricing page (`app/page.tsx`) in an earlier pass but missed here since that pass only
+  touched the marketing homepage, not the real billing page users actually subscribe from. Fixed the
+  same way: "For companies tendering regularly". Also applied `text-money` to `/billing`'s own
+  monthly-price display, same fix as the marketing pricing cards. Grepped the rest of the repo for
+  the same forbidden phrase afterward - the only other hit is a header comment in `lib/billing.ts`
+  documenting Sarel's own verbatim pricing confirmation, not live copy, left alone.
+- Verified `npm run verify` (clean), `npx vitest run` (100/100, no logic touched - this is styling
+  only), full `node:test` sweep (all green). Screenshot at 1440px/390px: the pricing page (both the
+  tier cards and the savings calculator) - reachable without a live Supabase session; `/billing`, the
+  Home counter card and the submission-pack breakdown all need a signed-in session this environment's
+  placeholder credentials can't provide, same documented limitation as every other signed-in-only
+  surface.
+- **Not touched this pass**: a broader sweep for every other Rand-amount display in the app (invoice-
+  style line items, if any exist beyond the five surfaces checked here) - worth a follow-up pass if
+  more turn up.
+
+## Spec §6 (part 1): explicit trial terms, B-BBEE caveat placement (2026-10-22)
+
+Small, high-confidence fixes from §6's own checklist - audited all four free-tool pages first; CIDB
+and B-BBEE already had correct SA-format Rand display (`formatZar`/`formatThousands` helpers, a
+pre-existing hydration-mismatch fix, not something this pass touched) and the intro paragraphs on
+every tool were already short (1-2 sentences before the interactive card), so the only concrete
+gaps were:
+
+- **`app/signup/page.tsx`** had no trial-terms statement anywhere - replaced the generic subtitle
+  with the spec's own exact wording: "14-day trial · no card needed · one full bid pack".
+- **B-BBEE tool's buyer-specific-goal caveat was buried in the page footer**, well below the result
+  box, the points table and the other-tools links - spec explicitly asks for it "next to the
+  result". Added a short version directly under the result box; trimmed the footer's citation note
+  (now just the regulation/gazette reference + "not legal advice") so the two don't duplicate the
+  same point twice on one page.
+- Checked the rest of §6's checklist against the live app: no "unlimited free tier" claim exists
+  anywhere (confirmed by grep), and the Founding Firms "Get in touch" CTA was already fixed in an
+  earlier pass (see that pass's own AGENTS.md entry) - left untouched.
+- Verified `npm run verify` (clean), `npx vitest run` (100/100, no logic touched), screenshots at
+  1440px of both changed pages (`/signup`, `/tools/bee-preference-points`) - both reachable without
+  a live Supabase session.
+- **Not covered by this pass - §6's biggest remaining item**: the no-signup interactive demo
+  (sample company + sample tender, real capabilities with sample data) is a substantial net-new
+  build, not a polish fix - tracked separately, built in part 2 below.
+
+## Spec §11: failure states, mobile layout, accessibility audit (2026-10-22)
+
+A systematic, 6-area audit against spec §11's own checklist, fixing only confirmed real gaps -
+most of this app's failure-state handling turned out to already be correct, built carefully across
+many earlier passes this session.
+
+1. **Loading skeletons** - 20 routes already had a `loading.tsx` (confirmed by listing every one).
+   6 genuine data-fetching routes were missing one: `/billing`, `/company`, `/company/team`,
+   `/invite/[token]`, `/my-cv`, `/tenders/new` - all real server components reading live Supabase
+   rows before rendering. Added skeletons for all six, reusing the exact existing kit
+   (`components/tt/skeletons.tsx`'s `SectionCardSkeleton`/`TableRowsSkeleton`, `components/ui/
+   skeleton.tsx`'s base `Skeleton`), shaped to roughly match each real page's layout, same
+   convention as `dashboard/loading.tsx`. Deliberately NOT added to `/login`, `/signup`, `/forgot-
+   password`, `/reset-password`, `/privacy`, `/design` (no server data fetch to skeleton) or `/tools/*`
+   (pure client-side calculators, no fetch at all).
+2. **Engine/AI failure states** - already correct. `general-workspace.tsx`'s extract-requirements
+   and pack-generation flows, and `submission-pack.tsx`'s pack flow, all show a short
+   `text-destructive` `error_message` line (never a raw stack trace) and keep the real generate/
+   retry form available on a `failed` status (re-submits the same server action - a genuine retry,
+   not a dead end). No fix needed.
+3. **Unsupported-template messaging** - already correct. `general-workspace.tsx`'s "No SBD/MBD
+   standard forms were found..." messages both end "(see below)", and what's below is real,
+   substantive next-step content (`OcrNotice`'s per-document OCR detail, `manifest.gaps`'s "what
+   Tender Ready can't do" list) - not a dead-end reference. No fix needed.
+4. **390px: tables/sidebar/overflow** - checked every `<table>` in the app (`market-context.tsx`,
+   `market-comparison.tsx`, `pipeline/pricing/page.tsx`, `pipeline/page.tsx`, the two free-tool
+   reference tables) plus the sidebar. Confirmed live via Playwright at 390px on every page reachable
+   without a session (`/`, `/tools`, `/tools/bee-preference-points`, `/tools/cidb-grade`, `/login`,
+   `/signup`, `/privacy`): zero horizontal page overflow anywhere (`document.documentElement.
+   scrollWidth` never exceeds `clientWidth`). Every table already sits inside an `overflow-x-auto`
+   container, so none of them ever bleed past the viewport - the "no horizontal overflow" half of
+   this requirement holds everywhere, not assumed. The separate "tables become cards" treatment is
+   already done for the two highest-traffic, genuinely row-per-entity tables (`pipeline/page.tsx`'s
+   list view and part of `pipeline/pricing/page.tsx`, both with their own 2026-10-21 "design-system
+   audit fix" comments explaining exactly this). **Left as a flagged, not-fixed gap**:
+   `market-context.tsx`'s `Register`/`SegmentTable` and `market-comparison.tsx`'s two tables are
+   comparison/cross-tabulation matrices (dynamic per-tender column counts, nested sub-labels per
+   cell) - converting these to a card layout is a real design call, not a mechanical fix (a card
+   stack can make an at-a-glance comparison WORSE, not better), and they already satisfy the literal
+   "no horizontal overflow" requirement via their scroll container. Flagging rather than forcing a
+   risky structural change to these files, consistent with this pass's own scope discipline.
+5. **Keyboard focus / touch targets / contrast** - already correct, checked rather than assumed.
+   Every `outline-none` usage in the app (13 files, searched directly) pairs with a
+   `focus-visible:ring-3 focus-visible:ring-ring/50` (or the `AvatarMenu`'s own `ring-2`) - no
+   unguarded occurrence found anywhere. `min-h-11`/`h-11` (44px) is the pervasive touch-target
+   convention already, confirmed by spot-check. `text-muted-foreground` on `bg-background`
+   contrast-computed by hand (not assumed): 5.51:1; on `bg-card` (pure white): 6.01:1 - both clear
+   WCAG AA passes (4.5:1 minimum).
+6. **Difficult-case testing** - exercised live, not read from source: typed an invalid B-BBEE input
+   (Pmin = 0) and confirmed the real instant, friendly `text-destructive` validation message
+   renders with no crash and the visible keyboard focus ring showing on the active field.
+   Expired-certificate/missing-document/unsupported-template/incomplete-pricing states all need a
+   live Supabase session to exercise directly - read their handling code instead (covered under
+   areas 2-3 above) rather than claiming they were exercised.
+
+- Verified `npm run verify` (clean), `npx vitest run` (100/100, unchanged - no logic touched), full
+  `node:test` sweep (all green). Screenshots at 390px confirm no overflow on every public route.
+- **This pass is mechanical and additive only** (6 new skeleton files, no logic/behavior changes) -
+  safe to merge once CI/Vercel are green, same trusted pattern as the color-migration batches.
+
+## Spec §6 (part 2): no-signup interactive demo (2026-10-22)
+
+Builds spec §6's biggest remaining item: "a clearly labelled sample company + sample tender...
+real capabilities with sample data, not simulated success." New public route `/demo`, zero auth,
+server-rendered.
+
+- **Reused the SAME house demo identity, not a new invented customer**: "Mzansi Roads & Civils
+  (Pty) Ltd" is already the one seeded, signed-in demo/trial company (`lib/demoCompany.ts`,
+  `engine/seed_demo_company.py`, see "Demo company with realistic sample data" above) - its own N7
+  Western Cape tender (SANRAL, Assessing & building, 3 key positions) is the scenario this public
+  teaser is modelled on, so the name stays consistent whether a visitor is looking at the public
+  no-signup page or (separately) signs into the real seeded account. No new fictional company
+  invented.
+- **Real components, hand-built sample data, not a mockup** - `lib/demoData.ts` is the one place
+  invented values live (clearly a sample tender, never a real customer); every renderer around it
+  is the real one:
+  - `components/tt/requirement-row.tsx` (new): the quote/OCR-tag/status-chip pattern
+    `general-workspace.tsx` renders inline for returnables, pulled into its own small component so
+    the demo renders it through the real `ChipBadge`/`StatusChip`/`OCR_TAG` pieces rather than a
+    separate "looks similar" block. **Not yet wired back into `general-workspace.tsx`'s own inline
+    markup** - that file was only just stabilised by the color-migration pass, so full
+    de-duplication is left for a follow-up rather than risked here; flagging this honestly rather
+    than claiming the inline markup was replaced.
+  - `cv-compare.tsx` split into the existing DB-touching `CvCompare` wrapper (zero behaviour
+    change for the real tender workspace) and a new pure `CvCompareView` taking plain
+    `{filename, href}`/`{pdfHref, docxHref}` props - the demo calls `CvCompareView` directly with
+    sample file names and no download links ("Sample - download disabled in this demo").
+  - `cover-page-preview.tsx` gained an optional `company` prop (default: its existing live
+    `companies` read) - the one DB call in an otherwise pure-props component, now skippable with
+    injected sample data; the real tender workspace is unaffected (prop omitted there).
+  - `position-person-select.tsx` gained a `demo?: boolean` prop - "Confirm"/"Use"/the dropdown
+    send a visitor to `/signup` instead of writing `tender_pack_assignments.confirmed_person_id`
+    (no real `tenderPackId` exists behind a sample tender to write to).
+  - The suggestion itself is **not hand-written** - `lib/demoData.ts` calls the real
+    `suggestForPosition()`/`whySuggested()` with a crafted `CandidateScore[]`/`RoleTag[]`, so the
+    "why" text and the ranking are the real logic's own output for this input, not invented prose.
+  - "A caught missing/expired document" calls the real `expiryStatus()` with a past date
+    (`"2026-08-15"`) - the "Expired" tone is the function's genuine output, not a hand-picked chip.
+  - `PackChecklist` (already a pure, exported component, no changes needed) renders a hand-built
+    `ChecklistRow[]` including one `not_included` row with a real reason ("Needs a director's
+    signature - never guessed or auto-signed") - the homepage's own "Not included, and why" proof
+    point, demonstrated for real.
+- **Banner**: a persistent `bg-info/10` strip at the very top of the page ("Sample company and
+  tender. Nothing below is a real customer...") - not a dismissible footnote, matching the spec's
+  "clearly labelled" requirement; reuses the same `info` soft-tint token `DemoBanner` (the
+  signed-in equivalent) already established, rather than inventing a new banner style.
+- **Linked from the homepage** (spec §6.2: "link naturally into the product") - a third hero CTA,
+  "See a sample tender", alongside the existing "Start free"/"Try a free tool first".
+- Verified `npm run verify` (clean), `npx vitest run` (100/100, unchanged - no logic regressed),
+  full `node:test` sweep (11 files, all green). **Screenshots at 1440px and 390px of the real,
+  live `/demo` route** (not a temporary `/design` mock) - this is the one piece of the whole spec
+  rollout that's finally fully screenshot-verified rather than "needs a live session", since it's
+  genuinely public.
+- **Not built this pass**: wiring `RequirementRow` back into `general-workspace.tsx`'s own inline
+  markup (noted above); a monthly-rotating or multiple sample tenders (one scenario is enough to
+  demonstrate every required capability per spec's own checklist).
+- **Two small review-time fixes, caught while checking this PR before merge**: `position-person-
+  select.tsx`'s demo-mode "Confirm"/"Use" used `window.location.href` (a real lint warning -
+  `@next/next/no-location-assign-relative-destination` - not just a style nit, since a full page
+  reload loses client-side router state) - switched to `useRouter().push()`. Separately,
+  `cover-page-preview.tsx`'s own explanatory footer text (pre-existing in the authenticated app,
+  not introduced by this pass) leaked two internal references into user-facing copy - "Sarel's own
+  spec" and "see app/AGENTS.md for what that would take" - harmless when only signed-in users saw
+  it, worse now that the exact same component renders on a public page with no auth. Trimmed the
+  sentence to the honest, customer-facing part ("nothing here can be typed over yet") and dropped
+  the internal detail; the fuller reasoning stays in the component's own code comment for whoever
+  next touches it.
+
+## Spec §10: analytics page (truthful only) - audit-first (2026-10-22)
+
+New `/analytics` page (nav item added between Bids and SANRAL schedules). Per the spec's own
+instruction ("only where reliable data exists... otherwise show an honest empty state, not sample
+charts presented as real"), the real work here was a dimension-by-dimension audit BEFORE writing
+any UI - every section below is annotated with what was actually found, not assumed:
+
+1. **Own bid activity & outcomes** - real. `lib/pipeline.ts`'s five real stages
+   (`found/bidding/submitted/won/lost`, migration 0021) aggregated into stage counts + win rate,
+   same calculation `app/pipeline/page.tsx` already does, not duplicated logic.
+2. **Upcoming deadlines** - real. Active-stage tenders (`found`/`bidding`/`submitted`) with a future
+   `closing_date`, sorted soonest first.
+3. **Win/loss trend over time** - real, and genuinely a TREND, not just a snapshot: `stage_changed_at`
+   (already stored per pack, migration 0021) lets the won/lost moves be bucketed by month. New pure
+   function `lib/analyticsLogic.ts`'s `buildWinLossTrend()` (6 unit tests in
+   `lib/analyticsLogic.spec.ts`, same split as `lib/savingsCounter.ts`/`lib/readiness.ts` - no
+   Supabase call inside it) deliberately keeps zero-decision months in the window rather than
+   skipping straight to the next month with data, so a quiet stretch reads as quiet, not compressed.
+4. **Submission values** - real. `tender_packs.submitted_price_zar` (already tracked for
+   `/pipeline`'s own "Total value being bid" stat) aggregated into total + median across every
+   tender with a recorded price.
+5. **Briefing attendance** - real, but thin: `tender_tasks` rows with `kind = 'briefing'` (one task
+   per tender, `status` either done or not) give a genuine "X of Y compulsory briefings confirmed
+   attended" count - not a rich attendance log (no record of WHO attended, just whether the task was
+   marked done), but a real, computed number, not invented.
+6. **Pricing trends & competitor/market insights** - real, and far richer than expected: a whole
+   already-built, tested market-pricing system (`lib/marketPricing.ts`, migrations 0053/0060/0062,
+   `engine/discovery/award_outcomes.py` scraping public eTenders/SANRAL award data) backs this, not
+   just `market-context.tsx`'s own per-tender view. Rolled up here across every tender this company
+   has bid on (not per-tender like `market-context.tsx`): `loadOutcomesForTenders()` matches this
+   company's own tenders against published award outcomes, `ownPosition()` places the company's own
+   recorded price on each matched register, `firmsMet()` lists which other bidders the company has
+   actually competed against (and how often each won), and `benchmark()` aggregates real
+   scale-free stats (lowest-bid-won rate, bidder-count percentiles, contract-size percentiles) -
+   gated by the module's own `MIN_SAMPLE` (5) so a company with too few matched outcomes gets the
+   honest empty state instead of a benchmark built on 1-2 data points. This is the one section where
+   skipping straight to the empty state would have been the WRONG call despite nothing like it
+   existing on a dedicated page before - the underlying data was real and already built, just never
+   surfaced outside a single tender's own workspace.
+7. **Savings figures from §9** - reused directly (`fetchSavingsCounterSummary()` +
+   `SavingsCounterCard`, no duplicated calculation), per the spec's own explicit instruction that
+   these appear on analytics too.
+- **Added a `money` tone to `components/tt/stat-card.tsx`** (`text-money`, the dedicated token from
+  the earlier money-token pass) for the Rand-amount stats this page needed - the shared component
+  didn't have one yet since nothing had asked for it on a `StatCard` specifically before.
+- Verified `npm run verify` (clean), `npx vitest run` (106/106 - 100 existing + 6 new), full
+  `node:test` sweep (11 files, all green). No screenshot - `/analytics` is signed-in only, needs a
+  live Supabase session this environment's placeholder credentials can't provide, same documented
+  limitation as every other authenticated-only page in this initiative.
+- **Not built, deliberately**: a standalone "pricing trends over time" chart beyond what
+  `loadMarketTrend()`/`market_trend_for_tags()` already computes (that RPC is itself segment-scoped
+  to one discipline/value-band at a time, designed for the per-tender context, not a cross-tender
+  rollup) - the company-wide benchmark above covers the spec's intent without duplicating that
+  RPC's own honesty-gating logic in a new shape; a dedicated historical price-trend chart for the
+  company's own most common discipline is a reasonable follow-up, not attempted here.
+
+**One review-time fix, caught while checking this PR before merge, unrelated to the analytics build
+itself**: `nav-items.ts`'s "SANRAL schedules" sidebar entry carried `badge: "Roads & Civils"`,
+visible to every signed-in user in the main nav and its tooltip. Spec §5's positioning rules
+explicitly forbid this exact phrase anywhere user-facing ("Never use the name 'Roads & Civils'") -
+a different, earlier session's own AGENTS.md entry had already flagged "Roads & Civils" as a stale/
+confused brief term with no real product meaning when it turned up in a pricing-tier context, but
+this standing nav badge was missed. Removed rather than replaced with another invented segment
+name - the item's own label, "SANRAL schedules", already says what the feature is.
+
+## Whole-app reset spec (v3) - Batch 1: broken journeys
+
+Two confirmed defects from the v3 audit's traceability register (O03, and an unlisted dev-only
+build error), both frontend-only - no schema, pricing, SANRAL engine or access-control change.
+
+1. **O03 - signed-in "Tools" left the app shell.** The sidebar's Tools item pointed at `/tools`,
+   the public, signed-out lead-magnet catalogue (deliberately outside `AppShell` - see the "App
+   shell" entry above) - so a signed-in user lost their nav, company context and return path for
+   calculators they could otherwise use without leaving. Built `/toolkit` (`app/app/toolkit/`): an
+   AppShell-wrapped index plus one route per calculator, each importing the SAME Client component
+   the public page renders (`DeadlineCalculatorClient`, `CidbGradeClient`,
+   `BeePreferencePointsClient`, `B6EstimatorClient`) with a new `embedded` prop. `embedded` only
+   toggles the public chrome (`ToolsHeader`, `OtherTools`, the full-bleed page wrapper, the
+   calculator's own `<h1>` since `PageHeader` now supplies it) - every input, calculation and
+   result element is the identical JSX either way, so the two contexts can never compute different
+   answers. The public `/tools/*` pages are untouched in behaviour (screenshot-diffed, still fully
+   interactive). `nav-items.ts`'s Tools item now points at `/toolkit`; `isNavItemActive`'s existing
+   prefix match needed no change. **Caught on first self-review round**: `/toolkit` built and
+   worked, but was reachable unauthenticated - `proxy.ts` gates routes via BOTH an in-function
+   `guarded` boolean AND a separate `config.matcher` array (Next only runs middleware on paths the
+   matcher lists at all), and the first pass only added `/toolkit` to `guarded`. Fixed by adding
+   `/toolkit/:path*` to `matcher` too; confirmed via curl that `/toolkit` now 307s to `/login` while
+   `/tools` stays a public 200. Noted, not fixed (pre-existing, out of this batch's scope): `/billing`,
+   `/analytics`, `/sanral-schedules` and `/market-intelligence` have the same unauthenticated-reachable
+   gap already (none in `guarded`/`matcher`) - AppShell itself renders an empty-state shell for a null
+   user rather than redirecting, so nothing sensitive leaks, but it's worth the same one-line fix in
+   a dedicated pass.
+2. **Dev-time Cache Components prerendering crash on every `loading.tsx` using `AppShell`.**
+   `AppShell` is an async server component reading `cookies()` and making live Supabase calls (auth,
+   notifications, subscription) - correct for a real page, wrong inside a loading boundary, which
+   Next's Cache Components tries to prerender as static shell chrome. Reproduced across all 25
+   `loading.tsx` files that imported it (`/pipeline`, `/company`, `/billing`, `/people`,
+   `/experience`, `/tenders/new` and 19 more - a full repo grep, not just the 6 the audit happened
+   to name). Root-caused, not suppressed: added `AppShellSkeleton` (new,
+   `app/app/_components/AppShellSkeleton.tsx`) - a fully static, synchronous stand-in built from the
+   SAME `Sidebar`/`SidebarContent`/`SidebarHeader`/`SidebarFooter`/`SidebarInset`/`SidebarProvider`
+   primitives `AppShell` and `AppSidebar` use (so the `group-data-[collapsible=icon]` Tailwind
+   selectors still resolve correctly without reimplementing the sidebar's own collapse behaviour),
+   rendering chrome shape only - no auth, no cookies, no data. All 25 `loading.tsx` files now import
+   `AppShellSkeleton` in place of `AppShell`; none changed their own skeleton content. New
+   `/toolkit/*` routes got matching `loading.tsx` files from the start, same convention.
+   Verified by `npm run build` (Turbopack): every `◐` Partial Prerender route - the exact ones that
+   previously threw - now compiles clean with no prerender error.
+
+**Tested**: `npm run verify` (0 errors, same 3 pre-existing unrelated warnings), `npx vitest run`
+(115/115), full `node:test` sweep (67/67), `npm run build` (all 56 routes compile, no prerender
+errors), Playwright screenshots at 1440px/390px of the public `/tools` index and all four rewritten
+public tool pages (pixel- and function-identical to before - the deadline calculator still computes
+a real result, the CIDB/B-BBEE/B6 tools still render their tables and verdicts), plus curl checks
+confirming `/toolkit` redirects unauthenticated visitors to `/login` while `/tools` stays public.
+**Not tested, and reported rather than faked**: a live signed-in walkthrough of `/toolkit` itself
+with the seeded demo company - this environment's credential-generation tools (magic-link/Admin API
+sign-in) are blocked by the session's own safety classifier, and the demo account's real password
+isn't committed anywhere this session can read. The embedded calculators render through the exact
+same component tree Playwright already exercised live on the public pages, and the route-protection
+behaviour (middleware redirect) was verified directly - but nobody has actually seen `/toolkit`
+rendered inside a real authenticated `AppShell` yet. Three full self-review rounds ran before this
+was merged (middleware matcher gap found and fixed in round 1; `Sidebar` `group` context and
+duplicate-`<h1>` a11y check in round 2; nav active-state and dead-reference sweep in round 3) - none
+surfaced a reason to believe the signed-in render itself is broken, but that's inference from a
+clean build and an identical component tree, not a screenshot of the real thing.
+
+### Hotfix: closed the middleware auth gap Batch 1 flagged but didn't fix
+
+The gap noted above as "out of scope" turned out to matter more than a one-line nice-to-have:
+`proxy.ts`'s `guarded` check and its `config.matcher` array never listed `/billing`, `/analytics`,
+`/sanral-schedules` or `/market-intelligence` at all, so middleware never ran for them - no redirect,
+not even an attempt. Each page itself has no independent auth check (`billing/page.tsx` reads
+`user?.id ?? ""` and just gets an empty membership back; the other three have no `auth.getUser()`
+call whatsoever), so a signed-out visitor got the full `AppShell` page render, not a 404 or a blank
+screen. `market-intelligence/page.tsx`'s own top-of-file comment records that this page was only
+approved to exist on the condition it's "shown only to signed-in, paying customers... never resold
+to or built for non-bidders" (tied to SANRAL's own data-reuse terms,
+`docs/specs/Award-Outcomes-Findings.md` §6) - an unauthenticated visitor loading it violated that
+condition directly, not just a UX nicety.
+
+Fixed by adding all four to both `guarded` and `matcher`, same pattern as every other protected
+route. This is access-restoring, not access-widening (the repo's own ground rule only forbids the
+latter without approval), so it went out as its own small PR rather than folding into Batch 1's.
+
+**Tested**: `npm run verify` (0 errors), `npx vitest run` (115/115), full `node:test` sweep (67/67),
+curl against a live dev server confirming all four now 307-redirect an unauthenticated request to
+`/login` while `/tools` and `/demo` stay public 200s, and that Batch 1's `/toolkit` still redirects
+correctly after the rebase. Three review rounds: round 1 confirmed no other allowlist/auth-gate
+mechanism exists elsewhere in the app that duplicates or conflicts with `proxy.ts`'s; round 2 and 3
+confirmed the new `/billing` matcher entry (`/billing/:path*`) does not and cannot match
+`/api/billing/checkout` or `/api/billing/payfast/itn` (different path prefix entirely -
+`/api/billing/...` does not start with `/billing`), so the PayFast checkout flow and webhook are
+untouched.
+
+### Spec v3 Batch 2: shared document intake foundation
+
+Batch 0's audit found the engine spec §4/§17 asks for already exists and works correctly - the
+bulk AI document-scan pipeline (`/company/document-scan`, migration 0063: upload -> OCR/AI
+classification -> a review-and-confirm screen that never silently overwrites a verified field -
+only a ticked field is written). The real gap was that 12+ other upload sites each had their own
+separate, dumber `<input type="file">` with no classification or review step at all - Company
+vault's own 7-row `DocumentRow.tsx` being the clearest example: choosing a file there wrote
+straight to the matching `companies.*` column with zero review, the exact "silent overwrite" §4/§17
+forbids.
+
+This batch did NOT rebuild the extraction engine - it extracted the GENERIC parts of
+`document-scan/upload-form.tsx` into two shared, reusable pieces, then wired exactly one additional
+real surface through the existing engine, per the spec's own "demonstrate one full real
+extraction/save/readback before propagating it everywhere" instruction (Batch 4 does the rest:
+People, Experience).
+
+- **New `app/app/_components/document-intake/uploadBatch.ts`** - the per-file upload engine,
+  extracted with one real behaviour fix: the original `uploadAll()` rolled back and discarded
+  every ALREADY-SUCCEEDED file in a batch the moment any ONE file failed, then aborted the whole
+  batch with a single generic error - directly against spec v3 §17's "a failed file must not
+  discard successfully received files." Rewritten so each file's outcome
+  (`queued`/`uploading`/`uploaded`/`failed`) is independent; a sibling's failure never touches
+  another file's state. Pure reducer functions (`markUploading`, `applyUploadResult`,
+  `partitionBatch`) are unit-tested directly (`uploadBatch.test.ts`, 5 tests) without needing a
+  DOM or a real Supabase call - same pattern as `onboardingScan.test.ts`.
+- **New `app/app/_components/document-intake/FileDropzone.tsx`** - the generic drag-drop +
+  click-to-choose UI (spec v3 O12: "one 'Add documents' control... Drag-and-drop is equally
+  supported"), with a `compact` mode for a single row inside a longer list (Company vault) versus
+  the full dashed panel for a dedicated upload page (document-scan). `validateFiles()` is the pure
+  extension/size/empty-file check, also unit-testable without rendering anything.
+- **`document-scan/upload-form.tsx`** now composes these two pieces instead of its own copy.
+  One deliberate behaviour change beyond the bug fix: registering a batch for AI classification is
+  no longer its own manual "Upload N documents" click - it happens automatically the moment every
+  file in that drop finishes uploading (spec v3 §17: "Starting upload after selection is
+  automatic"). The only button left in this component is the failed-file retry action.
+- **New `app/app/company/_components/VaultDocumentUploader.tsx`** - the new path for 6 of
+  `DocumentRow.tsx`'s 7 rows (`cidb`, `sars_tcs_pin`, `pi_insurance`, `iso_9001`, `bank_letter`,
+  `bee_proof`). Upload -> real AI classification (same engine, same `registerOnboardingBatch`
+  action, unchanged) -> the existing `/company/document-scan` review screen, where only a ticked
+  field is written (that gating logic - `confirmVaultDocument` in `document-scan/actions.ts` - was
+  already correct and needed no change; the fix was routing DocumentRow's upload through it at
+  all). `coid` (COID Letter of Good Standing) deliberately keeps the old direct-upload form,
+  unchanged: it has no entry anywhere in `onboardingScan.ts`'s `DocumentKind` enum or
+  `classify_documents.py`'s own kind list, and adding one means teaching the Python classifier a
+  new kind plus a new `document_kind` check-constraint value (migration 0063) - a schema/engine
+  change this batch's ground rules leave for a separate, explicitly-approved pass, not something to
+  fold in quietly. New `lib/vaultDocuments.ts` export `VAULT_KIND_TO_DOCUMENT_KIND` records exactly
+  which 6 are mapped, with its own tests (`vaultDocuments.test.ts`, 4 tests) pinning that `coid` is
+  deliberately absent and that nothing is silently unmapped.
+- **Byproduct, not the batch's goal**: the 6 upgraded rows can now accept up to 25 MB per file
+  (document-scan's own limit) instead of the old 4.4 MB `uploadVaultDocument` cap - that cap only
+  existed because a Server Action's request body is capped at 4.5 MB on Vercel, and these rows no
+  longer go through a Server Action for the file itself (straight-to-Storage from the browser, same
+  as document-scan). `coid` is unchanged and stays at 4.4 MB. Found and fixed in self-review round
+  2: the section's own shared caption still claimed a blanket "4.4 MB each" for all 7 rows after
+  this change, which was now wrong for 6 of them.
+
+**Self-review (3 rounds)**: round 1 confirmed every existing `onboardingScan.test.ts` /
+`document-scan` behaviour is unchanged (19 pre-existing tests still pass, `confirmVaultDocument`
+and the whole classify/review/confirm chain untouched) and added 9 new tests for the two new pieces;
+confirmed `DocumentRow.tsx` has exactly one real consumer (`ComplianceDocumentsSection.tsx` - a
+grep hit in `properties/page.tsx` turned out to be an unrelated type also named
+`PropertyDocumentRow`, not this component). Round 2 caught the stale 4.4 MB caption above. Round 3
+re-ran the full `npm run verify` + `vitest` + `node:test` suite clean after the fix.
+
+**Not tested, reported rather than faked**: same limitation as Batch 1 - this sandbox's
+credential-generation tools (Admin API magic-link sign-in) are blocked by its own safety
+classifier, and the demo account's real password isn't committed anywhere this session can read, so
+nobody has actually seen `VaultDocumentUploader` or the updated `upload-form.tsx` rendered and
+clicked inside a real authenticated session. What WAS verified live: both touched routes
+(`/company`, `/company/document-scan`) compile and correctly 307-redirect a signed-out request to
+`/login` with no console error (`npm run build`'s own route table shows both compiling as Partial
+Prerender routes with no prerender failure), and a standalone `react-dom/server` static render of
+`FileDropzone` in both its full and `compact` modes produces the expected markup with no runtime
+error - real evidence the component tree itself is sound, short of an actual click-through.
+
+### Spec v3 Batch 3: onboarding collapsed from a 6-step wizard to 2 screens
+
+Onboarding used to be `WizardShell` + `Step1.tsx` through `Step6.tsx`, each a full page with its own
+"Step N of 6", a Continue button chaining to the next step, and a "Skip for now" link - company
+basics, then compliance fields (CSD/SARS/B-BBEE/savings baseline), then one office location, then up
+to 3 people + CVs, then a notification preference, then plan selection, then a "done" bid-readiness
+screen. Every step past the first was individually skippable, but the sheer length (spec v3 O09) and
+the fact that none of it had a document-upload step at all (O13) were real, confirmed problems from
+the Batch 0 audit.
+
+**What actually changed**: `Step2.tsx`-`Step6.tsx` and their five actions (`saveComplianceStep`,
+`saveOfficeStep`, `addPersonStep`, `uploadPersonCvStep`, `saveNotificationStep`) are deleted, not
+rebuilt elsewhere - every field they captured already has a real, permanent, non-onboarding home:
+compliance/CSD/B-BBEE/savings baseline in Company vault (`CompanyIdentitySection.tsx`,
+`BeeCidbSection.tsx`, `ComplianceDocumentsSection.tsx`, `SavingsBaselineSection.tsx` - confirmed by
+grep before deleting anything), office location (`app/company/officeActions.ts`), people/CVs
+(`app/people/actions.ts`), the daily digest toggle (`app/company/Notifications.tsx`), and plan
+selection (Billing, reachable any time - the trial already starts automatically on company creation
+via the `companies_start_trial` trigger, migration 0078). None of that data-capture needed
+rebuilding; it only needed to stop being a forced sequential gate before Home. New
+`AddDocumentsScreen.tsx` is Screen 2 - it reuses `UploadForm` (spec v3 Batch 2, `#103`) completely
+unchanged, so "drop a file -> upload -> auto-classify -> review" is identical to `/company/
+document-scan`'s own flow, not a second implementation. `WizardShell.tsx` dropped to 2 titles
+("Your company", "Add documents") and lost its generic Back/Skip link logic, since neither of the
+two real screens needs it the same way the old 6 did (Screen 1 has nothing to go back to; Screen 2's
+skip is its own explicit "Skip for now, I'll add documents later" link straight to `/dashboard`, not
+a generic "advance to next step"). `onboarding/page.tsx` now has exactly two branches: no membership
+-> Screen 1; `?step=2` -> Screen 2; everything else (no param, a stale `step=3..6`/`step=done` link,
+anything else) -> `redirect("/dashboard")`. No schema change was needed or made - "has a
+`company_members` row" already meant "Screen 1 done" before this batch and still does; Screen 2 has
+no persisted "seen it" state at all, which is deliberate (per the spec's own boundary: don't add a
+column to solve this when behaving as "redirect to Home, whose own checklist already prompts for
+missing documents" is both simpler and already correct).
+
+**Real bugs this surfaced, not invented**: three call sites pointed at the step URLs being deleted,
+and would have otherwise silently regressed into dead loops (clicking them would land on `/onboarding`
+with a stale step number, which now redirects straight back to `/dashboard` - doing nothing).
+`lib/readiness.ts`'s `company_basics`/`csd`/`tax_compliance`/`bee`/`people_cvs` criteria all had
+`href: "/onboarding?step=N"` fix-it links; repointed to their real Company vault/`/people`
+destinations (`/company#company-identity`, `/company#bee-cidb`, `/company#compliance-documents`,
+`/people`). `dashboard/page.tsx`'s `setupChecklistItems` had the same three as fallback hrefs plus
+one hardcoded `/onboarding?step=4` for "add a CV" - same fix. `components/tt/bid-readiness-card.tsx`'s
+compact variant (used in Company vault's header) linked to `/onboarding?step=done` as its "see the
+full breakdown" action; repointed to `/dashboard`, where the large variant with the full blockers
+list actually lives. None of these three were found by writing a new test - they were found in round
+2 self-review by grepping every `onboarding?step` reference across the repo after making the
+deletions, specifically because a UX simplification that quietly breaks three "fix this" links would
+be worse than the problem it solved.
+
+**Tested**: `npm run verify` 0 errors (same 3 pre-existing unrelated warnings), `npx vitest run`
+115/115 (no new tests needed - this batch is routing/composition, not new pure logic;
+`lib/readiness.spec.ts`'s existing 6 tests don't assert on href values and still pass unchanged),
+full `node:test` sweep 76/76. Live dev server + curl: `/onboarding`, `/onboarding?step=2`, and
+`/dashboard` all still correctly 307-redirect an unauthenticated request to `/login` (middleware
+untouched). A standalone `react-dom/server` static render confirms `Step1` renders correctly
+standalone ("Your company", "Step 1 of 2" both present in the output);
+`AddDocumentsScreen` could not be rendered the same way, because it embeds `UploadForm` (a client
+component that calls `useRouter()`, which throws outside a real Next.js App Router context) - this
+is a limitation of the crude standalone-render harness, not evidence of a problem: `npm run build`
+itself already compiled `/onboarding` as a working dynamic route with no React Server Component
+boundary error, which is the real proof this composition is valid.
+
+**Not tested, reported rather than faked**: same sandbox limitation as every batch tonight - no way
+to generate real sign-in credentials here, so nobody has actually clicked through Screen 1 ->
+Screen 2 -> upload/skip -> Home as a real user. This is a significant UX restructuring of something
+that previously worked end-to-end; the structural checks above (build success, middleware behavior,
+every stale link found and fixed, existing tests still green) are real evidence, but they are not the
+same as watching a real signed-in walkthrough.
+
+## Spec v3 Batch 4: Experience's shared intake + ECSA/SACPCMP no longer universal (O23, O24)
+
+Two independent pieces - see the PR for why they aren't split in two, if they are.
+
+### Part A: Experience leads with upload through the existing engine
+
+Confirmed before writing anything: the AI extraction spec v3 §8/§17 wants for reference letters
+already exists and already works - `experience_reference_letter` has been a real `DOCUMENT_KINDS`
+entry with its own field set (`onboardingScan.ts`) and its own confirm action
+(`confirmExperienceReferenceLetter`, `company/document-scan/actions.ts`, files straight into
+`experience_items`) since migration 0063. The gap the audit found was real but narrower than it
+looked: `/experience`'s own "Add experience" form never offered a path INTO that engine - it had its
+own separate upload, with zero extraction, always.
+
+Fixed by giving `/experience` a real entry point into the SAME engine, not a second one:
+- `UploadForm` (`company/document-scan/upload-form.tsx`) gained three optional props -
+  `redirectTo`, `title`, `hint` - all defaulting to its exact previous hardcoded values, so its one
+  existing caller (`company/document-scan/page.tsx`) and Batch 3's `AddDocumentsScreen` are
+  byte-identical in behaviour. Experience passes `redirectTo="/experience?uploaded=1"` so the user
+  never leaves the page.
+- `DocumentReviewCard` (`company/document-scan/review.tsx`) gained an optional `returnTo` prop; when
+  set, a hidden `return_to` field rides along with every one of its forms (confirm/skip/discard).
+- `confirmExperienceReferenceLetter`, `confirmVaultDocument`, `confirmIdDocument`, `confirmCvHandoff`,
+  `skipOnboardingDocument`, `discardOnboardingDocument` (`company/document-scan/actions.ts`) all now
+  read that optional `return_to` via a new `backTo()` helper and redirect there instead of the
+  hardcoded `/company/document-scan`, falling back to the old constant when it's absent - every
+  existing caller (Company vault's own document-scan page) omits it, so their behaviour is
+  unchanged. `backTo()` only honours a same-origin relative path (`startsWith("/")`, rejects
+  `//host` protocol-relative forms) - this is user-supplied form data landing in a `redirect()` call,
+  so it gets the same open-redirect guard any such value needs.
+- `/experience/page.tsx` now queries its own `company_id` via the real `company_members` lookup
+  every other signed-in page uses (it used to read `all[0]?.company_id` from the experience list
+  itself - null for exactly the brand-new company with nothing in the Library yet, the one case this
+  feature matters most for), lists its own `onboarding_document_results` pending rows filtered to
+  `document_kind = 'experience_reference_letter'`, and renders them with the same
+  `DocumentReviewCard` Company vault's document-scan page uses - `returnTo="/experience"`, `principals`/
+  `people` passed as `[]` since this kind's render path never reads them. The pre-existing manual
+  "Add experience" form stays, relabelled "Enter a project manually" - the explicit secondary
+  alternative spec §8 asks for, not removed.
+
+**Known, inherited limitations - not introduced by this batch, not silently claimed fixed**:
+`confirmExperienceReferenceLetter` always INSERTS a new `experience_items` row; it has no "does this
+project already exist, is this an update" conflict-detection, and it never splits one uploaded
+document into several proposed projects even when the letter plausibly describes more than one.
+Spec §8/§17 asks for both. Building either is new engine capability (deciding whether this and an
+existing row are "the same project", or segmenting one PDF into N proposed records), not a UI wiring
+job - exactly the kind of thing this batch's own instructions said not to invent from scratch.
+Flagging it here rather than claiming full compliance.
+
+### Part B: ECSA/SACPCMP stop being the universal category (O23)
+
+**No schema change needed or made** - checked first, as instructed. The company-level
+`registration_types`/`held_registrations` catalog (0050) already supports a `person_id`
+(`loadHeldCatalogRegistrations` already queries it by person), and five bodies (SACAP, SACPLAN,
+SACQSP, SACPVP, PSIRA) already use it person-scoped with zero changes needed. ECSA and SACPCMP
+already have their own dedicated `people` columns (`ecsa_*`/`sacpcmp_*`, migration 0035) - exactly
+the same shape SACNASP/SAGC already use successfully as "conditional" bodies. The actual gap: ECSA
+and SACPCMP were the only two bodies in the whole registrations system that were NEVER conditional -
+`/people/[id]/page.tsx` rendered their 6 fields unconditionally on every person, and `/people/page.tsx`
+put a warning chip ("No ECSA on file") on every person lacking one, in both cases regardless of
+whether the company does engineering work or any tender asks for it at all. That's the literal "ECSA
+as the universal category" the spec names.
+
+**Deliberately did NOT touch** `CONDITIONAL_BODIES`/`ConditionalBody`/`bodyKeys()`/`isColumnBody()`
+(`lib/personCredentials.ts`) or anything importing them for compliance purposes
+(`lib/tenderCompliance.ts`, `lib/generalTender.ts`, `tenders/[id]/compliance-data.ts`,
+`tenders/[id]/general-workspace.tsx`) - `bodyKeys()`'s `${k}_category` pattern doesn't hold for ECSA
+(`ecsa_level`, not `ecsa_category`) or SACPCMP (no category field at all), so forcing them into that
+exact mechanism would have broken it for both; more importantly, those four files are compliance-
+/readiness-adjacent, and the ground rule for every batch tonight is not to touch tender-assessment
+surface without Sarel's own review, schema change or not. Scoped down to a change that provably
+cannot affect them:
+- `/people/[id]/page.tsx`: ECSA/SACPCMP's 6 fields now render inside the exact same `<details>`
+  disclosure pattern SACNASP/SAGC already use, shown by default only when `expiryByBody` already has
+  an `ECSA`/`SACPCMP` entry (i.e. `credentialExpiries()` - existing, unchanged - found the person
+  already holds one or has an expiry on file). A collapsed `<details>` still submits its fields
+  normally on save (confirmed: HTML form fields inside a closed `<details>` are NOT excluded from
+  `FormData`, only visually hidden) - `savePerson` needed no changes.
+  Section heading renamed "Registrations" -> "Memberships and professional registrations".
+- `/people/page.tsx`: dropped the unconditional "No ECSA on file" warning chip entirely - the
+  positive "ECSA: <level>" chip (shown only when actually held) already existed and is unchanged.
+- **Deliberately NOT done**: wiring ECSA into `registrationsAskedFor()`/`AskedFor` the way
+  SACNASP/SAGC/catalog bodies are (so a SANRAL tender asking for a Professional Engineer would
+  auto-reveal the disclosure). That needs a new "does this position need ECSA" signal on the tender
+  side - compliance-adjacent surface, out of this batch's safe scope. Today, ECSA/SACPCMP show
+  automatically only when already held; a user adding a brand-new engineer must open the disclosure
+  themselves. Noted as a real, smaller follow-up, not silently solved.
+
+**Tested**: `npm run verify` 0 errors (same 3 pre-existing unrelated warnings), `npx vitest run`
+115/115, full `node:test` sweep 76/76 (no count change - this batch is composition/conditional
+rendering, no new pure-function logic to unit test). Live dev server + curl: `/experience`,
+`/people/[id]`, `/company/document-scan` all still correctly 307-redirect an unauthenticated request
+to `/login` (middleware untouched by this batch). Confirmed via grep that every existing caller of
+`UploadForm`/`DocumentReviewCard` (`company/document-scan/page.tsx`, Batch 3's `AddDocumentsScreen`)
+omits every new optional prop, so their behaviour is provably unchanged, not just assumed so.
+
+**Not tested, reported rather than faked**: same sandbox credential-generation limitation as every
+batch tonight - nobody has actually uploaded a real reference letter through `/experience` or toggled
+the ECSA disclosure in a real browser session. The build compiling `/experience` and `/people/[id]`
+as working dynamic routes, the existing test suites staying green, and the explicit non-regression
+check above are real evidence; they are not the same as a real signed-in click-through.
+
+### Spec v3 Batch 5: tender workspace layout (`/tenders/[id]`, 12,755px single scroll)
+
+Batch 0's audit measured `/tenders/[id]` at 12,755px tall, one unbroken scroll - the underlying
+compliance/pricing/readiness logic is correct (confirmed again here: every pre-existing
+`*-logic.test.ts`/`*.spec.ts` under this directory passes unchanged, byte-for-byte), the problem is
+purely that every section - "report card" ready or not, blocker or pure history - renders fully
+expanded, every time, with no structure beyond a sticky jump-nav row of anchor links.
+
+**What changed** (`page.tsx` only - `compliance-report.tsx`, `general-workspace.tsx`,
+`submission-pack.tsx`, `pack-review.tsx` and every `*-logic.ts` file are untouched, so both the
+SANRAL and general workflows' own actual content is identical to before):
+
+- New `collapsible-section.tsx`: a plain `<details>/<summary>` wrapper, no client JS, no persisted
+  state (the `open` prop is per-page-load only - deliberately not written anywhere, so this stays
+  presentation-only with no schema change, per this batch's own ground rule).
+- **Persistent header** (spec §16.E: "tender title/reference, client, deadline... blockers... Do not
+  bury blockers in a hidden tab"): a slim row added above the existing sticky jump-nav, in the same
+  `position: sticky` wrapper so both scroll together - title/contract number, countdown, and the
+  confirmed/review/provide/overdue/open-positions counts the facts card below already computes
+  (`confirmedRows`/`reviewRows`/`missingRows`/`overdueTaskCount`/`openPositionsCount` - the last one
+  hoisted out of an inline IIFE that used to compute it only for one badge, now reused in two
+  places). No new data read - same values, now also visible while scrolled past the facts card.
+- **Key positions**: collapses to a one-line "All N confirmed" summary only when
+  `openPositionsCount === 0` - an unconfirmed position still renders its red "Fix: no key person
+  confirmed - blocks the submission pack" badge exactly as before and keeps the section fully open,
+  since that's a real blocker, never buried.
+- **Readiness report** (the Verify/Provide grid): collapses to "All confirmed" only when both
+  `missingRows` and `reviewRows` are empty - any real Provide/Verify work keeps it open exactly as
+  before.
+- **Deliberately NOT collapsed**: `MarketContext` and `ActivityLog` - both already render their own
+  `id="market"`/`id="activity"` anchor div internally (for the jump-nav's existing `#market`/
+  `#activity` links). Wrapping them in another `<details>` would mean either a duplicate `id` (two
+  elements sharing one id - invalid HTML) or editing those two components to accept an "embedded,
+  skip your own id" prop - a reasonable future change, but out of this batch's time/risk budget
+  tonight; noted here as a real, smaller follow-up rather than silently left undocumented.
+
+**Before/after page height**: NOT independently measured against a real populated tender - the same
+sandbox credential-generation limitation every batch tonight has hit (no way to sign in as the
+seeded demo company here) applies to Playwright/`scrollHeight` measurement too, so reporting a
+specific before/after number would be fabricated precision. What IS verifiable: the two sections
+collapsed by default when complete (Key positions, Readiness report) are exactly the two
+`id="..."` targets the audit's own jump-nav row links to, and each can run to several hundred to
+well over a thousand pixels on a mature/near-ready tender (Key positions renders one ~150-250px row
+per position; the Readiness grid's "Verify" card lists every confirmed field). Collapsing both to a
+single summary line each, on a tender that's actually ready to submit (the exact state where
+scrolling through confirmed-already content is pure waste), is a real, structural reduction - just
+not a number honestly claimed without having seen it render.
+
+**Tested**: `npm run verify` 0 errors (same 3 pre-existing unrelated warnings), `npm run build`
+compiles `/tenders/[id]` clean, `npx vitest run` 115/115 and full `node:test` 76/76 - every
+pre-existing tender/compliance/pricing/readiness test passes unchanged, confirming no calculation
+was touched. Live dev server + curl: `/tenders/new` still correctly 307-redirects an unauthenticated
+request to `/login` (middleware untouched); public routes unaffected.
+
+**Not tested, reported rather than faked**: an actual signed-in render of `/tenders/[id]` itself -
+same sandbox limitation as every batch tonight. The collapsing logic (`openPositionsCount === 0`,
+`missingRows.length === 0 && reviewRows.length === 0`) was verified by reading the exact same
+variables the pre-existing, already-tested facts-card summary chips use - not a new computation -
+but nobody has seen the collapsed/expanded states actually render against real data.
+
+## Spec v3 Batch 6: savings/founding-rate/digest truthfulness
+
+Four items from the spec's own Batch 6 scope (§18/§19/§16.K), each closed with a different outcome -
+fixed, already correct, or a documented gap, not all silently claimed as "done":
+
+1. **Savings default labeling (§18, Sarel's own 2026-10-22 answer)** - fixed, and a real bug found
+   along the way. `fetchSavingsCounterSummary()` (the Home/Analytics card) used to read
+   `savings_baseline_hours_per_tender`/`_hourly_cost_zar` straight off the `companies` row with no
+   fallback at all - an unconfirmed baseline (`null`) was cast straight to `number`, and
+   `hoursSavedForTender`'s own `Math.max(0, null)` guard silently resolved to a 0-hour cap, so a
+   company that had done real counted work but never visited the baseline field saw "0h / R0
+   saved", not even the documented 20h/R450 placeholder. Meanwhile `fetchTenderSavingsBreakdown()`
+   (the per-tender "how we worked this out" panel) had its OWN separate `?? 20`/`?? 450`, with no
+   way for the UI to tell confirmed and default apart, and no way for the two surfaces to agree on
+   which case they were even in.
+   Fixed with one new pure function, `resolveBaseline()` (`lib/savingsCounter.ts`, 6 new
+   `.spec.ts` tests), that both call sites now use instead of their own separate handling. Returns
+   `{ hoursPerTender, hourlyCostZar, isDefault }` - `isDefault` true unless BOTH values are
+   confirmed (a confirmed `0` is accepted as real, not treated as missing - `== null`, not falsy).
+   Both `SavingsCounterSummary` and `fetchTenderSavingsBreakdown()`'s return type gained a
+   `usingDefaultBaseline` field; `savings-counter-card.tsx` and `submission-pack.tsx`'s "How we
+   worked this out" panel now show two genuinely different sentences depending on which case
+   applies - "Using a default estimate (20h/R450 per tender) - we don't have your own numbers yet"
+   vs. "Estimated from your own confirmed baseline." The calculation itself (`hoursSavedForTender`/
+   `aggregateSavings`/`extraCapacity`) is untouched - confirmed by every pre-existing test in
+   `savingsCounter.spec.ts` still passing unmodified.
+
+2. **Founding-rate homepage claim** - fixed. `app/page.tsx`'s Founding Firms Programme paragraph
+   used to promise "the first 10 firms... a locked founding rate" - a hard count and a rate
+   commitment with no mechanism anywhere in this app to track or honour either (confirmed again
+   this pass: no founding-firm intake table, no per-customer locked-price flag). Reworded to keep
+   the founding-customer framing (true: an early customer gets more of Sarel's own direct attention
+   right now than one joining later will) without the count or the rate promise - "Early customers
+   get more of our attention while we build out the rest." The CTA itself was already fixed in an
+   earlier pass (links to plain `/signup`, labeled "Get in touch", not "Apply as a founding firm").
+
+3. **Analytics vs. Home consistency (§16.K)** - checked, already correct, nothing to fix. Both
+   `dashboard/page.tsx` and `analytics/page.tsx` call the exact same `fetchSavingsCounterSummary()`
+   and render the result through the exact same `SavingsCounterCard` - they cannot drift because
+   they're not two implementations of the same number, they're one. Checked the rest of each
+   page's own stats for an overlapping metric name that could visibly contradict itself (Home:
+   "Active bids"/"Packs ready"/"Closing this week"/"Documents expiring"; Analytics: "Submitted to
+   date"/"Total submitted value"/win-loss trend) - no shared metric besides savings exists on both
+   pages at all, so there's no second divergence risk to fix.
+
+4. **Email audit (§19)** - the TypeScript side (`lib/emailTemplates.ts`: welcome + deadline-reminder
+   emails) was already correct - "Tender Ready" identity throughout, real per-item deep links
+   (`/tenders/${tenderId}`), no old branding found. The daily digest is NOT sent from TypeScript at
+   all, though - it's `engine/notify/send_digest_emails.py` (Python, triggered by
+   `.github/workflows/daily-digest.yml`), confirmed via its own module docstring and
+   `daily_digest.py`'s doc comment. Checked the CURRENT file rather than assuming the spec's cited
+   "known uploaded-snapshot issue" was already fixed - it was not:
+   - **Old "Tender Tool" branding**: present live in `DEFAULT_FROM`, the subject line, and the
+     body greeting (3 occurrences). Fixed to "Tender Ready" in all three.
+   - **Dropped dates**: `render_text()` showed only each item's title/description, no date at all.
+     Fixed with a new `_item_date()` helper checking every date key this script's sections are
+     CONFIRMED to use (traced key-by-key in `watch_deadlines.py`/`daily_digest.py`'s own
+     dict-building code): `closing_date` (new_tenders/submission_due), `expiry_date`
+     (document_expiry, both "document" and "person_credential" item types), `due_date`
+     (tender_tasks), `updated_at` (readiness_changes). Verified against a REAL generated fixture
+     (ran `test_digest_live.py`, fed its own written `digest.json` into
+     `send_digest_emails.py --dry-run`), not just a hand-written example - caught and fixed a real
+     miss this way (`expiry_date` wasn't in the first version of the key list, confirmed by
+     tracing `find_due_documents()`'s actual dict shape, not guessed).
+   - **Dropped links**: fixed with one link at the end of every digest email -
+     `{APP_URL}/dashboard`, reusing the exact same `APP_URL` env var name/fallback
+     `scripts/send-deadline-reminders.ts` already established, rather than inventing a second
+     convention.
+   - **Honest, documented gap, not silently left as "done"**: per-item deep links (spec's own "one
+     primary action to the exact signed-in item") were NOT built for each of the 8 section types'
+     own different destinations (`new_tenders` -> Discovery, `tender_tasks` -> a specific tender,
+     `listing_changes`/`tender_updates`/`reassessed_tenders` -> unverified routes). Doing that
+     correctly needs each section's actual item shape and real route individually confirmed, which
+     is its own piece of work, not something to guess at under tonight's time budget and risk a
+     wrong/broken link going out in a real customer email. One safe generic dashboard link now,
+     real per-item links as a flagged follow-up.
+   - Digest opt-in/opt-out (`set_my_daily_digest_opt_in`, `app/company/digestActions.ts`) and
+     no-duplicate-send guarantees (`daily_digest.py`'s own seen-store) were already correct and
+     untouched - confirmed by reading, not re-verified with new tests, since this batch didn't
+     touch that code.
+
+Python side has no automated test for `send_digest_emails.py` itself (confirmed: neither
+`test_digest_live.py` nor `test_digest_opt_in.py` imports it - its own docstring calls itself "the
+missing send step" the rest of this test suite predates). Verified instead by: `python3 -m
+py_compile` (syntax), a smoke test against a hand-built digest dict, and the real fixture run above.
+Both pre-existing Python test files (`test_digest_live.py`, `test_digest_opt_in.py`) still pass
+unchanged (0 failures each) - confirms nothing this batch touched broke the digest-building logic
+upstream of the sender.
+
+**Tested (TypeScript)**: `npm run verify` 0 errors, `npx vitest run` 121/121 (115 pre-existing + 6
+new `resolveBaseline` tests), full `node:test` sweep 76/76 unchanged - run both ways (`tsx --test`
+and the real CI invocation, `node --experimental-strip-types` per file directly). Live dev server +
+curl against the real homepage confirmed the new founding-rate copy renders and the old "first 10
+firms"/"locked founding rate" text is gone.
+
+**Not tested**: an actual signed-in render of the savings card's two different messages (same
+sandbox credential limitation as every batch tonight) - verified instead by reading
+`resolveBaseline()`'s own unit tests and the component's conditional, not a screenshot of both
+states.
