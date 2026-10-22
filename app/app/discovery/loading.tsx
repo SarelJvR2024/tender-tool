@@ -1,4 +1,4 @@
-import { AppShell } from "../_components/AppShell";
+import { AppShellSkeleton } from "../_components/AppShellSkeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 
 /**
@@ -7,7 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function DiscoveryLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6 sm:px-8">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0 flex-1 basis-80 space-y-2">
@@ -34,6 +34,6 @@ export default function DiscoveryLoading() {
           ))}
         </div>
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

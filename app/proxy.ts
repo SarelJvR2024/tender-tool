@@ -52,7 +52,15 @@ export async function proxy(request: NextRequest) {
     path.startsWith("/people") ||
     path.startsWith("/experience") ||
     path.startsWith("/admin") ||
-    path.startsWith("/my-cv");
+    path.startsWith("/my-cv") ||
+    // spec v3 Batch 1: /toolkit is the new signed-in Tools home (see
+    // nav-items.ts). Added here, not left to inherit the pre-existing gap
+    // that /billing, /analytics, /sanral-schedules and /market-intelligence
+    // already have (reachable unauthenticated - AppShell itself just
+    // renders empty state for a null user rather than redirecting) - that
+    // gap predates this change and is out of scope for this batch, but a
+    // brand-new route shouldn't ship with it.
+    path.startsWith("/toolkit");
 
   if (!user && guarded) {
     const url = request.nextUrl.clone();
@@ -89,5 +97,6 @@ export const config = {
     "/experience/:path*",
     "/admin/:path*",
     "/my-cv/:path*",
+    "/toolkit/:path*",
   ],
 };

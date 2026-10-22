@@ -1,4 +1,4 @@
-import { AppShell } from "../_components/AppShell";
+import { AppShellSkeleton } from "../_components/AppShellSkeleton";
 import { TableRowsSkeleton } from "@/components/tt/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function SanralSchedulesLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 p-4 sm:p-6">
         <div className="space-y-2">
           <Skeleton className="h-7 w-64" />
@@ -27,6 +27,6 @@ export default function SanralSchedulesLoading() {
 
         <TableRowsSkeleton rows={3} columns={3} />
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

@@ -1,4 +1,4 @@
-import { AppShell } from "../_components/AppShell";
+import { AppShellSkeleton } from "../_components/AppShellSkeleton";
 import { StatCardSkeleton } from "@/components/tt/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -9,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function PipelineLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6 sm:px-8">
         <div className="mb-1 flex items-center justify-between gap-3">
           <Skeleton className="h-7 w-24" />
@@ -35,6 +35,6 @@ export default function PipelineLoading() {
           ))}
         </div>
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

@@ -1,4 +1,4 @@
-import { AppShell } from "../_components/AppShell";
+import { AppShellSkeleton } from "../_components/AppShellSkeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionCardSkeleton } from "@/components/tt/skeletons";
 
@@ -9,7 +9,7 @@ import { SectionCardSkeleton } from "@/components/tt/skeletons";
  */
 export default function BillingLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[1100px] flex-1 px-4 py-6">
         <div className="mb-5 space-y-2">
           <Skeleton className="h-6 w-40" />
@@ -22,6 +22,6 @@ export default function BillingLoading() {
           ))}
         </div>
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

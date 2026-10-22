@@ -36,7 +36,14 @@ function getServerToday() {
 // prerender-time read of the current time outright. useSyncExternalStore's
 // getServerSnapshot (empty string) is what the prerender actually sees;
 // `today()` only runs once this is live in a real browser.
-export default function DeadlineCalculatorClient() {
+//
+// `embedded` (spec v3 O03): true when rendered inside the signed-in app's
+// own /toolkit route, where AppShell already supplies navigation/chrome -
+// skips the public ToolsHeader/OtherTools (a "Start free" CTA and links
+// back to the signed-out catalogue make no sense for someone already
+// signed in) and the full-bleed page wrapper, keeping the calculator body
+// identical either way so the two contexts can never drift apart.
+export default function DeadlineCalculatorClient({ embedded = false }: { embedded?: boolean } = {}) {
   const [mode, setMode] = useState<"add" | "count">("add");
   const clientToday = useSyncExternalStore(subscribeNever, today, getServerToday);
   const [startDateInput, setStartDateInput] = useState("");
@@ -69,98 +76,107 @@ export default function DeadlineCalculatorClient() {
     return all.filter((h) => h.date >= startDate).slice(0, 6);
   }, [startDate]);
 
+  const body = (
+    <>
+      {!embedded && (
+        <h1 className="mb-2 font-display text-[22px] font-bold text-foreground">Working-day deadline calculator</h1>
+      )}
+      <p className="mb-6 text-[13px] leading-relaxed text-muted-foreground">
+        Excludes Saturdays, Sundays and South African public holidays (Public Holidays Act 36 of 1994, including the
+        Easter-derived Good Friday and Family Day). Use it for &quot;N working days from the briefing&quot; or
+        &quot;how many working days until closing&quot; tender clauses.
+      </p>
+
+      <Tabs value={mode} onValueChange={(v) => setMode(v as "add" | "count")} className="mb-4">
+        <TabsList className="h-11 w-full">
+          <TabsTrigger value="add" className="h-full flex-1 text-[13px] font-semibold">
+            Add working days
+          </TabsTrigger>
+          <TabsTrigger value="count" className="h-full flex-1 text-[13px] font-semibold">
+            Count working days between dates
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <div className={`${CARD} mb-5`}>
+        <div className="mb-4">
+          <label className={LABEL} htmlFor="start">{mode === "add" ? "Start date" : "From date"}</label>
+          <input id="start" type="date" value={startDate} onChange={(e) => setStartDateInput(e.target.value)} className={INPUT} />
+        </div>
+
+        {mode === "add" ? (
+          <>
+            <div className="mb-4">
+              <label className={LABEL} htmlFor="days">Working days to add (negative to go backwards)</label>
+              <input id="days" type="number" value={days} onChange={(e) => setDays(Number(e.target.value))} className={INPUT} />
+            </div>
+            {addResult.error ? (
+              <p className="text-[13px] text-destructive">{addResult.error}</p>
+            ) : (
+              <div className="rounded-lg bg-card px-4 py-3.5">
+                <div className="mb-1 text-xs text-muted-foreground">Deadline</div>
+                <div className="text-xl font-bold text-foreground">{addResult.value}</div>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="mb-4">
+              <label className={LABEL} htmlFor="end">To date</label>
+              <input id="end" type="date" value={endDate} onChange={(e) => setEndDateInput(e.target.value)} className={INPUT} />
+            </div>
+            {countResult.error ? (
+              <p className="text-[13px] text-destructive">{countResult.error}</p>
+            ) : (
+              <div className="rounded-lg bg-card px-4 py-3.5">
+                <div className="mb-1 text-xs text-muted-foreground">Working days</div>
+                <div className="text-xl font-bold text-foreground">{countResult.value}</div>
+              </div>
+            )}
+          </>
+        )}
+
+        {startDate && (isWeekend(startDate) || isPublicHoliday(startDate)) && (
+          <p className="mt-3 text-xs text-warning">
+            Note: the start date itself falls on a weekend or public holiday - it is never counted as a working day.
+          </p>
+        )}
+      </div>
+
+      <div className={CARD}>
+        <div className="mb-2.5 text-[13px] font-bold text-foreground">Upcoming public holidays</div>
+        {upcomingHolidays.length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">None found.</p>
+        ) : (
+          <ul className="list-none">
+            {upcomingHolidays.map((h) => (
+              <li key={h.date} className="flex justify-between border-b border-border py-1.5 text-[13px] text-foreground last:border-b-0">
+                <span>{h.name}</span>
+                <span className="text-muted-foreground">{h.date}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {!embedded && <OtherTools except="/tools/deadline-calculator" />}
+
+      <p className="mt-6 text-[11px] leading-relaxed text-muted-foreground">
+        Source: Public Holidays Act 36 of 1994, Schedule 1. Fixed-date holidays landing on a Sunday move the
+        following Monday to a public holiday (s2A). A one-off holiday gazetted by the President (s2(2))
+        isn&apos;t predictable in advance and may not yet be reflected here.
+      </p>
+    </>
+  );
+
+  if (embedded) {
+    return <div className="mx-auto w-full max-w-[640px]">{body}</div>;
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <ToolsHeader />
-
-      <main className="mx-auto max-w-[640px] px-4 pt-8 pb-16">
-        <h1 className="mb-2 font-display text-[22px] font-bold text-foreground">Working-day deadline calculator</h1>
-        <p className="mb-6 text-[13px] leading-relaxed text-muted-foreground">
-          Excludes Saturdays, Sundays and South African public holidays (Public Holidays Act 36 of 1994, including the
-          Easter-derived Good Friday and Family Day). Use it for &quot;N working days from the briefing&quot; or
-          &quot;how many working days until closing&quot; tender clauses.
-        </p>
-
-        <Tabs value={mode} onValueChange={(v) => setMode(v as "add" | "count")} className="mb-4">
-          <TabsList className="h-11 w-full">
-            <TabsTrigger value="add" className="h-full flex-1 text-[13px] font-semibold">
-              Add working days
-            </TabsTrigger>
-            <TabsTrigger value="count" className="h-full flex-1 text-[13px] font-semibold">
-              Count working days between dates
-            </TabsTrigger>
-          </TabsList>
-        </Tabs>
-
-        <div className={`${CARD} mb-5`}>
-          <div className="mb-4">
-            <label className={LABEL} htmlFor="start">{mode === "add" ? "Start date" : "From date"}</label>
-            <input id="start" type="date" value={startDate} onChange={(e) => setStartDateInput(e.target.value)} className={INPUT} />
-          </div>
-
-          {mode === "add" ? (
-            <>
-              <div className="mb-4">
-                <label className={LABEL} htmlFor="days">Working days to add (negative to go backwards)</label>
-                <input id="days" type="number" value={days} onChange={(e) => setDays(Number(e.target.value))} className={INPUT} />
-              </div>
-              {addResult.error ? (
-                <p className="text-[13px] text-destructive">{addResult.error}</p>
-              ) : (
-                <div className="rounded-lg bg-card px-4 py-3.5">
-                  <div className="mb-1 text-xs text-muted-foreground">Deadline</div>
-                  <div className="text-xl font-bold text-foreground">{addResult.value}</div>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="mb-4">
-                <label className={LABEL} htmlFor="end">To date</label>
-                <input id="end" type="date" value={endDate} onChange={(e) => setEndDateInput(e.target.value)} className={INPUT} />
-              </div>
-              {countResult.error ? (
-                <p className="text-[13px] text-destructive">{countResult.error}</p>
-              ) : (
-                <div className="rounded-lg bg-card px-4 py-3.5">
-                  <div className="mb-1 text-xs text-muted-foreground">Working days</div>
-                  <div className="text-xl font-bold text-foreground">{countResult.value}</div>
-                </div>
-              )}
-            </>
-          )}
-
-          {startDate && (isWeekend(startDate) || isPublicHoliday(startDate)) && (
-            <p className="mt-3 text-xs text-warning">
-              Note: the start date itself falls on a weekend or public holiday - it is never counted as a working day.
-            </p>
-          )}
-        </div>
-
-        <div className={CARD}>
-          <div className="mb-2.5 text-[13px] font-bold text-foreground">Upcoming public holidays</div>
-          {upcomingHolidays.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">None found.</p>
-          ) : (
-            <ul className="list-none">
-              {upcomingHolidays.map((h) => (
-                <li key={h.date} className="flex justify-between border-b border-border py-1.5 text-[13px] text-foreground last:border-b-0">
-                  <span>{h.name}</span>
-                  <span className="text-muted-foreground">{h.date}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <OtherTools except="/tools/deadline-calculator" />
-
-        <p className="mt-6 text-[11px] leading-relaxed text-muted-foreground">
-          Source: Public Holidays Act 36 of 1994, Schedule 1. Fixed-date holidays landing on a Sunday move the
-          following Monday to a public holiday (s2A). A one-off holiday gazetted by the President (s2(2))
-          isn&apos;t predictable in advance and may not yet be reflected here.
-        </p>
-      </main>
+      <main className="mx-auto max-w-[640px] px-4 pt-8 pb-16">{body}</main>
     </div>
   );
 }

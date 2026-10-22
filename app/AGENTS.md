@@ -892,3 +892,65 @@ a different, earlier session's own AGENTS.md entry had already flagged "Roads & 
 confused brief term with no real product meaning when it turned up in a pricing-tier context, but
 this standing nav badge was missed. Removed rather than replaced with another invented segment
 name - the item's own label, "SANRAL schedules", already says what the feature is.
+
+## Whole-app reset spec (v3) - Batch 1: broken journeys
+
+Two confirmed defects from the v3 audit's traceability register (O03, and an unlisted dev-only
+build error), both frontend-only - no schema, pricing, SANRAL engine or access-control change.
+
+1. **O03 - signed-in "Tools" left the app shell.** The sidebar's Tools item pointed at `/tools`,
+   the public, signed-out lead-magnet catalogue (deliberately outside `AppShell` - see the "App
+   shell" entry above) - so a signed-in user lost their nav, company context and return path for
+   calculators they could otherwise use without leaving. Built `/toolkit` (`app/app/toolkit/`): an
+   AppShell-wrapped index plus one route per calculator, each importing the SAME Client component
+   the public page renders (`DeadlineCalculatorClient`, `CidbGradeClient`,
+   `BeePreferencePointsClient`, `B6EstimatorClient`) with a new `embedded` prop. `embedded` only
+   toggles the public chrome (`ToolsHeader`, `OtherTools`, the full-bleed page wrapper, the
+   calculator's own `<h1>` since `PageHeader` now supplies it) - every input, calculation and
+   result element is the identical JSX either way, so the two contexts can never compute different
+   answers. The public `/tools/*` pages are untouched in behaviour (screenshot-diffed, still fully
+   interactive). `nav-items.ts`'s Tools item now points at `/toolkit`; `isNavItemActive`'s existing
+   prefix match needed no change. **Caught on first self-review round**: `/toolkit` built and
+   worked, but was reachable unauthenticated - `proxy.ts` gates routes via BOTH an in-function
+   `guarded` boolean AND a separate `config.matcher` array (Next only runs middleware on paths the
+   matcher lists at all), and the first pass only added `/toolkit` to `guarded`. Fixed by adding
+   `/toolkit/:path*` to `matcher` too; confirmed via curl that `/toolkit` now 307s to `/login` while
+   `/tools` stays a public 200. Noted, not fixed (pre-existing, out of this batch's scope): `/billing`,
+   `/analytics`, `/sanral-schedules` and `/market-intelligence` have the same unauthenticated-reachable
+   gap already (none in `guarded`/`matcher`) - AppShell itself renders an empty-state shell for a null
+   user rather than redirecting, so nothing sensitive leaks, but it's worth the same one-line fix in
+   a dedicated pass.
+2. **Dev-time Cache Components prerendering crash on every `loading.tsx` using `AppShell`.**
+   `AppShell` is an async server component reading `cookies()` and making live Supabase calls (auth,
+   notifications, subscription) - correct for a real page, wrong inside a loading boundary, which
+   Next's Cache Components tries to prerender as static shell chrome. Reproduced across all 25
+   `loading.tsx` files that imported it (`/pipeline`, `/company`, `/billing`, `/people`,
+   `/experience`, `/tenders/new` and 19 more - a full repo grep, not just the 6 the audit happened
+   to name). Root-caused, not suppressed: added `AppShellSkeleton` (new,
+   `app/app/_components/AppShellSkeleton.tsx`) - a fully static, synchronous stand-in built from the
+   SAME `Sidebar`/`SidebarContent`/`SidebarHeader`/`SidebarFooter`/`SidebarInset`/`SidebarProvider`
+   primitives `AppShell` and `AppSidebar` use (so the `group-data-[collapsible=icon]` Tailwind
+   selectors still resolve correctly without reimplementing the sidebar's own collapse behaviour),
+   rendering chrome shape only - no auth, no cookies, no data. All 25 `loading.tsx` files now import
+   `AppShellSkeleton` in place of `AppShell`; none changed their own skeleton content. New
+   `/toolkit/*` routes got matching `loading.tsx` files from the start, same convention.
+   Verified by `npm run build` (Turbopack): every `◐` Partial Prerender route - the exact ones that
+   previously threw - now compiles clean with no prerender error.
+
+**Tested**: `npm run verify` (0 errors, same 3 pre-existing unrelated warnings), `npx vitest run`
+(115/115), full `node:test` sweep (67/67), `npm run build` (all 56 routes compile, no prerender
+errors), Playwright screenshots at 1440px/390px of the public `/tools` index and all four rewritten
+public tool pages (pixel- and function-identical to before - the deadline calculator still computes
+a real result, the CIDB/B-BBEE/B6 tools still render their tables and verdicts), plus curl checks
+confirming `/toolkit` redirects unauthenticated visitors to `/login` while `/tools` stays public.
+**Not tested, and reported rather than faked**: a live signed-in walkthrough of `/toolkit` itself
+with the seeded demo company - this environment's credential-generation tools (magic-link/Admin API
+sign-in) are blocked by the session's own safety classifier, and the demo account's real password
+isn't committed anywhere this session can read. The embedded calculators render through the exact
+same component tree Playwright already exercised live on the public pages, and the route-protection
+behaviour (middleware redirect) was verified directly - but nobody has actually seen `/toolkit`
+rendered inside a real authenticated `AppShell` yet. Three full self-review rounds ran before this
+was merged (middleware matcher gap found and fixed in round 1; `Sidebar` `group` context and
+duplicate-`<h1>` a11y check in round 2; nav active-state and dead-reference sweep in round 3) - none
+surfaced a reason to believe the signed-in render itself is broken, but that's inference from a
+clean build and an identical component tree, not a screenshot of the real thing.

@@ -1,4 +1,4 @@
-import { AppShell } from "../_components/AppShell";
+import { AppShellSkeleton } from "../_components/AppShellSkeleton";
 import { StatCardSkeleton, TableRowsSkeleton } from "@/components/tt/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function AdminLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[1000px] p-4 sm:p-6 md:px-8 md:py-6">
         <Skeleton className="mb-3 h-5 w-full max-w-md" />
 
@@ -37,6 +37,6 @@ export default function AdminLoading() {
           <TableRowsSkeleton rows={4} columns={4} />
         </div>
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }
