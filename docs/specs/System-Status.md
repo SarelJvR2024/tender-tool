@@ -6,6 +6,50 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+---
+
+## Resume here (live, mid-task handover - 2026-10-22 ~12:25 UTC)
+
+**If you're a new session picking this up**: Sarel just added `SUPABASE_DB_URL` as an environment
+secret (Supabase dashboard → Settings → Database → Connect → Direct → URI), specifically so the
+migrations missing from the live project (`swkglctgdceqrehbabfl`) can be applied. The session that
+asked for it couldn't see the secret mid-session (new environment secrets need a fresh session to
+load) - that's very likely why you're starting fresh now. Full detail on what's missing and why:
+see `feature/narrative-document-generator`'s own System-Status.md entries once that PR (#74)
+merges, or ask Sarel to point you at the live conversation.
+
+**Do this, in order:**
+1. Confirm `SUPABASE_DB_URL` (and `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `SUPABASE_SERVICE_ROLE_KEY`) are visible (`env | grep -i supabase`).
+2. Check which migrations the live project is actually missing - cross-reference every migration
+   file's own `create table` statements against the project's real exposed tables (query
+   `$NEXT_PUBLIC_SUPABASE_URL/rest/v1/` with the service-role key as `apikey`/`Authorization:
+   Bearer`, which returns an OpenAPI doc listing every exposed table - compare its `paths` against
+   `app/supabase/migrations/*.sql`'s own `create table` statements). As of this handover, the live
+   project was missing migrations `0077` through `0085`, but don't trust that number blindly -
+   re-check, since more may have landed on `main` since.
+3. Apply whatever's actually missing, in filename order, via
+   `psql "$SUPABASE_DB_URL" -f <file>`. Re-run the same check as step 2 to confirm nothing's still
+   missing before moving on.
+4. Using `SUPABASE_SERVICE_ROLE_KEY`, run one disposable test job through the Railway worker (not
+   yet independently confirmed to be running - Sarel says it's set up) and clean it up afterward -
+   this is the one thing that tells Sarel whether CV/pack/narrative generation will actually
+   complete, not just queue.
+5. Report back to Sarel plainly: is the app ready for him to sign up as his own real company and
+   do a full onboarding walkthrough, yes or no, and exactly what (if anything) is still missing.
+
+**Do NOT** create a test company or sign up yourself - Sarel was explicit that onboarding is his
+to do once you confirm it's ready, not something to simulate on his behalf. There are already 6
+throwaway test companies in the live project from other sessions' own QA work (`E2E Test
+Construction`, `Debug Co`, and others, created 2026-10-18 to 2026-10-21) - don't add a 7th, and
+consider flagging those for cleanup before Sarel's own test.
+
+Once this is done, delete this "Resume here" section (it's a live handover, not a permanent
+record) - fold anything worth keeping into a dated entry below, same as every other finding in
+this file.
+
+---
+
 **Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
 is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
 R2,990/Business R4,990/Enterprise - that one's correct") - the full reconciliation (migration `0083`,
