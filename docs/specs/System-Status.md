@@ -8,37 +8,53 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
-## Resume here (live, mid-task handover - 2026-10-22 ~13:40 UTC, updated)
+## Resume here (live, mid-task handover - 2026-10-22 ~16:10 UTC, updated)
 
-**Still not done. Two real blockers found this pass, both need Sarel's own action - see the dated
-entry below ("Live-infrastructure handover, continued") for full detail before doing anything.**
-In short:
+**One of the two blockers from the last update is now fully resolved - the Railway worker is
+confirmed alive and actually completing jobs, not just queuing them. The other (migrations not yet
+applied) is still open, but is now just a "run this one file" problem, not an environment blocker.**
 
-1. **Migrations can't be applied from this sandbox.** `SUPABASE_DB_URL`'s host
-   (`db.swkglctgdceqrehbabfl.supabase.co`) only resolves to an IPv6 address (confirmed via a public
-   DNS-over-HTTPS lookup, not just a local failure) - this environment has no IPv6/raw-TCP egress,
-   only an HTTPS proxy, so `psql` can never reach it from here regardless of which session runs it.
-   Needs Sarel to either (a) get the **Session pooler** connection string from Supabase dashboard →
-   Settings → Database → Connection Pooling (IPv4-compatible, different host/username shape) and
-   set it as `SUPABASE_DB_URL` instead, or (b) run the missing migration files himself via the
-   Supabase dashboard's own SQL Editor (browser-based, no psql needed). Once either happens, a new
-   session can pick up step 3 from the original list below.
-2. **Confirming the Railway worker actually completes a job needs a read of real company/tender
-   rows** (to pick an existing throwaway test company and a tender it's pursuing) and a test-job
-   insert into `pack_generation_jobs` - this session's own "Production Reads" guardrail denied
-   that outright, correctly: it's real customer data, not something to wave through from inside a
-   task description. Needs Sarel's explicit go-ahead (or Sarel running the test himself) before a
-   session tries this again.
+1. **Railway worker: CONFIRMED WORKING, 2026-10-22 ~16:04 UTC.** With Sarel's explicit go-ahead,
+   read `companies` filtered to the project's own known throwaway test rows (`Fresh Walkthrough
+   Civils (Pty) Ltd` and 5 others, all from earlier sessions' QA work - none flagged
+   `is_test_company`, identified by name instead), picked one with an existing `tender_packs` row,
+   and inserted one disposable `pack_generation_jobs` row (`engine: general`, `kind:
+   extract_requirements` - the lightest real job type, no document/storage side effects beyond
+   `tenders.document_requirements`). Requested 16:04:26 UTC - claimed (`generating`) by 16:04:40 (14s
+   later, well inside the worker's own ~30s poll interval) - `ready` by 16:04:43. Verified this was
+   REAL work, not a status flip: `tenders.document_requirements.extracted_at` for that tender reads
+   `2026-10-22T16:04:41Z`, matching the job's own window exactly, with a full genuine extraction
+   payload (`cidb`/`gaps`/`forms`/`roles`/`scoring`/`returnables`/etc.), not a stub. Test row deleted
+   immediately after, confirmed gone. This is independent proof an active worker (presumably the
+   Railway deployment Sarel said he'd set up, though this check can't directly confirm WHICH process
+   claimed it - only that something is polling `pack_generation_jobs` live and completing real
+   `general`-engine work end to end) is running right now against the live project.
+2. **Migrations 0077-0084 still not applied** (re-checked live via the OpenAPI doc immediately
+   before writing this entry - still missing). **No longer an environment blocker**: this session's
+   container cannot reach Postgres directly on port 5432 at all (confirmed two ways - the direct
+   host resolves IPv6-only, and even the IPv4 Session Pooler host times out on a raw TCP connect;
+   this sandbox's egress is HTTPS-only, full stop, not fixable by changing the connection string).
+   The actual unblock: a combined, transaction-wrapped SQL file
+   (`begin;` + all of `0077_company_invites_and_employee_role.sql` through
+   `0084_pack_quota_counts_in_flight_jobs.sql` in filename order + `commit;`) was generated and
+   handed to Sarel to paste into the Supabase dashboard's own SQL Editor (browser-based HTTPS,
+   unaffected by this sandbox's network limits). **Still waiting on Sarel to actually run it** as of
+   this entry.
 
-**The original 5-step list is still the right order once those two are unblocked** - re-check the
-missing-migrations list first (don't trust the exact numbers below blindly, re-verify), apply them
-via `psql "$SUPABASE_DB_URL" -f <file>` in filename order, re-check, then the disposable test job,
-then report back plainly. **Do NOT** create a test company or sign up yourself - still Sarel's own
-step once the app is confirmed ready, not something to simulate on his behalf. Don't add an 7th
-throwaway test company to the 6 already there from other sessions' QA work.
+**Once Sarel confirms the SQL ran**: re-check the live OpenAPI doc for `company_invites`/
+`company_subscriptions`/`sent_deadline_reminders`/`payfast_payment_attempts` to confirm all 8
+landed, then report back plainly whether the app is ready for Sarel's own real onboarding
+walkthrough - likely yes at that point, given the worker is now independently confirmed. **Do NOT**
+create a test company or sign up as Sarel - still his own step, not something to simulate on his
+behalf. Don't add a 7th throwaway test company to the 6 already there.
 
-Once both blockers are cleared and the 5 steps are actually done, delete this section and fold
-anything worth keeping into a dated entry below, same as every other finding in this file.
+A loose end from this pass, worth noting for whoever picks it up: Sarel pasted a live Session
+Pooler connection string (including its password) directly into chat mid-task to test it. He was
+told to rotate it (Supabase dashboard → Settings → Database → Reset database password)
+immediately after - **not confirmed done yet**, worth checking rather than assuming.
+
+Once migrations are confirmed applied and this is reported back to Sarel, delete this section and
+fold anything worth keeping into a dated entry below, same as every other finding in this file.
 
 ---
 
