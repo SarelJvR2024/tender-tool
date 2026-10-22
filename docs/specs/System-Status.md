@@ -1198,6 +1198,49 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-22, standing QA/robustness review - sixty-seventh run): rotated back to SANRAL pack (engine/) - thorough review, no new bug found this time
+
+Orientation: re-checked the "Resume here" live handover first (per `CLAUDE.md`'s own standing
+instruction to read it before planning work) - still open, still blocked for this session's
+permission mode, nothing new to try (my own prior addendum already says not to re-litigate it).
+Synced a small batch (Google OAuth on signup, a dedicated "money" design-system token) - no
+engine/ changes since my own Finding 49, so rotated deliberately back to a genuine Python engine
+area rather than drifting further into TypeScript/billing territory several cycles running.
+
+Picked SANRAL pack (`engine/pack/assemble_pack.py`, `engine/sanral_fill.py`'s `Workbook.cached()`,
+`engine/sanral_b7.py`) - files not yet given a dedicated look this session. Read closely and
+tried to construct real reproductions for several candidates; none held up as a genuine,
+reachable bug:
+
+- `assemble_pack._excel_date()`'s numeric branch has no guard against a `float('nan')` input
+  (confirmed it crashes with one, directly) - but traced where that value could actually come
+  from (`Workbook.cached()` in `sanral_fill.py`): an Excel error cell (`#REF!` etc.) returns a
+  *string* error code through a different code path, not NaN, and a real XLSX's own `<v>` tag
+  wouldn't normally serialize a literal `"nan"`/`"inf"` string for a numeric cell. No realistic
+  path to this found - logged so a future pass doesn't need to re-investigate from scratch, not
+  fixed.
+- `build_submission_pack()`'s bare `profile["key_people"][0]` (step 6, the authority letter) would
+  crash on an empty list - but `process_pack_jobs.py` (the only real caller) already guards this
+  upstream (`if not signatories: raise ValueError(...)` before `key_people` is ever built), so
+  `key_people` can never actually be empty through the real pipeline. Confirmed, not a live gap.
+- The same naive-UTC `datetime.date.today()` bug class (Findings 37-39/48) is still present once
+  more, in the pack's own cover-page heading (`f"Generated {datetime.date.today().isoformat()}"`)
+  - but it's purely a display label nothing downstream reads back, so per Finding 37's own
+    established precedent (several cosmetic instances deliberately left unfixed that pass), not
+    worth fixing on its own.
+- `pdf_merge.verify_pack()`'s contents-page cross-check uses a plain substring match for a
+  section's page-range (`pages not in flat`), which could in principle miss a wrong page range if
+  it happens to be a substring of an unrelated number nearby - a verification-robustness nit, not
+  a customer-facing bug (it would only matter alongside an independent, compounding bug in the
+  actual page-numbering logic). Noted, not chased further.
+- `sanral_b7.check_plan()`'s percentage/B-BBEE-level/boolean-type validation held up under several
+  constructed adversarial inputs (percentage-as-string, zero-as-error, boolean miscoercion via
+  `_num()`) - all either correctly rejected or not realistically reachable from the real UI.
+
+No TypeScript or Python file changed this pass. Logging this as a genuine clean sweep of a real
+area, not a skipped cycle - the point of writing up what was checked and why nothing panned out
+is so the next pass through SANRAL pack starts further ahead, not from zero.
+
 ## This pass (2026-10-22, standing QA/robustness review - sixty-sixth run): live-handover attempted (blocked, needs production access); the brand-new savings-counter migration replayed clean against a real Postgres
 
 Orientation: synced a branding/design-system batch plus the brand-new "time and cost saved"
