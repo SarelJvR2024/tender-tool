@@ -3,6 +3,7 @@ import {
   aggregateSavings,
   extraCapacity,
   hoursSavedForTender,
+  resolveBaseline,
   SAVINGS_STEP_HOURS,
   type SavingsStepKey,
   type SavingsTotals,
@@ -24,8 +25,20 @@ export async function fetchSavingsCounterSummary(supabase: SupabaseClient): Prom
   ]);
   if (!company) return null;
 
-  const baselineHours = company.savings_baseline_hours_per_tender as number;
-  const hourlyCost = company.savings_baseline_hourly_cost_zar as number;
+  // Spec v3 §18: resolveBaseline() is the one place that decides "confirmed
+  // or placeholder default" - previously this read the raw columns
+  // directly, so an unconfirmed baseline (null) was cast straight to
+  // `number`, and hoursSavedForTender's own Math.max(0, null)=>0 guard
+  // silently zeroed every tender's hours saved rather than using the
+  // documented 20h/R450 default - a real bug, not just a labeling gap: a
+  // company that had completed real work but never visited the baseline
+  // field saw "0h / R0 saved" instead of any estimate at all.
+  const baseline = resolveBaseline(
+    company.savings_baseline_hours_per_tender as number | null,
+    company.savings_baseline_hourly_cost_zar as number | null,
+  );
+  const baselineHours = baseline.hoursPerTender;
+  const hourlyCost = baseline.hourlyCostZar;
   const allRows = (rows ?? []) as { tender_id: string; hours: number; counted_at: string }[];
 
   const now = new Date();
@@ -50,6 +63,7 @@ export async function fetchSavingsCounterSummary(supabase: SupabaseClient): Prom
     thisMonth,
     allTime,
     extraCapacityThisMonth: extraCapacity(thisMonth.hoursSaved, thisMonth.tendersCounted, baselineHours),
+    usingDefaultBaseline: baseline.isDefault,
   };
 }
 
@@ -80,22 +94,34 @@ export type CountedStepBreakdown = { stepKey: SavingsStepKey; reason: string; ho
 export async function fetchTenderSavingsBreakdown(
   supabase: SupabaseClient,
   tenderId: string,
-): Promise<{ hoursSaved: number; randSaved: number; steps: CountedStepBreakdown }> {
+): Promise<{ hoursSaved: number; randSaved: number; steps: CountedStepBreakdown; usingDefaultBaseline: boolean }> {
   const [{ data: company }, { data: rows }] = await Promise.all([
     supabase.from("companies").select("savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
     supabase.from("savings_counted_steps").select("step_key, hours").eq("tender_id", tenderId),
   ]);
 
-  const baselineHours = (company?.savings_baseline_hours_per_tender as number | undefined) ?? 20;
-  const hourlyCost = (company?.savings_baseline_hourly_cost_zar as number | undefined) ?? 450;
+  // Spec v3 §18: same resolveBaseline() the Home/Analytics summary above
+  // uses, so a company with no confirmed baseline sees the same "default,
+  // not yet confirmed" signal here as everywhere else - previously this
+  // function had its own separate `?? 20`/`?? 450` with no way for the UI
+  // to tell it apart from a real confirmed 20/450.
+  const baseline = resolveBaseline(
+    company?.savings_baseline_hours_per_tender as number | null | undefined,
+    company?.savings_baseline_hourly_cost_zar as number | null | undefined,
+  );
   const countedRows = (rows ?? []) as { step_key: string; hours: number }[];
 
   const steps: CountedStepBreakdown = countedRows
     .filter((r): r is { step_key: SavingsStepKey; hours: number } => r.step_key in SAVINGS_STEP_HOURS)
     .map((r) => ({ stepKey: r.step_key, reason: SAVINGS_STEP_HOURS[r.step_key].reason, hours: r.hours }));
 
-  const hoursSaved = hoursSavedForTender(countedRows.map((r) => r.hours), baselineHours);
-  return { hoursSaved, randSaved: Math.round(hoursSaved * hourlyCost), steps };
+  const hoursSaved = hoursSavedForTender(countedRows.map((r) => r.hours), baseline.hoursPerTender);
+  return {
+    hoursSaved,
+    randSaved: Math.round(hoursSaved * baseline.hourlyCostZar),
+    steps,
+    usingDefaultBaseline: baseline.isDefault,
+  };
 }
 
 /**

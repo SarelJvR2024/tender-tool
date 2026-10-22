@@ -8,6 +8,8 @@ export type SavingsCounterSummary = {
   thisMonth: SavingsTotals;
   allTime: SavingsTotals;
   extraCapacityThisMonth: number;
+  /** Spec v3 §18: true when the company hasn't confirmed its own baseline, so every figure here used the 20h/R450 placeholder default rather than a real measured number. */
+  usingDefaultBaseline: boolean;
 };
 
 /**
@@ -37,7 +39,7 @@ export function SavingsCounterCard({
     );
   }
 
-  const { thisMonth, allTime, extraCapacityThisMonth } = summary;
+  const { thisMonth, allTime, extraCapacityThisMonth, usingDefaultBaseline } = summary;
 
   return (
     <Card className="gap-3 px-5 py-4 shadow-sm">
@@ -68,11 +70,23 @@ export function SavingsCounterCard({
       </div>
 
       <div className="text-[11px] leading-relaxed text-muted-foreground">
-        Estimated, based on your numbers -{" "}
-        <Link href={baselineHref} className="underline hover:text-foreground">
-          update your baseline
-        </Link>
-        .
+        {usingDefaultBaseline ? (
+          <>
+            Using a default estimate (20h/R450 per tender) - we don&apos;t have your own numbers yet.{" "}
+            <Link href={baselineHref} className="underline hover:text-foreground">
+              Confirm your baseline
+            </Link>{" "}
+            for a figure based on your company.
+          </>
+        ) : (
+          <>
+            Estimated from your own confirmed baseline -{" "}
+            <Link href={baselineHref} className="underline hover:text-foreground">
+              update it
+            </Link>{" "}
+            any time.
+          </>
+        )}
       </div>
     </Card>
   );

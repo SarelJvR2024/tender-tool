@@ -364,11 +364,23 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                       </ul>
                     </details>
                     <div className="mt-1.5 text-[11px] text-muted-foreground">
-                      Estimated, based on your numbers -{" "}
-                      <Link href="/company#savings-baseline" className="underline">
-                        update your baseline
-                      </Link>
-                      .
+                      {savingsBreakdown.usingDefaultBaseline ? (
+                        <>
+                          Using a default estimate (20h/R450 per tender) - we don&apos;t have your own numbers yet.{" "}
+                          <Link href="/company#savings-baseline" className="underline">
+                            Confirm your baseline
+                          </Link>{" "}
+                          for a figure based on your company.
+                        </>
+                      ) : (
+                        <>
+                          Estimated from your own confirmed baseline -{" "}
+                          <Link href="/company#savings-baseline" className="underline">
+                            update it
+                          </Link>{" "}
+                          any time.
+                        </>
+                      )}
                     </div>
                   </div>
                 )}

@@ -77,7 +77,13 @@ MAX_RETRY_AFTER = 30
 # (step 5 above) should be set to an address on a verified domain as soon as
 # one exists - this default exists only so a --dry-run / first real test can
 # run before that domain work is done.
-DEFAULT_FROM = "Tender Tool Daily Digest <onboarding@resend.dev>"
+DEFAULT_FROM = "Tender Ready Daily Digest <onboarding@resend.dev>"
+
+# Spec v3 §19: every email needs "one primary action to the exact signed-in
+# item" - same env var name/fallback scripts/send-deadline-reminders.ts
+# already uses for this, so both the TypeScript and Python senders agree on
+# one convention rather than inventing a second one here.
+APP_URL = os.environ.get("APP_URL") or "https://tender-ready.vercel.app"
 
 # Sections in the order they should read in the email, each with the label
 # shown above it. Matches daily_digest.build_digest_for_person()'s own keys -
@@ -113,9 +119,28 @@ def has_content(digest):
     return any(section_count(digest.get(key)) for key, _ in SECTION_LABELS)
 
 
+def _item_date(item):
+    """Spec v3 §19: a digest that drops the date it's nagging someone about
+    is less useful than no digest at all. Checks every date-shaped key this
+    script's own sections are CONFIRMED to use, read straight from
+    watch_deadlines.py/daily_digest.py's own dict-building code:
+    closing_date (new_tenders/submission_due), expiry_date (document_expiry,
+    both "document" and "person_credential" item types), due_date
+    (tender_tasks), updated_at (readiness_changes). listing_changes/
+    tender_updates/reassessed_tenders weren't traced key-by-key here - if
+    their items use a different key, this returns None for them (an omitted
+    date), never a wrong one; not a full per-section audit, flagged as such
+    in app/AGENTS.md."""
+    for key in ("closing_date", "expiry_date", "due_date", "updated_at"):
+        value = item.get(key)
+        if value:
+            return str(value)[:10]  # ISO date prefix only, same slice daily_digest.py's own code uses
+    return None
+
+
 def render_text(digest):
     lines = [f"Hi {digest['person'].get('name') or 'there'},", "",
-             f"Your Tender Tool daily digest for {digest.get('company_name') or 'your company'}:", ""]
+             f"Your Tender Ready daily digest for {digest.get('company_name') or 'your company'}:", ""]
     for key, label in SECTION_LABELS:
         if key not in digest:
             continue
@@ -128,10 +153,21 @@ def render_text(digest):
             for item in items[:10]:
                 bit = (item.get("title") or item.get("description") or item.get("field")
                        or item.get("field_key") or item.get("contract_number") or "item")
-                lines.append(f"  - {bit}")
+                date = _item_date(item)
+                lines.append(f"  - {bit}" + (f" ({date})" if date else ""))
             if len(items) > 10:
                 lines.append(f"  ... and {len(items) - 10} more")
         lines.append("")
+    # Spec v3 §19 ("one primary action to the exact signed-in item"): a
+    # single dashboard link, not a per-item deep link to each of the 8
+    # section types' own different route shapes - that needs each section's
+    # item ids/routes verified individually (new_tenders -> /discovery,
+    # tender_tasks -> ?, listing_changes -> ?, etc.), which is a real,
+    # separate piece of work, not something to guess at here and risk a
+    # wrong/broken link in a customer-facing email. Flagged in AGENTS.md as
+    # the honest remaining gap, not silently left as "links already work".
+    lines.append(f"Open your dashboard: {APP_URL}/dashboard")
+    lines.append("")
     lines.append("You're receiving this because you opted in to the daily digest at /company. "
                  "You can turn it off there at any time.")
     return "\n".join(lines)
@@ -148,7 +184,7 @@ def send_one(api_key, from_addr, digest, dry_run=False):
     if not has_content(digest):
         return "skipped_empty", "nothing to report today"
 
-    subject = f"Your Tender Tool daily digest - {digest.get('company_name') or ''}".strip()
+    subject = f"Your Tender Ready daily digest - {digest.get('company_name') or ''}".strip()
     body = render_text(digest)
 
     if dry_run:
