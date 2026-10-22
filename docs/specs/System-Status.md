@@ -1142,6 +1142,34 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-22, standing QA/robustness review - sixty-fifth run): the PayFast signature test suite was not isolated from this environment's own real secrets
+
+Orientation: synced a branding/marketing batch (new logo/favicons, homepage repositioning, the
+GTM plan, an accessibility-contrast fix) - no overlap with engine work. Before picking a rotation
+area, ran the full suite as always and got a surprise: `npx vitest run` failed 2/80, both in
+`lib/payfast.spec.ts` - on `main`, as committed, not something this pass introduced.
+
+**Finding 54 (CONFIRMED, FIXED, moderate).** `verifyItnSignature()`'s tests - including the one
+reproducing PayFast's own real recorded ITN signature from their open-source SDK's test suite -
+never isolated themselves from `process.env.PAYFAST_PASSPHRASE`, and every fixture assumes no
+passphrase (PayFast's sandbox default). This session's own environment has a real,
+non-empty `PAYFAST_PASSPHRASE` configured (plausibly a real PayFast sandbox merchant account
+Sarel registered, not the shared generic test credentials) - so the tests failed here, for a real
+reason, but not a code bug: `verifyItnSignature()` itself correctly uses whatever passphrase is
+actually configured. Checked whether this affects real CI: `.github/workflows/app-ci.yml`
+declares no `env:`/`secrets:` block at all, so it injects nothing - confirmed NOT currently
+breaking GitHub Actions, but it would break for any developer or environment with real sandbox
+secrets configured, which is exactly the situation that just happened here.
+
+**Fix:** `payfast.spec.ts` now stubs `PAYFAST_PASSPHRASE` empty via `vi.stubEnv()`/
+`vi.unstubAllEnvs()` (standard Vitest isolation) so the suite's correctness never depends on the
+host environment. Reverted to confirm: the exact same 2 failures reappeared against this
+environment's real passphrase; restored: `11/11`, full suite `80/80`.
+
+Picked this up instead of a fresh rotation area because a red test on `main` - even one caused by
+environment, not code - is worth closing before it costs someone real debugging time, same
+priority the standing rules already give a genuine CI failure.
+
 ## This pass (2026-10-22, standing QA/robustness review - sixty-fourth run): the brand-new per-plan bid-pack quota could be bypassed entirely by requesting faster than a worker finishes
 
 Orientation: synced a large batch landing the FINAL pricing resolution (migration `0083`:

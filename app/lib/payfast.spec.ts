@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildSignatureBaseString,
   decodePlanInterval,
@@ -7,6 +7,28 @@ import {
   signCheckoutFields,
   verifyItnSignature,
 } from "./payfast";
+
+// payfastPassphrase() reads process.env.PAYFAST_PASSPHRASE directly (no way
+// to inject it as a param from here), and every fixture below - including
+// PayFast's own real recorded ITN signature - was computed assuming NO
+// passphrase (PayFast's sandbox has none configured by default). Without
+// this, these tests are not hermetic: they pass or fail depending on
+// whatever this environment's real PAYFAST_PASSPHRASE happens to be, which
+// is exactly the kind of thing a deployment environment legitimately sets
+// (QA pass, 2026-10-22 - confirmed live: this environment has a real,
+// non-empty PAYFAST_PASSPHRASE configured, and every verifyItnSignature
+// test failed against it, including the "reproduces PayFast's own real ITN
+// signature" one - not because the code is wrong, but because the test
+// never isolated itself from the ambient environment). vi.stubEnv() clears
+// it for every test in this file and vi.unstubAllEnvs() restores the real
+// value afterward, so this suite's own correctness never depends on what a
+// given machine happens to have configured.
+beforeEach(() => {
+  vi.stubEnv("PAYFAST_PASSPHRASE", "");
+});
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe("buildSignatureBaseString", () => {
   it("orders fields per PayFast's documented order, not insertion order", () => {
