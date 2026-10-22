@@ -238,11 +238,11 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
     const csd = readiness.criteria.find((c) => c.key === "csd");
     const bee = readiness.criteria.find((c) => c.key === "bee");
     setupChecklistItems = [
-      { key: "company_basics", label: "Company profile completed", done: basics?.satisfied ?? false, href: basics?.href ?? "/onboarding?step=1" },
-      { key: "csd", label: "CSD number on file", done: csd?.satisfied ?? false, href: csd?.href ?? "/onboarding?step=2" },
-      { key: "bee", label: "B-BBEE certificate on file", done: bee?.satisfied ?? false, href: bee?.href ?? "/onboarding?step=2" },
+      { key: "company_basics", label: "Company profile completed", done: basics?.satisfied ?? false, href: basics?.href ?? "/company#company-identity" },
+      { key: "csd", label: "CSD number on file", done: csd?.satisfied ?? false, href: csd?.href ?? "/company#company-identity" },
+      { key: "bee", label: "B-BBEE certificate on file", done: bee?.satisfied ?? false, href: bee?.href ?? "/company#bee-cidb" },
       { key: "tax_pin", label: "Tax clearance (SARS TCS PIN) on file", done: !!taxRow && taxRow.status !== "missing", href: "/company#compliance-documents" },
-      { key: "people_cvs", label: "At least one person with a CV uploaded", done: readiness.peopleWithCvCount >= 1, href: "/onboarding?step=4" },
+      { key: "people_cvs", label: "At least one person with a CV uploaded", done: readiness.peopleWithCvCount >= 1, href: "/people" },
       {
         key: "savings_baseline",
         label: "Your time/cost baseline confirmed (for the savings counter)",

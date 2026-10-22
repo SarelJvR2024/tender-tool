@@ -1059,3 +1059,72 @@ clicked inside a real authenticated session. What WAS verified live: both touche
 Prerender routes with no prerender failure), and a standalone `react-dom/server` static render of
 `FileDropzone` in both its full and `compact` modes produces the expected markup with no runtime
 error - real evidence the component tree itself is sound, short of an actual click-through.
+
+### Spec v3 Batch 3: onboarding collapsed from a 6-step wizard to 2 screens
+
+Onboarding used to be `WizardShell` + `Step1.tsx` through `Step6.tsx`, each a full page with its own
+"Step N of 6", a Continue button chaining to the next step, and a "Skip for now" link - company
+basics, then compliance fields (CSD/SARS/B-BBEE/savings baseline), then one office location, then up
+to 3 people + CVs, then a notification preference, then plan selection, then a "done" bid-readiness
+screen. Every step past the first was individually skippable, but the sheer length (spec v3 O09) and
+the fact that none of it had a document-upload step at all (O13) were real, confirmed problems from
+the Batch 0 audit.
+
+**What actually changed**: `Step2.tsx`-`Step6.tsx` and their five actions (`saveComplianceStep`,
+`saveOfficeStep`, `addPersonStep`, `uploadPersonCvStep`, `saveNotificationStep`) are deleted, not
+rebuilt elsewhere - every field they captured already has a real, permanent, non-onboarding home:
+compliance/CSD/B-BBEE/savings baseline in Company vault (`CompanyIdentitySection.tsx`,
+`BeeCidbSection.tsx`, `ComplianceDocumentsSection.tsx`, `SavingsBaselineSection.tsx` - confirmed by
+grep before deleting anything), office location (`app/company/officeActions.ts`), people/CVs
+(`app/people/actions.ts`), the daily digest toggle (`app/company/Notifications.tsx`), and plan
+selection (Billing, reachable any time - the trial already starts automatically on company creation
+via the `companies_start_trial` trigger, migration 0078). None of that data-capture needed
+rebuilding; it only needed to stop being a forced sequential gate before Home. New
+`AddDocumentsScreen.tsx` is Screen 2 - it reuses `UploadForm` (spec v3 Batch 2, `#103`) completely
+unchanged, so "drop a file -> upload -> auto-classify -> review" is identical to `/company/
+document-scan`'s own flow, not a second implementation. `WizardShell.tsx` dropped to 2 titles
+("Your company", "Add documents") and lost its generic Back/Skip link logic, since neither of the
+two real screens needs it the same way the old 6 did (Screen 1 has nothing to go back to; Screen 2's
+skip is its own explicit "Skip for now, I'll add documents later" link straight to `/dashboard`, not
+a generic "advance to next step"). `onboarding/page.tsx` now has exactly two branches: no membership
+-> Screen 1; `?step=2` -> Screen 2; everything else (no param, a stale `step=3..6`/`step=done` link,
+anything else) -> `redirect("/dashboard")`. No schema change was needed or made - "has a
+`company_members` row" already meant "Screen 1 done" before this batch and still does; Screen 2 has
+no persisted "seen it" state at all, which is deliberate (per the spec's own boundary: don't add a
+column to solve this when behaving as "redirect to Home, whose own checklist already prompts for
+missing documents" is both simpler and already correct).
+
+**Real bugs this surfaced, not invented**: three call sites pointed at the step URLs being deleted,
+and would have otherwise silently regressed into dead loops (clicking them would land on `/onboarding`
+with a stale step number, which now redirects straight back to `/dashboard` - doing nothing).
+`lib/readiness.ts`'s `company_basics`/`csd`/`tax_compliance`/`bee`/`people_cvs` criteria all had
+`href: "/onboarding?step=N"` fix-it links; repointed to their real Company vault/`/people`
+destinations (`/company#company-identity`, `/company#bee-cidb`, `/company#compliance-documents`,
+`/people`). `dashboard/page.tsx`'s `setupChecklistItems` had the same three as fallback hrefs plus
+one hardcoded `/onboarding?step=4` for "add a CV" - same fix. `components/tt/bid-readiness-card.tsx`'s
+compact variant (used in Company vault's header) linked to `/onboarding?step=done` as its "see the
+full breakdown" action; repointed to `/dashboard`, where the large variant with the full blockers
+list actually lives. None of these three were found by writing a new test - they were found in round
+2 self-review by grepping every `onboarding?step` reference across the repo after making the
+deletions, specifically because a UX simplification that quietly breaks three "fix this" links would
+be worse than the problem it solved.
+
+**Tested**: `npm run verify` 0 errors (same 3 pre-existing unrelated warnings), `npx vitest run`
+115/115 (no new tests needed - this batch is routing/composition, not new pure logic;
+`lib/readiness.spec.ts`'s existing 6 tests don't assert on href values and still pass unchanged),
+full `node:test` sweep 76/76. Live dev server + curl: `/onboarding`, `/onboarding?step=2`, and
+`/dashboard` all still correctly 307-redirect an unauthenticated request to `/login` (middleware
+untouched). A standalone `react-dom/server` static render confirms `Step1` renders correctly
+standalone ("Your company", "Step 1 of 2" both present in the output);
+`AddDocumentsScreen` could not be rendered the same way, because it embeds `UploadForm` (a client
+component that calls `useRouter()`, which throws outside a real Next.js App Router context) - this
+is a limitation of the crude standalone-render harness, not evidence of a problem: `npm run build`
+itself already compiled `/onboarding` as a working dynamic route with no React Server Component
+boundary error, which is the real proof this composition is valid.
+
+**Not tested, reported rather than faked**: same sandbox limitation as every batch tonight - no way
+to generate real sign-in credentials here, so nobody has actually clicked through Screen 1 ->
+Screen 2 -> upload/skip -> Home as a real user. This is a significant UX restructuring of something
+that previously worked end-to-end; the structural checks above (build success, middleware behavior,
+every stale link found and fixed, existing tests still green) are real evidence, but they are not the
+same as watching a real signed-in walkthrough.
