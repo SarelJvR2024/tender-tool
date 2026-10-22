@@ -56,7 +56,7 @@ export default function ResetPasswordPage() {
   return (
     <AuthShell>
       <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-9 text-center shadow-sm">
-        <h1 className="mb-1 font-display text-xl font-medium text-foreground">Set a new password</h1>
+        <h2 className="mb-1 font-display text-xl font-medium text-foreground">Set a new password</h2>
         <p className="mb-7 text-sm text-muted-foreground">Choose something you haven&apos;t used before</p>
 
         <form onSubmit={handleSubmit} noValidate>

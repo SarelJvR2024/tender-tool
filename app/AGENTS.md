@@ -1390,3 +1390,125 @@ firms"/"locked founding rate" text is gone.
 sandbox credential limitation as every batch tonight) - verified instead by reading
 `resolveBaseline()`'s own unit tests and the component's conditional, not a screenshot of both
 states.
+
+### Spec v3 Batch 7: final public-page polish + whole-rollout status note
+
+Last batch of tonight's run. Scope held to what's actually verifiable without a signed-in
+session - every public, no-auth route - rather than guessing at signed-in pages this sandbox
+can't click through.
+
+**Found and fixed, via a real Playwright pass (both 1440px and 390px) over every public route**
+(`/`, `/demo`, `/tools` + its 4 calculators, `/privacy`, `/signup`, `/login`):
+- `/signup` and `/login` (and, same shared `AuthShell`, `/forgot-password`, `/reset-password`, and
+  onboarding's `WizardShell`) each rendered TWO `<h1>`s - `AuthShell`'s own left-panel headline
+  ("Win more tenders. Miss fewer deadlines.") plus the page's own heading ("Create your account",
+  "Welcome back", etc.). Both are visible simultaneously at desktop widths (the left panel is only
+  CSS-hidden below `md:`, not removed from the DOM) - a real heading-hierarchy violation (spec
+  v3 §20/§28: one stable page heading), not just a lint nit. Fixed by demoting the six per-page
+  headings to `<h2>` - `AuthShell`'s headline is the true page-level heading; re-ran the same
+  Playwright check after the fix and confirmed `h1Count === 1` on every public page, both
+  viewports.
+- Three more B-BBEE spelling inconsistencies beyond what earlier sessions already fixed:
+  `BeeCidbSection.tsx` and `EditForm.tsx` both had a "BEE & CIDB" section title plus "BEE level"/
+  "BEE procurement recognition %" field labels - alongside "B-BBEE proof held"/"B-BBEE proof
+  expiry" in the very same section, an inconsistency within one form, not just across the app.
+  `company/page.tsx`'s own left-nav jump link had the same "BEE & CIDB" short form. All four now
+  read "B-BBEE" consistently; the `#bee-cidb` anchor id itself (what Batch 3's `lib/readiness.ts`
+  links point at) was left untouched, only the visible label text changed.
+- A stale comment in `app/tools/page.tsx` still said the signed-in sidebar's Tools item links to
+  this public page ("a signed-in visitor briefly leaves the shell") - Batch 1 (#101) fixed that
+  exact problem by giving signed-in users `/toolkit` instead, and had already updated
+  `nav-items.ts`'s own comment to say so, but left this page's comment telling the old story.
+  Updated to match current reality. No functional code changed here, just a comment that would
+  have misled the next session reading it.
+
+**Checked and already correct, no change needed**: zero horizontal overflow at 390px on any of the
+10 pages/viewport combinations tested; zero `<img>` without `alt` text; no console errors on any
+page at either viewport. `/demo`'s "Sample company and tender" labeling, the homepage's founding-
+rate and proof-point copy (both already fixed in Batch 6), and `/privacy`'s honest "what's still in
+progress" disclosure all read as intended on a fresh, skeptical re-read against spec §20's exact
+rules (plain language, no absolute guarantees, no "artefact"/"entity"/"workflow"/vague error text -
+none of those appear anywhere in the public-facing copy checked).
+
+**Found, not fixed - a real gap, correctly left alone per this batch's own scope**: both the
+homepage's Enterprise-tier "Contact us" (`app/page.tsx`) and the signed-in Billing page's identical
+Enterprise card (`app/billing/page.tsx`) are `mailto:hello@tendertool.co.za` links - and
+`hello@tendertool.co.za` is confirmed, as of earlier tonight, a non-existent mailbox nobody reads.
+Unlike the Founding Firms CTA Batch 6 already fixed (which could honestly reroute to `/signup`
+because that's genuinely where a "Start free" click already goes), an Enterprise prospect can't
+self-serve through `/signup` - that flow only handles the four fixed-price self-serve tiers, not a
+custom-quoted Enterprise deal, so rerouting there would trade one dishonest promise for a different
+one. The only real fix is a working mailbox, which is infrastructure, not code - noted here rather
+than patched around with equally-unbacked text, per this batch's own explicit instruction not to
+invent a second kind of fake certainty to cover the first.
+
+**Tested**: `npm run verify` 0 errors, 121/121 vitest, 76/76 node:test both ways (`tsx --test` and
+the real CI invocation, `node --experimental-strip-types` per file). Playwright pass over all 10
+public routes at 1440px and 390px, screenshots captured for all 20 combinations, re-run after the
+h1 fix to confirm it actually resolved.
+
+**Not tested**: anything behind sign-in. Same limitation every batch hit tonight (this sandbox's
+credential-generation tools are blocked by its own safety classifier, and the demo account's real
+password isn't committed anywhere any batch could read) - repeated here once more, explicitly,
+because this is the batch whose own job was supposed to include "whole-app quality," and it would
+be dishonest to let that scope note quietly disappear into "we checked everything" by the end of
+the night.
+
+---
+
+### Where spec v3's whole-app rollout actually stands, end of this session's run (2026-10-22)
+
+Seven batches plus one same-night security hotfix merged to `main` tonight (PRs #101-#107,
+chronologically: Batch 1 broken-journeys fix, a middleware auth-gap hotfix, Batch 2 shared
+document intake, Batch 3 onboarding collapse, Batch 4 Experience/People intake, Batch 5 tender
+workspace layout, Batch 6 savings/analytics/email truthfulness, this Batch 7). Every one was
+independently re-verified by the parent session after merge - diff re-read, fresh `npm install`,
+`npm run verify`, both vitest and both node:test invocations re-run - not just trusted from each
+batch's own self-report.
+
+**What's genuinely verified, not just logically argued**: every automated test in the repo (121
+vitest + 76 node:test, both runner conventions) passes on the current `main`. Every public page is
+confirmed, via a real browser, to render correctly at 1440px and 390px with no overflow, no missing
+alt text, no console errors, and (as of this batch) exactly one `<h1>` per page. The middleware
+auth gap is confirmed closed by direct `curl` against a running dev server. The Python digest
+sender's date-dropping bug fix is confirmed against a real generated fixture.
+
+**What's verified by logic/tests only, not an actual signed-in click-through**: literally
+everything behind `/login` - every batch tonight hit the same wall, a sandbox whose
+credential-generation tools are blocked by its own safety classifier, with no committed password
+for the seeded demo account. That covers: the new `/toolkit` route's actual rendering inside a real
+`AppShell`; the shared document-intake component's real upload/classify/review/confirm cycle (its
+logic is tested, its wiring is read-verified, but nobody has clicked through it); the 2-screen
+onboarding's actual flow for a brand-new signup; Experience's new upload path; the tender
+workspace's collapse/expand behavior on a real populated tender; the savings card's two different
+messages. None of this is faked or glossed over - every batch said so plainly in its own entry
+above - but it adds up to a whole rollout where the signed-in half of the product has not been
+seen working by anything other than its own source code and test suite, all night.
+
+**Known gaps from the Batch 0 audit's O01-O25 register that NO batch tonight touched** (not
+forgotten, just out of scope for what got done): O06 (tender workspace and Company vault are still
+long pages - Batch 5 only collapsed two sections once a tender is already near-complete; a
+brand-new tender is still close to its original ~12,755px height, and Company vault's own form
+density was never audited at all); O08 (click-count reduction was never measured before/after for
+any flow); O11 (signed-in form field widths/overflow was never checked live, only the public auth
+forms were); O16 (document-expiry page's own edit/replace-in-place behavior was not independently
+re-verified this session - pre-existing, not touched, not broken, just not re-confirmed); O19
+(SANRAL still has its own separate sidebar nav item, per the spec's "remove SANRAL as a universal
+primary menu destination" - a deliberate choice to leave alone, since Batch 0's audit found real
+SANRAL-specific capability behind it that a merge into a generic "Tools" or tender-workspace
+concept risks flattening, and that's a product decision, not a batch to execute unilaterally); O21
+(CV-led person creation was flagged by the Batch 0 audit as "not confirmed CV-first this pass" and
+no later batch independently re-checked it).
+
+**Also still open, unrelated to any specific O-item, flagged earlier tonight and unchanged by
+this batch**: no real contact mailbox exists yet (`hello@tendertool.co.za`,
+`privacy@tendertool.co.za` are both fake) - three more call sites of this same gap were found in
+this batch (both Enterprise "Contact us" links) and are listed above, not fixed, since the fix is
+infrastructure Sarel owns, not code. The live-database-write-access question from earlier tonight
+was also left untouched by every batch - no batch wrote to production data beyond the normal
+app-level writes its own feature needed.
+
+This is the honest state of the rollout at the end of tonight's run: real, substantial, verified-
+where-verification-was-possible progress across 6 of 7 planned batches plus an unplanned same-night
+security fix - and an equally real, equally honest list of what still needs either Sarel's own
+signed-in walkthrough or his own judgment call, not another batch pretending to supply either.

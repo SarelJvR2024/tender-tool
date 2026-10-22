@@ -118,7 +118,7 @@ export default function SignUpPage() {
     return (
       <AuthShell>
         <AuthCard>
-          <h1 className="mb-2.5 font-display text-lg font-medium text-foreground">Check your email</h1>
+          <h2 className="mb-2.5 font-display text-lg font-medium text-foreground">Check your email</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
             We&apos;ve sent a confirmation link to <strong className="text-foreground">{email}</strong>. Click it to activate your account and sign in.
           </p>
@@ -134,7 +134,7 @@ export default function SignUpPage() {
     return (
       <AuthShell>
         <AuthCard>
-          <h1 className="mb-2.5 font-display text-lg font-medium text-foreground">Sign-ups are paused</h1>
+          <h2 className="mb-2.5 font-display text-lg font-medium text-foreground">Sign-ups are paused</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
             Tender Ready isn&apos;t taking new accounts right now. Already have one?
           </p>
@@ -149,7 +149,7 @@ export default function SignUpPage() {
   return (
     <AuthShell>
       <AuthCard>
-        <h1 className="mb-1 font-display text-xl font-medium text-foreground">Create your account</h1>
+        <h2 className="mb-1 font-display text-xl font-medium text-foreground">Create your account</h2>
         <p className="mb-7 text-sm text-muted-foreground">14-day trial &middot; no card needed &middot; one full bid pack</p>
 
         <Button variant="outline" className="mb-2.5 h-11 w-full" onClick={() => signUpWith("google")}>

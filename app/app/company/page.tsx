@@ -143,7 +143,7 @@ export default async function CompanyPage({
     { href: "#size-offices", label: "Size & offices" },
     { href: "#savings-baseline", label: "Time & cost saved" },
     { href: "#how-we-work", label: "How we work" },
-    { href: "#bee-cidb", label: "BEE & CIDB", complete: beeCidbComplete },
+    { href: "#bee-cidb", label: "B-BBEE & CIDB", complete: beeCidbComplete },
     { href: "#bank-details", label: "Bank details" },
     { href: "#notifications", label: "Notifications" },
     { href: "#registers", label: "Registers" },
