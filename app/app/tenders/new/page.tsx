@@ -26,19 +26,19 @@ export default async function NewTenderPage() {
 
   return (
     <AppShell>
-      <div style={{ flex: 1, padding: "20px 16px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
-        <Link href="/dashboard" style={{ fontSize: 12, color: "#D97706", fontWeight: 600, textDecoration: "none" }}>← Tenders</Link>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "8px 0 4px" }}>Load a tender manually</h1>
-        <p style={{ fontSize: 13, color: "#5B6472", margin: "0 0 16px", lineHeight: 1.5 }}>
+      <div className="mx-auto box-border w-full max-w-[760px] flex-1 px-4 py-5 font-sans">
+        <Link href="/dashboard" className="text-xs font-semibold text-accent no-underline">← Tenders</Link>
+        <h1 className="mt-2 mb-1 text-xl font-bold text-foreground">Load a tender manually</h1>
+        <p className="mb-4 text-[13px] leading-normal text-muted-foreground">
           For a tender that didn&apos;t come in through Discovery - SANRAL&apos;s own portal, one a client forwarded, or a buyer that
           isn&apos;t on eTenders. Upload its documents and it gets the same analysis a discovered tender gets: whether it&apos;s a SANRAL
           template tender or a general one, what it requires, which forms can be filled for you, and how well it fits your company.
           Only your company can see a tender you load here.
         </p>
-        <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px" }}>
+        <div className="rounded-xl border border-border bg-card px-5 py-[18px]">
           <ManualTenderForm companyId={membership.company_id as string} />
         </div>
-        <p style={{ fontSize: 12, color: "#8A93A0", margin: "12px 0 0", lineHeight: 1.5 }}>
+        <p className="mt-3 text-xs leading-normal text-muted-foreground">
           The analysis runs on the Tender Ready worker (it needs Python and LibreOffice), so it takes a minute or two once the worker is
           running. The tender page shows its progress.
         </p>

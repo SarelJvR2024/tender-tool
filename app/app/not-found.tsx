@@ -10,15 +10,15 @@ import Link from "next/link";
  */
 export default function NotFound() {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", background: "#FFFFFF", padding: "24px" }}>
-      <div style={{ maxWidth: 420, textAlign: "center" }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 8 }}>Page not found</div>
-        <div style={{ fontSize: 13, color: "#5B6472", marginBottom: 20, lineHeight: 1.5 }}>
+    <div className="flex min-h-screen items-center justify-center bg-card p-6 font-sans">
+      <div className="max-w-[420px] text-center">
+        <div className="mb-2 text-[15px] font-bold text-foreground">Page not found</div>
+        <div className="mb-5 text-[13px] leading-normal text-muted-foreground">
           Nothing here - the link may be out of date, or this item may have been removed.
         </div>
         <Link
           href="/dashboard"
-          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 44, padding: "0 20px", borderRadius: 9, fontSize: 14, fontWeight: 600, textDecoration: "none", background: "#D97706", color: "#FFFFFF" }}
+          className="inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-5 text-sm font-semibold text-accent-foreground no-underline"
         >
           Back to Tenders
         </Link>

@@ -15,7 +15,10 @@ import { removePrivateTenderDocument } from "./general-actions";
 
 export type PrivateDoc = { id: string; title: string; storage_path: string; created_at: string };
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
+// Same reasoning as cv-compare.tsx's own actionLinkClass: a plural/secondary
+// download link, not a screen's single highlighted action, so it stays a
+// foreground-colored underline rather than a solid accent fill.
+const actionLinkClass = "text-xs font-semibold text-foreground underline underline-offset-2 hover:text-accent";
 
 export async function PrivateDocuments({
   tenderId,
@@ -37,40 +40,40 @@ export async function PrivateDocuments({
     });
   }
   return (
-    <div id="private-documents" style={card}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Your private documents</div>
-        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "#ECEEF1", color: "#16233B" }}>
+    <div id="private-documents" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+      <div className="mb-0.5 flex flex-wrap items-center gap-2">
+        <div className="text-[15px] font-bold text-foreground">Your private documents</div>
+        <span className="inline-flex rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-foreground">
           Only your company can see these
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 10 }}>
+      <div className="mb-2.5 text-xs text-muted-foreground">
         This tender is shared: other companies can pursue it from Discovery too. Documents you add here - for example the
         full bid document the buyer e-mailed you - stay private to your company. They are read together with the published
         documents, and what is found in them is kept with your copy of the tender, not shown to anyone else.
       </div>
       {docs.length > 0 && (
-        <div style={{ marginBottom: 10 }}>
+        <div className="mb-2.5">
           {docs.map((d) => (
-            <div key={d.id} style={{ display: "flex", alignItems: "center", gap: 8, justifyContent: "space-between", borderTop: "1px solid #ECEEF1", padding: "7px 0", fontSize: 12 }}>
-              <div style={{ minWidth: 0, wordBreak: "break-word" }}>
+            <div key={d.id} className="flex items-center justify-between gap-2 border-t border-border py-[7px] text-xs">
+              <div className="min-w-0 break-words">
                 {signed[d.storage_path] ? (
-                  <a href={signed[d.storage_path]} style={{ color: "#D97706", fontWeight: 600 }}>{d.title}</a>
+                  <a href={signed[d.storage_path]} className={actionLinkClass}>{d.title}</a>
                 ) : (
-                  <span style={{ color: "#16233B", fontWeight: 600 }}>{d.title}</span>
+                  <span className="font-semibold text-foreground">{d.title}</span>
                 )}
-                <span style={{ color: "#8A93A0" }}> · added {new Date(d.created_at).toLocaleDateString()}</span>
+                <span className="text-muted-foreground"> · added {new Date(d.created_at).toLocaleDateString()}</span>
               </div>
               <form action={removePrivateTenderDocument}>
                 <input type="hidden" name="tender_id" value={tenderId} />
                 <input type="hidden" name="document_id" value={d.id} />
-                <button type="submit" style={{ minHeight: 32, padding: "0 10px", borderRadius: 7, background: "#FFFFFF", border: "1px solid #E3E6EA", color: "#B91C1C", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>
+                <button type="submit" className="min-h-8 cursor-pointer rounded-md border border-border bg-card px-2.5 text-[11px] font-semibold text-destructive">
                   Remove
                 </button>
               </form>
             </div>
           ))}
-          <div style={{ fontSize: 11, color: readingIsPrivate ? "#15803D" : "#B45309", marginTop: 4 }}>
+          <div className={`mt-1 text-[11px] ${readingIsPrivate ? "text-success" : "text-warning"}`}>
             {readingIsPrivate
               ? "The requirements below were read from the published documents plus these."
               : "Not read yet - the requirements below come from the published documents only until the re-read finishes."}
