@@ -27,8 +27,6 @@ import type { BidTaskStatus } from "./bid-task-status";
  * components, only server-rendered JSX.
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
-
 // The Product promise's own Verify/Provide/Fix grouping (app/AGENTS.md),
 // collapsed from this screen's 5-way ReviewStatus via pack-review-logic.ts's
 // reviewStatusToBidTask() - see that function's own comment for exactly
@@ -37,25 +35,25 @@ const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E
 // comment already explains for its styling in general ("not imported from
 // there since that file is SANRAL-only by convention and exports no shared
 // components").
-const TASK_STYLE: Record<BidTaskStatus, { label: string; bg: string; color: string }> = {
-  verify: { label: "Verify", bg: "#DCFCE7", color: "#15803D" },
-  provide: { label: "Provide", bg: "#FEF3C7", color: "#B45309" },
-  fix: { label: "Fix", bg: "#FEE2E2", color: "#B91C1C" },
+const TASK_STYLE: Record<BidTaskStatus, { label: string; className: string }> = {
+  verify: { label: "Verify", className: "bg-success/10 text-success" },
+  provide: { label: "Provide", className: "bg-warning/10 text-warning" },
+  fix: { label: "Fix", className: "bg-destructive/10 text-destructive" },
 };
 
 function Pill({ status }: { status: ReviewStatus }) {
   const s = TASK_STYLE[reviewStatusToBidTask(status)];
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: s.bg, color: s.color, whiteSpace: "nowrap" }}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${s.className}`}>
       {s.label}
     </span>
   );
 }
 
-const STRENGTH_STYLE: Record<"strong" | "check" | "low", { bg: string; color: string }> = {
-  strong: { bg: "#F1F5F9", color: "#5B6472" },
-  check: { bg: "#FEF3C7", color: "#B45309" },
-  low: { bg: "#FEE2E2", color: "#B91C1C" },
+const STRENGTH_STYLE: Record<"strong" | "check" | "low", string> = {
+  strong: "bg-muted text-muted-foreground",
+  check: "bg-warning/10 text-warning",
+  low: "bg-destructive/10 text-destructive",
 };
 
 /**
@@ -68,20 +66,19 @@ const STRENGTH_STYLE: Record<"strong" | "check" | "low", { bg: string; color: st
 function MatchStrengthBadge({ confidence, reason }: { confidence: number | null | undefined; reason: string | null | undefined }) {
   const strength = matchStrengthStatus(confidence);
   if (!strength) return null;
-  const s = STRENGTH_STYLE[strength.tier];
   return (
     <span
       title={reason || undefined}
-      style={{ display: "inline-flex", alignItems: "center", padding: "1px 7px", borderRadius: 100, fontSize: 10.5, fontWeight: 600, background: s.bg, color: s.color, whiteSpace: "nowrap" }}
+      className={`inline-flex items-center rounded-full px-[7px] py-px text-[10.5px] font-semibold whitespace-nowrap ${STRENGTH_STYLE[strength.tier]}`}
     >
       {strength.label}
     </span>
   );
 }
 
-function SummaryChip({ count, label, bg, color }: { count: number; label: string; bg: string; color: string }) {
+function SummaryChip({ count, label, className }: { count: number; label: string; className: string }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color }}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${className}`}>
       {count} {label}
     </span>
   );
@@ -102,9 +99,9 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
   const toLookAtCount = allItems.length - confirmedCount;
 
   return (
-    <div id="general-pack-review" style={card}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Pack review - confirm before you compile</div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 14 }}>
+    <div id="general-pack-review" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+      <div className="mb-0.5 text-[15px] font-bold text-foreground">Pack review - confirm before you compile</div>
+      <div className="mb-3.5 text-xs text-muted-foreground">
         Everything identified to go into this tender&apos;s submission pack: company details, tender questions, the
         signature, supporting documents, the roles this tender names and who&apos;s tagged for them (with their CVs),
         company experience evidence, and office location. Check each section, use the link to jump to where it&apos;s
@@ -112,61 +109,61 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
       </div>
 
       {allItems.length > 0 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        <div className="mb-3.5 flex flex-wrap gap-2">
           {toLookAtCount === 0 ? (
-            <SummaryChip count={confirmedCount} label="confirmed - ready to compile" bg="#DCFCE7" color="#15803D" />
+            <SummaryChip count={confirmedCount} label="confirmed - ready to compile" className="bg-success/10 text-success" />
           ) : (
             <>
-              {confirmedCount > 0 && <SummaryChip count={confirmedCount} label="confirmed" bg="#DCFCE7" color="#15803D" />}
-              <SummaryChip count={toLookAtCount} label={toLookAtCount === 1 ? "item to look at" : "items to look at"} bg="#FEF3C7" color="#B45309" />
+              {confirmedCount > 0 && <SummaryChip count={confirmedCount} label="confirmed" className="bg-success/10 text-success" />}
+              <SummaryChip count={toLookAtCount} label={toLookAtCount === 1 ? "item to look at" : "items to look at"} className="bg-warning/10 text-warning" />
             </>
           )}
         </div>
       )}
 
       {snapshot.reviewed && (
-        <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "8px 14px", marginBottom: 12, fontSize: 12, color: "#15803D" }}>
+        <div className="mb-3 rounded-lg border border-success/30 bg-success/10 px-3.5 py-2 text-xs text-success">
           Reviewed {new Date(snapshot.reviewed.reviewedAt).toLocaleString()}
           {snapshot.reviewed.reviewedBy ? ` by ${snapshot.reviewed.reviewedBy}` : ""}. Review again any time - the list
           below always reflects what&apos;s on file right now.
         </div>
       )}
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <div className="flex flex-col gap-2.5">
         {snapshot.sections.map((s) => (
-          <details key={s.key} open={s.error !== null || s.items.some((i) => i.status !== "confirmed")} style={{ border: "1px solid #E3E6EA", borderRadius: 9, background: "#FFFFFF" }}>
-            <summary style={{ cursor: "pointer", padding: "8px 12px", fontSize: 12, fontWeight: 700, color: "#16233B", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
-              <span style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <details key={s.key} open={s.error !== null || s.items.some((i) => i.status !== "confirmed")} className="rounded-lg border border-border bg-card">
+            <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs font-bold text-foreground">
+              <span className="flex flex-wrap items-center gap-2">
                 {s.title}
                 {!s.error && (
-                  <span style={{ fontWeight: 400, color: "#8A93A0" }}>
+                  <span className="font-normal text-muted-foreground">
                     {s.items.length} item{s.items.length === 1 ? "" : "s"}
                     {s.items.some((i) => i.status !== "confirmed") ? ` - ${s.items.filter((i) => i.status !== "confirmed").length} to look at` : " - all confirmed"}
                   </span>
                 )}
               </span>
-              <Link href={s.changeHref} style={{ color: "#D97706", fontWeight: 600, fontSize: 11 }}>
+              <Link href={s.changeHref} className="text-[11px] font-semibold text-accent">
                 {s.changeLabel} &rarr;
               </Link>
             </summary>
-            <div style={{ padding: "0 12px 10px" }}>
+            <div className="px-3 pb-2.5">
               {s.error ? (
-                <div style={{ color: "#B91C1C", fontSize: 12, padding: "6px 0" }}>{s.error}</div>
+                <div className="py-1.5 text-xs text-destructive">{s.error}</div>
               ) : s.items.length === 0 ? (
-                <div style={{ color: "#8A93A0", fontSize: 12, padding: "6px 0" }}>Nothing to show yet.</div>
+                <div className="py-1.5 text-xs text-muted-foreground">Nothing to show yet.</div>
               ) : (
                 s.items.map((item) => (
-                  <div key={item.key} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 0", borderTop: "1px solid #E3E6EA", fontSize: 12 }}>
-                    <span style={{ flex: "0 0 auto", marginTop: 1, display: "flex", gap: 5, flexWrap: "wrap" }}>
+                  <div key={item.key} className="flex items-start gap-2 border-t border-border py-1.5 text-xs">
+                    <span className="mt-px flex flex-none flex-wrap gap-1">
                       <Pill status={item.status} />
                       <MatchStrengthBadge confidence={item.confidence} reason={item.confidenceReason} />
                     </span>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={{ color: "#16233B", fontWeight: 600, wordBreak: "break-word" }}>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-semibold break-words text-foreground">
                         {item.label}
-                        {item.value && <span style={{ color: "#5B6472", fontWeight: 400 }}> &middot; {item.value}</span>}
+                        {item.value && <span className="font-normal text-muted-foreground"> &middot; {item.value}</span>}
                       </div>
-                      {item.note && <div style={{ color: "#5B6472", wordBreak: "break-word" }}>{item.note}</div>}
+                      {item.note && <div className="break-words text-muted-foreground">{item.note}</div>}
                     </div>
                   </div>
                 ))
@@ -178,15 +175,15 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
 
       <PackChecklist rows={snapshot.checklist} title="What's identified to go into this pack" />
 
-      <form action={confirmGeneralPackReview} style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 10 }}>
+      <form action={confirmGeneralPackReview} className="mt-3.5 flex items-center gap-2.5">
         <input type="hidden" name="tender_id" value={tenderId} />
         <button
           type="submit"
-          style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+          className="min-h-10 cursor-pointer rounded-lg border-none bg-foreground px-4 text-sm font-semibold whitespace-nowrap text-white"
         >
           I&apos;ve reviewed this
         </button>
-        <span style={{ fontSize: 11, color: "#8A93A0" }}>Records that you looked at this list before generating a pack.</span>
+        <span className="text-[11px] text-muted-foreground">Records that you looked at this list before generating a pack.</span>
       </form>
     </div>
   );
