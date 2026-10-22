@@ -698,7 +698,7 @@ gaps were:
   a live Supabase session.
 - **Not covered by this pass - §6's biggest remaining item**: the no-signup interactive demo
   (sample company + sample tender, real capabilities with sample data) is a substantial net-new
-  build, not a polish fix - tracked separately.
+  build, not a polish fix - tracked separately, built in part 2 below.
 
 ## Spec §11: failure states, mobile layout, accessibility audit (2026-10-22)
 
@@ -759,3 +759,60 @@ many earlier passes this session.
   `node:test` sweep (all green). Screenshots at 390px confirm no overflow on every public route.
 - **This pass is mechanical and additive only** (6 new skeleton files, no logic/behavior changes) -
   safe to merge once CI/Vercel are green, same trusted pattern as the color-migration batches.
+
+## Spec §6 (part 2): no-signup interactive demo (2026-10-22)
+
+Builds spec §6's biggest remaining item: "a clearly labelled sample company + sample tender...
+real capabilities with sample data, not simulated success." New public route `/demo`, zero auth,
+server-rendered.
+
+- **Reused the SAME house demo identity, not a new invented customer**: "Mzansi Roads & Civils
+  (Pty) Ltd" is already the one seeded, signed-in demo/trial company (`lib/demoCompany.ts`,
+  `engine/seed_demo_company.py`, see "Demo company with realistic sample data" above) - its own N7
+  Western Cape tender (SANRAL, Assessing & building, 3 key positions) is the scenario this public
+  teaser is modelled on, so the name stays consistent whether a visitor is looking at the public
+  no-signup page or (separately) signs into the real seeded account. No new fictional company
+  invented.
+- **Real components, hand-built sample data, not a mockup** - `lib/demoData.ts` is the one place
+  invented values live (clearly a sample tender, never a real customer); every renderer around it
+  is the real one:
+  - `components/tt/requirement-row.tsx` (new): the quote/OCR-tag/status-chip pattern
+    `general-workspace.tsx` renders inline for returnables, pulled into its own small component so
+    the demo renders it through the real `ChipBadge`/`StatusChip`/`OCR_TAG` pieces rather than a
+    separate "looks similar" block. **Not yet wired back into `general-workspace.tsx`'s own inline
+    markup** - that file was only just stabilised by the color-migration pass, so full
+    de-duplication is left for a follow-up rather than risked here; flagging this honestly rather
+    than claiming the inline markup was replaced.
+  - `cv-compare.tsx` split into the existing DB-touching `CvCompare` wrapper (zero behaviour
+    change for the real tender workspace) and a new pure `CvCompareView` taking plain
+    `{filename, href}`/`{pdfHref, docxHref}` props - the demo calls `CvCompareView` directly with
+    sample file names and no download links ("Sample - download disabled in this demo").
+  - `cover-page-preview.tsx` gained an optional `company` prop (default: its existing live
+    `companies` read) - the one DB call in an otherwise pure-props component, now skippable with
+    injected sample data; the real tender workspace is unaffected (prop omitted there).
+  - `position-person-select.tsx` gained a `demo?: boolean` prop - "Confirm"/"Use"/the dropdown
+    send a visitor to `/signup` instead of writing `tender_pack_assignments.confirmed_person_id`
+    (no real `tenderPackId` exists behind a sample tender to write to).
+  - The suggestion itself is **not hand-written** - `lib/demoData.ts` calls the real
+    `suggestForPosition()`/`whySuggested()` with a crafted `CandidateScore[]`/`RoleTag[]`, so the
+    "why" text and the ranking are the real logic's own output for this input, not invented prose.
+  - "A caught missing/expired document" calls the real `expiryStatus()` with a past date
+    (`"2026-08-15"`) - the "Expired" tone is the function's genuine output, not a hand-picked chip.
+  - `PackChecklist` (already a pure, exported component, no changes needed) renders a hand-built
+    `ChecklistRow[]` including one `not_included` row with a real reason ("Needs a director's
+    signature - never guessed or auto-signed") - the homepage's own "Not included, and why" proof
+    point, demonstrated for real.
+- **Banner**: a persistent `bg-info/10` strip at the very top of the page ("Sample company and
+  tender. Nothing below is a real customer...") - not a dismissible footnote, matching the spec's
+  "clearly labelled" requirement; reuses the same `info` soft-tint token `DemoBanner` (the
+  signed-in equivalent) already established, rather than inventing a new banner style.
+- **Linked from the homepage** (spec §6.2: "link naturally into the product") - a third hero CTA,
+  "See a sample tender", alongside the existing "Start free"/"Try a free tool first".
+- Verified `npm run verify` (clean), `npx vitest run` (100/100, unchanged - no logic regressed),
+  full `node:test` sweep (11 files, all green). **Screenshots at 1440px and 390px of the real,
+  live `/demo` route** (not a temporary `/design` mock) - this is the one piece of the whole spec
+  rollout that's finally fully screenshot-verified rather than "needs a live session", since it's
+  genuinely public.
+- **Not built this pass**: wiring `RequirementRow` back into `general-workspace.tsx`'s own inline
+  markup (noted above); a monthly-rotating or multiple sample tenders (one scenario is enough to
+  demonstrate every required capability per spec's own checklist).

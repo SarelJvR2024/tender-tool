@@ -26,6 +26,7 @@ export function PositionPersonSelect({
   others,
   roleTitle,
   suggestions,
+  demo,
 }: {
   tenderId: string;
   tenderPackId: string;
@@ -35,12 +36,22 @@ export function PositionPersonSelect({
   others: PositionCandidate[];
   roleTitle: string | null;
   suggestions: PositionSuggestions;
+  // Set by the no-signup demo (spec §6): same real suggestion ranking and
+  // layout, but "Confirm"/"Use"/the dropdown send a visitor to sign up
+  // instead of writing tender_pack_assignments.confirmed_person_id - there
+  // is no real tenderPackId behind a sample tender to write to.
+  demo?: boolean;
 }) {
   const [isPending, startTransition] = useTransition();
-  const choose = (personId: string | null) =>
+  const choose = (personId: string | null) => {
+    if (demo) {
+      window.location.href = "/signup";
+      return;
+    }
     startTransition(() => {
       confirmPositionPerson(tenderId, tenderPackId, positionCode, personId);
     });
+  };
 
   const { suggestion, alternatives } = suggestions;
   const top = [suggestion, ...alternatives].filter((s): s is Suggestion => !!s);

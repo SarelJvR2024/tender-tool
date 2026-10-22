@@ -26,15 +26,25 @@ export async function CoverPagePreview({
   description,
   buyer,
   closingDate,
+  company: companyOverride,
 }: {
   contractNo: string | null;
   nraReference: string | null;
   description: string | null;
   buyer: string | null;
   closingDate: string | null;
+  // Set by the no-signup demo (spec §6) to skip the real company read below
+  // and render with a hand-built sample company instead - every other prop
+  // here is already plain data, so this is the one place this component
+  // reached for a live Supabase row itself.
+  company?: { legal_name: string | null; logo_storage_path: string | null };
 }) {
-  const supabase = await createClient();
-  const { data: company } = await supabase.from("companies").select("legal_name, logo_storage_path").maybeSingle();
+  let company = companyOverride ?? null;
+  if (!company) {
+    const supabase = await createClient();
+    const { data } = await supabase.from("companies").select("legal_name, logo_storage_path").maybeSingle();
+    company = data;
+  }
 
   return (
     <div id="cover-page" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
