@@ -82,6 +82,17 @@ detail in the meantime. Full QA re-verified after the separate design-system col
 batches (PRs #77/#79/#81) merged: `npm run verify` clean, full Python sweep (50 files) clean -
 those batches are unrelated to and don't conflict with either infrastructure PR.
 
+**Standing review pass, 2026-10-22 ~18:15 UTC: quiet pass, nothing new to flag beyond PR #80 still
+waiting.** Orientation found PR #88 (money design-system token) merged and a new PR #89 (SANRAL
+award-backfill bug fixes, unrelated engine area) opened by another session - neither touches any
+file PR #74 or this branch changed, confirmed by diffing `main` since this branch's own base, so no
+merge-in was needed this pass. PR #74 picked up the same two commits cleanly on its own last push
+and remains genuinely mergeable (base matches `main`'s tip exactly as of that push). The one thing
+actually worth repeating: **PR #80 has now been open about 4 hours with the real unblock ready** -
+the exact missing-migration list, a combined SQL file generated for the Supabase SQL Editor, and
+independent confirmation the Railway worker completes real jobs. Nothing in this file changes that
+fact each pass; it just needs Sarel's own review and a few minutes running that SQL file.
+
 **Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
 is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
 R2,990/Business R4,990/Enterprise - that one's correct") - the full reconciliation (migration `0083`,
