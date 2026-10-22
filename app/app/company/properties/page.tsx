@@ -103,10 +103,10 @@ function PropertyCard({ p, docs, urls }: { p: PropertyRow; docs: PropertyDocumen
       {types.map((t) => {
         const d = docs.find((x) => x.document_type === t.key);
         const status = !d?.storage_path
-          ? { label: "Not on file", bg: "#ECEEF1", color: "#5B6472" }
+          ? { label: "Not on file", tone: "muted" as const }
           : d.valid_until
             ? expiryStatus(d.valid_until)
-            : { label: "On file", bg: "#DCFCE7", color: "#15803D" };
+            : { label: "On file", tone: "success" as const };
         const old = d ? tooOld(d) : null;
         const name = d?.original_filename ?? filenameFromPath(d?.storage_path ?? null);
         return (

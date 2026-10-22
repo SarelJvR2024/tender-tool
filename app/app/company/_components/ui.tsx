@@ -85,7 +85,7 @@ export function Card({ title, id, children }: { title?: string; id?: string; chi
   );
 }
 
-/** A StatusChip (lib/dates.ts's expiryStatus - or an ad hoc {label,bg,color} of the same shape) rendered as a soft-tint token badge. */
+/** A StatusChip (lib/dates.ts's expiryStatus - or an ad hoc {label,tone} of the same shape) rendered as a soft-tint token badge. */
 export function Chip({ status }: { status: StatusChip }) {
   return <ChipBadge status={status} />;
 }
