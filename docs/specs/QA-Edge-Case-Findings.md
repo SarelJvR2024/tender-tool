@@ -3231,3 +3231,150 @@ already fails just that one job cleanly rather than the whole bridge, by the sam
 try/except. `claimed_at`'s `fromisoformat()` parse is unguarded but always fed a value this same
 code just wrote with `_now_iso()`, never client-supplied, so it can't actually receive a malformed
 string.
+
+### Finding 50 (CONFIRMED, FIXED, severe - a brand-new deadline-reminder email could silently never reach every company but one, for any tender tracked by more than one company)
+
+**Where:** `app/scripts/send-deadline-reminders.ts` (the "closing in 3 days / 24 hours" email,
+landed this same batch alongside PayFast/Resend) + `supabase/migrations/0079_sent_deadline_reminders.sql`'s
+`sent_deadline_reminders` table and `record_deadline_reminder_sent()` function.
+
+**What was tested:** `tenders` is the SHARED/PUBLIC table (`0001_init_schema.sql`'s own split -
+one daily-discovery feed serves every tenant) and `tender_packs` is `unique (company_id,
+tender_id)`, not `unique (tender_id)` - so more than one unrelated company routinely tracks the
+exact same public tender. The script's query (`tenders.select(..., tender_packs!inner(company_id))`)
+is a has-many embed: `tender.tender_packs` comes back as the array of EVERY company tracking that
+tender. The script read only `tender.tender_packs[0].company_id` and called
+`record_deadline_reminder_sent(tender_id, threshold)` once per TENDER - and 0079's own dedupe
+table had `unique (tender_id, threshold_days)`, with no `company_id` at all. Reproduced against a
+real local Postgres fixture matching 0079's exact schema (not a mock): seeded 2 real companies
+each with their own `tender_packs` row for the same tender, called
+`record_deadline_reminder_sent()` for the first - `true` (claims it) - then called it again for
+the same tender+threshold (what the second company's own claim attempt would do) - `false`
+("already sent"). The second company's 3-day/24-hour reminder would never fire, for either
+threshold, for as long as that tender stays open - not a corner case, the ordinary shape of this
+product's own multi-tenant discovery feed.
+
+**Why severe despite shipping with `RESEND_API_KEY` never set (so nothing has actually misfired
+yet):** `.github/workflows/deadline-reminders.yml` is already scheduled daily; the moment that key
+is added (which this exact batch's PayFast/Resend work makes imminent), every company sharing a
+tracked tender with another company silently loses this notification, permanently, per tender -
+with no `system_alerts`-style alerting at all to surface it (this script only `console.error`s,
+which nobody watches on a scheduled Action unless it exits non-zero, and this bug never makes it
+exit non-zero).
+
+**Fix:**
+1. New `supabase/migrations/0080_sent_deadline_reminders_per_company.sql`: adds `company_id` to
+   `sent_deadline_reminders`, re-scopes the unique constraint to `(tender_id, company_id,
+   threshold_days)`, and recreates `record_deadline_reminder_sent()` with a `p_company_id`
+   parameter. A pre-existing row (company_id NULL) is deleted rather than guessed at, per this
+   project's own "never guess" rule - confirmed necessary by applying the migration against a
+   fixture with a pre-existing row first (`alter ... set not null` failed loudly, as it should).
+2. Extracted the fan-out itself into a new, pure, unit-testable `deadlineReminderCandidates()` in
+   `lib/deadlineReminders.ts` (one entry per `(tender, company, threshold)`, not per tender), and
+   simplified `send-deadline-reminders.ts` to call it instead of its own inline filter/map chain.
+
+**Verified the regression test actually catches the bug:** new tests in
+`lib/deadlineReminders.spec.ts`. Reverted `deadlineReminderCandidates()` to the exact old `[0]`
+logic: the "not just the first" test failed with exactly the predicted `["company-a"]` instead of
+`["company-a", "company-b"]`; restored it: all 4 tests pass. Separately, verified the DB-level fix
+end to end against a real local Postgres (not just the TypeScript logic): applied 0079's exact
+schema, reproduced the second company's claim being blocked (`false`), applied 0080 on top
+(including the pre-existing-row delete path), and confirmed both companies can now independently
+claim + a re-claim of the same (tender, company, threshold) still correctly stays blocked.
+
+**Regression:** full app test suite (`npx vitest run`): 8 files, 77 tests, all pass.
+`npm run typecheck` (full repo) and `eslint` on every touched file: clean.
+
+### Finding 51 (CONFIRMED, FIXED, severe - a genuinely successful PayFast payment could be charged and then silently never activate the subscription)
+
+**Where:** `supabase/migrations/0078_company_subscriptions.sql`'s `start_payfast_checkout()` /
+`apply_payfast_itn()` pair, landed this same batch as Finding 50's deadline-reminder work. This
+is the exact function the migration's own header comment calls "the one place in this piece of
+work where correctness really matters (money-adjacent)".
+
+**What was tested:** `company_subscriptions` has `payfast_m_payment_id text unique` - ONE slot per
+company, overwritten unconditionally on every `start_payfast_checkout()` call, on the documented
+assumption that PayFast resends the SAME id on every recurring ITN. Nothing stops a second
+checkout before the first payment's ITN lands: `app/billing`'s `CheckoutLink` is a plain `<Link>`
+with no debounce and no "checkout in progress" state (confirmed by reading it), and PayFast ITNs
+are asynchronous by design (the route handler's own header comment: "PayFast expects a 200
+response and retries on anything else"). Reproduced against a real local Postgres running 0078's
+exact functions (not a mock): seeded one company, called `start_payfast_checkout('pro', ...)` ->
+payment A, then called it again (`'sanral_pro'`, simulating a double-click or a retry before A's
+ITN arrived) -> payment B, which overwrote `payfast_m_payment_id`. Payment A's own ITN then
+arrived with `payment_status=COMPLETE` (a real, successful charge) - `apply_payfast_itn()` raised
+`no subscription pending for this m_payment_id`, and the row stayed `status='trialing'`. The
+customer's card was genuinely charged; the subscription never activated.
+
+**Why severe:** there is no `system_alerts`-equivalent anywhere in the TypeScript codebase
+(confirmed by grep before writing this up) - the route handler only `console.error`s and still
+returns 200 (so PayFast never retries, believing the notification was received). A real charge
+with no activated subscription had **zero visibility anywhere in the product**, not even a log
+line anyone is likely to watch on a deployed Vercel app.
+
+**Fix:** new `supabase/migrations/0081_payfast_payment_attempts.sql` - an append-only
+`payfast_payment_attempts` table (company_id, m_payment_id, created_at) that `start_payfast_checkout()`
+now also writes to (in addition to, never instead of, the existing overwrite). `apply_payfast_itn()`
+falls back to this log when the primary UPDATE finds no row, but **only for a `COMPLETE`
+(successful) notification** - a stale `FAILED` notification for an abandoned, superseded attempt
+is deliberately left alone, since it carries no information worth acting on once the company has
+moved on, and rescuing it could wrongly downgrade an already-active paying customer whose later
+attempt already succeeded. Both functions keep their exact existing signatures - zero changes
+needed in `app/api/billing/payfast/itn/route.ts` or `app/api/billing/checkout/route.ts`.
+
+**Verified against a real database, not just by inspection** (migration applied cleanly on top of
+a fixture replicating 0078's exact schema): (1) reproduced the bug pre-fix as above; (2) applied
+0081, re-ran the identical two-checkout race, confirmed payment A's `COMPLETE` ITN now correctly
+sets `status='active'` with the right `payfast_token`, while `payfast_m_payment_id` stays
+correctly pointed at payment B (not corrupted); (3) ran payment B's own `COMPLETE` ITN
+afterwards - also applied correctly; (4) sent a late, stale `FAILED` notification for the long-
+abandoned payment A - confirmed the already-`active` subscription (now on payment B) was left
+completely untouched, proving the "don't rescue a stale failure" safety rule actually holds.
+
+**Regression:** no TypeScript file changed (the fix is entirely in the SQL migration layer, by
+design, to keep the blast radius contained) - full app suite (`npx vitest run`): 8 files, 77
+tests, unchanged and still passing.
+
+### Finding 52 (CONFIRMED, FIXED, moderate - closes the residual edge case a sibling pass flagged after Finding 51)
+
+**Where:** `apply_payfast_itn()`'s rescue path (migration `0081`, Finding 51). A sibling's
+independent standing-review verification of that fix (commit `df0892b`) read the actual function
+bodies (not just the commit message) and flagged a real residual gap, explicitly deferred rather
+than fixed on that pass: "the rescue path updates status/payfast_token/current_period_end but
+never touches payfast_m_payment_id itself. If a company starts checkout A (plan X), then checkout
+B (plan Y) before A's ITN arrives, and A's COMPLETE ITN is rescued, the subscription activates -
+but still under whatever plan company_subscriptions currently holds (B's selection)... If B then
+fails, apply_payfast_itn() would set past_due even though A's payment genuinely succeeded."
+
+**What was tested:** reproduced both halves against a real local Postgres running 0081's exact
+functions (not a mock, not just re-reading the SQL): started checkout A for 'pro'/'monthly',
+started checkout B for 'sanral_pro'/'yearly' before A's ITN arrived, delivered A's own `COMPLETE`
+ITN. Confirmed half 1 live: the subscription activated showing `sanral_pro`/`yearly` - the plan
+the customer did NOT pay for - while the plan they actually paid for ('pro'/'monthly') was nowhere
+recorded. Then delivered B's own later `FAILED` ITN and confirmed half 2 live: the subscription
+was downgraded to `past_due`, even though A's payment had genuinely succeeded and was still
+sitting there, unresolved and now invisible.
+
+**Fix:** `payfast_payment_attempts` (0081) gains `plan_tier`/`billing_interval` columns, recorded
+once at checkout time by `start_payfast_checkout()` (mirroring exactly what that attempt wrote to
+`company_subscriptions` at that moment - never changed afterward). The rescue path in
+`apply_payfast_itn()` now restores THIS attempt's own recorded plan (not whatever a later,
+still-unresolved attempt has since set) and - the key change - reclaims `payfast_m_payment_id`
+for the attempt it's rescuing. That second part closes half 2 for free: once reclaimed, a later
+`FAILED` notification for the attempt it superseded (B) no longer matches the primary `UPDATE...
+where payfast_m_payment_id = p_m_payment_id` at all, so it falls through to the same fallback path
+- which (unchanged from 0081) only ever rescues a `COMPLETE`, never a `FAILED` - and is correctly
+ignored.
+
+**Verified against a real database, all four scenarios, not just the two the sibling named:**
+applied migration `0082` on top of the same fixture; re-ran the identical two-checkout race -
+rescuing A's `COMPLETE` now correctly shows `pro`/`monthly`/`active` with `payfast_m_payment_id`
+reclaimed back to A; B's own later `FAILED` ITN no longer matches and is correctly ignored
+(subscription stays untouched at `pro`/`monthly`/`active`). Also re-confirmed Finding 51's own two
+original scenarios still hold under the new logic: both A and B eventually succeeding still ends
+with whichever one resolved LAST correctly "winning" (consistent, not a regression); and a late,
+stale `FAILED` for an attempt that's been properly superseded by a later SUCCESS stays correctly
+ignored.
+
+**Regression:** no TypeScript file changed (same contained, SQL-only blast radius as Finding 51)
+- full app suite (`npx vitest run`): 8 files, 77 tests, unchanged and still passing.

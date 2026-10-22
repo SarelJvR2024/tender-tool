@@ -37,34 +37,28 @@ export async function CoverPagePreview({
   const { data: company } = await supabase.from("companies").select("legal_name, logo_storage_path").maybeSingle();
 
   return (
-    <div id="cover-page" style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Cover page preview</div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+    <div id="cover-page" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+      <div className="mb-0.5 text-[15px] font-bold text-foreground">Cover page preview</div>
+      <div className="mb-3 text-xs text-muted-foreground">
         What the Outer Envelope and Envelope covers will print, generated fresh with the pack - read-only; see below for
         why.
       </div>
-      <div style={{ border: "1px dashed #E3E6EA", borderRadius: 9, padding: "20px 16px", textAlign: "center" }}>
-        <div style={{ fontSize: 11, color: "#8A93A0", marginBottom: 10 }}>
+      <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center">
+        <div className="mb-2.5 text-[11px] text-muted-foreground">
           {company?.logo_storage_path ? "Company logo" : "No logo on file"}
         </div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>OUTER ENVELOPE</div>
-        <div style={{ fontSize: 12, color: "#16233B", marginTop: 10 }}>The South African National Roads Agency SOC Limited</div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", marginTop: 10 }}>
-          CONTRACT {contractNo ?? "- no contract number on file"}
-        </div>
-        {nraReference && <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B" }}>{nraReference}</div>}
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", textTransform: "uppercase" }}>
-          {description ?? "- no description on file"}
-        </div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#16233B", marginTop: 10 }}>
+        <div className="text-[13px] font-bold text-foreground">OUTER ENVELOPE</div>
+        <div className="mt-2.5 text-xs text-foreground">The South African National Roads Agency SOC Limited</div>
+        <div className="mt-2.5 text-xs font-bold text-foreground">CONTRACT {contractNo ?? "- no contract number on file"}</div>
+        {nraReference && <div className="text-xs font-bold text-foreground">{nraReference}</div>}
+        <div className="text-xs font-bold text-foreground uppercase">{description ?? "- no description on file"}</div>
+        <div className="mt-2.5 text-xs font-bold text-foreground">
           TENDER CLOSES: {closingDate ? new Date(closingDate).toLocaleString() : "- no closing date on file"}
         </div>
-        <div style={{ fontSize: 11, color: "#5B6472", marginTop: 10 }}>Client: {buyer ?? "No client on file"}</div>
-        <div style={{ fontSize: 11, color: "#5B6472", marginTop: 6 }}>
-          TENDERER: {company?.legal_name ?? "No company name on file"}
-        </div>
+        <div className="mt-2.5 text-[11px] text-muted-foreground">Client: {buyer ?? "No client on file"}</div>
+        <div className="mt-1.5 text-[11px] text-muted-foreground">TENDERER: {company?.legal_name ?? "No company name on file"}</div>
       </div>
-      <div style={{ fontSize: 11, color: "#8A93A0", marginTop: 10 }}>
+      <div className="mt-2.5 text-[11px] text-muted-foreground">
         Everything above comes from this tender and your company record - nothing here can be typed over yet. The
         title wording and a chosen contact person (Sarel&apos;s own spec) aren&apos;t things the cover generator
         accepts as input today, so a box for either would change nothing about the real cover; see app/AGENTS.md for

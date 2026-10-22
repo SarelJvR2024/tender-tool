@@ -6,6 +6,45 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-22 ~06:17 UTC: quiet pass, full QA sweep clean.** Orientation found
+one routine design-token migration PR (#70, cover-page preview) merged since the last pass - no
+overlap with anything else in flight. Only PR #58 (marketing plan) remains open. Pricing-conflict
+flag is still unresolved, still Sarel's call. Full re-verification: `typecheck`/`lint` clean,
+`npx vitest run` (77/77), a real `rm -rf .next && npm run build` clean. Nothing new to flag.
+
+**Standing review pass, 2026-10-22 ~04:12 UTC: independently verified Finding 51's PayFast fix, one
+minor residual edge case noted (not blocking).** Orientation found Finding 51 fixed and merged since
+the last pass (`daaad75`) - a real, severe gap: a genuinely successful PayFast payment whose
+`m_payment_id` had been superseded by a second checkout attempt (no debounce on the "Subscribe"
+link) would raise "no subscription pending" and silently never activate, with zero alerting anywhere
+in the TypeScript codebase. Fixed by migration `0081`'s append-only `payfast_payment_attempts` log,
+letting `apply_payfast_itn()` rescue a superseded `COMPLETE` without ever rescuing a stale `FAILED`.
+
+Didn't just trust the commit message - re-verified independently: fresh 71-migration replay (clean)
+and the full real-Postgres tenant-isolation suite (237/237, confirms `0081` doesn't disturb RLS),
+plus read the actual SQL function bodies rather than only the comment explaining them.
+
+**One minor residual edge case, worth naming but not worth fixing now**: the rescue path updates
+`status`/`payfast_token`/`current_period_end` but never touches `payfast_m_payment_id` itself. If a
+company starts checkout A (plan X), then checkout B (plan Y) before A's ITN arrives, and A's `COMPLETE`
+ITN is rescued, the subscription activates - but still under whatever plan `company_subscriptions`
+currently holds (B's selection, since `start_payfast_checkout()` writes plan/interval immediately,
+before payment). If B then fails, `apply_payfast_itn()` would set `past_due` even though A's payment
+genuinely succeeded. This requires two *overlapping* checkout attempts for *different plans* inside
+one ITN round-trip - a real but narrow edge case, strictly rarer than the one Finding 51 already fixed
+(which just needed two attempts, same or different plan, in either order). Not fixed here - flagging
+for whoever next touches this function, not urgent enough to justify touching money-adjacent code on
+a standing review pass alone.
+
+**Standing review pass, 2026-10-22 ~02:12 UTC: quiet pass, full QA sweep clean.** Orientation found
+Finding 50 fixed and merged since the last pass (deadline-reminder emails silently skipping every
+company but one per tender - migration `0080`) plus a routine design-token migration PR (#69) - both
+from other sessions, no overlap with anything else in flight. Only PR #58 (marketing plan) remains
+open. Pricing-conflict flag from two passes ago is still unresolved, still Sarel's call. Full
+re-verification: `typecheck`/`lint` clean, `npx vitest run` (77/77), every `*.test.ts` individually
+clean, full Python `test_*.py` sweep clean, real `rm -rf .next && npm run build` clean. Nothing new
+to flag.
+
 **Standing review pass, 2026-10-22 ~00:12 UTC: quiet pass, full QA sweep clean.** Orientation found
 PR #63 (onboarding Step 3/4 Continue-button fix) and #67 (Experience design-token migration sub-PR
 5/5) merged since the last pass - both routine, no overlap with anything else in flight. Only PR #58
@@ -1044,6 +1083,125 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-third run): closed the residual PayFast edge case a sibling pass flagged on Finding 51
+
+Orientation: synced a sibling's independent re-verification of Finding 51 (`df0892b` - confirmed
+sound via a fresh migration replay and the real tenant-isolation suite, not just trusted), which
+flagged one real residual gap and explicitly deferred it ("not urgent enough to justify touching
+money-adjacent code on a standing review pass alone") rather than fix it on that pass. Picked that
+thread up myself rather than starting a fresh rotation area, since it's a direct, already-diagnosed
+continuation of my own Finding 51 fix and money-adjacent code with a known gap is worth closing
+promptly.
+
+**Finding 52 (CONFIRMED, FIXED, moderate).** The sibling's flagged gap: Finding 51's rescue path
+restored `status`/`payfast_token`/`current_period_end` but never `plan_tier`/`billing_interval`
+or `payfast_m_payment_id` itself. Reproduced both halves live against a real local Postgres:
+checkout A ('pro'/monthly) overlapped by checkout B ('sanral_pro'/yearly), A's delayed `COMPLETE`
+rescued correctly - but showing `sanral_pro`/yearly (what the customer did NOT pay for), with
+'pro'/monthly (what they DID pay for) recorded nowhere. Then B's own later `FAILED` ITN wrongly
+downgraded the whole subscription to `past_due`, even though A's successful payment was still
+sitting there, unresolved and now invisible.
+
+**Fix:** `payfast_payment_attempts` (0081) gains `plan_tier`/`billing_interval`, recorded once at
+checkout time, never changed afterward. The rescue path now restores THIS attempt's own recorded
+plan and - the key change - reclaims `payfast_m_payment_id` for the attempt it's rescuing. That
+second part closes half 2 for free: B's later `FAILED` no longer matches the primary path at all
+once A has reclaimed the id, so it correctly falls through to be ignored (the fallback, unchanged
+from 0081, only ever rescues `COMPLETE`).
+
+**Verified against a real database, all four scenarios:** the two the sibling named (now both
+correct - right plan restored, no wrongful downgrade) plus Finding 51's own original two
+scenarios re-confirmed still correct under the new logic (both attempts eventually succeeding;
+a stale `FAILED` for a truly-superseded-by-success attempt still ignored).
+
+**Regression:** no TypeScript file changed - full app suite (`npx vitest run`): 8 files, 77
+tests, unchanged.
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-second run): a genuinely successful PayFast payment could be charged and then silently never activate the subscription
+
+Orientation: rotated toward intake/onboarding first (classify_tender.py, process_onboarding_jobs.py,
+classify_documents.py) - thorough review, nothing new found (every edge case checked - unreadable
+workbooks, ambiguous-document tie-breaks, SetupError batch-halt behaviour matching
+extract_cv_fields.py's own established convention, zero-page/garbled-text PDFs, duplicate SA-ID
+handling - was already correctly guarded, several with their own prior findings' comments already
+documenting the fix). Pivoted to the other brand-new TypeScript area that landed in the same
+batch as Finding 50's deadline reminders: PayFast sandbox billing - exactly the "freshly landed,
+largely untested glue code" shape that rotation keeps finding real bugs in.
+
+**Finding 51 (CONFIRMED, FIXED, severe).** `company_subscriptions.payfast_m_payment_id` is one
+slot per company, overwritten unconditionally by every `start_payfast_checkout()` call - and
+nothing stops a second checkout before the first payment's ITN arrives (`app/billing`'s
+`CheckoutLink` is a plain link, no debounce, no in-progress state; PayFast ITNs are asynchronous
+by the route handler's own design). Reproduced against a real local Postgres running 0078's exact
+functions: started checkout A, started checkout B before A's ITN arrived (overwriting the tracked
+id), then delivered A's own `COMPLETE` ITN - `apply_payfast_itn()` raised "no subscription
+pending" and the row stayed `trialing`. The customer's card was genuinely charged; nothing
+anywhere in the product noticed (no `system_alerts`-equivalent exists in the TypeScript codebase
+at all - confirmed by grep - so this was invisible beyond a console log on a deployed Vercel app).
+
+**Fix:** new migration `0081_payfast_payment_attempts.sql` - an append-only
+`payfast_payment_attempts` log that `start_payfast_checkout()` now also writes to.
+`apply_payfast_itn()` falls back to it when the primary update finds no row, but only to rescue a
+`COMPLETE` notification - a stale `FAILED` notification for an abandoned, superseded attempt is
+deliberately left alone, so it can never wrongly downgrade an already-active subscription whose
+later attempt already succeeded. Both functions kept their exact signatures - zero TypeScript
+changes needed.
+
+**Verified against a real database at every step, not just by inspection:** reproduced the bug
+pre-fix; applied 0081 and re-ran the identical race - payment A's `COMPLETE` ITN now correctly
+activates the subscription without disturbing the `payfast_m_payment_id` already pointing at B;
+ran B's own `COMPLETE` ITN afterwards (also correct); sent a late, stale `FAILED` notification for
+the abandoned payment A and confirmed the now-`active` subscription was left completely untouched
+- proving the "don't rescue a stale failure" safety rule actually holds, not just reads well.
+
+**Regression:** full app suite (`npx vitest run`): 8 files, 77 tests, unchanged (the fix is
+entirely in the SQL migration layer, on purpose, to keep the blast radius contained - zero
+TypeScript files touched).
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-first run): a brand-new deadline-reminder email could silently never reach every company but one sharing a tracked tender
+
+Orientation: rotated to compliance/reminders. Synced a large batch of sibling work first (PayFast
+sandbox billing + Resend transactional email, the Company vault design-system migration, team
+invites/RLS work, a PR #63/#62 onboarding fix) - none of it touched the files below. The new
+Resend email work included a brand-new TypeScript deadline-reminder feature
+(`scripts/send-deadline-reminders.ts` + migration `0079`) landed this same batch, scheduled daily
+(`.github/workflows/deadline-reminders.yml`) but inert until `RESEND_API_KEY` is set - exactly the
+kind of untested, just-landed glue code this rotation looks for.
+
+**Finding 50 (CONFIRMED, FIXED, severe).** `tenders` is shared/public (one discovery feed, every
+tenant) and `tender_packs` is `unique (company_id, tender_id)` - more than one company routinely
+tracks the same tender. The script's Supabase embed (`tender_packs!inner(company_id)`) already
+returns every tracking company as an array, but the script read only `[0]` and called
+`record_deadline_reminder_sent` once per TENDER against a dedupe table keyed `(tender_id,
+threshold_days)` - no `company_id` at all. Reproduced against a real local Postgres fixture
+matching 0079's exact schema (not a mock, not just the TS logic): a second company's claim
+attempt for the same tender+threshold the first company already claimed came back `false` - its
+3-day/24-hour reminder would never fire, permanently, for as long as that tender stays open. Not a
+corner case - the ordinary shape of this product's own multi-tenant discovery feed - and once
+`RESEND_API_KEY` is added (imminent, same batch as the rest of the billing/email work), this
+starts silently losing a real notification for real companies with zero alerting (the script only
+logs to a console nobody watches, and never exits non-zero over this).
+
+**Fix:** new migration `0080_sent_deadline_reminders_per_company.sql` - `company_id` added to
+`sent_deadline_reminders`, the unique constraint re-scoped to `(tender_id, company_id,
+threshold_days)`, `record_deadline_reminder_sent()` recreated with a `p_company_id` parameter. A
+pre-existing (pre-0080) row can't be honestly attributed to one company, so it's deleted rather
+than guessed at (confirmed necessary: `set not null` failed loudly against a fixture seeded with
+one such row first, before the delete step was added). Extracted the fan-out itself into a new,
+pure `deadlineReminderCandidates()` in `lib/deadlineReminders.ts` (one entry per tender×company×
+threshold), simplifying the script to call it instead of its own inline chain.
+
+**Verified the regression test actually catches the bug, at two levels:** (1) TypeScript -
+`lib/deadlineReminders.spec.ts`'s new tests. Reverted `deadlineReminderCandidates()` to the exact
+old `[0]` logic: failed with exactly the predicted `["company-a"]` instead of `["company-a",
+"company-b"]`; restored it: clean. (2) Database - applied 0079's real schema to a local Postgres,
+reproduced the second company's claim coming back `false`, applied 0080 on top (including the
+pre-existing-row delete path), confirmed both companies can now independently claim and a
+re-claim of the same (tender, company, threshold) still correctly stays blocked.
+
+**Regression:** full app suite (`npx vitest run`): 8 files, 77 tests, all pass. `npm run
+typecheck` (whole repo) and `eslint` on every touched file: clean.
 
 ## This pass (2026-10-21, standing QA/robustness review - sixtieth run): a real, client-facing generated CV could print the literal word "None"
 
