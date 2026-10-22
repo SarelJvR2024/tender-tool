@@ -34,7 +34,7 @@ const TOOLS = [
   {
     href: "/tools/b6-estimator",
     title: "SANRAL B6 functionality score estimator",
-    blurb: "Estimate a key position's SANRAL functionality score from the real published Book 1 scoring matrices - no SANRAL competitor covers this at all.",
+    blurb: "Estimate a key position's SANRAL functionality score from the real published Book 1 scoring matrices.",
     badge: "B6",
   },
 ];
