@@ -10,19 +10,19 @@ export function OcrNotice({ documents }: { documents: { name: string; ocr?: Mani
   const ocrDocs = documents.filter((d) => d.ocr && d.ocr.pages_ocr.length > 0);
   if (ocrDocs.length === 0) return null;
   return (
-    <div style={{ background: "#EFF6FF", border: "1px solid #BFDBFE", borderRadius: 9, padding: "9px 12px", marginBottom: 12, fontSize: 12, color: "#1E3A8A" }}>
-      <div style={{ fontWeight: 700, marginBottom: 3 }}>Read by OCR from a scan - check against the original</div>
-      <div style={{ marginBottom: 4 }}>
+    <div className="mb-3 rounded-lg border border-info/20 bg-info/10 px-3 py-2.5 text-xs text-info">
+      <div className="mb-1 font-bold">Read by OCR from a scan - check against the original</div>
+      <div className="mb-1">
         {ocrDocs.length === 1 ? "This document has" : "These documents have"} no real text layer, so the text was read by OCR (character
         recognition). OCR can misread characters and numbers and can skip a line. Requirements marked &ldquo;read by OCR&rdquo; below came from
         this text.
       </div>
-      <ul style={{ margin: 0, paddingLeft: 18 }}>
+      <ul className="m-0 pl-[18px]">
         {ocrDocs.map((d) => {
           const o = d.ocr as ManifestOcr;
           const all = o.total_pages != null && o.pages_ocr.length === o.total_pages;
           return (
-            <li key={d.name} style={{ wordBreak: "break-word" }}>
+            <li key={d.name} className="break-words">
               {d.name}: {all ? `all ${o.pages_ocr.length} page${o.pages_ocr.length === 1 ? "" : "s"}` : `page${o.pages_ocr.length === 1 ? "" : "s"} ${o.pages_ocr.join(", ")}`}
               {o.mean_confidence != null ? `, OCR confidence ${Math.round(o.mean_confidence)}/100` : ""}
               {o.pages_failed.length > 0 ? ` - not read: ${o.pages_failed.map((f) => `p.${f.page}`).join(", ")}` : ""}

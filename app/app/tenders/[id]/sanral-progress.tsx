@@ -29,16 +29,10 @@ export function SanralProgress({ active }: { active: boolean }) {
   if (!active) return null;
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, fontSize: 12, color: "#B45309" }}>
+    <div className="mt-2.5 flex items-center gap-2 text-xs text-warning">
       <span
-        style={{
-          width: 12,
-          height: 12,
-          borderRadius: "50%",
-          border: "2px solid #F5D08A",
-          borderTopColor: "#B45309",
-          animation: "sanral-spin 0.8s linear infinite",
-        }}
+        className="size-3 rounded-full border-2 border-warning/30 border-t-warning"
+        style={{ animation: "sanral-spin 0.8s linear infinite" }}
       />
       <span>{STEPS[step]}</span>
       <style>{`@keyframes sanral-spin { to { transform: rotate(360deg); } }`}</style>

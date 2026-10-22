@@ -15,7 +15,7 @@ export function ReviewButton({ fieldKey }: { fieldKey: string }) {
 
   if (reviewed) {
     return (
-      <span style={{ fontSize: 12, fontWeight: 600, color: "#15803D", display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <span className="inline-flex items-center gap-1 text-xs font-semibold text-success">
         Looks right ✓
       </span>
     );
@@ -31,18 +31,7 @@ export function ReviewButton({ fieldKey }: { fieldKey: string }) {
           setReviewed(true);
         })
       }
-      style={{
-        padding: "5px 12px",
-        borderRadius: 7,
-        border: "1px solid #B45309",
-        background: "#FFFFFF",
-        color: "#B45309",
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: isPending ? "default" : "pointer",
-        opacity: isPending ? 0.6 : 1,
-        whiteSpace: "nowrap",
-      }}
+      className={`rounded-md border border-warning bg-card px-3 py-1 text-xs font-semibold whitespace-nowrap text-warning ${isPending ? "cursor-default opacity-60" : "cursor-pointer"}`}
     >
       Looks right
     </button>

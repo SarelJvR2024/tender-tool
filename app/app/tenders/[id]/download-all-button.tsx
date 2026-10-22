@@ -22,7 +22,7 @@ export function DownloadAllButton({ urls }: { urls: string[] }) {
           a.remove();
         }
       }}
-      style={{ minHeight: 32, padding: "0 12px", borderRadius: 7, background: "#16233B", color: "#FFFFFF", fontSize: 11, fontWeight: 700, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+      className="min-h-8 cursor-pointer rounded-md bg-foreground px-3 text-[11px] font-bold whitespace-nowrap text-white"
     >
       Download submission pack ({urls.length} file{urls.length === 1 ? "" : "s"})
     </button>
