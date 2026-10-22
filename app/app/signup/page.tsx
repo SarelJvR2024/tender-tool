@@ -150,7 +150,7 @@ export default function SignUpPage() {
     <AuthShell>
       <AuthCard>
         <h1 className="mb-1 font-display text-xl font-medium text-foreground">Create your account</h1>
-        <p className="mb-7 text-sm text-muted-foreground">Start tracking and preparing tenders</p>
+        <p className="mb-7 text-sm text-muted-foreground">14-day trial &middot; no card needed &middot; one full bid pack</p>
 
         <Button variant="outline" className="mb-2.5 h-11 w-full" onClick={() => signUpWith("google")}>
           Continue with Google

@@ -674,3 +674,28 @@ the dedicated color the spec actually calls for.
 - **Not touched this pass**: a broader sweep for every other Rand-amount display in the app (invoice-
   style line items, if any exist beyond the five surfaces checked here) - worth a follow-up pass if
   more turn up.
+
+## Spec §6 (part 1): explicit trial terms, B-BBEE caveat placement (2026-10-22)
+
+Small, high-confidence fixes from §6's own checklist - audited all four free-tool pages first; CIDB
+and B-BBEE already had correct SA-format Rand display (`formatZar`/`formatThousands` helpers, a
+pre-existing hydration-mismatch fix, not something this pass touched) and the intro paragraphs on
+every tool were already short (1-2 sentences before the interactive card), so the only concrete
+gaps were:
+
+- **`app/signup/page.tsx`** had no trial-terms statement anywhere - replaced the generic subtitle
+  with the spec's own exact wording: "14-day trial · no card needed · one full bid pack".
+- **B-BBEE tool's buyer-specific-goal caveat was buried in the page footer**, well below the result
+  box, the points table and the other-tools links - spec explicitly asks for it "next to the
+  result". Added a short version directly under the result box; trimmed the footer's citation note
+  (now just the regulation/gazette reference + "not legal advice") so the two don't duplicate the
+  same point twice on one page.
+- Checked the rest of §6's checklist against the live app: no "unlimited free tier" claim exists
+  anywhere (confirmed by grep), and the Founding Firms "Get in touch" CTA was already fixed in an
+  earlier pass (see that pass's own AGENTS.md entry) - left untouched.
+- Verified `npm run verify` (clean), `npx vitest run` (100/100, no logic touched), screenshots at
+  1440px of both changed pages (`/signup`, `/tools/bee-preference-points`) - both reachable without
+  a live Supabase session.
+- **Not covered by this pass - §6's biggest remaining item**: the no-signup interactive demo
+  (sample company + sample tender, real capabilities with sample data) is a substantial net-new
+  build, not a polish fix - tracked separately.
