@@ -827,3 +827,59 @@ server-rendered.
   sentence to the honest, customer-facing part ("nothing here can be typed over yet") and dropped
   the internal detail; the fuller reasoning stays in the component's own code comment for whoever
   next touches it.
+
+## Spec §10: analytics page (truthful only) - audit-first (2026-10-22)
+
+New `/analytics` page (nav item added between Bids and SANRAL schedules). Per the spec's own
+instruction ("only where reliable data exists... otherwise show an honest empty state, not sample
+charts presented as real"), the real work here was a dimension-by-dimension audit BEFORE writing
+any UI - every section below is annotated with what was actually found, not assumed:
+
+1. **Own bid activity & outcomes** - real. `lib/pipeline.ts`'s five real stages
+   (`found/bidding/submitted/won/lost`, migration 0021) aggregated into stage counts + win rate,
+   same calculation `app/pipeline/page.tsx` already does, not duplicated logic.
+2. **Upcoming deadlines** - real. Active-stage tenders (`found`/`bidding`/`submitted`) with a future
+   `closing_date`, sorted soonest first.
+3. **Win/loss trend over time** - real, and genuinely a TREND, not just a snapshot: `stage_changed_at`
+   (already stored per pack, migration 0021) lets the won/lost moves be bucketed by month. New pure
+   function `lib/analyticsLogic.ts`'s `buildWinLossTrend()` (6 unit tests in
+   `lib/analyticsLogic.spec.ts`, same split as `lib/savingsCounter.ts`/`lib/readiness.ts` - no
+   Supabase call inside it) deliberately keeps zero-decision months in the window rather than
+   skipping straight to the next month with data, so a quiet stretch reads as quiet, not compressed.
+4. **Submission values** - real. `tender_packs.submitted_price_zar` (already tracked for
+   `/pipeline`'s own "Total value being bid" stat) aggregated into total + median across every
+   tender with a recorded price.
+5. **Briefing attendance** - real, but thin: `tender_tasks` rows with `kind = 'briefing'` (one task
+   per tender, `status` either done or not) give a genuine "X of Y compulsory briefings confirmed
+   attended" count - not a rich attendance log (no record of WHO attended, just whether the task was
+   marked done), but a real, computed number, not invented.
+6. **Pricing trends & competitor/market insights** - real, and far richer than expected: a whole
+   already-built, tested market-pricing system (`lib/marketPricing.ts`, migrations 0053/0060/0062,
+   `engine/discovery/award_outcomes.py` scraping public eTenders/SANRAL award data) backs this, not
+   just `market-context.tsx`'s own per-tender view. Rolled up here across every tender this company
+   has bid on (not per-tender like `market-context.tsx`): `loadOutcomesForTenders()` matches this
+   company's own tenders against published award outcomes, `ownPosition()` places the company's own
+   recorded price on each matched register, `firmsMet()` lists which other bidders the company has
+   actually competed against (and how often each won), and `benchmark()` aggregates real
+   scale-free stats (lowest-bid-won rate, bidder-count percentiles, contract-size percentiles) -
+   gated by the module's own `MIN_SAMPLE` (5) so a company with too few matched outcomes gets the
+   honest empty state instead of a benchmark built on 1-2 data points. This is the one section where
+   skipping straight to the empty state would have been the WRONG call despite nothing like it
+   existing on a dedicated page before - the underlying data was real and already built, just never
+   surfaced outside a single tender's own workspace.
+7. **Savings figures from §9** - reused directly (`fetchSavingsCounterSummary()` +
+   `SavingsCounterCard`, no duplicated calculation), per the spec's own explicit instruction that
+   these appear on analytics too.
+- **Added a `money` tone to `components/tt/stat-card.tsx`** (`text-money`, the dedicated token from
+  the earlier money-token pass) for the Rand-amount stats this page needed - the shared component
+  didn't have one yet since nothing had asked for it on a `StatCard` specifically before.
+- Verified `npm run verify` (clean), `npx vitest run` (106/106 - 100 existing + 6 new), full
+  `node:test` sweep (11 files, all green). No screenshot - `/analytics` is signed-in only, needs a
+  live Supabase session this environment's placeholder credentials can't provide, same documented
+  limitation as every other authenticated-only page in this initiative.
+- **Not built, deliberately**: a standalone "pricing trends over time" chart beyond what
+  `loadMarketTrend()`/`market_trend_for_tags()` already computes (that RPC is itself segment-scoped
+  to one discipline/value-band at a time, designed for the per-tender context, not a cross-tender
+  rollup) - the company-wide benchmark above covers the spec's intent without duplicating that
+  RPC's own honesty-gating logic in a new shape; a dedicated historical price-trend chart for the
+  company's own most common discipline is a reasonable follow-up, not attempted here.
