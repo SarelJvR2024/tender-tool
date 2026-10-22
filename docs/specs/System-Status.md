@@ -1084,6 +1084,40 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-22, standing QA/robustness review - sixty-third run): closed the residual PayFast edge case a sibling pass flagged on Finding 51
+
+Orientation: synced a sibling's independent re-verification of Finding 51 (`df0892b` - confirmed
+sound via a fresh migration replay and the real tenant-isolation suite, not just trusted), which
+flagged one real residual gap and explicitly deferred it ("not urgent enough to justify touching
+money-adjacent code on a standing review pass alone") rather than fix it on that pass. Picked that
+thread up myself rather than starting a fresh rotation area, since it's a direct, already-diagnosed
+continuation of my own Finding 51 fix and money-adjacent code with a known gap is worth closing
+promptly.
+
+**Finding 52 (CONFIRMED, FIXED, moderate).** The sibling's flagged gap: Finding 51's rescue path
+restored `status`/`payfast_token`/`current_period_end` but never `plan_tier`/`billing_interval`
+or `payfast_m_payment_id` itself. Reproduced both halves live against a real local Postgres:
+checkout A ('pro'/monthly) overlapped by checkout B ('sanral_pro'/yearly), A's delayed `COMPLETE`
+rescued correctly - but showing `sanral_pro`/yearly (what the customer did NOT pay for), with
+'pro'/monthly (what they DID pay for) recorded nowhere. Then B's own later `FAILED` ITN wrongly
+downgraded the whole subscription to `past_due`, even though A's successful payment was still
+sitting there, unresolved and now invisible.
+
+**Fix:** `payfast_payment_attempts` (0081) gains `plan_tier`/`billing_interval`, recorded once at
+checkout time, never changed afterward. The rescue path now restores THIS attempt's own recorded
+plan and - the key change - reclaims `payfast_m_payment_id` for the attempt it's rescuing. That
+second part closes half 2 for free: B's later `FAILED` no longer matches the primary path at all
+once A has reclaimed the id, so it correctly falls through to be ignored (the fallback, unchanged
+from 0081, only ever rescues `COMPLETE`).
+
+**Verified against a real database, all four scenarios:** the two the sibling named (now both
+correct - right plan restored, no wrongful downgrade) plus Finding 51's own original two
+scenarios re-confirmed still correct under the new logic (both attempts eventually succeeding;
+a stale `FAILED` for a truly-superseded-by-success attempt still ignored).
+
+**Regression:** no TypeScript file changed - full app suite (`npx vitest run`): 8 files, 77
+tests, unchanged.
+
 ## This pass (2026-10-22, standing QA/robustness review - sixty-second run): a genuinely successful PayFast payment could be charged and then silently never activate the subscription
 
 Orientation: rotated toward intake/onboarding first (classify_tender.py, process_onboarding_jobs.py,

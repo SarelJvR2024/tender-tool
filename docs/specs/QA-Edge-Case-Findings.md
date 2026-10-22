@@ -3334,3 +3334,47 @@ completely untouched, proving the "don't rescue a stale failure" safety rule act
 **Regression:** no TypeScript file changed (the fix is entirely in the SQL migration layer, by
 design, to keep the blast radius contained) - full app suite (`npx vitest run`): 8 files, 77
 tests, unchanged and still passing.
+
+### Finding 52 (CONFIRMED, FIXED, moderate - closes the residual edge case a sibling pass flagged after Finding 51)
+
+**Where:** `apply_payfast_itn()`'s rescue path (migration `0081`, Finding 51). A sibling's
+independent standing-review verification of that fix (commit `df0892b`) read the actual function
+bodies (not just the commit message) and flagged a real residual gap, explicitly deferred rather
+than fixed on that pass: "the rescue path updates status/payfast_token/current_period_end but
+never touches payfast_m_payment_id itself. If a company starts checkout A (plan X), then checkout
+B (plan Y) before A's ITN arrives, and A's COMPLETE ITN is rescued, the subscription activates -
+but still under whatever plan company_subscriptions currently holds (B's selection)... If B then
+fails, apply_payfast_itn() would set past_due even though A's payment genuinely succeeded."
+
+**What was tested:** reproduced both halves against a real local Postgres running 0081's exact
+functions (not a mock, not just re-reading the SQL): started checkout A for 'pro'/'monthly',
+started checkout B for 'sanral_pro'/'yearly' before A's ITN arrived, delivered A's own `COMPLETE`
+ITN. Confirmed half 1 live: the subscription activated showing `sanral_pro`/`yearly` - the plan
+the customer did NOT pay for - while the plan they actually paid for ('pro'/'monthly') was nowhere
+recorded. Then delivered B's own later `FAILED` ITN and confirmed half 2 live: the subscription
+was downgraded to `past_due`, even though A's payment had genuinely succeeded and was still
+sitting there, unresolved and now invisible.
+
+**Fix:** `payfast_payment_attempts` (0081) gains `plan_tier`/`billing_interval` columns, recorded
+once at checkout time by `start_payfast_checkout()` (mirroring exactly what that attempt wrote to
+`company_subscriptions` at that moment - never changed afterward). The rescue path in
+`apply_payfast_itn()` now restores THIS attempt's own recorded plan (not whatever a later,
+still-unresolved attempt has since set) and - the key change - reclaims `payfast_m_payment_id`
+for the attempt it's rescuing. That second part closes half 2 for free: once reclaimed, a later
+`FAILED` notification for the attempt it superseded (B) no longer matches the primary `UPDATE...
+where payfast_m_payment_id = p_m_payment_id` at all, so it falls through to the same fallback path
+- which (unchanged from 0081) only ever rescues a `COMPLETE`, never a `FAILED` - and is correctly
+ignored.
+
+**Verified against a real database, all four scenarios, not just the two the sibling named:**
+applied migration `0082` on top of the same fixture; re-ran the identical two-checkout race -
+rescuing A's `COMPLETE` now correctly shows `pro`/`monthly`/`active` with `payfast_m_payment_id`
+reclaimed back to A; B's own later `FAILED` ITN no longer matches and is correctly ignored
+(subscription stays untouched at `pro`/`monthly`/`active`). Also re-confirmed Finding 51's own two
+original scenarios still hold under the new logic: both A and B eventually succeeding still ends
+with whichever one resolved LAST correctly "winning" (consistent, not a regression); and a late,
+stale `FAILED` for an attempt that's been properly superseded by a later SUCCESS stays correctly
+ignored.
+
+**Regression:** no TypeScript file changed (same contained, SQL-only blast radius as Finding 51)
+- full app suite (`npx vitest run`): 8 files, 77 tests, unchanged and still passing.
