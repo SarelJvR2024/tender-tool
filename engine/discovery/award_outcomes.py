@@ -61,6 +61,7 @@ Usage:
 import argparse
 import datetime
 import html
+import http.client
 import json
 import os
 import re
@@ -299,13 +300,20 @@ def parse_sanral_result_page(body):
 # ---------------------------------------------------------------- fetching
 
 def _get(url, headers, retries=3, backoff=2.0, timeout=60):
+    """A full backfill run against SANRAL's site crashed on an uncaught
+    http.client.IncompleteRead (2026-10-22 - the live site cut a response
+    short mid-chunk) - that exception type isn't a URLError/HTTPError/
+    TimeoutError/ConnectionError, so it wasn't retried, it killed the whole
+    multi-hour process. http.client.HTTPException covers IncompleteRead and
+    its siblings (BadStatusLine, RemoteDisconnected, etc.) the same way."""
     last_err = None
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=headers),
                                         timeout=timeout) as r:
                 return r.read()
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError) as e:
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, ConnectionError,
+                http.client.HTTPException) as e:
             last_err = e
             time.sleep(backoff * (attempt + 1))
     raise RuntimeError(f"{url}: failed after {retries} attempts: {last_err}")
@@ -383,7 +391,8 @@ def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=
                 rows, _, total_filtered = fetch_tenders(page_size=page_size, page_index=page,
                                                         list_slug=list_slug)
                 break
-            except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError) as e:
+            except (urllib.error.URLError, TimeoutError, ConnectionError, ValueError,
+                    http.client.HTTPException) as e:
                 err = e
                 time.sleep(2.0 * (attempt + 1))
         if rows is None:
