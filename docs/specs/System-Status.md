@@ -62,7 +62,13 @@ Word/re-upload path so nothing ships without a human reading and owning the word
   company's own named people with a role on file rather than the people specifically confirmed for
   this one tender (`tender_pack_assignments` is SANRAL-specific; general-family tenders have no
   equivalent concept yet) - a named, deliberate simplification, see the README. Not yet merged -
-  sitting on `feature/narrative-document-generator`, no PR opened yet.
+  sitting on `feature/narrative-document-generator`, now **PR #74** (draft, subscribed). Note for
+  anyone picking this up: this repo's CI (`app-ci.yml`/`bridge-worker-ci.yml`) only triggers on
+  `push` to `main`, not on `pull_request` - so PR #74 (and any other open PR) shows only the
+  Vercel preview deployment check, never a real CI run, until it's merged. Not a new problem this
+  pass introduced, and not fixed here (whether to add a `pull_request` trigger - cost of running
+  CI on every push to every branch vs. catching a regression before merge - is Sarel's call, not
+  a "small and safe" fix to make silently); flagged under "Open items for Sarel's own call" below.
 
 **Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
 is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
@@ -4482,6 +4488,19 @@ note added to the Built table above; nothing new to flag.
   - per-schedule compliance.
 - **Submission pack (Gap #12):** position confirmation now lives on the Key positions card, template upload on the Tender Workspace, and Envelope 2 is a separate PDF (documented convention). Still for Sarel: (a) is the Conventional Financial print right as "every visible sheet" (25 pages: input data, all 8 hours sheets incl. "not used" disciplines, All Hours, C2.4 FIN, Pricing Schedule, Summary Tendered Fee)? It follows Klipcorp's real RRM print, but no real completed *Conventional* financial print exists in the repo to compare; (b) should the Form of Offer also be in Envelope 1? (placed in Envelope 2 as in the real sample); (c) the signatory question above; (d) should one company's template upload be replaceable by another company working on the same tender (today: yes, recorded per row)?
 - **Deploying the bridge worker** (Railway Hobby, $5/mo, recommended; steps in `Automated-Fulfillment-Deployment.md`). It needs a Railway account plus the Supabase URL and service-role key, so it can only happen once a live Supabase project exists. A scheduled GitHub Action was considered and rejected, with evidence, in that doc (GitHub's Actions terms, 5-min floor, auto-disable after 60 idle days).
+- **CI only runs on push to `main`, never on a PR** (noticed this pass, not new): `app-ci.yml`/
+  `bridge-worker-ci.yml` both trigger on `push: branches: [main]` only - so every open PR (today:
+  #58, #74) shows a Vercel preview check but no real typecheck/lint/build/test run until after
+  merge. Every PR in this file's own history has instead been verified locally before push (as
+  this pass's own #74 was) - works, but means a regression is caught only if whoever's building
+  the PR actually runs the full suite by hand, not by CI structurally refusing a red merge. Adding
+  a `pull_request` trigger is the obvious fix; not made here since it changes CI cost/frequency
+  (runs on every push to every branch, not just `main`) and that tradeoff is Sarel's call.
+- **Narrative generator not wired into pack assembly** (this pass, `0085`): a company's final,
+  hand-edited cover letter/methodology statement (`narrative_documents.final_storage_path`) isn't
+  pulled into `assemble_pack.py`/`build_general_pack.py`'s compiled output yet - deliberately
+  flagged rather than built, since it needs a decision on where each document belongs in each
+  pack's own section order, and touches two separate pack-assembly engines.
 - **Pipeline board (item 10):** (a) should a tender auto-advance to "submitted" when its pack is ready? Not done: "pack ready" means a PDF exists, not that it was handed in (submission happens on the buyer's portal or by hand), so the only automatic move is found → bidding on a pack request. (b) Should "Prepare this tender" on Discovery count as bidding? Today it lands at found, since it's also used just to read a tender's requirements. (c) The Tenders tab (dashboard) still lists every shared tender with pack status; fold it into the board, or keep both?
 - **Scenario pass (`Engine-Scenario-Test-Results.md` "Open decisions"):** (1) ~~expired vault documents in a SANRAL pack~~ - **answered** (included, with a warning, plus a per-pack checklist - built); (2) ~~a project whose type exists only in the other SANRAL family~~ - **answered and built**: a project whose type a position's form doesn't offer is left off that position's Form B1 with a note (it was per position, not per family; `Hardcoded-Assumptions-Audit.md` §1); (3) ALT positions on SETUP get the same person as the primary slot - correct? (4) ~~manual tenders private~~ - **answered** (yes; confirmed and three leaks closed, `0032`); (5) ~~private documents on a shared tender~~ - **answered and built** (`0032`); (6) ~~OCR for scanned tenders~~ - **built as an experiment** (`OCR-Evaluation.md`, recommendation: keep with caveats) - keep or drop is Sarel's call.
 - **Tender notes + activity log (item 15):** (a) the activity log shows only the **latest** task status/assignee change and the **latest** pipeline move (`tender_tasks`/`tender_packs` overwrite in place, so a tender moved bidding → submitted → won shows "Submitted" and "Won", but not "Bidding"), and neither records **who** made that change. A full trail would need a small trigger-written events table on those two tables. That is the one place a "history" table would add real information. Worth it, or is latest-only enough? (b) People are named by their sign-in e-mail, because no display name exists for a user. Add a `company_members.display_name`? (c) Should notes be visible to the whole company (today), or only to people with a `tender_role` that can see that tender's work? (d) Pre-existing, found while testing: the `requested_by`/`created_by`/`uploaded_by` FKs to `auth.users` have no `on delete` action, so removing a user who ever requested anything fails at the database. The new `tender_comments.author_id` uses `set null`.
