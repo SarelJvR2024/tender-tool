@@ -12,9 +12,9 @@ const ROLE_LABEL: Record<string, string> = {
   employee: "Employee (restricted - your own CV and documents only)",
 };
 
-const CARD: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E5E1D5", borderRadius: 12, padding: "40px 36px", width: 380, maxWidth: "100%", boxSizing: "border-box", textAlign: "center", fontFamily: "system-ui, sans-serif" };
-const PRIMARY_BUTTON: React.CSSProperties = { width: "100%", minHeight: 44, padding: "0 16px", borderRadius: 8, border: "none", background: "#16233B", color: "#FFFFFF", fontSize: 14, fontWeight: 600, cursor: "pointer", boxSizing: "border-box" };
-const OAUTH_BUTTON: React.CSSProperties = { display: "block", width: "100%", minHeight: 44, padding: "0 16px", marginBottom: 10, borderRadius: 8, border: "1px solid #E5E1D5", background: "#FFFFFF", fontSize: 14, fontWeight: 600, color: "#16233B", textDecoration: "none", boxSizing: "border-box", lineHeight: "44px" };
+const cardClass = "box-border w-[380px] max-w-full rounded-xl border border-border bg-card px-9 py-10 text-center font-sans";
+const primaryButtonClass = "box-border min-h-11 w-full cursor-pointer rounded-lg border-none bg-foreground px-4 text-sm font-semibold text-white";
+const oauthButtonClass = "box-border mb-2.5 block min-h-11 w-full rounded-lg border border-border bg-card px-4 text-sm leading-11 font-semibold text-foreground no-underline";
 
 export default async function InvitePage({
   params,
@@ -38,12 +38,12 @@ export default async function InvitePage({
   if (!preview) {
     return (
       <AuthShell>
-        <div style={CARD}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>Invite not found</h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
+        <div className={cardClass}>
+          <h1 className="mb-2.5 text-lg font-bold text-foreground">Invite not found</h1>
+          <p className="m-0 text-[13px] leading-relaxed text-muted-foreground">
             This invite link isn&apos;t valid. Ask whoever sent it to send a new one.
           </p>
-          <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
+          <Link href="/login" className="mt-6 inline-block text-[13px] font-semibold text-foreground no-underline">
             &larr; Back to sign in
           </Link>
         </div>
@@ -54,16 +54,16 @@ export default async function InvitePage({
   if (preview.is_accepted || preview.is_expired) {
     return (
       <AuthShell>
-        <div style={CARD}>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: "#16233B", margin: "0 0 10px" }}>
+        <div className={cardClass}>
+          <h1 className="mb-2.5 text-lg font-bold text-foreground">
             {preview.is_accepted ? "Invite already used" : "Invite expired"}
           </h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: 0, lineHeight: 1.6 }}>
+          <p className="m-0 text-[13px] leading-relaxed text-muted-foreground">
             {preview.is_accepted
               ? "This invite has already been accepted. If that wasn't you, ask the company for a new one."
               : "This invite link has expired. Ask whoever sent it for a new one."}
           </p>
-          <Link href="/login" style={{ display: "inline-block", marginTop: 24, fontSize: 13, color: "#16233B", fontWeight: 600, textDecoration: "none" }}>
+          <Link href="/login" className="mt-6 inline-block text-[13px] font-semibold text-foreground no-underline">
             &larr; Back to sign in
           </Link>
         </div>
@@ -74,16 +74,16 @@ export default async function InvitePage({
   if (!user) {
     return (
       <AuthShell>
-        <div style={CARD}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Join {preview.company_name}</h1>
-          <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 28px" }}>
+        <div className={cardClass}>
+          <h1 className="mb-1 text-xl font-bold text-foreground">Join {preview.company_name}</h1>
+          <p className="mb-7 text-[13px] text-muted-foreground">
             You&apos;ve been invited as <strong>{ROLE_LABEL[preview.role] ?? preview.role}</strong>. Sign in or create an account to
             continue - you&apos;ll come straight back here to finish joining.
           </p>
-          <Link href={`/login?next=${encodeURIComponent(next)}`} style={OAUTH_BUTTON}>
+          <Link href={`/login?next=${encodeURIComponent(next)}`} className={oauthButtonClass}>
             Sign in
           </Link>
-          <Link href={`/signup?next=${encodeURIComponent(next)}`} style={{ ...OAUTH_BUTTON, marginBottom: 0 }}>
+          <Link href={`/signup?next=${encodeURIComponent(next)}`} className={`${oauthButtonClass} mb-0`}>
             Create an account
           </Link>
         </div>
@@ -93,15 +93,15 @@ export default async function InvitePage({
 
   return (
     <AuthShell>
-      <div style={CARD}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: "#16233B", margin: "0 0 4px" }}>Join {preview.company_name}</h1>
-        <p style={{ fontSize: 13, color: "#6B6758", margin: "0 0 20px" }}>
+      <div className={cardClass}>
+        <h1 className="mb-1 text-xl font-bold text-foreground">Join {preview.company_name}</h1>
+        <p className="mb-5 text-[13px] text-muted-foreground">
           You&apos;ll join as <strong>{ROLE_LABEL[preview.role] ?? preview.role}</strong>, signed in as {user.email}.
         </p>
-        {error && <p style={{ color: "#B91C1C", fontSize: 12, textAlign: "left", margin: "0 0 14px" }}>{error}</p>}
+        {error && <p className="mb-3.5 text-left text-xs text-destructive">{error}</p>}
         <form action={acceptInvite}>
           <input type="hidden" name="token" value={token} />
-          <button type="submit" style={PRIMARY_BUTTON}>
+          <button type="submit" className={primaryButtonClass}>
             Accept and join
           </button>
         </form>

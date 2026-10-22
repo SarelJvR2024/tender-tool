@@ -5,38 +5,31 @@ import { saveMyDetails, uploadMyCv, applyMyCvExtraction, discardMyCvExtraction }
 
 export const instant = false;
 
-const NAVY = "#16233B";
-const AMBER = "#D97706";
-const CREAM = "#F6F5F1";
-const BORDER = "#E5E1D5";
-const MUTED = "#6B6758";
-const FAINT = "#9A9684";
-
 const SAVED: Record<string, string> = {
   details: "Your details were saved.",
   cv: "CV uploaded.",
   extracted: "Fields saved to your record.",
 };
 
-const CV_UPLOAD_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
-  uploaded: { label: "Uploaded - used as-is", bg: "#DCFCE7", color: "#15803D" },
-  extraction_requested: { label: "Waiting for AI extraction", bg: "#FEF3C7", color: "#B45309" },
-  extracting: { label: "Reading the CV…", bg: "#FEF3C7", color: "#B45309" },
-  extracted: { label: "Fields read - see below", bg: "#DCFCE7", color: "#15803D" },
-  extraction_failed: { label: "Extraction failed", bg: "#FEE2E2", color: "#B91C1C" },
+const CV_UPLOAD_STATUS_LABEL: Record<string, { label: string; className: string }> = {
+  uploaded: { label: "Uploaded - used as-is", className: "bg-success/10 text-success" },
+  extraction_requested: { label: "Waiting for AI extraction", className: "bg-warning/10 text-warning" },
+  extracting: { label: "Reading the CV…", className: "bg-warning/10 text-warning" },
+  extracted: { label: "Fields read - see below", className: "bg-success/10 text-success" },
+  extraction_failed: { label: "Extraction failed", className: "bg-destructive/10 text-destructive" },
 };
 
-const GENERATED_CV_STATUS_LABEL: Record<string, { label: string; bg: string; color: string }> = {
-  requested: { label: "Requested", bg: "#FEF3C7", color: "#B45309" },
-  generating: { label: "Generating…", bg: "#FEF3C7", color: "#B45309" },
-  ready: { label: "Ready", bg: "#DCFCE7", color: "#15803D" },
-  failed: { label: "Failed", bg: "#FEE2E2", color: "#B91C1C" },
+const GENERATED_CV_STATUS_LABEL: Record<string, { label: string; className: string }> = {
+  requested: { label: "Requested", className: "bg-warning/10 text-warning" },
+  generating: { label: "Generating…", className: "bg-warning/10 text-warning" },
+  ready: { label: "Ready", className: "bg-success/10 text-success" },
+  failed: { label: "Failed", className: "bg-destructive/10 text-destructive" },
 };
 
-function Chip({ status }: { status?: { label: string; bg: string; color: string } }) {
+function Chip({ status }: { status?: { label: string; className: string } }) {
   if (!status) return null;
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: status.bg, color: status.color, whiteSpace: "nowrap" }}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${status.className}`}>
       {status.label}
     </span>
   );
@@ -44,20 +37,20 @@ function Chip({ status }: { status?: { label: string; bg: string; color: string 
 
 function Card({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: "#FFFFFF", border: `1px solid ${BORDER}`, borderRadius: 11, padding: "16px 18px", marginBottom: 14 }}>
-      {title && <h2 style={{ fontSize: 13, fontWeight: 600, color: FAINT, textTransform: "uppercase", letterSpacing: "0.04em", margin: "0 0 12px" }}>{title}</h2>}
+    <div className="mb-3.5 rounded-xl border border-border bg-card px-[18px] py-4">
+      {title && <h2 className="m-0 mb-3 text-[13px] font-semibold tracking-[0.04em] text-muted-foreground uppercase">{title}</h2>}
       {children}
     </div>
   );
 }
 
-const inputStyle: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 44, padding: "10px 12px", borderRadius: 8, border: `1px solid ${BORDER}`, fontSize: 14, fontFamily: "inherit", background: "#FFFFFF" };
+const inputClass = "box-border w-full min-h-11 rounded-lg border border-border bg-card px-3 py-2.5 font-sans text-sm text-foreground";
 
 function Field({ name, label, defaultValue, type = "text" }: { name: string; label: string; defaultValue?: string | null; type?: string }) {
   return (
     <div>
-      <label style={{ display: "block", fontSize: 11.5, fontWeight: 600, color: NAVY, marginBottom: 5 }}>{label}</label>
-      <input name={name} type={type} defaultValue={defaultValue ?? ""} style={inputStyle} />
+      <label className="mb-1.5 block text-[11.5px] font-semibold text-foreground">{label}</label>
+      <input name={name} type={type} defaultValue={defaultValue ?? ""} className={inputClass} />
     </div>
   );
 }
@@ -86,9 +79,9 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
   if (!person) {
     return (
       <AppShell>
-        <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", background: CREAM }}>
-          <h1 style={{ fontSize: 20, fontWeight: 700, color: NAVY }}>My CV</h1>
-          <p style={{ fontSize: 13, color: MUTED, lineHeight: 1.6 }}>
+        <div className="mx-auto box-border w-full max-w-[760px] flex-1 px-4 pt-5 pb-10">
+          <h1 className="text-xl font-bold text-foreground">My CV</h1>
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
             No roster record is linked to your account yet. Ask an owner or admin of your company to link your account to your
             CV record (Company &rarr; Team), or to send you an invite tied to your name.
           </p>
@@ -107,26 +100,26 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
 
   return (
     <AppShell>
-      <div style={{ flex: 1, padding: "20px 16px 40px", maxWidth: 760, width: "100%", margin: "0 auto", boxSizing: "border-box", background: CREAM }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, color: NAVY, margin: "0 0 6px" }}>My CV</h1>
-        <p style={{ fontSize: 13, color: MUTED, lineHeight: 1.55, marginBottom: 16 }}>
+      <div className="mx-auto box-border w-full max-w-[760px] flex-1 px-4 pt-5 pb-10">
+        <h1 className="mb-1.5 text-xl font-bold text-foreground">My CV</h1>
+        <p className="mb-4 text-[13px] leading-relaxed text-muted-foreground">
           Your own record only - {person.name}. Update your details, upload a CV, and see your generated CVs and project
           history below.
         </p>
         {saved && (
-          <div style={{ background: "#DCFCE7", border: "1px solid #86EFAC", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#15803D" }}>
+          <div className="mb-4 rounded-lg border border-success/30 bg-success/10 px-4 py-2.5 text-[13px] text-success">
             {SAVED[saved] ?? "Saved."}
           </div>
         )}
         {error && (
-          <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "11px 16px", marginBottom: 16, fontSize: 13, color: "#B91C1C" }}>
+          <div className="mb-4 rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
             Could not save: {error}
           </div>
         )}
 
         <Card title="My details">
           <form action={saveMyDetails} autoComplete="off">
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-3">
               <Field name="phone" label="Phone" defaultValue={person.phone} />
               <Field name="email" label="Email" defaultValue={person.email} />
               <Field name="ecsa_level" label="ECSA level" defaultValue={person.ecsa_level} />
@@ -139,8 +132,8 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
               <Field name="highest_institution" label="Institution" defaultValue={person.highest_institution} />
               <Field name="highest_graduated" label="Graduated" type="date" defaultValue={person.highest_graduated} />
             </div>
-            <div style={{ marginTop: 12 }}>
-              <button type="submit" style={{ minHeight: 44, padding: "0 18px", borderRadius: 9, background: AMBER, border: "none", color: "#FFFFFF", fontSize: 14, fontWeight: 600, cursor: "pointer" }}>
+            <div className="mt-3">
+              <button type="submit" className="min-h-11 cursor-pointer rounded-lg border-none bg-accent px-[18px] text-sm font-semibold text-accent-foreground">
                 Save changes
               </button>
             </div>
@@ -155,23 +148,23 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
               <form action={applyMyCvExtraction}>
                 <input type="hidden" name="extraction_id" value={ex.id} />
                 {fields.filter((f) => proposal[f]).map((f) => (
-                  <div key={f} style={{ display: "flex", alignItems: "center", gap: 10, padding: "6px 0" }}>
+                  <div key={f} className="flex items-center gap-2.5 py-1.5">
                     <input type="checkbox" name={`use_${f}`} defaultChecked />
-                    <div style={{ fontSize: 12, color: MUTED, width: 160, flexShrink: 0 }}>{f.replace(/_/g, " ")}</div>
-                    <input name={`f_${f}`} defaultValue={proposal[f]?.value ?? ""} style={{ ...inputStyle, minHeight: 36 }} />
+                    <div className="w-40 shrink-0 text-xs text-muted-foreground">{f.replace(/_/g, " ")}</div>
+                    <input name={`f_${f}`} defaultValue={proposal[f]?.value ?? ""} className={`${inputClass} min-h-9`} />
                   </div>
                 ))}
-                <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
-                  <button type="submit" style={{ minHeight: 40, padding: "0 16px", borderRadius: 9, background: AMBER, border: "none", color: "#FFFFFF", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+                <div className="mt-2.5 flex gap-2.5">
+                  <button type="submit" className="min-h-10 cursor-pointer rounded-lg border-none bg-accent px-4 text-[13px] font-semibold text-accent-foreground">
                     Save ticked fields
                   </button>
                 </div>
               </form>
-              <form action={discardMyCvExtraction} style={{ marginTop: 8 }}>
+              <form action={discardMyCvExtraction} className="mt-2">
                 <input type="hidden" name="extraction_id" value={ex.id} />
                 <ConfirmSubmitButton
                   confirmMessage="Discard this extraction? Nothing will be saved."
-                  style={{ minHeight: 36, padding: "0 14px", borderRadius: 9, background: "#FFFFFF", border: `1px solid ${BORDER}`, color: NAVY, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+                  className="min-h-9 cursor-pointer rounded-lg border border-border bg-card px-3.5 text-[12.5px] font-semibold text-foreground"
                 >
                   Discard
                 </ConfirmSubmitButton>
@@ -182,29 +175,29 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
 
         <Card title="Upload a CV">
           <form action={uploadMyCv} encType="multipart/form-data">
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-              <label style={{ fontSize: 13, color: NAVY }}>
+            <div className="flex flex-wrap items-center gap-3.5">
+              <label className="text-[13px] text-foreground">
                 <input type="radio" name="mode" value="as_is" defaultChecked /> Use this file as-is
               </label>
-              <label style={{ fontSize: 13, color: NAVY }}>
+              <label className="text-[13px] text-foreground">
                 <input type="radio" name="mode" value="ai_extract" /> Read my fields from it (AI-extract)
               </label>
             </div>
-            <div style={{ marginTop: 10 }}>
-              <input type="file" name="file" required accept=".pdf,.doc,.docx" style={{ fontSize: 12, color: NAVY }} />
+            <div className="mt-2.5">
+              <input type="file" name="file" required accept=".pdf,.doc,.docx" className="text-xs text-foreground" />
             </div>
-            <div style={{ marginTop: 10 }}>
-              <button type="submit" style={{ minHeight: 40, padding: "0 16px", borderRadius: 9, background: AMBER, border: "none", color: "#FFFFFF", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+            <div className="mt-2.5">
+              <button type="submit" className="min-h-10 cursor-pointer rounded-lg border-none bg-accent px-4 text-[13px] font-semibold text-accent-foreground">
                 Upload
               </button>
             </div>
           </form>
 
           {(uploads ?? []).length > 0 && (
-            <div style={{ marginTop: 14 }}>
+            <div className="mt-3.5">
               {(uploads ?? []).map((u) => (
-                <div key={u.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${BORDER}` }}>
-                  <div style={{ fontSize: 13, color: NAVY }}>{u.original_filename}</div>
+                <div key={u.id} className="flex items-center justify-between border-b border-border py-2">
+                  <div className="text-[13px] text-foreground">{u.original_filename}</div>
                   <Chip status={CV_UPLOAD_STATUS_LABEL[u.status]} />
                 </div>
               ))}
@@ -214,11 +207,11 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
 
         <Card title="My generated CVs (read-only)">
           {(generated ?? []).length === 0 ? (
-            <div style={{ fontSize: 13, color: MUTED }}>None generated yet.</div>
+            <div className="text-[13px] text-muted-foreground">None generated yet.</div>
           ) : (
             (generated ?? []).map((g) => (
-              <div key={g.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${BORDER}` }}>
-                <div style={{ fontSize: 13, color: NAVY }}>
+              <div key={g.id} className="flex items-center justify-between border-b border-border py-2">
+                <div className="text-[13px] text-foreground">
                   {g.format === "sanral_keyperson" ? "SANRAL key-person" : "World Bank"} - {g.detail}
                 </div>
                 <Chip status={GENERATED_CV_STATUS_LABEL[g.status]} />
@@ -229,12 +222,12 @@ export default async function MyCvPage({ searchParams }: { searchParams: Promise
 
         <Card title="My project history (read-only)">
           {(projects ?? []).length === 0 ? (
-            <div style={{ fontSize: 13, color: MUTED }}>No projects on file yet.</div>
+            <div className="text-[13px] text-muted-foreground">No projects on file yet.</div>
           ) : (
             (projects ?? []).map((p) => (
-              <div key={p.id} style={{ padding: "8px 0", borderBottom: `1px solid ${BORDER}` }}>
-                <div style={{ fontSize: 13, color: NAVY, fontWeight: 600 }}>{p.client_and_number}</div>
-                <div style={{ fontSize: 12, color: MUTED }}>
+              <div key={p.id} className="border-b border-border py-2">
+                <div className="text-[13px] font-semibold text-foreground">{p.client_and_number}</div>
+                <div className="text-xs text-muted-foreground">
                   {p.position_held ?? "—"} · {fmtDate(p.start_date)} – {fmtDate(p.end_date)}
                 </div>
               </div>

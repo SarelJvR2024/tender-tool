@@ -47,10 +47,10 @@ const toRow = (te: TargetedEnterprise): Row => ({
   tax_reference: te.tax_reference ?? "",
 });
 
-const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 10px", borderRadius: 8, border: "1px solid #E3E6EA", fontSize: 13, fontFamily: "inherit", background: "#FFFFFF", color: "#16233B" };
-const label: React.CSSProperties = { display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: "#16233B", fontWeight: 600, flex: "1 1 200px", minWidth: 0 };
-const hint: React.CSSProperties = { fontSize: 11, color: "#5B6472", fontWeight: 400 };
-const grid: React.CSSProperties = { display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 10 };
+const inputClass = "box-border w-full min-h-[38px] rounded-lg border border-border bg-card px-2.5 py-2 font-sans text-[13px] text-foreground";
+const labelClass = "flex min-w-0 flex-[1_1_200px] flex-col gap-1 text-xs font-semibold text-foreground";
+const hintClass = "text-[11px] font-normal text-muted-foreground";
+const gridClass = "flex flex-wrap gap-2.5";
 
 export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string; initial: SubcontractingPlan | null }) {
   const [mode, setMode] = useState<"" | "subcontract" | "waived_by_tender">(initial?.mode ?? "");
@@ -74,104 +74,104 @@ export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string
       <input type="hidden" name="tender_id" value={tenderId} />
       <input type="hidden" name="plan" value={payload} />
 
-      <fieldset style={{ border: "none", padding: 0, margin: "0 0 12px", display: "flex", flexDirection: "column", gap: 6 }}>
-        <legend style={{ fontSize: 13, fontWeight: 700, color: "#16233B", marginBottom: 6 }}>Your answer for this tender</legend>
-        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: "#16233B" }}>
-          <input type="radio" name="b7_mode" checked={mode === "subcontract"} onChange={() => setMode("subcontract")} style={{ width: 18, height: 18, marginTop: 1 }} />
+      <fieldset className="m-0 mb-3 flex flex-col gap-1.5 border-none p-0">
+        <legend className="mb-1.5 text-[13px] font-bold text-foreground">Your answer for this tender</legend>
+        <label className="flex items-start gap-2 text-[13px] text-foreground">
+          <input type="radio" name="b7_mode" checked={mode === "subcontract"} onChange={() => setMode("subcontract")} className="mt-px size-[18px]" />
           We will subcontract to Targeted Enterprises (fill in Form B7)
         </label>
-        <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, color: "#16233B" }}>
-          <input type="radio" name="b7_mode" checked={mode === "waived_by_tender"} onChange={() => setMode("waived_by_tender")} style={{ width: 18, height: 18, marginTop: 1 }} />
+        <label className="flex items-start gap-2 text-[13px] text-foreground">
+          <input type="radio" name="b7_mode" checked={mode === "waived_by_tender"} onChange={() => setMode("waived_by_tender")} className="mt-px size-[18px]" />
           This tender&apos;s Book 1 says Form B7 is not required
         </label>
       </fieldset>
 
       {mode === "waived_by_tender" && (
-        <label style={{ ...label, marginBottom: 10 }}>
+        <label className={`${labelClass} mb-2.5`}>
           Quote the Book 1 text (Form B7 page, or the Tender Data clause)
-          <span style={hint}>e.g. &quot;No sub-contracting requirement for all Entities and submission of form B7 is not required for this project&quot; - it is printed on the pack&apos;s checklist as the reason B7 is left out.</span>
-          <textarea value={quote} onChange={(e) => setQuote(e.target.value)} rows={3} required style={{ ...input, minHeight: 70 }} />
+          <span className={hintClass}>e.g. &quot;No sub-contracting requirement for all Entities and submission of form B7 is not required for this project&quot; - it is printed on the pack&apos;s checklist as the reason B7 is left out.</span>
+          <textarea value={quote} onChange={(e) => setQuote(e.target.value)} rows={3} required className={`${inputClass} min-h-[70px]`} />
         </label>
       )}
 
       {mode === "subcontract" && (
         <>
           {rows.map((r, i) => (
-            <div key={i} style={{ border: "1px solid #E3E6EA", borderRadius: 10, padding: "12px 14px", marginBottom: 10, background: "#FFFFFF" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>Targeted Enterprise {i + 1}</div>
+            <div key={i} className="mb-2.5 rounded-[10px] border border-border bg-card px-3.5 py-3">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-[13px] font-bold text-foreground">Targeted Enterprise {i + 1}</div>
                 {rows.length > 1 && (
-                  <button type="button" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#B91C1C", fontSize: 12, cursor: "pointer", padding: 0 }}>
+                  <button type="button" onClick={() => setRows((rs) => rs.filter((_, j) => j !== i))} className="cursor-pointer border-none bg-transparent p-0 text-xs text-destructive">
                     Remove
                   </button>
                 )}
               </div>
-              <div style={grid}>
-                <label style={label}>
+              <div className={gridClass}>
+                <label className={labelClass}>
                   Name
-                  <input value={r.to_be_identified ? B7_TBC_NAME : r.name} disabled={r.to_be_identified} onChange={(e) => set(i, { name: e.target.value })} style={{ ...input, color: r.to_be_identified ? "#5B6472" : "#16233B" }} />
+                  <input value={r.to_be_identified ? B7_TBC_NAME : r.name} disabled={r.to_be_identified} onChange={(e) => set(i, { name: e.target.value })} className={`${inputClass} ${r.to_be_identified ? "text-muted-foreground" : "text-foreground"}`} />
                 </label>
-                <label style={{ ...label, flex: "0 1 auto", flexDirection: "row", alignItems: "center", fontWeight: 400, alignSelf: "flex-end", minHeight: 38 }}>
-                  <input type="checkbox" checked={r.to_be_identified} onChange={(e) => set(i, { to_be_identified: e.target.checked })} style={{ width: 18, height: 18 }} />
+                <label className={`${labelClass} min-h-[38px] flex-[0_1_auto] flex-row items-center self-end font-normal`}>
+                  <input type="checkbox" checked={r.to_be_identified} onChange={(e) => set(i, { to_be_identified: e.target.checked })} className="size-[18px]" />
                   Not named yet - to be identified after award
                 </label>
               </div>
-              <div style={grid}>
-                <label style={label}>
+              <div className={gridClass}>
+                <label className={labelClass}>
                   EME or QSE
-                  <select value={r.size} onChange={(e) => set(i, { size: e.target.value as Row["size"] })} style={input}>
+                  <select value={r.size} onChange={(e) => set(i, { size: e.target.value as Row["size"] })} className={inputClass}>
                     <option value="">Choose…</option>
                     <option value="EME">EME</option>
                     <option value="QSE">QSE</option>
                   </select>
                 </label>
-                <label style={label}>
+                <label className={labelClass}>
                   B-BBEE status level
-                  <select value={r.bee_level} onChange={(e) => set(i, { bee_level: e.target.value })} style={input}>
+                  <select value={r.bee_level} onChange={(e) => set(i, { bee_level: e.target.value })} className={inputClass}>
                     <option value="">Choose…</option>
                     {[1, 2, 3, 4, 5, 6, 7, 8].map((l) => (
                       <option key={l} value={String(l)}>Level {l}</option>
                     ))}
                   </select>
                 </label>
-                <label style={label}>
+                <label className={labelClass}>
                   % black ownership
-                  <input inputMode="decimal" value={r.black_ownership_pct} onChange={(e) => set(i, { black_ownership_pct: e.target.value })} placeholder="e.g. 100" style={input} />
+                  <input inputMode="decimal" value={r.black_ownership_pct} onChange={(e) => set(i, { black_ownership_pct: e.target.value })} placeholder="e.g. 100" className={inputClass} />
                 </label>
               </div>
-              <div style={grid}>
-                <label style={label}>
+              <div className={gridClass}>
+                <label className={labelClass}>
                   % of contract price performed by it
-                  <input inputMode="decimal" value={r.pct_of_contract} onChange={(e) => set(i, { pct_of_contract: e.target.value })} style={input} />
+                  <input inputMode="decimal" value={r.pct_of_contract} onChange={(e) => set(i, { pct_of_contract: e.target.value })} className={inputClass} />
                 </label>
-                <label style={label}>
+                <label className={labelClass}>
                   % of contract price excl. provisional &amp; prime-cost sums
-                  <span style={hint}>Incl. site supervision staff. This is the % SANRAL counts towards the minimum.</span>
-                  <input inputMode="decimal" value={r.pct_excl_provisional} onChange={(e) => set(i, { pct_excl_provisional: e.target.value })} style={input} />
+                  <span className={hintClass}>Incl. site supervision staff. This is the % SANRAL counts towards the minimum.</span>
+                  <input inputMode="decimal" value={r.pct_excl_provisional} onChange={(e) => set(i, { pct_excl_provisional: e.target.value })} className={inputClass} />
                 </label>
               </div>
-              <div style={grid}>
-                <label style={label}>
+              <div className={gridClass}>
+                <label className={labelClass}>
                   Head office and other offices (address, contact numbers)
-                  <input value={r.head_office} onChange={(e) => set(i, { head_office: e.target.value })} style={input} />
+                  <input value={r.head_office} onChange={(e) => set(i, { head_office: e.target.value })} className={inputClass} />
                 </label>
-                <label style={label}>
+                <label className={labelClass}>
                   SARS tax reference number
-                  <input value={r.tax_reference} onChange={(e) => set(i, { tax_reference: e.target.value })} style={input} />
+                  <input value={r.tax_reference} onChange={(e) => set(i, { tax_reference: e.target.value })} className={inputClass} />
                 </label>
               </div>
-              <div style={{ ...grid, marginBottom: 0 }}>
-                <label style={label}>
+              <div className={`${gridClass} mb-0`}>
+                <label className={labelClass}>
                   Based in the project&apos;s province?
-                  <select value={r.in_project_province} onChange={(e) => set(i, { in_project_province: e.target.value as Row["in_project_province"] })} style={input}>
+                  <select value={r.in_project_province} onChange={(e) => set(i, { in_project_province: e.target.value as Row["in_project_province"] })} className={inputClass}>
                     <option value="">Not answered</option>
                     <option value="YES">Yes (attach proof of address)</option>
                     <option value="NO">No</option>
                   </select>
                 </label>
-                <label style={label}>
+                <label className={labelClass}>
                   A Consulting Engineering Firm (Conditions of Contract, Clause 1)?
-                  <select value={r.consulting_engineering_firm} onChange={(e) => set(i, { consulting_engineering_firm: e.target.value as Row["consulting_engineering_firm"] })} style={input}>
+                  <select value={r.consulting_engineering_firm} onChange={(e) => set(i, { consulting_engineering_firm: e.target.value as Row["consulting_engineering_firm"] })} className={inputClass}>
                     <option value="">Not answered</option>
                     <option value="YES">Yes</option>
                     <option value="NO">No</option>
@@ -180,25 +180,25 @@ export function SubcontractingPlanForm({ tenderId, initial }: { tenderId: string
               </div>
             </div>
           ))}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+          <div className="mb-2.5 flex flex-wrap items-center justify-between gap-2.5">
             {rows.length < B7_MAX_TES ? (
-              <button type="button" onClick={() => setRows((rs) => [...rs, { ...EMPTY }])} style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "#FFFFFF", color: "#16233B", border: "1px solid #E3E6EA", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+              <button type="button" onClick={() => setRows((rs) => [...rs, { ...EMPTY }])} className="min-h-9 cursor-pointer rounded-lg border border-border bg-card px-3.5 text-xs font-semibold text-foreground">
                 Add another Targeted Enterprise
               </button>
             ) : (
-              <span style={{ fontSize: 12, color: "#5B6472" }}>Form B7 holds at most {B7_MAX_TES}.</span>
+              <span className="text-xs text-muted-foreground">Form B7 holds at most {B7_MAX_TES}.</span>
             )}
-            <span style={{ fontSize: 12, color: total >= B7_POLICY_MIN_PCT ? "#15803D" : "#B45309", fontWeight: 600 }}>Total (excl. provisional sums): {Math.round(total * 100) / 100}%</span>
+            <span className={`text-xs font-semibold ${total >= B7_POLICY_MIN_PCT ? "text-success" : "text-warning"}`}>Total (excl. provisional sums): {Math.round(total * 100) / 100}%</span>
           </div>
-          <label style={{ ...label, marginBottom: 10 }}>
+          <label className={`${labelClass} mb-2.5`}>
             Comments (printed on Form B7)
-            <textarea value={comments} onChange={(e) => setComments(e.target.value)} rows={2} style={{ ...input, minHeight: 56 }} />
+            <textarea value={comments} onChange={(e) => setComments(e.target.value)} rows={2} className={`${inputClass} min-h-[56px]`} />
           </label>
         </>
       )}
 
       {mode && (
-        <button type="submit" style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" }}>
+        <button type="submit" className="min-h-10 cursor-pointer rounded-lg border-none bg-foreground px-4 text-sm font-semibold text-white">
           Save Form B7 answer
         </button>
       )}
