@@ -1,4 +1,4 @@
-import { AppShell } from "../../_components/AppShell";
+import { AppShellSkeleton } from "../../_components/AppShellSkeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TableRowsSkeleton } from "@/components/tt/skeletons";
 
@@ -9,7 +9,7 @@ import { TableRowsSkeleton } from "@/components/tt/skeletons";
  */
 export default function TeamLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[900px] flex-1 px-4 py-6">
         <div className="mb-4 space-y-2">
           <Skeleton className="h-6 w-40" />
@@ -19,6 +19,6 @@ export default function TeamLoading() {
         <Skeleton className="h-4 w-32 mb-2" />
         <Skeleton className="h-11 w-full max-w-[420px] rounded-lg" />
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

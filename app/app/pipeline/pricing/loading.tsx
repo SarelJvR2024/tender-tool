@@ -1,4 +1,4 @@
-import { AppShell } from "../../_components/AppShell";
+import { AppShellSkeleton } from "../../_components/AppShellSkeleton";
 import { TableRowsSkeleton } from "@/components/tt/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -8,7 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function PricingHistoryLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[1240px] flex-1 px-4 py-6 sm:px-8">
         <Skeleton className="h-4 w-16" />
         <Skeleton className="mt-2 mb-1 h-7 w-56" />
@@ -22,6 +22,6 @@ export default function PricingHistoryLoading() {
         <Skeleton className="mt-5 mb-2 h-5 w-32" />
         <TableRowsSkeleton rows={4} columns={6} />
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

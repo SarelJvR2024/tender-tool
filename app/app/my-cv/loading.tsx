@@ -1,4 +1,4 @@
-import { AppShell } from "../_components/AppShell";
+import { AppShellSkeleton } from "../_components/AppShellSkeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SectionCardSkeleton } from "@/components/tt/skeletons";
 
@@ -9,7 +9,7 @@ import { SectionCardSkeleton } from "@/components/tt/skeletons";
  */
 export default function MyCvLoading() {
   return (
-    <AppShell>
+    <AppShellSkeleton>
       <div className="mx-auto w-full max-w-[720px] flex-1 px-4 py-6">
         <div className="mb-4 space-y-2">
           <Skeleton className="h-6 w-32" />
@@ -18,6 +18,6 @@ export default function MyCvLoading() {
         <SectionCardSkeleton lines={4} className="mb-3.5" />
         <SectionCardSkeleton lines={3} />
       </div>
-    </AppShell>
+    </AppShellSkeleton>
   );
 }

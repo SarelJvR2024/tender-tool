@@ -29,7 +29,7 @@ export const NAV_ITEMS: NavItem[] = [
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/people", label: "People & CVs", icon: Users },
   { href: "/experience", label: "Experience", icon: GraduationCap },
-  { href: "/tools", label: "Tools", icon: Wrench },
+  { href: "/toolkit", label: "Tools", icon: Wrench },
 ];
 
 export const ADMIN_NAV_ITEM: NavItem = { href: "/admin", label: "Admin", icon: ShieldCheck };
@@ -45,7 +45,7 @@ export const EMPLOYEE_NAV_ITEMS: NavItem[] = [
   { href: "/my-cv", label: "My CV", icon: FileUser },
 ];
 
-/** /tenders/* drills down from Home; every other item matches its own prefix (so /pipeline/pricing still highlights Bids). */
+/** /tenders/* drills down from Home; every other item matches its own prefix (so /pipeline/pricing still highlights Bids). "Tools" points at /toolkit (spec v3 O03), not the public /tools catalogue those same calculators also render on. */
 export function isNavItemActive(pathname: string, href: string): boolean {
   if (href === "/dashboard") return pathname.startsWith("/dashboard") || pathname.startsWith("/tenders");
   return pathname === href || pathname.startsWith(`${href}/`);
