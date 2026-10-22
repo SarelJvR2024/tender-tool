@@ -1142,6 +1142,38 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-22, standing QA/robustness review - sixty-fourth run): the brand-new per-plan bid-pack quota could be bypassed entirely by requesting faster than a worker finishes
+
+Orientation: synced a large batch landing the FINAL pricing resolution (migration `0083`:
+Starter/Professional/Business/Enterprise, real `max_users`/`max_packs_per_month` usage gating -
+closing the "deliberately deferred" gap `app/AGENTS.md` had flagged across several prior passes)
+plus a routine design-token PR (#72). Went straight at the brand-new usage-gating functions -
+exactly the "just landed, largely untested" shape this rotation keeps finding real bugs in.
+
+**Finding 53 (CONFIRMED, FIXED, severe).** `company_can_request_pack()`/`company_packs_this_period()`
+(0083) only counted `status = 'ready'` (completed) bid packs - a job sitting `requested`/
+`generating` (the normal state between insert and an async worker finishing it, which can take
+well over the worker's own ~30s poll interval) was invisible to the gate. Reproduced against a
+real local Postgres running 0083's exact functions: a trialing company (one pack total, ever)
+requesting 5 different tenders' packs in a row got `true` all 5 times and all 5 jobs inserted; an
+active Starter plan (5/month) let 8 through. Each of those is real, chargeable work the moment a
+worker claims it (LibreOffice, Anthropic API calls) - a direct cost-control bypass on the exact
+feature the new pricing exists to meter, reachable by ordinary multi-tender usage, not a timing
+attack.
+
+**Fix:** new migration `0084_pack_quota_counts_in_flight_jobs.sql` - both functions now count
+`requested`/`generating`/`ready` together, excluding only `failed` (so a worker crash never costs
+the company its own quota).
+
+**Verified against a real database, including the "doesn't over-correct" case:** re-ran both
+flood scenarios post-fix - trial correctly capped at exactly 1, Starter at exactly 5 - then
+confirmed a legitimate retry after a failure still works (marking a job `failed` immediately
+re-opens the gate; one `ready` + one `failed` + three still `requested` out of a 5-cap still
+correctly allows a 6th request).
+
+**Regression:** no TypeScript file changed - full app suite (`npx vitest run`): 8 files, 80
+tests, unchanged.
+
 ## This pass (2026-10-22, standing QA/robustness review - sixty-third run): closed the residual PayFast edge case a sibling pass flagged on Finding 51
 
 Orientation: synced a sibling's independent re-verification of Finding 51 (`df0892b` - confirmed

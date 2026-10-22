@@ -3378,3 +3378,48 @@ ignored.
 
 **Regression:** no TypeScript file changed (same contained, SQL-only blast radius as Finding 51)
 - full app suite (`npx vitest run`): 8 files, 77 tests, unchanged and still passing.
+
+### Finding 53 (CONFIRMED, FIXED, severe - the brand-new per-plan bid-pack quota could be bypassed entirely by requesting faster than a worker finishes)
+
+**Where:** `company_can_request_pack()` / `company_packs_this_period()`, migration `0083`'s own
+usage-gating functions, landed this same batch as the new Starter/Professional/Business pricing -
+the one gate `requestSubmissionPack()` (`app/tenders/[id]/actions.ts`) and `requestJob()`'s
+`generate_pack` path (`app/tenders/[id]/general-actions.ts`) check before inserting a new
+`pack_generation_jobs` row.
+
+**What was tested:** `pack_generation_jobs.status` is `'requested' | 'generating' | 'ready' |
+'failed'` - a job sits in `requested`/`generating` between being inserted and actually finishing,
+asynchronously (the pack bridge workers poll every ~30s - `poll_loop.py`'s own default interval -
+and a real SANRAL/general pack can take meaningfully longer than that). Both gating functions
+counted ONLY `status = 'ready'` rows - a job still in flight was invisible to the gate, which kept
+answering "yes, you may request another" for every request made before the FIRST one ever
+completed. `requestSubmissionPack()` already blocks a second request for the SAME tender while
+one is queued, but nothing stops requesting DIFFERENT tenders' packs in a row - an entirely
+ordinary thing to do, not a contrived attack. Reproduced against a real local Postgres running
+`0083`'s exact functions (not a mock): a `trialing` company (one pack total, ever) requested packs
+for 5 different tenders in a row - `company_can_request_pack()` returned `true` all 5 times, and
+all 5 rows were inserted. The identical reproduction against an `active` Starter plan (5
+packs/month) let 8 requests through.
+
+**Why severe:** each of these jobs is real, chargeable work once a worker claims it (LibreOffice
+merging, Anthropic API calls for CV generation) - this is a direct cost-control and quota-bypass
+gap on the exact feature the new pricing tiers (`0083`) exist to meter, reachable with completely
+ordinary usage (pursuing several tenders at once), not a timing attack.
+
+**Fix:** new migration `0084_pack_quota_counts_in_flight_jobs.sql` - both functions now count
+`status in ('requested', 'generating', 'ready')`, excluding only `failed` (a failed job produced
+nothing and shouldn't cost the company its quota - same "never penalise the user for a system
+failure" rule this project already applies everywhere else, e.g. every engine bridge's
+`fail_stale_jobs()`).
+
+**Verified against a real database, including that the fix doesn't over-correct:** re-ran both
+flood scenarios after applying `0084` - the trial company now gets exactly 1 pack allowed (request
+2-5 correctly blocked), the Starter-plan company gets exactly 5 (requests 6-8 correctly blocked).
+Then confirmed a legitimate retry still works: marking the trial's one job `failed` immediately
+re-opened `company_can_request_pack()` to `true`; marking one of the Starter company's 5
+`requested` jobs `ready` and another `failed` still correctly allowed a 6th request (1 ready + 3
+still requested = 4 counted, under the cap of 5) - a worker failure never locks a company out of
+its own quota.
+
+**Regression:** no TypeScript file changed (same contained, SQL-only blast radius as Findings
+51/52) - full app suite (`npx vitest run`): 8 files, 80 tests, unchanged and still passing.
