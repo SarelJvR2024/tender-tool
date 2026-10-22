@@ -9,6 +9,10 @@ const TONE_CLASS = {
   success: "text-success",
   warning: "text-warning",
   destructive: "text-destructive",
+  // The dedicated money token (globals.css) - for a Rand-amount stat, per the
+  // locked §2 design system ("one dedicated accent colour, used only for
+  // Rand amounts"), added alongside the money-token pass this same session.
+  money: "text-money",
 } as const;
 
 /**
