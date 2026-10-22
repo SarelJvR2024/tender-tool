@@ -699,3 +699,63 @@ gaps were:
 - **Not covered by this pass - §6's biggest remaining item**: the no-signup interactive demo
   (sample company + sample tender, real capabilities with sample data) is a substantial net-new
   build, not a polish fix - tracked separately.
+
+## Spec §11: failure states, mobile layout, accessibility audit (2026-10-22)
+
+A systematic, 6-area audit against spec §11's own checklist, fixing only confirmed real gaps -
+most of this app's failure-state handling turned out to already be correct, built carefully across
+many earlier passes this session.
+
+1. **Loading skeletons** - 20 routes already had a `loading.tsx` (confirmed by listing every one).
+   6 genuine data-fetching routes were missing one: `/billing`, `/company`, `/company/team`,
+   `/invite/[token]`, `/my-cv`, `/tenders/new` - all real server components reading live Supabase
+   rows before rendering. Added skeletons for all six, reusing the exact existing kit
+   (`components/tt/skeletons.tsx`'s `SectionCardSkeleton`/`TableRowsSkeleton`, `components/ui/
+   skeleton.tsx`'s base `Skeleton`), shaped to roughly match each real page's layout, same
+   convention as `dashboard/loading.tsx`. Deliberately NOT added to `/login`, `/signup`, `/forgot-
+   password`, `/reset-password`, `/privacy`, `/design` (no server data fetch to skeleton) or `/tools/*`
+   (pure client-side calculators, no fetch at all).
+2. **Engine/AI failure states** - already correct. `general-workspace.tsx`'s extract-requirements
+   and pack-generation flows, and `submission-pack.tsx`'s pack flow, all show a short
+   `text-destructive` `error_message` line (never a raw stack trace) and keep the real generate/
+   retry form available on a `failed` status (re-submits the same server action - a genuine retry,
+   not a dead end). No fix needed.
+3. **Unsupported-template messaging** - already correct. `general-workspace.tsx`'s "No SBD/MBD
+   standard forms were found..." messages both end "(see below)", and what's below is real,
+   substantive next-step content (`OcrNotice`'s per-document OCR detail, `manifest.gaps`'s "what
+   Tender Ready can't do" list) - not a dead-end reference. No fix needed.
+4. **390px: tables/sidebar/overflow** - checked every `<table>` in the app (`market-context.tsx`,
+   `market-comparison.tsx`, `pipeline/pricing/page.tsx`, `pipeline/page.tsx`, the two free-tool
+   reference tables) plus the sidebar. Confirmed live via Playwright at 390px on every page reachable
+   without a session (`/`, `/tools`, `/tools/bee-preference-points`, `/tools/cidb-grade`, `/login`,
+   `/signup`, `/privacy`): zero horizontal page overflow anywhere (`document.documentElement.
+   scrollWidth` never exceeds `clientWidth`). Every table already sits inside an `overflow-x-auto`
+   container, so none of them ever bleed past the viewport - the "no horizontal overflow" half of
+   this requirement holds everywhere, not assumed. The separate "tables become cards" treatment is
+   already done for the two highest-traffic, genuinely row-per-entity tables (`pipeline/page.tsx`'s
+   list view and part of `pipeline/pricing/page.tsx`, both with their own 2026-10-21 "design-system
+   audit fix" comments explaining exactly this). **Left as a flagged, not-fixed gap**:
+   `market-context.tsx`'s `Register`/`SegmentTable` and `market-comparison.tsx`'s two tables are
+   comparison/cross-tabulation matrices (dynamic per-tender column counts, nested sub-labels per
+   cell) - converting these to a card layout is a real design call, not a mechanical fix (a card
+   stack can make an at-a-glance comparison WORSE, not better), and they already satisfy the literal
+   "no horizontal overflow" requirement via their scroll container. Flagging rather than forcing a
+   risky structural change to these files, consistent with this pass's own scope discipline.
+5. **Keyboard focus / touch targets / contrast** - already correct, checked rather than assumed.
+   Every `outline-none` usage in the app (13 files, searched directly) pairs with a
+   `focus-visible:ring-3 focus-visible:ring-ring/50` (or the `AvatarMenu`'s own `ring-2`) - no
+   unguarded occurrence found anywhere. `min-h-11`/`h-11` (44px) is the pervasive touch-target
+   convention already, confirmed by spot-check. `text-muted-foreground` on `bg-background`
+   contrast-computed by hand (not assumed): 5.51:1; on `bg-card` (pure white): 6.01:1 - both clear
+   WCAG AA passes (4.5:1 minimum).
+6. **Difficult-case testing** - exercised live, not read from source: typed an invalid B-BBEE input
+   (Pmin = 0) and confirmed the real instant, friendly `text-destructive` validation message
+   renders with no crash and the visible keyboard focus ring showing on the active field.
+   Expired-certificate/missing-document/unsupported-template/incomplete-pricing states all need a
+   live Supabase session to exercise directly - read their handling code instead (covered under
+   areas 2-3 above) rather than claiming they were exercised.
+
+- Verified `npm run verify` (clean), `npx vitest run` (100/100, unchanged - no logic touched), full
+  `node:test` sweep (all green). Screenshots at 390px confirm no overflow on every public route.
+- **This pass is mechanical and additive only** (6 new skeleton files, no logic/behavior changes) -
+  safe to merge once CI/Vercel are green, same trusted pattern as the color-migration batches.
