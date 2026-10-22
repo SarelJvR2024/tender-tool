@@ -883,3 +883,12 @@ any UI - every section below is annotated with what was actually found, not assu
   rollup) - the company-wide benchmark above covers the spec's intent without duplicating that
   RPC's own honesty-gating logic in a new shape; a dedicated historical price-trend chart for the
   company's own most common discipline is a reasonable follow-up, not attempted here.
+
+**One review-time fix, caught while checking this PR before merge, unrelated to the analytics build
+itself**: `nav-items.ts`'s "SANRAL schedules" sidebar entry carried `badge: "Roads & Civils"`,
+visible to every signed-in user in the main nav and its tooltip. Spec §5's positioning rules
+explicitly forbid this exact phrase anywhere user-facing ("Never use the name 'Roads & Civils'") -
+a different, earlier session's own AGENTS.md entry had already flagged "Roads & Civils" as a stale/
+confused brief term with no real product meaning when it turned up in a pricing-tier context, but
+this standing nav badge was missed. Removed rather than replaced with another invented segment
+name - the item's own label, "SANRAL schedules", already says what the feature is.
