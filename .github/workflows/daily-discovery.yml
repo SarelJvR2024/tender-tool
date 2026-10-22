@@ -1,0 +1,113 @@
+# Runs the national tender discovery watch (engine/discovery/watch_new_tenders.py)
+# once a day. This is the ONE script that populates /discovery -
+# discovered_opportunities (migration 0004) - which the app's own Discovery
+# page, the Pipeline board and the per-tender "fit" verdicts all read.
+#
+# Found 2026-10-22 (Sarel, after onboarding his real company): nothing in
+# this repo had ever scheduled this script. The always-on bridge worker
+# (engine/worker/run_bridges.py's own BRIDGES dict - see bridge-worker-ci.yml
+# for why THAT one is a container, not a GitHub Action) only runs CV/pack/
+# general/onboarding job-queue bridges, never discovery. No other workflow
+# ran it either (daily-digest.yml's own daily_digest.py scores the whole
+# feed independently for the EMAIL digest - confirmed by reading its own
+# header - it never writes discovered_opportunities). The result: every
+# company's own Discovery page only ever showed whatever a session happened
+# to run by hand, most recently 11 hours stale relative to this fix, and
+# showing nothing at all for any company that signed up after that.
+#
+# Same reasoning as daily-digest.yml for why a scheduled GitHub Action is
+# the right shape here, not the always-on worker: one short batch job, once
+# a day, not reacting to anything the instant it happens - exactly what
+# GitHub's own Actions terms want scheduled workflows used for, not the
+# "serverless application" shape they warn against.
+#
+# UNLIKE daily-digest.yml's own --mode live (confirmed read-only), this
+# script WRITES to the real database: it seeds discovered_opportunities and
+# discovery_seen_releases (via seed_supabase_opportunities.seed(), called
+# from main() itself - see watch_new_tenders.py's own module docstring) and
+# downloads every document on a newly-discovered, report-worthy release to
+# real Storage (discovered_opportunity_documents / the
+# 'discovered-tender-documents' bucket, migration 0071). It is still safe to
+# run daily and safe to re-run: diffed per-company against the seen store
+# (so a company is never re-reported the same release twice) and document
+# downloads are idempotent (a file already on record is never re-fetched -
+# see download_discovered_documents.py's own docstring).
+#
+# Needs the same 2 repository secrets daily-digest.yml already has
+# (Settings > Secrets and variables > Actions) - nothing new to add:
+#   NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+#
+# timeout-minutes: no full scheduled run's own wall-clock time is confirmed
+# yet (this workflow is new) - 90 is a generous estimate, not a measurement:
+# watch_new_tenders.py's own default --days 14 window is narrower than
+# daily_digest.py's separate 3000-row closed-tenders read (that one hit 31+
+# minutes and was still mid-run), but this script also downloads every
+# document on every report-worthy release across several government sources,
+# which daily_digest.py doesn't do at all. Worth tightening once the first
+# real scheduled run reports its actual time in the Actions log - flagged in
+# System-Status.md, not guessed at further here.
+#
+# A per-source read failure (one government site down, a parse error) does
+# NOT fail this job - gov_sources.py's own per-source try/except already
+# isolates that (confirmed by reading it), the same "one bad source doesn't
+# stop the whole run" discipline this engine uses throughout. Only a
+# genuine run-level failure (the script's own top-level exception) turns
+# this job red.
+#
+# Scheduled runs disable themselves after 60 days with no repository commits
+# (a GitHub Actions platform behaviour) - not a practical concern while this
+# repo is under active development.
+
+name: daily-discovery
+
+on:
+  schedule:
+    # 02:45 UTC = 04:45 SAST (no DST in South Africa) - an hour ahead of
+    # daily-digest.yml's own 03:45 UTC run, a few minutes off the hour on
+    # purpose (same reasoning as that workflow: GitHub runs a lot of
+    # on-the-hour cron jobs across every repo, which can delay a run
+    # scheduled for exactly :00/:30). No functional ordering dependency
+    # between the two (daily_digest.py scores independently), but running
+    # discovery first means the day's freshest data either way.
+    - cron: "45 2 * * *"
+  workflow_dispatch: {} # manual test run, e.g. right after adding the secrets above
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daily-discovery
+  cancel-in-progress: false # let a running scoring pass finish rather than cutting it off mid-write
+
+jobs:
+  discover:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          # No pip install step: watch_new_tenders.py's own full import
+          # chain (every gov_sources.py reader, assess_tender.py,
+          # seed_supabase_opportunities.py, download_discovered_documents.py)
+          # is pure standard library - confirmed by tracing every import in
+          # that chain against engine/worker/requirements.txt's own
+          # third-party list before writing this workflow. Nothing to
+          # install.
+
+      - name: Run the discovery watch (writes discovered_opportunities + downloads documents)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/discovery/watch_new_tenders.py --out discovery_report.json
+
+      - name: Upload the run's own report-worthy-releases JSON (debugging aid, kept a week)
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: discovery_report
+          path: discovery_report.json
+          retention-days: 7
+          if-no-files-found: ignore
