@@ -107,11 +107,11 @@ export function EditForm({ company }: { company: CompanyRow }) {
         </div>
       </VaultSection>
 
-      <VaultSection title="BEE & CIDB">
+      <VaultSection title="B-BBEE & CIDB">
         <div className={fieldGridClass}>
-          <NumberInput name="bee_level" label="BEE level" defaultValue={company.bee_level} />
+          <NumberInput name="bee_level" label="B-BBEE level" defaultValue={company.bee_level} />
           <NumberInput name="black_ownership_pct" label="Black ownership %" defaultValue={company.black_ownership_pct} step="0.1" />
-          <NumberInput name="bee_procurement_recognition_pct" label="BEE procurement recognition %" defaultValue={company.bee_procurement_recognition_pct} step="0.1" />
+          <NumberInput name="bee_procurement_recognition_pct" label="B-BBEE procurement recognition %" defaultValue={company.bee_procurement_recognition_pct} step="0.1" />
           <TextInput name="status" label="Status (e.g. QSE)" defaultValue={company.status} />
           <SelectInput
             name="bee_proof_type"

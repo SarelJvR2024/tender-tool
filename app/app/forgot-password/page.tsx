@@ -51,7 +51,7 @@ export default function ForgotPasswordPage() {
     return (
       <AuthShell>
         <AuthCard>
-          <h1 className="mb-2.5 font-display text-lg font-medium text-foreground">Check your email</h1>
+          <h2 className="mb-2.5 font-display text-lg font-medium text-foreground">Check your email</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
             If an account exists for <strong className="text-foreground">{email}</strong>, a password reset link is on its way.
           </p>
@@ -66,7 +66,7 @@ export default function ForgotPasswordPage() {
   return (
     <AuthShell>
       <AuthCard>
-        <h1 className="mb-1 font-display text-xl font-medium text-foreground">Reset your password</h1>
+        <h2 className="mb-1 font-display text-xl font-medium text-foreground">Reset your password</h2>
         <p className="mb-7 text-sm text-muted-foreground">We&apos;ll email you a link to set a new one</p>
 
         <form onSubmit={handleSubmit} noValidate>
