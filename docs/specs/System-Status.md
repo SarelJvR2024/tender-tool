@@ -6,6 +6,40 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+---
+
+## Resume here (live, mid-task handover - 2026-10-22 ~12:25 UTC)
+
+**If you're a new session picking this up**: Sarel just added `SUPABASE_DB_URL` as an environment
+secret (Settings → Database → Connect → Direct → URI, from the Supabase dashboard), specifically
+so the 9 migrations missing from the live project (see the entry directly below) can be applied.
+The session that asked for it couldn't see the secret mid-session (new environment secrets need a
+fresh session to load) - that's very likely why you're starting fresh now.
+
+**Do this, in order:**
+1. Confirm `SUPABASE_DB_URL` (and `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+   `SUPABASE_SERVICE_ROLE_KEY`) are visible (`env | grep -i supabase`).
+2. Apply migrations `0077` through `0085` (every `.sql` file in `app/supabase/migrations/` not yet
+   on the live project - see "Live infrastructure checked" below for exactly which ones and why)
+   to the real project (`swkglctgdceqrehbabfl`) via `psql "$SUPABASE_DB_URL" -f <file>`, in
+   filename order. Confirm the previously-missing tables now exist (cross-check against the live
+   REST API's `/rest/v1/` root the same way the entry below did) before touching anything else.
+3. Using `SUPABASE_SERVICE_ROLE_KEY`, run one disposable test job through the Railway worker (not
+   yet independently confirmed to be running - Sarel says it's set up) and clean it up afterward -
+   this is the one thing that tells Sarel whether CV/pack/narrative generation will actually
+   complete, not just queue.
+4. Report back to Sarel plainly: is the app ready for him to sign up as his own real company and
+   do a full onboarding walkthrough, yes or no, and exactly what (if anything) is still missing.
+
+**Do NOT** create a test company or sign up yourself - Sarel was explicit that onboarding is his
+to do once you confirm it's ready, not something to simulate on his behalf.
+
+Once this is done, delete this "Resume here" section (it's a live handover, not a permanent
+record) - fold anything worth keeping into a dated entry below, same as every other finding in
+this file.
+
+---
+
 **Live infrastructure checked for the first time, 2026-10-22 ~12:20 UTC - production code is 9
 migrations ahead of the live database.** Sarel confirmed a Supabase project
 (`swkglctgdceqrehbabfl`) and Vercel/Railway are already set up; this is the first pass with
