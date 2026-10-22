@@ -954,3 +954,31 @@ was merged (middleware matcher gap found and fixed in round 1; `Sidebar` `group`
 duplicate-`<h1>` a11y check in round 2; nav active-state and dead-reference sweep in round 3) - none
 surfaced a reason to believe the signed-in render itself is broken, but that's inference from a
 clean build and an identical component tree, not a screenshot of the real thing.
+
+### Hotfix: closed the middleware auth gap Batch 1 flagged but didn't fix
+
+The gap noted above as "out of scope" turned out to matter more than a one-line nice-to-have:
+`proxy.ts`'s `guarded` check and its `config.matcher` array never listed `/billing`, `/analytics`,
+`/sanral-schedules` or `/market-intelligence` at all, so middleware never ran for them - no redirect,
+not even an attempt. Each page itself has no independent auth check (`billing/page.tsx` reads
+`user?.id ?? ""` and just gets an empty membership back; the other three have no `auth.getUser()`
+call whatsoever), so a signed-out visitor got the full `AppShell` page render, not a 404 or a blank
+screen. `market-intelligence/page.tsx`'s own top-of-file comment records that this page was only
+approved to exist on the condition it's "shown only to signed-in, paying customers... never resold
+to or built for non-bidders" (tied to SANRAL's own data-reuse terms,
+`docs/specs/Award-Outcomes-Findings.md` §6) - an unauthenticated visitor loading it violated that
+condition directly, not just a UX nicety.
+
+Fixed by adding all four to both `guarded` and `matcher`, same pattern as every other protected
+route. This is access-restoring, not access-widening (the repo's own ground rule only forbids the
+latter without approval), so it went out as its own small PR rather than folding into Batch 1's.
+
+**Tested**: `npm run verify` (0 errors), `npx vitest run` (115/115), full `node:test` sweep (67/67),
+curl against a live dev server confirming all four now 307-redirect an unauthenticated request to
+`/login` while `/tools` and `/demo` stay public 200s, and that Batch 1's `/toolkit` still redirects
+correctly after the rebase. Three review rounds: round 1 confirmed no other allowlist/auth-gate
+mechanism exists elsewhere in the app that duplicates or conflicts with `proxy.ts`'s; round 2 and 3
+confirmed the new `/billing` matcher entry (`/billing/:path*`) does not and cannot match
+`/api/billing/checkout` or `/api/billing/payfast/itn` (different path prefix entirely -
+`/api/billing/...` does not start with `/billing`), so the PayFast checkout flow and webhook are
+untouched.
