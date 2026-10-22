@@ -4,6 +4,7 @@ import { Check, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { LogoLockup } from "./_components/Logo";
 import { buttonVariants } from "@/components/ui/button";
+import { SavingsCalculator } from "@/components/tt/savings-calculator";
 import { cn } from "@/lib/utils";
 
 // This is the product's landing page, not a static marketing page: a
@@ -366,6 +367,9 @@ export default async function Home() {
               </div>
             );
           })}
+        </div>
+        <div className="mt-8">
+          <SavingsCalculator />
         </div>
       </section>
 

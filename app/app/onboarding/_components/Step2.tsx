@@ -15,6 +15,8 @@ type CompanyCompliance = {
   bee_proof_expiry: string | null;
   cidb_grading: string | null;
   cidb_expiry: string | null;
+  savings_baseline_hours_per_tender: number;
+  savings_baseline_hourly_cost_zar: number;
 };
 
 function expiryTone(dateStr: string | null): { label: string; className: string } {
@@ -58,6 +60,29 @@ export function Step2({ company, error }: { company: CompanyCompliance; error?: 
             </Link>
             .
           </p>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/40 p-3">
+          <div className="mb-1 text-sm font-medium text-foreground">Time and cost saved</div>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Used to estimate how many hours and how much money Tender Ready saves you - your own numbers. Change this any time in Company vault.
+          </p>
+          <div className="grid grid-cols-2 gap-3">
+            <Field
+              name="savings_baseline_hours_per_tender"
+              label="Hours your team usually spends on one tender"
+              type="number"
+              step="1"
+              defaultValue={company.savings_baseline_hours_per_tender}
+            />
+            <Field
+              name="savings_baseline_hourly_cost_zar"
+              label="Cost per hour of that time (Rand)"
+              type="number"
+              step="1"
+              defaultValue={company.savings_baseline_hourly_cost_zar}
+            />
+          </div>
         </div>
 
         <Button type="submit" className="mt-2 h-11">

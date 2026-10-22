@@ -40,6 +40,27 @@ export function EditForm({ company }: { company: CompanyRow }) {
         </div>
       </VaultSection>
 
+      <VaultSection
+        id="savings-baseline"
+        title="Time and cost saved"
+        description="Used to estimate how many hours and how much money Tender Ready saves you (Home, final review, the pricing calculator) - your own numbers, not a universal average."
+      >
+        <div className={fieldGridClass}>
+          <NumberInput
+            name="savings_baseline_hours_per_tender"
+            label="Hours your team usually spends on one tender"
+            defaultValue={company.savings_baseline_hours_per_tender}
+            step="1"
+          />
+          <NumberInput
+            name="savings_baseline_hourly_cost_zar"
+            label="Cost per hour of that person's time (Rand)"
+            defaultValue={company.savings_baseline_hourly_cost_zar}
+            step="1"
+          />
+        </div>
+      </VaultSection>
+
       <VaultSection title="How we work">
         <Label htmlFor="how_we_work" className="mb-1.5 block">
           Who you are and how you approach a tender, in your own words
