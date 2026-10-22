@@ -256,6 +256,7 @@ def merge(key, parts, existing_first_seen=None):
     if winner_part and not amount:
         amount = next((p.get("winner_amount_zar") for p in ordered if p.get("winner_amount_zar")), None)
 
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     row = {
         "outcome_key": key,
         "match_keys": sorted({k for p in ordered for k in award_match_keys(p.get("reference")) + award_match_keys(p.get("title"))}),
@@ -276,10 +277,16 @@ def merge(key, parts, existing_first_seen=None):
         "source_urls": [p["source_url"] for p in ordered if p.get("source_url")],
         "attribution": first("attribution"),
         "parts": {p["source"]: p for p in ordered},
-        "refreshed_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "refreshed_at": now_iso,
+        # Always present (never a conditional key) - a batch upsert mixing
+        # new tenders (no existing row yet) with already-seen ones used to
+        # add this key only for the latter, and PostgREST's bulk insert
+        # rejects a JSON array whose objects don't all share the same keys
+        # (PGRST102 "All object keys must match"). Seen live, 2026-10-22:
+        # a chunk of 150 portal rows crashed as soon as it contained even
+        # one genuinely new tender alongside already-known ones.
+        "first_seen_at": existing_first_seen or now_iso,
     }
-    if existing_first_seen:
-        row["first_seen_at"] = existing_first_seen
     cats = [c for c in assess_tender.categorize(row["title"], None) if not c.startswith("uncategorized")]
     row["categories"] = cats
 
@@ -310,9 +317,24 @@ def merge(key, parts, existing_first_seen=None):
         row["median_bid_zar"] = round(statistics.median(s), 2)
         if wi is not None and bidders[wi]["amounts"] and bidders[wi]["amounts"][0]["amount_zar"]:
             wa = bidders[wi]["amounts"][0]["amount_zar"]
-            row["winner_rank"] = 1 + sum(1 for a in s if a < wa)
-            row["winner_vs_median"] = round(wa / row["median_bid_zar"], 4)
-            row["lowest_bid_won"] = row["winner_rank"] == 1
+            # A real backfill run crashed the whole store() on a numeric
+            # overflow: without_typos() (above) screens the general bid
+            # list before the median is taken, but never the WINNER's own
+            # amount - a typo'd winner amount (e.g. a missing decimal, an
+            # OCR/parsing slip) could still divide out to a ratio
+            # winner_vs_median's own numeric(8,4) column (0053) can't hold
+            # (max ~9999.9999), and with fewer than 3 bids without_typos()
+            # doesn't filter anything at all, so this isn't only a
+            # never-happens case. Same OUTLIER_FACTOR bound as the general
+            # list, applied to the winner's own amount specifically.
+            if row["median_bid_zar"] / OUTLIER_FACTOR <= wa <= row["median_bid_zar"] * OUTLIER_FACTOR:
+                row["winner_rank"] = 1 + sum(1 for a in s if a < wa)
+                row["winner_vs_median"] = round(wa / row["median_bid_zar"], 4)
+                row["lowest_bid_won"] = row["winner_rank"] == 1
+            else:
+                notes.append(f"The winner's own recorded amount is more than {OUTLIER_FACTOR}x away from the "
+                             "median bid (most likely a typing error on the register) - left out of the "
+                             "field-wide numbers, shown as published.")
     if not row["competitive"]:
         notes.append(f"The buyer recorded this as '{row['procurement_type']}' - no open price competition.")
     row["bidders"] = bidders
@@ -383,6 +405,8 @@ def main():
     ap.add_argument("--department", type=int, default=None)
     ap.add_argument("--sanral-lists", default="awarded,closed")
     ap.add_argument("--sanral-limit", type=int, default=40)
+    ap.add_argument("--sanral-start-page", type=int, default=1,
+                     help="resume a chunked backfill from this page (page_size 50) instead of the newest tender")
     ap.add_argument("--dry-run", action="store_true", help="print a summary and the rows, write nothing")
     ap.add_argument("--out", default=None, help="with --dry-run: write the merged rows here")
     args = ap.parse_args()
@@ -393,10 +417,11 @@ def main():
     if args.fetch:
         report = {}
         if args.source in ("portal", "both"):
-            raw, _, _ = ao.fetch_portal_awarded(args.limit, args.department)
+            raw, _, _, _ = ao.fetch_portal_awarded(args.limit, args.department)
             report["portal"] = {"records": [ao.normalize_portal_award(r) for r in raw]}
         if args.source in ("sanral", "both"):
-            report["sanral"] = {k: ao.fetch_sanral_outcomes(k.strip(), args.sanral_limit)
+            report["sanral"] = {k: ao.fetch_sanral_outcomes(k.strip(), args.sanral_limit,
+                                                            start_page=args.sanral_start_page)
                                 for k in args.sanral_lists.split(",") if k.strip()}
         parts += parts_from_report(report)
     if not parts:
