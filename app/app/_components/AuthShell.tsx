@@ -1,5 +1,5 @@
 import { FileCheck2, AlarmClock, ShieldCheck } from "lucide-react";
-import { Logo } from "./Logo";
+import { Logo, LogoLockup } from "./Logo";
 import { StatusBadge } from "@/components/tt/status-badge";
 
 const PROOF_POINTS = [
@@ -63,13 +63,12 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
             photo, not a gradient blob, just the product's own shape oversized
             and cropped into the corner. */}
         <div className="pointer-events-none absolute -bottom-24 -right-24 opacity-[0.07]">
-          <Logo size={420} variant="light" />
+          <Logo size={420} />
         </div>
 
         <div className="relative z-10">
-          <div className="mb-10 flex items-center gap-3">
-            <Logo size={36} variant="light" />
-            <span className="text-lg font-semibold text-white">Tender Ready</span>
+          <div className="mb-10 flex items-center">
+            <LogoLockup height={32} surface="dark" />
           </div>
 
           <h1 className="mb-6 max-w-[420px] font-display text-[28px] font-medium leading-[1.25] text-white">
