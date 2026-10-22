@@ -72,7 +72,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
   if (error) {
     console.error("tender_watched_documents select failed", tenderId, error);
     return (
-      <div style={{ background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "12px 16px", marginBottom: 16, fontSize: 12, color: "#B91C1C" }}>
+      <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3 text-xs text-destructive">
         Couldn&apos;t check this tender for addenda and updates - try refreshing. If it keeps happening, let us know.
       </div>
     );
@@ -84,20 +84,20 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
   const addenda = updates.filter((u) => u.kind === "addendum").length;
 
   return (
-    <div id="tender-updates" style={{ background: "#FFFFFF", border: `2px solid ${top.border}`, borderRadius: 12, padding: "16px 18px", marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>This tender has been updated since it was found</div>
-        <span style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: top.bg, color: top.color, whiteSpace: "nowrap" }}>
+    <div id="tender-updates" className={`mb-4 rounded-xl border-2 bg-card px-[18px] py-4 ${top.cardBorderClassName}`}>
+      <div className="flex flex-wrap items-start justify-between gap-2.5">
+        <div className="text-[15px] font-bold text-foreground">This tender has been updated since it was found</div>
+        <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${top.badgeClassName}`}>
           {updates.length} new document{updates.length === 1 ? "" : "s"}
           {addenda > 0 ? ` · ${addenda} addend${addenda === 1 ? "um" : "a"}` : ""}
         </span>
       </div>
-      <div style={{ fontSize: 12, color: "#5B6472", margin: "4px 0 10px" }}>
+      <div className="my-1 mb-2.5 text-xs text-muted-foreground">
         The buyer published these after this tender was first found. Read each one before you submit - an addendum
         usually has to be acknowledged in the bid.
       </div>
 
-      <ol style={{ listStyle: "none", margin: 0, padding: 0 }}>
+      <ol className="m-0 list-none p-0">
         {updates.map((u) => {
           const style = URGENCY_STYLE[u.urgency ?? "info"];
           const changes = u.changes ?? {};
@@ -105,18 +105,18 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
           const applied = appliedLine(changes.closing_date);
           const briefing = changes.briefing;
           return (
-            <li key={u.id} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0" }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
-                <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 700, background: style.bg, color: style.color }}>
+            <li key={u.id} className="border-t border-border py-2.5">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${style.badgeClassName}`}>
                   {u.kind ? UPDATE_KIND_LABEL[u.kind] : "New document"} · {style.label}
                 </span>
-                <span style={{ fontSize: 11, color: "#8A93A0" }}>
+                <span className="text-[11px] text-muted-foreground">
                   Found {formatActivityTime(u.first_seen_at)} · {u.source === "sanral_page" ? "SANRAL tender page" : "eTenders"}
                 </span>
               </div>
-              <div style={{ fontSize: 13, color: "#16233B", fontWeight: 600, wordBreak: "break-word" }}>
+              <div className="text-[13px] font-semibold break-words text-foreground">
                 {u.url ? (
-                  <a href={u.url} target="_blank" rel="noopener noreferrer" style={{ color: "#16233B" }}>
+                  <a href={u.url} target="_blank" rel="noopener noreferrer" className="text-foreground">
                     {u.title ?? "Untitled document"}
                   </a>
                 ) : (
@@ -141,20 +141,14 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
               ) : (
                 closing && (
                   <div
-                    style={{
-                      marginTop: 6,
-                      padding: "8px 11px",
-                      borderRadius: 8,
-                      fontSize: 13,
-                      fontWeight: 600,
-                      background: closing.tone === "good" ? "#DCFCE7" : closing.tone === "bad" ? "#FEE2E2" : "#FFFFFF",
-                      color: closing.tone === "good" ? "#15803D" : closing.tone === "bad" ? "#B91C1C" : "#16233B",
-                    }}
+                    className={`mt-1.5 rounded-lg px-2.5 py-2 text-[13px] font-semibold ${
+                      closing.tone === "good" ? "bg-success/10 text-success" : closing.tone === "bad" ? "bg-destructive/10 text-destructive" : "bg-card text-foreground"
+                    }`}
                   >
                     {closing.text}
-                    {applied && <div style={{ fontSize: 12, fontWeight: 400, marginTop: 3 }}>{applied}</div>}
+                    {applied && <div className="mt-0.5 text-xs font-normal">{applied}</div>}
                     {changes.closing_date?.accepted_at && (
-                      <div style={{ fontSize: 12, fontWeight: 400, marginTop: 3 }}>
+                      <div className="mt-0.5 text-xs font-normal">
                         Accepted by {acceptedBy(changes.closing_date)} on {formatActivityTime(changes.closing_date.accepted_at)}
                         {changes.closing_date.listing_date ? ` - the listing showed ${formatDay(changes.closing_date.listing_date)}` : ""}.
                       </div>
@@ -175,12 +169,12 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                 />
               ) : (
                 briefing && (
-                  <div style={{ marginTop: 6, fontSize: 13, color: "#16233B" }}>
+                  <div className="mt-1.5 text-[13px] text-foreground">
                     {briefing.cancelled
                       ? "Briefing session cancelled or no longer compulsory."
                       : `Briefing moved${briefing.previous_date ? ` from ${formatDay(briefing.previous_date)}` : ""} to ${formatDay(briefing.date)}${briefing.time ? ` ${briefing.time}` : ""}.`}
                     {briefing.applied && (
-                      <div style={{ fontSize: 12, color: "#5B6472", marginTop: 2 }}>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
                         {briefing.accepted_at
                           ? `Accepted by ${acceptedBy(briefing)} on ${formatActivityTime(briefing.accepted_at)} - the briefing date and the “Briefing session” task now show it.`
                           : "The briefing date on file and the “Briefing session” task have been updated."}
@@ -190,7 +184,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                 )
               )}
               {!closing && !briefing && u.summary && (
-                <div style={{ marginTop: 4, fontSize: 13, color: "#16233B" }}>
+                <div className="mt-1 text-[13px] text-foreground">
                   {/* A summary that is only the file name again says nothing new. */}
                   {u.title && u.summary.includes(u.title) ? "Open it to see what changed." : u.summary}
                 </div>
@@ -203,7 +197,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                 <Quote key={o.quote} label={OTHER_KIND_LABEL[o.kind] ?? o.kind} text={o.quote} />
               ))}
 
-              <div style={{ marginTop: 6, fontSize: 11, color: "#8A93A0" }}>
+              <div className="mt-1.5 text-[11px] text-muted-foreground">
                 {u.read_basis ? BASIS_LABEL[u.read_basis] : null}
                 {u.read_error ? ` · ${u.read_error}` : null}
               </div>
@@ -213,7 +207,7 @@ export async function TenderUpdates({ tenderId }: { tenderId: string }) {
                 .filter((c) => !(changes.closing_date?.accepted_at && c.startsWith("The listing still shows")))
                 .filter((c) => !(changes.briefing?.accepted_at && c.startsWith("The briefing date on file is")))
                 .map((c) => (
-                <div key={c} style={{ fontSize: 11, color: "#B45309", marginTop: 2 }}>
+                <div key={c} className="mt-0.5 text-[11px] text-warning">
                   {c}
                 </div>
               ))}
@@ -241,34 +235,34 @@ function DateDisagreement({
   form: { tenderId: string; documentId: string; change: "closing_date" | "briefing"; label: string } | null;
 }) {
   return (
-    <div style={{ marginTop: 6, padding: "10px 12px", borderRadius: 8, background: "#FEF3C7", border: "1px solid #FCD34D" }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: "#B45309", marginBottom: 8 }}>&#9888; {heading}</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+    <div className="mt-1.5 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2.5">
+      <div className="mb-2 text-[13px] font-bold text-warning">&#9888; {heading}</div>
+      <div className="flex flex-wrap gap-2">
         {rows.map((r) => (
           <div
             key={r.label}
-            style={{ flex: "1 1 150px", minWidth: 0, background: "#FFFFFF", border: `1px solid ${r.strong ? "#D97706" : "#E3E6EA"}`, borderRadius: 8, padding: "7px 10px" }}
+            className={`min-w-0 flex-[1_1_150px] rounded-lg border bg-card px-2.5 py-[7px] ${r.strong ? "border-accent" : "border-border"}`}
           >
-            <div style={{ fontSize: 11, color: "#5B6472" }}>{r.label}</div>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#16233B" }}>{r.value}</div>
+            <div className="text-[11px] text-muted-foreground">{r.label}</div>
+            <div className="text-sm font-bold text-foreground">{r.value}</div>
           </div>
         ))}
       </div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginTop: 8 }}>{note}</div>
+      <div className="mt-2 text-xs text-muted-foreground">{note}</div>
       {form ? (
-        <form action={acceptTenderUpdateDate} style={{ marginTop: 8 }}>
+        <form action={acceptTenderUpdateDate} className="mt-2">
           <input type="hidden" name="tender_id" value={form.tenderId} />
           <input type="hidden" name="watched_document_id" value={form.documentId} />
           <input type="hidden" name="change" value={form.change} />
           <button
             type="submit"
-            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: "#D97706", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer" }}
+            className="min-h-10 cursor-pointer rounded-lg border-none bg-accent px-4 text-[13px] font-semibold text-accent-foreground"
           >
             {form.label}
           </button>
         </form>
       ) : (
-        <div style={{ fontSize: 12, color: "#8A93A0", marginTop: 6 }}>Only a company working on this tender can accept this date.</div>
+        <div className="mt-1.5 text-xs text-muted-foreground">Only a company working on this tender can accept this date.</div>
       )}
     </div>
   );
@@ -276,8 +270,8 @@ function DateDisagreement({
 
 function Quote({ text, label }: { text: string; label?: string }) {
   return (
-    <div style={{ marginTop: 5, padding: "6px 10px", borderLeft: "3px solid #E3E6EA", background: "#FAFAF7", fontSize: 12, color: "#5B6472", wordBreak: "break-word" }}>
-      {label && <span style={{ fontWeight: 700, color: "#16233B" }}>{label}: </span>}
+    <div className="mt-1 border-l-[3px] border-border bg-card px-2.5 py-1.5 text-xs break-words text-muted-foreground">
+      {label && <span className="font-bold text-foreground">{label}: </span>}
       &ldquo;{text}&rdquo;
     </div>
   );
