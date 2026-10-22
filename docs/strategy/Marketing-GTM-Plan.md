@@ -3,11 +3,35 @@
 Status: living document, first drafted 2026-10-21, refined overnight across multiple research passes.
 Supersedes the pricing section of `Marketing-Pricing-Strategy.md` (keep that file for its competitive
 notes and ECSA value-calc work — the pricing itself is now the founder's own verbatim 4-tier structure
-below, not that doc's "Model A/B/C").
+below, not that doc's "Model A/B/C") — **with one major caveat, surfaced by this session's own standing
+code-review pass, not by marketing research: see the flag immediately below before treating any number
+on this page as final.**
+
+## ⚠️ Pricing conflict, unresolved — read this before anything else on this page
+
+This document's whole revenue model (Part 0 below) is built on a 4-tier structure given directly in
+chat this session: **Starter R1,490/mo · Professional R2,990/mo · Business R4,990/mo · Enterprise
+(custom)**, no feature gating.
+
+A separate session, working on the actual billing code at the same time, found that **a different
+4-tier brief** (Starter/Professional/**Roads & Civils**/Enterprise "from R9,500") had been given to
+*it*, and that **what's actually live today** on the product's own homepage (`app/page.tsx`) and
+already-merged billing system (`company_subscriptions`, PR #60, merged by the founder himself) is a
+**third, different scheme**: **Tender Watch (free) / Tender Pro (R1,490/mo) / SANRAL Pro (R3,950/mo)**.
+
+**Three different pricing schemes have now surfaced across sessions for the same product.** This is
+not something research can resolve — it's recorded in `docs/specs/System-Status.md` as the founder's
+own call to make. Until he confirms which one is real:
+- Treat every R-figure and tier name in Part 0 below as **the structure this document's OWN research
+  was commissioned against**, not a confirmed final price list.
+- Do **not** publish, print, or quote this document's pricing externally.
+- Once confirmed, the fix is mechanical: this doc's numbers, `app/page.tsx`'s `PRICING_TIERS`, and
+  `lib/billing.ts`'s plan tiers all need to agree — whichever one is correct.
 
 ## 0. The headline number the founder should see first
 
-**Pricing:** Starter R1,490/mo · Professional R2,990/mo · Business R4,990/mo · Enterprise (custom).
+**Pricing (as briefed for this research — see the flag above, not yet confirmed against what's
+live):** Starter R1,490/mo · Professional R2,990/mo · Business R4,990/mo · Enterprise (custom).
 No feature gating — every tier gets every engine; tiers differ only by seats and bid-pack volume.
 
 The founder's three stated goals were "100 clients", "R100k/month", "R500k/month" — stated as if in that
@@ -34,29 +58,35 @@ first hire.
 
 ## 1. Competitive landscape
 
-*[PENDING — a background research pass on this is still running as this document is first drafted.
-It will confirm/deepen the existing competitors named in `Marketing-Pricing-Strategy.md` (L2B,
-TenderFlow, AITenders, BidsStack, TenderProSA) plus adjacent generic RFP tools (Loopio, Responsive,
-PandaDoc) and quantify what's genuinely missing from each versus Tender Ready's AI compliance check,
-opportunity scoring, CV tailoring, SANRAL engine, and full-feature-every-tier pricing. This section
-will be filled in and the rest of the document cross-checked against it on the next refinement pass.]*
+**Fully researched this pass (direct vendor pricing pages, not secondary sources) — the earlier
+"nobody else does AI" claim below was WRONG and has been corrected.** The previous draft of this
+section leaned on an assumption (every SA competitor is a plain workflow tool, none do AI compliance
+or opportunity scoring) that a background research pass never actually confirmed — it had silently
+drifted off-task. This pass replaces it with real, current, vendor-sourced pricing and features.
 
-**What's already known and safe to act on now, regardless of that pass's findings:** every SA
-tender-software competitor identified so far is a **workflow/document tool**, not an **AI
-compliance-and-opportunity tool**. None of them are known to do automatic compliance checking against
-a specific tender's requirements, AI-scored opportunity discovery, or CV/cover-page auto-tailoring.
-That gap is real and independent of exact pricing comparisons — it's a capability gap, not just a
-price gap, and it's the sharper thing to lead with in positioning (Part 3) than "we're cheaper."
+| Competitor | Pricing (current, vendor site) | What it actually does | How it compares to Tender Ready |
+|---|---|---|---|
+| **L2B** ("Leads 2 Business") | R1,426/mo ex VAT (SA-only tier); R2,461/mo for SA+Africa | Tender listing/alert feed only | Not a real competitor to the core workflow — a category Tender Ready's own opportunity-discovery engine already subsumes. Worth asking early customers if they're paying L2B separately: a clean "why pay for both" pitch. |
+| **TenderFlow** (tenderflow.co.za) | **Free** (1 user, 3 AI analyses/mo) · **Professional R1,900/mo** (2 users, 25 AI analyses + 25 AI proposal generations/mo) · **Enterprise R3,500/mo** (5 users, unlimited AI) — 14-day free trial, no card, on paid tiers | Has **real AI tender analysis and AI proposal generation** — this is the one identified competitor whose own marketing claims genuine AI, not just workflow automation. Also: deadline/BBBEE/CIDB calculators, briefing/proposal templates, a tender-readiness score. | **The closest real competitor found.** No evidence of CV tailoring, cover-page auto-fill, or SANRAL-specific schedule automation — its "AI proposal generation" is generic, not tied to a specific engine like SANRAL's Book 1 schedules. Its pricing is also meaningfully higher per seat than Tender Ready's equivalent tiers (R1,900/2 users vs. Tender Ready's Professional R2,990/5 users) — worth a direct seat-count comparison in sales conversations. |
+| **AITenders** (aitenders.co.za, by Tactical) | **R199/mo**, custom "bid teams" tier on request | AI opportunity matching (fit score vs. sector/CIDB/BBBEE/geography), drag-and-drop bid pipeline, win-rate analytics, a **Claude-powered chat feature** that can "flag compliance gaps" on request | A genuine opportunity-scoring competitor, and the only one found with any AI compliance angle — but it's a **conversational, user-prompted** check (you ask it), not an automatic, built-into-the-submission-workflow check the way Tender Ready's compliance engine is. No CV tailoring or document generation found. Cheapest of the AI-capable competitors. |
+| **TenderProSA** (tenderprosa.co.za, by Dauntless AI) | From **R299/mo + 100 free credits on signup** (credit-based beyond that, exact structure unclear) | CIDB grading match-check, B-BBEE preference-point calculator (80/20, 90/10), OHSA method-statement generation, priced Bills of Quantities (50,000+ SA material rates), SBD-form flagging | The closest thing to a direct "compliance + document generation" competitor found — genuinely does some of what Tender Ready does (CIDB check, B-BBEE calc, document generation). No evidence of CV tailoring or a SANRAL-specific schedule engine. Vendor-claimed figures only, no independent reviews found — treat performance claims skeptically until verified. |
+| **BidsStack** (bidsstack.com) | **Starter R300/mo** flat (unlimited alerts, open/closed/awarded tender search back to 2018) · **TenderScout** (a separate bid-qualification product: tender-pack review, requirement extraction, fit/risk/disqualification signals, bid/no-bid recommendation) — pricing not published | Starter tier is an alert/search feed, closer to L2B. TenderScout sounds closer to Tender Ready's compliance angle, but no pricing was found and its depth is unconfirmed. | Worth a follow-up check once TenderScout's pricing surfaces — it's the one named competitor whose positioning (tender-pack review → fit/risk signals → bid/no-bid) most directly overlaps Tender Ready's own compliance-check framing. |
+| Generic RFP tools (Loopio, Responsive, PandaDoc) | Enterprise pricing, not SA-market-specific | Content-library-driven proposal assembly for large enterprise RFP teams | Wrong market entirely — priced and built for large corporate bid teams, not SA SME tenderers. Not a real competitive threat in this segment. |
 
-**One confirmed data point so far**: L2B ("Leads 2 Business") publishes real pricing — its South
-Africa-only tender *alert/discovery* subscription is ~R1,426/mo ex VAT (current comparison page;
-an older 2022 figure of R1,200/mo should be treated as stale). Combined SA+Africa coverage runs to
-~R2,461/mo ex VAT. Critically, **L2B is a tender-listing/alert feed, not a bid-preparation or
-compliance tool** — it solves "which tenders exist," not "will this bid survive compliance review"
-or "help me actually produce the submission." That means L2B isn't really a head-to-head competitor
-to Tender Ready's core workflow at all; it's closer to a category Tender Ready's own opportunity-
-discovery engine already subsumes. Worth checking directly whether any current Tender Ready customer
-is *also* paying L2B separately — if so, that's a clean "why pay for both" pitch.
+**The corrected, defensible differentiation claim**: Tender Ready is not the only competitor with
+*any* AI feature — TenderFlow has AI proposal generation, AITenders has AI opportunity scoring and an
+on-demand compliance chat, TenderProSA has CIDB/B-BBEE compliance calculators and document generation.
+**But no competitor found combines all of**: (1) compliance checking that's *automatic and built into
+the submission workflow itself* (not a chatbot you have to remember to ask), (2) CV tailoring per
+tender, (3) cover-page/client-template auto-fill, and (4) a named, SANRAL-specific schedule-automation
+engine. That combination — not "we're the only one with AI" — is the real, checkable wedge. Positioning
+(Part 3) has been corrected to match this.
+
+**Pricing context**: Tender Ready's Professional tier (R2,990/mo, 5 people, 15 packs) sits between
+TenderProSA/AITenders (R199–299/mo, narrower feature sets) and TenderFlow's Professional (R1,900/mo
+but only 2 users) — not the cheapest, but priced for meaningfully more seats and a wider feature set
+per tier than anything else found. This is worth testing directly in messaging once the pricing
+conflict above is resolved.
 
 The deeper, more important competitor, confirmed by direct evidence below, is **not other software —
 it's Word, Excel, email, and a disqualified bid.** See Part 2.
@@ -197,11 +227,16 @@ door when the one person who "knows how we do tenders" leaves or is overloaded.
 > die by tenders — built so the thing that disqualifies an experienced bidder at 11pm the night
 > before closing never happens to you again.
 
-**What this is NOT:** a document-management tool, a generic proposal tool, a workflow tracker with
-AI bolted on as a feature. Every competitor identified so far occupies that "document workflow" space.
-Tender Ready's wedge is **compliance-and-opportunity intelligence** — catching the B-BBEE/JV/
-certificate failure before submission, and telling a company which tenders are actually worth bidding
-on before they spend the hours.
+**What this is NOT:** a document-management tool, a generic proposal tool, a workflow tracker with AI
+bolted on as a feature. **Correction from an earlier pass**: several competitors (TenderFlow,
+AITenders, TenderProSA — see Part 1's now-complete table) do have real AI features, so "nobody else
+has AI" is not a safe or honest claim to lead with. The real, checkable wedge is narrower and
+stronger: nothing found combines *automatic, workflow-embedded* compliance checking (not a chatbot you
+have to remember to ask), CV tailoring, cover-page auto-fill, and a named SANRAL-specific schedule
+engine, all in one product. Tender Ready's wedge is **compliance-and-opportunity intelligence that's
+built into the submission itself** — catching the B-BBEE/JV/certificate failure before submission
+without the user having to prompt an AI to check, and telling a company which tenders are actually
+worth bidding on before they spend the hours.
 
 **Tone:** plain, direct, evidence-literate — this market has seen a lot of vague "digital
 transformation" sales pitches and is skeptical of hype, especially AI hype, in compliance-critical
@@ -332,10 +367,10 @@ proven to bid, and just lost) but:
 
 ## 6. Open items / next refinement pass
 
-- [ ] Fold in the competitive-landscape research once it lands (background pass still running as of
-  first draft) — specifically current public pricing of L2B/TenderFlow/AITenders/BidsStack/
-  TenderProSA, and confirm/deny the "nobody else does AI compliance + opportunity scoring" claim this
-  draft is currently leaning on.
+- [x] **Competitive landscape, fully researched this pass** (direct vendor pricing pages): TenderFlow
+  (free/R1,900/R3,500), AITenders (R199/mo), TenderProSA (from R299/mo), BidsStack (R300/mo, plus an
+  unpriced TenderScout product). The earlier "nobody else does AI" claim was corrected — several
+  competitors have real AI features; Tender Ready's defensible wedge is narrower (see Part 1/3).
 - [x] SAFCEC's Emerging/Established turnover cutoff — confirmed directly: Emerging is CIDB grade
   1-5 and/or turnover under R1-5m, Established is grade 6-9 and/or turnover over R6m.
 - [x] Closed/private LinkedIn/Facebook/WhatsApp groups for SA tendering SMEs — two search passes
@@ -343,9 +378,29 @@ proven to bid, and just lost) but:
   customers instead (see Part 2.5).
 - [x] L2B's current public pricing — confirmed (~R1,426/mo ex VAT, SA-only tier) and it's a
   listing/alert feed, not a bid-prep competitor — see Part 1.
-- [ ] Still pending: TenderFlow, AITenders, BidsStack, TenderProSA current public pricing and
-  feature sets (the background competitive-landscape research pass covers these; fold in on
-  arrival).
+- [ ] **BidsStack's TenderScout pricing** — the one named competitor whose positioning most directly
+  overlaps Tender Ready's compliance framing, but no price was found; worth a follow-up check.
+- [ ] **THE BLOCKING ITEM: which of the three pricing schemes is real** (see the flag at the top of
+  this document) — not resolvable by research, needs Sarel's confirmation before anything here is
+  finalized or shared externally.
 - [ ] Revenue-math scenarios in Part 0 assume a tier distribution that is itself an assumption (40/45/
   12/3 split) — revisit once there's real trial/conversion data from the first cohort of actual
-  customers, rather than a modeled guess.
+  customers, rather than a modeled guess. Also revisit once the pricing conflict above is resolved,
+  since the whole revenue model depends on which tier structure is real.
+
+## 7. This pass's refinement notes (2026-10-22 ~00:30 UTC)
+
+This pass did two things: (1) folded in the pricing conflict discovered by this session's own standing
+code-review pass (a different, separately-verified finding, not marketing research — see the flag at
+the top of this document) and (2) actually completed the competitive-landscape research the previous
+draft had only assumed would land from a background pass that, on inspection, never delivered usable
+findings (it drifted into unrelated work). Every competitor's pricing/features above came from this
+pass's own direct vendor-site searches and fetches, not secondary sources.
+
+**Stopping here rather than chaining another overnight pass**: the single biggest named gap
+(competitive landscape) is now filled with real, multi-source data, and the one major finding
+(positioning needed correcting — several competitors DO have AI features) has been folded into both
+Part 1 and Part 3. What remains open (the pricing conflict, BidsStack's TenderScout price, the tier-
+distribution assumption) isn't something another research pass can resolve — the first needs Sarel's
+decision, the other two need real product/trial data that doesn't exist yet. This document is ready
+to present as a solid first draft, with its one real blocker clearly flagged rather than buried.
