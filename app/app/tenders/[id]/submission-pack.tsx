@@ -351,7 +351,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                 {j.status === "ready" && savingsBreakdown && savingsBreakdown.steps.length > 0 && (
                   <div className="mt-2 rounded-lg border border-success/20 bg-success/10 p-3">
                     <div className="font-semibold text-success">
-                      About {savingsBreakdown.hoursSaved} hour{savingsBreakdown.hoursSaved === 1 ? "" : "s"} saved ({formatRand(savingsBreakdown.randSaved)})
+                      About {savingsBreakdown.hoursSaved} hour{savingsBreakdown.hoursSaved === 1 ? "" : "s"} saved (<span className="text-money">{formatRand(savingsBreakdown.randSaved)}</span>)
                     </div>
                     <details className="mt-1">
                       <summary className="cursor-pointer text-xs font-medium text-success">How we worked this out</summary>

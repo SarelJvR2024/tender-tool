@@ -163,7 +163,7 @@ function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: stri
       title={PLAN_LABEL[plan]}
       description={
         <>
-          <span className="text-2xl font-semibold text-foreground">R{monthly.toLocaleString("en-ZA")}</span>
+          <span className="text-2xl font-semibold text-money">R{monthly.toLocaleString("en-ZA")}</span>
           <span className="text-sm text-muted-foreground">/month</span>
         </>
       }
@@ -173,7 +173,7 @@ function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: stri
         <li>&bull; {limits.maxUsers} people</li>
         <li>&bull; {limits.maxPacksPerMonth} bid packs a month</li>
         <li>&bull; Every AI engine - nothing held back</li>
-        {plan === "professional" && <li className="font-medium text-accent">&bull; The plan most companies start on</li>}
+        {plan === "professional" && <li className="font-medium text-accent">&bull; For companies tendering regularly</li>}
       </ul>
       <div className="flex flex-col gap-2">
         <CheckoutLink plan={plan} interval="monthly" disabled={isCurrent} label={`Subscribe monthly - R${monthly.toLocaleString("en-ZA")}`} />

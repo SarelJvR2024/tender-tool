@@ -11,12 +11,11 @@ export type SavingsCounterSummary = {
 };
 
 /**
- * Home cockpit "Time and cost saved" card (spec §9.3). No dedicated "money"
- * design-system token exists yet (the locked §2 table calls for one - "one
- * dedicated accent colour, used only for Rand amounts" - but it was never
- * actually added to globals.css), so Rand figures here reuse the existing
- * `text-accent` blue rather than inventing a new token outside this
- * feature's own scope - see app/AGENTS.md's savings-counter entry.
+ * Home cockpit "Time and cost saved" card (spec §9.3). Rand figures use the
+ * dedicated `text-money` token (globals.css) per the locked §2 design
+ * system ("Money figures - one dedicated accent colour, used only for Rand
+ * amounts") - a violet, distinct from the blue `accent` used for buttons/
+ * links so a Rand figure reads as its own category at a glance.
  */
 export function SavingsCounterCard({
   summary,
@@ -59,12 +58,12 @@ export function SavingsCounterCard({
         <div>
           <div className="text-xs text-muted-foreground">This month</div>
           <div className="font-display text-xl font-medium text-foreground">{thisMonth.hoursSaved}h</div>
-          <div className="text-sm font-medium text-accent">{formatRand(thisMonth.randSaved)}</div>
+          <div className="text-sm font-medium text-money">{formatRand(thisMonth.randSaved)}</div>
         </div>
         <div>
           <div className="text-xs text-muted-foreground">All time</div>
           <div className="font-display text-xl font-medium text-foreground">{allTime.hoursSaved}h</div>
-          <div className="text-sm font-medium text-accent">{formatRand(allTime.randSaved)}</div>
+          <div className="text-sm font-medium text-money">{formatRand(allTime.randSaved)}</div>
         </div>
       </div>
 

@@ -346,7 +346,7 @@ export default async function Home() {
               >
                 <div className="mb-1 text-sm font-semibold text-foreground">{tier.name}</div>
                 <div className="mb-4">
-                  <span className={cn("font-display font-medium text-foreground", isCustom ? "text-[18px]" : "text-[26px]")}>{tier.price}</span>
+                  <span className={cn("font-display font-medium", isCustom ? "text-[18px] text-foreground" : "text-[26px] text-money")}>{tier.price}</span>
                   <span className="text-[13px] text-muted-foreground">{tier.cadence}</span>
                 </div>
                 <div className="mb-5 flex flex-col gap-2">
