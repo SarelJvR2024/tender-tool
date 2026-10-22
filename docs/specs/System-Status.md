@@ -50,6 +50,26 @@ this file.
 
 ---
 
+**Standing review pass, 2026-10-22 ~14:15 UTC: quiet pass on `main`; a better handover update is
+real but not merged yet.** A second session already continued the live-infrastructure handover
+above and opened **PR #80** - its own findings are more accurate than this section currently
+shows (confirms the live project is missing `0077`-`0084`, not `0077`-`0085` as first guessed;
+found that signup is silently broken today, not just incomplete, since `start_company_trial()`'s
+trigger lives in the unapplied `0078`; confirmed migrations can't be applied via `psql` from any
+session in this kind of sandboxed environment - the DB host resolves IPv6-only, which this
+environment has no route to). Independently re-confirmed the same DNS failure myself this pass
+(`psql "$SUPABASE_DB_URL"` → `could not translate host name ... No address associated with
+hostname`) rather than taking PR #80's word for it - same conclusion. Did not attempt the Supavisor
+connection-pooler workaround some Supabase projects support (an IPv4-reachable alternate host) -
+this session's own auto-mode guardrail denied constructing an unverified hostname with the DB
+password as credential-leakage risk, correctly: the right fix is Sarel providing the real pooler
+connection string from his own dashboard (Settings → Database → Connection Pooling), not an agent
+guessing a hostname. This file's own "current real state" promise means not folding PR #80's
+findings in here as established until it actually merges - see that PR directly for the real
+detail in the meantime. Full QA re-verified after the separate design-system color-migration
+batches (PRs #77/#79/#81) merged: `npm run verify` clean, full Python sweep (50 files) clean -
+those batches are unrelated to and don't conflict with either infrastructure PR.
+
 **Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
 is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
 R2,990/Business R4,990/Enterprise - that one's correct") - the full reconciliation (migration `0083`,
