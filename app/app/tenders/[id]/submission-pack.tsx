@@ -11,6 +11,8 @@ import { classifyComplianceItem } from "./bid-task-status";
 import { computeTenderReadiness } from "./tender-readiness";
 import { SanralProgress } from "./sanral-progress";
 import { DownloadAllButton } from "./download-all-button";
+import { fetchTenderSavingsBreakdown, recordSavingsStep } from "@/lib/savingsCounterData";
+import { formatRand, SAVINGS_STEP_ORDER } from "@/lib/savingsCounter";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -84,7 +86,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   const readiness = packReadiness(complianceData);
   const b7 = await loadB7State(tenderId);
 
-  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }, { data: reviewRow }, { data: scopeRows }, { data: tenderRow }] = await Promise.all([
+  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }, { data: reviewRow }, { data: scopeRows }, { data: tenderRow }, { data: packRow }] = await Promise.all([
     supabase.from("tender_documents").select("doc_type").eq("tender_id", tenderId),
     supabase
       .from("pack_generation_jobs")
@@ -102,6 +104,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     // signatory - advisory only, used to suggest a default below.
     supabase.from("signatory_scopes").select("person_id, region, industry_tag, discipline_tag"),
     supabase.from("tenders").select("region, industry_tags, discipline_tags").eq("id", tenderId).maybeSingle(),
+    supabase.from("tender_packs").select("company_id").eq("id", tenderPackId).maybeSingle(),
   ]);
   const signers = (signerRows ?? []) as Signatory[];
   const scopes = (scopeRows ?? []) as SignatoryScope[];
@@ -179,6 +182,27 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       if (r.data?.signedUrl) signed[paths[i]] = r.data.signedUrl;
     });
   }
+
+  // Time/cost saved counter (spec §9): record every step once the first
+  // ready pack proves they all genuinely happened for this tender - the
+  // compliance check, vault documents, CVs, cover page, SANRAL schedule and
+  // the pack itself are all bundled into one generated PDF by the time a
+  // job reaches "ready", so this is the single safe, server-rendered moment
+  // to count all six at once. recordSavingsStep() is itself idempotent
+  // (savings_counted_steps' own unique constraint - 0085), so re-rendering
+  // this page on every visit never double-counts; a company without
+  // savings_baseline columns yet (should not happen post-migration, but
+  // this read happens on every render) fails silently rather than breaking
+  // the page - the breakdown panel below just shows nothing counted yet.
+  const companyId = packRow?.company_id as string | undefined;
+  if (companyId && jobs.some((j) => j.status === "ready")) {
+    try {
+      await Promise.all(SAVINGS_STEP_ORDER.map((stepKey) => recordSavingsStep(supabase, { companyId, tenderId, stepKey })));
+    } catch (e) {
+      console.error("recordSavingsStep failed (non-fatal - savings counter only)", e);
+    }
+  }
+  const savingsBreakdown = companyId ? await fetchTenderSavingsBreakdown(supabase, tenderId) : null;
 
   return (
     <div id="submission-pack" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
@@ -320,9 +344,32 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                   <div className="mt-1 break-words text-destructive">{j.error_message}</div>
                 )}
                 {j.status === "ready" && j.started_at && j.completed_at && (
-                  <div className="mt-1 font-semibold text-success">
-                    Time saved: usually 6-8 hours by hand - this run took{" "}
-                    {formatDuration(new Date(j.completed_at).getTime() - new Date(j.started_at).getTime())}.
+                  <div className="mt-1 text-muted-foreground">
+                    Generated in {formatDuration(new Date(j.completed_at).getTime() - new Date(j.started_at).getTime())}.
+                  </div>
+                )}
+                {j.status === "ready" && savingsBreakdown && savingsBreakdown.steps.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-success/20 bg-success/10 p-3">
+                    <div className="font-semibold text-success">
+                      About {savingsBreakdown.hoursSaved} hour{savingsBreakdown.hoursSaved === 1 ? "" : "s"} saved ({formatRand(savingsBreakdown.randSaved)})
+                    </div>
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs font-medium text-success">How we worked this out</summary>
+                      <ul className="mt-1.5 list-disc pl-4 text-xs text-muted-foreground">
+                        {savingsBreakdown.steps.map((s) => (
+                          <li key={s.stepKey}>
+                            {s.reason} - {s.hours}h
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                    <div className="mt-1.5 text-[11px] text-muted-foreground">
+                      Estimated, based on your numbers -{" "}
+                      <Link href="/company#savings-baseline" className="underline">
+                        update your baseline
+                      </Link>
+                      .
+                    </div>
                   </div>
                 )}
                 {j.status === "ready" && (

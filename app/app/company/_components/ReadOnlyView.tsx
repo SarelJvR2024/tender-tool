@@ -2,6 +2,7 @@ import { expiryStatus } from "@/lib/dates";
 import { BANK_LETTER_RENEW_SOON_DAYS } from "@/lib/vaultDocuments";
 import { CompanyIdentitySection } from "./CompanyIdentitySection";
 import { SizeOfficesSection } from "./SizeOfficesSection";
+import { SavingsBaselineSection } from "./SavingsBaselineSection";
 import { HowWeWorkSection } from "./HowWeWorkSection";
 import { ComplianceDocumentsSection } from "./ComplianceDocumentsSection";
 import { BeeCidbSection } from "./BeeCidbSection";
@@ -44,6 +45,7 @@ export function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrl
 
       <CompanyIdentitySection company={company} />
       <SizeOfficesSection company={company} />
+      <SavingsBaselineSection company={company} />
       <HowWeWorkSection company={company} />
       <ComplianceDocumentsSection company={company} docUrls={docUrls} />
       <BeeCidbSection company={company} />

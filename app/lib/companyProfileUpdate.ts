@@ -56,7 +56,20 @@ export const COMPANY_NUMERIC_FIELDS = [
   "sacpcmp_registered_staff_count",
   "total_employees",
   "typical_jv_share_pct",
+  // Time/cost saved counter baseline (0085, spec §9) - unlike the Form B3
+  // counts above, these are NOT-NULL columns with real defaults (20/450), so
+  // a blank submission here is refused rather than written as null; see the
+  // dedicated check just below the main loop.
+  "savings_baseline_hours_per_tender",
+  "savings_baseline_hourly_cost_zar",
 ] as const;
+
+// savings_baseline_* are not-null-with-default columns (0085) - unlike every
+// other numeric field here, a blank value is never a valid write (there is
+// no "not recorded" state for a calculation baseline the savings counter
+// divides by), so they're excluded from the generic blank-becomes-null loop
+// and validated on their own just below instead.
+const BLANK_NOT_ALLOWED = new Set(["savings_baseline_hours_per_tender", "savings_baseline_hourly_cost_zar"]);
 
 // Integer columns: a fractional count is refused rather than sent to Postgres.
 const INTEGER_FIELDS = new Set(["other_offices", "ecsa_registered_staff_count", "sacpcmp_registered_staff_count", "total_employees", "bee_level"]);
@@ -98,6 +111,9 @@ export function buildCompanyUpdate(formData: FormData): { update: CompanyUpdate;
     const raw = formData.get(field);
     if (raw === null) continue;
     const trimmed = (raw as string).trim();
+    if (trimmed === "" && BLANK_NOT_ALLOWED.has(field)) {
+      return { update, error: `"${field.replace(/_/g, " ")}" can't be blank.` };
+    }
     const n = trimmed === "" ? null : Number(trimmed);
     if (n !== null && (!Number.isFinite(n) || n < 0 || (INTEGER_FIELDS.has(field) && !Number.isInteger(n)))) {
       return { update, error: `"${field.replace(/_/g, " ")}" must be a ${INTEGER_FIELDS.has(field) ? "whole " : ""}number of 0 or more.` };
