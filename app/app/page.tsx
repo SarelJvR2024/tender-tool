@@ -182,6 +182,12 @@ export default async function Home() {
               Start free
             </Link>
             <Link
+              href="/demo"
+              className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-lg border border-white/35 px-6 text-[15px] font-semibold text-white no-underline hover:bg-white/10"
+            >
+              See a sample tender
+            </Link>
+            <Link
               href="/tools"
               className="inline-flex min-h-11 items-center justify-center whitespace-nowrap rounded-lg border border-white/35 px-6 text-[15px] font-semibold text-white no-underline hover:bg-white/10"
             >
