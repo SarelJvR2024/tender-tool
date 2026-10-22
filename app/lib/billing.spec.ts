@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   effectiveSubscriptionStatus,
+  isPayablePlan,
   isSubscriptionLapsed,
+  PLAN_LIMITS,
+  PLAN_MONTHLY_ZAR,
   priceForPlanZar,
   priceForPayfastAmount,
   trialDaysLeft,
@@ -14,29 +17,55 @@ function daysFromNow(n: number): string {
 }
 
 const base: CompanySubscriptionRow = {
-  planTier: "sanral_pro",
+  planTier: "professional",
   billingInterval: "monthly",
   status: "trialing",
   trialEndsAt: daysFromNow(10),
+  maxUsers: 5,
+  maxPacksPerMonth: 15,
 };
 
 describe("yearlyPriceZar / priceForPlanZar", () => {
   it("yearly is exactly 10x monthly - '2 months free', computed not hardcoded", () => {
     expect(yearlyPriceZar(1490)).toBe(14900);
-    expect(yearlyPriceZar(3950)).toBe(39500);
+    expect(yearlyPriceZar(2990)).toBe(29900);
+    expect(yearlyPriceZar(4990)).toBe(49900);
   });
 
-  it("matches app/page.tsx's own PRICING_TIERS numbers", () => {
-    expect(priceForPlanZar("pro", "monthly")).toBe(1490);
-    expect(priceForPlanZar("pro", "yearly")).toBe(14900);
-    expect(priceForPlanZar("sanral_pro", "monthly")).toBe(3950);
-    expect(priceForPlanZar("sanral_pro", "yearly")).toBe(39500);
-    expect(priceForPlanZar("watch", "monthly")).toBe(0);
+  it("matches Sarel's own confirmed pricing (Starter/Professional/Business)", () => {
+    expect(priceForPlanZar("starter", "monthly")).toBe(1490);
+    expect(priceForPlanZar("starter", "yearly")).toBe(14900);
+    expect(priceForPlanZar("professional", "monthly")).toBe(2990);
+    expect(priceForPlanZar("professional", "yearly")).toBe(29900);
+    expect(priceForPlanZar("business", "monthly")).toBe(4990);
+    expect(priceForPlanZar("business", "yearly")).toBe(49900);
   });
 
   it("formats for PayFast as a 2-decimal string, no thousands separator", () => {
-    expect(priceForPayfastAmount("pro", "monthly")).toBe("1490.00");
-    expect(priceForPayfastAmount("sanral_pro", "yearly")).toBe("39500.00");
+    expect(priceForPayfastAmount("starter", "monthly")).toBe("1490.00");
+    expect(priceForPayfastAmount("business", "yearly")).toBe("49900.00");
+  });
+});
+
+describe("PLAN_LIMITS / PLAN_MONTHLY_ZAR", () => {
+  it("every self-serve tier has a fixed price and real seat/pack limits", () => {
+    expect(PLAN_LIMITS.starter).toEqual({ maxUsers: 2, maxPacksPerMonth: 5 });
+    expect(PLAN_LIMITS.professional).toEqual({ maxUsers: 5, maxPacksPerMonth: 15 });
+    expect(PLAN_LIMITS.business).toEqual({ maxUsers: 10, maxPacksPerMonth: 30 });
+  });
+
+  it("enterprise is unlimited/custom on both axes - priced and scoped on request", () => {
+    expect(PLAN_LIMITS.enterprise).toEqual({ maxUsers: null, maxPacksPerMonth: null });
+    expect(PLAN_MONTHLY_ZAR.enterprise).toBeNull();
+  });
+});
+
+describe("PAYABLE_PLAN_TIERS / isPayablePlan", () => {
+  it("enterprise is never self-serve payable", () => {
+    expect(isPayablePlan("enterprise")).toBe(false);
+    expect(isPayablePlan("starter")).toBe(true);
+    expect(isPayablePlan("professional")).toBe(true);
+    expect(isPayablePlan("business")).toBe(true);
   });
 });
 

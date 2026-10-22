@@ -13,7 +13,7 @@ import type { CompanySubscriptionRow } from "./billing";
 export async function fetchCompanySubscription(supabase: SupabaseClient): Promise<CompanySubscriptionRow | null> {
   const { data, error } = await supabase
     .from("company_subscriptions")
-    .select("plan_tier, billing_interval, status, trial_ends_at")
+    .select("plan_tier, billing_interval, status, trial_ends_at, max_users, max_packs_per_month")
     .maybeSingle();
 
   if (error) {
@@ -27,5 +27,7 @@ export async function fetchCompanySubscription(supabase: SupabaseClient): Promis
     billingInterval: data.billing_interval,
     status: data.status,
     trialEndsAt: data.trial_ends_at,
+    maxUsers: data.max_users,
+    maxPacksPerMonth: data.max_packs_per_month,
   };
 }

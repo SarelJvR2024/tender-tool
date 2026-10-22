@@ -161,6 +161,13 @@ async function requestJob(formData: FormData, kind: "extract_requirements" | "ge
     if (!reviewRow?.reviewed_at) {
       redirect(back(tenderId, `?error=${encodeURIComponent("Review the full Pack Review list above and click \"I've reviewed this\" before generating a pack.")}`));
     }
+    // Billing (0083): company_can_request_pack() covers both engines (no
+    // `engine` filter in its own count query) - the same monthly/trial
+    // allowance requestSubmissionPack() (actions.ts) checks for SANRAL.
+    const { data: canRequest } = await supabase.rpc("company_can_request_pack", { p_company_id: companyId });
+    if (!canRequest) {
+      redirect(back(tenderId, `?error=${encodeURIComponent("You've reached your plan's bid pack limit for this period - upgrade on the Billing page to generate more.")}`));
+    }
   }
   const { data: pack } = await supabase.from("tender_packs").select("id").eq("tender_id", tenderId).maybeSingle();
   const { error } = await supabase.from(JOBS_TABLE).insert({

@@ -64,33 +64,40 @@ const FREE_TOOLS = [
   { href: "/tools/b6-estimator", title: "SANRAL B6 functionality score estimator", blurb: "Estimate a key position's SANRAL functionality score from the real published Book 1 scoring matrices." },
 ];
 
-// PRICING_TIERS content (names/prices/bullets) is left exactly as-is on
-// purpose - a separate, dedicated piece of work is building real billing
-// enforcement for these limits, and changing the copy now (even to soften
-// it) would pre-empt that decision and create a merge conflict with it.
-// Only this array's STYLING changed in this pass, not its words or numbers.
+// Confirmed by Sarel directly (2026-10-22, in chat) after a real pricing
+// conflict surfaced across sessions - see docs/specs/System-Status.md and
+// lib/billing.ts's own header comment for the full story. This is the one
+// place these numbers/words are written by hand; lib/billing.ts's
+// PLAN_LIMITS/PLAN_MONTHLY_ZAR mirror them (and are cross-checked against
+// them by that file's own test), migration 0083's tt_plan_limits() mirrors
+// them again in SQL - three copies, deliberately never imported across the
+// app/database boundary, each checked against the others rather than
+// shared, same convention this array has used since it first existed.
 const PRICING_TIERS = [
   {
-    name: "Tender Watch",
-    price: "Free",
-    cadence: "",
-    bullets: ["Discovery, fit verdict and score outlook", "Vault with expiry, view only", "1 compliance report a month"],
-  },
-  {
-    name: "Tender Pro",
+    name: "Starter",
     price: "R1,490",
     cadence: "/month",
-    // "Pipeline" renamed to "Bids" here only - matching the app-wide label
-    // rename ("Bids pipeline redesign") this bullet's own wording had fallen
-    // behind; nothing else in this array touched.
-    bullets: ["Everything in Watch, plus reminders", "General pack: SBD/MBD fill, merged pack (6/month)", "Experience Library and CV library", "Bids, tasks and role-based digest"],
+    bullets: ["5 bid packs a month, 2 people", "Tender discovery, AI compliance and opportunity checks", "Your company vault and the bid pipeline", "Every AI engine included - nothing held back"],
   },
   {
-    name: "SANRAL Pro",
-    price: "R3,950",
+    name: "Professional",
+    price: "R2,990",
     cadence: "/month",
-    bullets: ["Everything in Pro, no pack limit", "SANRAL workbook fill, both envelopes", "Done-with-you onboarding"],
+    bullets: ["15 bid packs a month, 5 people", "CVs tailored to each tender, cover pages, SANRAL schedule engine", "Analytics: win rate, pricing trends, where you're losing", "The plan most companies start on"],
     highlight: true,
+  },
+  {
+    name: "Business",
+    price: "R4,990",
+    cadence: "/month",
+    bullets: ["30 bid packs a month, 10 people", "Several bids or branches at once, shared pipelines", "Deeper analytics across tenders and competitors", "Priority onboarding and support"],
+  },
+  {
+    name: "Enterprise",
+    price: "Priced on request",
+    cadence: "",
+    bullets: ["For organisations with their own tender function", "Multiple entities or specific reporting needs", "Users, volume, integrations and training scoped with you"],
   },
 ];
 
@@ -262,38 +269,44 @@ export default async function Home() {
       {/* Pricing */}
       <section className={SECTION}>
         <h2 className={H2}>Pricing</h2>
-        <p className={LEDE}>Excl. VAT. No credits to ration, no per-seat markup on the thing that actually creates the value.</p>
-        <div className="mx-auto grid max-w-[900px] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {PRICING_TIERS.map((tier) => (
-            <div
-              key={tier.name}
-              className={cn(
-                "rounded-xl border bg-card p-6",
-                tier.highlight ? "border-2 border-accent" : "border-border",
-              )}
-            >
-              <div className="mb-1 text-sm font-semibold text-foreground">{tier.name}</div>
-              <div className="mb-4">
-                <span className="font-display text-[26px] font-medium text-foreground">{tier.price}</span>
-                <span className="text-[13px] text-muted-foreground">{tier.cadence}</span>
-              </div>
-              <div className="mb-5 flex flex-col gap-2">
-                {tier.bullets.map((b) => (
-                  <CheckItem key={b}>{b}</CheckItem>
-                ))}
-              </div>
-              <Link
-                href="/signup"
-                className={buttonVariants({
-                  variant: tier.highlight ? "accent" : "default",
-                  size: "lg",
-                  className: "min-h-11 w-full",
-                })}
+        <p className={LEDE}>
+          Excl. VAT. Every plan gets every AI engine - plans differ only in how many people and how many bid packs a month.
+          14-day trial, no card needed, with one full bid pack. Pay monthly or annually - annual is 2 months free.
+        </p>
+        <div className="mx-auto grid max-w-[1100px] grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {PRICING_TIERS.map((tier) => {
+            const isCustom = tier.name === "Enterprise";
+            return (
+              <div
+                key={tier.name}
+                className={cn(
+                  "rounded-xl border bg-card p-6",
+                  tier.highlight ? "border-2 border-accent" : "border-border",
+                )}
               >
-                {tier.price === "Free" ? "Start free" : "Get started"}
-              </Link>
-            </div>
-          ))}
+                <div className="mb-1 text-sm font-semibold text-foreground">{tier.name}</div>
+                <div className="mb-4">
+                  <span className={cn("font-display font-medium text-foreground", isCustom ? "text-[18px]" : "text-[26px]")}>{tier.price}</span>
+                  <span className="text-[13px] text-muted-foreground">{tier.cadence}</span>
+                </div>
+                <div className="mb-5 flex flex-col gap-2">
+                  {tier.bullets.map((b) => (
+                    <CheckItem key={b}>{b}</CheckItem>
+                  ))}
+                </div>
+                <Link
+                  href={isCustom ? "mailto:hello@tendertool.co.za?subject=Enterprise%20plan" : "/signup"}
+                  className={buttonVariants({
+                    variant: tier.highlight ? "accent" : "default",
+                    size: "lg",
+                    className: "min-h-11 w-full",
+                  })}
+                >
+                  {isCustom ? "Contact us" : "Get started"}
+                </Link>
+              </div>
+            );
+          })}
         </div>
       </section>
 

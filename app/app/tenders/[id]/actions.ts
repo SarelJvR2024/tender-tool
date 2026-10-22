@@ -201,6 +201,12 @@ export async function requestSubmissionPack(formData: FormData) {
     }
   }
 
+  // Billing (0083): company_can_request_pack() is the one source of truth
+  // for both the trial's one-pack-total cap and an active plan's monthly
+  // allowance - never re-derived here.
+  const { data: canRequest } = await supabase.rpc("company_can_request_pack", { p_company_id: companyId });
+  if (!canRequest) fail("You've reached your plan's bid pack limit for this period - upgrade on the Billing page to generate more.");
+
   const { error } = await supabase.from("pack_generation_jobs").insert({
     company_id: companyId,
     tender_id: tenderId,
