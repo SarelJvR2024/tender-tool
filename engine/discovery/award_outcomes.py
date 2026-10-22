@@ -329,13 +329,19 @@ def portal_page(start, length, department=None, retries=3):
     return json.loads(body)
 
 
-def fetch_portal_awarded(limit=200, department=None, page_size=25, pause=0.5):
-    """Newest-first pages of the portal's Awarded tab, up to `limit` rows.
-    Returns (rows, records_filtered, skipped_broken_records)."""
+def fetch_portal_awarded(limit=200, department=None, page_size=25, pause=0.5, start=0):
+    """Newest-first pages of the portal's Awarded tab, up to `limit` rows,
+    starting at result offset `start` (for a chunked, resumable backfill -
+    see run_sanral_backfill.py's docstring on why a one-shot fetch of the
+    whole tab is unsafe: it can run far longer than this environment stays
+    up, and nothing was ever resumable from mid-fetch before this).
+    Returns (rows, records_filtered, skipped_broken_records, next_start) -
+    next_start is None once the tab is exhausted."""
     rows, total, skipped, failed_in_a_row = [], None, 0, 0
-    start = 0
+    exhausted = False
     for _ in range(MAX_PORTAL_PAGES):
         if len(rows) >= limit or (total is not None and start >= total):
+            exhausted = total is not None and start >= total
             break
         try:
             data = portal_page(start, page_size, department)
@@ -357,11 +363,16 @@ def fetch_portal_awarded(limit=200, department=None, page_size=25, pause=0.5):
                       f"{len(rows)} rows.", file=sys.stderr)
                 break
         if not batch and total is None:
+            exhausted = True
             break
         rows += batch
         start += page_size
         time.sleep(pause)
-    return rows[:limit], total, skipped
+    # Don't truncate to `limit` here - page_size may not divide limit evenly,
+    # so rows[:limit] could silently drop already-fetched rows that `start`
+    # (the next chunk's resume point) has already moved past, the same
+    # gap/overshoot bug fixed for fetch_sanral_list/fetch_sanral_outcomes.
+    return rows, total, skipped, (None if exhausted else start)
 
 
 def fetch_sanral_list(list_slug, want=None, page_size=50, max_pages=40, retries=3, start_page=1):
@@ -507,7 +518,7 @@ def main():
 
     if args.source in ("portal", "both", "all"):
         print("Reading the eTenders portal's Awarded tab...", file=sys.stderr)
-        raw, total, skipped = fetch_portal_awarded(args.limit, args.department)
+        raw, total, skipped, _ = fetch_portal_awarded(args.limit, args.department)
         recs = [normalize_portal_award(r) for r in raw]
         if args.buyer:
             needle = args.buyer.lower()

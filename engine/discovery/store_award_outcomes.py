@@ -410,7 +410,7 @@ def main():
     if args.fetch:
         report = {}
         if args.source in ("portal", "both"):
-            raw, _, _ = ao.fetch_portal_awarded(args.limit, args.department)
+            raw, _, _, _ = ao.fetch_portal_awarded(args.limit, args.department)
             report["portal"] = {"records": [ao.normalize_portal_award(r) for r in raw]}
         if args.source in ("sanral", "both"):
             report["sanral"] = {k: ao.fetch_sanral_outcomes(k.strip(), args.sanral_limit,
