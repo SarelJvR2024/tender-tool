@@ -73,10 +73,14 @@ export const UPDATE_KIND_LABEL: Record<TenderUpdateKind, string> = {
   supporting_document: "New document",
 };
 
-export const URGENCY_STYLE: Record<TenderUpdateUrgency, { bg: string; color: string; border: string; label: string }> = {
-  critical: { bg: "#FEE2E2", color: "#B91C1C", border: "#FCA5A5", label: "Act now" },
-  high: { bg: "#FEF3C7", color: "#B45309", border: "#FCD34D", label: "Important" },
-  info: { bg: "#E8EBF1", color: "#16233B", border: "#CBD2DF", label: "For information" },
+// Tailwind token classes (app/globals.css), not literal hex - badgeClassName
+// follows components/tt/bid-task-badge.tsx's own soft-tint convention
+// (border-X/20 bg-X/10 text-X); cardBorderClassName is the stronger,
+// solid-token border the whole update card itself uses to flag severity.
+export const URGENCY_STYLE: Record<TenderUpdateUrgency, { badgeClassName: string; cardBorderClassName: string; label: string }> = {
+  critical: { badgeClassName: "border-destructive/20 bg-destructive/10 text-destructive", cardBorderClassName: "border-destructive/50", label: "Act now" },
+  high: { badgeClassName: "border-warning/20 bg-warning/10 text-warning", cardBorderClassName: "border-warning/50", label: "Important" },
+  info: { badgeClassName: "border-border bg-muted text-foreground", cardBorderClassName: "border-border", label: "For information" },
 };
 
 const URGENCY_RANK: Record<TenderUpdateUrgency, number> = { critical: 0, high: 1, info: 2 };

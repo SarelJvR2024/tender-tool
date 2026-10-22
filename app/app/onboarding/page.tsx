@@ -51,7 +51,9 @@ export default async function OnboardingPage({
   if (step === 2) {
     const { data: company } = await supabase
       .from("companies")
-      .select("id, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, bee_level, bee_proof_expiry, cidb_grading, cidb_expiry")
+      .select(
+        "id, csd_supplier_number, sars_tcs_pin, sars_tcs_pin_expiry, bee_level, bee_proof_expiry, cidb_grading, cidb_expiry, savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar",
+      )
       .eq("id", companyId)
       .single();
     return (

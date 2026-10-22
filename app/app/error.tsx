@@ -22,17 +22,17 @@ export default function Error({ error, retry }: { error: unknown; retry: () => v
   const digest = error && typeof error === "object" && "digest" in error ? String((error as { digest?: unknown }).digest) : null;
 
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, sans-serif", background: "#FFFFFF", padding: "24px" }}>
-      <div style={{ maxWidth: 420, textAlign: "center" }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 8 }}>Something went wrong</div>
-        <div style={{ fontSize: 13, color: "#5B6472", marginBottom: 20, lineHeight: 1.5 }}>
+    <div className="flex min-h-screen items-center justify-center bg-card p-6 font-sans">
+      <div className="max-w-[420px] text-center">
+        <div className="mb-2 text-[15px] font-bold text-foreground">Something went wrong</div>
+        <div className="mb-5 text-[13px] leading-normal text-muted-foreground">
           This page hit an unexpected error. Try again - if it keeps happening, let us know.
-          {digest && <span style={{ display: "block", marginTop: 8, fontSize: 11, color: "#8A93A0" }}>Reference: {digest}</span>}
+          {digest && <span className="mt-2 block text-[11px] text-muted-foreground">Reference: {digest}</span>}
         </div>
         <button
           type="button"
           onClick={() => retry()}
-          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 44, padding: "0 20px", borderRadius: 9, fontSize: 14, fontWeight: 600, border: "none", cursor: "pointer", background: "#D97706", color: "#FFFFFF" }}
+          className="inline-flex min-h-11 cursor-pointer items-center justify-center rounded-lg border-none bg-accent px-5 text-sm font-semibold text-accent-foreground"
         >
           Try again
         </button>

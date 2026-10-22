@@ -11,6 +11,8 @@ import { classifyComplianceItem } from "./bid-task-status";
 import { computeTenderReadiness } from "./tender-readiness";
 import { SanralProgress } from "./sanral-progress";
 import { DownloadAllButton } from "./download-all-button";
+import { fetchTenderSavingsBreakdown, recordSavingsStep } from "@/lib/savingsCounterData";
+import { formatRand, SAVINGS_STEP_ORDER } from "@/lib/savingsCounter";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -48,11 +50,11 @@ type PackJob = {
   acknowledged_gaps: boolean;
 };
 
-const STATUS: Record<PackJob["status"], { label: string; bg: string; color: string }> = {
-  requested: { label: "Requested - waiting for the pack builder", bg: "#FEF3C7", color: "#B45309" },
-  generating: { label: "Generating…", bg: "#FEF3C7", color: "#B45309" },
-  ready: { label: "Ready", bg: "#DCFCE7", color: "#15803D" },
-  failed: { label: "Failed", bg: "#FEE2E2", color: "#B91C1C" },
+const STATUS: Record<PackJob["status"], { label: string; className: string }> = {
+  requested: { label: "Requested - waiting for the pack builder", className: "bg-warning/10 text-warning" },
+  generating: { label: "Generating…", className: "bg-warning/10 text-warning" },
+  ready: { label: "Ready", className: "bg-success/10 text-success" },
+  failed: { label: "Failed", className: "bg-destructive/10 text-destructive" },
 };
 
 const OUTPUT_LABEL: Record<string, string> = {
@@ -61,8 +63,6 @@ const OUTPUT_LABEL: Record<string, string> = {
   financial_xlsm: "Financial workbook (.xlsm)",
   actions_to_sign: "What to sign (summary)",
 };
-
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
 // "SANRAL schedules" premium feature (item 2 of 10): the marketing claim
 // itself ("usually 6 to 8 hours by hand") is Sarel's own fixed copy, not a
@@ -86,7 +86,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
   const readiness = packReadiness(complianceData);
   const b7 = await loadB7State(tenderId);
 
-  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }, { data: reviewRow }, { data: scopeRows }, { data: tenderRow }] = await Promise.all([
+  const [{ data: docRows }, { data: jobRows }, { data: signerRows }, { data: signerAnswer }, { data: reviewRow }, { data: scopeRows }, { data: tenderRow }, { data: packRow }] = await Promise.all([
     supabase.from("tender_documents").select("doc_type").eq("tender_id", tenderId),
     supabase
       .from("pack_generation_jobs")
@@ -104,6 +104,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     // signatory - advisory only, used to suggest a default below.
     supabase.from("signatory_scopes").select("person_id, region, industry_tag, discipline_tag"),
     supabase.from("tenders").select("region, industry_tags, discipline_tags").eq("id", tenderId).maybeSingle(),
+    supabase.from("tender_packs").select("company_id").eq("id", tenderPackId).maybeSingle(),
   ]);
   const signers = (signerRows ?? []) as Signatory[];
   const scopes = (scopeRows ?? []) as SignatoryScope[];
@@ -182,28 +183,38 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     });
   }
 
+  // Time/cost saved counter (spec §9): record every step once the first
+  // ready pack proves they all genuinely happened for this tender - the
+  // compliance check, vault documents, CVs, cover page, SANRAL schedule and
+  // the pack itself are all bundled into one generated PDF by the time a
+  // job reaches "ready", so this is the single safe, server-rendered moment
+  // to count all six at once. recordSavingsStep() is itself idempotent
+  // (savings_counted_steps' own unique constraint - 0085), so re-rendering
+  // this page on every visit never double-counts; a company without
+  // savings_baseline columns yet (should not happen post-migration, but
+  // this read happens on every render) fails silently rather than breaking
+  // the page - the breakdown panel below just shows nothing counted yet.
+  const companyId = packRow?.company_id as string | undefined;
+  if (companyId && jobs.some((j) => j.status === "ready")) {
+    try {
+      await Promise.all(SAVINGS_STEP_ORDER.map((stepKey) => recordSavingsStep(supabase, { companyId, tenderId, stepKey })));
+    } catch (e) {
+      console.error("recordSavingsStep failed (non-fatal - savings counter only)", e);
+    }
+  }
+  const savingsBreakdown = companyId ? await fetchTenderSavingsBreakdown(supabase, tenderId) : null;
+
   return (
-    <div id="submission-pack" style={card}>
+    <div id="submission-pack" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
       <AutoRefresh active={active} />
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 10,
-          background: "linear-gradient(90deg, #FFF7E6, #FFFFFF)",
-          border: "1px solid #F5D08A",
-          borderRadius: 9,
-          padding: "10px 14px",
-          marginBottom: 10,
-        }}
-      >
-        <span style={{ fontSize: 18 }} aria-hidden>⚡</span>
-        <div style={{ fontSize: 13, color: "#92400E", fontWeight: 600, lineHeight: 1.4 }}>
+      <div className="mb-2.5 flex items-center gap-2.5 rounded-lg border border-warning/30 bg-gradient-to-r from-warning/10 to-card px-3.5 py-2.5">
+        <span className="text-lg" aria-hidden>⚡</span>
+        <div className="text-[13px] leading-snug font-semibold text-warning">
           SANRAL schedules - usually 6 to 8 hours by hand. We fill them in minutes.
         </div>
       </div>
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Submission pack</div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 12 }}>
+      <div className="mb-0.5 text-[15px] font-bold text-foreground">Submission pack</div>
+      <div className="mb-3 text-xs text-muted-foreground">
         Two PDFs, one per sealed envelope, each in submission order with a contents page and page numbers. The
         submission pack: outer cover, then Envelope 1 (Technical) - authority letter, A-Forms, your vault documents,
         Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B5, and Form B7 from your own
@@ -216,8 +227,8 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       </div>
 
       {blockers.length > 0 && (
-        <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#B91C1C" }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>Can&apos;t generate yet</div>
+        <div className="mb-3 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-xs text-destructive">
+          <div className="mb-1 font-bold">Can&apos;t generate yet</div>
           {blockers.map((b) => (
             <div key={b}>- {b}</div>
           ))}
@@ -225,15 +236,15 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       )}
 
       {blockers.length === 0 && needsAck && (
-        <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#92400E" }}>
-          <div style={{ fontWeight: 700, marginBottom: 4 }}>
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-xs text-warning">
+          <div className="mb-1 font-bold">
             {readiness.checked
               ? `The compliance check above shows ${gaps.length} gap${gaps.length === 1 ? "" : "s"}`
               : "This tender's returnable list isn't mapped, so readiness hasn't been checked"}
           </div>
           {gaps.slice(0, 8).map((g) => (
-            <div key={g.text} style={{ color: g.tone === "red" ? "#B91C1C" : "#92400E" }}>
-              - {g.text} <span style={{ color: "#8A93A0" }}>({g.note})</span>
+            <div key={g.text} className={g.tone === "red" ? "text-destructive" : "text-warning"}>
+              - {g.text} <span className="text-muted-foreground">({g.note})</span>
             </div>
           ))}
           {gaps.length > 8 && <div>…and {gaps.length - 8} more (see the compliance check)</div>}
@@ -241,34 +252,34 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       )}
 
       {blockers.length === 0 && !reviewed && (
-        <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#92400E" }}>
-          <div style={{ fontWeight: 700, marginBottom: 2 }}>Review the pack first</div>
-          See the full <a href="#pack-review" style={{ color: "#92400E", fontWeight: 700 }}>Pack review</a> above - company data,
+        <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3.5 py-2.5 text-xs text-warning">
+          <div className="mb-0.5 font-bold">Review the pack first</div>
+          See the full <a href="#pack-review" className="font-bold text-warning">Pack review</a> above - company data,
           key positions and CVs, form answers, signature, documents, Form B7 - and click &quot;I&apos;ve reviewed this&quot;
           there before generating.
         </div>
       )}
 
       {blockers.length === 0 && (
-        <form action={requestSubmissionPack} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <form action={requestSubmissionPack} className="flex flex-wrap items-center gap-2.5">
           <input type="hidden" name="tender_id" value={tenderId} />
           <input type="hidden" name="tender_pack_id" value={tenderPackId} />
           {signers.length === 0 && (
-            <div style={{ fontSize: 12, color: "#92400E" }}>
-              No one on your <Link href="/people" style={{ color: "#92400E", fontWeight: 700 }}>People page</Link> has a signatory
+            <div className="text-xs text-warning">
+              No one on your <Link href="/people" className="font-bold text-warning">People page</Link> has a signatory
               capacity set yet - add one before generating, so the pack has someone to name as signing it.
             </div>
           )}
           {signers.length === 1 && (
-            <div style={{ fontSize: 12, color: "#16233B" }}>
+            <div className="text-xs text-foreground">
               Signs this bid: <strong>{signers[0].name} - {signers[0].signatory_capacity}</strong>
             </div>
           )}
           {signers.length > 1 && (
-            <label id="signatory-select" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "#16233B", flexWrap: "wrap" }}>
+            <label id="signatory-select" className="flex flex-wrap items-center gap-1.5 text-xs text-foreground">
               Who signs this bid
               <select name="signatory_person_id" defaultValue={signers.some((p) => p.id === chosenSigner) ? chosenSigner : ""}
-                style={{ minHeight: 36, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 8px", maxWidth: "100%" }}>
+                className="min-h-9 max-w-full rounded-md border border-border px-2 text-xs">
                 <option value="">
                   Not chosen - {suggested?.name ?? signers[0].name} (suggested for this tender; the pack will say so)
                 </option>
@@ -282,14 +293,16 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
             type="submit"
             disabled={!!disabledReason}
             title={disabledReason ?? undefined}
-            style={{ minHeight: 40, padding: "0 16px", borderRadius: 8, background: disabledReason ? "#8A93A0" : "#16233B", color: "#FFFFFF", fontSize: 13, fontWeight: 600, border: "none", cursor: disabledReason ? "not-allowed" : "pointer", whiteSpace: "nowrap" }}
+            className={`min-h-10 rounded-lg border-none px-4 text-[13px] font-semibold whitespace-nowrap text-white ${
+              disabledReason ? "cursor-not-allowed bg-muted-foreground" : "cursor-pointer bg-foreground"
+            }`}
           >
             Fill SANRAL schedules
           </button>
           {/* title= (hover) doesn't reach touch devices - the same reason as
               visible text so a phone user isn't left guessing why it's grey. */}
           {disabledReason && (
-            <div style={{ fontSize: 11, color: "#B45309", width: "100%" }}>{disabledReason}</div>
+            <div className="w-full text-[11px] text-warning">{disabledReason}</div>
           )}
         </form>
       )}
@@ -297,24 +310,24 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
       <SanralProgress active={active} />
 
       {jobs.length > 0 && (
-        <div style={{ marginTop: 14, display: "flex", flexDirection: "column" }}>
+        <div className="mt-3.5 flex flex-col">
           {jobs.map((j) => {
-            const st = STATUS[j.status] ?? { label: j.status, bg: "#ECEEF1", color: "#5B6472" };
+            const st = STATUS[j.status] ?? { label: j.status, className: "bg-muted text-muted-foreground" };
             const warnings = j.manifest?.warnings ?? [];
             const techRows = checklistOf(j.manifest);
             const finRows = checklistOf(j.manifest?.financial);
             return (
-              <div key={j.id} style={{ borderTop: "1px solid #ECEEF1", padding: "10px 0", fontSize: 12, color: "#4B5563" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
+              <div key={j.id} className="border-t border-border py-2.5 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${st.className}`}>
                     {st.label}
                   </span>
-                  <span style={{ color: "#8A93A0" }}>
+                  <span className="text-muted-foreground">
                     requested {new Date(j.requested_at).toLocaleString()}
                     {j.acknowledged_gaps ? " · draft, with known gaps" : ""}
                   </span>
                   {j.status === "ready" && j.storage_path_pdf && signed[j.storage_path_pdf] && (
-                    <a href={signed[j.storage_path_pdf]} style={{ color: "#D97706", fontWeight: 700 }}>
+                    <a href={signed[j.storage_path_pdf]} className="font-bold text-accent">
                       Download PDF{j.page_count ? ` (${j.page_count} pages)` : ""}
                     </a>
                   )}
@@ -328,20 +341,43 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                   )}
                 </div>
                 {j.status === "failed" && j.error_message && (
-                  <div style={{ color: "#B91C1C", marginTop: 4, wordBreak: "break-word" }}>{j.error_message}</div>
+                  <div className="mt-1 break-words text-destructive">{j.error_message}</div>
                 )}
                 {j.status === "ready" && j.started_at && j.completed_at && (
-                  <div style={{ color: "#15803D", fontWeight: 600, marginTop: 4 }}>
-                    Time saved: usually 6-8 hours by hand - this run took{" "}
-                    {formatDuration(new Date(j.completed_at).getTime() - new Date(j.started_at).getTime())}.
+                  <div className="mt-1 text-muted-foreground">
+                    Generated in {formatDuration(new Date(j.completed_at).getTime() - new Date(j.started_at).getTime())}.
+                  </div>
+                )}
+                {j.status === "ready" && savingsBreakdown && savingsBreakdown.steps.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-success/20 bg-success/10 p-3">
+                    <div className="font-semibold text-success">
+                      About {savingsBreakdown.hoursSaved} hour{savingsBreakdown.hoursSaved === 1 ? "" : "s"} saved ({formatRand(savingsBreakdown.randSaved)})
+                    </div>
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-xs font-medium text-success">How we worked this out</summary>
+                      <ul className="mt-1.5 list-disc pl-4 text-xs text-muted-foreground">
+                        {savingsBreakdown.steps.map((s) => (
+                          <li key={s.stepKey}>
+                            {s.reason} - {s.hours}h
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                    <div className="mt-1.5 text-[11px] text-muted-foreground">
+                      Estimated, based on your numbers -{" "}
+                      <Link href="/company#savings-baseline" className="underline">
+                        update your baseline
+                      </Link>
+                      .
+                    </div>
                   </div>
                 )}
                 {j.status === "ready" && (
-                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
+                  <div className="mt-1 flex flex-wrap gap-3">
                     {Object.entries(j.output_files ?? {})
                       .filter(([k, p]) => OUTPUT_LABEL[k] && signed[p])
                       .map(([k, p]) => (
-                        <a key={k} href={signed[p]} style={{ color: "#D97706", fontWeight: 600 }}>
+                        <a key={k} href={signed[p]} className="font-semibold text-accent">
                           {OUTPUT_LABEL[k]}
                         </a>
                       ))}
@@ -354,7 +390,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                   </>
                 )}
                 {j.status === "ready" && warnings.length > 0 && (
-                  <ul style={{ margin: "6px 0 0", paddingLeft: 18, color: "#92400E" }}>
+                  <ul className="mt-1.5 pl-[18px] text-warning">
                     {warnings.map((w, i) => (
                       <li key={`w${i}`}>{w}</li>
                     ))}

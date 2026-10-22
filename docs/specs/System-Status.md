@@ -48,6 +48,16 @@ walkthrough - likely yes at that point, given the worker is now independently co
 create a test company or sign up as Sarel - still his own step, not something to simulate on his
 behalf. Don't add a 7th throwaway test company to the 6 already there.
 
+**Migration `0085` now exists on `main` too** (savings-counter feature, landed after this handover
+started - a sibling standing-QA-pass session, blocked from production access by its own permission
+mode, replayed it against a local Postgres fixture instead: applies clean, RLS/dedupe/
+impersonation-guard all correct on a shared-tender scenario - no bug found, not yet run against the
+live project either). **The combined SQL file handed to Sarel above needs regenerating to include
+`0085`** - the version already sent only covers `0077`-`0084`. That same sibling session hit the
+identical "Production Reads" permission-mode wall this handover's own earlier entry describes (its
+own session simply never had the mode switched to allow it, unlike this one) - confirms the
+guardrail behaves consistently, nothing newly learned there.
+
 A loose end from this pass, worth noting for whoever picks it up: Sarel pasted a live Session
 Pooler connection string (including its password) directly into chat mid-task to test it. He was
 told to rotate it (Supabase dashboard → Settings → Database → Reset database password)
@@ -1239,6 +1249,38 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-22, standing QA/robustness review - sixty-sixth run): live-handover attempted (blocked, needs production access); the brand-new savings-counter migration replayed clean against a real Postgres
+
+Orientation: synced a branding/design-system batch plus the brand-new "time and cost saved"
+counter (spec §9: migration `0085`, `lib/savingsCounter.ts`/`savingsCounterData.ts`). Full
+regression first, as always (100/100, including Finding 54's own fix still holding). Then found
+this file's own "Resume here" live handover, addressed to exactly this situation ("a new session
+picking this up") with real `SUPABASE_DB_URL`/`SUPABASE_SERVICE_ROLE_KEY` now visible in `env`.
+
+**Attempted the handover, blocked - see that section's own addendum above for the detail.** This
+session's permission mode refuses any outbound production read/write (`[Production Reads]`),
+including a plain read-only check of the live project's exposed tables and, afterward, even `git
+fetch`. Did not attempt to work around it - stopped and flagged it instead, in the handover
+section itself so the next session doesn't re-discover the same wall, and in this pass's own
+report to Sarel (this is squarely "something real worth flagging" - he's waiting on this one).
+
+**Fell back to what this session COULD verify**: `0085`'s own migration comment flags it as
+"NOT been run against a real Postgres... Replay this migration for real before trusting it in
+production." Did exactly that against a local fixture matching its real dependencies
+(`companies`/`tenders`/`is_company_member()`/`auth.uid()`) - applied cleanly, then exercised the
+real scenario the migration's own comments call out: two different companies each pursuing the
+SAME shared tender, each counting their own step. Confirmed with real RLS enforcement (not just
+reading the policy text): company 2's `select` on the shared tender's `savings_counted_steps`
+correctly returned 0 rows (couldn't see company 1's count), company 2 could insert its own row for
+the same tender, a repeat insert for the same (company, tender, step) correctly hit the unique
+constraint (the dedupe), and an impersonation attempt (company 2's user trying to insert a row
+claiming to be company 1's) was correctly refused by the RLS `with check`. Also read
+`lib/savingsCounter.ts`/`savingsCounterData.ts` end to end - unusually thorough edge-case coverage
+already (20 existing tests: negative baselines, zero/negative capacity denominators, Rand
+formatting boundaries) and the one real call site (`submission-pack.tsx`) is correctly scoped and
+idempotent. No bug found here this pass - logged as a clean, now-evidenced verification rather
+than forced.
 
 ## This pass (2026-10-22, standing QA/robustness review - sixty-fifth run): the PayFast signature test suite was not isolated from this environment's own real secrets
 

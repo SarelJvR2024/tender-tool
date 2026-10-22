@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { FileCheck2, AlarmClock, ShieldCheck } from "lucide-react";
 import { Logo, LogoLockup } from "./Logo";
 import { StatusBadge } from "@/components/tt/status-badge";
@@ -72,7 +73,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <h1 className="mb-6 max-w-[420px] font-display text-[28px] font-medium leading-[1.25] text-white">
-            Win more tenders. <span className="text-accent">Miss fewer deadlines.</span>
+            Win more tenders. Miss fewer deadlines.
           </h1>
 
           <ul className="mb-9 flex flex-col gap-3.5">
@@ -88,7 +89,15 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
-      <div className="flex flex-1 items-center justify-center bg-background p-4">{children}</div>
+      <div className="flex flex-1 flex-col items-center justify-center gap-6 bg-background p-4">
+        {/* The left panel (and its logo) is hidden below md: on mobile the
+            brand otherwise disappears entirely from account screens (spec
+            §3) - a small linked wordmark above the form keeps it present. */}
+        <Link href="/" className="md:hidden">
+          <LogoLockup height={28} surface="light" />
+        </Link>
+        {children}
+      </div>
     </div>
   );
 }

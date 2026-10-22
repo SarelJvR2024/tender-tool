@@ -3,10 +3,10 @@
 import { useTransition } from "react";
 import { advanceTaskStatus, type TenderTaskStatus } from "./actions";
 
-const STATUS_LABEL: Record<TenderTaskStatus, { label: string; bg: string; color: string }> = {
-  not_started: { label: "Not started", bg: "#ECEEF1", color: "#5B6472" },
-  in_progress: { label: "In progress", bg: "#FEF3C7", color: "#B45309" },
-  done: { label: "Done", bg: "#DCFCE7", color: "#15803D" },
+const STATUS_LABEL: Record<TenderTaskStatus, { label: string; className: string }> = {
+  not_started: { label: "Not started", className: "bg-muted text-muted-foreground" },
+  in_progress: { label: "In progress", className: "bg-warning/10 text-warning" },
+  done: { label: "Done", className: "bg-success/10 text-success" },
 };
 
 const NEXT_ACTION_LABEL: Record<TenderTaskStatus, string> = {
@@ -34,20 +34,8 @@ export function TaskStatusButton({
   const chip = STATUS_LABEL[status];
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-      <span
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          padding: "3px 10px",
-          borderRadius: 100,
-          fontSize: 11,
-          fontWeight: 600,
-          background: chip.bg,
-          color: chip.color,
-          whiteSpace: "nowrap",
-        }}
-      >
+    <div className="flex items-center gap-2">
+      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap ${chip.className}`}>
         {chip.label}
       </span>
       {status !== "done" && (
@@ -59,18 +47,7 @@ export function TaskStatusButton({
               advanceTaskStatus(taskId, tenderId, status);
             })
           }
-          style={{
-            padding: "4px 10px",
-            borderRadius: 7,
-            border: "1px solid #E3E6EA",
-            background: "#FFFFFF",
-            color: "#16233B",
-            fontSize: 11,
-            fontWeight: 600,
-            cursor: isPending ? "default" : "pointer",
-            opacity: isPending ? 0.6 : 1,
-            whiteSpace: "nowrap",
-          }}
+          className={`rounded-md border border-border bg-card px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap text-foreground ${isPending ? "cursor-default opacity-60" : "cursor-pointer"}`}
         >
           {isPending ? "…" : NEXT_ACTION_LABEL[status]}
         </button>

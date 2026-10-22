@@ -19,18 +19,7 @@ export function RetryButton({ label = "Retry" }: { label?: string }) {
       type="button"
       onClick={() => startTransition(() => router.refresh())}
       disabled={pending}
-      style={{
-        minHeight: 44,
-        minWidth: 44,
-        padding: "0 14px",
-        borderRadius: 7,
-        border: "1px solid currentColor",
-        background: "transparent",
-        color: "inherit",
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: pending ? "default" : "pointer",
-      }}
+      className={`min-h-11 min-w-11 rounded-md border border-current bg-transparent px-3.5 text-xs font-semibold text-inherit ${pending ? "cursor-default" : "cursor-pointer"}`}
     >
       {pending ? "Retrying…" : label}
     </button>

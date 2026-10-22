@@ -15,21 +15,31 @@ import { AddTenderDocumentsForm } from "../new/manual-tender-form";
  * (discovered_opportunities - the same row Discovery shows).
  */
 
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
-const chip = (bg: string, color: string): React.CSSProperties => ({ display: "inline-flex", alignItems: "center", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: bg, color, whiteSpace: "nowrap" });
+const chipClassName = "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold whitespace-nowrap";
+const chip = (className: string) => `${chipClassName} ${className}`;
 
-const VERDICT: Record<string, { label: string; bg: string; color: string }> = {
-  strong_fit: { label: "Strong fit", bg: "#DCFCE7", color: "#15803D" },
-  possible: { label: "Possible", bg: "#FEF3C7", color: "#B45309" },
-  needs_review: { label: "Needs review", bg: "#FEF3C7", color: "#B45309" },
-  not_a_fit: { label: "Not a fit", bg: "#FEE2E2", color: "#B91C1C" },
-  closed: { label: "Closed", bg: "#F1F5F9", color: "#475569" },
+const VERDICT: Record<string, { label: string; className: string }> = {
+  strong_fit: { label: "Strong fit", className: "bg-success/10 text-success" },
+  possible: { label: "Possible", className: "bg-warning/10 text-warning" },
+  needs_review: { label: "Needs review", className: "bg-warning/10 text-warning" },
+  not_a_fit: { label: "Not a fit", className: "bg-destructive/10 text-destructive" },
+  closed: { label: "Closed", className: "bg-muted text-muted-foreground" },
 };
-const FP_STYLE: Record<string, { label: string; bg: string; color: string }> = {
-  ok: { label: "Template unchanged", bg: "#DCFCE7", color: "#15803D" },
-  mismatch: { label: "Template changed", bg: "#FEE2E2", color: "#B91C1C" },
-  no_baseline: { label: "No baseline yet", bg: "#FEF3C7", color: "#B45309" },
-  error: { label: "Fingerprint failed", bg: "#FEE2E2", color: "#B91C1C" },
+const FP_STYLE: Record<string, { label: string; className: string }> = {
+  ok: { label: "Template unchanged", className: "bg-success/10 text-success" },
+  mismatch: { label: "Template changed", className: "bg-destructive/10 text-destructive" },
+  no_baseline: { label: "No baseline yet", className: "bg-warning/10 text-warning" },
+  error: { label: "Fingerprint failed", className: "bg-destructive/10 text-destructive" },
+};
+// Mirrors lib/generalTender.ts's JOB_STATUS_STYLE semantics (queued/working
+// -> warning, ready -> success, failed -> destructive) as Tailwind classes -
+// kept local rather than changing that shared hex-based export, which other
+// not-yet-migrated files still read directly (out of scope for this pass).
+const JOB_BADGE_CLASS: Record<string, string> = {
+  requested: "bg-warning/10 text-warning",
+  generating: "bg-warning/10 text-warning",
+  ready: "bg-success/10 text-success",
+  failed: "bg-destructive/10 text-destructive",
 };
 
 type Opportunity = Downgrade & { id: string; verdict: string; reasons: string[] | null; score_outlook: { summary?: string[] } | null; source: string };
@@ -71,72 +81,72 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
   const jobStyle = job ? JOB_STATUS_STYLE[job.status] : null;
 
   return (
-    <div id="intake" style={card}>
+    <div id="intake" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
       <AutoRefresh active={active} />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 6 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>How this tender was read</div>
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <span style={chip("#ECEEF1", "#16233B")}>{isManual ? "Loaded manually" : source === "etenders_ocds" ? "From Discovery (eTenders)" : "SANRAL list"}</span>
-          {jobStyle && <span style={chip(jobStyle.bg, jobStyle.color)}>Analysis: {jobStyle.label}</span>}
+      <div className="mb-1.5 flex flex-wrap items-start justify-between gap-2.5">
+        <div className="text-[15px] font-bold text-foreground">How this tender was read</div>
+        <div className="flex flex-wrap gap-1.5">
+          <span className={chip("bg-muted text-foreground")}>{isManual ? "Loaded manually" : source === "etenders_ocds" ? "From Discovery (eTenders)" : "SANRAL list"}</span>
+          {jobStyle && <span className={chip(JOB_BADGE_CLASS[job!.status] ?? "bg-muted text-muted-foreground")}>Analysis: {jobStyle.label}</span>}
         </div>
       </div>
 
       {active && (
-        <div style={{ fontSize: 13, color: "#B45309", background: "#FEF3C7", borderRadius: 9, padding: "10px 14px", marginBottom: 10 }}>
+        <div className="mb-2.5 rounded-lg bg-warning/10 px-3.5 py-2.5 text-[13px] text-warning">
           Reading the documents: working out whether this is a SANRAL template tender or a general one, what it requires, and how
           it fits your company. This page refreshes by itself. If it stays queued, the Tender Ready worker isn&apos;t running yet.
         </div>
       )}
 
       {job?.status === "failed" && (
-        <div role="alert" style={{ fontSize: 13, color: "#B91C1C", background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 9, padding: "10px 14px", marginBottom: 10 }}>
-          <div style={{ fontWeight: 700, marginBottom: 3 }}>The analysis failed - nothing below has been checked against this tender&apos;s documents.</div>
-          <div style={{ wordBreak: "break-word" }}>{job.error_message ?? "No reason recorded."}</div>
+        <div role="alert" className="mb-2.5 rounded-lg border border-destructive/30 bg-destructive/10 px-3.5 py-2.5 text-[13px] text-destructive">
+          <div className="mb-1 font-bold">The analysis failed - nothing below has been checked against this tender&apos;s documents.</div>
+          <div className="break-words">{job.error_message ?? "No reason recorded."}</div>
         </div>
       )}
 
       {intake && (
         <>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
-            <span style={chip(intake.route === "sanral" ? "#16233B" : "#ECEEF1", intake.route === "sanral" ? "#FFFFFF" : "#16233B")}>
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className={chip(intake.route === "sanral" ? "bg-foreground text-white" : "bg-muted text-foreground")}>
               {intake.route === "sanral" ? `SANRAL pack flow - ${intake.family}` : "General (non-SANRAL) flow"}
             </span>
             {intake.fingerprint && (
-              <span style={chip(FP_STYLE[intake.fingerprint.status].bg, FP_STYLE[intake.fingerprint.status].color)}>{FP_STYLE[intake.fingerprint.status].label}</span>
+              <span className={chip(FP_STYLE[intake.fingerprint.status].className)}>{FP_STYLE[intake.fingerprint.status].label}</span>
             )}
           </div>
-          <div style={{ fontSize: 12, color: "#4B5563", lineHeight: 1.5, marginBottom: 8 }}>{intake.signal}</div>
+          <div className="mb-2 text-xs leading-relaxed text-muted-foreground">{intake.signal}</div>
           {intake.fingerprint && intake.fingerprint.status !== "ok" && (
-            <div style={{ fontSize: 12, color: intake.fingerprint.status === "no_baseline" ? "#B45309" : "#B91C1C", marginBottom: 8 }}>
+            <div className={`mb-2 text-xs ${intake.fingerprint.status === "no_baseline" ? "text-warning" : "text-destructive"}`}>
               {intake.fingerprint.detail}
               {intake.fingerprint.changes.length > 0 && ` Changed: ${intake.fingerprint.changes.join(", ")}.`}
             </div>
           )}
           {intake.sanral_documents.length > 0 && (
-            <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 8 }}>
-              <div style={{ fontWeight: 600, color: "#16233B", marginBottom: 2 }}>SANRAL templates found</div>
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
+            <div className="mb-2 text-xs text-muted-foreground">
+              <div className="mb-0.5 font-semibold text-foreground">SANRAL templates found</div>
+              <ul className="m-0 pl-[18px]">
                 {intake.sanral_documents.map((d) => (
-                  <li key={d.doc_type}>{d.label}: <span style={{ color: "#5B6472" }}>{d.document}</span></li>
+                  <li key={d.doc_type}>{d.label}: <span className="text-muted-foreground">{d.document}</span></li>
                 ))}
               </ul>
             </div>
           )}
           {intake.setup && intake.setup.positions.length > 0 && (
-            <div style={{ fontSize: 12, color: "#4B5563", marginBottom: 8 }}>
+            <div className="mb-2 text-xs text-muted-foreground">
               Key positions on this tender&apos;s SETUP sheet:{" "}
               {intake.setup.positions.map((p) => `${p.code} (${p.description ?? "-"}${p.managerial ? ", managerial" : ""})`).join("; ")}
             </div>
           )}
           {intake.notes.length > 0 && (
-            <ul style={{ margin: "0 0 8px", paddingLeft: 18, fontSize: 12, color: "#B45309" }}>
-              {intake.notes.map((n, i) => <li key={i} style={{ marginBottom: 2 }}>{n}</li>)}
+            <ul className="mb-2 pl-[18px] text-xs text-warning">
+              {intake.notes.map((n, i) => <li key={i} className="mb-0.5">{n}</li>)}
             </ul>
           )}
           {intake.unreadable_documents.length > 0 && (
-            <div style={{ fontSize: 12, color: "#B91C1C", marginBottom: 8 }}>
-              <div style={{ fontWeight: 600 }}>Couldn&apos;t read ({intake.unreadable_documents.length})</div>
-              <ul style={{ margin: 0, paddingLeft: 18 }}>
+            <div className="mb-2 text-xs text-destructive">
+              <div className="font-semibold">Couldn&apos;t read ({intake.unreadable_documents.length})</div>
+              <ul className="m-0 pl-[18px]">
                 {intake.unreadable_documents.map((d) => <li key={d.document}>{d.document}: {d.reason}</li>)}
               </ul>
             </div>
@@ -145,29 +155,29 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
       )}
 
       {opp && isOpenDowngrade(opp) && (
-        <div style={{ marginTop: 6 }}>
+        <div className="mt-1.5">
           <DowngradeFlag opportunityId={opp.id} verdict={opp.verdict} downgrade={opp} pursuingStage={pursuingStage} returnTo={`/tenders/${tenderId}`} acknowledgedByLabel={null} />
         </div>
       )}
       {opp && (
-        <div style={{ marginTop: 6, padding: "10px 12px", background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 9 }}>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "#16233B" }}>Fit for your company</span>
-            <span style={chip((VERDICT[opp.verdict] ?? VERDICT.closed).bg, (VERDICT[opp.verdict] ?? VERDICT.closed).color)}>{(VERDICT[opp.verdict] ?? { label: opp.verdict }).label}</span>
+        <div className="mt-1.5 rounded-lg border border-border bg-card px-3 py-2.5">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-xs font-bold text-foreground">Fit for your company</span>
+            <span className={chip((VERDICT[opp.verdict] ?? VERDICT.closed).className)}>{(VERDICT[opp.verdict] ?? { label: opp.verdict }).label}</span>
             {isDowngraded(opp) && (
-              <span style={{ ...chip("#FFFFFF", "#5B6472"), border: "1px solid #E3E6EA", textDecoration: "line-through" }}>was {verdictLabel(opp.downgraded_from)}</span>
+              <span className={`${chip("bg-card text-muted-foreground")} border border-border line-through`}>was {verdictLabel(opp.downgraded_from)}</span>
             )}
           </div>
-          <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, color: "#4B5563" }}>
+          <ul className="m-0 pl-4 text-xs text-muted-foreground">
             {(opp.reasons ?? []).map((r, i) => <li key={i}>{r}</li>)}
-            {(opp.score_outlook?.summary ?? []).map((r, i) => <li key={`s${i}`} style={{ color: "#5B6472" }}>{r}</li>)}
+            {(opp.score_outlook?.summary ?? []).map((r, i) => <li key={`s${i}`} className="text-muted-foreground">{r}</li>)}
           </ul>
         </div>
       )}
 
       {isManual && ownerId && !active && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #ECEEF1" }}>
-          <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 6 }}>
+        <div className="mt-3 border-t border-border pt-3">
+          <div className="mb-1.5 text-xs text-muted-foreground">
             Missing something (an addendum, the SANRAL workbook, a readable copy of a scanned page)? Add it and the tender is read again.
           </div>
           <AddTenderDocumentsForm companyId={ownerId} tenderId={tenderId} />

@@ -67,6 +67,10 @@ export type CompanyRow = {
   sacpcmp_registered_staff_count: number | null;
   total_employees: number | null;
   typical_jv_share_pct: number | null;
+  // 0085_savings_counter.sql - time/cost saved counter baseline (spec §9).
+  // Not-null columns with real defaults (20/450), unlike every field above.
+  savings_baseline_hours_per_tender: number;
+  savings_baseline_hourly_cost_zar: number;
 };
 
 export type DocUrls = Partial<Record<VaultDocumentKind, string>>;
