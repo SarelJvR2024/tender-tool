@@ -12,9 +12,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 // Same OAuth providers as app/app/login/page.tsx, same MICROSOFT_AUTH_READY
-// gate (see that file's own comment for why Microsoft is off) - this page
-// never had them at all until now, only email/password (ported late).
-const MICROSOFT_AUTH_READY = false;
+// flag (see that file's own comment for the history) - this page never had
+// them at all until 2026-10-22, only email/password (ported late).
+const MICROSOFT_AUTH_READY = true;
 
 const MIN_PASSWORD_LENGTH = 8;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
