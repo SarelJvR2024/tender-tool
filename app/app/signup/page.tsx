@@ -11,6 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
+// Same OAuth providers as app/app/login/page.tsx, same MICROSOFT_AUTH_READY
+// gate (see that file's own comment for why Microsoft is off) - this page
+// never had them at all until now, only email/password (ported late).
+const MICROSOFT_AUTH_READY = false;
+
 const MIN_PASSWORD_LENGTH = 8;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -45,6 +50,20 @@ export default function SignUpPage() {
   // Hook (server-side, configured in the Supabase dashboard) - not yet
   // built. Treat this toggle as a UI-level pause, not a hard lock.
   const [signupsEnabled, setSignupsEnabled] = useState<boolean | null>(null);
+
+  const signUpWith = async (provider: "google" | "azure") => {
+    // Created here, not at the top of the component - same reasoning as
+    // login/page.tsx's own copy of this pattern (this page is statically
+    // prerendered; instantiating the Supabase client during that prerender
+    // throws if env vars aren't present at build time).
+    const supabase = createClient();
+    await supabase.auth.signInWithOAuth({
+      provider,
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
+    });
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +151,21 @@ export default function SignUpPage() {
       <AuthCard>
         <h1 className="mb-1 font-display text-xl font-medium text-foreground">Create your account</h1>
         <p className="mb-7 text-sm text-muted-foreground">Start tracking and preparing tenders</p>
+
+        <Button variant="outline" className="mb-2.5 h-11 w-full" onClick={() => signUpWith("google")}>
+          Continue with Google
+        </Button>
+        {MICROSOFT_AUTH_READY && (
+          <Button variant="outline" className="mb-2.5 h-11 w-full" onClick={() => signUpWith("azure")}>
+            Continue with Microsoft
+          </Button>
+        )}
+
+        <div className="my-5 flex items-center gap-2.5">
+          <div className="h-px flex-1 bg-border" />
+          <span className="text-[11px] text-muted-foreground">or</span>
+          <div className="h-px flex-1 bg-border" />
+        </div>
 
         <form onSubmit={handleSubmit} noValidate>
           <div className="mb-3.5 text-left">
