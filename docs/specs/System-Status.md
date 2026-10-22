@@ -6,6 +6,30 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-22 ~04:12 UTC: independently verified Finding 51's PayFast fix, one
+minor residual edge case noted (not blocking).** Orientation found Finding 51 fixed and merged since
+the last pass (`daaad75`) - a real, severe gap: a genuinely successful PayFast payment whose
+`m_payment_id` had been superseded by a second checkout attempt (no debounce on the "Subscribe"
+link) would raise "no subscription pending" and silently never activate, with zero alerting anywhere
+in the TypeScript codebase. Fixed by migration `0081`'s append-only `payfast_payment_attempts` log,
+letting `apply_payfast_itn()` rescue a superseded `COMPLETE` without ever rescuing a stale `FAILED`.
+
+Didn't just trust the commit message - re-verified independently: fresh 71-migration replay (clean)
+and the full real-Postgres tenant-isolation suite (237/237, confirms `0081` doesn't disturb RLS),
+plus read the actual SQL function bodies rather than only the comment explaining them.
+
+**One minor residual edge case, worth naming but not worth fixing now**: the rescue path updates
+`status`/`payfast_token`/`current_period_end` but never touches `payfast_m_payment_id` itself. If a
+company starts checkout A (plan X), then checkout B (plan Y) before A's ITN arrives, and A's `COMPLETE`
+ITN is rescued, the subscription activates - but still under whatever plan `company_subscriptions`
+currently holds (B's selection, since `start_payfast_checkout()` writes plan/interval immediately,
+before payment). If B then fails, `apply_payfast_itn()` would set `past_due` even though A's payment
+genuinely succeeded. This requires two *overlapping* checkout attempts for *different plans* inside
+one ITN round-trip - a real but narrow edge case, strictly rarer than the one Finding 51 already fixed
+(which just needed two attempts, same or different plan, in either order). Not fixed here - flagging
+for whoever next touches this function, not urgent enough to justify touching money-adjacent code on
+a standing review pass alone.
+
 **Standing review pass, 2026-10-22 ~02:12 UTC: quiet pass, full QA sweep clean.** Orientation found
 Finding 50 fixed and merged since the last pass (deadline-reminder emails silently skipping every
 company but one per tender - migration `0080`) plus a routine design-token migration PR (#69) - both
