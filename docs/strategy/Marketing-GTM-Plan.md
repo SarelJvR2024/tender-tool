@@ -3,36 +3,20 @@
 Status: living document, first drafted 2026-10-21, refined overnight across multiple research passes.
 Supersedes the pricing section of `Marketing-Pricing-Strategy.md` (keep that file for its competitive
 notes and ECSA value-calc work — the pricing itself is now the founder's own verbatim 4-tier structure
-below, not that doc's "Model A/B/C") — **with one major caveat, surfaced by this session's own standing
-code-review pass, not by marketing research: see the flag immediately below before treating any number
-on this page as final.**
+below, not that doc's "Model A/B/C").
 
-## ⚠️ Pricing conflict, unresolved — read this before anything else on this page
-
-This document's whole revenue model (Part 0 below) is built on a 4-tier structure given directly in
-chat this session: **Starter R1,490/mo · Professional R2,990/mo · Business R4,990/mo · Enterprise
-(custom)**, no feature gating.
-
-A separate session, working on the actual billing code at the same time, found that **a different
-4-tier brief** (Starter/Professional/**Roads & Civils**/Enterprise "from R9,500") had been given to
-*it*, and that **what's actually live today** on the product's own homepage (`app/page.tsx`) and
-already-merged billing system (`company_subscriptions`, PR #60, merged by the founder himself) is a
-**third, different scheme**: **Tender Watch (free) / Tender Pro (R1,490/mo) / SANRAL Pro (R3,950/mo)**.
-
-**Three different pricing schemes have now surfaced across sessions for the same product.** This is
-not something research can resolve — it's recorded in `docs/specs/System-Status.md` as the founder's
-own call to make. Until he confirms which one is real:
-- Treat every R-figure and tier name in Part 0 below as **the structure this document's OWN research
-  was commissioned against**, not a confirmed final price list.
-- Do **not** publish, print, or quote this document's pricing externally.
-- Once confirmed, the fix is mechanical: this doc's numbers, `app/page.tsx`'s `PRICING_TIERS`, and
-  `lib/billing.ts`'s plan tiers all need to agree — whichever one is correct.
+**Pricing confirmed, 2026-10-22**: a real conflict surfaced across sessions — the live homepage and
+already-merged billing code were running a different, older scheme (Tender Watch/Tender Pro/SANRAL
+Pro) than this document's own 4-tier structure. Sarel confirmed directly, in chat: *"Starter
+R1,490/Professional R2,990/Business R4,990/Enterprise — that one's correct."* Every number in this
+document is now the confirmed, final pricing — the homepage, billing schema and usage-limit
+enforcement have all been reconciled to match (see `docs/specs/System-Status.md` and PR #71).
 
 ## 0. The headline number the founder should see first
 
-**Pricing (as briefed for this research — see the flag above, not yet confirmed against what's
-live):** Starter R1,490/mo · Professional R2,990/mo · Business R4,990/mo · Enterprise (custom).
-No feature gating — every tier gets every engine; tiers differ only by seats and bid-pack volume.
+**Pricing (confirmed, 2026-10-22):** Starter R1,490/mo · Professional R2,990/mo · Business R4,990/mo ·
+Enterprise (custom). No feature gating — every tier gets every engine; tiers differ only by seats and
+bid-pack volume.
 
 The founder's three stated goals were "100 clients", "R100k/month", "R500k/month" — stated as if in that
 order. **They are not in that order.** Run the math on a realistic SaaS tier distribution (roughly
@@ -380,13 +364,13 @@ proven to bid, and just lost) but:
   listing/alert feed, not a bid-prep competitor — see Part 1.
 - [ ] **BidsStack's TenderScout pricing** — the one named competitor whose positioning most directly
   overlaps Tender Ready's compliance framing, but no price was found; worth a follow-up check.
-- [ ] **THE BLOCKING ITEM: which of the three pricing schemes is real** (see the flag at the top of
-  this document) — not resolvable by research, needs Sarel's confirmation before anything here is
-  finalized or shared externally.
+- [x] **Which pricing scheme is real — confirmed by Sarel directly, 2026-10-22**: Starter/
+  Professional/Business/Enterprise, as this document always used. The homepage and billing code
+  (which had drifted to a different, older scheme) are now reconciled to match — see
+  `docs/specs/System-Status.md` and PR #71.
 - [ ] Revenue-math scenarios in Part 0 assume a tier distribution that is itself an assumption (40/45/
   12/3 split) — revisit once there's real trial/conversion data from the first cohort of actual
-  customers, rather than a modeled guess. Also revisit once the pricing conflict above is resolved,
-  since the whole revenue model depends on which tier structure is real.
+  customers, rather than a modeled guess.
 
 ## 7. This pass's refinement notes (2026-10-22 ~00:30 UTC)
 
