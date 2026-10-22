@@ -8,6 +8,48 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Microsoft SSO fixed and enabled, 2026-10-22 ~19:00 UTC (PR #91, `app/app/login/page.tsx` +
+`app/app/signup/page.tsx`).** Closes the gap flagged throughout this file since 2026-10-18:
+Supabase's Azure OAuth provider had Google's credentials pasted into it by mistake, so
+`MICROSOFT_AUTH_READY` existed as a `false` flag to hide the "Continue with Microsoft" button
+rather than expose that broken path to a real visitor.
+
+Sarel registered a real Microsoft Entra app, walked through step by step and verified together
+rather than just reported as done:
+
+- **App registration**: "Tender Ready", created under **`sarel@clev.co.za`** (his own Microsoft
+  account/tenant, `clev.co.za`) - worth knowing for whoever next needs app-registration access in
+  Azure Portal, since it isn't a separate service account.
+- **Supported account types: "Any Entra ID Tenant + Personal Microsoft accounts"** ("All Microsoft
+  account users") - deliberately NOT the default single-tenant option, which would have only
+  allowed `clev.co.za` accounts to sign in rather than any customer's Microsoft account. This is
+  the one step in the whole flow that's easy to get wrong silently (the default selection looks
+  reasonable and would have shipped a Microsoft SSO button that fails for every real customer).
+- **Redirect URI**: Supabase's own `https://swkglctgdceqrehbabfl.supabase.co/auth/v1/callback`.
+- **Client secret**: created with a 2-year expiry - **due around 2028-10-22**. No rotation
+  reminder/scheduled task exists for this yet; whoever's maintaining this project as that date
+  approaches should either rotate it proactively or expect Microsoft SSO to silently start failing
+  for every user the day it lapses (Azure doesn't warn end users, only shows in the Azure Portal
+  app registration's own Certificates & secrets page).
+- **Supabase side** (Authentication → Providers → Azure): real Client ID + Client Secret pasted in
+  (replacing Google's mistakenly-pasted ones), Tenant field set to
+  **`https://login.microsoftonline.com/common`** to match the multi-tenant registration - note this
+  field validates as a URL, not a bare tenant name like `common` alone (caught live during setup,
+  first attempt was rejected).
+
+Also closed in the same pass: `signup/page.tsx` never had Google/Microsoft OAuth at all (only
+email/password, ported late and separately) - added via PR #90, same `MICROSOFT_AUTH_READY` gate,
+merged before this one.
+
+**Open, not this pass's to fix**: the orange Azure Portal warning on the app registration -
+"End users cannot grant consent to newly registered multitenant apps without verified
+publishers" - some companies with stricter Microsoft tenant consent policies may need their own IT
+admin to approve before staff can use "Continue with Microsoft". Fixing it means Microsoft Partner
+Network (MPN) publisher verification, a separate optional step, not required for this to work for
+most users today.
+
+---
+
 **Live-infrastructure handover CLOSED, 2026-10-22 ~16:12 UTC - the app is ready for Sarel's own
 real onboarding walkthrough.** Both blockers this handover tracked are resolved:
 
