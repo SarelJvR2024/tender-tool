@@ -6,6 +6,16 @@ and not a restatement of the phased feature list in
 `Tender-Tool-Competitor-Feature-Deep-Dive.md` (read that for *what should exist and why*; read
 this for *what actually exists right now, and what's inconsistent between agents' work*).
 
+**Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
+is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
+R2,990/Business R4,990/Enterprise - that one's correct") - the full reconciliation (migration `0083`,
+real usage-limit gating, the homepage/billing-page rewrite) is written up in detail and verified
+against a real Postgres, but it's sitting on **PR #71** (draft), not yet in `main` - this file's own
+"current real state" promise means not claiming it's done here until that PR actually merges. `main`
+itself is unchanged since the last pass (no new commits); full re-verification: `typecheck`/`lint`
+clean, `npx vitest run` (77/77 - PR #71's own 4 new cases aren't in this count yet, correctly), a real
+`rm -rf .next && npm run build` clean. Nothing new to flag beyond watching PR #71 to merge.
+
 **Pricing conflict resolved, 2026-10-22 ~08:15 UTC - Sarel confirmed directly: "Starter R1,490/
 Professional R2,990/Business R4,990/Enterprise - that one's correct."** Reconciled every place the
 old, unconfirmed watch/pro/sanral_pro scheme (R0/R1,490/R3,950, from `app/page.tsx`'s pre-existing
