@@ -816,3 +816,14 @@ server-rendered.
 - **Not built this pass**: wiring `RequirementRow` back into `general-workspace.tsx`'s own inline
   markup (noted above); a monthly-rotating or multiple sample tenders (one scenario is enough to
   demonstrate every required capability per spec's own checklist).
+- **Two small review-time fixes, caught while checking this PR before merge**: `position-person-
+  select.tsx`'s demo-mode "Confirm"/"Use" used `window.location.href` (a real lint warning -
+  `@next/next/no-location-assign-relative-destination` - not just a style nit, since a full page
+  reload loses client-side router state) - switched to `useRouter().push()`. Separately,
+  `cover-page-preview.tsx`'s own explanatory footer text (pre-existing in the authenticated app,
+  not introduced by this pass) leaked two internal references into user-facing copy - "Sarel's own
+  spec" and "see app/AGENTS.md for what that would take" - harmless when only signed-in users saw
+  it, worse now that the exact same component renders on a public page with no auth. Trimmed the
+  sentence to the honest, customer-facing part ("nothing here can be typed over yet") and dropped
+  the internal detail; the fuller reasoning stays in the component's own code comment for whoever
+  next touches it.

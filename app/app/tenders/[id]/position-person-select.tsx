@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import { confirmPositionPerson } from "./pack-inputs-actions";
 import type { PositionSuggestions, Suggestion } from "@/lib/positionSuggestions";
@@ -42,10 +43,11 @@ export function PositionPersonSelect({
   // is no real tenderPackId behind a sample tender to write to.
   demo?: boolean;
 }) {
+  const router = useRouter();
   const [isPending, startTransition] = useTransition();
   const choose = (personId: string | null) => {
     if (demo) {
-      window.location.href = "/signup";
+      router.push("/signup");
       return;
     }
     startTransition(() => {

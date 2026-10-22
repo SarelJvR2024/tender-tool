@@ -69,10 +69,7 @@ export async function CoverPagePreview({
         <div className="mt-1.5 text-[11px] text-muted-foreground">TENDERER: {company?.legal_name ?? "No company name on file"}</div>
       </div>
       <div className="mt-2.5 text-[11px] text-muted-foreground">
-        Everything above comes from this tender and your company record - nothing here can be typed over yet. The
-        title wording and a chosen contact person (Sarel&apos;s own spec) aren&apos;t things the cover generator
-        accepts as input today, so a box for either would change nothing about the real cover; see app/AGENTS.md for
-        what that would take.
+        Everything above comes from this tender and your company record - nothing here can be typed over yet.
       </div>
     </div>
   );
