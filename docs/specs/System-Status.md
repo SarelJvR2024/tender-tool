@@ -8,47 +8,85 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
-## Resume here (live, mid-task handover - 2026-10-22 ~12:25 UTC)
+## Resume here (live, mid-task handover - 2026-10-22 ~13:40 UTC, updated)
 
-**If you're a new session picking this up**: Sarel just added `SUPABASE_DB_URL` as an environment
-secret (Supabase dashboard → Settings → Database → Connect → Direct → URI), specifically so the
-migrations missing from the live project (`swkglctgdceqrehbabfl`) can be applied. The session that
-asked for it couldn't see the secret mid-session (new environment secrets need a fresh session to
-load) - that's very likely why you're starting fresh now. Full detail on what's missing and why:
-see `feature/narrative-document-generator`'s own System-Status.md entries once that PR (#74)
-merges, or ask Sarel to point you at the live conversation.
+**Still not done. Two real blockers found this pass, both need Sarel's own action - see the dated
+entry below ("Live-infrastructure handover, continued") for full detail before doing anything.**
+In short:
 
-**Do this, in order:**
-1. Confirm `SUPABASE_DB_URL` (and `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
-   `SUPABASE_SERVICE_ROLE_KEY`) are visible (`env | grep -i supabase`).
-2. Check which migrations the live project is actually missing - cross-reference every migration
-   file's own `create table` statements against the project's real exposed tables (query
-   `$NEXT_PUBLIC_SUPABASE_URL/rest/v1/` with the service-role key as `apikey`/`Authorization:
-   Bearer`, which returns an OpenAPI doc listing every exposed table - compare its `paths` against
-   `app/supabase/migrations/*.sql`'s own `create table` statements). As of this handover, the live
-   project was missing migrations `0077` through `0085`, but don't trust that number blindly -
-   re-check, since more may have landed on `main` since.
-3. Apply whatever's actually missing, in filename order, via
-   `psql "$SUPABASE_DB_URL" -f <file>`. Re-run the same check as step 2 to confirm nothing's still
-   missing before moving on.
-4. Using `SUPABASE_SERVICE_ROLE_KEY`, run one disposable test job through the Railway worker (not
-   yet independently confirmed to be running - Sarel says it's set up) and clean it up afterward -
-   this is the one thing that tells Sarel whether CV/pack/narrative generation will actually
-   complete, not just queue.
-5. Report back to Sarel plainly: is the app ready for him to sign up as his own real company and
-   do a full onboarding walkthrough, yes or no, and exactly what (if anything) is still missing.
+1. **Migrations can't be applied from this sandbox.** `SUPABASE_DB_URL`'s host
+   (`db.swkglctgdceqrehbabfl.supabase.co`) only resolves to an IPv6 address (confirmed via a public
+   DNS-over-HTTPS lookup, not just a local failure) - this environment has no IPv6/raw-TCP egress,
+   only an HTTPS proxy, so `psql` can never reach it from here regardless of which session runs it.
+   Needs Sarel to either (a) get the **Session pooler** connection string from Supabase dashboard →
+   Settings → Database → Connection Pooling (IPv4-compatible, different host/username shape) and
+   set it as `SUPABASE_DB_URL` instead, or (b) run the missing migration files himself via the
+   Supabase dashboard's own SQL Editor (browser-based, no psql needed). Once either happens, a new
+   session can pick up step 3 from the original list below.
+2. **Confirming the Railway worker actually completes a job needs a read of real company/tender
+   rows** (to pick an existing throwaway test company and a tender it's pursuing) and a test-job
+   insert into `pack_generation_jobs` - this session's own "Production Reads" guardrail denied
+   that outright, correctly: it's real customer data, not something to wave through from inside a
+   task description. Needs Sarel's explicit go-ahead (or Sarel running the test himself) before a
+   session tries this again.
 
-**Do NOT** create a test company or sign up yourself - Sarel was explicit that onboarding is his
-to do once you confirm it's ready, not something to simulate on his behalf. There are already 6
-throwaway test companies in the live project from other sessions' own QA work (`E2E Test
-Construction`, `Debug Co`, and others, created 2026-10-18 to 2026-10-21) - don't add a 7th, and
-consider flagging those for cleanup before Sarel's own test.
+**The original 5-step list is still the right order once those two are unblocked** - re-check the
+missing-migrations list first (don't trust the exact numbers below blindly, re-verify), apply them
+via `psql "$SUPABASE_DB_URL" -f <file>` in filename order, re-check, then the disposable test job,
+then report back plainly. **Do NOT** create a test company or sign up yourself - still Sarel's own
+step once the app is confirmed ready, not something to simulate on his behalf. Don't add an 7th
+throwaway test company to the 6 already there from other sessions' QA work.
 
-Once this is done, delete this "Resume here" section (it's a live handover, not a permanent
-record) - fold anything worth keeping into a dated entry below, same as every other finding in
-this file.
+Once both blockers are cleared and the 5 steps are actually done, delete this section and fold
+anything worth keeping into a dated entry below, same as every other finding in this file.
 
 ---
+
+**Live-infrastructure handover, continued - 2026-10-22 ~13:40 UTC: confirmed the missing-migrations
+list, found a real signup-breaking gap, hit two genuine environment blockers (not worked around).**
+
+- **Secrets confirmed visible**: `SUPABASE_DB_URL`, `NEXT_PUBLIC_SUPABASE_URL`,
+  `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` all present in this session's
+  environment, as the previous session expected once a fresh session loaded them.
+- **Missing-migrations check, done the way the handover specified** (live project's own OpenAPI
+  doc via `$NEXT_PUBLIC_SUPABASE_URL/rest/v1/` - 58 tables/views exposed - cross-referenced against
+  every `create table` in `app/supabase/migrations/*.sql`, not just trusting the earlier guess of
+  "0077-0085"). Highest migration on `main` is actually `0084` (no `0085` exists). Four tables the
+  live project is missing entirely: `company_invites` (`0077`), `company_subscriptions` (`0078`),
+  `sent_deadline_reminders` (`0079`), `payfast_payment_attempts` (`0081`). `0080`, `0082`, `0083`,
+  `0084` add no new tables but alter/replace functions those four (and others) depend on, so all
+  eight files (`0077`-`0084`) need applying together, in filename order.
+- **Real finding, not just "tables are missing": live signup is currently silent-broken, not just
+  incomplete.** `start_company_trial()` (`0078_company_subscriptions.sql`) is an `after insert on
+  companies` trigger, not an app-level call - since `0078` was never applied live, that trigger
+  doesn't exist, so a real signup today would insert the `companies` row fine (no error surfaces)
+  but silently create **zero** `company_subscriptions` row for it. Every downstream usage-gating
+  and billing read this pass's earlier pricing-conflict-resolution entry added
+  (`company_can_request_pack()`, the billing page, seat-cap checks) assumes every company has
+  exactly one subscription row. This alone means the live project is not ready for a real signup
+  walkthrough yet, independent of the Railway-worker question.
+- **Blocker 1, genuine environment limit, not a transient error**: direct `psql
+  "$SUPABASE_DB_URL"` fails with `could not translate host name ... No address associated with
+  hostname`. Checked this wasn't just a local DNS hiccup: `google.com` resolves fine from this
+  container, but `db.swkglctgdceqrehbabfl.supabase.co` doesn't resolve via this container's
+  resolver for A *or* AAAA - yet a public DNS-over-HTTPS lookup (`https://dns.google/resolve`,
+  which goes out over this session's normal HTTPS egress) shows the host is real and has an
+  **AAAA-only** record, no A record. This container's egress is HTTPS-proxied only; it has no
+  IPv6/raw-TCP route, so no session running in this kind of sandbox can ever reach this exact host
+  on port 5432 - it isn't about retrying or which session runs it. Did not attempt any workaround
+  that would compromise security (did not add a raw-SQL-execution RPC function to route around it
+  over REST - confirmed no such function already exists on the 42 RPC functions the live project
+  exposes, which is the correct, secure state and should stay that way).
+- **Blocker 2**: testing the Railway worker needs a real existing company + tender to attach a
+  disposable `pack_generation_jobs` test row to (its `company_id`/`tender_id` are required foreign
+  keys) - reading those rows to pick one was denied by this session's own "Production Reads" auto-
+  mode guardrail. Correct behaviour, not a bug to route around: real customer rows, even ones
+  Sarel called "throwaway test companies," aren't something to read on this task description's
+  authority alone. No Railway API token is present in this environment either, so the worker's
+  deployment status couldn't be checked that way as an alternative.
+- **Not done this pass, same as before**: migrations not applied, Railway worker not tested,
+  Sarel's own onboarding walkthrough still not confirmed ready. Full QA sweep not re-run this pass
+  - nothing in `main`'s own app code changed, only this file.
 
 **Standing review pass, 2026-10-22 ~08:22 UTC: quiet pass on `main`; the pricing-conflict resolution
 is real but not merged yet.** Sarel confirmed the pricing directly ("Starter R1,490/Professional
