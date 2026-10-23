@@ -471,6 +471,122 @@ most users today.
 
 ---
 
+**Live infrastructure checked for the first time, 2026-10-22 ~12:20 UTC - production code is 9
+migrations ahead of the live database.** Sarel confirmed a Supabase project
+(`swkglctgdceqrehbabfl`) and Vercel/Railway are already set up; this is the first pass with
+real credentials for either (`SUPABASE_SERVICE_ROLE_KEY`, both `NEXT_PUBLIC_SUPABASE_*` keys,
+and a `VERCEL_TOKEN`, all present as environment secrets - no DB connection string yet, so
+nothing was changed, only read).
+
+- **Vercel production** (`tender-tool-sarel.vercel.app`) is deployed from `main`'s current tip
+  (`42d9ee2`, confirmed via the Vercel API) with exactly the right three env vars
+  (`NEXT_PUBLIC_SUPABASE_URL`/`NEXT_PUBLIC_SUPABASE_ANON_KEY`/`SUPABASE_SERVICE_ROLE_KEY`) pointed
+  at the real Supabase project. The web app side of deployment is genuinely done.
+- **The live database schema stops at migration `0076`.** Cross-referencing every migration's own
+  `create table` statements against the project's real exposed table list (via the REST API's
+  OpenAPI root, service-role key) shows `company_invites` (`0077`), `company_subscriptions`
+  (`0078`), `sent_deadline_reminders` (`0079`), `payfast_payment_attempts` (`0081`), and (not yet
+  mergeable - PR #74) `narrative_documents` (`0085`) all missing - meaning migrations `0077`
+  through `0085` (9 files: company-invites/employee-role RLS, the whole billing/subscription
+  system, PayFast payment tracking, the pricing/usage-limit gating PR #71 just built, the
+  pack-quota fix, and this pass's own narrative generator) have never been applied to the real
+  project. **Production's own code already calls functions and reads tables from that gap** (PR
+  #71's `start_company_trial()`/`company_can_request_pack()` need `company_subscriptions` and
+  `tt_plan_limits()`, neither of which exist yet) - signing up for real right now would very
+  likely fail or behave wrongly partway through trial provisioning, not because anything in this
+  pass is broken, but because the database was never brought forward to match the code that's
+  already live.
+- **Six companies already exist in the real project** - all named like test fixtures (`E2E Test
+  Construction`, `Debug Co`, `E2E Tender Co`, `Fresh Walkthrough Civils`, two more), created
+  2026-10-18 through 2026-10-21 by other sessions' own QA/verification work, not by Sarel. Not
+  urgent, but worth a cleanup pass before Sarel's own onboarding test so his real company isn't
+  sitting next to five throwaway ones in the same dashboard views.
+- **PayFast is confirmed in sandbox mode** (`PAYFAST_MODE=sandbox` in this environment) - no real
+  billing risk from a signup test, whenever it happens.
+- **Railway could not be checked** - no Railway API token exists in this environment (only
+  Vercel's), so whether the worker is actually deployed and polling is still unconfirmed from
+  here; Sarel says it's set up. **[Update, ~16:15 UTC]** PR #80 (open, not yet merged) since
+  confirmed it directly - a disposable test job was claimed and completed in under 20 seconds
+  with real output written back. Worth treating as confirmed once that PR merges, not before.
+- **Not fixed here**: applying the missing migrations needs a direct Postgres connection
+  (`SUPABASE_DB_URL`/the Settings → Database connection string) that doesn't exist in this
+  environment yet - asked for, not yet provided. Nothing was written to the live database this
+  pass; every check above was read-only. **[Update, ~16:15 UTC]** `SUPABASE_DB_URL` has since been
+  provided, but neither the direct host nor the Session Pooler host are reachable from this kind
+  of sandboxed environment at all (HTTPS-only egress, confirmed by two independent sessions) - see
+  PR #80 for the combined SQL file it generated for Sarel to run by hand instead, and this file's
+  own "Resume here" section above for the current state of that blocker. The exact missing range
+  is `0077`-`0084`, not `0077`-`0085` as first guessed here - `0085` now belongs to an unrelated
+  `savings_counter` migration that landed on `main` separately (see this file's dated entries for
+  that feature). This pass's own `narrative_documents` migration has been renumbered to `0086`
+  accordingly - see the entry directly below.
+
+**Cover letter / methodology statement generator built, 2026-10-22 ~10:30 UTC - on `feature/
+narrative-document-generator`, not yet merged.** Sarel asked directly: "lets buil a cover letter
+and methodology generator engin... it may NEVER generate the ame or similar versions for two
+companies then theymight both get disqualified." This directly reopens a decision made five days
+earlier (`docs/specs/Company-Voice-Audit.md`, 2026-10-17): AI-drafted executive summaries/
+methodology were cut from scope for the exact same reason Sarel now named - confirmed before any
+code was written (`AskUserQuestion`): build a full, ready-to-use draft anyway, but with a
+mechanical similarity check across companies for the same tender, plus an export/hand-edit-in-
+Word/re-upload path so nothing ships without a human reading and owning the words.
+
+- **Engine** (`engine/narrative/` - see its own `README.md` for full detail): `build_prompt.py`
+  (hard rules - never invent a fact, preserve `how_we_work`'s own phrasing, names and forbids
+  generic filler, ties length/detail/visual to the company's style choices), `uniqueness.py` (the
+  anti-collusion safeguard - stdlib `difflib`, `SIMILARITY_FLAG_THRESHOLD = 0.6`), `build_docx.py`
+  (real, editable `.docx`, 5 color themes, 3 visual-richness levels), `generate_narrative.py` (the
+  orchestrator - one structured-output Anthropic call, same `call_llm` convention as
+  `extract_cv_fields.py`; a draft scoring too similar gets **exactly one** automatic regeneration
+  with an explicit distinctness instruction, then is honestly flagged if still similar - never
+  silently shipped, never retried a third time), `process_narrative_jobs.py` (the Supabase polling
+  bridge, same shape as `process_cv_jobs.py`/`process_pack_jobs.py`).
+- **Data model**: migration `0086_narrative_documents.sql` (renumbered twice now - first `0084` to
+  `0085` when `main` advanced with its own unrelated `0084_pack_quota_counts_in_flight_jobs.sql`
+  while this was being built, then `0085` to `0086` when `main` separately added an unrelated
+  `0085_savings_counter.sql` after this branch was cut - caught each time by re-fetching `main`
+  before merging, not after). Same request/fulfil shape as
+  `pack_generation_jobs`/`generated_cvs`: `status` `requested`→`generating`→`ready`/`failed`,
+  `style_length`/`style_detail`/`style_visual`/`style_color` captured at request time,
+  `similarity_score`/`similarity_flagged`/`regenerated_for_distinctness` recording the uniqueness
+  check's own result, `final_storage_path`/`final_original_filename`/`final_uploaded_at` for the
+  re-uploaded human-edited version (which, not `generated_storage_path`, is what anything
+  downstream should treat as real). RLS: tenant isolation plus the same employee-has-no-access
+  RESTRICTIVE policy `0077` established for every other company-business table - the cross-tenant
+  read the uniqueness check needs is only ever done by the service-role worker, never granted to
+  any client role.
+- **Built**: `app/app/tenders/[id]/narrative-documents.tsx` (a card on the Tender Workspace,
+  guidance textarea + style pickers per document kind, the same poll-via-`router.refresh()`
+  convention `AutoRefresh`/`submission-pack.tsx` already use, a plainly-worded warning banner when
+  a draft is still flagged after its one retry, a re-upload control for the final edited Word
+  doc) and `narrative-actions.ts` (`requestNarrativeDocument`/`uploadNarrativeFinal` - only ever
+  insert/update rows, same as every other action in this directory). Applies to any tender, SANRAL
+  or general family, not gated on a confirmed tender pack.
+- **Verified**: fresh 75-migration replay (clean) and the full real-Postgres tenant-isolation suite
+  (`ALL PASSED`) against a scratch Postgres with the renumbered migration; all 6
+  `engine/narrative/test_*.py` files pass (0 failures each, including a dedicated
+  `test_process_narrative_jobs.py` added specifically because that bridge script had shipped with
+  zero test coverage); the full repo-wide Python sweep (50 `engine/**/test_*.py` files) unaffected;
+  `tsc --noEmit`, `eslint`, `npx vitest run` (80/80), and `npm run build` all clean.
+- **Not done / open for Sarel**: no live Supabase run and no real Anthropic API call anywhere in
+  this work - no `ANTHROPIC_API_KEY` and no live Supabase project exist in this sandbox (the same
+  standing gap as every other entry in this file); every check above is against stubs/a scratch
+  Postgres, genuinely verifying the prompt/docx/uniqueness logic and the schema/RLS/UI, not the
+  real end-to-end "generate a real draft from a real company's real data" path. Not wired into
+  submission-pack assembly (`assemble_pack.py`/`build_general_pack.py`) - a deliberate scope cut,
+  flagged rather than built, since it touches two separate pack-assembly engines and a product
+  decision about where this belongs in each pack's own document order. `load_key_people` picks this
+  company's own named people with a role on file rather than the people specifically confirmed for
+  this one tender (`tender_pack_assignments` is SANRAL-specific; general-family tenders have no
+  equivalent concept yet) - a named, deliberate simplification, see the README. Not yet merged -
+  sitting on `feature/narrative-document-generator`, now **PR #74** (draft, subscribed). Note for
+  anyone picking this up: this repo's CI (`app-ci.yml`/`bridge-worker-ci.yml`) only triggers on
+  `push` to `main`, not on `pull_request` - so PR #74 (and any other open PR) shows only the
+  Vercel preview deployment check, never a real CI run, until it's merged. Not a new problem this
+  pass introduced, and not fixed here (whether to add a `pull_request` trigger - cost of running
+  CI on every push to every branch vs. catching a regression before merge - is Sarel's call, not
+  a "small and safe" fix to make silently); flagged under "Open items for Sarel's own call" below.
+
 **Live-infrastructure handover CLOSED, 2026-10-22 ~16:12 UTC - the app is ready for Sarel's own
 real onboarding walkthrough.** Both blockers this handover tracked are resolved:
 
@@ -5351,6 +5467,19 @@ note added to the Built table above; nothing new to flag.
   - per-schedule compliance.
 - **Submission pack (Gap #12):** position confirmation now lives on the Key positions card, template upload on the Tender Workspace, and Envelope 2 is a separate PDF (documented convention). Still for Sarel: (a) is the Conventional Financial print right as "every visible sheet" (25 pages: input data, all 8 hours sheets incl. "not used" disciplines, All Hours, C2.4 FIN, Pricing Schedule, Summary Tendered Fee)? It follows Klipcorp's real RRM print, but no real completed *Conventional* financial print exists in the repo to compare; (b) should the Form of Offer also be in Envelope 1? (placed in Envelope 2 as in the real sample); (c) the signatory question above; (d) should one company's template upload be replaceable by another company working on the same tender (today: yes, recorded per row)?
 - **Deploying the bridge worker** (Railway Hobby, $5/mo, recommended; steps in `Automated-Fulfillment-Deployment.md`). It needs a Railway account plus the Supabase URL and service-role key, so it can only happen once a live Supabase project exists. A scheduled GitHub Action was considered and rejected, with evidence, in that doc (GitHub's Actions terms, 5-min floor, auto-disable after 60 idle days).
+- **CI only runs on push to `main`, never on a PR** (noticed this pass, not new): `app-ci.yml`/
+  `bridge-worker-ci.yml` both trigger on `push: branches: [main]` only - so every open PR (today:
+  #58, #74) shows a Vercel preview check but no real typecheck/lint/build/test run until after
+  merge. Every PR in this file's own history has instead been verified locally before push (as
+  this pass's own #74 was) - works, but means a regression is caught only if whoever's building
+  the PR actually runs the full suite by hand, not by CI structurally refusing a red merge. Adding
+  a `pull_request` trigger is the obvious fix; not made here since it changes CI cost/frequency
+  (runs on every push to every branch, not just `main`) and that tradeoff is Sarel's call.
+- **Narrative generator not wired into pack assembly** (this pass, `0085`): a company's final,
+  hand-edited cover letter/methodology statement (`narrative_documents.final_storage_path`) isn't
+  pulled into `assemble_pack.py`/`build_general_pack.py`'s compiled output yet - deliberately
+  flagged rather than built, since it needs a decision on where each document belongs in each
+  pack's own section order, and touches two separate pack-assembly engines.
 - **Pipeline board (item 10):** (a) should a tender auto-advance to "submitted" when its pack is ready? Not done: "pack ready" means a PDF exists, not that it was handed in (submission happens on the buyer's portal or by hand), so the only automatic move is found → bidding on a pack request. (b) Should "Prepare this tender" on Discovery count as bidding? Today it lands at found, since it's also used just to read a tender's requirements. (c) The Tenders tab (dashboard) still lists every shared tender with pack status; fold it into the board, or keep both?
 - **Scenario pass (`Engine-Scenario-Test-Results.md` "Open decisions"):** (1) ~~expired vault documents in a SANRAL pack~~ - **answered** (included, with a warning, plus a per-pack checklist - built); (2) ~~a project whose type exists only in the other SANRAL family~~ - **answered and built**: a project whose type a position's form doesn't offer is left off that position's Form B1 with a note (it was per position, not per family; `Hardcoded-Assumptions-Audit.md` §1); (3) ALT positions on SETUP get the same person as the primary slot - correct? (4) ~~manual tenders private~~ - **answered** (yes; confirmed and three leaks closed, `0032`); (5) ~~private documents on a shared tender~~ - **answered and built** (`0032`); (6) ~~OCR for scanned tenders~~ - **built as an experiment** (`OCR-Evaluation.md`, recommendation: keep with caveats) - keep or drop is Sarel's call.
 - **Tender notes + activity log (item 15):** (a) the activity log shows only the **latest** task status/assignee change and the **latest** pipeline move (`tender_tasks`/`tender_packs` overwrite in place, so a tender moved bidding → submitted → won shows "Submitted" and "Won", but not "Bidding"), and neither records **who** made that change. A full trail would need a small trigger-written events table on those two tables. That is the one place a "history" table would add real information. Worth it, or is latest-only enough? (b) People are named by their sign-in e-mail, because no display name exists for a user. Add a `company_members.display_name`? (c) Should notes be visible to the whole company (today), or only to people with a `tender_role` that can see that tender's work? (d) Pre-existing, found while testing: the `requested_by`/`created_by`/`uploaded_by` FKs to `auth.users` have no `on delete` action, so removing a user who ever requested anything fails at the database. The new `tender_comments.author_id` uses `set null`.

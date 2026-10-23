@@ -30,6 +30,7 @@ import { formatDay } from "@/lib/tenderUpdates";
 import { MarketContext } from "./market-context";
 import { ReusePastSubmission } from "./reuse-past-submission";
 import { TenderTemplates } from "./tender-templates";
+import { NarrativeDocuments } from "./narrative-documents";
 import { SubcontractingPlan } from "./subcontracting-plan";
 import { PositionPersonSelect } from "./position-person-select";
 import { startTenderPack } from "./pack-inputs-actions";
@@ -397,6 +398,19 @@ export default async function TenderWorkspacePage({
     }
   }
 
+  // Cover letter / methodology generator (0085): applies to any tender,
+  // SANRAL or general, not gated on a confirmed tender pack - unlike the
+  // sections above, all it needs is company_id + tender_id.
+  let narrativeDocumentsSection: React.ReactNode = null;
+  try {
+    narrativeDocumentsSection = await NarrativeDocuments({ tenderId: id });
+  } catch (err) {
+    console.error("NarrativeDocuments failed to render for tender", id, err);
+    narrativeDocumentsSection = (
+      <ErrorBanner message="Couldn't load the cover letter / methodology generator. If it keeps happening, let us know." />
+    );
+  }
+
   return (
     <AppShell>
       <div style={{ flex: 1, padding: "20px 16px", maxWidth: 820, width: "100%", margin: "0 auto", boxSizing: "border-box", fontFamily: "system-ui, sans-serif" }}>
@@ -622,6 +636,7 @@ export default async function TenderWorkspacePage({
                     {showSubmissionPack && <JumpLink href="#form-b7" label="Form B7" />}
                     {showSubmissionPack && <JumpLink href="#pack-review" label="Pack review" />}
                     {isGeneralFamily && <JumpLink href="#general-pack-review" label="Pack review" />}
+                    <JumpLink href="#narrative-documents" label="Cover letter" />
                   </div>
                   <ScrollFade fadeColor="255, 255, 255" minWidthToHide={99999} hint={false} />
                 </div>
@@ -958,6 +973,9 @@ export default async function TenderWorkspacePage({
 
             {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
             {submissionPackSection}
+
+            {/* Cover letter / methodology statement generator (narrative_documents, 0085). */}
+            {narrativeDocumentsSection}
           </>
         )}
       </div>
