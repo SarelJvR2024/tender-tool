@@ -2168,3 +2168,100 @@ standing gap as every other page in this file) - the mock route therefore also s
   pagination/filtering fix in this entry works regardless of whether such a policy ever exists, but
   would need less of it (smaller `MAX_SHOW`, fewer "Load more" clicks to reach deep history) if one
   did.
+
+---
+
+### Reconciling PR #120 (Opportunities card enrichment) onto the now-paginated Discovery page
+
+PR #120 (`feature/opportunities-card-enrichment`) built five real additions to each Opportunities
+card from Sarel's own live feedback (2026-10-22): a closes-in countdown, a company-readiness
+indicator, a "done N similar tenders before" history match, a market-pricing-range lookup, and
+conditional scope/pricing-model display. It was opened against the OLD, pre-pagination `main` and
+was never merged - PR #123 (the `discovered_opportunities` scaling fix directly above this entry)
+landed first and rewrote the same `renderDiscovery()` function PR #120 touches, which PR #123's own
+entry above flagged explicitly as "a real, substantive merge/semantics conflict for whoever lands
+second, not just a textual diff conflict." This entry is that reconciliation, done by hand (not a
+blind `git merge`/`git cherry-pick`) onto `main`'s current, already-paginated
+`app/app/discovery/page.tsx`.
+
+**The one real conflict, exactly as PR #123 diagnosed it.** PR #120's `buildDoneHistory()`
+(`lib/opportunityInsights.ts`) needs every past opportunity this company has pursued to at least a
+submitted bid, to answer "done N similar tenders before" honestly. Before PR #123, the page's own
+`rows` variable WAS this company's entire scored-opportunity history, so passing `rows` into
+`buildDoneHistory()` worked. After PR #123, `rows` is only the current bounded page/filter window
+(`PAGE_SIZE=30` by default, up to `MAX_SHOW=300`) - feeding that windowed `rows` into
+`buildDoneHistory()` would silently undercount history matches for any company with more pursued
+history than what's currently loaded on screen. Exactly the same class of bug this whole session's
+other PRs (#111, #122, #123, #124) have been hunting and fixing - this must not ship as a
+regression, and it doesn't.
+
+**The fix**: `buildDoneHistory()`'s own pure-function signature in `lib/opportunityInsights.ts` is
+UNCHANGED from PR #120 - only what `discovery/page.tsx` passes into it changed. The page now runs a
+second, dedicated, un-paginated query in the SAME `Promise.all(...)` as the existing queries (not
+serially after it):
+```
+supabase.from("discovered_opportunities").select("tender_id, buyer, categories").not("tender_id", "is", null)
+```
+identical in shape and reasoning to `app/app/pipeline/page.tsx`'s own query after its PR #123 fix -
+this is safe because `pursue_discovered_opportunity()` always backfills `tender_id` the moment a
+tender is pursued (verified across migrations 0018/0024/0051, same verification PR #123's own entry
+above already did for the pipeline page). A company's own pursued pipeline is naturally small - one
+row per OCDS release that became a real tender - unlike the full scored-opportunity table the page
+itself must paginate, so this query needs no pagination of its own. `buildDoneHistory()` is now fed
+these rows (`pursuedHistoryRows`), not the windowed `rows`, so it always sees this company's FULL
+pursued history regardless of which page/filter window is currently showing.
+
+**Proven with a real test, not just asserted**: `lib/opportunityInsights.test.ts` has a new case
+("a pursued match outside a 30-row paginated window is still counted") that builds a 400-row mock
+dataset with exactly one pursued/won match sitting at index 349 - well outside any default
+PAGE_SIZE=30 slice - and shows that feeding `buildDoneHistory()` a plain windowed slice silently
+drops the match to zero (the regression this whole fix exists to prevent), while feeding it the
+dedicated-query-shaped full set finds it correctly. This is the regression PR #123's own entry
+warned about, reproduced and then shown fixed, not just described.
+
+**The other four PR #120 features - verified unaffected by pagination, confirmed by reading the
+code, not assumed**:
+- **Closes-in countdown** (`closingCountdown()`, new export on `lib/dates.ts`) - operates per-card
+  only, no history dependency. Unaffected, unchanged from PR #120.
+- **Company-readiness/compliance indicator** (`fetchCompanyReadiness()`) - called once per page
+  render inside the same `Promise.all(...)` as everything else, company-wide, not per-row or
+  history-dependent. Unaffected, unchanged from PR #120.
+- **Market pricing range** (`pricingCategoriesFor()`/`pricingSegmentKey()`, `lib/marketPricing.ts`,
+  capped at `MAX_PRICING_LOOKUPS = 40`) - operates on whatever cards are in the CURRENT rendered
+  `visibleRows` window, which is fine: pagination (PR #123) already means fewer cards per page than
+  before PR #123 was ever drafted, so this cap will rarely if ever actually bind now. Noted plainly
+  here, not treated as something to "fix" - exactly the interaction PR #123's own entry above
+  predicted, and the cap is kept anyway as a correct belt-and-braces guard (see this constant's own
+  comment in `discovery/page.tsx`).
+- **Scope/pricing-model conditional display** (`tender_scope_records`, migration 0060) - per
+  already-pursued row within the current `visibleRows` window, not history-wide. Unaffected,
+  unchanged from PR #120 (still honestly rare today - `engine/discovery/tender_enrichment.py` is
+  still never invoked by the production discovery pipeline, same standing follow-up PR #120 itself
+  flagged, not re-litigated here).
+
+**Self-review, 3 full rounds**: round 1 - re-read `lib/discoveryPagination.ts`'s own module comment
+and the current (post-#123) `discovery/page.tsx` in full before writing anything, to work from the
+file's real current shape rather than PR #120's stale diff assumptions. Round 2 - traced every one
+of PR #120's five features through the new tabbed/paginated/windowed structure one at a time,
+confirming each renders correctly and that only the history-match feature had a real
+pagination-window dependency (matching PR #123's own diagnosis - no other hidden dependency found).
+Round 3 - confirmed directly in the diff that the new pursued-history query is a sibling array
+entry inside the existing `Promise.all(...)` (parallel), never a second `await` after it, and that
+`buildDoneHistory()`'s call site now reads from `pursuedHistoryRows`, never from `rows` or
+`visibleRows`.
+
+**Verified**: `rm -rf .next && npm run verify` - 0 errors (the same 3 pre-existing warnings as PR
+#123's own pass - `Logo.tsx`'s two `<img>` warnings and `analytics/page.tsx`'s unused `STAGE_META`
+import, confirmed present on `main` before this branch touched anything). `npx vitest run` -
+147/147 (unchanged from main's baseline - no vitest-covered logic touched by this reconciliation).
+Full `node:test` sweep both ways: `npx tsx --test $(find . -name "*.test.ts" -not -path
+"*/node_modules/*")` - 104/104 (88 baseline + 7 in `dates.test.ts` + 9 in
+`opportunityInsights.test.ts`, the latter including the new regression-proof case above); the same
+set run individually via `node --experimental-strip-types --test <file>` - 104/104, both sweeps
+agree (the same pre-existing 5 zero-test `app/tenders/[id]/*.test.ts` files PR #120's own entry
+already noted as an unrelated quirk of single-file invocation, not something this reconciliation
+introduced or touched).
+
+PR #120 itself is closed (superseded, not merged) once this reconciliation branch is open, with a
+comment pointing to the new PR - avoids leaving a stale, now-conflicting original open alongside its
+own replacement.

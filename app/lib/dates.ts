@@ -51,3 +51,26 @@ export function expiryStatus(dateStr: string | null, renewSoonWithinDays = 60): 
   if (left <= renewSoonWithinDays) return { label: "Renew soon", tone: "warning" };
   return { label: "Current", tone: "success" };
 }
+
+/**
+ * "Closes in X days / Y hours" - the exact wording Sarel asked for on the
+ * Opportunities cards (2026-10-22 live feedback). Shares the tender-workspace
+ * page's own closingCountdown() logic (app/app/tenders/[id]/page.tsx) rather
+ * than importing from that file, since a sibling session was concurrently
+ * editing it when this was written - a shared export here lets both pages
+ * use the same rule without either one depending on the other's file.
+ */
+export function closingCountdown(closingDate: string | null): { text: string; urgent: boolean } | null {
+  if (!closingDate) return null;
+  const ms = new Date(closingDate).getTime() - Date.now();
+  if (Number.isNaN(ms)) return null;
+  if (ms <= 0) return { text: "closed", urgent: true };
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  if (hours < 24) return { text: hours < 1 ? "closes within the hour" : `closes in ${hours} hour${hours === 1 ? "" : "s"}`, urgent: true };
+  const days = Math.floor(hours / 24);
+  const remHours = hours - days * 24;
+  return {
+    text: remHours > 0 ? `closes in ${days} day${days === 1 ? "" : "s"} ${remHours} hour${remHours === 1 ? "" : "s"}` : `closes in ${days} day${days === 1 ? "" : "s"}`,
+    urgent: days <= 7,
+  };
+}
