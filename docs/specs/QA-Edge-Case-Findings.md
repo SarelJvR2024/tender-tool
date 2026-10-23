@@ -3843,3 +3843,45 @@ by grep).
 (2 call sites updated for the new `find_closing_time()` return shape, plus a new ambiguity note at
 each site), and the test file. No schema or API shape change - `intake_rec["delivery_address"]`
 gains one extra key (`ambiguous`), additive only.
+
+### Finding 63 (CONFIRMED, FIXED, moderate - a real project with no captured position title crashed CV generation entirely for that person, not just printed the word "None")
+
+**Where:** `engine/cv/generate_cv.py`'s `build_sanral_keyperson()` - the normal (non-World-Bank)
+CV builder, used for every real key-person CV this project generates.
+
+**What was tested:** rotated to CV this cycle. Finding 49 (run 60, 2026-10-21) fixed the sibling
+builder `build_world_bank()` for the exact same bug class - `dict.get(key, default)` only
+substitutes `default` when the key is ABSENT, never when it's present with value `None` - and its
+own write-up said `build_sanral_keyperson()` "already guards the identical fields correctly with
+`proj.get(...) or ''`". Checked that claim directly against the actual code rather than trusting
+it: true for `start`/`end`/`contact`/`contact_phone`/`value_rm`, but **not** for `position_held`
+(line 290) - still a bare `proj.get("position_held", "")` with no `or ""`. `position_held` is a
+nullable column (`0001_init_schema.sql`'s `projects` table; `client_and_number`, the one other
+unguarded field on the same line, is `not null` in the schema and so was correctly left alone).
+Reproduced directly: a project row with `position_held=None` (a real, plausible shape - a key
+person's project entered without filling in every field) crashes `_safe_text(None)` with
+`TypeError: expected string or bytes-like object, got 'NoneType'` (`_safe_text`'s own docstring
+says plainly it is "never called on None (every call site already has its own '' fallback for
+that)" - this was the one call site that didn't).
+
+**Why worse than Finding 49, not just the same bug again:** Finding 49's bug rendered the literal
+word "None" into a real CV - wrong content, but the document still generated. This one crashes
+`build_sanral_keyperson()` outright, failing that key person's CV generation job entirely (contained
+to one job by `process_cv_jobs.py`'s own per-job try/except, confirmed in Finding 49's own write-up
+- not a bridge-wide outage, but a real, visible job failure for a company relying on that person's
+CV for a real submission).
+
+**Fix:** added the same `or ""` guard already used for every other nullable field on these rows -
+`proj.get("position_held", "") or ""`.
+
+**Verified the regression test actually catches the regression:** new
+`test_sanral_keyperson_project_with_null_position_held_does_not_crash()` in
+`engine/cv/test_generate_cv.py` - a project with `position_held=None` and every other field
+present and valid, asserting the row renders (no crash), the position cell is blank (not the word
+"None"), and every other cell in the same row is unaffected. Reverted the fix (saved patch + `git
+apply -R`, restored with `git apply`): the new test failed with the exact predicted `TypeError` at
+the exact predicted line; restored: `0` failures. Full `test_generate_cv.py` (now 9 functions) and
+`test_extract_cv_fields.py` re-run clean.
+
+**Regression:** one line changed in `engine/cv/generate_cv.py`. No schema or call-site changes
+needed elsewhere.

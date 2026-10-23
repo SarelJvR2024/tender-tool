@@ -1529,6 +1529,27 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventy-fifth run): the sibling fix to Finding 49's "prints the word None" bug left one field unguarded, and this one crashed CV generation outright
+
+Orientation: rotated to CV. Finding 49 (run 60, 2026-10-21) fixed `build_world_bank()`'s
+`dict.get(key, default)`-vs-`None` bug and said `build_sanral_keyperson()` "already guards the
+identical fields correctly" - checked that claim against the actual code rather than taking it on
+faith.
+
+**Finding 63 (CONFIRMED, FIXED, moderate).** It mostly held, except for one field:
+`build_sanral_keyperson()`'s `position_held` (a real, nullable column) still had a bare
+`proj.get("position_held", "")`, no `or ""`. Worse than Finding 49's own bug - that one printed
+the wrong text; this one crashes `_safe_text(None)` outright (`TypeError`), failing a key person's
+CV generation job entirely for a real, plausible shape (a project entered without a captured
+position title).
+
+**Fix:** added the same `or ""` guard every other nullable field on that row already has.
+
+**Verified the regression test actually catches the regression:** new test in
+`test_generate_cv.py` with `position_held=None` and every other field valid. Reverted: failed
+with the exact predicted `TypeError` at the exact predicted line; restored: `0` failures. Full
+`test_generate_cv.py` (9 functions) and `test_extract_cv_fields.py` re-run clean.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-fourth run): a SANRAL addendum moving the delivery venue or extending the deadline could be silently outvoted by the original notice on a filename coin-flip
 
 Orientation: rotated to `engine/intake` - the most overdue area in the standing rotation (last

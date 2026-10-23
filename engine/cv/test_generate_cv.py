@@ -202,6 +202,34 @@ def test_world_bank_project_with_null_fields_does_not_print_the_word_none():
     check("the start date is still shown correctly", "2022-01-01" in text, text)
 
 
+def test_sanral_keyperson_project_with_null_position_held_does_not_crash():
+    print("build_sanral_keyperson: a real project row with no captured position title "
+          "(position_held=None) must not crash CV generation for that person")
+    # Finding (2026-10-23): dict.get(key, default) only substitutes `default`
+    # when the key is ABSENT, not when it's present with value None -
+    # position_held is a nullable column (0001_init_schema.sql's projects
+    # table), and _safe_text(None) itself crashes (re.sub needs a string,
+    # not None) - every OTHER nullable project field in this same function
+    # already guards with `or ""` (the "or" pattern that fixed the sibling
+    # build_world_bank() bug, Finding 49), position_held was the one left
+    # behind. Worse than Finding 49's "prints the word None": this one
+    # failed the whole CV generation job, not just rendered wrong text.
+    person = {"name": "Jane Doe", "role": "Engineer", "qualifications": {},
+              "projects": [{"client_and_number": "Real Project A/2022", "position_held": None,
+                             "start": "2022-01-01", "end": "2023-01-01", "value_rm": 10,
+                             "contact": "A Buyer", "contact_phone": "012 345 6789"}]}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_sanral_keyperson(profile, person, "person_1", "full", None, None, log)
+    row = next(r for t in doc.tables for r in t.rows if any("Real Project" in c.text for c in r.cells))
+    cells = [c.text for c in row.cells]
+    check("the project renders at all (no crash) and the position cell is blank, not the word 'None'",
+          cells[2] == "", cells)
+    check("the rest of the row is unaffected (client/value/start/end/contact all still correct)",
+          cells[0] == "Real Project A/2022" and cells[1] == "10" and cells[3] == "2022-01-01"
+          and cells[4] == "2023-01-01" and cells[5] == "A Buyer", cells)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -211,6 +239,7 @@ def main():
     test_control_characters_are_stripped_not_crashed_on()
     test_years_experience_uses_sast_not_naive_utc_today()
     test_world_bank_project_with_null_fields_does_not_print_the_word_none()
+    test_sanral_keyperson_project_with_null_position_held_does_not_crash()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
