@@ -1552,6 +1552,19 @@ them): `test_lephalale.py`, `test_vaal_central_water.py`, every `engine/complian
 file, and several others using the real-clock-independent relative-`TODAY` pattern or dates far
 enough out (~73 years) not to be a near-term risk.
 
+**CI infrastructure note, not this session's code**: `bridge-worker-ci`'s `smoke-test` job has now
+hung on its "Install LibreOffice..." step for the full ~15 minutes before auto-cancelling on 3
+separate pushes today (Findings 59, 63, and 64's own CI runs) - each time with every real test
+step downstream showing `skipped`, never reached, and each time resolved cleanly by one
+`rerun_failed_jobs` retry. Three occurrences in one day crosses from "an occasional flake" to "a
+real, recurring CI infrastructure pattern" worth someone's attention - most likely an
+apt/Microsoft-package-repo mirror hiccup on the GitHub-hosted runner side, not a problem in this
+repo's own code (every other job and every actual test step has stayed green throughout). Not
+something a sandbox session can fix directly (it's GitHub's own runner infrastructure, not this
+repo's CI config); flagging here so it isn't mistaken for a code regression if it recurs again,
+and so whoever next touches `bridge-worker-ci.yml` knows this step in particular is worth watching
+(e.g. pinning the LibreOffice package/mirror, or giving that one step its own timeout+retry).
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-fifth run): the sibling fix to Finding 49's "prints the word None" bug left one field unguarded, and this one crashed CV generation outright
 
 Orientation: rotated to CV. Finding 49 (run 60, 2026-10-21) fixed `build_world_bank()`'s
