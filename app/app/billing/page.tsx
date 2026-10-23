@@ -17,6 +17,7 @@ import { PageHeader } from "@/components/tt/page-header";
 import { SectionCard } from "@/components/tt/section-card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { payfastMode } from "@/lib/payfast";
 
 // Depends on the signed-in user's own subscription row, same reason as
 // every other RLS-scoped page in this app.
@@ -40,6 +41,21 @@ export default async function BillingPage({
   searchParams: Promise<{ checkout?: string; error?: string }>;
 }) {
   const { checkout, error } = await searchParams;
+  // UX audit 2026-10-23, item 6: "PayFast sandbox" was hardcoded into this
+  // page's copy regardless of PAYFAST_MODE (lib/payfast.ts), so production
+  // would keep telling paying customers their card wasn't being charged
+  // even once PAYFAST_MODE=live. First fix gated the copy on the real
+  // checkout/ITN routes' own flag; re-review 2026-10-23 asked for an
+  // explicit NEXT_PUBLIC_PAYFAST_SANDBOX switch instead, so it can be
+  // turned off here without touching PAYFAST_MODE's own effect on where
+  // checkout actually posts. CAUTION, not enforced in code: if this is set
+  // to "false" while PAYFAST_MODE is still "sandbox", the page will claim
+  // live payment while checkout is still hitting PayFast's sandbox - don't
+  // flip this ahead of PAYFAST_MODE actually going live. Unset falls back
+  // to the real mode, same safe default as before.
+  const isSandbox = process.env.NEXT_PUBLIC_PAYFAST_SANDBOX === undefined
+    ? payfastMode() === "sandbox"
+    : process.env.NEXT_PUBLIC_PAYFAST_SANDBOX === "true";
   const supabase = await createClient();
   const subscription = await fetchCompanySubscription(supabase);
 
@@ -64,7 +80,7 @@ export default async function BillingPage({
         <PageHeader
           className="mb-5"
           title="Billing"
-          description="Your plan, trial and payment - PayFast sandbox for now, so no real card is charged."
+          description={isSandbox ? "Your plan, trial and payment - PayFast sandbox for now, so no real card is charged." : "Your plan, trial and payment."}
         />
 
         {error && (
@@ -139,12 +155,17 @@ export default async function BillingPage({
         </div>
 
         <p className="mt-6 text-xs text-muted-foreground">
-          Yearly billing is 2 months free (10&times; the monthly price). Prices exclude VAT. Payments run through PayFast&apos;s
-          sandbox for now - see{" "}
-          <Link href="https://sandbox.payfast.co.za" className="underline underline-offset-2" target="_blank" rel="noreferrer">
-            sandbox.payfast.co.za
-          </Link>
-          .
+          Yearly billing is 2 months free (10&times; the monthly price). Prices exclude VAT.
+          {isSandbox && (
+            <>
+              {" "}
+              Payments run through PayFast&apos;s sandbox for now - see{" "}
+              <Link href="https://sandbox.payfast.co.za" className="underline underline-offset-2" target="_blank" rel="noreferrer">
+                sandbox.payfast.co.za
+              </Link>
+              .
+            </>
+          )}
         </p>
       </div>
     </AppShell>
@@ -181,7 +202,7 @@ function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: stri
           plan={plan}
           interval="yearly"
           disabled={isCurrent}
-          label={`Subscribe yearly - R${yearly.toLocaleString("en-ZA")} (2 months free)`}
+          label={`Subscribe yearly - R${yearly.toLocaleString("en-ZA")}/yr`}
           variant="outline"
         />
       </div>

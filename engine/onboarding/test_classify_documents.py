@@ -154,10 +154,57 @@ CIDB_ANSWER = {
 }
 
 
+CIDB_ANSWER_WIRE = {
+    "document_kind": "cidb_registration", "document_kind_reason": "CIDB grading certificate.",
+    "fields": [
+        {"field": "registration_number", "value": "123456789", "evidence": "Registration number: 123456789"},
+        {"field": "grade_class", "value": "8CE", "evidence": "Grading: 8CE"},
+        {"field": "expiry_date", "value": "2026-12-31", "evidence": "Expiry date: 31 December 2026"},
+        {"field": "contractor_name", "value": "Klipcorp Test (Pty) Ltd", "evidence": "Contractor: Klipcorp Test (Pty) Ltd"},
+    ],
+    "parse_problems": [],
+}
+
+
+def _count_union_params(schema):
+    """What the API's own error actually counts (re-review, 2026-10-23
+    evening): 'N parameters with type arrays or anyOf' - only union/
+    nullable-typed properties, not every property. The first version of
+    this check counted every property regardless of union-ness; it still
+    happened to pass here (7 < 16) but wasn't verifying the thing the API
+    actually limits - extract_cv_fields.py's own sibling check made that
+    gap concrete (it reported "22 total params" as still only partial
+    progress, when the real, API-relevant number was already 12). Counting
+    only union-typed properties, recursively through `properties`, array
+    `items` and `anyOf` branches, is what actually matches the provider's
+    limit."""
+    if not isinstance(schema, dict):
+        return 0
+    n = 0
+    for v in (schema.get("properties") or {}).values():
+        if isinstance(v, dict) and ("anyOf" in v or isinstance(v.get("type"), list)):
+            n += 1
+        n += _count_union_params(v)
+    items = schema.get("items")
+    if isinstance(items, dict):
+        n += _count_union_params(items)
+    for branch in schema.get("anyOf") or []:
+        n += _count_union_params(branch)
+    return n
+
+
 def test_validate_proposal_schema():
     import jsonschema
-    jsonschema.validate(CIDB_ANSWER, cd.output_schema())
-    check(True, "test-double answer is valid against the structured-output schema sent to the API")
+    jsonschema.validate(CIDB_ANSWER_WIRE, cd.output_schema())
+    check(True, "array-shaped test-double answer is valid against the real structured-output schema sent to the API")
+    # Regression guard for the real 2026-10-23 bug: the old `fields` shape
+    # (one named sub-object per entry in ALL_FIELDS) put 54 union-typed
+    # parameter definitions in one request and every upload failed outright.
+    # This stays small and constant regardless of how many fields/kinds exist.
+    n = _count_union_params(cd.output_schema())
+    check(n < 16, f"schema has {n} union-typed parameters (API limit 16) - was 54 before the fix")
+    check(len(cd.ALL_FIELDS) > 16, f"sanity check: {len(cd.ALL_FIELDS)} real fields exist - if this were still the "
+          "old one-sub-object-per-field shape, the schema would already be over the limit on field count alone")
 
 
 def test_cidb():
@@ -322,6 +369,31 @@ def test_llm_call():
                                 (StubResponse("{}", "max_tokens"), "more content", "max_tokens"),
                                 (StubResponse("not json"), "valid structured", "bad JSON")]:
         expect_fail(lambda: cd.call_llm("t", "f.pdf", client=StubClient(resp)), needle, f"stop/answer: {label}")
+
+    # Re-review 2026-10-23: same fix as extract_cv_fields.py's sibling check
+    # - a BadRequestError (the exact shape of the real "too many union
+    # parameters" rejection) must come out as a clean, fixed customer
+    # message, with the technical detail only on `.detail`, not folded into
+    # the message a customer sees via onboarding_uploads.classification_error.
+    import anthropic
+    import httpx
+    raw = ("Schemas contains too many parameters with union types (54 parameters with type arrays or anyOf). "
+           "This causes exponential compilation cost. Reduce the number of nullable or union-typed parameters "
+           "(limit: 16 parameters with unions).")
+    resp = httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+                          json={"type": "error", "error": {"type": "invalid_request_error", "message": raw},
+                                "request_id": "req_test456"})
+
+    def boom(**kw):
+        raise anthropic.BadRequestError(raw, response=resp, body=resp.json())
+    bad_client = types.SimpleNamespace(beta=types.SimpleNamespace(messages=types.SimpleNamespace(create=boom)))
+    try:
+        cd.call_llm("doc text", "f.pdf", client=bad_client)
+        check(False, "BadRequestError should raise ClassificationFailed")
+    except cd.ClassificationFailed as e:
+        check("Error code" not in str(e) and "request_id" not in str(e) and "54 parameters" not in str(e),
+              "customer-facing message has no raw provider error or request id")
+        check(e.detail and "54 parameters" in e.detail, "raw provider detail kept on .detail for system_alerts, not lost")
 
 
 # ----------------------------------------------------------------------------

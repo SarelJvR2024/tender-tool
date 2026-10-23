@@ -648,7 +648,17 @@ export default async function TenderWorkspacePage({
             {!tenderPack && !packError && (
               <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "var(--muted-foreground)", marginBottom: 16 }}>
                 No tender pack exists yet for this tender at your company - nothing to review until one is created.
-                {isSanralPackFamily && (
+                {/* UX audit re-review 2026-10-23, item 5: this button used to be
+                    gated to isSanralPackFamily only, so a general (non-SANRAL)
+                    tender showed this same "nothing to review" text with no way
+                    to act on it at all - confirmed live. startTenderPack() itself
+                    has no SANRAL-specific logic (just an upsert of company_id +
+                    tender_id), and the general pack-generation flow
+                    (general-workspace.tsx's own #general-pack section) doesn't
+                    depend on this row existing, but the readiness report, key
+                    positions and chips above all do - general tenders need this
+                    button exactly as much as SANRAL ones do. */}
+                {(isSanralPackFamily || isGeneralFamily) && (
                   <form action={startTenderPack} style={{ marginTop: 12 }}>
                     <input type="hidden" name="tender_id" value={id} />
                     <button

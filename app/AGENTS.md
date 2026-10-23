@@ -2265,3 +2265,64 @@ introduced or touched).
 PR #120 itself is closed (superseded, not merged) once this reconciliation branch is open, with a
 comment pointing to the new PR - avoids leaving a stale, now-conflicting original open alongside its
 own replacement.
+
+---
+
+### Company vault: always-visible progress summary + grouped sub-nav (Sarel's own live feedback)
+
+Sarel's next piece of live feedback tonight: "Company vault need a similar improvement to see
+progress, number of docs uploaded and missing, people uploaded and missing docs per person. also
+see if there is a better way to do the layout and how to get to the different sections it feel
+intimidating for an initial users... it need to be completely clear how the process and flow
+works." Two real gaps, both addressed without a second completeness mechanism: Company vault had
+no document count anywhere, no per-person CV status anywhere, and People wasn't linked from this
+page at all (not in `RegisterLinks`' card grid, not in the sub-nav).
+
+**Progress summary**: new `VaultProgressSummary.tsx` - two always-visible cards (not inside a
+section you have to open), right under `BidReadinessCard` at the top of the page. "Compliance
+documents: N of 7 on file" with a link to the missing count when incomplete, and "People / CVs: N
+of M have a CV" with up to 4 missing names linked straight to `/people/[id]` plus a "see all" link
+to `/people`; a zero-people company instead gets "No one on file yet" + "Add your first person" -
+the actual first-attempt state, not a 0/0 that reads as done. Both numbers reuse data `page.tsx`
+already computes or trivially extends: `documentsOnFile`/`documentsTotal` loop the same 7
+`VAULT_DOCUMENTS` keys `ComplianceDocumentsSection` already renders one row per (counted, not
+re-derived as a second array); the per-person CV set is the one new `people(id, name)` query added
+alongside the `cv_uploads` read the bid-readiness score already made, kept instead of discarded
+once its count was taken. Deliberately not a second progress bar/percentage - `BidReadinessCard`
+above it still owns "the one score" for this company; this is the concrete, countable version of
+the same underlying facts (its own file's doc comment: "these surfaces can't quietly disagree").
+
+**Grouped sub-nav**: `CompanySubNavItem` gained an optional `group` field; `CompanySubNav.tsx`
+renders a small uppercase header above each cluster of items that share one (desktop column only -
+the horizontal pill row below `lg` stays flat, since a scroller has no good place to inline a
+header). `page.tsx`'s `subNavItems` now reads as three clusters instead of one flat 12-item list:
+"Required for every tender" (Expiry, Documents, Identity, B-BBEE & CIDB, Bank details), "Team &
+experience" (new **People** and **Experience** entries - neither existed in the sub-nav before,
+despite both having real `lib/readiness.ts` criteria with hrefs already pointing at `/people` and
+`/experience` - plus Registers), "Other company info" (Size & offices, Time & cost saved, How we
+work, Notifications, Letters, Offices). Two new completion ticks reuse existing criteria exactly
+like `identityComplete`/`beeCidbComplete` already did (`satisfied("people_cvs")`,
+`satisfied("experience")`, `satisfied("bank_confirmation")` for the pre-existing Bank details
+entry, which never had one before) - no guessed tick invented for the nav. Grouping only relabels
+and reorders the existing items; no section, href, or signal is new besides the two sub-nav
+entries themselves (both already real pages).
+
+**Self-review**: round 1 - a dev-only mock route (`/design/screenshot-company-vault`, deleted
+before finishing, never committed) rendered the real `VaultProgressSummary` + `CompanySubNav`
+components with `computeBidReadiness`-derived mock data, screenshotted at 1440px and 390px in both
+a populated state and an all-zero first-time-user state (`?empty=1`). Confirmed: group headers
+render correctly above each cluster on desktop, the pill row degrades to a flat horizontal
+scroller with no stray headers on mobile, the progress cards stack to one column below `sm:`, and
+the empty state reads as "add your first document / your first person" rather than a misleading
+0/0. Round 2 - re-checked against Sarel's own two asks: progress (done - two always-visible counts,
+missing docs and missing people both link straight to where to fix them) and layout (done - the
+sub-nav is now three named clusters instead of one list, and People/Experience are reachable from
+it for the first time). Round 3 - confirmed `lib/readiness.ts` and the compliance-docs/field-width
+work from the last two batches are untouched: `git diff` shows only `page.tsx`,
+`CompanySubNav.tsx`, and the new `VaultProgressSummary.tsx`; `lib/readiness.spec.ts` (6/6) and the
+full vitest/node:test suites re-run clean.
+
+**Tested**: `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways (`tsx --test` and
+`node --experimental-strip-types` per file). **Not tested**: an actual signed-in render - same
+sandbox credential-generation limitation as every batch tonight; the mock-route screenshots above
+are the closest available substitute, not a replacement for Sarel clicking it himself.

@@ -5,6 +5,7 @@ import { Card, SubPage } from "../_components/ui";
 import { UploadForm } from "./upload-form";
 import { DocumentReviewCard, type OnboardingResult } from "./review";
 import { AutoRefresh } from "../../_components/AutoRefresh";
+import { retryOnboardingUpload } from "./actions";
 
 // Bulk onboarding document scan (0063): drop in a folder/zip of whatever
 // compliance documents the company already has instead of uploading and
@@ -18,6 +19,7 @@ const SAVED: Record<string, string> = {
   "handed-off": "Handed off to the CV pipeline - find it on that person's People page.",
   skipped: "Marked as needing manual review.",
   discarded: "Discarded.",
+  retrying: "Queued again - this page updates itself as the result comes in.",
 };
 
 export default async function DocumentScanPage({ searchParams }: { searchParams: Promise<{ error?: string; saved?: string }> }) {
@@ -29,7 +31,7 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
   if (!membership) redirect("/onboarding");
   const companyId = membership.company_id as string;
 
-  const [{ data: pending, error: pendingError }, { data: principals }, { data: people }, { count: queuedCount }, { data: company }] = await Promise.all([
+  const [{ data: pending, error: pendingError }, { data: principals }, { data: people }, { count: queuedCount }, { data: company }, { data: failed, error: failedError }] = await Promise.all([
     supabase
       .from("onboarding_document_results")
       .select("id, document_kind, document_kind_reason, fields, warnings, text_method, model, created_at, onboarding_uploads(original_filename)")
@@ -44,6 +46,17 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
       .eq("company_id", companyId)
       .in("status", ["classification_requested", "classifying"]),
     supabase.from("companies").select("legal_name").eq("id", companyId).maybeSingle(),
+    // UX audit re-review 2026-10-23, item 2: a failed classification used to
+    // leave no trace anywhere on this page - not "still being read" (that
+    // only counts classification_requested/classifying), not "To review"
+    // (that only counts rows classify_documents.py actually succeeded on).
+    // This is the only place that failure is visible at all.
+    supabase
+      .from("onboarding_uploads")
+      .select("id, original_filename, created_at")
+      .eq("company_id", companyId)
+      .eq("status", "classification_failed")
+      .order("created_at", { ascending: false }),
   ]);
 
   // "handed-off" means confirmCvHandoff just inserted a cv_uploads row for
@@ -107,6 +120,34 @@ export default async function DocumentScanPage({ searchParams }: { searchParams:
         <div className="mb-3.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
           Couldn&apos;t load documents waiting for review - try refreshing. If it keeps happening, let us know.
         </div>
+      )}
+
+      {failedError && (
+        <div className="mb-3.5 rounded-lg border border-destructive/20 bg-destructive/10 px-3.5 py-3 text-sm text-destructive">
+          Couldn&apos;t load documents that failed - try refreshing. If it keeps happening, let us know.
+        </div>
+      )}
+
+      {!failedError && (failed ?? []).length > 0 && (
+        <Card title={`Couldn't be read (${failed!.length})`}>
+          {failed!.map((u) => (
+            <div key={u.id} className="mb-2 flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-border bg-card px-4 py-2.5 last:mb-0">
+              <div>
+                <div className="text-sm font-semibold text-foreground">{u.original_filename}</div>
+                <div className="mt-0.5 text-xs text-destructive">
+                  We couldn&apos;t read this file automatically. The original file is safe - retry, or upload a
+                  clearer copy.
+                </div>
+              </div>
+              <form action={retryOnboardingUpload}>
+                <input type="hidden" name="upload_id" value={u.id} />
+                <button type="submit" className="text-xs font-semibold text-accent">
+                  Retry
+                </button>
+              </form>
+            </div>
+          ))}
+        </Card>
       )}
 
       <Card title={`To review (${pending?.length ?? 0})`}>

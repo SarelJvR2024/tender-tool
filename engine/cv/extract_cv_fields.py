@@ -83,7 +83,17 @@ sys.path.insert(0, os.path.join(ENGINE, "ocr"))
 import scan_ocr  # noqa: E402  (EXPERIMENTAL - docs/specs/OCR-Evaluation.md)
 
 DEFAULT_MODEL = "claude-opus-5-5"
-STALE_AFTER_MINUTES = 30  # one API call + a text pull; 30 minutes means the worker died
+# A real text pull + one structured-output call normally takes well under a
+# minute. 180s is generous headroom for a large CV, well short of
+# STALE_AFTER_MINUTES below, so a genuinely hung call times out and retries
+# (TransientError) long before a row would ever need the stale-reclaim.
+LLM_TIMEOUT_SECONDS = 180
+# Lowered from 30 (UX audit, 2026-10-23: "CV extractions dying... stuck in
+# 'extracting' for over 30 minutes" - 30 minutes was itself the problem, not
+# just the worst case). 10 minutes is still generous above LLM_TIMEOUT_SECONDS
+# and the Supabase REST calls' own 30s timeouts - real room for one slow
+# pass, not a half-hour wait before any safety net acts.
+STALE_AFTER_MINUTES = 10  # one API call + a text pull; this long means the worker died
 
 # ---------------------------------------------------------------------------
 # SANRAL's own closed lists. Read out of the real R.396-010-2025/1F
@@ -138,7 +148,21 @@ OCR_FIELD_WARNING = ("Read by OCR from a scan, not from a text layer - OCR can m
 
 
 class ExtractionFailed(Exception):
-    """A reason the user should see, in plain words. The job is marked failed."""
+    """A reason the user should see, in plain words. The job is marked failed.
+
+    `detail`, when given, is the raw technical cause (a provider error body,
+    a request id) - never shown to the customer, only passed to
+    system_alerts for an engineer to read. Re-review 2026-10-23 found this
+    contract broken for API rejections: `except anthropic.BadRequestError`
+    used to put the raw provider message straight into the exception's own
+    text, which both `fail_upload()` (customer-facing `extraction_error`,
+    rendered verbatim on the person's page) and system_alerts then shared
+    verbatim - a customer seeing "Error code: 400 - {'type': 'error', ...
+    'request_id': 'req_...'}" instead of a plain-words reason."""
+
+    def __init__(self, message, detail=None):
+        super().__init__(message)
+        self.detail = detail
 
 
 class SetupError(Exception):
@@ -349,19 +373,32 @@ def _nullable(schema):
     return {"anyOf": [schema, {"type": "null"}]}
 
 
-def _field(value_schema):
-    return {
-        "type": "object",
-        "properties": {"value": _nullable(value_schema), "evidence": _nullable({"type": "string"})},
-        "required": ["value", "evidence"],
-        "additionalProperties": False,
-    }
+# Real failure, live, 2026-10-23 (UX audit - the same bug hit
+# engine/onboarding/classify_documents.py's `fields`, "the exact same
+# pipeline shape" per this module's own docstring): `person` used to be one
+# named sub-object per entry in LLM_PERSON_FIELDS (16 of them), each a
+# {value, evidence} pair with a nullable type on both - 32 nested parameter
+# definitions from `person` alone, on top of `projects`/`other_registrations`
+# (~51 total), over the API's real limit ("54 parameters... limit 16" is
+# classify_documents.py's own count, but the shape and the failure are
+# identical here). `projects`/`other_registrations` were already arrays and
+# are untouched; `person` is now one too - an array of {field, value,
+# evidence} entries instead of a fixed object with one named property per
+# field, so the schema's size is constant regardless of how many person
+# fields exist, not just squeezed under today's limit.
+PERSON_FIELD_ENTRY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "field": {"type": "string", "enum": LLM_PERSON_FIELDS},
+        "value": _nullable({"type": "string"}),
+        "evidence": _nullable({"type": "string"}),
+    },
+    "required": ["field", "value", "evidence"],
+    "additionalProperties": False,
+}
 
 
 def output_schema():
-    person_props = {f: _field({"type": "string"}) for f in PERSON_TEXT_FIELDS + PERSON_DATE_FIELDS}
-    for f, options in PERSON_ENUM_FIELDS.items():
-        person_props[f] = _field({"type": "string", "enum": options})
     project_props = {f: _nullable({"type": "number"} if f == "value_rm" else {"type": "string"}) for f in PROJECT_FIELDS}
     project_props["evidence"] = {"type": "string"}
     return {
@@ -369,8 +406,7 @@ def output_schema():
         "properties": {
             "document_kind": {"type": "string", "enum": ["cv", "sanral_key_person_forms", "not_a_cv"]},
             "document_kind_reason": {"type": "string"},
-            "person": {"type": "object", "properties": person_props, "required": list(person_props),
-                       "additionalProperties": False},
+            "person": {"type": "array", "items": PERSON_FIELD_ENTRY_SCHEMA},
             "projects": {"type": "array", "items": {
                 "type": "object", "properties": project_props, "required": list(project_props),
                 "additionalProperties": False}},
@@ -391,7 +427,8 @@ SYSTEM_PROMPT = """You read the text of one person's CV for a South African engi
 
 How to fill the output:
 
-- Every value needs `evidence`: a short verbatim quote copied character-for-character from the CV text that shows the value (the line or table cell it came from). The quote is searched for in the CV afterwards; a value whose quote cannot be found is shown to the reviewer as unverified. If you cannot quote it, set both value and evidence to null.
+- `person` is a list: add ONE entry {"field": <name, e.g. "role" or "ecsa_number">, "value": ..., "evidence": ...} for each field you actually found a real value for. Leave a field OUT of the list entirely if the CV doesn't clearly state it - do not add an entry with a null value.
+- Every entry needs `evidence`: a short verbatim quote copied character-for-character from the CV text that shows the value (the line or table cell it came from). The quote is searched for in the CV afterwards; a value whose quote cannot be found is shown to the reviewer as unverified.
 - Dates: write `YYYY-MM-DD` only when the CV gives the full date. If it gives only a month and year write `YYYY-MM`; only a year, `YYYY`. Never invent a day or month. Read `2015/3/5`, `05 Mar 2015` and `5 March 2015` all as 2015-03-05; if day/month order is genuinely ambiguous, use the lower precision you are sure of and say so in parse_problems.
 - `role`: the person's current job title.
 - Registrations: `ecsa_level`/`ecsa_number`/`ecsa_date` are the person's Engineering Council of South Africa registration (category, registration number, date registered). `sacpcmp_number`/`sacpcmp_date` are the SA Council for the Project and Construction Management Professions. `ecsa_level` must be one of the listed options and only when the CV states the category (for example "Pr Eng" or "Professional Engineer" is "Professional Engineer"; "Pr Tech Eng" is "Professional Engineering Technologist"; "Pr Techni Eng" is "Professional Engineering Technician"; a candidate category is the matching "Candidate ..." option). Any other professional body (SACAP, SACPLAN, SACNASP, SAICE membership, PLATO, SACQSP, ECSA-recognised voluntary associations, ...) goes in `other_registrations`, not in the ECSA/SACPCMP fields.
@@ -429,7 +466,14 @@ def default_llm_client():
     except ImportError:
         raise SetupError("The 'anthropic' Python package isn't installed on this worker "
                          "(pip install -r engine/worker/requirements.txt).")
-    return anthropic.Anthropic(api_key=key)
+    # Explicit, bounded timeout - the SDK's own default (read=600s) left a
+    # single hung connection able to wedge a whole extraction for 10 minutes
+    # before even raising (UX audit, 2026-10-23: "CV extractions dying...
+    # stuck in 'extracting' for over 30 minutes"). A timeout here raises
+    # anthropic.APITimeoutError, already caught below as APIConnectionError
+    # (it subclasses it) -> TransientError -> the job is released back to
+    # the queue and retried next pass, never left silently 'extracting'.
+    return anthropic.Anthropic(api_key=key, timeout=LLM_TIMEOUT_SECONDS)
 
 
 def call_llm(text, client=None, model=None):
@@ -462,11 +506,13 @@ def call_llm(text, client=None, model=None):
     except anthropic.RateLimitError:
         raise TransientError("Anthropic API rate limit reached; will retry on the next pass.")
     except anthropic.BadRequestError as e:
-        raise ExtractionFailed(f"The AI service rejected this CV's request: {e.message}")
+        raise ExtractionFailed("The AI service couldn't process this CV right now. Try again, or upload the "
+                               "original Word/PDF.", detail=f"BadRequestError: {e.message}")
     except anthropic.APIStatusError as e:
         if e.status_code >= 500:
             raise TransientError(f"Anthropic API server error {e.status_code}; will retry on the next pass.")
-        raise ExtractionFailed(f"The AI service returned an error ({e.status_code}): {e.message}")
+        raise ExtractionFailed("The AI service couldn't process this CV right now. Try again, or upload the "
+                               "original Word/PDF.", detail=f"APIStatusError {e.status_code}: {e.message}")
     except anthropic.APIConnectionError:
         raise TransientError("Could not reach the Anthropic API; will retry on the next pass.")
 
@@ -544,6 +590,17 @@ def normalise_date(raw):
     return None, None, f"'{raw}' isn't a date that could be read; enter it by hand."
 
 
+def _fields_by_name(raw_fields):
+    """The model's real answer is a list of {field, value, evidence} entries
+    (output_schema()'s PERSON_FIELD_ENTRY_SCHEMA) - a dict keyed by field
+    name is also accepted, kept only so hand-written test fixtures (which
+    test the logic below, not the wire schema) don't all need rewriting.
+    Last entry for a repeated field name wins, same as a dict literal would."""
+    if isinstance(raw_fields, list):
+        return {e.get("field"): e for e in raw_fields if isinstance(e, dict) and e.get("field")}
+    return raw_fields or {}
+
+
 def validate_proposal(data, text, local_ids):
     """Turns the model's answer into the stored proposal: per field {value,
     evidence, verified, warnings}. Raises ExtractionFailed when the answer
@@ -557,9 +614,10 @@ def validate_proposal(data, text, local_ids):
                                + (f": {data.get('document_kind_reason')}" if data.get("document_kind_reason") else ".")
                                + " Nothing was proposed.")
 
+    raw_person = _fields_by_name(data.get("person"))
     person = {}
     for f in LLM_PERSON_FIELDS:
-        item = (data.get("person") or {}).get(f) or {}
+        item = raw_person.get(f) or {}
         value, evidence = item.get("value"), item.get("evidence")
         if isinstance(value, str):
             value = value.strip() or None
@@ -771,7 +829,7 @@ def process_upload(url, key, upload, client_factory=default_llm_client):
               f"{len(proposal['projects'])} project(s), {len(warnings)} warning(s)")
         return True
     except (SetupError, TransientError) as e:
-        release_upload(url, key, upload)
+        _safe_update(lambda: release_upload(url, key, upload), upload, "release back to the queue")
         if isinstance(e, SetupError):
             raise  # recorded by whoever runs the pass (run_bridges.py's non-zero exit / poll_forever)
         # Retried next pass; recorded so a lasting outage (rate limit, API down) is seen.
@@ -780,20 +838,37 @@ def process_upload(url, key, upload, client_factory=default_llm_client):
         print(f"[retry] cv_upload {upload['id']}: {e}")
         return False
     except ExtractionFailed as e:
-        fail_upload(url, key, upload, str(e))
-        system_alerts.record("cv_extract", f"CV extraction refused an upload: {e}", "warning",
+        _safe_update(lambda: fail_upload(url, key, upload, str(e)), upload, "mark as failed")
+        alert_detail = f" ({e.detail})" if e.detail else ""
+        system_alerts.record("cv_extract", f"CV extraction refused an upload: {e}{alert_detail}", "warning",
                              context={"cv_upload_id": upload["id"], "company_id": upload.get("company_id")})
-        print(f"[failed] cv_upload {upload['id']}: {e}")
+        print(f"[failed] cv_upload {upload['id']}: {e}{alert_detail}")
         return True
     except Exception as e:  # a bug, not a user problem - still never leave it 'extracting'
         system_alerts.record("cv_extract", f"CV extraction crashed: {type(e).__name__}: {e}", "error", exc=e,
                              context={"cv_upload_id": upload["id"], "company_id": upload.get("company_id")})
-        fail_upload(url, key, upload, f"AI extraction hit an unexpected error ({type(e).__name__}). Nothing was "
-                                      "proposed - upload the CV again or enter the fields by hand.")
+        _safe_update(lambda: fail_upload(url, key, upload, f"AI extraction hit an unexpected error ({type(e).__name__}). "
+                                         "Nothing was proposed - upload the CV again or enter the fields by hand."),
+                     upload, "mark as failed")
         print(f"[failed] cv_upload {upload['id']}: unexpected {type(e).__name__}: {e}")
         return True
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def _safe_update(write, upload, what):
+    """A write that reports an outcome (release back to the queue, or mark
+    failed) must never itself leave the row stuck 'extracting' if IT fails
+    (a transient Supabase blip right as we're reporting a different error) -
+    same reasoning as process_cv_jobs.py's own nested try/except around
+    marking a generation job failed, applied here (found missing, UX audit
+    2026-10-23: a prior known contributor to a row staying 'extracting'
+    past STALE_AFTER_MINUTES until the next stale-reclaim pass caught it)."""
+    try:
+        write()
+    except Exception as e2:
+        system_alerts.record("cv_extract", f"Could not {what} for cv_upload {upload['id']}: {type(e2).__name__}: {e2}",
+                             "error", exc=e2, context={"cv_upload_id": upload["id"]})
 
 
 def poll_once(url, key, quiet_when_empty=False, client_factory=default_llm_client):
