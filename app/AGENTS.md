@@ -1512,3 +1512,67 @@ This is the honest state of the rollout at the end of tonight's run: real, subst
 where-verification-was-possible progress across 6 of 7 planned batches plus an unplanned same-night
 security fix - and an equally real, equally honest list of what still needs either Sarel's own
 signed-in walkthrough or his own judgment call, not another batch pretending to supply either.
+
+### Spec v3 Batch 8: Company vault form density (O06 remainder)
+
+A follow-up batch, after the Batch 1-7 status note above was already written, picking up one of
+its own listed gaps: "Company vault's own form density was never audited at all." Scoped to the
+main `/company` page's own capture forms (`EditForm.tsx` plus the `*Section.tsx` read-only
+display components) - spec v3 §10/§28 exactly, not a cosmetic shrink pass.
+
+**Found and fixed, two real violations**:
+- **Addresses squeezed into a 1-of-3 grid column** (`EditForm.tsx`, `CompanyIdentitySection.tsx`):
+  `fieldGridClass` (`grid-cols-1 sm:grid-cols-2 lg:grid-cols-3`) gives every field in "Company
+  identity" the same share of the row regardless of content - a VAT number and a full postal
+  address got identical width. Spec §10/§28, verbatim: "Names, email addresses and long values
+  need enough width... Do not make all boxes smaller to make the form compact." In the edit form
+  this meant typing a multi-line registered/postal address into a ~370px-wide `<Textarea rows={2}>`
+  at desktop widths - the one field in this form that actually needed the room. Fixed with a new
+  optional `fullWidth` prop on both `shared.tsx`'s `Field` (read-only) and `EditForm.tsx`'s
+  `TextInput` (edit mode), applied only to `registered_address`/`postal_address` - `col-span-full`
+  spans the field across the grid's full row at every breakpoint the grid defines, harmless at
+  `grid-cols-1` (mobile) where it's already full width. No other field in any of the vault's
+  section components (`SizeOfficesSection`, `BankDetailsSection`, `SavingsBaselineSection`,
+  `ComplianceDocumentsSection`, `BeeCidbSection`) holds a comparably long value - checked each one,
+  none needed the same treatment.
+- **Major sections spaced tighter than a "major region" per spec §28** (16px via `gap-4`, spec's
+  own range for this is 24-32px for "major page regions" vs. 6-16px for fields/related groups
+  within one topic): `EditForm.tsx`'s top-level form, `ReadOnlyView.tsx`'s top-level wrapper, and
+  `page.tsx`'s own list of major components (document-expiry overview, the read-only sections,
+  notifications, register links, letters, office locations) all used the same 16px gap a form's
+  own *fields* should use, not what should separate "Company identity" from "B-BBEE & CIDB" from
+  "Bank details" - genuinely different topics, not one continuous list. Bumped all three to
+  `gap-6` (24px, the low end of the spec's own stated range) for consistency between read and edit
+  modes.
+
+**Found, deliberately NOT fixed here - flagged for a future, separate pass**: `EditForm.tsx`'s
+"Size & offices (SANRAL Form B3)" section asks every company, regardless of whether it does
+engineering work, for ECSA-registered and SACPCMP-registered staff counts, unconditionally -
+the same "ECSA as the universal category" pattern spec v3 O23 already fixed at the *person*
+level (Batch 4, #105: these two bodies no longer render unconditionally on every person). This is
+the same problem one level up, at the *company* level, and genuinely belongs with that same O23
+work rather than a "form density" batch bundling in a different kind of fix under cover of a CSS
+pass - noted here so it isn't lost, not touched, to keep this batch's own diff to what it actually
+set out to do.
+
+**Also found, out of this batch's own stated scope** (Company vault's main page, not its
+sub-routes): `registrations/page.tsx`, `properties/page.tsx` and `principals/page.tsx` each have
+their own "Notes" field (`ui.tsx`'s shared `Area` component) sitting in a same-width grid cell
+alongside short fields - the identical pattern just fixed here, on different pages with their own
+separate `grid`/`Text`/`Area` component family (not `fieldGridClass`/`TextInput`). A real
+instance of the same spec rule, left alone because it's a different set of files than this
+batch's own directive named.
+
+**Tested**: `npm run verify` 0 errors, 129/129 vitest (the +8 over Batch 7's 121 are from other
+sessions' commits already on `main` before this batch started, unrelated to this change), 76/76
+node:test both ways (`tsx --test` and the real CI invocation, `node --experimental-strip-types` per
+file). A standalone `react-dom/server` static render of both `CompanyIdentitySection` (read-only)
+and `EditForm` (edit mode) with representative sample data confirmed `col-span-full` appears
+exactly twice in each - the two address fields, nothing else - and that neither component throws
+when rendered with the new prop.
+
+**Not tested**: an actual signed-in render of `/company` itself, in either mode, at either
+viewport - the same sandbox credential-generation limitation every batch has hit all night. The
+fix is a span/gap class change on components that already render correctly per the static-render
+check above and the existing build/test suite, but nobody has seen the real page with real data
+in a real browser.

@@ -35,7 +35,7 @@ export function ReadOnlyView({ company, docUrls }: { company: CompanyRow; docUrl
   const allGood = expiredCount === 0 && renewSoonCount === 0 && notOnFileCount === 0;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-6">
       <div className="flex flex-wrap gap-2">
         {expiredCount > 0 && <SummaryChip count={expiredCount} label={expiredCount === 1 ? "document expired" : "documents expired"} tone="destructive" />}
         {renewSoonCount > 0 && <SummaryChip count={renewSoonCount} label="renewing soon" tone="warning" />}

@@ -12,8 +12,8 @@ export function CompanyIdentitySection({ company }: { company: CompanyRow }) {
         <Field label="Income tax number" value={company.income_tax_number} />
         <Field label="PAYE number" value={company.paye_number} />
         <Field label="CSD supplier number" value={company.csd_supplier_number} />
-        <Field label="Registered address" value={company.registered_address} />
-        <Field label="Postal address" value={company.postal_address} />
+        <Field label="Registered address" value={company.registered_address} fullWidth />
+        <Field label="Postal address" value={company.postal_address} fullWidth />
       </div>
     </VaultSection>
   );

@@ -14,7 +14,7 @@ export function EditForm({ company }: { company: CompanyRow }) {
   const updateWithId = updateCompanyProfile.bind(null, company.id);
 
   return (
-    <form action={updateWithId} className="flex flex-col gap-4">
+    <form action={updateWithId} className="flex flex-col gap-6">
       <VaultSection title="Company identity">
         <div className={fieldGridClass}>
           <TextInput name="legal_name" label="Legal name" defaultValue={company.legal_name} required />
@@ -24,8 +24,8 @@ export function EditForm({ company }: { company: CompanyRow }) {
           <TextInput name="income_tax_number" label="Income tax number" defaultValue={company.income_tax_number} />
           <TextInput name="paye_number" label="PAYE number" defaultValue={company.paye_number} />
           <TextInput name="csd_supplier_number" label="CSD supplier number" defaultValue={company.csd_supplier_number} />
-          <TextInput name="registered_address" label="Registered address" defaultValue={company.registered_address} textarea />
-          <TextInput name="postal_address" label="Postal address" defaultValue={company.postal_address} textarea />
+          <TextInput name="registered_address" label="Registered address" defaultValue={company.registered_address} textarea fullWidth />
+          <TextInput name="postal_address" label="Postal address" defaultValue={company.postal_address} textarea fullWidth />
         </div>
       </VaultSection>
 
@@ -148,15 +148,18 @@ function TextInput({
   defaultValue,
   required,
   textarea,
+  fullWidth,
 }: {
   name: string;
   label: string;
   defaultValue: string | null;
   required?: boolean;
   textarea?: boolean;
+  /** Spec v3 §10/§28: a long value (an address) needs the grid's full row, not a 1-of-3 share. */
+  fullWidth?: boolean;
 }) {
   return (
-    <div>
+    <div className={fullWidth ? "col-span-full" : undefined}>
       <Label htmlFor={name} className="mb-1.5 block">
         {label}
       </Label>
