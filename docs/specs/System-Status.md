@@ -216,6 +216,23 @@ pass, and the full Python sweep (50 files) clean.
 
 ---
 
+**Standing review pass, 2026-10-23 ~12:20 UTC: real coordination gap found and fixed - the last
+7 standing-review entries above were never on `main`, only on PR #74's own branch.** Every one of
+these entries (this pass's own predecessors, from the `~02:15 UTC` "PR #82 closed" pass through
+the AI-call-quality-standard retrofit) had been committed and pushed only to
+`feature/narrative-document-generator`, because that was the branch I happened to be re-verifying
+each time - I never actually checked that this file, the one `CLAUDE.md` tells every session to
+read FIRST, was reaching `main` itself. Any other session reading `main`'s own copy during that
+window (several hours) would have seen none of it - the PR #82 closure, the open-redirect and
+fan_out findings, none of it. Found by actually diffing `main`'s own file against the branch's,
+not assumed clean. Ported the missing entries verbatim onto `main` directly (this commit), same
+as every other session's own small Finding/fix commits already do for this file - going forward,
+every pass's own entry lands on `main` directly, same commit as the merge-forward work, not only
+on PR #74's branch. No code changed, no QA re-run needed for this fix itself (it is the QA
+finding).
+
+---
+
 **Microsoft SSO fixed and enabled, 2026-10-22 ~19:00 UTC (PR #91, `app/app/login/page.tsx` +
 `app/app/signup/page.tsx`).** Closes the gap flagged throughout this file since 2026-10-18:
 Supabase's Azure OAuth provider had Google's credentials pasted into it by mistake, so
