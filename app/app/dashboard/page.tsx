@@ -6,7 +6,7 @@ import { AppShell } from "../_components/AppShell";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { getNotifications } from "@/lib/notifications";
 import { nextStepFor } from "@/lib/tenderNextStep";
-import { ACTIVE_PURSUIT_STAGES } from "@/lib/discoveryReassessment";
+import { IN_PROGRESS_STAGES } from "@/lib/pipeline";
 import { loadDocumentExpiryOverview } from "@/lib/documentExpiry";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
 import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
@@ -158,7 +158,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   const rows = (tenders ?? []) as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
 
-  const activeBidsCount = rows.filter((t) => ACTIVE_PURSUIT_STAGES.includes(stageOf(t))).length;
+  const activeBidsCount = rows.filter((t) => (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t))).length;
   const packsReadyCount = rows.filter((t) => statusFor(t).variant === "ready").length;
   const closingThisWeekCount = rows.filter((t) => {
     const left = daysUntil(t.closing_date);
