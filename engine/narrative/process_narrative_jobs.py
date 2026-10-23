@@ -259,6 +259,8 @@ def process_one(url, key, job, out_dir):
                 "similarity_score": result["similarity_score"],
                 "similarity_flagged": result["similarity_flagged"],
                 "regenerated_for_distinctness": result["regenerated_for_distinctness"],
+                "quality_review_passes": result["quality_review_passes"],
+                "quality_flagged": result["quality_flagged"],
                 "completed_at": _now_iso(),
             },
         )

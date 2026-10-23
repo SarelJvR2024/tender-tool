@@ -71,6 +71,17 @@ create table narrative_documents (
   similarity_flagged boolean not null default false,
   regenerated_for_distinctness boolean not null default false,
 
+  -- Sarel's own standing AI-call-quality standard (docs/specs/
+  -- AI-Call-Quality-Standard.md, added 2026-10-22): never ship a model's
+  -- first output as the answer. quality_review_passes is how many
+  -- generate_narrative.py self-review passes actually ran (1-3).
+  -- quality_flagged is true only if the model was STILL finding and fixing
+  -- real issues on the very last allowed pass - the same honest-flag
+  -- discipline as similarity_flagged, so a human decides rather than the
+  -- system assuming the last attempt was good enough.
+  quality_review_passes integer,
+  quality_flagged boolean not null default false,
+
   -- The human-finishing step: export the draft, edit it in Word, upload the
   -- real final version back. Once final_storage_path is set, IT - not
   -- generated_storage_path - is the version anything downstream (a future

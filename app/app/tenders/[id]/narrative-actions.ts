@@ -6,7 +6,7 @@ import { revalidatePath } from "next/cache";
 import { safeFileName } from "@/lib/safeFileName";
 
 /**
- * Cover letter / methodology statement generator (migration 0085). Same
+ * Cover letter / methodology statement generator (migration 0086). Same
  * request/fulfil shape as requestTenderCv/requestSubmissionPack in
  * ./actions.ts: the web app cannot run the real generation step (an LLM call
  * plus python-docx), so this only ever records a 'requested' row.
@@ -113,7 +113,7 @@ export async function requestNarrativeDocument(formData: FormData) {
 
 /**
  * The human-finishing step this whole feature exists for (Sarel, 2026-10-22,
- * and migration 0085's own header comment): the AI draft is a starting
+ * and migration 0086's own header comment): the AI draft is a starting
  * point, never the final word - export to Word, edit it as the company's
  * own, upload the real final version back. Once set, final_storage_path -
  * not generated_storage_path - is what anything downstream should use.

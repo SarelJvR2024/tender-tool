@@ -3,7 +3,7 @@ import { AutoRefresh } from "../../_components/AutoRefresh";
 import { requestNarrativeDocument, uploadNarrativeFinal } from "./narrative-actions";
 
 /**
- * Cover letter / methodology statement generator (migration 0085) -
+ * Cover letter / methodology statement generator (migration 0086) -
  * AI-drafted, grounded in this company's own profile, people, past projects
  * and how they describe their own approach (how_we_work), plus this
  * tender's own facts. Every draft is mechanically checked
@@ -12,7 +12,7 @@ import { requestNarrativeDocument, uploadNarrativeFinal } from "./narrative-acti
  * the same. The AI draft is a starting point, not the final word - export
  * to Word, edit it, upload the real final version back before using it.
  *
- * See migration 0085's own header comment and docs/specs/Company-Voice-Audit.md
+ * See migration 0086's own header comment and docs/specs/Company-Voice-Audit.md
  * for why this directly reopens an earlier, deliberate decision to cut
  * AI-drafted executive summaries/methodology from scope, and what mitigates
  * the same risk this time (Sarel, 2026-10-22).
@@ -28,6 +28,7 @@ type NarrativeDoc = {
   requested_at: string;
   generated_storage_path: string | null;
   similarity_flagged: boolean;
+  quality_flagged: boolean;
   final_storage_path: string | null;
   final_original_filename: string | null;
   final_uploaded_at: string | null;
@@ -78,7 +79,7 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
   const { data: rows } = await supabase
     .from("narrative_documents")
     .select(
-      "id, kind, status, requested_at, generated_storage_path, similarity_flagged, final_storage_path, final_original_filename, final_uploaded_at, error_message",
+      "id, kind, status, requested_at, generated_storage_path, similarity_flagged, quality_flagged, final_storage_path, final_original_filename, final_uploaded_at, error_message",
     )
     .eq("tender_id", tenderId)
     .order("requested_at", { ascending: false })
@@ -208,6 +209,13 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
                           This draft reads similar to another submission for this tender, even after being
                           rewritten once for distinctness. Read it carefully and put it in your own words before
                           using it - two similar submissions risk disqualification.
+                        </div>
+                      )}
+
+                      {d.status === "ready" && d.quality_flagged && (
+                        <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 8, padding: "8px 10px", marginTop: 6, color: "#92400E" }}>
+                          This draft still had issues on its own final review pass - read it closely before
+                          using it. It&apos;s a starting point for you to correct, not a finished document.
                         </div>
                       )}
 

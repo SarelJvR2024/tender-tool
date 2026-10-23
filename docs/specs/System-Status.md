@@ -8,6 +8,61 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Narrative generator (PR #74) brought into compliance with the new AI call quality standard,
+2026-10-23 ~00:30 UTC - retrofitted, not just flagged.** `docs/specs/AI-Call-Quality-Standard.md`
+(merged into `main` while PR #74 was still open, see the entry below) is Sarel's own standing
+rule, verbatim: "neve be stisfied with your first anser and output, always review it... run that
+3 times." `engine/narrative/generate_narrative.py` is exactly the kind of call this targets - it
+generates a document that goes into a real tender submission - and it was single-pass. Rather than
+merge PR #74 with a known gap against a standard that landed the same day, retrofitted it for real:
+
+- **`run_review_passes()`** (new, `generate_narrative.py`) chains up to 3 real self-review turns
+  onto the SAME conversation the draft was generated in - a genuine multi-turn exchange (the
+  model's own prior output as a real assistant turn, not a reconstructed prompt pretending to be
+  one), using the literal review-prompt template the standard specifies. Stops the moment a pass
+  reports nothing wrong; if the model is still finding (and fixing) real issues on the very last
+  allowed pass, `quality_flagged` comes back true - the same honest-flag discipline
+  `similarity_flagged` already uses, so a human decides rather than the system assuming the last
+  attempt was good enough.
+- **`call_llm()` generalized** to accept either a bare string (back-compatible, wrapped into a
+  single-turn message) or a real multi-turn messages list, and a per-call `schema` (generation
+  calls use the existing `output_schema()`; review calls use the new `review_output_schema()`,
+  which adds `no_issues_found`/`review_notes` without changing the `sections` shape downstream
+  code already depends on). Now returns the full parsed dict, not just `sections` - callers that
+  need the review-specific fields can read them; existing callers just read `parsed["sections"]`.
+- **Migration `0086_narrative_documents.sql` edited in place** (not a new migration) to add
+  `quality_review_passes`/`quality_flagged` columns - safe since this table has never been applied
+  anywhere real (PR #74 still unmerged; confirmed no collision with `main`'s current migration
+  numbering, still ends at `0086`). `process_narrative_jobs.py` persists both; the Tender Workspace
+  card (`narrative-documents.tsx`) shows a plainly-worded amber warning banner when
+  `quality_flagged` is true, same visual pattern as the existing red similarity-flagged banner -
+  "never present an output that failed its own quality check as if it passed" meant the UI, not
+  just the database row, had to actually show it.
+- **Real test coverage, not just "it compiles"**: `test_generate_narrative.py` proves the loop
+  stops early on a clean pass, chains corrections into the next pass's actual input (not the
+  original draft), caps at exactly 3 passes and flags honestly if still finding issues on the
+  last one, and sends a genuine multi-turn conversation (asserted against the real messages array
+  the stub client received) - not just that the function runs without error. Found and fixed one
+  real stub-harness bug along the way: `StubClient` was storing a reference to the mutable
+  `messages` list, not a snapshot, so later appends in the production code were leaking backward
+  into an earlier call's recorded state - a test-only bug (the real Anthropic SDK serializes the
+  request before returning), but a real bug in the test, caught by writing a test specific enough
+  to notice it, not assumed away.
+- **Re-verified everything after the retrofit**: fresh 76-migration replay (clean), full
+  tenant-isolation suite (`ALL PASSED`), all 5 `engine/narrative/test_*.py` files (0 failures,
+  including the new review-pass and schema tests), `npm run verify` clean.
+
+**Not done**: no real LLM call exercises this loop end to end (same standing sandbox limitation as
+everything else in this feature - no `ANTHROPIC_API_KEY` here). The review loop runs strictly
+*after* the uniqueness distinctness-retry settles, not interleaved with or re-checked against it -
+a deliberate ordering choice (documented in the function's own docstring) to avoid the two checks
+chasing each other, not an oversight. `docs/specs/AI-Call-Quality-Standard.md`'s own text names
+three *other*, pre-existing call sites (`company_documents.py`, `extract_cv_fields.py`,
+`classify_documents.py`) as still single-pass, explicitly calling that separate follow-up work -
+this pass only retrofitted the one call site it was already touching.
+
+---
+
 **Standing review pass, 2026-10-22 ~22:15 UTC: merged a substantial batch (Spec v3 batches 1-6,
 a real middleware auth gap fix, a real CI-red fix), confirmed no collision with PR #74.** Six
 "Spec v3" batches landed (onboarding collapsed from a 6-step wizard to 2 screens, the tender

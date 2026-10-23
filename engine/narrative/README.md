@@ -41,7 +41,16 @@ header comment for the same reasoning recorded against the schema.
   scores too similar gets **exactly one** automatic regeneration with an explicit
   distinctness instruction; if still too similar after that, it is honestly flagged
   (`similarity_flagged=true`) for a human to read and rewrite — never silently shipped, never
-  silently discarded, never retried a third time.
+  silently discarded, never retried a third time. Once the uniqueness question is settled,
+  `run_review_passes()` chains up to **3** real self-review turns onto the SAME conversation
+  the draft was generated in — Sarel's own standing standard
+  (`docs/specs/AI-Call-Quality-Standard.md`, verbatim: "neve be stisfied with your first anser
+  and output, always review it... run that 3 times"). Each pass checks the corrected-so-far
+  output against the real source facts for exactly the mistakes a sworn tender submission
+  can't afford (an invented name/number, a generic-filler regression, the requester's own
+  guidance being dropped), stops the moment a pass finds nothing wrong, and — if the model is
+  still finding real issues on the very last allowed pass — sets `quality_flagged=true` rather
+  than silently shipping a result that failed its own check.
 - `process_narrative_jobs.py` — the Supabase polling bridge (see below).
 
 ## Usage
@@ -109,12 +118,15 @@ first pass; a natural follow-up once a general-family "confirmed people" concept
   own unit tests (`test_uniqueness.py`, `test_build_prompt.py`, `test_build_docx.py` —
   reopens the generated `.docx` with `python-docx` and checks real styling,
   `test_generate_narrative.py` — a stub Anthropic client proves the exact two-call-maximum
-  retry behaviour, `test_process_narrative_jobs.py` — a stub Supabase client proves the
-  row-shape adapters), the migration's schema and RLS (fresh 75-migration replay plus the
-  full tenant-isolation suite, both `ALL PASSED`), and the Next.js side (`tsc --noEmit`,
-  `eslint`, `vitest`, `next build`, all clean). The actual "write a real draft from a real
-  company's real data" path is not exercised end to end until this runs somewhere with real
-  credentials.
+  distinctness-retry behaviour AND the review-pass loop's own real behaviour: stops as soon
+  as a pass reports nothing wrong, chains each pass's correction into the next pass's actual
+  input, caps at exactly 3 passes, flags honestly if still finding issues on the last one, and
+  sends a genuine multi-turn conversation rather than a reconstructed single prompt;
+  `test_process_narrative_jobs.py` — a stub Supabase client proves the row-shape adapters),
+  the migration's schema and RLS (fresh 76-migration replay plus the full tenant-isolation
+  suite, both `ALL PASSED`), and the Next.js side (`tsc --noEmit`, `eslint`, `vitest`,
+  `next build`, all clean). The actual "write a real draft from a real company's real data"
+  path is not exercised end to end until this runs somewhere with real credentials.
 - **Not wired into submission-pack assembly.** `engine/pack/assemble_pack.py` /
   `engine/general/build_general_pack.py` do not yet pull a narrative document's
   `final_storage_path` into the compiled submission pack — a deliberate scope cut for this

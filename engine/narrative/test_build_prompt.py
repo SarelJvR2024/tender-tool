@@ -5,9 +5,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from build_prompt import (
     build_distinctness_retry_user_message,
+    build_review_user_message,
     build_system_prompt,
     build_user_message,
     output_schema,
+    review_output_schema,
     sections_to_plain_text,
 )
 
@@ -133,6 +135,37 @@ def test_distinctness_retry_message_includes_original_context_and_warning():
     check("retry message carries the previous draft for reference", "a previous generic draft" in retry_message)
 
 
+def test_review_output_schema_adds_quality_fields_without_losing_sections():
+    schema = review_output_schema()
+    check("sections are still required, same shape as the generation schema",
+          schema["properties"]["sections"] == output_schema()["properties"]["sections"])
+    check("no_issues_found is a required boolean", schema["properties"]["no_issues_found"]["type"] == "boolean")
+    check("review_notes is a required string", schema["properties"]["review_notes"]["type"] == "string")
+    check("all three fields are required, nothing optional",
+          set(schema["required"]) == {"sections", "no_issues_found", "review_notes"})
+
+
+def test_review_user_message_names_the_right_document_kind():
+    cover_letter_review = build_review_user_message({**CONTEXT, "kind": "cover_letter"}, [])
+    methodology_review = build_review_user_message({**CONTEXT, "kind": "methodology"}, [])
+    check("cover_letter kind produces a cover-letter review prompt", "cover letter" in cover_letter_review)
+    check("methodology kind produces a methodology review prompt", "technical methodology statement" in methodology_review)
+
+
+def test_review_user_message_asks_for_self_review_not_regeneration():
+    message = build_review_user_message(CONTEXT, [])
+    check("explicitly frames this as reviewing prior output", "review your own output" in message)
+    check("explicitly allows and expects 'no issues found' as a real outcome", "No issues found" in message)
+    check("tells the model to quote and fix, not just flag", "Quote exactly what is wrong" in message)
+
+
+def test_review_user_message_includes_the_real_checklist():
+    message = build_review_user_message(CONTEXT, [])
+    for expected in ["traces to a fact explicitly given", "generic, interchangeable filler",
+                      "requester's own stated guidance", "different company, tender, or buyer"]:
+        check(f"review checklist includes '{expected}'", expected in message)
+
+
 def main():
     test_system_prompt_names_the_right_document_kind()
     test_system_prompt_forbids_inventing_facts()
@@ -146,6 +179,10 @@ def main():
     test_output_schema_matches_sections_to_plain_text_shape()
     test_sections_to_plain_text_flattens_prose_and_bullets()
     test_distinctness_retry_message_includes_original_context_and_warning()
+    test_review_output_schema_adds_quality_fields_without_losing_sections()
+    test_review_user_message_names_the_right_document_kind()
+    test_review_user_message_asks_for_self_review_not_regeneration()
+    test_review_user_message_includes_the_real_checklist()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

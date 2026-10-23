@@ -187,6 +187,53 @@ def sections_to_plain_text(sections):
     return "\n".join(lines)
 
 
+REVIEW_CHECKLIST = """- Every named person, project, qualification, certification, CIDB grade, B-BBEE level, or number in the draft traces to a fact explicitly given in the source material above - nothing invented, inferred, or borrowed from a similar-sounding tender.
+- Any reference to the company's own "how we work" text is faithful to what was actually provided, not replaced with a generic substitute.
+- No generic, interchangeable filler that could apply to any company bidding on any tender ("committed to excellence", "dedicated professionals", "pride ourselves on quality" and anything in that register).
+- The requester's own stated guidance (if any was given) is visibly addressed, not ignored.
+- The tone and technical depth genuinely match what was asked for (length/detail/visual style), not just in the opening paragraph.
+- Every heading is short and each section stays focused on one idea.
+- Nothing in the draft reads as if it was written for a different company, tender, or buyer than the one named in the source material."""
+
+
+def build_review_user_message(context, sections):
+    """Sarel's own standing AI-call-quality standard (docs/specs/
+    AI-Call-Quality-Standard.md): never treat a model's first output as the
+    answer. This builds the literal review turn that standard specifies -
+    sent as a follow-up user message in the SAME conversation as the
+    generation call (see generate_narrative.py's run_review_passes), not a
+    fresh, context-free prompt, so the model is actually reviewing its own
+    prior output rather than re-deriving a new one from scratch.
+    """
+    kind_label = "cover letter" if context["kind"] == "cover_letter" else "technical methodology statement"
+    who_relies_on_this = (
+        "the company's own director, who will read and may edit it, but is relying on it "
+        "being accurate and complete before it goes into a real tender submission"
+    )
+    return f"""You just produced the {kind_label} above.
+
+Before this is treated as final, review your own output as if you were a strict, skeptical colleague checking it before it reaches {who_relies_on_this} - not as its author defending it. Read the source material and your own output again, side by side, and check specifically for:
+
+{REVIEW_CHECKLIST}
+
+For each issue you find:
+- Quote exactly what is wrong and where (the specific field, sentence, or value).
+- Fix it.
+- If you are not sure something is wrong, say so rather than guessing a fix - never "fix" something that may already be correct, and never remove a null/flag that honestly reflects what the source material doesn't say.
+
+If a genuine, line-by-line check finds nothing wrong, say so explicitly in review_notes: "No issues found on this pass." Do not manufacture a change just to have something to report - set no_issues_found to true only in that case.
+
+Return the corrected {kind_label} in full in `sections` - not a diff, not just the changed parts. If no issues were found, return the same sections unchanged."""
+
+
+def review_output_schema():
+    schema = output_schema()
+    schema["properties"]["no_issues_found"] = {"type": "boolean"}
+    schema["properties"]["review_notes"] = {"type": "string"}
+    schema["required"] = ["no_issues_found", "review_notes", "sections"]
+    return schema
+
+
 def build_distinctness_retry_user_message(context, previous_text):
     """Used for the one automatic regeneration pass when the first draft
     scored too similar to another company's (uniqueness.py). Deliberately
