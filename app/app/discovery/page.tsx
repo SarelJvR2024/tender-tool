@@ -35,6 +35,7 @@ import { formatRand } from "@/lib/dealEconomics";
 import { OpportunityPreferencesPanel } from "./OpportunityPreferencesPanel";
 import { hasNoTaggedDisciplines } from "@/lib/disciplineTaggingNudge";
 import { matchesInterestedDisciplines } from "@/lib/opportunityDisciplineMatch";
+import { OpportunityQuickActions } from "./OpportunityQuickActions";
 
 // Column list for the scope/pricing-model/value-band record (migration 0060,
 // engine/discovery/tender_enrichment.py). Honestly rare today: that script is
@@ -769,6 +770,13 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                       ))}
                     </div>
                   )}
+
+                  {/* PREVIEW of Sarel's own live feedback (2026-10-22): company
+                      tags + quick interest/decline marking. Not the real
+                      feature - see OpportunityQuickActions's own comment and
+                      this PR's description for why (needs new schema, not
+                      merged here). */}
+                  <OpportunityQuickActions opportunityId={o.id} />
 
                   {o.etenders_category && (
                     // The buyer's own pick on eTenders, as a cross-reference
