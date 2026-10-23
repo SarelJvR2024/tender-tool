@@ -8,6 +8,39 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~02:15 UTC: no overlap found, PR #74 merged forward, PR #82
+closed as fully superseded.** Since the last pass, exactly one commit landed on `main` directly
+(`273344e`, "Refuse ambiguous multi-list SANRAL backfill resume" - Finding 56, a different
+session's QA/robustness rotation): `engine/discovery/store_award_outcomes.py` plus its own test
+and two docs files. No file overlap with PR #74 or #82's own touched files - confirmed by reading
+the commit's diff directly, not assumed from the file list.
+
+Merged this into `feature/narrative-document-generator` (PR #74) - clean auto-merge, including
+`System-Status.md` itself. Re-verified after the merge: all 51 `engine/**/test_*.py` files run via
+each file's own `python3 <file>.py` entry point (not `pytest` - not installed in this sandbox, same
+as presumably every other session's environment) - 0 failures; `npm run verify`
+(typecheck/lint/build) clean; `npx vitest run` separately - 121/121. PR #74 remains genuinely
+mergeable against `main`'s current tip.
+
+**PR #82 (`chore/standing-review-2`) closed, not merged.** Read its full diff: one dated entry
+confirming the live DB migration gap (`0077`-`0085`) closed for real, with a table-count figure
+(58 → 63). That exact confirmation - same table-count figure, same RPC-count figure - already
+exists in this file's own "Live-infrastructure handover CLOSED, 2026-10-22 ~16:12 UTC" entry
+below, which is also chronologically *later* than PR #82's own ~20:15 UTC entry timestamp
+suggested (the handover-closed entry landed on `main` directly, never through this PR). The one
+other thing PR #82 repeats - the DB password pasted into chat needing rotation, still
+unconfirmed - is also already tracked in this file's own "Live-infrastructure handover CLOSED"
+entry below, word-for-word the same open item. Keeping PR #82 open any longer would only have
+meant maintaining a second, increasingly stale copy of information this file already carries in
+one place; closed it with a comment explaining why rather than merging a no-op or leaving it to
+rot. Nothing in PR #82 was lost - every real finding it carried is already here.
+
+**Still open, unconfirmed, same as every prior pass's own flag**: whether the Session Pooler
+password pasted into chat has actually been rotated. Not something I can check or do myself - it's
+on Sarel's own Supabase dashboard.
+
+---
+
 **Narrative generator (PR #74) brought into compliance with the new AI call quality standard,
 2026-10-23 ~00:30 UTC - retrofitted, not just flagged.** `docs/specs/AI-Call-Quality-Standard.md`
 (merged into `main` while PR #74 was still open, see the entry below) is Sarel's own standing
