@@ -8,6 +8,35 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**PR #74 merged (Sarel's own call); real CI-red found and fixed immediately after (Finding
+65) - correcting something I got wrong two passes ago.** Sarel asked directly to merge PR #74;
+confirmed `main` hadn't moved in a way that collides (one new merged PR, #126, real tender
+scope/BOQ extraction engine - no overlap with `engine/narrative/` or any migration), re-verified,
+merged. `main`'s CI (`app-ci.yml`/`bridge-worker-ci.yml`, push-triggered only) ran for real for the
+first time on this code.
+
+**I was wrong two passes ago, and should say so plainly rather than let it stand**: the `httpx`
+`ModuleNotFoundError` in `engine/cv/test_extract_cv_fields.py` and
+`engine/onboarding/test_classify_documents.py` was recorded here as "a confirmed sandbox-only
+gap... will pass there [the real worker container]". That was wrong. Checking the **real**
+`bridge-worker-ci` run on `main` (the one from PR #126's own merge, `305f29c`, which predates PR
+#74 and proves this isn't something PR #74 caused) shows the identical failure in real GitHub
+Actions CI, not just this sandbox - confirmed by reading that run's own job log and its own `pip
+install` output directly. The real root cause: `anthropic==1.15.0`'s own real dependency is
+`httpx2<3,>=2.0.0`, not `httpx` - confirmed from `anthropic/_base_client.py`'s own import lines and
+its own docstring ("`httpx` objects don't work with `httpx2`, and would otherwise fail deep inside
+a request"). A bare `import httpx` in those two tests was wrong twice over: nothing in this
+dependency tree ever installs plain `httpx`, and even if it did, handing an `httpx.Response` to
+`anthropic.BadRequestError` would silently misbehave per that same docstring, not just fail to
+import. **Fixed**: `import httpx2 as httpx` in both files - minimal, re-verified clean (both
+files individually, full 55-file Python sweep). This is real CI-red on `main` that predates PR #74
+(confirmed on `305f29c`, the commit before it), not caused by the merge just performed.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **2026-10-23 ~19:00 UTC addendum — resolves part of task #78's "Live Supabase DB access" question,
 real finding, not a workaround.** Confirmed directly (not assumed from an old note): this
 environment can write to the real Supabase project over HTTPS/PostgREST (`$NEXT_PUBLIC_SUPABASE_URL/rest/v1/...`

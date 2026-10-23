@@ -338,7 +338,16 @@ def test_llm_call():
     # "too many union parameters" rejection - must now come out as a clean,
     # fixed customer message, with the technical detail only on `.detail`.
     import anthropic
-    import httpx
+    # Finding 65, 2026-10-23: this is httpx2, not httpx - anthropic's own
+    # _base_client.py imports httpx2 throughout ("`httpx` objects don't work
+    # with `httpx2`, and would otherwise fail deep inside a request") and
+    # anthropic==1.15.0's real dependency is httpx2<3,>=2.0.0, confirmed from
+    # a real CI run's own pip install log, not assumed. A bare `import httpx`
+    # here was wrong in two ways at once: ModuleNotFoundError since nothing
+    # in this dependency tree installs plain httpx, and even if it were
+    # installed, passing an httpx.Response into anthropic.BadRequestError
+    # would silently misbehave per that same docstring.
+    import httpx2 as httpx
     raw = ("Schemas contains too many parameters with union types (42 parameters with type arrays or anyOf). "
            "This causes exponential compilation cost. Reduce the number of nullable or union-typed parameters "
            "(limit: 16 parameters with unions).")

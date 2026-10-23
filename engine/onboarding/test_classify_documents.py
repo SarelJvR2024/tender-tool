@@ -376,7 +376,11 @@ def test_llm_call():
     # message, with the technical detail only on `.detail`, not folded into
     # the message a customer sees via onboarding_uploads.classification_error.
     import anthropic
-    import httpx
+    # Finding 65, 2026-10-23: same fix as extract_cv_fields.py's sibling check
+    # - this is httpx2, not httpx (anthropic==1.15.0's real dependency,
+    # confirmed from a real CI run's own pip install log), and anthropic's
+    # own exception classes don't accept a plain httpx.Response anyway.
+    import httpx2 as httpx
     raw = ("Schemas contains too many parameters with union types (54 parameters with type arrays or anyOf). "
            "This causes exponential compilation cost. Reduce the number of nullable or union-typed parameters "
            "(limit: 16 parameters with unions).")
