@@ -1773,3 +1773,101 @@ guessed name from its filename), not just that the markup renders. Screenshotted
 controls, toggle and rows all visible at both widths. The temporary route, `.env.local`, and the
 `playwright-core` dev install were all deleted again before commit (confirmed via `git status`
 showing only the real feature files) - this was a self-review aid, never meant to reach `main`.
+
+---
+
+### Tender workspace: quick doc link, phase-grouped plan, action-type tags, tabs (Sarel's own live feedback)
+
+Sarel's third live-feedback round tonight, screenshot of `/tenders/[id]#general-preparation`
+(RFP165/2026, DBSA, general family): "have a quick link to access all tender docs. change
+submission plan to be grouped by how to compile the tender pack and according to the timeline...
+not just one long list. also indicate if it requires a physical action, a decision, a document,
+info, review etc not just [a status badge]... you can still color code if it needs fixing or done
+or ready to submit. the tags in the standard forms section should be standard sizes. add a summary
+of how much is still needed per section... always displayed. see if you can streamline the page
+and move to different tabs, it is a very long list, even reduce some of the blabber on the
+questions." Seven distinct asks, all in `general-workspace.tsx`/`submission-plan-*.ts` (general
+family only - SANRAL's own `compliance-report.tsx` and `disqualification-guard.tsx` sit outside
+this page's biggest-complaint area and were left alone beyond one copy trim). The CV-pre-population/
+confidence-level closing line is the same ground `CV-led "Add person"` work (same night, different
+Claude session/PR) already covers - not re-scoped here to avoid two sessions racing the same code.
+
+**Action-type tags (new axis, not a status change)**: new `ActionType = "physical" | "decision" |
+"document" | "info" | "review"` and a pure `actionTypeForStep()` in `submission-plan-logic.ts`,
+derived from each step's existing `category` (+ `bidTaskStatus` for forms: engine-filled ->
+review, by-hand -> document) - no new data, no schema change. Rendered by new `ActionTypeTag`
+(`action-type-tag.tsx`) - deliberately a square-cornered, icon+outline tag, a different SHAPE from
+`BidTaskBadge`'s rounded pill, so the two read as two different kinds of information at a glance:
+the existing Fix/Provide/Verify status badge (kept, unchanged, still color-coded) stays the "is
+this OK" signal; the new tag is "what do I actually have to go and do." Never merged into one
+badge - Sarel's own words kept the two separate ("not just [status], it is not descriptive enough,
+you can still color code").
+
+**Submission plan regrouped by phase, not status**: `submission-plan-view.tsx` rewritten -
+`PHASE_ORDER` groups the exact same steps into "1. Confirm you qualify" (returnable, cidb_grading)
+-> "2. Assign your team" (role) -> "3. Complete the forms" (form, buyer_form) -> "4. Answer this
+tender's own questions" (question) -> "5. Attend the briefing" (briefing) -> "6. Known limitations"
+(gap) - the order a pack actually gets compiled in, derived purely from each step's existing
+`category` field (8 values already there, nothing new read). Status is still worst-first WITHIN
+each phase and still the row's own color-coded badge - grouping changed, the Fix/Provide/Verify
+model didn't. An always-visible "`N` of `M` ready · `fix` to fix · `provide` to provide · `verify`
+to verify" bar sits above the phases (item 5), plus a "`done` of `total` done" count per phase
+header, even while scrolled past it. An empty phase (e.g. no gaps) is skipped entirely rather than
+padded with an empty-state line - the old flat list's own `emptyText` strings are gone; a phase
+with zero items for this tender just isn't shown.
+
+**Tabs, scoped deliberately**: new `WorkspaceTabs` (`workspace-tabs.tsx`, client component) wraps
+ONLY `GeneralTenderWorkspace`'s 4 secondary sections (Documents/Questions/People/Pack) behind a tab
+bar - "What this tender needs" (has its own live blocker chips) stays always visible above the
+tabs, and the Disqualification guard + Submission plan (`page.tsx`, mounted above this whole
+component) were already structurally outside/above it before tonight - confirmed by reading
+`page.tsx` before starting. No blocker is ever hidden in a tab (spec v3 §16.E: "Do not bury
+blockers in a hidden tab"). Every tab's content is always rendered (same data already being
+fetched unconditionally before tabs existed) - only which one is VISIBLE changes, via the `hidden`
+attribute rather than unmounting, so an existing `JumpLink href="#general-documents"` style anchor
+still finds a real element. Since a `hidden` element can't be scrolled to, `WorkspaceTabs` listens
+for `hashchange` (a `JumpLink` click, or the page loading with a hash already in the URL) and
+switches tabs itself before re-doing the scroll the browser couldn't do while it was hidden; a
+tab's optional `anchors` list (used for `general-pack-review`, rendered inside the Pack tab but
+with its own id) covers a hash that isn't the tab's own id. Each tab carries a `TabBadge` - the
+same per-section "still outstanding" count Sarel asked for (item 5), on the bar itself so it's
+genuinely "always displayed" even while a different tab is open: Documents = `docsMissing`,
+Questions = `needAnswer`, People = `regGaps + roleGaps` (new, a small pure count from already-
+loaded `personRegs`/`roleRowsForTender`, not a new query), Pack = `generalFixCount` (already
+computed, reused).
+
+**Quick doc link + standard-size form tags + copy trim**: "Read from N documents" in "What this
+tender needs" is now a link to `#general-documents`/the Documents tab; that section gained a
+`<details>` disclosure listing every `manifest.documents[]` entry by name (with an unreadable/OCR
+note) - the one genuine gap found while investigating (the manifest's own document list was being
+counted everywhere but never itemized anywhere) - rather than inventing a download feature the
+schema doesn't have (checked: no `listing_url`/original-document storage exists beyond
+`tender_private_documents`, which IS already linked from inside the disclosure when present).
+`FormTag` (SBD/MBD code pills, "standard forms" section) got a `minWidth: 56` + centered text - the
+literal ask ("standard forms section tags should be standard sizes"); previously auto-width, so
+"SBD 1" and "SBD 6.1" visibly differed. Trimmed the Questions intro paragraph, the Submission plan
+intro, and the Disqualification guard's description to their load-bearing sentence each - the
+"blabber" complaint was about fixed wrapper copy, not per-question `help` text (that's extracted
+from the tender's own documents, not authored here).
+
+**Self-review (4 rounds, this page's size/risk)**: round 1 - re-read Sarel's own words item by
+item against the diff; the "info" fallback for a signatory-type question (`q.type === "person"`)
+is a known, accepted simplification - `PlanStep` carries no discriminator for it today, so it reads
+as generic "info" rather than "decision" (who signs); not silently missed, flagged here. Round 2 -
+confirmed `disqualification-guard.tsx`'s own `plan.steps.filter((s) => s.category === "role")`
+still works unchanged (category values untouched, only a new derived `ActionType` added alongside).
+Round 3 - a mock-data screenshot harness (`/design/screenshot-workspace-redesign`, temporary,
+deleted before finishing) rendered `ActionTypeTag` for all 5 types, the phase-grouped plan with 9
+mock steps across 5 phases, and `WorkspaceTabs` with its badges; confirmed visually at 1440px and
+390px, and confirmed a real click switches tabs (Playwright, `page.getByRole('tab').click()`).
+Round 4 - re-read the full restructured `general-workspace.tsx` end to end for the tab-content
+extraction itself (the highest-risk mechanical step): every section's own id, every prop/state
+closure (`tenderId`, `manifest`, `returnables`, `qStates`, etc.) still reads from the same
+surrounding closure as before, nothing duplicated or dropped in the move.
+
+**Tested**: `npm run build` clean, `npm run verify` 0 errors, 144/144 vitest (11 new
+`actionTypeForStep` cases added to the existing `submission-plan-logic.spec.ts`), 76/76 node:test
+both ways. **Not tested**: an actual signed-in render of `/tenders/[id]` - same sandbox credential-
+generation limitation as every batch tonight; the mock-data screenshot harness above is real
+evidence the new components render, lay out, and respond to clicks correctly, not a substitute for
+Sarel clicking through his own real tender.
