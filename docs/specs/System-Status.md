@@ -31,6 +31,9 @@ dependency tree ever installs plain `httpx`, and even if it did, handing an `htt
 import. **Fixed**: `import httpx2 as httpx` in both files - minimal, re-verified clean (both
 files individually, full 55-file Python sweep). This is real CI-red on `main` that predates PR #74
 (confirmed on `305f29c`, the commit before it), not caused by the merge just performed.
+**Confirmed in real CI, not just locally**: both `app-ci` and `bridge-worker-ci` are green on
+`main`'s current tip (`c71c17e`) - the fix verified against the actual GitHub Actions run, not
+assumed from the local sweep alone.
 
 **Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
 pasted into chat has actually been rotated.
