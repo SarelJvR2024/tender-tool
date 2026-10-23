@@ -49,6 +49,19 @@ warnings), `npm run build` clean (57 routes), `npx vitest run` 147/147, `node --
 Pushed to the existing PR #130 branch, not `main`, per explicit instruction - the Vercel preview on
 that PR is the review surface, not a new deploy.
 
+**Real finding, blocks any preview-based testing, not just this session's own**: the Vercel
+*Preview* deployment for this PR 500s on every authenticated page - confirmed with a plain `curl`
+(`/login` → 200, `/dashboard` → 500), and separately with a headless-browser login attempt, which
+hung on "Signing in..." forever and surfaced `@supabase/ssr: Your project's URL and API key are
+required to create a Supabase client!` in the console. Nothing in this PR touches
+`lib/supabase/server.ts` or any env-var-reading code, so this isn't a regression from this work -
+it's almost certainly the Supabase env vars (`NEXT_PUBLIC_SUPABASE_URL`,
+`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_DB_URL`) being scoped to
+the "Production" Vercel environment only, not "Preview", in the Vercel project's own dashboard
+settings - a one-time fix only Sarel can make (this session has no Vercel dashboard access). Until
+that's fixed, **no PR preview on this project can be logged into and visually reviewed** - worth
+fixing once, for every future PR, not just this one.
+
 ---
 
 **Part 4 retab, done properly this time, on a branch/PR (not pushed to `main` directly) -
