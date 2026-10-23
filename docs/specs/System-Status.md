@@ -8,6 +8,25 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~06:15 UTC: merged forward again, no overlap, re-verified.**
+Two things landed on `main` since the last pass: PR #110 (Spec v3 Batch 8 - company vault form
+density, `app/app/company/_components/*`) and `af512b9` (Finding 58 - parallelizes
+`watch_new_tenders.py`'s `fan_out()` document reads with a new concurrency test, pushed directly
+by the QA/robustness session). Neither touches `engine/narrative/`, `app/app/tenders/[id]/`, or
+any migration file - confirmed from both diffs directly, not assumed. Migration numbering
+re-checked again: `main` still ends at `0085`.
+
+Merged into `feature/narrative-document-generator` - clean auto-merge. Re-verified: all 51
+`engine/**/test_*.py` files, 0 failures; `npm run verify` clean; `npx vitest run` - 129/129 (no
+count change this pass - Batch 8's own new coverage was a static `react-dom/server` render check
+and a `node:test` pair, not a vitest spec). PR #74 remains genuinely mergeable against `main`'s
+current tip.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **Standing review pass, 2026-10-23 ~04:15 UTC: merged forward again, no overlap, re-verified.**
 Since the last pass, exactly one new commit landed on `main` directly (`d2de313`, "Fix
 open-redirect bypass in post-login/signup redirect" - Finding 57, same QA/robustness session as
