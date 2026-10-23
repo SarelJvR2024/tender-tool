@@ -216,7 +216,83 @@ def test_enrich_end_to_end_shape():
     check(result["value_band"] == "R5-20m", f"value band wrong: {result['value_band']}")
     check(result["value_band_basis"] == "stated_in_text", "basis should be stated_in_text")
     check(result["confidence"] == "heuristic", "confidence should be heuristic with no document text supplied")
-    check(result["boq_summary"]["items"] == [], "boq items should always be empty")
+    check(result["boq_summary"]["items"] == [], "boq items should always be empty when no boq_items are supplied")
+    check(result["needs_human_review"] is False, "needs_human_review should default to False")
+
+
+# ---------------------------------------------------------------------------
+# Real BOQ items wired into boq_summary (step 1 wiring - the parsing itself
+# is tested in full in test_boq_extraction.py; this only checks enrich()
+# actually plumbs a pre-parsed items list through, never fabricating or
+# dropping it).
+# ---------------------------------------------------------------------------
+
+def test_enrich_wires_real_boq_items_through():
+    items = [{"description": "Excavate trenches", "unit": "m3", "quantity": 120, "rate_zar": 85.5,
+             "amount_zar": 10260.0}]
+    result = te.enrich("Road upgrade", "Upgrade of gravel road including stormwater works.",
+                       taxonomy=taxonomy.active(), boq_items=items)
+    check(result["boq_summary"]["items"] == items, f"real boq_items should pass straight through, got {result['boq_summary']}")
+    check(result["boq_summary"]["referenced"] is True, "boq_summary should be referenced=True when real items exist")
+    check(result["confidence"] == "document_confirmed",
+          "a tender with real boq_items should be document_confirmed even with no prose document_text")
+
+
+def test_detect_boq_reference_never_fabricates_without_items():
+    r = te.detect_boq_reference("Tenderers must complete the attached Bill of Quantities.")
+    check(r["items"] == [], "no items supplied -> must stay empty, exactly as before this task")
+    check("could not be confidently parsed" in r["note"] or "no matching document" in r["note"],
+          f"note should explain why items are empty, got {r['note']!r}")
+
+
+# ---------------------------------------------------------------------------
+# LLM scope result wired into scope_summary/source_note (the LLM call/review
+# loop itself is tested in full in test_scope_llm.py; this only checks
+# enrich() uses it correctly - as a FALLBACK, only when the regex heading
+# match didn't already succeed, and folds needs_human_review into
+# source_note honestly, never silently).
+# ---------------------------------------------------------------------------
+
+def test_enrich_uses_llm_scope_result_only_as_a_fallback():
+    # The regex path SUCCEEDS here (a real "SCOPE OF WORK" heading) - the
+    # LLM result must be IGNORED even though one was supplied, since the
+    # free/fast path already found a real answer.
+    doc_text = "SCOPE OF WORK\nRehabilitation of 12km of gravel road.\n\nOTHER CLAUSES\n..."
+    llm_result = ("An LLM-fabricated scope that must NOT be used", "document_scope_snippet", False, "LLM note")
+    result = te.enrich("Road works", "short advert text", document_text=doc_text, taxonomy=taxonomy.active(),
+                       llm_scope_result=llm_result)
+    check("Rehabilitation of 12km" in result["scope_summary"],
+          f"regex match should win over a supplied LLM result, got {result['scope_summary']!r}")
+
+    # The regex path FAILS here (no heading at all) - the LLM result must be
+    # used, and its needs_human_review flag folded into source_note.
+    doc_text_no_heading = "TENDER DATA\n\nThe Contractor shall resurface Ward 4's internal roads over 18 months.\n"
+    llm_result_flagged = ("Resurfacing of Ward 4's internal roads over 18 months.", "document_scope_snippet",
+                          True, "LLM-extracted scope summary (3 review pass(es)). NEEDS HUMAN REVIEW: still unsure about scope")
+    result2 = te.enrich("Road works", "short advert text", document_text=doc_text_no_heading,
+                        taxonomy=taxonomy.active(), llm_scope_result=llm_result_flagged)
+    check(result2["scope_summary"] == llm_result_flagged[0], f"LLM result should be used as the fallback, got {result2}")
+    check(result2["scope_source"] == "document_scope_snippet", "LLM-derived scope uses the same source label as a real document read")
+    check(result2["needs_human_review"] is True, "needs_human_review should be surfaced on the result")
+    check("NEEDS HUMAN REVIEW" in result2["source_note"], f"the flag must be honestly recorded in source_note, got {result2['source_note']!r}")
+
+
+# ---------------------------------------------------------------------------
+# enrich_release() - the per-release heuristic hook for gov_sources.py
+# ---------------------------------------------------------------------------
+
+def test_enrich_release_is_heuristic_only():
+    release = {
+        "title": "Appointment of a service provider for guarding services",
+        "description": "24-hour armed guarding and access control at regional offices for 36 months.",
+        "documents": [{"title": "Bill_of_Quantities.xlsx", "url": "https://example.test/boq.xlsx"}],
+        "procurement_category": None,
+    }
+    result = te.enrich_release(release, taxonomy=taxonomy.active())
+    check("security_facilities" in result["industry_tags"], f"enrich_release should still tag industries, got {result}")
+    check(result["confidence"] == "heuristic", "enrich_release never has document_text/boq_items - always heuristic")
+    check(result["boq_summary"]["referenced"] is True, "a BOQ-named document should still be detected by title")
+    check(result["boq_summary"]["items"] == [], "enrich_release never downloads/parses documents - items stay empty")
 
 
 def main():
@@ -231,6 +307,10 @@ def main():
     test_scope_summary_prefers_document_scope_heading_when_available()
     test_scope_summary_none_when_nothing_available()
     test_enrich_end_to_end_shape()
+    test_enrich_wires_real_boq_items_through()
+    test_detect_boq_reference_never_fabricates_without_items()
+    test_enrich_uses_llm_scope_result_only_as_a_fallback()
+    test_enrich_release_is_heuristic_only()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

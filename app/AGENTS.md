@@ -1906,6 +1906,8 @@ feature was touched; `compliance-report.tsx`/`submission-pack.tsx`/`subcontracti
 correctly. `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways (`tsx --test` and
 the real CI invocation, `node --experimental-strip-types` per file).
 
+---
+
 ## App-wide counts & calculations audit (2026-10-23)
 
 Sarel, after seeing the real Active-bids 6-vs-1 discrepancy (PR #122, `fix/active-bids-count-mismatch`
@@ -2326,3 +2328,238 @@ full vitest/node:test suites re-run clean.
 `node --experimental-strip-types` per file). **Not tested**: an actual signed-in render - same
 sandbox credential-generation limitation as every batch tonight; the mock-route screenshots above
 are the closest available substitute, not a replacement for Sarel clicking it himself.
+---
+
+### Feature: real scope/BOQ/quantity extraction engine (BOQ line items, LLM-assisted scope, backlog pagination check)
+
+Sarel's own request, verbatim: "In the market analysis shown the number of tenders in the system
+and stats on them. We need an engine that assess and extract the scope of each tender even the
+backlog so that we can. Do analysis on scope and boq and quantities even on historic tenders to
+provide insights and trends. Build the extract engines so long we will still finalize what we
+analyze and what we visualise." Read literally: the extraction engine only - the analysis/
+visualisation layer (`app/app/market-intelligence/`) is explicitly deferred and NOT touched here.
+
+This builds on `engine/discovery/tender_enrichment.py` (migration 0060, 2026-10-18), whose own
+module docstring and the `tender_scope_records.boq_summary` column comment both explicitly
+anticipated this exact follow-on ("a future real-extraction pass"). No schema change was needed or
+made - confirmed by reading migration 0060's own column comments before writing a line of code, and
+again at the end of this pass; `scope_source`'s existing check constraint
+(`'description_text' | 'document_scope_snippet'`) already had room for the new LLM path (see below -
+it reuses `'document_scope_snippet'`, deliberately, rather than adding a third value that would need
+a migration).
+
+**What's REAL now (read `tender_enrichment.py`'s own module docstring for the full, precise
+breakdown - this is the summary):**
+
+- **BOQ line items** (`boq_summary.items`) - real, deterministic spreadsheet parsing, new module
+  `engine/discovery/boq_extraction.py`. Reuses `engine/sanral_fill.Workbook` (this repo's own
+  hand-rolled .xlsx/.xlsm zip+XML reader - confirmed, again, that no third-party spreadsheet library
+  exists anywhere in this repo before writing this) rather than adding `openpyxl` - `Workbook` turned
+  out to already have everything needed except a way to read a whole sheet's shape without already
+  knowing which cell holds what, so it gained two new, narrowly-scoped, read-only methods:
+  `sheet_names()` and `sheet_grid(sheet, max_rows=5000)` (every existing `Workbook` caller -
+  `fingerprint.py`, `fill_financial.py`, `sanral_fill.py`'s own SANRAL-specific code - is unchanged
+  and still reads known, fixed cell references exactly as before; confirmed by re-running
+  `test_form_field_audit.py`, `test_sanral_b7.py` and `test_tenant_isolation.py` after the change -
+  all still pass).
+  - **Item shape** (no fixed schema on the jsonb column itself, so documented here and in
+    `boq_extraction.py`'s own docstring): `{"description": str, "unit": str|None,
+    "quantity": number|None, "rate_zar": number|None, "amount_zar": number|None}`.
+  - **Header detection, not a fixed layout**: a row is trusted as a real header only when it matches
+    both "description" and "quantity" column-name variants (`HEADER_PATTERNS` - extend this list from
+    a real template that doesn't match, never from a guess), each to a *different* column letter.
+    Every sheet in the workbook is tried in turn (the priced schedule is rarely sheet 1 - a BOQ
+    workbook usually opens on a cover/instructions sheet first).
+  - **Three separate "never fabricate" guards**, each with its own test in
+    `test_boq_extraction.py`: (1) a sheet with no confident header match at all leaves `items: []`
+    with an honest `note`; (2) a header match whose "quantity" column is mostly non-numeric text
+    (a coincidental match, e.g. a returnable-schedule Yes/No table) is rejected
+    (`MIN_NUMERIC_QUANTITY_RATIO`); (3) a row with real text in the description column but **no
+    number anywhere** (quantity/rate/amount all null - a footer note, an instruction, a signature
+    line that happens to land in the same column as the real descriptions) is never counted as an
+    item - every genuine BOQ row has at least one number attached to it. Caught in this pass's own
+    round-2 self-review (a footer-note row was briefly being counted as a zero-info "item" before
+    this guard was added) and has its own test
+    (`test_footer_note_in_the_description_column_is_not_fabricated_as_an_item`).
+  - **Known limitation, honestly flagged, not silently worked around**: a BOQ shipped inside a
+    `.zip` (seen live in this pass's own sample run - DBSA's RFP165/2026 "SHEQ Annexures.zip") is not
+    unpacked by this CLI's own document fetcher (`_read_document_text()` reads one file at a time by
+    URL/extension; it does not reuse `engine/general/requirements.collect_documents()`'s own zip-
+    unpacking, which was built for a local directory of already-downloaded files, not one URL at a
+    time). Logged plainly ("'zip' is not a text document format this reader handles"), never guessed
+    at - a real gap worth closing in a follow-up pass if zipped BOQ bundles turn out to be common on
+    non-SANRAL buyers.
+
+- **LLM-assisted scope summary** - new module `engine/discovery/scope_llm.py`, built per
+  `docs/specs/AI-Call-Quality-Standard.md` **read in full before writing the prompt**, both required
+  parts:
+  1. **A prompt specific to this exact job** (`SYSTEM_PROMPT`, `test_scope_llm.py`'s own
+     `test_prompt_is_scenario_specific_not_a_copy_of_the_cv_prompt` proves it isn't a copy of
+     `extract_cv_fields.py`'s prompt): what the output is for (a cross-tender market-intelligence
+     record for real trend-spotting, not a sworn compliance document, but still a real cost if
+     wrong); SA-government-tender-specific rules (scope scattered across SCOPE OF WORK/Part
+     T1.2/annexures, "the Contractor/Service Provider shall", SBD/MBD/BOQ form references are form
+     numbers, not scope); the explicit null-when-unclear + verbatim-quote-evidence rule; and a
+     concrete checklist of what "good" looks like for this output (specific to THIS tender's actual
+     work vs. a generic restatement of the buyer; every quantity/unit genuinely in the source text,
+     not inferred; every claim traceable to a real quote; free of filler like "as required" with
+     nothing substantive attached).
+  2. **The mandatory 3-pass generate -> review -> revise loop**
+     (`extract_scope_with_review()`), each review pass re-reading the source text plus the
+     **previous pass's own corrected output** (never the original draft again) - proven by
+     `test_review_loop_chains_forward_and_stops_on_clean_pass`, which inspects the actual request
+     body sent on the 2nd review call. Stops as soon as a pass reports "No issues found on this
+     pass"; if pass 3 still finds a real issue, the result is still returned (the best version found)
+     but `needs_human_review` is set and the reason is folded into `source_note` with a
+     `"NEEDS HUMAN REVIEW: ..."` prefix - never silently shipped as if it passed its own check
+     (`test_review_loop_caps_at_3_passes_and_flags_needs_human_review`).
+  - Called **only as a fallback**: `extract_scope_summary()`'s existing fast/free "SCOPE OF WORK"
+    heading regex is tried first and kept whenever it succeeds (the task was explicit: don't replace
+    working logic with a slower/costlier one for no reason) - the LLM pass only runs when that regex
+    finds nothing, real document text exists, and it's at least `MIN_TEXT_CHARS_FOR_LLM_PASS` (400)
+    characters long. `scope_source` stays `'document_scope_snippet'` for BOTH paths deliberately (no
+    migration needed to add a third check-constraint value): both genuinely came from reading the
+    tender's own document; which one ran is distinguishable, if needed, by whether `source_note`
+    starts with "LLM-extracted".
+  - Same proven LLM-calling convention as `engine/cv/extract_cv_fields.py`, reused deliberately, not
+    reinvented: `client.beta.messages.create()` with a `json_schema` structured output, the
+    `server-side-fallback-2026-07-01` beta + `"default"` fallbacks pair, the same
+    `SetupError`/`TransientError` exception taxonomy, the same `<MODULE>_EXTRACTION_MODEL`
+    (`SCOPE_EXTRACTION_MODEL`) env-var-override pattern (default `claude-opus-5-5`).
+
+- **`tender_enrichment.enrich()` now actually receives real document text/BOQ items** when its
+  caller supplies them (`boq_items`, `llm_scope_result` - both optional, both None by default) - it
+  still does **no I/O itself** (stays a pure function, see its own docstring); only the CLI (`run()`)
+  does real I/O. A tender whose documents yield either real `boq_items` or real `document_text` is
+  marked `confidence='document_confirmed'`; everything else stays `'heuristic'`, exactly as the
+  column always promised.
+
+- **The CLI (`run()`) now actually fetches and reads each tender's own documents** before calling
+  `enrich()` - previously it called `enrich()` with no `document_text`/`documents` at all, so every
+  row ever written was permanently heuristic regardless of `enrich()`'s own capability. Documents
+  come from `discovered_opportunities.document_urls` (join on `tender_id`) - the direct buyer-site
+  links captured at discovery time for an eTenders/general tender; `discovered_opportunities` is
+  also the only place a tender's `buyer` name is recorded (`tenders` itself has no `buyer` column),
+  read from there for the LLM prompt's own context, not guessed from the title (a real bug caught and
+  fixed in this pass's own round-1 self-review - the first draft wrongly passed `contract_no` as the
+  "buyer"). PDFs are read via `assess_tender.fetch_pdf_text()` (read-only reuse, never modified);
+  .docx/.doc/.txt via `engine/general/requirements.read_document()` (confirmed by a prior session's
+  own PR #118 investigation to NOT be wired into the live discovery feed - reused here rather than a
+  third document-reading path, without touching the live feed itself). **SANRAL tenders'
+  `tender_documents` rows are deliberately NOT read for this** - they are blank template workbooks
+  uploaded by hand (migration 0001), not the tender's real scope/BOQ content; a SANRAL tender's scope
+  still comes from its own title/description (the heuristic path, unchanged).
+
+- **Per-release heuristic hook, going forward**: `gov_sources.fetch_all()` now calls
+  `tender_enrichment.enrich_release()` on every merged release (`attach_scope_enrichment()`),
+  attaching `release['scope_enrichment']` - the same cheap, free, zero-cost tagging `enrich()`
+  always did, just now running on every release as it's discovered, not only once it becomes a
+  `tenders` row. Deliberately heuristic-only at this point (no `tenders.id` exists yet for most
+  releases - most eTenders releases only get one once pursued, migration 0018 - and no document has
+  been downloaded this early) - never fatal (one release's tagging failure is logged and skipped,
+  same "one bad release never stops the whole run" discipline `gov_sources.py` already uses
+  throughout). The existing per-company scoring fan-out in `watch_new_tenders.py` is completely
+  untouched.
+
+**Backlog pagination (step 5) - checked, found already fixed, not re-fixed**: the task's own brief
+named this as a real, previously-found bug class (`app/lib/marketPricing.ts`, PR #111 - a
+client-side `.limit()` silently truncated at PostgREST's hard 1000-row cap). Read
+`company_profiles.RestClient.select()`'s own implementation before assuming anything: it already
+loops on `offset`/`limit` (`PAGE = 1000`) until a page comes back short - this was evidently already
+fixed (or built correctly from the start) in the Python client, separately from the TypeScript one
+PR #111 fixed. No code change was needed. Added `engine/discovery/test_company_profiles.py` anyway -
+the Python-equivalent of `marketPricing.spec.ts`'s own `serverThatCapsAt()` test - proving it for
+real (a server stand-in capped at 1000 rows regardless of the requested limit; `select()` correctly
+pages through 2500 real rows in 3 requests) rather than leaving this as a read-and-trust claim.
+
+**Real backlog-size numbers** - a new `counts` subcommand
+(`python3 engine/discovery/tender_enrichment.py counts`) reports the true, paginated total tender
+count and how many already have a `tender_scope_records` row, split by confidence, vs. none at all.
+Run for real in this sandbox's own configured Supabase project (a dev/test project - `companies`
+rows are named things like "E2E Test Construction", "Debug Co", "Fresh Walkthrough Civils", not real
+customers; this is NOT the same as checking Sarel's real production backlog size, which needs this
+same command run against production credentials): **9 total tenders, 0 already enriched** before this
+pass. This is a small, dev-scale number precisely because it's a test project, not evidence about the
+real production backlog - the full-backfill proposal below is sized in general terms for exactly that
+reason.
+
+**Sample run - a REAL run, not just a mocked one**: this sandbox turned out to have real
+(non-placeholder) `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` configured (confirmed live,
+read-only, before writing anything) - no `ANTHROPIC_API_KEY` though (confirmed absent, same as every
+other LLM-adjacent pass tonight). Ran `python3 engine/discovery/tender_enrichment.py run --limit 20
+--all` for real against all 9 real tenders in that project (within this task's own 20-50 sample
+bound) - real network fetches of real government documents, real BOQ-candidate detection, real
+writes to `tenders`/`tender_scope_records`. Result: **9/9 enriched, 2 document_confirmed (both real
+PDFs fetched and read over the network from dbsa-procurement), 7 heuristic** (manual/demo tenders and
+one Cape Town RFQ with no attached document URLs). One of the two document-confirmed rows (DBSA
+RFQ073/2026) got a real regex-matched "SCOPE OF WORK" snippet genuinely pulled from the live-fetched
+PDF text ("2.1 Supply and Provision of Equipment - Supply and provide suitable three (03) X-ray
+baggage/item screening machines..."); the other (DBSA RFP165/2026) also matched the regex path but
+picked up a less useful snippet (a repeated page header/boilerplate from elsewhere in a 108-page PDF)
+- a **pre-existing limitation of the regex-only heading match, not something this pass introduced**,
+and exactly the kind of case the new LLM fallback exists to improve on - except the regex path
+"succeeded" (found *a* heading) so the LLM fallback correctly didn't run for it, per this task's own
+explicit instruction not to replace a working fast/free path. Neither of the 9 real tenders triggered
+the LLM fallback for real (every one either matched the regex path or had no document text at all),
+so **the LLM scope call itself is still unverified against a live Anthropic API** - proven correct
+only via the mocked `test_scope_llm.py` (3-pass loop, chaining, early-stop, cap+flag) and a local,
+stub-client demonstration script (not committed) that exercised the real `extract_scope_with_review()`
+logic end to end. Real BOQ parsing WAS exercised end to end with a real (synthetic, hand-built)
+.xlsx in `test_boq_extraction.py` and the same local demonstration.
+
+**Full-backfill proposal - NOT YET RUN, a sized decision for Sarel, same "propose, don't spend"
+discipline this repo already applies to schema risk, applied here to real API cost**:
+- Real tender count in whatever project this runs against: check with
+  `python3 engine/discovery/tender_enrichment.py counts` first - this sandbox's own project has only
+  9 (see above); Sarel's real production count needs checking separately, against production
+  credentials, before deciding anything.
+- Rough per-tender cost/time, from this pass's own sample run and `scope_llm.py`'s own call shape: a
+  tender whose regex heading match fails needs up to 4 LLM calls (1 generate + up to 3 review passes,
+  `effort: "medium"`, ~4000 max_tokens each) against `claude-opus-5-5` (or whatever
+  `SCOPE_EXTRACTION_MODEL` is set to) - each call sends the tender's own document text (capped at
+  `MAX_TEXT_CHARS_SENT` = 60,000 characters) plus the system prompt. **Check current published
+  Anthropic pricing for the configured model before relying on a dollar figure here** - this pass
+  did not have a live key to measure real token usage/cost against, so any number quoted here would
+  be a guess dressed up as a measurement, which is exactly what this standard exists to prevent.
+  Order-of-magnitude planning assumption instead: budget for up to 4 LLM calls per tender that
+  doesn't have a clean "SCOPE OF WORK" heading (most adverts in this pass's own earlier samples
+  across `test_tender_enrichment.py`'s fixtures do state one or have no document text at all, so this
+  is likely well under 100% of the real backlog, but that ratio should be measured on a larger real
+  sample before committing to a number) - a few seconds of wall-clock time per call, so a few tens of
+  seconds per tender needing the fallback, times the real tender count.
+- Exact CLI invocation for the full run, once a count and a cost estimate are in hand:
+  `ANTHROPIC_API_KEY=... python3 engine/discovery/tender_enrichment.py run --all` (drop `--all` to
+  only enrich tenders with no `tags_updated_at` yet, i.e. skip ones already done in an earlier
+  partial run).
+
+**Self-review (3 rounds, per this task's own standing rule)**: round 1 - re-read the CLI's own
+document-fetch wiring line by line and caught a real bug before it ever ran: the first draft passed
+`t.get("contract_no")` as the LLM prompt's "buyer" context, but `tenders` has no `buyer` column at
+all (migration 0001) - fixed by reading the real buyer from `discovered_opportunities` alongside the
+document URLs (`_tender_context()`, replacing the narrower `_documents_for_tender()`), with its own
+new test (`test_tender_context_dedupes_documents_and_reads_the_buyer`) checking the buyer is read
+from the right table, not guessed. Round 2 - re-read `boq_extraction.py`'s own item-row filter
+adversarially and found it would count a footer/signature line with no numbers as a zero-info "item"
+whenever it happened to land in the description column; added the "at least one number" guard and
+its own test before moving on, exactly the "does the BOQ parser ever fabricate a line item from a
+sheet it genuinely can't read" question this task's own brief asked self-review to specifically
+check. Round 3 - re-ran the FULL existing Python test sweep (46 files, all pre-existing, 0 changed by
+this pass) plus the new test files, then did the real, live sample run above as the final check
+rather than trusting the unit tests alone; re-confirmed the chaining/early-stop/cap-and-flag review-
+loop behaviour and the real-paginated-count behaviour both have their own passing tests, not just
+read-and-trust claims, per this task's own explicit self-review checklist.
+
+**Tested**: 50/50 Python test files (46 pre-existing + 4 new: `test_boq_extraction.py`,
+`test_scope_llm.py`, `test_company_profiles.py`, `test_tender_enrichment_cli.py`), 0 failures,
+including `test_form_field_audit.py`/`test_sanral_b7.py`/`test_tenant_isolation.py` re-run to confirm
+the new `Workbook.sheet_grid()`/`sheet_names()` methods didn't disturb any existing `sanral_fill.py`
+caller. Plus the real, live sample run above (not a substitute for the mocked LLM tests, a
+complement to them - this is explicitly the one new LLM call site this pass could NOT verify live, no
+`ANTHROPIC_API_KEY` in this sandbox).
+
+**Not touched, per this task's own explicit scope**: `app/app/market-intelligence/` or any other
+analysis/visualisation page (what gets analysed/shown is still Sarel's own call); any database
+migration (none was needed - confirmed by reading migration 0060's own column comments, twice);
+`app/lib/marketPricing.ts`, `app/app/discovery/page.tsx`, `app/app/pipeline/page.tsx`,
+`app/app/pipeline/pricing/page.tsx` (other sessions' own in-flight files tonight); the full historic
+backlog itself (sized and proposed above, deliberately not run).
