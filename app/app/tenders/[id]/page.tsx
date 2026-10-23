@@ -1596,23 +1596,31 @@ function WorkspaceStatusBadge({
 function PrimaryPackActionLink({ href, ready, disabledReason }: { href: string; ready: boolean; disabledReason: string | null }) {
   if (!ready && disabledReason) {
     return (
-      <span
-        title={disabledReason}
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          minHeight: 40,
-          padding: "0 18px",
-          borderRadius: 8,
-          background: "var(--muted)",
-          color: "var(--muted-foreground)",
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: "not-allowed",
-        }}
-      >
-        Generate submission pack
-      </span>
+      <div>
+        <span
+          aria-disabled="true"
+          title={disabledReason}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            minHeight: 40,
+            padding: "0 18px",
+            borderRadius: 8,
+            background: "var(--muted)",
+            color: "var(--muted-foreground)",
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "not-allowed",
+          }}
+        >
+          Generate submission pack
+        </span>
+        {/* title= (hover) doesn't reach touch devices - same reason
+            submission-pack.tsx's own disabled "Fill SANRAL schedules" button
+            already pairs its title with this exact visible line, so a phone
+            user isn't left guessing why this one is grey too. */}
+        <div style={{ marginTop: 6, fontSize: 12, color: "var(--warning)" }}>{disabledReason}</div>
+      </div>
     );
   }
   return (
