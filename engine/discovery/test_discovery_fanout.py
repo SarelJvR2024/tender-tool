@@ -36,6 +36,8 @@ import json
 import os
 import shlex
 import sys
+import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
@@ -212,6 +214,74 @@ def part1():
         os.environ.update({k: v for k, v in saved.items() if v})
 
 
+def part1b_concurrency():
+    """fan_out()'s document reads run concurrently (FAN_OUT_READ_WORKERS,
+    QA pass 2026-10-23 - a sibling session's own daily tender-watch run took
+    4.5 hours instead of ~20 minutes because every release's read ran
+    strictly sequentially behind the others' 45s hard timeouts). Proves two
+    things with a real wall clock, not a mock of the thread pool itself:
+    (a) reads genuinely overlap in time and the whole batch finishes far
+    faster than reading them one at a time would, and (b) with that same
+    input, the result (report-worthy output AND seen-store content, same
+    order) is byte-identical to a plain sequential read - concurrency changes
+    only how long the read step takes, nothing about what fan_out() returns
+    or records."""
+    print("Part 1b - fan_out concurrency: reads overlap, same result as sequential")
+    N, SLEEP = 10, 0.2
+    # A short, fixed fixture text rather than the real sample PDFs: read_release()
+    # does real CPU-bound work on whatever text fetch_text returns (categorize,
+    # extract_signals), and that work is GIL-bound Python - with a full real PDF's
+    # worth of text it serialises across threads regardless of the thread pool,
+    # which would mask the very thing this is proving. The actual read step this
+    # fix parallelises is the network wait (fetch_pdf_text's HTTP GET, which
+    # releases the GIL while blocked on the socket) - time.sleep() below stands
+    # in for that wait without the confound.
+    FIXTURE = ("Scope of work: concurrency-fixture document, nothing further.", None)
+    lock = threading.Lock()
+    state = {"current": 0, "max": 0}
+
+    def slow_fetch(url):
+        with lock:
+            state["current"] += 1
+            state["max"] = max(state["max"], state["current"])
+        time.sleep(SLEEP)
+        with lock:
+            state["current"] -= 1
+        return FIXTURE
+
+    def fast_fetch(url):
+        return FIXTURE
+
+    releases = []
+    for i in range(N):
+        r = dict(RELEASES[i % len(RELEASES)])
+        r["ocid"] = r["contract_number"] = f"fanout-concurrency-test-{i}"
+        releases.append(r)
+    companies = [
+        synthetic("Concurrency Test Guards CC", ["security_facilities"], False, "Northern Cape"),
+        synthetic("Concurrency Test Architects Inc", ["buildings", "professional_services"], True, "Eastern Cape"),
+    ]
+
+    seen_concurrent = {}
+    t0 = time.time()
+    out_concurrent = watch.fan_out(releases, companies, seen_concurrent, ALL, fetch_text=slow_fetch)
+    elapsed = time.time() - t0
+    sequential_estimate = N * SLEEP
+    check(state["max"] >= 2, f"reads actually overlap in time (max concurrent observed: {state['max']})")
+    check(elapsed < sequential_estimate * 0.6,
+          f"{N} releases x {SLEEP}s-per-read finish in {elapsed:.2f}s, well under the "
+          f"{sequential_estimate:.2f}s strictly sequential reads would take")
+
+    # Same input, the same (cached) document text but no artificial delay -
+    # the only thing that should differ from the run above is how long it took.
+    seen_reference = {}
+    out_reference = watch.fan_out(releases, companies, seen_reference, ALL, fetch_text=fast_fetch)
+    check(out_concurrent == out_reference,
+          "concurrent run's report-worthy output is identical to a sequential run's")
+    check(seen_concurrent == seen_reference,
+          "concurrent run's seen-store content is identical to a sequential run's")
+
+
 def part2(psql):
     import bridge_selftest
     from test_manual_intake import Client
@@ -363,6 +433,7 @@ def part2(psql):
 
 if __name__ == "__main__":
     part1()
+    part1b_concurrency()
     psql = os.environ.get("FANOUT_PSQL")
     if psql:
         part2(psql)
