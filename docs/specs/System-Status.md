@@ -8,6 +8,55 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~18:20 UTC: migration-numbering collision #3 (0086 taken by a
+real RLS fix), renumbered; `page.tsx` touched by the same batch, auto-merged correctly; a real
+sandbox-only test gap found and confirmed, not fixed.** A big batch landed since the last pass:
+a Phase 1 UX-audit sign-off round (two merged PRs, #128/#129 - onboarding/CV-extraction schema
+fixes, `/admin` locked to real platform admins at the page level, a dead general-tender pack
+button fixed, PayFast sandbox-copy gating, **`system_alerts`'s own RLS gap closed via a new
+migration `0086_system_alerts_platform_admin_only.sql`** - any company owner, not just Sarel,
+could read the platform-wide operational log directly via PostgREST, confirmed live with a
+non-admin owner's own token), the company-vault progress-summary/sub-nav feature (#116) merged,
+and a confirmed-live OCR fix (Railway's own Dockerfile Path was blank, not a code bug).
+
+**The new `0086` collides with PR #74's own `0086_narrative_documents.sql`** - this is the third
+time this exact collision pattern has hit this one migration (first `0084`→`0085`, then
+`0085`→`0086`, now `0086`→`0087`), each time because this branch has now been open long enough
+to outlive 3 separate unrelated migrations landing on `main`. Renumbered to `0087`, updated every
+reference (`README.md`, `narrative-actions.ts`, `narrative-documents.tsx`), and - unlike the
+earlier two renumbers, which only got a fresh migration replay - this time also re-ran the full
+tenant-isolation suite against the replayed 77-migration schema (`ALL PASSED`), since a security
+RLS fix landing in the same migration range deserved that extra check, not just a clean replay.
+
+**`app/app/tenders/[id]/page.tsx` was also touched by this batch** (one conditional expanded from
+`isSanralPackFamily` to `isSanralPackFamily || isGeneralFamily`, around the "no tender pack yet"
+button, a different region of the file from `narrativeDocumentsSection`) - auto-merged with no
+conflict, confirmed correct by reading the actual diff, not assumed clean from a successful
+`git merge`.
+
+**A real, confirmed sandbox-only test gap, found during re-verification, not fixed**: the same
+UX-audit batch added a new sub-test to both `engine/cv/test_extract_cv_fields.py` and
+`engine/onboarding/test_classify_documents.py` (`test_llm_call`'s stop-reason coverage) that does
+a bare `import httpx` to construct a fake API-error response. Both fail here with
+`ModuleNotFoundError: No module named 'httpx'` - root-caused, not assumed: this sandbox's own
+`anthropic==1.15.0` install was deliberately repackaged to depend on `httpx2` instead of real
+`httpx` (`pip show anthropic` lists `httpx2` under `Requires:`, confirmed this is the only
+`import httpx` anywhere in the repo), almost certainly for this environment's own HTTP-proxy
+tooling to hook into cleanly. `engine/worker/requirements.txt` only pins `anthropic` directly;
+real `httpx` arrives as anthropic's own normal transitive dependency in the real worker container,
+so this will pass there - not touching the test to work around a sandbox-only substitution that
+doesn't reflect the real deployment environment. Every other check in both files passes; this is
+the only failure in an otherwise clean 51-file Python sweep.
+
+Full re-verification after the renumber: fresh 77-migration replay (clean), tenant-isolation suite
+(`ALL PASSED`), `npm run verify` clean, `npx vitest run` - 147/147 unaffected. PR #74 remains
+genuinely mergeable against `main`'s current tip.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **Resume here (2026-10-23 ~16:20 UTC).** Sarel gave a full 5-phase UX-audit correction brief (23
 Oct 2026 signed-in audit) and then explicitly said, twice, to do Phase 1 only and stop for his
 review before any later phase. **Phase 1's 6 items are done and in PR #128
