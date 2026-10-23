@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
-import { NEXT_STAGES, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { IN_PROGRESS_STAGES, NEXT_STAGES, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -257,7 +257,7 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   // only "value" this app tracks, same field the card itself shows),
   // submitted this month (submitted_at's calendar month = now's), win rate
   // (Awarded / (Awarded + Lost), the only two outcomes that exist).
-  const activeCards = [...byStage.found, ...byStage.bidding];
+  const activeCards = IN_PROGRESS_STAGES.flatMap((s) => byStage[s]);
   const activeBids = activeCards.length;
   const totalValueBeingBid = activeCards.reduce((sum, c) => sum + (toNumber(c.economics?.submitted_price_zar) ?? 0), 0);
   const now = new Date();

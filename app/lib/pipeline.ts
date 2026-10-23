@@ -6,6 +6,19 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 export const PIPELINE_STAGES = ["found", "bidding", "submitted", "won", "lost"] as const;
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
 
+// "Active bids" everywhere this label is shown (Home's stat card, the Bids
+// board's own stat card) means work this company still has to do - found
+// (not yet decided) or bidding (assessing/building). A submitted bid is
+// handed in and awaiting an outcome, not active work, so it's deliberately
+// excluded here and tracked under its own "Submitted this month" stat
+// instead. Single source of truth so the two pages can't drift again (found
+// drifted once: Home's own stat used to reuse discoveryReassessment.ts's
+// broader ACTIVE_PURSUIT_STAGES, which legitimately includes "submitted" for
+// a different purpose - a submitted bid can still be flagged if a
+// re-assessment downgrades it - and ended up showing a different number
+// from the Bids page for the same company whenever anything was submitted).
+export const IN_PROGRESS_STAGES = ["found", "bidding"] as const satisfies readonly PipelineStage[];
+
 export function isPipelineStage(value: unknown): value is PipelineStage {
   return typeof value === "string" && (PIPELINE_STAGES as readonly string[]).includes(value);
 }
