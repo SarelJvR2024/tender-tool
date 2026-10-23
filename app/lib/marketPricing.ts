@@ -21,6 +21,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { median, toNumber } from "@/lib/dealEconomics";
+import { fetchAllRows } from "@/lib/supabasePaging";
 
 export type BidAmount = { column: string | null; amount_zar: number | null; amount_raw: string | null };
 export type Bidder = { name: string; amounts: BidAmount[]; bbbee?: string | null; notes?: string | null; is_winner?: boolean };
@@ -296,33 +297,18 @@ export function segmentsFor(args: { buyerLabel: string; isSanral: boolean; categ
   return out;
 }
 
-// PostgREST's own hard response cap on this project (db-max-rows) - confirmed
-// live 2026-10-23 during the Market Intelligence QA pass: requesting
-// .limit(5000) still only ever returned rows 0-999 (content-range
-// "0-999/39536" on a direct, unfiltered check). A client-side .limit() past
-// this is silently truncated, not an error - every caller below paginates
-// with .range() instead of trusting .limit() alone whenever more than this
-// many matching rows are plausible, which both loadSegment() (a buyer x
-// discipline segment, occasionally large for SANRAL/common disciplines) and
-// loadMarketOutcomes() (the whole table) now are.
-const POSTGREST_PAGE_SIZE = 1000;
-
-/** Pages through .range() in POSTGREST_PAGE_SIZE chunks until maxRows is hit
- * or a page comes back short (no more rows) - see POSTGREST_PAGE_SIZE. */
-export async function fetchAllRows<T>(
-  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-  maxRows: number,
-): Promise<{ rows: T[]; error: string | null }> {
-  const rows: T[] = [];
-  for (let offset = 0; offset < maxRows; offset += POSTGREST_PAGE_SIZE) {
-    const to = Math.min(offset + POSTGREST_PAGE_SIZE, maxRows) - 1;
-    const { data, error } = await page(offset, to);
-    if (error) return { rows, error: error.message };
-    rows.push(...(data ?? []));
-    if (!data || data.length < to - offset + 1) break;
-  }
-  return { rows, error: null };
-}
+// Pagination past PostgREST's own hard response cap on this project
+// (db-max-rows) - confirmed live 2026-10-23 during the Market Intelligence QA
+// pass: requesting .limit(5000) still only ever returned rows 0-999
+// (content-range "0-999/39536" on a direct, unfiltered check). A client-side
+// .limit() past this is silently truncated, not an error - every caller below
+// paginates with .range() (via the shared fetchAllRows(), lib/supabasePaging.ts)
+// instead of trusting .limit() alone whenever more than this many matching
+// rows are plausible, which both loadSegment() (a buyer x discipline segment,
+// occasionally large for SANRAL/common disciplines) and loadMarketOutcomes()
+// (the whole table) now are. Re-exported here so this module's own existing
+// imports/tests don't need to change call site.
+export { fetchAllRows };
 
 /** Competitive published outcomes in a segment (numbers only - no registers). */
 export async function loadSegment(supabase: SupabaseClient, s: Segment): Promise<{ rows: OutcomeStats[]; error: string | null }> {

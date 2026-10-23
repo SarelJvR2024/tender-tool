@@ -1905,3 +1905,129 @@ feature was touched; `compliance-report.tsx`/`submission-pack.tsx`/`subcontracti
 `tender-templates.tsx` (the actual SANRAL-only screens) are unchanged, confirmed still gated
 correctly. `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways (`tsx --test` and
 the real CI invocation, `node --experimental-strip-types` per file).
+
+## App-wide counts & calculations audit (2026-10-23)
+
+Sarel, after seeing the real Active-bids 6-vs-1 discrepancy (PR #122, `fix/active-bids-count-mismatch`
+- same root cause shape cited throughout this pass): "run through the app all calculations and counts
+and make sure they are correct." A systematic read of every page that shows a computed stat, count,
+percentage or total - `dashboard/page.tsx`, `pipeline/page.tsx` (read-only per the file-overlap rule
+below), `analytics/page.tsx`, Company vault (`lib/companyReadinessData.ts`/`lib/readiness.ts`),
+`lib/savingsCounter*.ts`, `lib/marketPricing.ts` and everything reachable from them - checked against
+its own label, against every other place in the app computing what should logically be the same
+number, and against zero-row/one-row/null-field/wrong-company edge cases, same bar as the
+Audit-fix-cluster batches above.
+
+**File-overlap rule followed**: two other sessions were concurrently touching
+`app/app/discovery/page.tsx`, `app/app/pipeline/page.tsx` and `app/app/pipeline/pricing/page.tsx`
+(server-side pagination/filtering batch, and PR #122's own active-bids fix) - none of those three
+were edited in this pass, even though `pipeline/page.tsx`'s own `totalValueBeingBid`/
+`submittedThisMonth`/`winRate` were read and checked (see "found but not fixed" below for the one
+real issue that turned up there).
+
+**Fixed - real bug, same precedent as PR #111 ("silently reading a 2.5% sample, not the real
+table")**: `app/dashboard/page.tsx` and `app/analytics/page.tsx` both read the whole shared `tenders`
+table (migration 0001: "Shared across every company - not tenant-scoped", readable by every
+authenticated user for every non-manual row) with a plain `.select()` and **no `.range()`-based
+pagination at all** - `analytics/page.tsx`'s own read didn't even have an `.order()` clause. PostgREST
+caps any response at 1000 rows (db-max-rows) regardless of a client-side `.limit()`, confirmed live
+during the PR #111 QA pass against this exact project - once the shared `tenders` table (grown daily
+by the discovery pipeline, with nothing ever pruning closed/old rows) passes 1000 rows, both pages
+would silently see an arbitrary, truncated slice instead of the real set, undercounting "Active
+bids"/"Packs ready"/"Closing this week"/"Tenders tracked"/"Win rate" etc. for every company on the
+platform at once - not a single-company bug, a whole-platform one, the moment the row count crosses
+the cap. Grepped the whole codebase for every other `.select()` that could plausibly read more than
+1000 rows without `.range()`-based pagination (325 `.select()` calls checked) - every other one is
+either already paginated (`lib/marketPricing.ts`, PR #111) or inherently bounded by a real filter
+(`.eq("id", ...)`, a single company's own RLS-scoped rows, a `tender_packs!inner(...)` join that
+requires a real pack, a `.limit()` on a small capped list) - these two were the only genuine gaps.
+- **Extracted `fetchAllRows()`/`POSTGREST_PAGE_SIZE` out of `lib/marketPricing.ts` into a new shared
+  `lib/supabasePaging.ts`** (re-exported from `marketPricing.ts` so its own existing imports/tests
+  don't need to change) - this exact fix needed reusing in two more files, not redefining.
+- `dashboard/page.tsx`'s `tenders` read now pages through `fetchAllRows()` (keeping its existing
+  `.order("closing_date")`, needed for the "Closing soon" list's own ordering) capped at 20,000 rows
+  - headroom above any plausible current count, not a measurement, same reasoning
+  `loadMarketOutcomes()`'s own 60,000 cap documents.
+- `analytics/page.tsx`'s `tenders` read gets the same fix (no pre-existing `.order()` to preserve -
+  none was ever applied here, matching `lib/marketPricing.ts`'s own un-ordered
+  `loadSegment()`/`loadMarketOutcomes()` precedent for a `fetchAllRows()` caller).
+- **Test**: `lib/supabasePaging.spec.ts` (5 cases, moved from `marketPricing.spec.ts` + one new) -
+  including a direct regression case naming the exact old bug (a naive single `.range()` request
+  returns only 1000 of 1800 real rows) vs. the fix (returns the real 1800). The generic helper is
+  what's unit-tested (same as PR #111's own fix); neither `dashboard/page.tsx` nor
+  `analytics/page.tsx` can be unit-tested against a live-growing table in this environment (no
+  `SUPABASE_DB_URL` here either - same documented limitation as every other DB-dependent page in
+  this file), so correctness here rests on reusing the already-tested helper verbatim, not a new
+  page-level test.
+- **Before/after**: today's real row count is well under 1000, so this is forward-looking, not a
+  live-data fix visible in a screenshot right now - exactly the same situation PR #111 was in before
+  `public_tender_outcomes` crossed the cap for real. The bug is real and reproducible (the new
+  regression test proves it) even though it hasn't yet bitten in production.
+
+**Checked and confirmed correct (re-verified, not just trusted from the prior pass's own fix)**:
+- `lib/savingsCounter.ts`/`lib/savingsCounterData.ts` (this file's own "Spec §9" entry documents a
+  real past R0-savings bug) - `resolveBaseline()` is used consistently in both
+  `fetchSavingsCounterSummary()` and `fetchTenderSavingsBreakdown()`, `hoursSavedForTender()`'s
+  baseline cap and `extraCapacity()`'s divide-by-zero guard are both still correct against their own
+  26 unit tests. One real but very narrow edge case found, **not fixed**: `fetchSavingsCounterSummary()`'s
+  "this month" boundary (`new Date(now.getFullYear(), now.getMonth(), 1)`) uses the server's own local
+  time zone, not `Africa/Johannesburg` (unlike `dashboard/page.tsx`'s own `greetingFor()`, which
+  explicitly uses SAST) - on a server running in UTC, a step counted in the ~2-hour window around
+  midnight SAST at a month boundary could land in the wrong month's total. Narrow enough (a few hours,
+  once a month) that this pass judged it not worth the risk of a deploy-environment-dependent fix
+  without being able to confirm the real server's time zone here - flagged for whoever next touches
+  this file.
+- `lib/companyReadinessData.ts`/`lib/readiness.ts` - confirmed `app/dashboard/page.tsx`,
+  `app/company/page.tsx` and the onboarding end screen all ultimately feed the exact same
+  `computeBidReadiness()` pure function with field-for-field identical inputs;
+  `app/company/page.tsx` computes its own input object (rather than calling
+  `fetchCompanyReadiness()`) only to reuse data it had already fetched for other reasons on the same
+  page (the company row, the principal count) - checked every field one by one against
+  `fetchCompanyReadiness()`'s own mapping and found zero drift, so this is a legitimate fetch-path
+  optimization, not the "recomputing its own version" drift risk this audit was looking for.
+- `lib/documentExpiry.ts`/`lib/notifications.ts` - the vault's "N documents need attention" count and
+  the topbar bell read the same `COMPANY_EXPIRY_FIELDS`/tables, the bell's tighter 60-day vs. the
+  vault's 30-day window is a documented, deliberate difference (already in this file's own prior
+  entry), not a disagreement bug.
+- `app/pipeline/page.tsx`'s own `totalValueBeingBid`/`submittedThisMonth`/`winRate` (read-only, not
+  edited per the file-overlap rule) - all three check out: `winRate` uses the identical
+  `won/(won+lost)` formula (with the identical `decided === 0 -> null` guard) as
+  `analytics/page.tsx`'s own win rate, `submittedThisMonth` counts by `submitted_at`'s calendar
+  month regardless of current stage (correct - a tender submitted this month that was later decided
+  should still count), and `totalValueBeingBid` sums `submitted_price_zar` only across
+  found+bidding (not-yet-decided) cards, matching the field the pipeline card itself already shows.
+  The one real disagreement in this area - `pipeline/page.tsx`'s own "Active bids" (found+bidding
+  only) vs. `dashboard/page.tsx`'s (found+bidding+submitted, via `ACTIVE_PURSUIT_STAGES`) - is
+  exactly PR #122's own fix, already in flight; not re-fixed here to avoid colliding with it.
+- `lib/dealEconomics.ts`'s `median()` (odd/even length, empty array), `commissionRand()`'s
+  round-to-cents arithmetic, `lib/dates.ts`'s `daysUntil()` (NaN/malformed-date guard) - all read
+  correct against their call sites and existing tests; left alone.
+- `app/tenders/[id]/tender-readiness.ts`'s `computeTenderReadiness()` returning `score: 100` for
+  `totalCount === 0` is deliberate and already covered by its own 5-case test (an unmapped family or
+  zero-section pack reads as "nothing to assess yet", not "0% ready") - not a bug.
+- Confirmed no query anywhere in `app/`/`lib/` uses a service-role/admin Supabase client that bypasses
+  RLS (grepped for `service_role`/`SUPABASE_SERVICE_ROLE`/`supabaseAdmin` - the only hit is
+  `scripts/send-deadline-reminders.ts`, a standalone cron script, not a page) - **no tenant-isolation
+  leak found** in this pass. `discovered_opportunities`, `savings_counted_steps`, `tender_packs` all
+  confirmed to carry a real `company_id` + tenant-scoped RLS policy by reading their migrations
+  directly, not assumed from naming.
+
+**Found but NOT fixed here (file-overlap conflict with concurrent work - write-up only, per this
+batch's own instruction)**:
+- `app/app/pipeline/page.tsx`'s "Active bids" stat (found+bidding only) disagreeing with
+  `app/app/dashboard/page.tsx`'s "Active bids" (found+bidding+submitted, via
+  `ACTIVE_PURSUIT_STAGES`) - this is the exact bug PR #122 (`fix/active-bids-count-mismatch`) is
+  already open to fix; deliberately not touched a second time here to avoid a merge collision. See
+  that PR's own description for the fix (a shared `IN_PROGRESS_STAGES` constant in `lib/pipeline.ts`).
+- No other real counts/calculations bug was found specifically inside `discovery/page.tsx`,
+  `pipeline/page.tsx` or `pipeline/pricing/page.tsx` beyond the one above - both files were read in
+  full for this audit's own verification purposes (see "Checked and confirmed correct" above), not
+  skipped, just not edited.
+
+Verified: `rm -rf .next && npm run verify` - 0 errors (3 pre-existing warnings, unrelated to this
+pass - 2 `no-img-element` on `Logo.tsx`, 1 `no-unused-vars` on `analytics/page.tsx`'s own
+`STAGE_META` import, confirmed present on `origin/main` before this pass touched the file).
+`npx vitest run` - 145/145 (144 baseline + 1 new regression test; `supabasePaging.spec.ts`'s 5 cases
+replace the 4 `fetchAllRows` cases moved out of `marketPricing.spec.ts`). Full `node:test` sweep both
+ways: `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 76/76; the same
+set run individually via `node --experimental-strip-types --test <file>` - 76/76, zero failures.

@@ -9,6 +9,7 @@ import { nextStepFor } from "@/lib/tenderNextStep";
 import { IN_PROGRESS_STAGES } from "@/lib/pipeline";
 import { loadDocumentExpiryOverview } from "@/lib/documentExpiry";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
 import { PageHeader } from "@/components/tt/page-header";
 import { StatCard } from "@/components/tt/stat-card";
@@ -29,6 +30,15 @@ export const instant = false;
 
 const CLOSING_SOON_WINDOW_DAYS = 14;
 const ACTION_WINDOW_DAYS = 7;
+// "tenders" (migration 0001: "Shared across every company - not
+// tenant-scoped") is unbounded and grows every day the discovery pipeline
+// runs - a plain .select() with no .range() silently truncates at
+// PostgREST's own 1000-row response cap once the shared table passes that
+// size (same bug class as PR #111's marketPricing.ts fix - "silently
+// reading a 2.5% sample, not the real table"). Paginated with the same
+// fetchAllRows() helper; 20,000 is headroom above any plausible current row
+// count, not a measurement - revisit upward if the table ever grows past it.
+const TENDERS_FETCH_CAP = 20_000;
 
 type PackJoin = { status: string; pipeline_stage: string };
 
@@ -135,11 +145,16 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ data: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary] = await Promise.all([
-    supabase
-      .from("tenders")
-      .select("id, contract_no, nra_reference, description, closing_date, source, family, tender_packs(status, pipeline_stage)")
-      .order("closing_date", { ascending: true }),
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary] = await Promise.all([
+    fetchAllRows<TenderRow>(
+      (from, to) =>
+        supabase
+          .from("tenders")
+          .select("id, contract_no, nra_reference, description, closing_date, source, family, tender_packs(status, pipeline_stage)")
+          .order("closing_date", { ascending: true })
+          .range(from, to),
+      TENDERS_FETCH_CAP,
+    ),
     fetchCompanyReadiness(supabase),
     getNotifications(supabase),
     supabase
@@ -155,7 +170,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
 
   if (error) console.error("tenders select failed for dashboard", error);
 
-  const rows = (tenders ?? []) as unknown as TenderRow[];
+  const rows = tenders as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
 
   const activeBidsCount = rows.filter((t) => (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t))).length;
