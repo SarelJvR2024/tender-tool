@@ -125,8 +125,15 @@ just plain-text fields - still Sarel's call, documented for whenever he picks it
   upload entry point only appears where that form actually exists today (general-family, shared
   tenders) - confirmed via `isGeneralFamily`, never a dead link.
 - **Verified**: `npx tsc --noEmit` clean, `npx eslint .` clean (same 3 warnings), `npm run build`
-  clean (57 routes), `npx vitest run` 147/147, `node --test` 138/138. Not yet preview-verified with
-  real data - next step before merge.
+  clean (57 routes), `npx vitest run` 147/147, `node --test` 138/138. Preview-verified with real
+  data too: the "Tender documents" popover renders correctly including an honest empty state (a
+  tender with nothing on file shows "No documents on file for this tender yet", not a fabricated
+  placeholder), the "Pack review" tooltip shows the real explanation on hover, zero console errors.
+  **PR #133 opened, marked ready for review (not draft) - intentionally not merged by this
+  session**: unlike #132, Sarel hasn't seen this diff yet; it changes user-facing copy and adds a
+  new UI element, worth his own look before it ships, especially since he said he'd check in
+  tomorrow. Screenshots sent to him directly. Items 1 and 2 remain open, waiting on his design
+  call, whenever he picks them up.
 
 ---
 
