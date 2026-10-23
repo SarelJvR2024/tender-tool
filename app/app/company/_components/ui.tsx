@@ -183,9 +183,26 @@ export function YesNo({ name, label, value }: { name: string; label: string; val
   );
 }
 
-export function Area({ name, label, defaultValue }: { name: string; label: string; defaultValue?: string | null }) {
+/**
+ * Spec v3 §10/§28, same rule Batch 8 applied to the main vault form's
+ * `Field`/`TextInput`: "descriptions and experience need multiline fields"
+ * - a Notes textarea sharing a 1-of-3 grid column with short fields wraps
+ * onto a few cramped lines instead of reading as the block it is.
+ * `fullWidth` spans it across the grid's full row.
+ */
+export function Area({
+  name,
+  label,
+  defaultValue,
+  fullWidth,
+}: {
+  name: string;
+  label: string;
+  defaultValue?: string | null;
+  fullWidth?: boolean;
+}) {
   return (
-    <div>
+    <div className={fullWidth ? "col-span-full" : undefined}>
       <FieldLabel text={label} htmlFor={name} />
       <Textarea id={name} name={name} defaultValue={defaultValue ?? ""} rows={2} className="min-h-11 resize-y text-sm" />
     </div>
