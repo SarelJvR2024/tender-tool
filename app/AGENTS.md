@@ -2787,3 +2787,110 @@ something to force through by shipping a preview that quietly implies it already
 engine-level items flagged above (a `--company-id` on-demand scan flag, and wiring
 `hide_sanral_board` into `pipeline/page.tsx` once the schema exists) are also explicitly deferred to
 him, not built.
+
+---
+
+### Opportunity preferences (SANRAL visibility + disciplines) - built for real, migration 0087 NOT yet applied live
+
+Sarel's explicit sign-off, this session (2026-10-23): he reviewed the `company_tender_preferences`
+schema proposed above and approved building the real feature against it - not just reacting to
+another preview. This entry replaces the preview end-to-end; `lib/opportunityPreferencesPreview.ts`
+and its test (the localStorage-only mock the entry above describes) are deleted, not kept alongside
+the real version - one source of truth, not two that could drift.
+
+**Migration**: `app/supabase/migrations/0087_company_tender_preferences.sql` - the exact SQL
+proposed above, unchanged (Sarel's own review covered that exact text). **NOT applied to the live
+database from this session** - this environment can reach the real Supabase project over
+PostgREST but genuinely cannot run raw DDL (confirmed, see this file's own 2026-10-23 ~19:00 UTC
+addendum and `docs/specs/System-Status.md`'s matching entry). **Sarel needs to paste this migration's
+SQL into Supabase's own SQL Editor (Project > SQL Editor) before merging** - every server action
+below will error with "relation does not exist" against a database that doesn't have this table
+yet (both pages degrade gracefully when that happens - see below - but nothing actually saves or
+filters until the table is real).
+
+**Server action**: `app/app/discovery/preferencesActions.ts`'s `setOpportunityPreferences(hideSanralBoard,
+interestedDisciplines)` - same `requireCompanyId()` tenant-check shape as every other mutating
+action in this app (`app/app/tenders/[id]/actions.ts`'s own copy, read directly before writing
+this one); companyId is derived server-side from the signed-in user's own `company_members` row,
+never taken from the client, so RLS (`is_company_member`, migration 0087) and this extra check
+agree by construction. Upserts both columns in one row (`onConflict: "company_id"`), re-validates
+every discipline slug against `SLUG_RE` (0040's own slug shape) rather than trusting the client
+array, and revalidates both `/discovery` and `/pipeline` since `hide_sanral_board` affects both.
+
+**Panel wiring**: `OpportunityPreferencesPanel.tsx` no longer reads/writes `localStorage` at all -
+prefilled from a real row `discovery/page.tsx` reads server-side
+(`company_tender_preferences.select("hide_sanral_board, interested_disciplines").maybeSingle()`,
+same no-explicit-company_id-filter pattern the page's own `experience_items` query already uses),
+and every toggle calls `setOpportunityPreferences()` directly inside `useTransition` - same
+direct-invoke-no-form shape as `task-status-button.tsx`'s `advanceTaskStatus` - with an optimistic
+local update that reverts and shows an error banner on a failed save. The "Preview - not yet saved"
+badge is gone; the body copy now says this is saved to the company's account.
+
+**`pipeline/page.tsx` wiring (task item 4 - explicitly deferred, not built, by the entry above)**:
+`renderPipeline()` now also reads `company_tender_preferences.hide_sanral_board` (same
+no-explicit-filter RLS read) and, inside the existing `if (!pack) { ... }` guard for the "found"
+column, `continue`s past a card when `hideSanralBoard` is true - every remaining branch of that
+guard is already narrowed to a non-general-family (i.e. SANRAL-conventional) tender by the
+`t.family === GENERAL_FAMILY` check just above it, so this is exactly the shared board the
+preference is about, nothing else. A pack that already exists (anything actually pursued) is
+completely unaffected - this only ever hides the un-tenant-scoped "found" suggestions, never a
+tender this company is already working.
+
+**`discovery/page.tsx` wiring (task item 5)** - deliberately additive, never a filter:
+`lib/opportunityDisciplineMatch.ts`'s `matchesInterestedDisciplines()` (new, unit-tested pure
+function - expands BOTH the company's stated disciplines and the tender's own categories via
+`disciplineTaxonomy.ts`'s existing `expandDisciplines()`, the same call the page's own
+market-pricing lookup already makes on an opportunity's categories, so a company that selected a
+whole group matches a tender tagged with one of its children and vice versa) is used only to sort
+matching tenders first within whatever verdict tab and pagination window is already active - same
+window, same count, same cards, nothing hidden or removed. A company with no stated preference
+(`interested_disciplines` empty, the default) sees exactly today's order, since the function
+returns `true` for everything in that case. A non-matching card (only shown when the company HAS
+stated a preference) gets a small muted "Outside your disciplines" badge next to its verdict chip,
+with a title explaining it was sorted lower, not hidden - the same honesty discipline every other
+badge on this page already follows.
+
+**A real, necessary one-line fix found along the way, not a scope change**: `disciplineTaxonomy.ts`
+itself imported `lib/experience.ts` via the `"@/lib/experience"` alias. That's fine for
+Next.js/`tsx` (both resolve `tsconfig.json`'s `paths`), but `opportunityDisciplineMatch.test.ts` is
+this file's first unit-test importer, and this task's own required sweep
+(`node --experimental-strip-types --test <file>`, no bundler, no tsconfig paths resolution) failed
+with `ERR_MODULE_NOT_FOUND` on the alias. Fixed by switching that one import to the equivalent
+relative path (`./experience.ts`, same directory, same file, same runtime behavior, confirmed by
+re-running the full app `verify`/`vitest`/both `node:test` sweeps below) - the only form every
+required test runner in this repo can resolve, same reasoning `tender-readiness.ts` already uses
+an explicit `.ts` relative import for.
+
+**Self-review, 3 full rounds** (per this task's own instruction):
+1. Re-read `discovery/page.tsx`'s diff adversarially: confirmed the new discipline-interest sort key
+   sits strictly between the existing open-downgrade sort and the original index tiebreak (never
+   overriding the downgrade bump), confirmed `visibleRows`/`changedVisible` for the "Changed" tab
+   still derive from the same (now-additionally-sorted) `rows`, and confirmed the "Outside your
+   disciplines" badge and the sort use the exact same `matchesInterestedDisciplines()` call so they
+   can never disagree with each other.
+2. Re-read `pipeline/page.tsx`'s diff adversarially: confirmed `hideSanralBoard` only short-circuits
+   inside the `if (!pack)` branch (a card with an existing pack - bidding/submitted/won/lost, or
+   already "found" via a manual load - is untouched), and confirmed it reads the same
+   `company_tender_preferences` table/column the panel writes, not a stale duplicate.
+3. Grepped the whole repo for every remaining reference to
+   `lib/opportunityPreferencesPreview`/`setHideSanralPreview`/`setDisciplinesPreview`/the old
+   "Preview - not yet saved" copy after deleting that module - none left outside this entry's own
+   explanatory prose (confirmed: a dangling import would also have failed `npm run typecheck`/`build`
+   below, which it didn't).
+
+**Verified**: `rm -rf app/.next && npm run verify` (`typecheck` + `lint` + `build`) - 0 errors, the
+same 3 pre-existing warnings every recent pass on this area has reported (`Logo.tsx`'s two `<img>`
+warnings, `analytics/page.tsx`'s unused `STAGE_META` import). `npx vitest run` - 147/147 (unchanged -
+no vitest-covered logic touched). Full `node:test` sweep both ways: combined
+`npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 116/116 (118 from the
+preview entry above, minus 9 deleted with `opportunityPreferencesPreview.test.ts`, plus 7 new in
+`opportunityDisciplineMatch.test.ts`); the same set run individually via
+`node --experimental-strip-types --test <file>` - also 116/116, including the new file (the fix
+above was specifically to make this per-file invocation pass, not just the combined one), both
+sweeps agree. No `engine/` file touched - Python sweep not re-run.
+
+**This PR stays in draft.** The schema is approved and the code is real (not a preview), but the
+migration genuinely is not live yet - merging now would ship server actions and page reads against
+a table that, until Sarel runs the SQL above in Supabase's own SQL Editor, does not exist, which
+both pages handle gracefully (empty preferences, board stays visible) but is still not the state
+this PR is meant to land in.
