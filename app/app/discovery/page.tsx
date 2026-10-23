@@ -35,6 +35,7 @@ import { formatRand } from "@/lib/dealEconomics";
 import { OpportunityPreferencesPanel } from "./OpportunityPreferencesPanel";
 import { hasNoTaggedDisciplines } from "@/lib/disciplineTaggingNudge";
 import { matchesInterestedDisciplines } from "@/lib/opportunityDisciplineMatch";
+import { OpportunityQuickActions } from "./OpportunityQuickActions";
 
 // Column list for the scope/pricing-model/value-band record (migration 0060,
 // engine/discovery/tender_enrichment.py). Honestly rare today: that script is
@@ -109,6 +110,10 @@ type OpportunityRow = Downgrade & {
   // `categories`, never used for the verdict. Null = not read.
   etenders_category: string | null;
   etenders_category_check: { status: "agrees" | "differs" | "generic" | "unmapped"; note: string; matching_categories: string[] } | null;
+  // 0089: company-defined tags + quick interest/decline mark - real columns
+  // now (replacing the earlier browser-only localStorage preview).
+  company_tags: string[] | null;
+  interest_marker: "interested" | "declined" | null;
 };
 
 // Design-system audit fix (2026-10-21): soft-tint token classes, not stale hex.
@@ -119,8 +124,24 @@ const XREF_STYLE: Record<string, { label: string; chipClass: string }> = {
   unmapped: { label: "not cross-referenced yet", chipClass: "bg-muted text-muted-foreground" },
 };
 
-type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed";
+type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed" | "declined";
 
+// "Declined" (migration 0089, task item 4) is a different axis from the rest
+// of this list - the company's own quick-decline mark (interest_marker),
+// not the engine-computed verdict - but it's added as one more entry in this
+// SAME exclusive, single-select tab list rather than a second, independent
+// toggle control. Reasoning: this list was never strictly "verdict values"
+// to begin with ("reassessed" is downgraded_from, "changed" isn't a column
+// at all) - it's already "what the one row of filter tabs can show at a
+// time", and Sarel asked for "a Declined filter chip/tab alongside the
+// existing ones", not a second filter axis to compose with the first. A
+// composable second toggle (e.g. "Strong fit" AND "Declined" at once) would
+// need its own query param, its own two-dimensional WHERE clause, and a UI
+// that shows two simultaneously-active controls - real complexity this
+// single-select list already avoids for "reassessed", with no complaint.
+// Selecting "Declined" shows every declined row regardless of verdict (no
+// verdict restriction), exactly like "Re-assessed" shows every re-assessed
+// row regardless of verdict today.
 const FILTERS: { key: VerdictFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "strong_fit", label: "Strong fit" },
@@ -131,6 +152,8 @@ const FILTERS: { key: VerdictFilter; label: string }[] = [
   { key: "changed", label: "Changed" },
   // 0055: a re-assessment made the verdict worse (still flagged or already seen).
   { key: "reassessed", label: "Re-assessed" },
+  // 0089: this company marked it "Not interested" - see the module comment above.
+  { key: "declined", label: "Declined" },
 ];
 
 const SAST_DATE: Intl.DateTimeFormatOptions = { timeZone: "Africa/Johannesburg", day: "numeric", month: "short", year: "numeric" };
@@ -220,7 +243,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   // transferred) rather than scanning the full in-memory array.
   let opportunityQuery = supabase
     .from("discovered_opportunities")
-    .select(`id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status, etenders_category, etenders_category_check, ${DOWNGRADE_COLUMNS}`)
+    .select(`id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status, etenders_category, etenders_category_check, company_tags, interest_marker, ${DOWNGRADE_COLUMNS}`)
     .order("first_seen", { ascending: false })
     .order("id", { ascending: false }); // deterministic tiebreak only - not an indexed column, just keeps "top N" stable across requests
   opportunityQuery = withVerdictSpec(opportunityQuery, activeFilter);
@@ -421,6 +444,16 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   for (const [f, c] of countEntries) counts[f] = c;
 
   const visibleRows = activeFilter === "changed" ? changedVisible : rows;
+
+  // "Reuse a tag you already typed" suggestions (OpportunityQuickActions,
+  // migration 0089) - every distinct company_tags value across the current
+  // fetched window, the closest this page can get to a company-wide tag
+  // vocabulary without its own dedicated query. Scoped to this window only,
+  // the same documented limitation as the "Changed" tab above (see
+  // lib/discoveryPagination.ts's module comment) - a tag used only on
+  // history outside the current window won't suggest until that row is
+  // loaded too.
+  const allCompanyTags = [...new Set(fetchedRows.flatMap((r) => r.company_tags ?? []))].sort();
 
   // Scope/pricing-model/value-band record (0060) for tenders this company has
   // already pursued - per already-pursued row, not history-wide, so it's
@@ -769,6 +802,16 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                       ))}
                     </div>
                   )}
+
+                  {/* Company tags + quick interest/decline marking (Sarel's own
+                      live feedback, 2026-10-22; migration 0089). Real
+                      persistence - see OpportunityQuickActions's own comment. */}
+                  <OpportunityQuickActions
+                    opportunityId={o.id}
+                    tags={o.company_tags ?? []}
+                    interest={o.interest_marker}
+                    suggestions={allCompanyTags}
+                  />
 
                   {o.etenders_category && (
                     // The buyer's own pick on eTenders, as a cross-reference

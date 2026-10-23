@@ -89,7 +89,15 @@ export function canLoadMore(show: number, fetchedHasMore: boolean): boolean {
   return fetchedHasMore && show < MAX_SHOW;
 }
 
-export type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed";
+// "declined" (migration 0089) is a different axis from the rest of this list
+// - it's the company's own interest_marker column, not the engine-computed
+// verdict - but it's kept in the same exclusive, single-select tab list as
+// "reassessed" (downgraded_from) and "changed" (no column at all): this list
+// was never strictly "verdict values" to begin with, it's "what the
+// Opportunities page's one row of filter tabs can show at a time". See
+// page.tsx's own FILTERS array comment for why this composes as one more
+// exclusive tab rather than a second, independent toggle.
+export type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed" | "declined";
 
 /**
  * The verdict-to-query-filter mapping (task item 3 + 4): a declarative,
@@ -106,7 +114,7 @@ export type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" 
  */
 export type VerdictQuerySpec =
   | { kind: "none" }
-  | { kind: "eq"; column: "verdict"; value: string }
+  | { kind: "eq"; column: "verdict" | "interest_marker"; value: string }
   | { kind: "in"; column: "verdict"; values: string[] }
   | { kind: "not_null"; column: "downgraded_from" };
 
@@ -122,6 +130,12 @@ export function verdictQuerySpec(filter: VerdictFilter): VerdictQuerySpec {
       return { kind: "eq", column: "verdict", value: "not_a_fit" };
     case "reassessed":
       return { kind: "not_null", column: "downgraded_from" };
+    // 0089: the company's own quick-decline mark, a real indexed column
+    // (discovered_opportunities_interest_marker_idx) just like verdict/
+    // downgraded_from above, so this is a genuine full-history filter, not a
+    // page-scoped one - same reasoning as "reassessed".
+    case "declined":
+      return { kind: "eq", column: "interest_marker", value: "declined" };
     case "all":
     case "changed":
       return { kind: "none" };
@@ -134,4 +148,4 @@ export function verdictQuerySpec(filter: VerdictFilter): VerdictQuerySpec {
 // over the company's FULL history, which is exactly the heavy, schema-shaped
 // work this batch is scoped to avoid (see app/AGENTS.md's follow-up
 // proposal for a dedicated view/function).
-export const COUNTABLE_FILTERS: readonly VerdictFilter[] = ["all", "strong_fit", "needs_review", "not_a_fit", "reassessed"];
+export const COUNTABLE_FILTERS: readonly VerdictFilter[] = ["all", "strong_fit", "needs_review", "not_a_fit", "reassessed", "declined"];
