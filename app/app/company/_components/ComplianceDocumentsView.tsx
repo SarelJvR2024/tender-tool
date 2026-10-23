@@ -7,8 +7,9 @@ import { VaultSection, ChipBadge } from "./shared";
 import { DocumentRow, DocumentUploadAction } from "./DocumentRow";
 import { filenameFromPath } from "@/lib/vaultDocuments";
 import type { ComplianceDocEntry } from "./ComplianceDocumentsSection";
+import { formatDate } from "@/lib/dates";
 
-const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
+const fmtDate = (d: string | null) => (d ? (formatDate(d) ?? "—") : "—");
 
 /**
  * Sarel's own live feedback on this exact section: "these cards take up a

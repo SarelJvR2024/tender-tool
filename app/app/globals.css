@@ -8,11 +8,16 @@
  * Tender Tool design system - "confident & premium" direction (2026-10-20),
  * color scheme updated 2026-10-21: deep navy ink, blue accent, neutral grey
  * canvas (no cream/beige anywhere), editorial (Fraunces) headings over a
- * quiet UI sans (Inter Tight). Tokens below are the only place these
- * colors are defined - every component should read them through Tailwind's
- * generated utilities (bg-background, text-foreground, bg-accent, ...)
- * rather than hardcoding a hex/oklch value again. See app/AGENTS.md for the
- * one-line rationale behind each non-obvious choice.
+ * quiet UI sans (Inter Tight). Phase 2 "Trust Blue" pass (2026-10-23) pins
+ * --background/--border/--warning/--destructive to the brief's own exact
+ * hex values (navy/blue/success already matched exactly, so only those four
+ * moved) - navy, blue and no-purple were already this system's own rule
+ * from the 2026-10-21 update and the 2026-10-23 UX re-review, not new here.
+ * Tokens below are the only place these colors are defined - every
+ * component should read them through Tailwind's generated utilities
+ * (bg-background, text-foreground, bg-accent, ...) rather than hardcoding a
+ * hex/oklch value again. See app/AGENTS.md for the one-line rationale
+ * behind each non-obvious choice.
  *
  * .dark exists so a future theme toggle has somewhere to land, but nothing
  * in this app currently adds the `dark` class - see app/AGENTS.md.
@@ -85,7 +90,7 @@
      update: the earlier warm off-white/gold pairing is gone - no cream or
      beige anywhere in the neutral/surface colors, and the one accent is
      blue, not gold). */
-  --background: oklch(0.97 0.0029 264.5); /* #F4F5F7 - no blue tint, just neutral grey */
+  --background: oklch(0.9842 0.0034 247.9); /* #F8FAFC - Trust Blue standard canvas (2026-10-23 Phase 2) */
   --foreground: oklch(0.2393 0.0581 256.7); /* #0B1F3A navy ink */
 
   /* Cards stay pure white against the grey page - the layering cue that
@@ -118,9 +123,9 @@
 
   --success: oklch(0.6271 0.1699 149.2); /* #16A34A */
   --success-foreground: oklch(1 0 0);
-  --warning: oklch(0.5664 0.1414 51.6); /* #B5590E - a warm amber is still correct here: this is a semantic status color, not a neutral/surface tone, so "no cream or beige" doesn't apply to it */
+  --warning: oklch(0.6658 0.1574 58.3); /* #D97706 - Trust Blue standard warning amber (2026-10-23 Phase 2) */
   --warning-foreground: oklch(1 0 0);
-  --destructive: oklch(0.5013 0.1783 28.7); /* #B3261E */
+  --destructive: oklch(0.5771 0.2152 27.3); /* #DC2626 - Trust Blue standard destructive red (2026-10-23 Phase 2) */
   --destructive-foreground: oklch(1 0 0);
   --info: oklch(0.4949 0.1244 253.2); /* #2563A6 */
   --info-foreground: oklch(1 0 0);
@@ -133,7 +138,7 @@
   --money: oklch(0.4882 0.2172 264.4); /* #1D4ED8, same as --accent */
   --money-foreground: oklch(1 0 0);
 
-  --border: oklch(0.9053 0.0052 247.9); /* #DDE0E3 - neutral grey, not the old cream border */
+  --border: oklch(0.9288 0.0126 255.5); /* #E2E8F0 - Trust Blue standard (slate-200), 2026-10-23 Phase 2 */
   --input: var(--border);
   --ring: var(--accent); /* focus rings use the brand blue */
 
@@ -161,13 +166,20 @@
      multi-stop rainbow. */
   --gradient-hero: linear-gradient(135deg, oklch(0.22 0.05 257) 0%, oklch(0.16 0.045 257) 60%, oklch(0.32 0.14 264) 100%);
 
-  --sidebar: var(--background);
-  --sidebar-foreground: var(--foreground);
-  --sidebar-primary: var(--foreground);
-  --sidebar-primary-foreground: oklch(1 0 0);
-  --sidebar-accent: var(--secondary);
-  --sidebar-accent-foreground: var(--foreground);
-  --sidebar-border: var(--border);
+  /* Trust Blue standard sidebar (Phase 2, 2026-10-23): dark navy surface, not
+     the light page background it used to share - the one deliberately dark
+     surface in an otherwise light system, same navy as --foreground so the
+     brand ink reads consistently in both places. Muted slate text/icons at
+     rest, crisp white on hover/active - --sidebar-accent is a soft white
+     wash (not a solid fill) so the active-item pill reads as "lifted", not
+     as a second accent color competing with the one blue this system uses. */
+  --sidebar: oklch(0.2393 0.0581 256.7); /* #0B1F3A navy - same ink as --foreground */
+  --sidebar-foreground: oklch(0.7107 0.0351 256.8); /* #94A3B8 muted slate */
+  --sidebar-primary: oklch(1 0 0);
+  --sidebar-primary-foreground: oklch(0.2393 0.0581 256.7);
+  --sidebar-accent: oklch(1 0 0 / 10%); /* white/10 wash, hover + active state */
+  --sidebar-accent-foreground: oklch(1 0 0); /* pure white on hover/active */
+  --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: var(--accent);
 }
 

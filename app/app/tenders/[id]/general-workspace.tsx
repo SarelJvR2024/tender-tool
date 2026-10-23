@@ -31,6 +31,7 @@ import { GeneralPackReview } from "./general-pack-review";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { computeTenderReadiness } from "./tender-readiness";
 import { WorkspaceTabs, TabBadge, type WorkspaceTab } from "./workspace-tabs";
+import { formatDate, formatDateTime } from "@/lib/dates";
 
 /**
  * Non-SANRAL tender preparation (Sarel, 2026-10-16: "keep working on
@@ -147,7 +148,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             <Chip label={JOB_STATUS_STYLE[extractJob.status].label} className={JOB_BADGE_CLASS[extractJob.status]} />
             {extractJob.status === "failed"
               ? <span style={{ color: "var(--destructive)" }}>Couldn&apos;t read the documents: {extractJob.error_message}</span>
-              : <span>Reading {docUrls.length} published document{docUrls.length === 1 ? "" : "s"}{privateDocs.length > 0 ? ` and ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"}` : ""} - requested {new Date(extractJob.requested_at).toLocaleString()}.</span>}
+              : <span>Reading {docUrls.length} published document{docUrls.length === 1 ? "" : "s"}{privateDocs.length > 0 ? ` and ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"}` : ""} - requested {(formatDateTime(extractJob.requested_at) ?? "—")}.</span>}
           </div>
         ) : null}
         {(!extractJob || extractJob.status === "failed") && (
@@ -547,7 +548,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           return (
             <div key={j.id} style={{ borderTop: "1px solid var(--border)", marginTop: 10, paddingTop: 10 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: "var(--muted-foreground)" }}>
-                <span>Requested {new Date(j.requested_at).toLocaleString()}</span>
+                <span>Requested {(formatDateTime(j.requested_at) ?? "—")}</span>
                 <Chip label={st.label} className={JOB_BADGE_CLASS[j.status]} />
                 {j.page_count ? <span>{j.page_count} pages</span> : null}
                 {j.storage_path_pdf && signed[j.storage_path_pdf] && <a href={signed[j.storage_path_pdf]} style={{ color: "var(--accent)", fontWeight: 600 }}>Download PDF</a>}
@@ -630,7 +631,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             {manifest.documents.length} {readingIsPrivate ? "" : "published "}document{manifest.documents.length === 1 ? "" : "s"}
           </Link>
           {readingIsPrivate ? ` (including your ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"})` : ""}
-          {tender.buyer ? ` by ${tender.buyer}` : ""} on {new Date(manifest.extracted_at).toLocaleDateString()}.{" "}
+          {tender.buyer ? ` by ${tender.buyer}` : ""} on {(formatDate(manifest.extracted_at) ?? "—")}.{" "}
           {manifest.form_suite === "MBD"
             ? "This buyer uses the municipal MBD forms (same fields as National Treasury's SBD forms)."
             : manifest.form_suite === "SBD"

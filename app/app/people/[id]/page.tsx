@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { AlertTriangle, UserX } from "lucide-react";
-import { expiryStatus } from "@/lib/dates";
+import { expiryStatus, formatDate } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
 import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, retryCvExtraction, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
 import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
@@ -810,7 +810,7 @@ export default async function PersonDetailPage({
                       <div>
                         <div className="text-sm font-semibold text-foreground">{u.original_filename}</div>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">
-                          {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {new Date(u.created_at).toLocaleDateString()}
+                          {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {(formatDate(u.created_at) ?? "—")}
                         </div>
                         {u.status === "extraction_failed" && (
                           // UX audit re-review 2026-10-23, item 3: this used to render

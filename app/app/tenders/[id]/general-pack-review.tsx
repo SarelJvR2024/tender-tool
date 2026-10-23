@@ -5,6 +5,7 @@ import { PackChecklist } from "./pack-checklist";
 import { reviewStatusToBidTask, type ReviewStatus } from "./pack-review-logic";
 import { matchStrengthStatus } from "./general-pack-review-logic";
 import type { BidTaskStatus } from "./bid-task-status";
+import { formatDateTime } from "@/lib/dates";
 
 /**
  * General (non-SANRAL) tender Pack Review: the confirm-before-compile
@@ -123,7 +124,7 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
 
       {snapshot.reviewed && (
         <div className="mb-3 rounded-lg border border-success/30 bg-success/10 px-3.5 py-2 text-xs text-success">
-          Reviewed {new Date(snapshot.reviewed.reviewedAt).toLocaleString()}
+          Reviewed {(formatDateTime(snapshot.reviewed.reviewedAt) ?? "—")}
           {snapshot.reviewed.reviewedBy ? ` by ${snapshot.reviewed.reviewedBy}` : ""}. Review again any time - the list
           below always reflects what&apos;s on file right now.
         </div>

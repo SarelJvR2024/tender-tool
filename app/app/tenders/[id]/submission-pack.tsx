@@ -13,6 +13,7 @@ import { SanralProgress } from "./sanral-progress";
 import { DownloadAllButton } from "./download-all-button";
 import { fetchTenderSavingsBreakdown, recordSavingsStep } from "@/lib/savingsCounterData";
 import { formatRand, SAVINGS_STEP_ORDER } from "@/lib/savingsCounter";
+import { formatDateTime } from "@/lib/dates";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -323,7 +324,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                     {st.label}
                   </span>
                   <span className="text-muted-foreground">
-                    requested {new Date(j.requested_at).toLocaleString()}
+                    requested {(formatDateTime(j.requested_at) ?? "—")}
                     {j.acknowledged_gaps ? " · draft, with known gaps" : ""}
                   </span>
                   {j.status === "ready" && j.storage_path_pdf && signed[j.storage_path_pdf] && (

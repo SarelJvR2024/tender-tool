@@ -4,20 +4,17 @@ import { useEffect, useState } from "react";
 import { Search } from "lucide-react";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { AvatarMenu } from "./AvatarMenu";
 import { NotificationsBell } from "./NotificationsBell";
 import { CommandPalette } from "./CommandPalette";
 import type { AppNotification } from "@/lib/notifications";
 
 export function TopBar({
-  userEmail,
   companyName,
   isPlatformAdmin,
   isEmployee,
   notifications,
   notificationsError = false,
 }: {
-  userEmail: string | null;
   companyName: string | null;
   isPlatformAdmin: boolean;
   isEmployee: boolean;
@@ -56,7 +53,6 @@ export function TopBar({
       <div className="ml-auto flex items-center gap-1">
         {companyName && <div className="hidden max-w-40 truncate text-sm font-medium text-foreground md:block">{companyName}</div>}
         <NotificationsBell notifications={notifications} hasError={notificationsError} />
-        <AvatarMenu email={userEmail} isEmployee={isEmployee} />
       </div>
       <CommandPalette isPlatformAdmin={isPlatformAdmin} isEmployee={isEmployee} open={paletteOpen} onOpenChange={setPaletteOpen} />
     </header>

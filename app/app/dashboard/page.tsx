@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Clock, FolderOpen, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { daysUntil } from "@/lib/dates";
+import { daysUntil, formatDate } from "@/lib/dates";
 import { AppShell } from "../_components/AppShell";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { getNotifications } from "@/lib/notifications";
@@ -388,7 +388,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1.5">
                       <StatusBadge status={st.variant}>{badgeText}</StatusBadge>
-                      <div className="text-xs text-foreground">{t.closing_date ? new Date(t.closing_date).toLocaleDateString() : "-"}</div>
+                      <div className="text-xs text-foreground">{t.closing_date ? (formatDate(t.closing_date) ?? "—") : "-"}</div>
                       <DeadlineChip daysLeft={left} />
                     </div>
                   </Link>

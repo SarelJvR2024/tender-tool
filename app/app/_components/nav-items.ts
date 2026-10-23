@@ -1,4 +1,4 @@
-import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, Zap, FileUser, CreditCard, BarChart3, TrendingUp, type LucideIcon } from "lucide-react";
+import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, FileUser, CreditCard, BarChart3, TrendingUp, type LucideIcon } from "lucide-react";
 
 export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: string };
 
@@ -18,18 +18,26 @@ export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: s
 // (see the "4-tier scheme" entry below). Removed rather than replaced with
 // another invented segment name - "SANRAL schedules" already says what the
 // feature is without one.
+// Phase 2 nav restructure (2026-10-23, Sarel's own brief): the 6 primary
+// items below, in this exact order, are what the brief names explicitly -
+// "SANRAL schedules" moved out of this list into /toolkit itself (its own
+// featured card there), not deleted. Analytics/Billing/People & CVs/
+// Experience aren't named in the brief's own 6-item list either way - kept
+// here, appended after the named 6, rather than guessed-removed: the brief
+// never says to drop real functionality a paying customer already reaches
+// from here (Billing above all), and silently cutting a nav entry is a much
+// harder mistake to notice than leaving an unmentioned one in place.
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/discovery", label: "Opportunities", icon: Compass },
-  { href: "/pipeline", label: "Bids", icon: Gavel },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/market-intelligence", label: "Market intelligence", icon: TrendingUp },
-  { href: "/sanral-schedules", label: "SANRAL schedules", icon: Zap },
+  { href: "/pipeline", label: "Bid pipeline", icon: Gavel },
   { href: "/company", label: "Company vault", icon: Vault },
+  { href: "/market-intelligence", label: "Market intelligence", icon: TrendingUp },
+  { href: "/toolkit", label: "Toolkit", icon: Wrench },
+  { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/billing", label: "Billing", icon: CreditCard },
   { href: "/people", label: "People & CVs", icon: Users },
   { href: "/experience", label: "Experience", icon: GraduationCap },
-  { href: "/toolkit", label: "Tools", icon: Wrench },
 ];
 
 export const ADMIN_NAV_ITEM: NavItem = { href: "/admin", label: "Admin", icon: ShieldCheck };

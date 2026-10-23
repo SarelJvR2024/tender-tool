@@ -1,3 +1,34 @@
+// Trust Blue standard date format (Phase 2, 2026-10-23): always "23 Oct 2026",
+// never a raw US MM/DD/YYYY from an unqualified toLocaleDateString() - the
+// exact options discovery/page.tsx's own SAST_DATE already used locally;
+// shared here so every other caller gets the same, correct rendering
+// instead of depending on the server's own default locale (which produced
+// MM/DD/YYYY wherever a bare toLocaleDateString()/toLocaleString() call
+// slipped through).
+const SAST_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  timeZone: "Africa/Johannesburg",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+};
+const SAST_DATETIME_OPTIONS: Intl.DateTimeFormatOptions = { ...SAST_DATE_OPTIONS, hour: "2-digit", minute: "2-digit" };
+
+/** "23 Oct 2026" - South African date-only format. Returns null for an unreadable date, never a guess. */
+export function formatDate(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-ZA", SAST_DATE_OPTIONS);
+}
+
+/** "23 Oct 2026, 14:30" - South African date+time format. Returns null for an unreadable date, never a guess. */
+export function formatDateTime(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString("en-ZA", SAST_DATETIME_OPTIONS);
+}
+
 // Shared "N days until a date" math, used anywhere a closing date or expiry
 // date needs a day count: tenders closing (dashboard), documents expiring
 // (company vault). Normalizes "today" to midnight first so the count is

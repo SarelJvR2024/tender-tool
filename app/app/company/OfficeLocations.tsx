@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { formatDate } from "@/lib/dates";
 import { COMPANY_OFFICE_COLUMNS, OFFICE_KINDS, OFFICE_PROOF_TYPES, PROVINCES, type CompanyOffice } from "@/lib/locality";
 import { deleteCompanyOffice, saveCompanyOffice } from "./officeActions";
 import { Banner, VaultSection, fieldGridClass } from "./_components/shared";
@@ -123,7 +124,7 @@ export async function OfficeLocations() {
                 }
               >
                 {o.proof_type
-                  ? `${labelOf(OFFICE_PROOF_TYPES, o.proof_type)}${o.proof_date ? ` · ${new Date(o.proof_date).toLocaleDateString()}` : ""}`
+                  ? `${labelOf(OFFICE_PROOF_TYPES, o.proof_type)}${o.proof_date ? ` · ${formatDate(o.proof_date) ?? o.proof_date}` : ""}`
                   : "No proof recorded"}
               </span>
             </div>

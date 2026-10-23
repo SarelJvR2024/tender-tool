@@ -24,7 +24,7 @@
 // in the detail text but doesn't change the status - same as COID, whose
 // status has always come from the number + expiry on file.
 
-import { closingDayOf, daysUntil } from "./dates";
+import { closingDayOf, daysUntil, formatDate } from "./dates";
 import { SACQSP_POSITION_RE, SAGC_POSITION_RE, catalogSlug, type CatalogBody, type HeldCatalogRegistration, type PersonCredentialFields } from "./personCredentials";
 
 export type ComplianceStatus = "have" | "missing" | "check";
@@ -107,7 +107,11 @@ export const COMPANY_VAULT_COLUMNS =
 
 const RENEW_SOON_DAYS = 60; // same threshold as app/lib/dates.ts expiryStatus()
 
-const fmt = (d: string) => new Date(d).toLocaleDateString();
+// Trust Blue standard date format (Phase 2, 2026-10-23): the bare
+// `new Date(d).toLocaleDateString()` this used to be rendered raw US
+// MM/DD/YYYY under the server's own default locale - formatDate() (lib/dates.ts)
+// always gives the South African "23 Oct 2026" form instead.
+const fmt = (d: string) => formatDate(d) ?? d;
 
 /**
  * Validity of a dated document on this tender's closing date. "missing" when
@@ -243,13 +247,13 @@ export function sanralConventionalDocumentChecks(input: {
       detail = `Letter ${c?.coid_letter_of_good_standing_number} on file but no expiry date - confirm it is valid on the closing date.`;
     } else if (closingLeft !== null && expLeft !== null && expLeft < closingLeft) {
       status = "missing";
-      detail = `Expires ${new Date(exp).toLocaleDateString()}, before this tender closes - renew it first.`;
+      detail = `Expires ${fmt(exp)}, before this tender closes - renew it first.`;
     } else if (expLeft !== null && expLeft < 0) {
       status = "missing";
-      detail = `Expired ${new Date(exp).toLocaleDateString()}.`;
+      detail = `Expired ${fmt(exp)}.`;
     } else {
       status = "have";
-      detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${new Date(exp).toLocaleDateString()} - covers the closing date.` + copyNote(c?.coid_letter_document_path ?? null);
+      detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${fmt(exp)} - covers the closing date.` + copyNote(c?.coid_letter_document_path ?? null);
     }
     const fill = formFillNote(input.provenance, ["a_forms.A20"], input.hasPack);
     const exp_ = !!exp && expiredCopy(status, c?.coid_letter_document_path);
@@ -278,7 +282,7 @@ export function sanralConventionalDocumentChecks(input: {
     ...(input.briefingTask
       ? input.briefingTask.status === "done"
         ? { status: "have" as const, detail: "Briefing task marked done." }
-        : { status: "check" as const, detail: `Briefing task is ${input.briefingTask.status.replace("_", " ")}${input.briefingTask.due_date ? `, due ${new Date(input.briefingTask.due_date).toLocaleDateString()}` : ""}. Missing it disqualifies the tender.` }
+        : { status: "check" as const, detail: `Briefing task is ${input.briefingTask.status.replace("_", " ")}${input.briefingTask.due_date ? `, due ${fmt(input.briefingTask.due_date)}` : ""}. Missing it disqualifies the tender.` }
       : { status: "check" as const, detail: "No briefing task on this tender. Add one under Tasks & milestones with its date - the date isn't extracted from the tender document yet." }),
   });
 

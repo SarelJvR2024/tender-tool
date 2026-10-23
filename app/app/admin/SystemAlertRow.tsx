@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatDateTime } from "@/lib/dates";
 import { markSystemAlertResolved, reopenSystemAlert } from "./actions";
 
 export type SystemAlert = {
@@ -69,7 +70,7 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
         <span className={chipClass(status.tone)}>{status.label}</span>
         <span className="text-[11px] text-muted-foreground">
           {alert.occurrences > 1 ? `${alert.occurrences}x, last ` : ""}
-          {new Date(alert.last_seen_at).toLocaleString()}
+          {formatDateTime(alert.last_seen_at) ?? alert.last_seen_at}
           <span className="ml-1.5 text-accent">{open ? "hide ▲" : "open ▼"}</span>
         </span>
       </button>
@@ -77,9 +78,9 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
       {open && (
         <div className="bg-card px-4.5 pb-4.5 pt-1">
           <div className="mb-2 text-xs text-muted-foreground">
-            First seen {new Date(alert.first_seen_at).toLocaleString()}
+            First seen {formatDateTime(alert.first_seen_at) ?? alert.first_seen_at}
             {alert.occurrences > 1 && ` - happened ${alert.occurrences} times`}
-            {alert.reported_at && ` - e-mailed ${new Date(alert.reported_at).toLocaleString()}`}
+            {alert.reported_at && ` - e-mailed ${formatDateTime(alert.reported_at) ?? alert.reported_at}`}
           </div>
           {context.length > 0 && (
             <div className="mb-2.5 flex flex-wrap gap-1.5">
@@ -101,7 +102,7 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
               <form action={reopenSystemAlert} className="flex flex-wrap items-start gap-3">
                 <input type="hidden" name="alert_id" value={alert.id} />
                 <div className="flex-[1_1_240px] text-xs text-success">
-                  Resolved {new Date(alert.resolved_at).toLocaleString()}
+                  Resolved {formatDateTime(alert.resolved_at) ?? alert.resolved_at}
                   {alert.resolution_note && <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{alert.resolution_note}</div>}
                 </div>
                 <button type="submit" className="min-h-11 rounded-md border border-border bg-card px-3 text-xs text-foreground">

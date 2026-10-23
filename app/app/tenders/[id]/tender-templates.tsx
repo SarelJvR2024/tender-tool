@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { TENDER_TEMPLATES, TENDER_TEMPLATE_ORDER } from "@/lib/tenderTemplates";
 import { uploadTenderTemplate } from "./pack-inputs-actions";
+import { formatDate } from "@/lib/dates";
 
 /**
  * "Blank tender templates" - upload the files SANRAL issued for this tender
@@ -65,7 +66,7 @@ export async function TenderTemplates({ tenderId, saved }: { tenderId: string; s
               </div>
               <div className="mt-0.5 text-[11px] break-words text-muted-foreground">
                 {row
-                  ? `${row.source === "buyer" ? "from the buyer's published tender documents" : (row.original_filename ?? "uploaded")} · ${new Date(row.downloaded_at).toLocaleDateString()}`
+                  ? `${row.source === "buyer" ? "from the buyer's published tender documents" : (row.original_filename ?? "uploaded")} · ${(formatDate(row.downloaded_at) ?? "—")}`
                   : t.hint}
               </div>
             </div>

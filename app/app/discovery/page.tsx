@@ -36,6 +36,7 @@ import { OpportunityPreferencesPanel } from "./OpportunityPreferencesPanel";
 import { hasNoTaggedDisciplines } from "@/lib/disciplineTaggingNudge";
 import { matchesInterestedDisciplines } from "@/lib/opportunityDisciplineMatch";
 import { OpportunityQuickActions } from "./OpportunityQuickActions";
+import { displayTenderTitle } from "@/lib/titleCase";
 
 // Column list for the scope/pricing-model/value-band record (migration 0060,
 // engine/discovery/tender_enrichment.py). Honestly rare today: that script is
@@ -745,7 +746,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                     )}
                   </div>
                   <div className="mb-0.5 text-sm font-semibold text-foreground">
-                    {o.title || "(untitled)"}
+                    {displayTenderTitle(o.title) || "(untitled)"}
                   </div>
                   <div className="mb-1.5 text-xs text-muted-foreground">
                     {o.buyer || "(unknown buyer)"}

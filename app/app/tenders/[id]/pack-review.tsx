@@ -4,6 +4,7 @@ import { confirmPackReview } from "./pack-review-actions";
 import { PackChecklist } from "./pack-checklist";
 import { reviewStatusToBidTask } from "./pack-review-logic";
 import type { BidTaskStatus } from "./bid-task-status";
+import { formatDateTime } from "@/lib/dates";
 
 /**
  * Pack Review: the pre-compile screen Sarel asked for (2026-10-18) - "share
@@ -87,7 +88,7 @@ export async function PackReview({ tenderId }: { tenderId: string }) {
 
       {snapshot.reviewed && (
         <div className="mb-3 rounded-lg border border-success/30 bg-success/10 px-3.5 py-2 text-xs text-success">
-          Reviewed {new Date(snapshot.reviewed.reviewedAt).toLocaleString()}
+          Reviewed {(formatDateTime(snapshot.reviewed.reviewedAt) ?? "—")}
           {snapshot.reviewed.reviewedBy ? ` by ${snapshot.reviewed.reviewedBy}` : ""}. Review again any time - the list
           below always reflects what&apos;s on file right now.
         </div>

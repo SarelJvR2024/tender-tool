@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { SectionCard } from "@/components/tt/section-card";
-import type { StatusChip, ChipTone } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
+import type { ChipTone, StatusChip } from "@/lib/dates";
 
 /**
  * Small shared pieces every extracted Company vault section reuses - kept
@@ -114,7 +115,7 @@ export function SummaryChip({
   );
 }
 
-export const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
+export const fmtDate = (d: string | null) => (d ? (formatDate(d) ?? "—") : "—");
 
 /** A full-width inline message - "saved", "couldn't load", etc. */
 export function Banner({ tone, children }: { tone: "destructive" | "success"; children: React.ReactNode }) {

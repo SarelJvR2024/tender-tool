@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { setTestCompany } from "../actions";
+import { formatDate, formatDateTime } from "@/lib/dates";
 
 export type CustomerMember = { user_id: string; email: string; role: string; joined_at: string };
 
@@ -61,7 +62,7 @@ export default function CustomerRow({ customer }: { customer: Customer }) {
           <span>{customer.people_count} people</span>
           <span>{customer.tenders_pursued_count} pack{customer.tenders_pursued_count === 1 ? "" : "s"}</span>
           <span className="text-[11px]">
-            joined {new Date(customer.created_at).toLocaleDateString()}
+            joined {(formatDate(customer.created_at) ?? "—")}
             <span className="ml-1.5 hidden text-accent sm:inline">{open ? "hide ▲" : "open ▼"}</span>
           </span>
         </span>
@@ -70,7 +71,7 @@ export default function CustomerRow({ customer }: { customer: Customer }) {
       {open && (
         <div className="bg-card px-4.5 pb-4.5 pt-1">
           <div className="mb-2.5 text-xs text-muted-foreground">
-            Last activity {customer.last_activity_at ? new Date(customer.last_activity_at).toLocaleString() : "none recorded"}
+            Last activity {customer.last_activity_at ? (formatDateTime(customer.last_activity_at) ?? "—") : "none recorded"}
           </div>
 
           <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
@@ -79,7 +80,7 @@ export default function CustomerRow({ customer }: { customer: Customer }) {
               <div key={m.user_id} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border px-3.5 py-2 text-xs first:border-t-0">
                 <span className="min-w-0 flex-1 truncate text-foreground">{m.email}</span>
                 <span className="text-muted-foreground">{m.role}</span>
-                <span className="text-muted-foreground">since {new Date(m.joined_at).toLocaleDateString()}</span>
+                <span className="text-muted-foreground">since {(formatDate(m.joined_at) ?? "—")}</span>
               </div>
             ))}
           </div>

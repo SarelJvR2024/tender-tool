@@ -38,6 +38,7 @@ import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
+import { formatDate } from "@/lib/dates";
 import { computeTenderReadiness } from "./tender-readiness";
 import { DisqualificationGuard } from "./disqualification-guard";
 import { SubmissionPlanView } from "./submission-plan-view";
@@ -426,6 +427,31 @@ export default async function TenderWorkspacePage({
 
         {tenderFacts && (
           <>
+            {/* Phase 2 sticky header banner (2026-10-23): breadcrumb, status
+                badge and a single primary action, all built from data this
+                page already computes (countdown, tenderReadiness, packStatus,
+                openPositionsCount) - no new reads, so the banner can never
+                disagree with the detailed sections below it. Deliberately
+                NOT a rewrite of the page's own body into new tabs: this file
+                already has an explicit, hard-won rule (see WorkspaceTabs'
+                own docstring, general-workspace.tsx) that a blocker is never
+                buried in a hidden tab - retabbing everything below risks
+                breaking that rule, or the disqualification-guard/compliance/
+                pack-review sections themselves, with no review gate before
+                this ships. The banner is additive and safe; the body stays
+                as the same sections, same order, same logic, as before. */}
+            <nav aria-label="Breadcrumb" className="mb-2 text-xs text-muted-foreground">
+              <a href="/pipeline" className="text-muted-foreground no-underline hover:text-foreground hover:underline">
+                Pipeline
+              </a>
+              {" / "}
+              <a href="/dashboard" className="text-muted-foreground no-underline hover:text-foreground hover:underline">
+                Tenders
+              </a>
+              {" / "}
+              <span className="text-foreground">{tenderFacts.contract_no ?? tenderFacts.nra_reference ?? "This tender"}</span>
+            </nav>
+
             {/* Tender facts */}
             <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
@@ -433,11 +459,7 @@ export default async function TenderWorkspacePage({
                   <div style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{tenderFacts.contract_no ?? "No contract number"}</div>
                   <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{tenderFacts.nra_reference ?? "No NRA reference"}</div>
                 </div>
-                {packStatus && (
-                  <span className={packStatus.className} style={{ display: "inline-flex", alignItems: "center", padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                    {packStatus.label}
-                  </span>
-                )}
+                <WorkspaceStatusBadge tenderPack={tenderPack} tenderReadiness={tenderReadiness} packStatus={packStatus} />
               </div>
               <h1 style={{ fontSize: 18, fontWeight: 700, color: "var(--foreground)", margin: "0 0 2px", lineHeight: 1.35 }}>
                 {tenderFacts.description ?? "Untitled tender"}
@@ -447,7 +469,7 @@ export default async function TenderWorkspacePage({
               </div>
               <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
                 Closes{" "}
-                {tenderFacts.closing_date ? new Date(tenderFacts.closing_date).toLocaleDateString() : "- no closing date on file"}
+                {tenderFacts.closing_date ? (formatDate(tenderFacts.closing_date) ?? "—") : "- no closing date on file"}
                 {countdown && (
                   <span style={{ marginLeft: 8, fontWeight: 600, color: countdown.urgent ? "var(--warning)" : "var(--muted-foreground)" }}>
                     ({countdown.text})
@@ -502,7 +524,7 @@ export default async function TenderWorkspacePage({
                   which is "remind us before it's due". */}
               {tenderPack && ["submitted", "won", "lost"].includes(tenderPack.pipeline_stage) && tenderPack.submitted_at && (
                 <div style={{ fontSize: 13, color: "var(--success)", fontWeight: 600, marginTop: 6 }}>
-                  Submitted on {new Date(tenderPack.submitted_at).toLocaleDateString()}
+                  Submitted on {(formatDate(tenderPack.submitted_at) ?? "—")}
                 </div>
               )}
 
@@ -520,6 +542,31 @@ export default async function TenderWorkspacePage({
                   {overdueTaskCount > 0 && (
                     <SummaryChip count={overdueTaskCount} label={overdueTaskCount === 1 ? "task overdue" : "tasks overdue"} className="bg-destructive/10 text-destructive" />
                   )}
+                </div>
+              )}
+
+              {/* Primary action (Phase 2 brief): takes you to the real
+                  generate-pack control that already exists further down this
+                  page (SubmissionPack for SANRAL, GeneralTenderWorkspace's
+                  own pack section for general) rather than a second, new
+                  mutation path - one real "generate" action per tender, not
+                  two that could disagree. Disabled (with why) until there is
+                  a pack to generate from and nothing still blocking it. */}
+              {(showSubmissionPack || isGeneralFamily) && (
+                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+                  <PrimaryPackActionLink
+                    href={showSubmissionPack ? "#submission-pack" : "#general-pack"}
+                    ready={!!tenderPack && (!tenderReadiness || tenderReadiness.thingsLeft === 0) && openPositionsCount === 0}
+                    disabledReason={
+                      !tenderPack
+                        ? "Start a tender pack first (below) before a submission pack can be generated."
+                        : openPositionsCount > 0
+                          ? `${openPositionsCount} key position${openPositionsCount === 1 ? "" : "s"} still need${openPositionsCount === 1 ? "s" : ""} confirming before the pack can be generated.`
+                          : tenderReadiness && tenderReadiness.thingsLeft > 0
+                            ? `${tenderReadiness.thingsLeft} readiness item${tenderReadiness.thingsLeft === 1 ? "" : "s"} still need confirming first.`
+                            : null
+                    }
+                  />
                 </div>
               )}
             </div>
@@ -1055,7 +1102,7 @@ function TaskTimeline({
                     )}
                   </div>
                   <div style={{ fontSize: 12, color: overdue ? "var(--destructive)" : "var(--muted-foreground)", marginTop: 2 }}>
-                    {t.due_date ? `Due ${new Date(t.due_date).toLocaleDateString()}` : "No due date set"}
+                    {t.due_date ? `Due ${(formatDate(t.due_date) ?? "—")}` : "No due date set"}
                     {left !== null && t.status !== "done" && (
                       <span style={{ marginLeft: 6, fontWeight: 600 }}>
                         ({left >= 0 ? `${left} day${left === 1 ? "" : "s"} left` : `${-left} day${-left === 1 ? "" : "s"} overdue`})
@@ -1258,7 +1305,7 @@ function WonProjectCard({
 
       {completed && (
         <div style={{ fontSize: 13, color: "var(--success)", fontWeight: 600, marginBottom: 2 }}>
-          Completed {new Date(tenderPack.project_completed_at!).toLocaleDateString()}
+          Completed {(formatDate(tenderPack.project_completed_at!) ?? "—")}
           {completionValue != null && `, valued at R${Number(completionValue).toLocaleString("en-ZA")}m`}
         </div>
       )}
@@ -1323,6 +1370,99 @@ function WonProjectCard({
         </button>
       </form>
     </div>
+  );
+}
+
+// Phase 2 sticky header banner (2026-10-23): one holistic status word for
+// the whole tender, built from the same packStatus/tenderReadiness this
+// page already computes - never a second, independent judgement of "where
+// is this tender" that could disagree with the readiness score right below
+// it on the same card.
+function WorkspaceStatusBadge({
+  tenderPack,
+  tenderReadiness,
+  packStatus,
+}: {
+  tenderPack: { pipeline_stage: string } | null;
+  tenderReadiness: { thingsLeft: number } | null;
+  packStatus: { label: string; className: string } | null;
+}) {
+  let label: string;
+  let className: string;
+  if (tenderPack && tenderPack.pipeline_stage === "won") {
+    label = "Won";
+    className = "bg-success/10 text-success";
+  } else if (tenderPack && tenderPack.pipeline_stage === "lost") {
+    label = "Lost";
+    className = "bg-muted text-muted-foreground";
+  } else if (tenderPack && tenderPack.pipeline_stage === "submitted") {
+    label = "Submitted";
+    className = "bg-success/10 text-success";
+  } else if (tenderReadiness && tenderReadiness.thingsLeft === 0) {
+    label = "Ready to submit";
+    className = "bg-success/10 text-success";
+  } else if (tenderPack) {
+    label = "Assessing & building";
+    className = packStatus?.className ?? "bg-warning/10 text-warning";
+  } else {
+    label = "Not started";
+    className = "bg-muted text-muted-foreground";
+  }
+  return (
+    <span className={className} style={{ display: "inline-flex", alignItems: "center", padding: "4px 12px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+      {label}
+    </span>
+  );
+}
+
+// Phase 2 sticky header banner's primary action: links to the real
+// generate-pack control already further down this page (SubmissionPack /
+// GeneralTenderWorkspace's own pack section) instead of a second, new
+// mutation path - a disabled-looking span with the reason when a real gate
+// (no pack yet, an unconfirmed key position, an unresolved readiness item)
+// blocks it, a real link when it doesn't. A plain anchor has no native
+// disabled state, so "disabled" here is deliberately a span, not a
+// non-functional <a>, which would still be keyboard-focusable and clickable.
+function PrimaryPackActionLink({ href, ready, disabledReason }: { href: string; ready: boolean; disabledReason: string | null }) {
+  if (!ready && disabledReason) {
+    return (
+      <span
+        title={disabledReason}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          minHeight: 40,
+          padding: "0 18px",
+          borderRadius: 8,
+          background: "var(--muted)",
+          color: "var(--muted-foreground)",
+          fontSize: 13,
+          fontWeight: 600,
+          cursor: "not-allowed",
+        }}
+      >
+        Generate submission pack
+      </span>
+    );
+  }
+  return (
+    <a
+      href={href}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        minHeight: 40,
+        padding: "0 18px",
+        borderRadius: 8,
+        background: "var(--accent)",
+        color: "var(--accent-foreground)",
+        fontSize: 13,
+        fontWeight: 600,
+        textDecoration: "none",
+      }}
+    >
+      Generate submission pack
+    </a>
   );
 }
 

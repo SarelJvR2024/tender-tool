@@ -62,7 +62,7 @@ export default function PrivacyPage() {
             Only what a SANRAL or other public-sector tender submission actually requires: company registration
             details (CIPC number, VAT, tax, CIDB/CSD numbers), director details, key people&apos;s ID numbers,
             qualifications, project histories and CVs, and the compliance documents you upload (COID letters, tax
-            clearance, insurance, BEE certificates). None of it is collected for any purpose beyond preparing and
+            clearance, insurance, B-BBEE certificates). None of it is collected for any purpose beyond preparing and
             tracking your company&apos;s own tender submissions.
           </p>
           <p className="text-sm leading-relaxed text-muted-foreground">

@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { AutoRefresh } from "../../_components/AutoRefresh";
 import { requestNarrativeDocument, uploadNarrativeFinal } from "./narrative-actions";
+import { formatDate, formatDateTime } from "@/lib/dates";
 
 /**
  * Cover letter / methodology statement generator (migration 0087) -
@@ -192,7 +193,7 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
                         <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
                           {st.label}
                         </span>
-                        <span style={{ color: "#8A93A0" }}>requested {new Date(d.requested_at).toLocaleString()}</span>
+                        <span style={{ color: "#8A93A0" }}>requested {(formatDateTime(d.requested_at) ?? "—")}</span>
                         {d.status === "ready" && d.generated_storage_path && signed[d.generated_storage_path] && (
                           <a href={signed[d.generated_storage_path]} style={{ color: "#D97706", fontWeight: 700 }}>
                             Download draft (Word)
@@ -248,7 +249,7 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
                             </a>
                           )}
                           {d.final_uploaded_at && (
-                            <span style={{ color: "#8A93A0" }}>{new Date(d.final_uploaded_at).toLocaleDateString()}</span>
+                            <span style={{ color: "#8A93A0" }}>{(formatDate(d.final_uploaded_at) ?? "—")}</span>
                           )}
                         </div>
                       )}

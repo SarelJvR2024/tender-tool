@@ -13,6 +13,7 @@
 // Evidence for every rule: docs/specs/General-Tender-Engine-Findings.md and
 // docs/specs/General-Tender-Preparation-Findings.md.
 
+import { formatDate } from "./dates";
 import { BEE_PROOF_LABEL, validityAtClosing, type CompanyVault, type ComplianceStatus } from "./tenderCompliance";
 import type { EvidenceRule } from "./experienceEvidence";
 import type { LocalityRow } from "./locality";
@@ -164,7 +165,8 @@ export type ReturnableCheck = {
   expiring?: boolean;
 };
 
-const fmt = (d: string) => new Date(d).toLocaleDateString();
+// Trust Blue standard date format (Phase 2, 2026-10-23) - see tenderCompliance.ts's own fmt().
+const fmt = (d: string) => formatDate(d) ?? d;
 
 /**
  * One supporting document against the vault / this tender's uploads.

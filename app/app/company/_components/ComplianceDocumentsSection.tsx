@@ -1,5 +1,5 @@
 import type { StatusChip } from "@/lib/dates";
-import { expiryStatus } from "@/lib/dates";
+import { expiryStatus, formatDate } from "@/lib/dates";
 import { BANK_LETTER_RENEW_SOON_DAYS, beeProofLabel } from "@/lib/vaultDocuments";
 import type { VaultDocumentKind } from "@/lib/vaultDocuments";
 import { ComplianceDocumentsView } from "./ComplianceDocumentsView";
@@ -145,4 +145,4 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
   return <ComplianceDocumentsView companyId={company.id} entries={entries} />;
 }
 
-const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : "—");
+const fmtDate = (d: string | null) => (d ? (formatDate(d) ?? "—") : "—");

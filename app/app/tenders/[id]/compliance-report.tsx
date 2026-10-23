@@ -6,6 +6,7 @@ import { estimateSanralConventional, type Range } from "@/lib/sanralScoring";
 import { DOCUMENT_TYPES, disciplineLabel, isScoreableEvidence, labelFor, type ExperienceItem } from "@/lib/experience";
 import { acceptedDocTypes, describeRule, type ChosenRule, type EvaluationRules } from "@/lib/experienceEvidence";
 import { matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
+import { formatDate } from "@/lib/dates";
 
 /**
  * Compliance check + score estimate for one tender (Sarel, 2026-10-16: "once
@@ -394,7 +395,7 @@ function ExperienceSection({
       <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
         Tagged {disciplines.map((d) => disciplineLabel(d).toLowerCase()).join(" / ")} projects (the disciplines of this tender&apos;s key positions) in your Experience Library
         {rule.window_years ? ` completed within ${rule.window_years} years of` : " up to"}
-        {closingDate ? ` ${new Date(closingDate).toLocaleDateString()}` : " closing"}.
+        {closingDate ? ` ${(formatDate(closingDate) ?? "—")}` : " closing"}.
       </div>
       {ruleBox}
       {items.length === 0 && (
@@ -409,7 +410,7 @@ function ExperienceSection({
             <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>
               {labelFor(DOCUMENT_TYPES, i.document_type)}
               {i.client_name ? ` · ${i.client_name}` : ""}
-              {i.completion_date ? ` · completed ${new Date(i.completion_date).toLocaleDateString()}` : ""}
+              {i.completion_date ? ` · completed ${(formatDate(i.completion_date) ?? "—")}` : ""}
             </div>
           </div>
           {accepted.has(i.document_type) ? (

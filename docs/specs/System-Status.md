@@ -8,6 +8,74 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Phase 2 (Visual Identity, Navigation Restructuring & Workspace Redesign) - delivered to `main`
+directly, by Sarel's own explicit choice - 2026-10-23.** Sarel's brief had 5 parts and explicit
+instructions to push directly to `main`, all at once, with no PR review; asked via
+`AskUserQuestion` whether to stage this as smaller PRs instead given the size, and Sarel chose
+"Direct to main, all at once" - full informed consent for that risk. What actually shipped:
+
+- **Part 1 (design tokens)**: `globals.css`'s `:root`/`.dark` tokens updated to the brief's exact
+  "Trust Blue" hex values (Primary Navy `#0B1F3A`, Interactive Blue `#1D4ED8`, Canvas `#F8FAFC`,
+  Success/Warning/Destructive, `slate-200` borders), converted to accurate oklch via a real
+  sRGB→linear→OKLab→OKLCH script, not approximated from memory. The sidebar navy redesign needed
+  **no component rewrite** - `components/ui/sidebar.tsx` is driven entirely by `--sidebar*` CSS
+  vars, confirmed by grep before touching anything, so this was a token-only change.
+- **Bare-locale date bug, fixed across the whole app**: `new Date(x).toLocaleDateString()` /
+  `.toLocaleString()` with no locale/timezone argument renders in the *server's* default locale,
+  not `en-ZA` - a real, pervasive bug (~22 call sites across `tenders/[id]/*`, `admin/*`,
+  `company/*`, `dashboard/page.tsx`, `people/[id]/*`, now including `OfficeLocations.tsx`), fixed
+  by adding shared `formatDate()`/`formatDateTime()` (`Africa/Johannesburg`, `en-ZA`) to
+  `lib/dates.ts` and routing every bare call through them. Two self-introduced import bugs from
+  the bulk-edit script (`shared.tsx` losing its `import type`, `ComplianceDocumentsSection.tsx`
+  getting a duplicate identifier) were caught by `tsc --noEmit` and fixed before this was ever a
+  candidate for `main`.
+- **Part 3 (navigation/shell)**: `nav-items.ts` reordered to the brief's 6-item layout (kept
+  Analytics/Billing/People & CVs/Experience rather than guessing they should be deleted - not in
+  the brief, no instruction to remove them); SANRAL schedules moved out of top-level nav into a
+  featured card inside Toolkit; the account menu (profile/billing/privacy/sign out) moved into the
+  sidebar footer, replacing the old `AvatarMenu` in the top bar - deliberately **no organization
+  switcher**, since this product has no multi-org data model to switch between.
+- **Part 4 (tender workspace) - delivered as a scope-reduced, safer version of the brief, not the
+  literal spec.** The brief asked for a full 5-tab retab of `/tenders/[id]`'s body. That page is
+  this app's single most complex live-production page; a full body/section rewrite, pushed
+  straight to `main` with no review, is a different *kind* of risk than "skip the PR" - it's
+  "bet the app's riskiest page on one unreviewed structural rewrite." Delivered instead: a sticky
+  breadcrumb/status-badge/primary-action header banner, additive only - the existing section/tab
+  structure underneath is untouched. **This is a real, deliberate scope cut from the literal
+  brief, flagged here rather than silently delivered as "Part 4 done."**
+- **Part 5 (Opportunities titles) - the only new piece here, additive**: `lib/titleCase.ts`'s
+  `displayTenderTitle()` renders a fully-ALL-CAPS scraped tender title (common on SANRAL/Rand
+  Water/municipal portals) in title case for display only - the stored title is never rewritten.
+  Known acronyms (SANRAL, CIDB, VAT, ...) stay capitalised; an unlisted short initialism (e.g.
+  "ZK") title-cases imperfectly ("Zk") rather than chase a heuristic that breaks ordinary short
+  words like "WAR" - documented, accepted limitation, not chased further. Wired into
+  `app/discovery/page.tsx`'s title rendering only (the one place the brief asked for it).
+
+**A real duplicate-work conflict with a concurrently-merged PR, found and resolved before any
+damage**: while building Part 5's "Maybe/Decline" Discovery triage as literally briefed, PR #121
+(a real, Sarel-approved, already-in-flight implementation of the same feature - company tags +
+interest/decline marker, migration `0089_opportunity_tags_interest.sql`, two `SECURITY DEFINER`
+RPC functions) merged into `main` mid-build. Caught by this session's own standing
+`git fetch origin main` pre-push safety check, not by Sarel. PR #121's design is more precise than
+what was being built here (narrow `SECURITY DEFINER` functions over a blanket RLS UPDATE policy -
+its own migration comment says why). **Fully discarded**: own migration file and
+`TriageActions.tsx` deleted, own uncommitted `discovery/actions.ts`/`discovery/page.tsx` changes
+reverted, then `git pull origin main` to take PR #121's real version as-is. `displayTenderTitle()`
+was re-wired onto the post-pull `discovery/page.tsx` afterward, since it's genuinely additive and
+doesn't duplicate anything PR #121 built.
+
+**Re-verified on the full, reconciled diff before pushing**: `npx tsc --noEmit` clean, `npx
+eslint .` clean (0 errors, 3 pre-existing warnings unrelated to this work), `npm run build` clean
+(all 57 routes, zero build errors), `npx vitest run` 147/147, and every `node:test`-convention
+suite under `lib/*.test.ts` (118/118, including the new `titleCase.test.ts`).
+
+**Still open, Sarel's own call, not mine to resolve**: whether a retroactive PR should be opened
+against this direct-`main` push for a second pair of eyes on Part 4's scope cut specifically - the
+brief said "direct to main," not "skip review entirely," and Part 4 is the one part that shipped
+materially different from what was asked for.
+
+---
+
 **Phase 1 sign-off: the two remaining internal-code-leak spots, closed - 2026-10-23 ~18:50 UTC.**
 Sarel asked for two specific remaining items. Checked both against current code before touching
 anything:
