@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
-import { loadDisciplineTaxonomy, taxonomyLabel } from "@/lib/disciplineTaxonomy";
+import { expandDisciplines, loadDisciplineTaxonomy, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { pursueOpportunity } from "./actions";
 import {
   CHANGE_LABELS,
@@ -26,6 +26,45 @@ import { ErrorState } from "@/components/tt/error-state";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Inbox } from "lucide-react";
+import { closingCountdown } from "@/lib/dates";
+import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
+import { buildDoneHistory, pricingCategoriesFor, pricingSegmentKey, similarTendersBefore } from "@/lib/opportunityInsights";
+import { MIN_SAMPLE, benchmark, loadSegment, segmentsFor, type Benchmark } from "@/lib/marketPricing";
+import { formatRand } from "@/lib/dealEconomics";
+
+// Column list for the scope/pricing-model/value-band record (migration 0060,
+// engine/discovery/tender_enrichment.py). Honestly rare today: that script is
+// never invoked by the production discovery fan-out (checked - nothing in
+// engine/discovery/*.py calls it outside its own test), so this map is empty
+// for almost every row. Shown only when a row genuinely has one - never
+// faked. Wiring the enrichment script into the pipeline is a Python/engine
+// change, outside this PR's own ground rule (see docs/specs/System-Status.md).
+const SCOPE_RECORD_COLUMNS = "tender_id, scope_summary, scope_source, pricing_model, value_band, value_band_basis, confidence";
+type ScopeRecord = {
+  tender_id: string;
+  scope_summary: string | null;
+  scope_source: string | null;
+  pricing_model: string | null;
+  value_band: string | null;
+  value_band_basis: string;
+  confidence: string;
+};
+const PRICING_MODEL_LABEL: Record<string, string> = {
+  lump_sum: "Lump sum",
+  schedule_of_rates: "Schedule of rates",
+  boq_based: "Bill of quantities",
+  cost_reimbursable: "Cost reimbursable",
+  remeasurement: "Remeasurement",
+  time_based: "Time-based",
+};
+
+// Hard cap on distinct market-pricing lookups (lib/marketPricing.ts's
+// loadSegment) per page render, keyed by discipline mix rather than by row -
+// the page can show up to ~1000 unpaginated cards, but they share a small,
+// fixed set of discipline_categories combinations, so this bounds real
+// query count to that, not to row count. See the "Market range" comment
+// further down for the honesty gate on what gets shown.
+const MAX_PRICING_LOOKUPS = 40;
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -152,7 +191,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
 
   // Scoped to the signed-in user's company via RLS (is_company_member) -
   // this query shape works the same regardless of which company is asking.
-  const [{ data: opportunities, error }, { data: packRows }, { data: labelRows }] = await Promise.all([
+  const [{ data: opportunities, error }, { data: packRows }, { data: labelRows }, readiness] = await Promise.all([
     supabase
       .from("discovered_opportunities")
       .select(`id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status, etenders_category, etenders_category_check, ${DOWNGRADE_COLUMNS}`)
@@ -160,12 +199,25 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
     // RLS: this company's own packs - which re-assessed tenders it is working on.
     supabase.from("tender_packs").select("tender_id, pipeline_stage"),
     supabase.rpc("company_member_labels"),
+    // Reused, not recomputed: same scoring Home/Company vault already show
+    // (lib/companyReadinessData.ts), one call for the whole page - not per
+    // card. There is no per-tender compliance requirement to check against
+    // before a tender is pursued (tender_requirements is written only once a
+    // pack exists), so "how much the company already complies" below is
+    // honestly the company's own general readiness, not a tender-specific
+    // match - labelled that way on every card (Sarel's live feedback,
+    // 2026-10-22: "add an indicator to show compliance with the tender, how
+    // much the company already comply with").
+    fetchCompanyReadiness(supabase),
   ]);
   if (error) console.error("discovered_opportunities select failed", error);
   const { data: { user } } = await supabase.auth.getUser();
   const stageByTender = new Map<string, string>();
+  const stageByTenderAnyStage = new Map<string, string>();
   for (const p of (packRows ?? []) as { tender_id: string; pipeline_stage: string | null }[]) {
-    if (p.pipeline_stage && ACTIVE_PURSUIT_STAGES.includes(p.pipeline_stage)) stageByTender.set(p.tender_id, p.pipeline_stage);
+    if (!p.pipeline_stage) continue;
+    stageByTenderAnyStage.set(p.tender_id, p.pipeline_stage);
+    if (ACTIVE_PURSUIT_STAGES.includes(p.pipeline_stage)) stageByTender.set(p.tender_id, p.pipeline_stage);
   }
   const labels = new Map<string, string>();
   for (const r of (labelRows ?? []) as { user_id: string; label: string }[]) labels.set(r.user_id, r.label);
@@ -193,6 +245,14 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   const changesByOcid = groupByOcid(changeRows);
   const changesFor = (r: OpportunityRow) => (r.ocid ? changesByOcid.get(r.ocid) ?? [] : []);
 
+  // "Done similar tenders before" (Sarel, 2026-10-22) - no new query: every
+  // row this company has ever had reach at least a submitted bid is already
+  // in `rows` + `stageByTenderAnyStage` above.
+  const doneHistory = buildDoneHistory(
+    rows.map((r) => ({ tenderId: r.tender_id, buyer: r.buyer, categories: r.categories })),
+    stageByTenderAnyStage,
+  );
+
   const counts: Record<VerdictFilter, number> = {
     all: rows.length,
     strong_fit: rows.filter((r) => r.verdict === "strong_fit").length,
@@ -207,6 +267,53 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
       ? isDowngraded(r)
       : matchesFilter(r.verdict, activeFilter) && (activeFilter !== "changed" || changesFor(r).length > 0),
   );
+
+  // Scope/pricing-model/value-band record (0060) for tenders this company has
+  // already pursued. Batched + chunked the same way as the listing-changes
+  // lookup above - never one query per card.
+  const pursuedTenderIds = [...new Set(visibleRows.map((r) => r.tender_id).filter((id): id is string => !!id))];
+  const scopeRows: ScopeRecord[] = [];
+  for (let i = 0; i < pursuedTenderIds.length; i += 150) {
+    const { data } = await supabase.from("tender_scope_records").select(SCOPE_RECORD_COLUMNS).in("tender_id", pursuedTenderIds.slice(i, i + 150));
+    scopeRows.push(...((data ?? []) as ScopeRecord[]));
+  }
+  const scopeByTenderId = new Map(scopeRows.map((r) => [r.tender_id, r]));
+
+  // Market pricing range ("something more indicative than just the tender",
+  // Sarel 2026-10-22) - reuses the EXISTING MIN_SAMPLE-gated benchmark system
+  // (lib/marketPricing.ts, already live on the Tender Workspace's own Market
+  // tab) rather than tender_scope_records.value_band, which is unpopulated
+  // today (see SCOPE_RECORD_COLUMNS comment above). Deduped by discipline mix
+  // and capped at MAX_PRICING_LOOKUPS real queries - independent of how many
+  // cards are on screen, since many cards share the same mix. All-buyers
+  // segment only (not buyer-specific): a per-buyer lookup would multiply the
+  // dedup key space by every distinct buyer name on the page, defeating the
+  // cap.
+  const pricingSegments = new Map<string, string[]>();
+  for (const o of visibleRows) {
+    const cats = pricingCategoriesFor(o.categories);
+    if (cats.length === 0) continue;
+    const expanded = expandDisciplines(taxonomy, cats);
+    const key = pricingSegmentKey(expanded);
+    if (!pricingSegments.has(key) && pricingSegments.size >= MAX_PRICING_LOOKUPS) continue;
+    pricingSegments.set(key, expanded);
+  }
+  const pricingByKey = new Map<string, Benchmark>();
+  await Promise.all(
+    [...pricingSegments.entries()].map(async ([key, expanded]) => {
+      const segs = segmentsFor({ buyerLabel: "", isSanral: false, categories: expanded, categoryLabel: "" });
+      const allBuyersSeg = segs.find((s) => s.key === "all");
+      if (!allBuyersSeg) return;
+      const { rows: segRows } = await loadSegment(supabase, allBuyersSeg);
+      const b = benchmark(segRows);
+      if (b.contractSize.n >= MIN_SAMPLE) pricingByKey.set(key, b);
+    }),
+  );
+  const pricingFor = (o: OpportunityRow): Benchmark | null => {
+    const cats = pricingCategoriesFor(o.categories);
+    if (cats.length === 0) return null;
+    return pricingByKey.get(pricingSegmentKey(expandDisciplines(taxonomy, cats))) ?? null;
+  };
 
   return (
     <AppShell>
@@ -311,6 +418,10 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
             const facts = [o.province, o.tender_type].filter(Boolean).join(" · ");
             const pursuingStage = o.tender_id ? stageByTender.get(o.tender_id) ?? null : null;
             const open = isOpenDowngrade(o);
+            const countdown = closingCountdown(o.closing_date);
+            const similar = similarTendersBefore({ tenderId: o.tender_id, buyer: o.buyer, categories: o.categories }, doneHistory);
+            const pricing = pricingFor(o);
+            const scope = o.tender_id ? scopeByTenderId.get(o.tender_id) ?? null : null;
             return (
               <div
                 key={o.id}
@@ -434,6 +545,39 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                     </div>
                   )}
 
+                  {(similar || pricing) && (
+                    <div className="mb-1.5 flex flex-wrap gap-1.5">
+                      {similar && (
+                        <span
+                          title={`${similar.sameBuyerCount > 0 ? `${similar.sameBuyerCount} with this same buyer. ` : ""}Stages reached: ${similar.stages.join(", ")}.`}
+                          className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent"
+                        >
+                          Done {similar.count} similar tender{similar.count === 1 ? "" : "s"} before
+                          {similar.wonCount > 0 && ` · won ${similar.wonCount}`}
+                        </span>
+                      )}
+                      {pricing && (
+                        <span
+                          title={`Across ${pricing.contractSize.n} comparable awarded tenders in this discipline (all buyers) - a size range, not a price to bid.`}
+                          className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
+                        >
+                          Market size range: {formatRand(pricing.contractSize.p25)} - {formatRand(pricing.contractSize.p75)} (median {formatRand(pricing.contractSize.median)})
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {scope && (scope.scope_summary || scope.pricing_model || scope.value_band) && (
+                    <div className="mb-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-muted-foreground">
+                      {scope.scope_summary && <div className="mb-0.5 text-foreground">{scope.scope_summary.slice(0, 220)}</div>}
+                      <div className="flex flex-wrap gap-x-3">
+                        {scope.pricing_model && <span>Pricing model: {PRICING_MODEL_LABEL[scope.pricing_model] ?? scope.pricing_model}</span>}
+                        {scope.value_band && <span>Estimated value: {scope.value_band}</span>}
+                      </div>
+                      {scope.confidence === "heuristic" && <div className="mt-0.5 text-[10px]">Keyword-matched from the listing text, not document-confirmed - treat as a starting point.</div>}
+                    </div>
+                  )}
+
                   {o.etenders_category && (
                     // The buyer's own pick on eTenders, as a cross-reference
                     // only - Tender Ready's categories (above) drive the fit.
@@ -497,9 +641,31 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                     classes, not a hand-rolled <style> media query). */}
                 <div className="flex-1 basis-full text-left sm:flex-none sm:basis-[180px] sm:text-right">
                   <div className="mb-0.5 text-[11px] text-muted-foreground">Closes</div>
-                  <div className="mb-2.5 text-sm font-semibold text-foreground">
+                  <div className="mb-0.5 text-sm font-semibold text-foreground">
                     {o.closing_date ? new Date(o.closing_date).toLocaleString("en-ZA", SAST_DATETIME) : "-"}
                   </div>
+                  {countdown ? (
+                    <div className={cn("mb-2.5 text-xs font-semibold", countdown.urgent ? "text-destructive" : "text-muted-foreground")}>
+                      {countdown.text}
+                    </div>
+                  ) : (
+                    <div className="mb-2.5" />
+                  )}
+                  {/* Company-wide bid readiness, not a per-tender compliance
+                      check - see the fetchCompanyReadiness() comment above
+                      for why no per-tender requirement exists to check
+                      against before a tender is pursued. */}
+                  <Link
+                    href="/company"
+                    title={
+                      readiness.blockers.length === 0
+                        ? "All tracked compliance criteria are met"
+                        : `${readiness.blockers.length} outstanding item${readiness.blockers.length === 1 ? "" : "s"}: ${readiness.blockers.slice(0, 3).map((b) => b.label).join(", ")}`
+                    }
+                    className="mb-2.5 block text-xs font-semibold text-muted-foreground no-underline hover:text-foreground"
+                  >
+                    Company profile {readiness.percent}% ready
+                  </Link>
                   {/* Into the Tender Workspace: what this tender needs, the questions
                       only you can answer, and a generated pack (migration 0018). */}
                   {o.verdict !== "closed" && !changes.some((c) => c.change_type === "cancelled") && (

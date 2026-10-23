@@ -1773,3 +1773,85 @@ guessed name from its filename), not just that the markup renders. Screenshotted
 controls, toggle and rows all visible at both widths. The temporary route, `.env.local`, and the
 `playwright-core` dev install were all deleted again before commit (confirmed via `git status`
 showing only the real feature files) - this was a self-review aid, never meant to reach `main`.
+
+---
+
+### Opportunities card enrichment: closes-in countdown, compliance/history/pricing insight (Sarel's own live feedback)
+
+Sarel's own live feedback on `/discovery` (2026-10-22): "Add a indictor to show complaince with
+the tender, how much the company already comply with, and if they have done similar tenders
+before, and pricing range or somthing more indicative than jsut the tender, provide some insight
+already. Also add a indictor... Add closes in ...days hours." Four real, honestly-scoped additions
+to each card - no new tables, no fabricated numbers, and specifically capped against the page's own
+unpaginated up-to-1000-row query (see that query's own comment further up this file).
+
+**Closes-in countdown**: `closingCountdown()`, a new export on `lib/dates.ts` (the tender
+workspace page already has an identical, unexported local copy at `app/tenders/[id]/page.tsx` -
+not touched here, since a sibling session was concurrently redesigning that exact file; a shared
+export avoids either page depending on the other's file while they both need the same rule).
+Shows both the exact date/time (unchanged) and "closes in N days M hours" / "closes within the
+hour" / "closed", in `text-destructive` once 7 days or fewer remain.
+
+**Compliance indicator**: reuses `fetchCompanyReadiness()` (dashboard/Company vault's own bid-
+readiness score), called once per page render, not once per card - no per-tender compliance exists
+to check against (tender_requirements is only written once a pack is created, i.e. after pursuing),
+so this is honestly labelled "Company profile NN% ready" on every card rather than invented as a
+per-tender match.
+
+**"Done similar tenders before"**: new `lib/opportunityInsights.ts` (pure, unit-tested, no
+Supabase) - `buildDoneHistory()`/`similarTendersBefore()` match a card's buyer/discipline tags
+against this company's own past opportunities that reached at least a submitted bid
+(`tender_packs.pipeline_stage` in submitted/won/lost). Zero extra queries: every row needed is
+already loaded for the existing pipeline-stage flags and the card list itself.
+
+**Pricing range**: reuses the EXISTING `lib/marketPricing.ts` benchmark system (same
+`MIN_SAMPLE`-gated `segmentsFor`/`loadSegment`/`benchmark` already live on the Tender Workspace's
+own Market tab) rather than `tender_scope_records.value_band` - checked, that column is still
+unpopulated in production (`engine/discovery/tender_enrichment.py`, migration 0060, is never
+invoked by the discovery fan-out - nothing in `engine/discovery/*.py` calls it outside its own
+test). Deduped by discipline-tag mix and capped at `MAX_PRICING_LOOKUPS` (40) real queries per page
+render, independent of row count - a market-wide (all-buyers) benchmark per distinct discipline
+mix, not per card and not per buyer (a per-buyer key would multiply the dedup space by every buyer
+name on the page). Shown only once at least `MIN_SAMPLE` (5) comparable awarded tenders exist for
+that mix - the same honesty gate the Market tab already uses, never a figure invented below it.
+
+**Scope/pricing-model detail**: a defensive, conditional block reading `tender_scope_records`
+(0060) for tenders this company has already pursued - almost always empty today for the same
+reason the pricing-range section above gives (the enrichment script is never invoked), honestly
+documented in `discovery/page.tsx`'s own `SCOPE_RECORD_COLUMNS` comment rather than silently
+left unexplained. Wiring `tender_enrichment.py` into the production pipeline is a Python/engine
+change - outside this PR's ground rule, flagged as a real, separate, valuable follow-up needing
+Sarel's own sign-off, not something worked around or faked here.
+
+**Scope boundary, deliberately not built in this PR**: company-defined search/priority tags and a
+quick interest/decline marker (the other half of Sarel's same feedback) need new schema
+(`discovered_opportunities` has no such columns) - drafted separately as its own non-merged PR with
+proposed migration SQL in the description, per this repo's standing rule that schema changes are
+proposed, never autonomously merged.
+
+**Self-review**: round 1 - read every touched query path end to end (`fetchCompanyReadiness`,
+`marketPricing.ts`'s `segmentsFor`/`loadSegment`/`benchmark`, `tender_scope_records`'s real
+migration/columns) before writing any card-rendering code, to avoid inventing a shape that doesn't
+match what's actually on disk. Round 2 - re-read the full diff against Sarel's own literal wording
+item by item (countdown wording "closes in ...days hours" matched exactly; "how much the company
+already comply with" mapped honestly to company-wide readiness, not invented per-tender data).
+Round 3 - traced the N+1 risk explicitly: with the page's own up-to-1000-row unpaginated query,
+`similarTendersBefore()` is one in-memory pass per card (no query), the scope-record lookup is
+batched/chunked exactly like the existing listing-changes lookup, and the pricing lookup is capped
+at `MAX_PRICING_LOOKUPS` real queries regardless of row count - confirmed by re-reading the capped
+`pricingSegments` map construction, not just assumed from the cap constant's existence.
+
+**Tested**: `npm run verify` 0 errors (full `next build` + typecheck + lint); vitest unchanged at
+133/133 (the new tests below are node:test style, matching every other pure-logic module in
+`lib/`); node:test 91/91 combined via `npx tsx --test` (76 pre-existing + 8 new in
+`opportunityInsights.test.ts` + 7 new in `dates.test.ts`), and every changed/new test file
+individually via `node --experimental-strip-types --test` agrees with the combined run (the
+pre-existing 5 zero-test files under `app/tenders/[id]/*.test.ts` are an unrelated, pre-existing
+quirk of that single-file invocation, not something this PR introduced or touched). A temporary
+mock-data page at `app/design/screenshot-opp-enrich` (never committed - confirmed via `git status`
+before finishing) rendered the real countdown/history/pricing/scope markup with representative
+mock data at 1440px and 390px: chip wrapping, urgent-red vs muted countdown colour, and the scope
+box all read correctly at both widths. **Not tested**: an actual signed-in render against real
+Supabase data - same sandbox credential-generation limitation as every batch tonight; real coverage
+for the pricing/history signals specifically also needs real `public_tender_outcomes`/`tender_packs`
+rows to populate against, which the sandbox has no way to seed either.
