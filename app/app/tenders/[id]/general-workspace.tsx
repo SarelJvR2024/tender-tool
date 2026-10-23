@@ -80,9 +80,9 @@ type Person = PersonCredentialFields & { id: string; name: string; signatory_cap
 /**
  * One section per returned key, so the Tender Workspace's top-level tabs
  * (page.tsx, Phase 2 retab) can place each where it belongs (overview ->
- * Overview & Scope, documents/questions -> Forms & Returnables, people ->
- * Team & Key Personnel, pack -> Pack Review & Export) instead of this
- * component's own internal tab bar - nothing here changed except the
+ * Overview, documents/questions -> Compliance & Guard, people -> Team &
+ * CVs, pack -> Pack compiler) instead of this component's own internal tab
+ * bar - nothing here changed except the
  * return shape; every read, every computed value, every piece of JSX is
  * identical to before this split. "overview" is "What this tender needs"
  * (manifest/forms/scoring summary) plus the private-documents card - the

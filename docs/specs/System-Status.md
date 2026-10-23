@@ -8,6 +8,49 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**PR #130 revised: a mid-review brief was checked against the real repo before acting on it, not
+assumed - 2026-10-23.** A "Phase 2 Completion" brief arrived naming files that don't exist in this
+repo (`src/app/(dashboard)/tenders/[id]/page.tsx`, `src/components/layout/app-sidebar.tsx` - this
+repo has no `src/` directory and no `(dashboard)` route group anywhere) and describing the tab bar
+as "just in-page anchor jumps" / "a 300-line continuous scroll" - true of `main` today, not of
+PR #130's own already-built, already-tested real tabs. Its suggested classes (`bg-blue-600`,
+`text-slate-400`) are generic Tailwind, not this app's own CSS-variable tokens. Flagged to Sarel
+before touching anything rather than guessed at silently or ignored outright; confirmed it was a
+real revision request (likely an automated/generic reviewer's output relayed without being
+checked against the repo - exactly the kind of "surprising claim" this session's own standing
+discipline says to verify before acting on), checked against this repo's actual files.
+
+What changed on top of the prior entry's 6 tabs, same PR branch, same low-risk pattern (section
+objects placed into different tabs, no logic touched):
+
+- **5 tabs, renamed and reshuffled** to the exact names asked for: Overview, Compliance & Guard,
+  Pack compiler, Team & CVs, Pricing & Market. The Disqualification guard moved again - out of
+  Overview and into its own dedicated "Compliance & Guard" tab, which is arguably a *better*
+  resolution of the "never bury a blocker" tension than Overview was: it now has a clearly-labelled
+  home of its own, not a generically-named tab, still kept visible from elsewhere via that tab's
+  own fix-count badge. "Plan" (tasks/milestones/reuse-past/submission-plan) folded into Overview -
+  the new 5-tab list has no separate slot for it and nothing else fits better.
+- **Sidebar re-grouped a second time**, superseding the first pass's 3-group-plus-bottom-section
+  scheme: 4 labelled groups (Core workspace / Intelligence / Assets & library / Settings), Billing
+  now its own "Settings" group instead of a bottom-section special case, platform admin's "Admin"
+  link moved into Settings.
+- **A real design-token gap, found and fixed, not hardcoded around**: the brief's "crisp Trust
+  Blue highlight... instead of generic dark grey" for the active nav item turned out to be a
+  legitimate complaint even once the literal `bg-blue-600` was rejected - the sidebar's active
+  state shared the same soft white/10 hover-wash `--sidebar-accent` token as plain hover, so an
+  active item never actually read as blue. Added `--sidebar-active`/`--sidebar-active-foreground`
+  (Interactive Blue, fixed in both `:root` and `.dark` - deliberately not `var(--accent)`, which
+  `.dark` repurposes as gold for page content) rather than hardcode a Tailwind color inline.
+- **/people copy**: already matched the requested text exactly from the prior pass - confirmed, no
+  change needed.
+
+**Re-verified before pushing**: `npx tsc --noEmit` clean, `npx eslint .` clean (same 3 pre-existing
+warnings), `npm run build` clean (57 routes), `npx vitest run` 147/147, `node --test` 118/118.
+Pushed to the existing PR #130 branch, not `main`, per explicit instruction - the Vercel preview on
+that PR is the review surface, not a new deploy.
+
+---
+
 **Part 4 retab, done properly this time, on a branch/PR (not pushed to `main` directly) -
 2026-10-23.** The prior Phase 2 pass (see the entry below) deliberately shipped Part 4 as a
 header-only upgrade rather than retab the Tender Workspace's body, flagging that cut rather than

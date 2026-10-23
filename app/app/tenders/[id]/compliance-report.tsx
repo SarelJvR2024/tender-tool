@@ -49,8 +49,8 @@ const card: React.CSSProperties = { background: "var(--card)", border: "1px soli
 /**
  * One section per returned key, so the Tender Workspace's top-level tabs
  * (page.tsx, Phase 2 retab) can place each where it belongs (documents/
- * locality -> Forms & Returnables, people/experience -> Team & Key
- * Personnel, score -> Overview & Scope) instead of one long fragment -
+ * locality -> Compliance & Guard, people/experience -> Team & CVs,
+ * score -> Overview) instead of one long fragment -
  * nothing here changed except the return shape; every read, every
  * computed value, every piece of JSX is identical to before this split.
  */

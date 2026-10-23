@@ -32,6 +32,8 @@
   --font-heading: var(--font-display);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-active-foreground: var(--sidebar-active-foreground);
+  --color-sidebar-active: var(--sidebar-active);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-accent: var(--sidebar-accent);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
@@ -170,15 +172,26 @@
      the light page background it used to share - the one deliberately dark
      surface in an otherwise light system, same navy as --foreground so the
      brand ink reads consistently in both places. Muted slate text/icons at
-     rest, crisp white on hover/active - --sidebar-accent is a soft white
-     wash (not a solid fill) so the active-item pill reads as "lifted", not
-     as a second accent color competing with the one blue this system uses. */
+     rest, crisp white on hover - --sidebar-accent is a soft white wash (not
+     a solid fill), used for hover only now.
+     --sidebar-active/-foreground (targeted polish, 2026-10-23, Sarel's own
+     follow-up review against production): the ACTIVE nav item instead gets
+     a solid Interactive Blue fill - "a crisp Trust Blue highlight... instead
+     of generic dark grey" was the literal ask, confirmed against this file's
+     own §2 definition of Interactive Blue as the token for "active tabs,
+     links, and selected states", which an active sidebar item plainly is.
+     Not --accent itself: .dark below repurposes --accent as a gold token for
+     page content, and the sidebar's own brand blue must stay blue regardless
+     of the app's light/dark theme, so this is its own dedicated token, equal
+     to --accent's LIGHT-mode value in both blocks on purpose. */
   --sidebar: oklch(0.2393 0.0581 256.7); /* #0B1F3A navy - same ink as --foreground */
   --sidebar-foreground: oklch(0.7107 0.0351 256.8); /* #94A3B8 muted slate */
   --sidebar-primary: oklch(1 0 0);
   --sidebar-primary-foreground: oklch(0.2393 0.0581 256.7);
-  --sidebar-accent: oklch(1 0 0 / 10%); /* white/10 wash, hover + active state */
-  --sidebar-accent-foreground: oklch(1 0 0); /* pure white on hover/active */
+  --sidebar-accent: oklch(1 0 0 / 10%); /* white/10 wash, hover only now */
+  --sidebar-accent-foreground: oklch(1 0 0); /* pure white on hover */
+  --sidebar-active: oklch(0.4882 0.2172 264.4); /* #1D4ED8 Interactive Blue, always - see comment above */
+  --sidebar-active-foreground: oklch(1 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: var(--accent);
 }
@@ -250,6 +263,11 @@
   --sidebar-primary-foreground: oklch(0.2021 0.034 265.5);
   --sidebar-accent: var(--secondary);
   --sidebar-accent-foreground: var(--foreground);
+  /* Same fixed Interactive Blue as the :root block above, not var(--accent)
+     - .dark repurposes --accent as gold, but the sidebar's own active-item
+     highlight stays the brand's one blue regardless of app theme. */
+  --sidebar-active: oklch(0.4882 0.2172 264.4); /* #1D4ED8 */
+  --sidebar-active-foreground: oklch(1 0 0);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--accent);
 }

@@ -24,7 +24,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "./actions";
-import { ADMIN_NAV_ITEM, BOTTOM_NAV_ITEMS, EMPLOYEE_NAV_ITEMS, NAV_GROUPS, type NavItem, isNavItemActive } from "./nav-items";
+import { ADMIN_NAV_ITEM, EMPLOYEE_NAV_ITEMS, NAV_GROUPS, type NavItem, isNavItemActive } from "./nav-items";
+import { cn } from "@/lib/utils";
 
 function initialsOf(email: string | null): string {
   if (!email) return "?";
@@ -93,9 +94,8 @@ function SidebarAccountMenu({
   );
 }
 
-// One nav-item row's markup, shared between the grouped sections, the
-// employee flat list and the bottom section below - so "what a row looks
-// like" can't drift between them.
+// One nav-item row's markup, shared between the grouped sections and the
+// employee flat list - so "what a row looks like" can't drift between them.
 function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
   const active = isNavItemActive(pathname, item.href);
   return (
@@ -104,7 +104,15 @@ function NavRow({ item, pathname }: { item: NavItem; pathname: string }) {
         render={<Link href={item.href} />}
         isActive={active}
         tooltip={item.badge ? `${item.label} (${item.badge})` : item.label}
-        className="min-h-11 md:min-h-9"
+        className={cn(
+          "min-h-11 md:min-h-9",
+          // Phase 2 completion pass (2026-10-23): a crisp Interactive-Blue
+          // fill for the active item, not the soft white hover-wash the
+          // base component's own data-active styling otherwise shares with
+          // hover - see globals.css's own --sidebar-active comment for why
+          // this needs its own dedicated token rather than --accent itself.
+          active && "data-active:bg-sidebar-active data-active:text-sidebar-active-foreground data-active:hover:bg-sidebar-active data-active:hover:text-sidebar-active-foreground",
+        )}
       >
         <item.icon />
         <span>{item.label}</span>
@@ -130,16 +138,16 @@ export function AppSidebar({
   companyName: string | null;
 }) {
   const pathname = usePathname();
-  // Phase 2 targeted polish (2026-10-23): 3 labelled groups (Tendering /
-  // Company assets / Tools & intelligence) instead of one flat list -
-  // Sarel's own follow-up brief. Platform admin's own "Admin" link is kept
-  // in Tools & intelligence (closest fit of the 3 named groups) rather than
-  // a 4th group invented for one item. An 'employee' (migration 0067) still
-  // gets the separate, un-grouped, 2-item EMPLOYEE_NAV_ITEMS list - too few
-  // items for section headers to earn their keep, and none of the 3 new
-  // group labels fit "My CV" anyway.
+  // Phase 2 completion pass (2026-10-23): 4 labelled groups (Core workspace /
+  // Intelligence / Assets & library / Settings) - see nav-items.ts's own
+  // comment for why this superseded the earlier same-day 3-group pass.
+  // Platform admin's own "Admin" link joins Settings (administrative, same
+  // as Billing) rather than a 5th group invented for one item. An
+  // 'employee' (migration 0067) still gets the separate, un-grouped, 2-item
+  // EMPLOYEE_NAV_ITEMS list - too few items for section headers to earn
+  // their keep, and none of the 4 group labels fit "My CV" anyway.
   const groups = NAV_GROUPS.map((g) =>
-    isPlatformAdmin && g.label === "Tools & intelligence" ? { ...g, items: [...g.items, ADMIN_NAV_ITEM] } : g,
+    isPlatformAdmin && g.label === "Settings" ? { ...g, items: [...g.items, ADMIN_NAV_ITEM] } : g,
   );
 
   return (
@@ -166,7 +174,11 @@ export function AppSidebar({
         ) : (
           groups.map((group) => (
             <SidebarGroup key={group.label}>
-              <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
+              {/* "Small uppercase label headers" (Phase 2 completion pass) -
+                  uppercase/tracking added on top of SidebarGroupLabel's own
+                  existing token-driven size/color (text-xs,
+                  text-sidebar-foreground/70), not a new hardcoded color. */}
+              <SidebarGroupLabel className="uppercase tracking-wider">{group.label}</SidebarGroupLabel>
               <SidebarGroupContent>
                 <SidebarMenu className="gap-1 px-2">
                   {group.items.map((item) => (
@@ -179,13 +191,8 @@ export function AppSidebar({
         )}
       </SidebarContent>
       <SidebarFooter>
-        {!isEmployee && (
-          <SidebarMenu className="gap-1 px-2 pb-1">
-            {BOTTOM_NAV_ITEMS.map((item) => (
-              <NavRow key={item.href} item={item} pathname={pathname} />
-            ))}
-          </SidebarMenu>
-        )}
+        {/* Billing is its own labelled "Settings" group above now (Phase 2
+            completion pass) - no longer a special bottom-section link. */}
         <SidebarAccountMenu userEmail={userEmail} companyName={companyName} isEmployee={isEmployee} />
       </SidebarFooter>
     </Sidebar>

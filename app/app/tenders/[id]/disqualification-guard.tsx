@@ -47,13 +47,13 @@ const STATUS_LABEL: Record<BidTaskStatus, string> = {
 export type DisqualificationGuardResult = { content: React.ReactNode; fixCount: number };
 
 /**
- * Phase 2 targeted polish (2026-10-23, Sarel's own follow-up brief): this
+ * Phase 2 completion pass (2026-10-23, Sarel's own explicit brief): this
  * now returns { content, fixCount } instead of just content, so page.tsx
- * can move the Guard's own content inside the Overview tab (per the new
- * brief) while still badging that tab with its fix count from every other
- * tab - the same "visible without a click" guarantee the old always-outside
- * placement gave, kept through the tab's own badge instead of position.
- * Nothing about the reads or the 7-check logic below changed.
+ * can move the Guard's own content inside its own dedicated "Compliance &
+ * Guard" tab while still badging that tab with its fix count - the same
+ * "visible without a click" guarantee the old always-outside placement
+ * gave, kept through the tab's own badge instead of position. Nothing
+ * about the reads or the 7-check logic below changed.
  */
 export async function DisqualificationGuard({
   tenderId,

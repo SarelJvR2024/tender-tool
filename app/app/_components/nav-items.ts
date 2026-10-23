@@ -18,15 +18,18 @@ export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: s
 // (see the "4-tier scheme" entry below). Removed rather than replaced with
 // another invented segment name - "SANRAL schedules" already says what the
 // feature is without one.
-// Phase 2 targeted polish (2026-10-23, Sarel's own follow-up brief): grouped
-// into 3 labelled sections (Tendering / Company assets / Tools &
-// intelligence) plus Billing in the sidebar's bottom section next to the
-// account menu, replacing the single flat list the first Phase 2 pass used.
-// Each item is defined once below and shared between the flat NAV_ITEMS
-// (CommandPalette's own search list - a command palette has no use for
-// section headers) and the grouped NAV_GROUPS/BOTTOM_NAV_ITEMS (AppSidebar) -
-// one definition per destination, so the two lists can't silently drift
-// apart on label/icon/href.
+// Phase 2 completion pass (2026-10-23, Sarel's own review against the real
+// production deploy): grouped into 4 labelled sections (Core workspace /
+// Intelligence / Assets & library / Settings) - this exact grouping
+// superseded an earlier same-day 3-group-plus-bottom-section pass once
+// Sarel reviewed the real thing and asked for Company vault to sit with the
+// other everyday-workspace items, Toolkit to sit with the reference
+// material it actually is, and Billing to be its own labelled group rather
+// than a bottom-section special case. Each item is defined once below and
+// shared between the flat NAV_ITEMS (CommandPalette's own search list - a
+// command palette has no use for section headers) and the grouped
+// NAV_GROUPS (AppSidebar) - one definition per destination, so the two
+// lists can't silently drift apart on label/icon/href.
 const DASHBOARD: NavItem = { href: "/dashboard", label: "Dashboard", icon: Home };
 const OPPORTUNITIES: NavItem = { href: "/discovery", label: "Opportunities", icon: Compass };
 const BID_PIPELINE: NavItem = { href: "/pipeline", label: "Bid pipeline", icon: Gavel };
@@ -52,15 +55,11 @@ export const NAV_ITEMS: NavItem[] = [
 ];
 
 export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
-  { label: "Tendering", items: [DASHBOARD, OPPORTUNITIES, BID_PIPELINE] },
-  { label: "Company assets", items: [COMPANY_VAULT, PEOPLE_CVS, EXPERIENCE] },
-  { label: "Tools & intelligence", items: [MARKET_INTELLIGENCE, TOOLKIT, ANALYTICS] },
+  { label: "Core workspace", items: [DASHBOARD, OPPORTUNITIES, BID_PIPELINE, COMPANY_VAULT] },
+  { label: "Intelligence", items: [MARKET_INTELLIGENCE, ANALYTICS] },
+  { label: "Assets & library", items: [PEOPLE_CVS, EXPERIENCE, TOOLKIT] },
+  { label: "Settings", items: [BILLING] },
 ];
-
-// Rendered in the sidebar's bottom section, directly above the account menu
-// - not its own labelled group, same footer area a "Billing" link belongs in
-// next to Profile/Privacy/Sign out.
-export const BOTTOM_NAV_ITEMS: NavItem[] = [BILLING];
 
 export const ADMIN_NAV_ITEM: NavItem = { href: "/admin", label: "Admin", icon: ShieldCheck };
 

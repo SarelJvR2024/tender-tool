@@ -331,7 +331,7 @@ export default async function TenderWorkspacePage({
 
   // Phase 2 brief (Part 4): "Value Estimate / Range (if available)" on the
   // header's Key Metadata Bar, plus the fuller "Scope & pricing" card in the
-  // Pricing & Strategy tab (Phase 2 targeted polish). tender_scope_records
+  // Pricing & Market tab (Phase 2 completion pass). tender_scope_records
   // (migration 0060, engine/discovery/tender_enrichment.py - see
   // discovery/page.tsx's own SCOPE_RECORD_COLUMNS comment) is honestly rare
   // today: that enrichment script isn't wired into the production fan-out,
@@ -527,7 +527,7 @@ export default async function TenderWorkspacePage({
                 )}
                 {valueEstimate && (
                   <span
-                    title="Estimated value range - a size indicator, not a price to bid (see the Pricing & Strategy tab)"
+                    title="Estimated value range - a size indicator, not a price to bid (see the Pricing & Market tab)"
                     className="bg-muted text-muted-foreground"
                     style={{ display: "inline-flex", alignItems: "center", borderRadius: 100, padding: "2px 9px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
                   >
@@ -674,18 +674,24 @@ export default async function TenderWorkspacePage({
               </div>
             )}
 
-            {/* Phase 2 retab (2026-10-23): the long flat stack that used to
-                be here - readiness report, intake, compliance/general
-                workspace, market context, tasks, key positions, cover page,
-                templates, Form B7, pack review/export, cover letter - is now
-                5 top-level tabs (the brief's own "modular, tabbed
-                workspace"), built from these exact same section values
-                (nothing re-read, nothing re-computed) and handed to the
-                already-existing WorkspaceTabs. The Disqualification guard
-                and this "no pack yet" banner above stay outside the tabs on
-                purpose (never bury a blocker); Activity/notes stays outside
-                below the tabs, since a comment history belongs in view
-                regardless of which tab is open, not hidden behind a click. */}
+            {/* Phase 2 retab, then completion pass (2026-10-23): the long flat
+                stack that used to be here - disqualification guard,
+                readiness report, intake, compliance/general workspace,
+                market context, tasks, key positions, cover page, templates,
+                Form B7, pack review/export, cover letter - is now 5
+                top-level tabs (Overview / Compliance & Guard / Pack
+                compiler / Team & CVs / Pricing & Market), built from these
+                exact same section values (nothing re-read, nothing
+                re-computed) and handed to the already-existing
+                WorkspaceTabs. The Disqualification guard moved inside the
+                Compliance & Guard tab per Sarel's own explicit brief - a
+                deliberate override of this file's own earlier "never bury a
+                blocker" rule, kept honest via that tab's own fix-count badge
+                (visible from every other tab, not just by position) rather
+                than by position alone. This "no pack yet" banner above
+                stays outside the tabs; Activity/notes stays outside below
+                the tabs, since a comment history belongs in view regardless
+                of which tab is open, not hidden behind a click. */}
             {(() => {
               const readinessReportSection = tenderPack ? (
                 <>
@@ -798,7 +804,7 @@ export default async function TenderWorkspacePage({
                   {positions.length === 0 && (
                     <div style={{ fontSize: 12, color: "var(--muted-foreground)", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
                       No positions listed yet. They are read from this tender&apos;s own Technical Submission workbook (its
-                      SETUP sheet) - upload it under Blank tender templates (Forms & Returnables) below, and they appear
+                      SETUP sheet) - upload it under Blank tender templates (Compliance & Guard tab) below, and they appear
                       here once the pack builder has read it.
                     </div>
                   )}
@@ -925,8 +931,8 @@ export default async function TenderWorkspacePage({
               // Honest per-tab "still outstanding" badges, from exactly the
               // same counts the facts card above already uses - never a
               // second, independently-computed number that could disagree.
-              const overviewBadgeCount = disqualificationGuardFixCount;
               const formsBadgeCount = missingRows.length + (generalSections?.badges.docsMissing ?? 0) + (generalSections?.badges.needAnswer ?? 0);
+              const complianceGuardBadgeCount = disqualificationGuardFixCount + formsBadgeCount;
               const teamBadgeCount = openPositionsCount + (generalSections?.badges.peopleGaps ?? 0);
 
               // Condensed title/status/countdown recap, sticky above the tab
@@ -958,30 +964,14 @@ export default async function TenderWorkspacePage({
                 {
                   id: "overview",
                   label: "Overview",
-                  anchors: ["disqualification-guard", "general-preparation", "private-documents", "score-estimate", "intake"],
-                  badge: overviewBadgeCount > 0 ? <TabBadge count={overviewBadgeCount} /> : undefined,
-                  content: (
-                    <>
-                      {complianceError}
-                      {/* Moved here from always-outside-the-tabs, Sarel's own
-                          follow-up brief (2026-10-23): "Overview (Default):
-                          ... and Disqualification Guard." Overview is the
-                          default tab, and this tab's own badge (above) keeps
-                          the fix-count visible from every other tab too. */}
-                      {disqualificationGuardSection}
-                      {generalSections?.overview}
-                      {complianceSections?.score}
-                      <IntakeCard tenderId={id} />
-                    </>
-                  ),
-                },
-                {
-                  id: "plan",
-                  label: "Plan",
-                  anchors: ["reuse-past", "submission-plan", "tasks-milestones"],
+                  anchors: ["general-preparation", "private-documents", "score-estimate", "intake", "reuse-past", "submission-plan", "tasks-milestones"],
                   badge: overdueTaskCount > 0 ? <TabBadge count={overdueTaskCount} /> : undefined,
                   content: (
                     <>
+                      {complianceError}
+                      {generalSections?.overview}
+                      {complianceSections?.score}
+                      <IntakeCard tenderId={id} />
                       {/* Feature item 9: carry over last time's reusable answers /
                           key-position people from a submitted tender (reuse-past-submission.tsx). */}
                       <ReusePastSubmission tenderId={id} reuseFrom={reuseFrom} saved={saved} reused={reused} />
@@ -995,16 +985,18 @@ export default async function TenderWorkspacePage({
                   ),
                 },
                 {
-                  id: "forms",
-                  label: "Forms & Documents",
-                  anchors: ["readiness-report", "compliance-check", "locality", "general-documents", "general-questions", "tender-templates", "form-b7"],
-                  badge: formsBadgeCount > 0 ? <TabBadge count={formsBadgeCount} /> : undefined,
+                  id: "compliance-guard",
+                  label: "Compliance & Guard",
+                  anchors: ["disqualification-guard", "readiness-report", "compliance-check", "locality", "general-documents", "general-questions", "tender-templates", "form-b7"],
+                  badge: complianceGuardBadgeCount > 0 ? <TabBadge count={complianceGuardBadgeCount} /> : undefined,
                   content: (
                     <>
-                      {/* The 3-column Fix/Provide/Verify compliance checklist
-                          (SANRAL) + returnables (general) - Sarel's own
-                          follow-up brief names this tab after exactly this
-                          content. */}
+                      {/* The checks most likely to disqualify this bid outright,
+                          then the 3-column Fix/Provide/Verify compliance
+                          checklist (SANRAL) + returnables (general) -
+                          Sarel's own completion-pass brief names this tab
+                          after exactly this content. */}
+                      {disqualificationGuardSection}
                       {readinessReportSection}
                       {complianceSections?.documents}
                       {complianceSections?.locality}
@@ -1018,8 +1010,34 @@ export default async function TenderWorkspacePage({
                   ),
                 },
                 {
-                  id: "people",
-                  label: "People & Experience",
+                  id: "pack-compiler",
+                  label: "Pack compiler",
+                  anchors: ["cover-page", "pack-review", "submission-pack", "general-pack", "general-pack-review", "narrative-documents"],
+                  badge: (generalSections?.badges.generalFixCount ?? 0) > 0 ? <TabBadge count={generalSections!.badges.generalFixCount} /> : undefined,
+                  content: (
+                    <>
+                      {showSubmissionPack && (
+                        <CoverPagePreview
+                          contractNo={tenderFacts.contract_no}
+                          nraReference={tenderFacts.nra_reference}
+                          description={tenderFacts.description}
+                          buyer={tenderFacts.buyer}
+                          closingDate={tenderFacts.closing_date}
+                        />
+                      )}
+                      {/* Pack review: the full pre-compile preview (pack_review_confirmations, 0059) - shown before the generate button. */}
+                      {packReviewSection}
+                      {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
+                      {submissionPackSection}
+                      {generalSections?.pack}
+                      {/* Cover letter / methodology statement generator (narrative_documents, 0085), applies to both families. */}
+                      {narrativeDocumentsSection}
+                    </>
+                  ),
+                },
+                {
+                  id: "team-cvs",
+                  label: "Team & CVs",
                   anchors: ["key-positions", "key-people", "company-experience", "general-people", "won-project"],
                   badge: teamBadgeCount > 0 ? <TabBadge count={teamBadgeCount} /> : undefined,
                   content: (
@@ -1045,8 +1063,8 @@ export default async function TenderWorkspacePage({
                   ),
                 },
                 {
-                  id: "pricing",
-                  label: "Pricing & Strategy",
+                  id: "pricing-market",
+                  label: "Pricing & Market",
                   anchors: ["market", "scope-pricing", "preference-points"],
                   content: (
                     <>
@@ -1081,8 +1099,8 @@ export default async function TenderWorkspacePage({
                           )}
                         </div>
                       )}
-                      {/* Preference-points calculation (Sarel's own follow-up
-                          brief) - the real Toolkit calculator
+                      {/* Preference-points calculation (Sarel's own completion-
+                          pass brief) - the real Toolkit calculator
                           (/toolkit/bee-preference-points), embedded rather
                           than re-built: it's a general B-BBEE/price formula
                           with no tender-specific inputs of its own, so
@@ -1091,32 +1109,6 @@ export default async function TenderWorkspacePage({
                         <div className="mb-2 text-[15px] font-bold text-foreground">Preference points calculator</div>
                         <BeePreferencePointsClient embedded />
                       </div>
-                    </>
-                  ),
-                },
-                {
-                  id: "review",
-                  label: "Review & Submit",
-                  anchors: ["cover-page", "pack-review", "submission-pack", "general-pack", "general-pack-review", "narrative-documents"],
-                  badge: (generalSections?.badges.generalFixCount ?? 0) > 0 ? <TabBadge count={generalSections!.badges.generalFixCount} /> : undefined,
-                  content: (
-                    <>
-                      {showSubmissionPack && (
-                        <CoverPagePreview
-                          contractNo={tenderFacts.contract_no}
-                          nraReference={tenderFacts.nra_reference}
-                          description={tenderFacts.description}
-                          buyer={tenderFacts.buyer}
-                          closingDate={tenderFacts.closing_date}
-                        />
-                      )}
-                      {/* Pack review: the full pre-compile preview (pack_review_confirmations, 0059) - shown before the generate button. */}
-                      {packReviewSection}
-                      {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
-                      {submissionPackSection}
-                      {generalSections?.pack}
-                      {/* Cover letter / methodology statement generator (narrative_documents, 0085), applies to both families. */}
-                      {narrativeDocumentsSection}
                     </>
                   ),
                 },
