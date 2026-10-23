@@ -1266,6 +1266,35 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventy-third run): a hung bridge pass's own timeout only killed its own PID, leaking a soffice-shaped grandchild forever on the real worker
+
+Orientation: rotated to `engine/worker` - the one area in the standing rotation with no dedicated
+run yet. `run_bridges.py`'s own docstring names "a leaked LibreOffice process" as a risk its
+per-bridge subprocess design and `--timeout` exist to prevent - worth checking whether that's
+actually true, given the exact same class of process (a long-running `soffice` child) independently
+hung the `bridge-worker-ci` CI job's own install step earlier today (Finding 59's CI note).
+
+**Finding 60 (CONFIRMED, FIXED, severe).** It wasn't true. `BridgeRunner.run_once()` ran each
+bridge via `subprocess.run(..., timeout=self.timeout)`; on a hang, that only ever kills the ONE PID
+it started - any grandchild the bridge itself spawned (soffice for the real `.docx` -> `.pdf`
+step) keeps running, orphaned, for as long as the worker container lives. Confirmed directly,
+outside any test: a fixture that spawns `sleep 300` then hangs past the timeout left that
+grandchild alive a full second after `subprocess.TimeoutExpired` fired; adding
+`start_new_session=True` to the same `subprocess.run()` call changed nothing, since nothing then
+targets the process group it creates.
+
+**Fix:** switched to `subprocess.Popen(..., start_new_session=True)` + `os.killpg(os.getpgid(p.pid),
+signal.SIGKILL)` on timeout - kills the whole group the bridge and everything it spawned belong to,
+not just the bridge's own PID. Confirmed directly: the same fixture's grandchild is dead within
+~2 seconds under the fix, versus never under the old code.
+
+**Verified the regression test actually catches the regression:** new
+`test_timeout_kills_the_whole_process_group()` in `test_poll_loop.py`. Reverted to the exact old
+`subprocess.run(..., timeout=...)` version: failed exactly as predicted (grandchild still alive 5s
+later); restored: all 6 tests in the file passed, including the 3 existing ones that already
+exercise `run_bridges.py` end to end. One function changed; every registered bridge (cv,
+cv_extract, pack, general, onboarding) and any `--script` addition gets the fix for free.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-second run): a non-string expiry value in a local company profile crashed the whole daily-digest run, not just that one item
 
 Orientation: rotated to `engine/notify` (not covered by any of the last dozen+ runs). Read

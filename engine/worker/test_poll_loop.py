@@ -253,10 +253,55 @@ def test_script_flag_is_additive():
     print("PASS run_bridges.py: --script is additive, --bridge still narrows when given")
 
 
+def test_timeout_kills_the_whole_process_group():
+    # A real bridge that shells out to soffice/LibreOffice (the docx -> pdf
+    # step every pack bridge needs) and then hangs leaves that grandchild
+    # process running forever if the runner's own timeout only kills the
+    # bridge script's own PID - confirmed directly before this fix:
+    # subprocess.run's own timeout=... kill (and even adding
+    # start_new_session=True to it, with nothing then using the group it
+    # creates) only ever reaps the immediate child. This fixture script
+    # stands in for that shape: it spawns its own grandchild ("sleep 300"),
+    # writes that PID to a file so the test can check on it, then hangs
+    # itself well past the runner's own --timeout.
+    tmp = tempfile.mkdtemp(prefix="bridge_timeout_")
+    pidfile = os.path.join(tmp, "grandchild.pid")
+    hanger = os.path.join(tmp, "hangs_with_a_grandchild.py")
+    with open(hanger, "w") as f:
+        f.write(
+            "import subprocess, sys, time\n"
+            "p = subprocess.Popen(['sleep', '300'])\n"
+            "open(sys.argv[2], 'w').write(str(p.pid))\n"  # argv: [script, '--once', pidfile]
+            "time.sleep(300)\n"
+        )
+    runner = run_bridges.BridgeRunner([("hanger", hanger)], timeout=2, extra_args=[pidfile])
+    try:
+        runner.run_once()
+        raise AssertionError("a hung bridge pass must raise (it's reported as broken)")
+    except RuntimeError as e:
+        assert "hanger timed out after 2s" in str(e), str(e)
+
+    wait_for(lambda: os.path.exists(pidfile), 5, "the fixture's grandchild PID to be written")
+    grandchild_pid = int(open(pidfile).read())
+
+    def grandchild_is_gone():
+        try:
+            os.kill(grandchild_pid, 0)
+            return False
+        except ProcessLookupError:
+            return True
+    wait_for(grandchild_is_gone, 5, f"the leaked grandchild (pid {grandchild_pid}) to actually be killed, "
+                                    "not just the bridge script's own PID")
+    print(f"PASS run_bridges.py: a bridge pass timing out kills its whole process group - "
+          f"grandchild pid {grandchild_pid} (its own 'sleep 300', standing in for a hung soffice) is dead too, "
+          f"not leaked")
+
+
 if __name__ == "__main__":
     test_poll_forever_unit()
     test_claim_is_atomic()
     test_cv_bridge_loop_end_to_end()
     test_runner_drives_bridges_and_stops_on_sigterm()
     test_script_flag_is_additive()
+    test_timeout_kills_the_whole_process_group()
     print("All bridge-loop smoke tests passed.")

@@ -3713,3 +3713,68 @@ already-malformed-string check stayed green. Restored: `0` failures. Also re-ran
 site (`find_due_documents`, `find_due_person_credentials`, `registration_reminders`,
 `find_due_tasks`, both `daily_digest.py --mode local` helpers) gets the fix for free, with no
 call-site changes needed.
+
+### Finding 60 (CONFIRMED, FIXED, severe - a hung bridge pass's own timeout only killed its own PID, leaking whatever it had spawned (soffice included) forever on the live worker container)
+
+**Where:** `engine/worker/run_bridges.py`'s `BridgeRunner.run_once()` - the one place every async
+bridge (CV generation, SANRAL/general pack generation, CV field extraction, onboarding document
+scan) gets run as a subprocess, with a `--timeout` (default 30 minutes) meant to stop a hung pass
+from stalling the whole worker forever.
+
+**What was tested:** rotated to `engine/worker` this cycle (the one area in the standing rotation
+that had never had a dedicated run by name). The module's own docstring already names the exact
+risk this finding confirms: "a crash or a leaked LibreOffice process in one bridge can't take down
+the other" - worth checking whether the existing timeout mechanism actually PREVENTS that leak, or
+only describes the goal. Every real pack bridge shells out to `soffice` for its own `.docx` ->
+`.pdf` step (confirmed: this exact class of process - a long-running child spawned BY the bridge
+script, not the bridge script itself - is also what hung the `bridge-worker-ci` CI job's own
+"Install LibreOffice" step earlier this same day, Finding 59's CI note). Constructed the
+adversarial case directly: a fixture script that spawns its own grandchild (`subprocess.Popen(["sleep",
+"300"])`, standing in for a hung `soffice`) and then hangs itself well past the runner's
+`--timeout`. Reproduced in isolation first, outside any test harness, to confirm the mechanism
+before touching the real code:
+```
+p = subprocess.run([sys.executable, 'fake_bridge.py'], capture_output=True, timeout=2)
+# -> subprocess.TimeoutExpired; the grandchild ("sleep 300") is CONFIRMED STILL ALIVE a second later
+```
+Also confirmed that merely adding `start_new_session=True` to that same `subprocess.run()` call
+changes nothing on its own - the grandchild is still leaked - because nothing then targets the
+process GROUP that flag creates; `subprocess.run()`'s own built-in timeout handling only ever
+kills the one PID it started.
+
+**Why severe:** this is the real worker container's own crash-recovery mechanism failing silently
+at the exact moment it exists to matter - a hung pack generation (a slow/corrupt tender's documents
+jamming LibreOffice, exactly the shape Finding 59's own CI note hit the same day) doesn't just fail
+that one job: the orphaned `soffice` process keeps holding CPU/memory on the worker indefinitely,
+cycle after cycle, for as long as the container runs, with nothing in the existing design
+noticing or reclaiming it. `run_bridges.py`'s own docstring already names leaked LibreOffice
+processes as the risk its `--timeout` and run-each-bridge-as-its-own-subprocess design are
+supposed to prevent - they didn't, for exactly the shape most likely to occur in production.
+
+**Fix:** `BridgeRunner.run_once()` now starts each bridge with `subprocess.Popen(...,
+start_new_session=True)` (putting the bridge and everything IT spawns in one new process group)
+instead of `subprocess.run(..., timeout=...)`, and on `TimeoutExpired` calls
+`os.killpg(os.getpgid(p.pid), signal.SIGKILL)` - killing the whole group, not just the bridge's own
+PID - before draining its pipes. Confirmed directly (not assumed) that this actually closes the
+gap: the same fixture's grandchild, alive and unreachable under the old code, is dead within
+~2 seconds under the fix.
+
+**Verified the regression test actually catches the regression:** new
+`test_timeout_kills_the_whole_process_group()` in `engine/worker/test_poll_loop.py` - runs
+`BridgeRunner` directly (unit-level) against the grandchild-spawning fixture, confirms the pass is
+reported as timed out (`RuntimeError`, same as before) AND that the grandchild's own PID is
+actually dead within 5 seconds, not just unreachable-but-still-running. Reverted
+`run_once()` to the exact previous `subprocess.run(..., timeout=...)` version (saved patch + `git
+apply -R`, restored with `git apply`): the new test failed exactly as predicted (the grandchild
+PID was still alive 5 seconds later, confirmed via `os.kill(pid, 0)` not raising
+`ProcessLookupError`); restored: all 6 tests in the file passed, including the 3 that already
+exercised `run_bridges.py` end to end (CV bridge fulfilling a job, SIGTERM mid-sleep, `--script`
+additivity) - this fix changes nothing about the non-timeout path, only what happens to a hung
+pass's own descendants.
+
+**Regression:** only `engine/worker/run_bridges.py` changed (`BridgeRunner.run_once()`); every
+registered bridge (`cv`, `cv_extract`, `pack`, `general`, `onboarding`) and any `--script` addition
+gets the fix for free, with no bridge-script changes needed. Also cleaned up two of my own leaked
+sandbox processes from reproducing this live (`sleep 300` fixtures from before the fix landed) -
+noted here only because the standing discipline (Finding 56) is to disclose any mid-task mistake,
+even a harmless one in a throwaway sandbox.
