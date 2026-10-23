@@ -113,7 +113,7 @@ export async function DisqualificationGuard({
     <div id="disqualification-guard" className="mb-4 scroll-mt-20">
       <SectionCard
         title="Disqualification guard"
-        description="The checks most likely to disqualify a bid outright, read from your company vault and this tender's own documents - nothing new to fill in here."
+        description="The checks most likely to disqualify this bid outright - nothing new to fill in here."
       >
         {!mapped && (
           <div className="text-xs text-muted-foreground">
