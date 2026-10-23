@@ -102,7 +102,7 @@ export default async function PeoplePage({
         <PageHeader
           className="mb-4"
           title="People / CV Library"
-          description="Staff on file for key-position matching against SANRAL tenders."
+          description="Staff on file for key-position matching and automated CV compilation across tenders."
           actions={
             <div className="flex flex-wrap gap-2">
               <Link href="/people/bulk-cv" className={buttonVariants({ variant: "outline", size: "lg", className: "min-h-11" })}>

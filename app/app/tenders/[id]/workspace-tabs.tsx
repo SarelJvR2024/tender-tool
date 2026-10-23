@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { ScrollFade } from "../../_components/ScrollFade";
 
 export type WorkspaceTab = {
   id: string;
@@ -15,26 +16,33 @@ export type WorkspaceTab = {
 };
 
 /**
- * Tabs for GeneralTenderWorkspace's secondary sections (Documents/Questions/
- * People/Pack) - Sarel's own live feedback: "see if you can streamline the
- * page and move to different tabs, it is a very long list." Deliberately
- * scoped to ONLY these four: the Disqualification guard and the Submission
- * plan (page.tsx) and this workspace's own "What this tender needs" section
- * are mounted above/outside this component entirely, so no blocker ever
- * ends up hidden in a tab (spec v3 §16.E: "Do not bury blockers in a hidden
- * tab").
+ * The Tender Workspace's own top-level tabs (page.tsx), and formerly
+ * GeneralTenderWorkspace's own secondary sections too (that nested use was
+ * removed in the Phase 2 retab - everything is one set of top-level tabs
+ * now). `header`, when passed, renders above the tab bar inside the same
+ * sticky container (page.tsx's condensed title/status/countdown recap,
+ * Sarel's own follow-up brief: "Keep the contract title, closing badge, and
+ * status header sticky at the top above the tabs").
  *
  * Content for every tab is always rendered (no extra fetch per tab - all of
  * it was already being fetched unconditionally before this existed); only
  * which one is VISIBLE changes, via the `hidden` attribute rather than
- * unmounting, so a JumpLink's href="#general-documents" style in-page
+ * unmounting, so a deep link's href="#general-documents" style in-page
  * anchor still finds a real element in the DOM. Since `hidden` elements
- * can't be scrolled to, this listens for the hash changing (a JumpLink
+ * can't be scrolled to, this listens for the hash changing (an anchor
  * click, or the page loading with a hash already in the URL) and switches
  * tabs itself before re-doing the scroll the browser couldn't do while it
  * was hidden.
  */
-export function WorkspaceTabs({ tabs }: { tabs: WorkspaceTab[] }) {
+export function WorkspaceTabs({
+  tabs,
+  sticky = false,
+  header,
+}: {
+  tabs: WorkspaceTab[];
+  sticky?: boolean;
+  header?: React.ReactNode;
+}) {
   const [active, setActive] = useState(tabs[0]?.id ?? "");
 
   useEffect(() => {
@@ -53,26 +61,46 @@ export function WorkspaceTabs({ tabs }: { tabs: WorkspaceTab[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const tabBar = (
+    <div role="tablist" className="flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted/40 p-1">
+      {tabs.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={active === t.id}
+          onClick={() => setActive(t.id)}
+          className={cn(
+            "flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-colors",
+            active === t.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          {t.label}
+          {t.badge}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div>
-      <div role="tablist" className="mb-3 flex gap-1 overflow-x-auto rounded-lg border border-border bg-muted/40 p-1">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={active === t.id}
-            onClick={() => setActive(t.id)}
-            className={cn(
-              "flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-semibold transition-colors",
-              active === t.id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t.label}
-            {t.badge}
-          </button>
-        ))}
-      </div>
+      {sticky ? (
+        // The page's own top-level tabs (page.tsx, Phase 2 retab): sticky so
+        // the tab bar - this workspace's primary navigation now - stays
+        // reachable while scrolling a long tab's content, same idea the old
+        // flat jump-nav row used to serve. Not used for a nested
+        // WorkspaceTabs (none currently exist) - stacking two sticky bars
+        // would cover more of the viewport than it's worth.
+        <div className="sticky top-0 z-[5] mb-3 bg-background py-1.5">
+          {header}
+          <div className="relative">
+            {tabBar}
+            <ScrollFade fadeColor="255, 255, 255" minWidthToHide={99999} hint={false} />
+          </div>
+        </div>
+      ) : (
+        <div className="mb-3">{tabBar}</div>
+      )}
       {tabs.map((t) => (
         <div key={t.id} hidden={active !== t.id}>
           {t.content}

@@ -46,21 +46,43 @@ const TASK_STYLE: Record<BidTaskStatus, { title: string; className: string }> = 
 // large diff for a color-only pass (design-system color migration, batch 4).
 const card: React.CSSProperties = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
-export async function ComplianceReport({ tenderId }: { tenderId: string }) {
+/**
+ * One section per returned key, so the Tender Workspace's top-level tabs
+ * (page.tsx, Phase 2 retab) can place each where it belongs (documents/
+ * locality -> Compliance & Guard, people/experience -> Team & CVs,
+ * score -> Overview) instead of one long fragment -
+ * nothing here changed except the return shape; every read, every
+ * computed value, every piece of JSX is identical to before this split.
+ */
+export type ComplianceReportSections = {
+  documents: React.ReactNode;
+  people: React.ReactNode;
+  experience: React.ReactNode;
+  locality: React.ReactNode;
+  score: React.ReactNode | null;
+};
+
+export async function ComplianceReport({ tenderId }: { tenderId: string }): Promise<ComplianceReportSections | null> {
   const data = await loadTenderCompliance(tenderId);
   if (!data) return null;
   if (!data.mapped) {
     const family = data.family;
-    return (
-      <div style={card}>
-        <SectionTitle title="Compliance check" />
-        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-          Required documents are only mapped for SANRAL Conventional Consultant tenders so far
-          {family ? ` - this one is "${family}"` : ""}. Other buyers each set their own returnable list, so
-          nothing is claimed here until this tender&apos;s list has been read.
+    return {
+      documents: (
+        <div style={card}>
+          <SectionTitle title="Compliance check" />
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+            Required documents are only mapped for SANRAL Conventional Consultant tenders so far
+            {family ? ` - this one is "${family}"` : ""}. Other buyers each set their own returnable list, so
+            nothing is claimed here until this tender&apos;s list has been read.
+          </div>
         </div>
-      </div>
-    );
+      ),
+      people: null,
+      experience: null,
+      locality: null,
+      score: null,
+    };
   }
 
   const {
@@ -91,46 +113,45 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
   ];
   const fixCount = tasks.filter((t) => t.task.status === "fix").length;
 
-  return (
-    <>
-      {/* Required documents */}
-      <div id="compliance-check" style={card}>
-        <SectionTitle title="Compliance check - required documents" />
-        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
-          SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria, checked against your
-          company vault on the closing date. <strong>Fix</strong> items would disqualify the bid at Stage 2 if left as is.{" "}
-          <strong>Provide</strong> items only you can supply. <strong>Verify</strong> items are already filled from your
-          vault - just confirm them.
-        </div>
-        {fixCount > 0 && (
-          <div className="border border-destructive/40 bg-destructive/10 text-destructive" style={{ borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, fontWeight: 600 }}>
-            {fixCount} requirement{fixCount === 1 ? "" : "s"} would disqualify this bid at Stage 2 - fix {fixCount === 1 ? "it" : "them"} before you submit.
-          </div>
-        )}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-          {taskGroups.map((g) => {
-            const rows = tasks.filter((t) => t.task.status === g.status);
-            const st = TASK_STYLE[g.status];
-            return (
-              <div key={g.status} style={{ border: "1px solid var(--border)", borderRadius: 11, padding: "12px 14px", minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{st.title}</div>
-                  <CountBadge count={rows.length} className={st.className} />
-                </div>
-                {rows.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", paddingTop: 6 }}>{g.empty}</div>
-                ) : (
-                  rows.map(({ item, task }) => <BidTaskRow key={item.key} item={item} task={task} />)
-                )}
-              </div>
-            );
-          })}
-        </div>
+  const documents = (
+    <div id="compliance-check" style={card}>
+      <SectionTitle title="Compliance check - required documents" />
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
+        SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria, checked against your
+        company vault on the closing date. <strong>Fix</strong> items would disqualify the bid at Stage 2 if left as is.{" "}
+        <strong>Provide</strong> items only you can supply. <strong>Verify</strong> items are already filled from your
+        vault - just confirm them.
       </div>
+      {fixCount > 0 && (
+        <div className="border border-destructive/40 bg-destructive/10 text-destructive" style={{ borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, fontWeight: 600 }}>
+          {fixCount} requirement{fixCount === 1 ? "" : "s"} would disqualify this bid at Stage 2 - fix {fixCount === 1 ? "it" : "them"} before you submit.
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+        {taskGroups.map((g) => {
+          const rows = tasks.filter((t) => t.task.status === g.status);
+          const st = TASK_STYLE[g.status];
+          return (
+            <div key={g.status} style={{ border: "1px solid var(--border)", borderRadius: 11, padding: "12px 14px", minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{st.title}</div>
+                <CountBadge count={rows.length} className={st.className} />
+              </div>
+              {rows.length === 0 ? (
+                <div style={{ fontSize: 12, color: "var(--muted-foreground)", paddingTop: 6 }}>{g.empty}</div>
+              ) : (
+                rows.map(({ item, task }) => <BidTaskRow key={item.key} item={item} task={task} />)
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 
-      {/* Key people & CVs */}
-      <div id="key-people" style={card}>
-        <SectionTitle title="Key people & CVs" />
+  const people = (
+    <div id="key-people" style={card}>
+      <SectionTitle title="Key people & CVs" />
         <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           Whether each position is filled by someone <strong>your company has tagged</strong> as fitting that role (set on
           the person&apos;s People page - Tender Ready doesn&apos;t guess role fit), with the C3.1.11 minimums checked
@@ -234,24 +255,24 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
           );
         })}
       </div>
-
-      {/* Company experience (Experience Library) */}
-      <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} chosen={chosenRule} disciplines={experienceDisciplines} />
-
-      {/* Locality (office locations vs the tender's own locality rows) */}
-      <LocalitySection rules={evaluationRules} offices={offices} />
-
-      {/* Score estimate */}
-      {estimate && (
-        <ScoreEstimate
-          estimate={estimate}
-          beeLevel={(company?.bee_level as number | null) ?? null}
-          beeProofValid={beeProofValid}
-          qualityFromVault={qualitySystem !== null}
-        />
-      )}
-    </>
   );
+
+  const experienceSection = (
+    <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} chosen={chosenRule} disciplines={experienceDisciplines} />
+  );
+
+  const locality = <LocalitySection rules={evaluationRules} offices={offices} />;
+
+  const score = estimate ? (
+    <ScoreEstimate
+      estimate={estimate}
+      beeLevel={(company?.bee_level as number | null) ?? null}
+      beeProofValid={beeProofValid}
+      qualityFromVault={qualitySystem !== null}
+    />
+  ) : null;
+
+  return { documents, people, experience: experienceSection, locality, score };
 }
 
 function ScoreEstimate({
