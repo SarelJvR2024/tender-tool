@@ -1773,3 +1773,84 @@ guessed name from its filename), not just that the markup renders. Screenshotted
 controls, toggle and rows all visible at both widths. The temporary route, `.env.local`, and the
 `playwright-core` dev install were all deleted again before commit (confirmed via `git status`
 showing only the real feature files) - this was a self-review aid, never meant to reach `main`.
+
+---
+
+### Opportunities: "needs a human look" / "no readable tender document" - diagnosis (Sarel's own live feedback)
+
+Sarel's live feedback named two Opportunities messages as unhelpful: the discipline-match
+"needs a human look" text, and "No readable tender document - scoring rules unknown until the
+full RFP is read." Diagnosed both before building anything, per this task's own directive
+(narrow verified bug fix only; a genuinely new engine capability goes to Sarel for review, not
+built blind).
+
+**Message 1 - discipline matching: a real bug, fixed.** `assess_tender.assess_fit()`'s own
+`elif not known_disciplines:` branch (an empty Experience-Library-sourced disciplines list,
+correctly treated as "unknown" rather than "out of scope" since the 2026-10-18 regression fix)
+had a comment declaring the intent that an actionable message - "they come from your Experience
+Library tags" - should reach "every caller including the live OCDS discovery feed". It never
+did: that wording was only ever implemented at `classify_tender.assess_fit_from_text()`'s own
+separate call site (the manual "add tender by URL" path), not at `assess_fit()` itself. Confirmed
+via grep that `watch_new_tenders.py` (the live Discovery fan-out) calls `assess_tender.score_release()`
+→ `assess_fit()` directly, and stores its `reasons` straight into what the Opportunities page
+renders - so the live feed Sarel is looking at kept showing the old, generic "has no disciplines
+recorded yet" with no way to know where to fix it. **Fix**: moved the actionable wording to the
+root (`assess_fit()`), and simplified `classify_tender.py`'s now-partially-redundant local
+override to its one still-distinct job - appending the same note when a *different* primary
+reason fires first (e.g. "uncategorized"), which `assess_fit()` itself never covers. New coverage:
+`engine/discovery/test_taxonomy.py` (asserts the reason text, not just the verdict, on the
+existing no-disciplines fixture) and two new tests in `engine/intake/test_classify_tender.py`
+(no duplicate message on the categorized case; the distinct append-only behaviour still fires on
+the uncategorized case). All three suites: 0 failures.
+
+**Message 2 - "no readable tender document": one honest sub-case, one real and unfixed gap.**
+Two different paths produce this message, and they are not the same kind of problem:
+
+- **No document attached at all** (`release.get("documents")` empty → `depth` stays
+  `"metadata_only"`) is simply true - confirmed against Sarel's own screenshot (the Kouga
+  ERRATUM tender), which already shows "No document URL on file" for that exact card. Nothing to
+  fix here; the honest wording already exists.
+- **Document(s) attached, but every one fails to read** (`depth` becomes `"no_extractable_text"`
+  after `read_release()`'s own fetch loop) is a **real, root-cause, fixable gap - not fixed here,
+  because fixing it is a genuinely new engine capability, not a narrow bug fix.** `read_release()`
+  calls `assess_tender.fetch_pdf_text()` on every document URL, which does exactly one thing: runs
+  `pdftotext` on whatever it downloads, with zero regard for the document's actual format. A
+  richer document reader already exists in this codebase - `engine/general/requirements.py`'s
+  `read_document()` - and already handles `.docx` (via `python-docx`), legacy `.doc` (via a
+  LibreOffice conversion), and OCR for scanned PDF pages with no text layer
+  (`engine/ocr/scan_ocr.py`, flagged EXPERIMENTAL in its own docstring, `docs/specs/OCR-Evaluation.md`).
+  It is wired into the manual "add tender by URL" intake path (`watch_tender_updates.py` calls
+  it directly) and into `classify_tender.assess_fit_from_text()`'s own specific-reason passthrough
+  (confirmed in `docs/specs/System-Status.md`'s 2026-10-18 04:15 entry) - but **never into the live
+  Discovery feed's own `read_release()`/`fetch_pdf_text()` path**, which is the one Sarel is
+  actually looking at on the Opportunities page. Real-world evidence this isn't rare:
+  `download_discovered_documents.py`'s own comment says plainly "some buyers link a .pdf, some an
+  .docx/.xlsx Book 1," and `docs/specs/General-Tender-Preparation-Findings.md` names a live ESKOM
+  release whose NEC3 contract document is a `.doc` and three of whose annexures are scanned
+  images - exactly the two failure modes `fetch_pdf_text` cannot handle and `requirements.read_document()`
+  already can.
+  **Why this isn't a narrow fix to just make:** `fetch_pdf_text()`'s architecture (one URL in,
+  one subprocess call to `pdftotext`, no format detection) is structurally different from
+  `requirements.read_document()`'s (operates on a pre-downloaded `{name, path, format}` dict from
+  `collect_documents()`, needs a `work_dir`, and its OCR step is explicitly experimental and
+  calls out to `scan_ocr.py`). Wiring OCR and `.docx`/`.doc` support into the live Discovery
+  fan-out means running a heavier, slower pipeline (LibreOffice conversion, OCR) across every
+  attached document for every newly-seen tender, once per day, regardless of company count - a
+  real latency and infra-cost decision, and the OCR step's own experimental status is itself a
+  reason to involve Sarel rather than widen its blast radius unilaterally. No LLM call is involved
+  in `read_document()` itself, so `AI-Call-Quality-Standard.md` doesn't apply to this proposal.
+  **Recommendation for Sarel's own call**: wire `requirements.collect_documents()`/`read_document()`
+  (or an equivalent, lighter extraction of just its format-dispatch logic, without the OCR step
+  if its cost is the concern) into `read_release()`'s own fetch loop as a fallback when
+  `fetch_pdf_text` fails, so a `.docx`/`.doc` Book 1 or a scanned page gets the same honest,
+  specific reason the manual intake path already gives, instead of the live feed quietly
+  mislabeling a readable document as unreadable.
+
+**Worktree discipline note**: this diagnosis/fix was done in `/tmp/discovery-scoring-diagnosis`
+(`fix/discovery-scoring-diagnosis`), not the shared main checkout - caught and corrected mid-task
+after the edits were already made directly against the shared tree; moved via a patch before
+committing, per this repo's own standing worktree-isolation rule.
+
+**Tested**: `python3 engine/discovery/test_taxonomy.py`, `python3 engine/discovery/test_discovery_fanout.py`,
+`python3 engine/intake/test_classify_tender.py` - all three, 0 failures. No TypeScript/UI surface
+touched by this fix (Opportunities' own card copy/layout is task #94's scope, not this one's).
