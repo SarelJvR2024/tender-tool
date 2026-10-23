@@ -109,6 +109,7 @@ import sys
 import json
 import argparse
 import datetime
+import concurrent.futures
 
 sys.path.insert(0, os.path.dirname(__file__))
 import etenders_national
@@ -250,6 +251,25 @@ def _pending(entry, companies, fps):
     return out
 
 
+FAN_OUT_READ_WORKERS = 12  # read_release() is I/O-bound (network fetches, each
+# with its own 45s hard deadline - assess_tender.fetch_pdf_text's own 30s
+# timeout + 15s grace) and touches no shared state, so a bounded thread pool
+# is safe here. Before this, every release's document read ran strictly
+# sequentially: with ~1,400+ releases in the 14-day window and dozens of
+# slow/dead document hosts, those 45s stalls stacked up one at a time -
+# confirmed live via py-spy on a run that took 4.5 hours instead of the
+# normal ~20 minutes (genuinely progressing the whole time, never hung;
+# flagged by a sibling session's own daily tender-watch check-in, 2026-10-23,
+# worse as more companies onboard since a brand-new company's first-ever
+# scoring pass reads the FULL window). Scoring itself (score_release) stays
+# sequential, right after this, exactly as before - it's fast (no I/O) and
+# mutates `seen`/`entry`, which a thread pool would need to synchronise for
+# no real benefit. An overall wall-clock run budget (the sibling's other
+# suggestion) is a real, separate idea - deliberately not built here without
+# working out what "stop early" should leave in the seen store for the
+# releases it never got to; flagged, not half-built.
+
+
 def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document=True, fetch_text=None):
     """Scores each release once per company not yet scored on it - and again
     for a company whose own profile changed since, or whose last scoring
@@ -261,10 +281,18 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
     first scoring, else "profile_changed" / "retry_after_error". Mutates
     `seen`. A seen-store entry written before the fan-out (no "companies"
     key) was scored against one shared profile file, not any company's own
-    rows, so it is scored again for every company."""
+    rows, so it is scored again for every company.
+
+    The document read for each release that needs one runs concurrently
+    (FAN_OUT_READ_WORKERS, see its own comment) - everything else here stays
+    single-threaded and in release order, same as before."""
     today = (today or datetime.datetime.now(sh.SAST).date()).isoformat()
     fps = {c["key"]: company_profiles.profile_fingerprint(c["profile"]) for c in companies}
-    out = []
+
+    # Pass 1 (fast, no I/O, release order): which releases actually need a
+    # document read, and the seen-store bookkeeping that was already done
+    # up front regardless of pending/reading.
+    prepared = []
     for r in releases:
         key = release_key(r)
         if not key:
@@ -279,13 +307,36 @@ def fan_out(releases, companies, seen, report_worthy, today=None, fetch_document
         pending = [c for c in companies if c["key"] in why]
         if not pending:
             continue
+        prepared.append((r, entry, why, pending))
+
+    # Pass 2 (slow, I/O-bound, unordered): read every prepared release's own
+    # documents concurrently - read_release() takes no mutable state, so
+    # this is safe. One release's slow/dead host no longer serialises behind
+    # every other release's own 45s hard timeout.
+    readings = {}
+    if prepared:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=FAN_OUT_READ_WORKERS) as pool:
+            futures = {pool.submit(assess_tender.read_release, r, fetch_document=fetch_document,
+                                   fetch_text=fetch_text): i
+                      for i, (r, _entry, _why, _pending) in enumerate(prepared)}
+            for fut in concurrent.futures.as_completed(futures):
+                i = futures[fut]
+                try:
+                    readings[i] = (fut.result(), None)
+                except Exception as e:
+                    readings[i] = (None, e)
+
+    # Pass 3 (fast, no I/O, release order): score each release's pending
+    # companies - unchanged from before this fix, just reading the
+    # concurrently-fetched result instead of fetching it inline.
+    out = []
+    for i, (r, entry, why, pending) in enumerate(prepared):
+        reading, read_exc = readings[i]
         ctx = {"ocid": r.get("ocid"), "contract_number": r.get("contract_number"), "buyer": r.get("buyer")}
-        try:
-            reading = assess_tender.read_release(r, fetch_document=fetch_document, fetch_text=fetch_text)
-        except Exception as e:
-            reading, read_error = None, str(e)
-            system_alerts.record("discovery", f"Could not read a discovered tender for scoring: {type(e).__name__}: {e}",
-                                 "error", exc=e, context=ctx)
+        if reading is None:
+            read_error = str(read_exc)
+            system_alerts.record("discovery", f"Could not read a discovered tender for scoring: {type(read_exc).__name__}: {read_exc}",
+                                 "error", exc=read_exc, context=ctx)
         results, reassessed, base = [], [], None
         for c in pending:
             try:

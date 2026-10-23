@@ -1521,6 +1521,38 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventy-first run): a real daily discovery run took 4.5 hours instead of ~20 minutes - fixed
+
+Orientation: rotated to discovery. This cycle's origin was a sibling session's own cross-session
+message (`session_01PAw7oeNsQgNdYpS5qH2b1R`, its daily tender-watch check-in) - its live run had
+just taken 4.5 hours instead of the usual ~20 minutes, and its own `py-spy` trace pointed at
+`read_release()`'s document fetch. Independently re-derived the root cause in code rather than
+trusting the report at face value, per this review's own standing discipline.
+
+**Finding 58 (CONFIRMED, FIXED, severe).** `fan_out()` (`engine/discovery/watch_new_tenders.py`)
+read every newly-seen release's documents strictly sequentially, one at a time, each with its own
+45-second hard timeout (`assess_tender.fetch_pdf_text`'s 30s + 15s grace). With ~1,400+ releases in
+the 14-day discovery window and dozens of slow/dead document hosts among them, those 45s stalls
+stack up one after another - and it gets worse as more companies onboard, since a brand-new
+company's first scoring pass reads the full window, not just what changed since its last run.
+
+**Fix:** split the one loop into 3 passes - unchanged fast bookkeeping (pass 1), a bounded
+`ThreadPoolExecutor(max_workers=12)` for the I/O-bound document reads only (pass 2, new), then the
+unchanged scoring logic in the original release order (pass 3). Scoring itself stays single-threaded
+(it's fast, and mutates the seen store - no benefit to parallelising it, real cost to synchronising
+it). Deliberately did not also build an overall wall-clock run budget (the sibling's other
+suggestion, raised but not resolved) - that needs its own design pass on what "stop early" should
+leave in the seen store; flagged in the new `FAN_OUT_READ_WORKERS` comment rather than half-built.
+Caught and fixed a `ctx`-scoping `NameError` risk in my own first draft before ever running it (see
+Finding 58 for detail).
+
+**Verified the regression test actually catches the regression:** new test proves both (a)
+concurrent reads measurably overlap and the whole batch finishes far faster than sequential would,
+and (b) the exact same input produces byte-identical output/seen-store content either way - this
+fix changes only timing, not behavior. Reverted to the old sequential loop (via a saved patch +
+`git apply -R`, not `git stash`, learning from Finding 56's own near-miss): both timing checks
+failed exactly as predicted, equivalence checks stayed green; restored: `28/28` pass.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventieth run): a real open-redirect bypass in the post-login/signup redirect, and a redirect sink with no validation at all
 
 Orientation: confirmed CI (no new app/ pushes since last cycle, nothing to re-check), rotated to

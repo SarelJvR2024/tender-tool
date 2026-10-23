@@ -3590,3 +3590,65 @@ rejected). Reverted `isSafeRedirectPath()` to the exact old `startsWith("/") && 
 check: 2 of 8 tests failed with exactly the predicted backslash-bypass value passing through;
 restored the fix: `8/8`. Full app suite (`npx vitest run`): 12 files, 129 tests, all pass. `npm run
 typecheck`/`lint`: clean (0 errors). Every `*.test.ts` file run the same way CI runs them: clean.
+
+### Finding 58 (CONFIRMED, FIXED, severe - a real daily discovery run took 4.5 hours instead of ~20 minutes, flagged by a sibling session's own py-spy trace)
+
+**Where:** `engine/discovery/watch_new_tenders.py`'s `fan_out()` - the discovery scan that scores
+every newly-seen tender release against every onboarded company's profile.
+
+**What a sibling session found and reported (`session_01PAw7oeNsQgNdYpS5qH2b1R`'s own daily
+tender-watch check-in, 2026-10-23):** its live daily discovery run took 4.5 hours instead of the
+normal ~20 minutes - genuinely progressing the whole time, never hung - and a `py-spy` trace of
+the running process showed it stuck, almost the entire time, inside `read_release()`'s document
+fetch. Independently re-derived the root cause directly in code rather than trusting the report at
+face value: `fan_out()` read every release's documents **strictly sequentially**, one release at a
+time, in its one existing loop; `assess_tender.fetch_pdf_text()` has its own 45-second hard
+wall-clock deadline per document (30s timeout + 15s grace, enforced via a worker thread +
+`.result(timeout=...)`); with ~1,400+ releases in the 14-day discovery window and dozens of
+slow/dead document hosts among them, those 45s stalls stack up one after another with nothing else
+able to proceed meanwhile. This gets worse as more companies onboard, not better: a brand-new
+company's first-ever scoring pass has to read the FULL window, not just what's new since its last
+run.
+
+**Fix:** split `fan_out()` into 3 explicit passes instead of one combined loop. Pass 1 (unchanged,
+fast, no I/O): the existing seen-store bookkeeping, deciding which releases actually need scoring.
+Pass 2 (new): for releases that need a read, `read_release()` runs through a bounded
+`concurrent.futures.ThreadPoolExecutor(max_workers=FAN_OUT_READ_WORKERS=12)` - safe because
+`read_release()` is I/O-bound (network fetches that release the GIL while blocked on the socket)
+and touches no shared mutable state. Pass 3 (unchanged scoring logic, same release order as
+before): scores each release's pending companies against its now-prefetched reading, exactly as the
+single old loop did. Deliberately did NOT also build an overall wall-clock run budget (the
+sibling's other suggestion) in this same pass - a real, separate idea, but "what should 'stop
+early' leave in the seen store for the releases it never got to" is an unresolved design question
+of its own; flagged in the new `FAN_OUT_READ_WORKERS` comment, not half-built.
+
+**Self-caught bug during the edit, before running anything:** the first draft of Pass 3 only built
+the `ctx` dict (used for `system_alerts.record(..., context=ctx)`) inside the `if reading is None:`
+branch, but it's also referenced unconditionally in the per-company scoring-error handler - a
+`NameError` waiting to happen whenever the read succeeded but one company's own `score_release()`
+call still raised. Fixed by moving `ctx`'s construction to the top of the Pass 3 loop body,
+unconditional, before writing or running any test.
+
+**What was tested:** the full existing `test_discovery_fanout.py` suite passed unchanged (28
+checks, including the "documents read once per tender" and "each scoring error recorded in
+system_alerts, one fingerprint for the same failure" invariants - confirming the `ctx` fix is
+correct). New, dedicated `part1b_concurrency()`: 10 synthetic releases, a `fetch_text` that tracks
+how many calls are in flight at once and sleeps 0.2s per call (a short, fixed fixture document text
+rather than a real PDF - read_release()'s own text-analysis work is CPU-bound/GIL-bound Python, and
+with a full real document's worth of text it serialises across threads regardless of the pool,
+which masked the timing proof on the first attempt). Confirmed (a) reads genuinely overlap (max
+concurrent observed: 10) and the whole batch finishes in ~0.3s, far under the ~2.0s strictly
+sequential reads of that shape would take, and (b) the SAME input scored with an unmodified
+(non-concurrent) fetch produces byte-identical `fan_out()` output and seen-store content - this
+fix changes only how long the read step takes, nothing about what it returns or records.
+
+**Verified the regression test actually catches the regression:** reverted `fan_out()` to the exact
+old single-loop sequential version (via a saved patch + `git apply -R`, not `git stash`, to avoid
+any risk of an unmocked real network call slipping through while reverted - see Finding 56's own
+near-miss on this exact point). Re-ran: both new concurrency checks failed exactly as predicted
+(max concurrent observed: 1; elapsed ~2.1s, matching the sequential estimate), while the
+equivalence checks stayed green (correctly showing the bug is about speed, not correctness).
+Restored the fix via `git apply`: all 28 checks green again.
+
+**Regression:** only `engine/discovery/watch_new_tenders.py` changed (plus the new test) - no
+schema, no API shape change. `test_discovery_fanout.py` part1/part1b: 28/28 pass.
