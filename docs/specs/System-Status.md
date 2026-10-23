@@ -8,6 +8,34 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Phase 1 sign-off: the two remaining internal-code-leak spots, closed - 2026-10-23 ~18:50 UTC.**
+Sarel asked for two specific remaining items. Checked both against current code before touching
+anything:
+
+- **CV-led add-person (`/people/new`)**: already fully built by the earlier Phase 1 sign-off
+  (`a9b2bfb`) - `canSkipName` already drops the name requirement and enables the extract button
+  the moment a file is chosen in `ai_extract` mode (the default), and `createPersonWithCv()`
+  already inserts a placeholder name and lets the real AI-proposed name reach the existing
+  confirm-or-correct review card (`name` is `EXTRACTED_PERSON_FIELDS`' own first field). Verified
+  against the live file, not assumed from the commit message alone. Nothing left to build here.
+- **Internal-script leaks**: that same earlier pass's own sweep (`billing/page.tsx`,
+  `tenders/new/page.tsx`, `compliance-report.tsx`) missed two real ones, now fixed: the Key
+  Positions helper text in `tenders/[id]/page.tsx` (exact replacement wording Sarel gave) and the
+  Project/reference-history helper text in `people/[id]/page.tsx` (named
+  `engine/pack_generator/suggest_pack.py` directly). Re-swept the whole `app/` tree for
+  `engine/`/`.py` references after fixing both - everything remaining is either a code comment
+  (never rendered) or inside `/admin/*`, which is platform-admin-only internal tooling where
+  naming the actual script to run is useful, not a leak - same judgment call the earlier pass
+  made, re-confirmed rather than assumed still correct.
+
+Re-verified: `npm run verify` clean, `npx vitest run` 147/147. Pushed directly to `main` (small,
+well-specified copy fixes, same as the earlier sign-off pass's own convention).
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **PR #74 merged (Sarel's own call); real CI-red found and fixed immediately after (Finding
 65) - correcting something I got wrong two passes ago.** Sarel asked directly to merge PR #74;
 confirmed `main` hadn't moved in a way that collides (one new merged PR, #126, real tender
