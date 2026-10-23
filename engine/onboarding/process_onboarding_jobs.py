@@ -39,7 +39,13 @@ from process_cv_jobs import supabase_request  # noqa: E402  (same REST helper, s
 from extract_cv_fields import storage_download as _storage_download  # noqa: E402  (same Storage download helper)
 import classify_documents as cd  # noqa: E402
 
-STALE_AFTER_MINUTES = 30  # one API call + a text pull; 30 minutes means the worker died
+# Lowered from 30 (UX audit, 2026-10-23, same root cause as
+# extract_cv_fields.py's own STALE_AFTER_MINUTES: 30 minutes was itself the
+# problem, not just the worst case). Generous above the LLM call's own
+# explicit timeout (classify_documents.cd.default_llm_client ->
+# extract_cv_fields.default_llm_client, LLM_TIMEOUT_SECONDS=180) and the
+# Supabase REST calls' own 30s timeouts.
+STALE_AFTER_MINUTES = 10  # one API call + a text pull; this long means the worker died
 BUCKET = "onboarding-documents"
 
 
@@ -120,7 +126,7 @@ def process_upload(url, key, upload, client_factory=cd.default_llm_client):
               f"({len(proposal['fields'])} field(s), {len(warnings)} warning(s))")
         return True
     except (cd.SetupError, cd.TransientError) as e:
-        release_upload(url, key, upload)
+        _safe_update(lambda: release_upload(url, key, upload), upload, "release back to the queue")
         if isinstance(e, cd.SetupError):
             raise
         system_alerts.record("onboarding_scan", f"Onboarding document classification hit a temporary problem and "
@@ -129,7 +135,7 @@ def process_upload(url, key, upload, client_factory=cd.default_llm_client):
         print(f"[retry] onboarding_upload {upload['id']}: {e}")
         return False
     except cd.ClassificationFailed as e:
-        fail_upload(url, key, upload, str(e))
+        _safe_update(lambda: fail_upload(url, key, upload, str(e)), upload, "mark as failed")
         system_alerts.record("onboarding_scan", f"Onboarding document classification refused an upload: {e}", "warning",
                              context={"onboarding_upload_id": upload["id"], "company_id": upload.get("company_id")})
         print(f"[failed] onboarding_upload {upload['id']}: {e}")
@@ -137,12 +143,24 @@ def process_upload(url, key, upload, client_factory=cd.default_llm_client):
     except Exception as e:
         system_alerts.record("onboarding_scan", f"Onboarding document classification crashed: {type(e).__name__}: {e}",
                              "error", exc=e, context={"onboarding_upload_id": upload["id"], "company_id": upload.get("company_id")})
-        fail_upload(url, key, upload, f"Classification hit an unexpected error ({type(e).__name__}). Upload this "
-                                      "file again or file it manually.")
+        _safe_update(lambda: fail_upload(url, key, upload, f"Classification hit an unexpected error ({type(e).__name__}). "
+                                         "Upload this file again or file it manually."), upload, "mark as failed")
         print(f"[failed] onboarding_upload {upload['id']}: unexpected {type(e).__name__}: {e}")
         return True
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+def _safe_update(write, upload, what):
+    """A write that reports an outcome must never itself leave the row stuck
+    'classifying' if IT fails (a transient Supabase blip right as we're
+    reporting a different error) - same fix as extract_cv_fields.py's own
+    _safe_update, found missing here too, UX audit 2026-10-23."""
+    try:
+        write()
+    except Exception as e2:
+        system_alerts.record("onboarding_scan", f"Could not {what} for onboarding_upload {upload['id']}: "
+                             f"{type(e2).__name__}: {e2}", "error", exc=e2, context={"onboarding_upload_id": upload["id"]})
 
 
 def poll_once(url, key, quiet_when_empty=False, client_factory=cd.default_llm_client):

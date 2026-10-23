@@ -154,10 +154,45 @@ CIDB_ANSWER = {
 }
 
 
+CIDB_ANSWER_WIRE = {
+    "document_kind": "cidb_registration", "document_kind_reason": "CIDB grading certificate.",
+    "fields": [
+        {"field": "registration_number", "value": "123456789", "evidence": "Registration number: 123456789"},
+        {"field": "grade_class", "value": "8CE", "evidence": "Grading: 8CE"},
+        {"field": "expiry_date", "value": "2026-12-31", "evidence": "Expiry date: 31 December 2026"},
+        {"field": "contractor_name", "value": "Klipcorp Test (Pty) Ltd", "evidence": "Contractor: Klipcorp Test (Pty) Ltd"},
+    ],
+    "parse_problems": [],
+}
+
+
+def _count_schema_params(schema):
+    """Every named property definition anywhere in the schema tree - the
+    same thing the real API rejected at 54 (see output_schema()'s own
+    comment: 2026-10-23, "54 parameters with union types... limit 16")."""
+    if not isinstance(schema, dict):
+        return 0
+    n = len(schema.get("properties") or {})
+    for sub in (schema.get("properties") or {}).values():
+        n += _count_schema_params(sub)
+    items = schema.get("items")
+    if isinstance(items, dict):
+        n += _count_schema_params(items)
+    return n
+
+
 def test_validate_proposal_schema():
     import jsonschema
-    jsonschema.validate(CIDB_ANSWER, cd.output_schema())
-    check(True, "test-double answer is valid against the structured-output schema sent to the API")
+    jsonschema.validate(CIDB_ANSWER_WIRE, cd.output_schema())
+    check(True, "array-shaped test-double answer is valid against the real structured-output schema sent to the API")
+    # Regression guard for the real 2026-10-23 bug: the old `fields` shape
+    # (one named sub-object per entry in ALL_FIELDS) put 54 nested parameter
+    # definitions in one request and every upload failed outright. This
+    # stays small and constant regardless of how many fields/kinds exist.
+    n = _count_schema_params(cd.output_schema())
+    check(n < 16, f"schema has {n} total parameter definitions - must stay under the API's real limit (was 54)")
+    check(len(cd.ALL_FIELDS) > 16, f"sanity check: {len(cd.ALL_FIELDS)} real fields exist - if this were still the "
+          "old one-sub-object-per-field shape, the schema would already be over the limit on field count alone")
 
 
 def test_cidb():

@@ -36,6 +36,17 @@ async function requireCompanyId() {
  * "Start a pack for this tender" - the company's tender_packs row (0001),
  * which everything else on the Tender Workspace hangs off. Idempotent: the
  * (company_id, tender_id) unique constraint means a second click is a no-op.
+ *
+ * UX audit 2026-10-23, item 4: this used to end with
+ * `redirect(`/tenders/${tenderId}`)` on success - a redirect back to the
+ * EXACT url the form was already on. Confirmed live (production DB) that
+ * the upsert itself worked every time; the page just kept showing "No
+ * tender pack exists yet" after the click, with no error, because Next's
+ * router treats a Server Action's redirect to the current path as already
+ * there and skips re-fetching it, so the stale pre-mutation render stayed
+ * on screen. `revalidatePath` alone - the same "mutate, stay put" pattern
+ * confirmPositionPerson below already uses - is enough: the form's own
+ * submission already re-renders this page, now with fresh data.
  */
 export async function startTenderPack(formData: FormData) {
   const { companyId } = await requireCompanyId();
@@ -52,7 +63,6 @@ export async function startTenderPack(formData: FormData) {
   }
 
   revalidatePath(`/tenders/${tenderId}`);
-  redirect(`/tenders/${tenderId}`);
 }
 
 /**

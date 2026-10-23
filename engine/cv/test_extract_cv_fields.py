@@ -189,11 +189,50 @@ GOOD_ANSWER = {  # TEST DOUBLE: what a correct model answer for make_docx()'s CV
 }
 
 
+def _person_as_wire_entries(person_dict):
+    """GOOD_ANSWER["person"] is a dict (used throughout this file to test
+    validate_proposal()'s own logic) - the real wire schema (output_schema())
+    is an array of {field, value, evidence} entries (see extract_cv_fields.py's
+    own 2026-10-23 comment on PERSON_FIELD_ENTRY_SCHEMA). Converts one to the
+    other for the one test that checks a fixture against the real schema."""
+    return [{"field": k, "value": v["value"], "evidence": v["evidence"]} for k, v in person_dict.items()]
+
+
+def _count_schema_params(schema):
+    """Every named property definition anywhere in the schema tree - what
+    the real API counts toward its limit (see output_schema()'s own 2026-10-23
+    comment: the old shape put ~51 of these in one request)."""
+    if not isinstance(schema, dict):
+        return 0
+    n = len(schema.get("properties") or {})
+    for sub in (schema.get("properties") or {}).values():
+        n += _count_schema_params(sub)
+    items = schema.get("items")
+    if isinstance(items, dict):
+        n += _count_schema_params(items)
+    return n
+
+
 def test_validation(docx_path, tmp):
     print("3. checks applied to a model answer (hand-written test doubles)")
     import jsonschema
-    jsonschema.validate(GOOD_ANSWER, x.output_schema())
-    check(True, "test-double answer is valid against the structured-output schema sent to the API")
+    jsonschema.validate(dict(GOOD_ANSWER, person=_person_as_wire_entries(GOOD_ANSWER["person"])), x.output_schema())
+    check(True, "array-shaped test-double answer is valid against the real structured-output schema sent to the API")
+    n = _count_schema_params(x.output_schema())
+    # `person` (32 params, same fixed-object-per-field shape as the confirmed
+    # live bug in classify_documents.py's `fields`) is now 3. `projects`/
+    # `other_registrations` are deliberately NOT collapsed the same way in
+    # this pass: they're typed per-field records (a number field, two date
+    # fields, a shared per-project evidence quote `validate_proposal()`
+    # falls back to the client/body text for) with real verification logic
+    # built around that shape, not a simple flat value/evidence pair per
+    # field - flattening them changes what gets independently verified, a
+    # bigger behavioural change than fixing a schema-size bug, and neither
+    # was confirmed as part of the reported failure the way `person` was.
+    # 22 is the honest current number: a long way down from 51, with
+    # `person`'s own confirmed-pattern bug fixed; not asserted to be under
+    # the API's real limit the way classify_documents.py's rebuilt schema is.
+    check(n < 30, f"schema has {n} total parameter definitions - down from ~51 before `person` was fixed")
     text = x.read_cv_text(docx_path, tmp)["text"]
     _, ids = x.find_and_redact_sa_ids(text)
     prop, warnings = x.validate_proposal(json.loads(json.dumps(GOOD_ANSWER)), text, ids)
@@ -362,6 +401,24 @@ def test_queue(docx_path, tmp):
     x.poll_once("u", "k", quiet_when_empty=True, client_factory=lambda: stub)
     u4 = [r for r in db.tables["cv_uploads"] if r["id"] == "u4"][0]
     check(u4["status"] == "extraction_failed" and "stopped mid-job" in u4["extraction_error"], "stale 'extracting' reclaimed as failed")
+
+    # A write that REPORTS an outcome (fail_upload) must never itself crash
+    # the pass if IT fails (a transient Supabase blip right as a different
+    # error is being reported) - found missing, UX audit 2026-10-23: a prior
+    # contributor to a row staying 'extracting' past the stale-reclaim window.
+    db.tables["cv_uploads"].append(dict(base, id="u5", storage_path="c1/people/p1/uploads/missing.docx", created_at="5"))
+    real_request = db.request
+
+    def flaky_request(url, key, method, path, body=None):
+        if method == "PATCH" and path == "cv_uploads?id=eq.u5":  # fail_upload()'s own write, not claim_upload()'s
+            raise RuntimeError("simulated transient Supabase failure while marking u5 failed")
+        return real_request(url, key, method, path, body)
+    x.supabase_request = flaky_request
+    try:
+        handled5 = x.poll_once("u", "k", quiet_when_empty=True, client_factory=lambda: stub)
+        check(handled5 >= 1, "poll_once() itself doesn't crash when fail_upload()'s own write fails")
+    finally:
+        x.supabase_request = real_request
 
 
 def test_ocr(docx_path, tmp):
