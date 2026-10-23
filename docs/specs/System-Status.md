@@ -2053,6 +2053,35 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventy-eighth run): every compliance/registration reminder would silently stop past the 1000th company, person, registration or task
+
+Orientation: rotated to `engine/compliance` (most overdue literal rotation slot). This exact
+"client read never pages past PostgREST's 1000-row cap" bug class has already been found and
+fixed twice elsewhere in this repo in the last day (`marketPricing.ts` PR #111,
+`company_profiles.RestClient.select()`) - worth checking whether `watch_deadlines.py`'s own,
+separate `supabase_request()` got the same treatment.
+
+**Finding 67 (CONFIRMED, FIXED, severe).** It hadn't: one GET per call, no offset/limit loop at
+all. Shared by `find_due_documents()`, `find_due_person_credentials()`, `find_due_tasks()`, and
+(via `registration_reminders.py`) `find_due_registrations()`/`find_due_property_documents()` -
+every compliance/deadline/registration reminder this platform sends. Confirmed directly: a fake
+PostgREST server capping every response at 1000 rows, called through the real function, silently
+returned 1000 of 2500 real rows, no error. Not yet triggered at today's scale, but
+`held_registrations`/`property_documents` can accumulate several rows per company, so this is
+reachable well before 1000 customers.
+
+**Fix:** `supabase_request()` now pages (offset/limit, `PAGE=1000`) the same way
+`RestClient.select()` already does, with a stable `order=id.asc` default when the caller gives
+none. The real HTTP call moved into a separately-swappable `_fetch_page()` so the pagination loop
+itself could be tested without disturbing any existing test's own full-function fake.
+
+**Verified the regression test actually catches the regression:** new test using the same
+`CappedServer` pattern `test_company_profiles.py` already uses for `RestClient.select()`, proving
+2500 rows page through in exactly 3 requests. Reverted: the new test's seam doesn't exist on the
+old code, and separately reproduced the old code's silent truncation by hand one more time;
+restored: `0` failures. Full compliance suite + `engine/notify`'s own digest test all re-run
+clean.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-seventh run): the brand-new narrative-document generator's Word builder had no control-character guard at all, and crashed on a tender's own corrupted contract number
 
 Orientation: PR #74 (cover letter / methodology statement generator) merged earlier this session

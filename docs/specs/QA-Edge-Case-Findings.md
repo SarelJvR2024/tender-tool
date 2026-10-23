@@ -4016,3 +4016,65 @@ worker reads this first.
 **Regression:** one function changed in `engine/narrative/build_docx.py` (the renderer itself);
 every caller (`generate_narrative.py`'s CLI, `process_narrative_jobs.py`'s real bridge) gets the
 fix for free, with no call-site changes needed.
+
+### Finding 67 (CONFIRMED, FIXED, severe - every compliance/registration reminder would silently stop past the 1000th company, person, registration or task, the exact bug class already fixed elsewhere in this repo but not here)
+
+**Where:** `engine/compliance/watch_deadlines.py`'s own `supabase_request()` - shared by
+`find_due_documents()`, `find_due_person_credentials()`, `find_due_tasks()` in that file, and (via
+`_wd().supabase_request`) `registration_reminders.py`'s `find_due_registrations()` and
+`find_due_property_documents()`. Every compliance/deadline/registration reminder this platform
+sends goes through this one function.
+
+**What was tested:** rotated to `engine/compliance` this cycle (most overdue literal rotation
+slot). This exact bug class - a client read that never pages past PostgREST's hard 1000-row-per-
+response cap, silently truncating rather than erroring - has already been found and fixed twice
+elsewhere in this very repo within the last day (`app/lib/marketPricing.ts`, PR #111: "silently
+reading a 2.5% sample, not the real table"; `engine/discovery/company_profiles.py`'s
+`RestClient.select()`, with its own dedicated `test_company_profiles.py` proving it pages
+correctly) - worth checking whether `watch_deadlines.py`'s OWN, separate `supabase_request()`
+function got the same treatment. It hadn't: confirmed by reading it (no `offset`/`limit` loop at
+all, a single GET per call) and reproducing directly - a fake PostgREST server that caps every
+response at 1000 rows regardless of what's asked for, called through the real (unmodified)
+function, returned exactly 1000 rows for a table with 2500 real ones, with no error, no warning,
+nothing to indicate anything was missing.
+
+**Why severe:** this silently drops EVERY company/person/registration/task past row 1000 from
+EVERY compliance reminder the platform sends - document expiry, person-credential expiry
+(ECSA/SACPCMP/SACNASP/SAGC), the shared registrations catalog (PSIRA, SETA, waste permits...),
+property documents, and tender task due-dates - the exact kind of silent, unannounced coverage
+gap this review's own standing discipline exists to catch. Not yet triggered at today's company
+count, but a pure function of row count that will start silently dropping reminders, with zero
+symptom until someone notices a reminder that should have fired never did, the moment any ONE of
+those tables crosses 1000 real rows - and `held_registrations`/`property_documents` in particular
+can accumulate several rows per company, so this is reachable well before the platform itself has
+1000 customers.
+
+**Fix:** `supabase_request()` now pages (offset/limit, `PAGE=1000`) exactly the way
+`RestClient.select()` already does, accumulating every page until one comes back short. Also
+appends a stable `order=id.asc` when the caller's own path has no `order=` clause (every table
+read through this function already selects `id` as its first column), so repeated paged GETs
+can't skip or duplicate rows across pages - the same safety `RestClient.select()`'s own docstring
+calls out ("pass order for a stable order across pages"). The actual network call moved into a
+small, separately-swappable `_fetch_page()` so the real pagination LOOP (not a replacement fake)
+could be exercised by a test, while every existing test's own `wd.supabase_request = fake_request`
+monkeypatch (which replaces the whole function) is completely unaffected.
+
+**Verified the regression test actually catches the regression:** new
+`supabase_request_pages_past_the_1000_row_server_cap()` in `test_watch_deadlines_urgency.py` - a
+`CappedServer` stand-in (the identical pattern `test_company_profiles.py`'s own `CappedServer`
+already uses for `RestClient.select()`) hooked onto the new `_fetch_page()` seam, proving the real
+function pages through 2500 rows in exactly 3 requests, that a missing `order=` gets a safe
+default, and that a caller's own `order=` is left alone. Reverted `watch_deadlines.py` to its
+exact previous version (saved patch + `git apply -R`, restored with `git apply`): confirmed the
+NEW test breaks (the `_fetch_page` seam it needs doesn't exist on the old code) and, separately
+and more directly, reproduced the OLD code's actual silent-truncation behavior one more time by
+hand against the same capped-at-1000 fake server - exactly 1000 rows back for a 2500-row table, no
+error. Restored: `0` failures. Full compliance suite (`test_watch_deadlines_urgency.py`,
+`test_watch_person_credentials.py`, `test_principals_registrations.py`,
+`test_watch_conditional_registrations.py`, `test_reminder_seen_db.py`) and `engine/notify`'s own
+`test_digest_live.py` (which reads company/document/task data through this same function) all
+re-run clean.
+
+**Regression:** one function changed (`supabase_request()`), plus a new, purely additive
+`_fetch_page()` helper; every one of its 7 callers across `watch_deadlines.py` and
+`registration_reminders.py` gets the fix for free, with no call-site changes needed.

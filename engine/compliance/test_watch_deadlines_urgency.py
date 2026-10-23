@@ -141,7 +141,65 @@ def days_until_malformed_inputs():
     check(not ALERTS, "none of the valid dates above raised a spurious alert")
 
 
+class CappedServer:
+    """A PostgREST stand-in that never returns more than 1000 rows in one
+    response, however wide a limit/offset the caller requests - the same
+    real cap engine/discovery/test_company_profiles.py's own CappedServer
+    already proves RestClient.select() pages past correctly. This one
+    hooks wd._fetch_page (the lower-level seam supabase_request() now
+    loops over), so the test exercises the REAL pagination loop in
+    supabase_request() itself, not a fake that skips it."""
+    SERVER_CAP = 1000
+
+    def __init__(self, total_rows):
+        self.total_rows = total_rows
+        self.requests = []
+
+    def fetch(self, url, service_key, path):
+        self.requests.append(path)
+        _, _, qs = path.partition("?")
+        params = dict(urllib.parse.parse_qsl(qs))
+        requested_limit = int(params.get("limit", self.SERVER_CAP))
+        offset = int(params.get("offset", 0))
+        effective_limit = min(requested_limit, self.SERVER_CAP)
+        return [{"id": i} for i in range(offset, min(offset + effective_limit, self.total_rows))]
+
+
+def supabase_request_pages_past_the_1000_row_server_cap():
+    print("supabase_request(): pages past PostgREST's real 1000-row cap")
+    # Finding, 2026-10-23: supabase_request() (shared by find_due_documents/
+    # find_due_person_credentials/find_due_tasks here, and
+    # registration_reminders.py's find_due_registrations/
+    # find_due_property_documents) made exactly one GET, no offset/limit
+    # loop at all - every one of those would have silently stopped
+    # reminding anyone past the 1000th company/person/registration/task,
+    # the exact bug class company_profiles.RestClient.select() already
+    # guards against elsewhere in this repo.
+    real_fetch = wd._fetch_page
+    server = CappedServer(2500)
+    wd._fetch_page = server.fetch
+    try:
+        rows = wd.supabase_request("https://example.test", "key", "companies?select=id,legal_name")
+    finally:
+        wd._fetch_page = real_fetch
+    check(len(rows) == 2500, f"should page through all 2500 real rows past the server's 1000-row cap, got {len(rows)}")
+    check(rows[0]["id"] == 0 and rows[-1]["id"] == 2499, "rows should be the full, real set, not truncated")
+    check(len(server.requests) == 3, f"should take exactly 3 requests (1000+1000+500), took {len(server.requests)}")
+    check(all("order=id.asc" in r for r in server.requests),
+          "a stable order is added (none was given) so paging can't skip/duplicate rows")
+
+    server2 = CappedServer(2000)
+    wd._fetch_page = server2.fetch
+    try:
+        wd.supabase_request("https://example.test", "key", "people?select=id,name&order=name.asc")
+    finally:
+        wd._fetch_page = real_fetch
+    check(all("order=name.asc" in r and "order=id.asc" not in r for r in server2.requests),
+          "a caller's own order= is kept as-is, not overridden by the default")
+
+
 def main():
+    supabase_request_pages_past_the_1000_row_server_cap()  # before supabase_request itself is replaced below
     wd.supabase_request = fake_request
     days_until_malformed_inputs()
     seen = {}
