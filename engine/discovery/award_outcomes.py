@@ -117,12 +117,29 @@ def parse_rand(raw):
         return None
 
 
+PORTAL_EARLIEST_PLAUSIBLE_DATE = "2000-01-01"
+
+
 def parse_portal_date(raw):
-    """"2026-10-14T00:00:00" -> "2026-10-14"; the portal's "no date"
-    placeholders 0001-01-01 / 1900-01-01 -> None."""
-    if not raw or raw.startswith(("0001-01-01", "1900-01-01")):
+    """"2026-10-14T00:00:00" -> "2026-10-14"; None for anything before the
+    portal could plausibly have a real date for. Catches the portal's known
+    "no date" placeholders (0001-01-01, 1900-01-01, and 1753-01-01 - SQL
+    Server's own DATETIME column minimum) the same way plausible() in
+    store_award_outcomes.py bounds a mangled rand amount, plus whatever else
+    slips through the same way: a garbled year seen live, 2026-10-23
+    ("1025-10-13" for what is almost certainly "2025-10-13" in the portal's
+    own source data) poisoned the market-wide date-range aggregate's MIN()
+    with a single bad row (caught during the Market Intelligence QA pass -
+    confirmed live: nothing real exists between the 1753 sentinel and the
+    earliest genuine award date found, 2009-07-01, so this bound has real
+    margin, not a guess). ISO "YYYY-MM-DD..." strings compare lexicographically
+    the same as chronologically, so a plain string comparison is exact."""
+    if not raw:
         return None
-    return raw[:10]
+    date = raw[:10]
+    if date < PORTAL_EARLIEST_PLAUSIBLE_DATE:
+        return None
+    return date
 
 
 def parse_sanral_date(raw):
