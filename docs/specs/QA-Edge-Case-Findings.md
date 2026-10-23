@@ -3496,3 +3496,53 @@ and `npm run build` (completes cleanly).
 right now (not a hypothetical or an environment-specific false failure like Finding 54) - every
 push since "Spec v3 Batch 2" landed has been failing the one check that's supposed to catch
 exactly this kind of regression before it reaches `main`.
+
+### Finding 56 (CONFIRMED, FIXED, severe - a chunked SANRAL award backfill resume could silently skip an entire list's worth of pages)
+
+**Where:** `engine/discovery/store_award_outcomes.py`'s `main()` - the CLI driving a fresh,
+heavily-iterated resumable-backfill feature (4 commits in a row this same day fixing edge cases
+in `award_outcomes.fetch_sanral_list()`/`fetch_sanral_outcomes()`'s own per-list resume cursor:
+a silent 2,000-row cap, exact next-page tracking, overshoot-row handling). `--sanral-start-page`
+resumes a chunked backfill from a given page instead of always re-reading the newest tender -
+built and tested per-list (`--sanral-lists closed` alone), but `--sanral-lists` defaults to
+`"awarded,closed"` (BOTH lists together), and the CLI applied the SAME `--sanral-start-page` to
+every list named, via one dict comprehension: `{k: ao.fetch_sanral_outcomes(k.strip(),
+args.sanral_limit, start_page=args.sanral_start_page) for k in args.sanral_lists.split(",") ...}`.
+
+**What was tested:** `"awarded"` and `"closed"` are two completely independent, differently-sized
+SANRAL lists (the closed list alone holds 5,546 tenders), each with its own pagination. Confirmed
+live (mocking only the network-touching `fetch_sanral_outcomes`, not reimplementing any logic):
+running the CLI's own real argument-building code with `--sanral-start-page 41` (resuming a
+"closed"-list chunk, the whole reason this flag exists) and the DEFAULT `--sanral-lists` called
+`fetch_sanral_outcomes("awarded", ..., start_page=41)` AND `fetch_sanral_outcomes("closed", ...,
+start_page=41)` - the exact same cursor applied to both. Whichever list the operator meant to
+resume gets the right page; the OTHER list silently skips however many of its own pages sit
+before page 41, a gap no later chunk would ever cover (since every later chunk's own start_page
+is chosen relative to whichever list's progress the operator is actually tracking).
+
+**Why severe:** this is the exact "silent gap" bug class the SAME commit chain was built and
+re-fixed four times in a row to eliminate elsewhere in this identical code path - just one layer
+up, at the CLI argument level rather than inside the pagination logic itself. A full backfill of
+the 5,546-tender closed list is explicitly the scenario `--sanral-start-page` exists for (a single
+run "risks losing all of it if interrupted" per the commit that added it), and the default
+`--sanral-lists` value makes this the easy, unmarked path, not a contrived misuse.
+
+**Fix:** refuse the ambiguous combination outright - `--sanral-start-page != 1` with more than one
+list named in `--sanral-lists` now raises a clear `SystemExit` naming the exact problem and what
+to do (resume one list per run), rather than silently applying one list's cursor to another.
+
+**Verified the regression test actually catches the bug:** new
+`test_sanral_start_page_is_refused_for_more_than_one_list()` in
+`engine/discovery/test_award_prices.py` (3 checks: the ambiguous combination is refused with zero
+network calls made at all; a single named list still resumes correctly; the unresumed default -
+both lists from page 1 - is unaffected). Reverted the fix (`git apply -R`), re-ran: the refusal
+check failed exactly as predicted (no `SystemExit`, the run instead failed later for an unrelated
+reason, proving the guard clause itself was gone); restored the fix: `0 failure(s)`. The test
+mocks `fetch_sanral_outcomes` for every call it makes, including the one expected to be refused
+before reaching that function, so it can never hit the real SANRAL site regardless of code state -
+confirmed necessary the hard way: an earlier, less-isolated version of this same test accidentally
+triggered real unmocked network calls against the live SANRAL site during its own revert-check,
+caught and stopped mid-run, then rewritten to mock unconditionally.
+
+**Regression:** full `test_award_prices.py` (Part 1, offline): all checks pass.
+`test_discovery_fanout.py` and `test_gov_sources.py`: both clean, unaffected.

@@ -1266,6 +1266,42 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - sixty-ninth run): a chunked SANRAL award backfill resume could silently skip an entire list's worth of pages
+
+Orientation: confirmed CI stayed green for 4 more pushes after Finding 55's fix (good), synced a
+large batch (live-infra handover closed - migrations 0077-0085 confirmed live - plus Market
+Intelligence, several spec v3 batches, a middleware auth-gap hotfix, Microsoft SSO). Rotated to
+discovery, specifically the SANRAL award backfill resumability work that landed the same day (4
+commits in a row fixing edge cases in `award_outcomes.fetch_sanral_list()`'s own per-list resume
+cursor) - a heavily-iterated area is exactly where one more edge case is likely to still be
+sitting, one layer up from where the last four were found.
+
+**Finding 56 (CONFIRMED, FIXED, severe).** `store_award_outcomes.py`'s CLI applied one shared
+`--sanral-start-page` to every list named in `--sanral-lists` (default `"awarded,closed"` - BOTH)
+via a single dict comprehension, even though "awarded" and "closed" paginate completely
+independently (closed alone holds 5,546 tenders). Confirmed live by mocking only the
+network-touching call: resuming with `--sanral-start-page 41` and the default lists value called
+`fetch_sanral_outcomes` with `start_page=41` for BOTH - whichever list the operator meant to
+resume gets the right page, the other silently skips however many of its own pages sit before
+page 41, a permanent gap no later chunk would ever cover. The exact "silent gap" bug class this
+same commit chain was built to eliminate, just at the CLI layer instead of inside the pagination
+logic.
+
+**Fix:** refuse `--sanral-start-page != 1` combined with more than one `--sanral-lists` value
+outright, naming the problem and the fix (resume one list per run) rather than silently applying
+one list's cursor to another.
+
+**Verified the regression test actually catches the bug, and caught a real mistake of my own
+along the way**: wrote a new test, reverted the fix, confirmed it fails exactly as predicted,
+restored it. The first version of that test only mocked the network call for two of its three
+checks - reverting the fix to prove the test catches the regression made the THIRD, unmocked
+check actually call out to the real live SANRAL site before I caught it mid-run and stopped it.
+Rewrote the test to mock unconditionally for every call it makes, confirmed the revert-check is
+now safe regardless of code state, then re-ran the full revert/restore cycle properly.
+
+**Regression:** `test_award_prices.py` (Part 1), `test_discovery_fanout.py`,
+`test_gov_sources.py`: all clean.
+
 ## This pass (2026-10-22, standing QA/robustness review - sixty-eighth run): real CI was red on `main` for 3 consecutive pushes - fixed
 
 Orientation: synced a very large batch (live-infra handover closed - migrations 0077-0085

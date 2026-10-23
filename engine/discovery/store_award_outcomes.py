@@ -406,10 +406,30 @@ def main():
     ap.add_argument("--sanral-lists", default="awarded,closed")
     ap.add_argument("--sanral-limit", type=int, default=40)
     ap.add_argument("--sanral-start-page", type=int, default=1,
-                     help="resume a chunked backfill from this page (page_size 50) instead of the newest tender")
+                     help="resume a chunked backfill from this page (page_size 50) instead of the newest tender - "
+                          "only with --sanral-lists naming exactly ONE list (see below)")
     ap.add_argument("--dry-run", action="store_true", help="print a summary and the rows, write nothing")
     ap.add_argument("--out", default=None, help="with --dry-run: write the merged rows here")
     args = ap.parse_args()
+
+    sanral_list_keys = [k.strip() for k in args.sanral_lists.split(",") if k.strip()]
+    if args.sanral_start_page != 1 and len(sanral_list_keys) > 1:
+        # fetch_sanral_list()'s own resume cursor (next_page) is per-list -
+        # "awarded" and "closed" paginate completely independently (different
+        # sizes, different content). Applying ONE --sanral-start-page to
+        # BOTH via this dict comprehension's shared start_page= argument
+        # would resume whichever list the operator actually meant to resume
+        # correctly, but silently skip however many pages of the OTHER list
+        # sit before that same page number - a permanent, silent gap in that
+        # list, never covered by any later chunk (confirmed live: mocking
+        # fetch_sanral_outcomes and running this exact comprehension with
+        # --sanral-start-page 41 called BOTH 'awarded' and 'closed' with
+        # start_page=41, each blind to the other's own real progress - QA
+        # pass, 2026-10-23). Refuse rather than silently corrupt a backfill:
+        # a resume is inherently a per-list operation.
+        raise SystemExit(f"--sanral-start-page is per-list (each SANRAL list paginates independently) - "
+                         f"pass exactly one --sanral-lists value when resuming, not {args.sanral_lists!r}. "
+                         "Resume each list in its own run.")
 
     parts = []
     for path in args.report:
@@ -420,9 +440,9 @@ def main():
             raw, _, _, _ = ao.fetch_portal_awarded(args.limit, args.department)
             report["portal"] = {"records": [ao.normalize_portal_award(r) for r in raw]}
         if args.source in ("sanral", "both"):
-            report["sanral"] = {k: ao.fetch_sanral_outcomes(k.strip(), args.sanral_limit,
+            report["sanral"] = {k: ao.fetch_sanral_outcomes(k, args.sanral_limit,
                                                             start_page=args.sanral_start_page)
-                                for k in args.sanral_lists.split(",") if k.strip()}
+                                for k in sanral_list_keys}
         parts += parts_from_report(report)
     if not parts:
         raise SystemExit("nothing to store: pass --report and/or --fetch")
