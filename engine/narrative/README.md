@@ -17,7 +17,7 @@ they might both get disqualified." Confirmed before any code was written: build 
 as a **full, ready-to-use draft**, but with a **mechanical similarity check** across
 companies for the same tender — not just "trust the prompt" — plus an explicit export /
 hand-edit-in-Word / re-upload path, so nothing ships without a human actually reading and
-owning the words. See migration `app/supabase/migrations/0086_narrative_documents.sql`'s own
+owning the words. See migration `app/supabase/migrations/0087_narrative_documents.sql`'s own
 header comment for the same reasoning recorded against the schema.
 
 ## Modules

@@ -3,7 +3,7 @@ import { AutoRefresh } from "../../_components/AutoRefresh";
 import { requestNarrativeDocument, uploadNarrativeFinal } from "./narrative-actions";
 
 /**
- * Cover letter / methodology statement generator (migration 0086) -
+ * Cover letter / methodology statement generator (migration 0087) -
  * AI-drafted, grounded in this company's own profile, people, past projects
  * and how they describe their own approach (how_we_work), plus this
  * tender's own facts. Every draft is mechanically checked
@@ -12,7 +12,7 @@ import { requestNarrativeDocument, uploadNarrativeFinal } from "./narrative-acti
  * the same. The AI draft is a starting point, not the final word - export
  * to Word, edit it, upload the real final version back before using it.
  *
- * See migration 0086's own header comment and docs/specs/Company-Voice-Audit.md
+ * See migration 0087's own header comment and docs/specs/Company-Voice-Audit.md
  * for why this directly reopens an earlier, deliberate decision to cut
  * AI-drafted executive summaries/methodology from scope, and what mitigates
  * the same risk this time (Sarel, 2026-10-22).
