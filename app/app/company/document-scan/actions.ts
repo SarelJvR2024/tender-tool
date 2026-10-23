@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
 import { VAULT_BUCKET } from "@/lib/vaultDocuments";
+import { safeRedirectPath } from "@/lib/safeRedirect";
 import {
   ONBOARDING_BUCKET,
   VAULT_DOCUMENT_COLUMN,
@@ -56,10 +57,10 @@ function num(formData: FormData, key: string): number | null {
 // review.tsx's own returnTo prop. Every existing caller omits it, so every
 // existing redirect/revalidate target is unchanged. Only a same-origin
 // relative path is honoured (an open-redirect guard - this is user-supplied
-// form data, never trusted as-is).
+// form data, never trusted as-is) - see lib/safeRedirect.ts for why
+// startsWith("/") alone (what this used to check) isn't enough.
 function backTo(formData: FormData): string {
-  const v = str(formData, "return_to");
-  return v && v.startsWith("/") && !v.startsWith("//") ? v : BACK;
+  return safeRedirectPath(str(formData, "return_to"), BACK);
 }
 
 /**

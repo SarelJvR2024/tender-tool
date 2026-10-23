@@ -1266,6 +1266,36 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventieth run): a real open-redirect bypass in the post-login/signup redirect, and a redirect sink with no validation at all
+
+Orientation: confirmed CI (no new app/ pushes since last cycle, nothing to re-check), rotated to
+the brand-new "Spec v3 Batch 4" people/experience work. Its own `backTo()` helper
+(`app/company/document-scan/actions.ts`) explicitly called itself "an open-redirect guard" - worth
+checking whether it actually closes the real bypass for that class of check, not just the obvious
+one.
+
+**Finding 57 (CONFIRMED, FIXED, severe).** It didn't, and neither did the two older, identically-
+shaped checks on `/login`/`/signup`'s own `?next=` param: all three only checked
+`value.startsWith("/") && !value.startsWith("//")`, which blocks the protocol-relative case but
+not the WHATWG URL spec's own backslash-as-path-separator rule every real browser implements -
+confirmed directly with Node's own WHATWG-compliant parser: `new URL("/\\evil.com", base).href`
+is `"https://evil.com/"`, not a same-origin path, and `"/\\evil.com"` passes every one of those 3
+checks. The 4th and most important site, `/auth/callback/route.ts` (the actual redirect right
+after a real OAuth sign-in succeeds), had no check on `next` at all - a bare `"@evil.com"` (the
+userinfo-authority trick) would pass straight through there. `next`/`return_to` on login, signup
+and the OAuth callback is about as high-value a phishing target as exists in this app: a crafted
+link lets a victim genuinely sign in, then redirects their now-authenticated browser straight to
+an attacker's page.
+
+**Fix:** new shared `lib/safeRedirect.ts` (same "one shared helper" convention as
+`safeFileName.ts`) - `/^\/(?!\/|\\)/`, applied at all 4 sites including the previously-unguarded
+callback route (a redirect sink validating its own input, not just trusting its caller).
+
+**Verified the regression test actually catches the bug:** new `lib/safeRedirect.spec.ts` (8
+checks). Reverted to the exact old check: 2/8 failed with exactly the predicted backslash-bypass
+value passing through; restored: 8/8. Full app suite: 12 files, 129 tests, all pass.
+`typecheck`/`lint` clean, every `*.test.ts` file clean the same way CI runs them.
+
 ## This pass (2026-10-23, standing QA/robustness review - sixty-ninth run): a chunked SANRAL award backfill resume could silently skip an entire list's worth of pages
 
 Orientation: confirmed CI stayed green for 4 more pushes after Finding 55's fix (good), synced a

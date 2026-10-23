@@ -10,6 +10,7 @@ import { PasswordInput } from "../_components/PasswordInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { safeRedirectPath } from "@/lib/safeRedirect";
 
 // Same OAuth providers as app/app/login/page.tsx, same MICROSOFT_AUTH_READY
 // flag (see that file's own comment for the history) - this page never had
@@ -25,10 +26,12 @@ function AuthCard({ children }: { children: React.ReactNode }) {
 
 // Same reasoning as app/app/login/page.tsx: read `next` off window.location
 // rather than useSearchParams(), to avoid a Suspense-boundary requirement.
+// safeRedirectPath, not a bare startsWith("/") check - see
+// lib/safeRedirect.ts and login/page.tsx's own comment on why that matters.
 function nextParam(): string {
   if (typeof window === "undefined") return "/dashboard";
   const v = new URLSearchParams(window.location.search).get("next");
-  return v && v.startsWith("/") ? v : "/dashboard";
+  return safeRedirectPath(v, "/dashboard");
 }
 
 export default function SignUpPage() {
