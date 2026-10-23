@@ -18,17 +18,20 @@ where each item landed:
 1. Onboarding doc-classification schema rejected ("54 params, limit 16") - **fixed**,
    `classify_documents.py` + `extract_cv_fields.py`'s `person` block moved to a constant-size
    array schema. Tests updated and passing.
-2. OCR/Tesseract on the worker - **not a code bug, a live deployment gap, not fixable from this
-   sandbox.** `engine/worker/Dockerfile` has installed `tesseract-ocr` since commit `f1a0d56`
-   (2026-10-21), confirmed on `main` right now. Production `system_alerts` as of 2026-10-23
-   16:01 UTC still logged "Tesseract OCR is not installed on this worker" on a real onboarding
-   upload and a real CV upload. Railway is documented (`Automated-Fulfillment-Deployment.md`) to
-   auto-rebuild on every push to `main`, so 2+ days without picking up a Dockerfile change that's
-   been on `main` the whole time points at the Railway service itself: check (in Railway's own
-   dashboard, which this sandbox cannot reach) whether `RAILWAY_DOCKERFILE_PATH` is actually set
-   to `engine/worker/Dockerfile`, whether the service tracks `main`, whether `OCR_DISABLED` got
-   set on that service's own variables, and the latest deploy's build log/timestamp. **Whoever
-   picks this up next: don't re-fix the code, verify the Railway build first.**
+2. OCR/Tesseract on the worker - **was never a code bug; confirmed root cause and confirmed
+   fixed, live, 2026-10-23 ~16:50 UTC.** `engine/worker/Dockerfile` has installed `tesseract-ocr`
+   since commit `f1a0d56` (2026-10-21), but the Railway service's **Dockerfile Path build
+   setting was blank** (no `RAILWAY_DOCKERFILE_PATH` variable either), so Railway had no Dockerfile
+   to build from and kept serving an old, pre-OCR container image indefinitely - nothing about
+   this was visible from the repo, only from Railway's own dashboard. Sarel added
+   `RAILWAY_DOCKERFILE_PATH=engine/worker/Dockerfile` as a service variable, which triggered a
+   rebuild (one attempt hit a transient Railway platform-outage build failure, a redeploy then
+   succeeded). Confirmed fixed by running `scan_ocr.available()` directly in the live container
+   via Railway's Console tab: `(True, 'tesseract 5.5.0')`. `system_alerts` also confirms no new
+   "Tesseract OCR is not installed" entries since 16:16:51 UTC, the moment of the last pre-fix
+   upload. **Nothing left to do on item 2.** (The *schema* fix, item 1, is still sitting in
+   unmerged PR #128, so real uploads will keep hitting the unrelated "54 parameters" error until
+   that PR merges - don't mistake that for OCR still being broken.)
 3. CV/onboarding jobs dying mid-job, stuck "extracting"/"classifying" - **fixed**: 180s LLM
    timeout, 30->10 min stale-reclaim window, defensive writes around the error-reporting path
    itself (CV, onboarding, and `company_documents.py`'s own LLM client).
