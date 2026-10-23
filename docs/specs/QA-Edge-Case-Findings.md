@@ -3843,3 +3843,109 @@ by grep).
 (2 call sites updated for the new `find_closing_time()` return shape, plus a new ambiguity note at
 each site), and the test file. No schema or API shape change - `intake_rec["delivery_address"]`
 gains one extra key (`ambiguous`), additive only.
+
+### Finding 63 (CONFIRMED, FIXED, moderate - a real project with no captured position title crashed CV generation entirely for that person, not just printed the word "None")
+
+**Where:** `engine/cv/generate_cv.py`'s `build_sanral_keyperson()` - the normal (non-World-Bank)
+CV builder, used for every real key-person CV this project generates.
+
+**What was tested:** rotated to CV this cycle. Finding 49 (run 60, 2026-10-21) fixed the sibling
+builder `build_world_bank()` for the exact same bug class - `dict.get(key, default)` only
+substitutes `default` when the key is ABSENT, never when it's present with value `None` - and its
+own write-up said `build_sanral_keyperson()` "already guards the identical fields correctly with
+`proj.get(...) or ''`". Checked that claim directly against the actual code rather than trusting
+it: true for `start`/`end`/`contact`/`contact_phone`/`value_rm`, but **not** for `position_held`
+(line 290) - still a bare `proj.get("position_held", "")` with no `or ""`. `position_held` is a
+nullable column (`0001_init_schema.sql`'s `projects` table; `client_and_number`, the one other
+unguarded field on the same line, is `not null` in the schema and so was correctly left alone).
+Reproduced directly: a project row with `position_held=None` (a real, plausible shape - a key
+person's project entered without filling in every field) crashes `_safe_text(None)` with
+`TypeError: expected string or bytes-like object, got 'NoneType'` (`_safe_text`'s own docstring
+says plainly it is "never called on None (every call site already has its own '' fallback for
+that)" - this was the one call site that didn't).
+
+**Why worse than Finding 49, not just the same bug again:** Finding 49's bug rendered the literal
+word "None" into a real CV - wrong content, but the document still generated. This one crashes
+`build_sanral_keyperson()` outright, failing that key person's CV generation job entirely (contained
+to one job by `process_cv_jobs.py`'s own per-job try/except, confirmed in Finding 49's own write-up
+- not a bridge-wide outage, but a real, visible job failure for a company relying on that person's
+CV for a real submission).
+
+**Fix:** added the same `or ""` guard already used for every other nullable field on these rows -
+`proj.get("position_held", "") or ""`.
+
+**Verified the regression test actually catches the regression:** new
+`test_sanral_keyperson_project_with_null_position_held_does_not_crash()` in
+`engine/cv/test_generate_cv.py` - a project with `position_held=None` and every other field
+present and valid, asserting the row renders (no crash), the position cell is blank (not the word
+"None"), and every other cell in the same row is unaffected. Reverted the fix (saved patch + `git
+apply -R`, restored with `git apply`): the new test failed with the exact predicted `TypeError` at
+the exact predicted line; restored: `0` failures. Full `test_generate_cv.py` (now 9 functions) and
+`test_extract_cv_fields.py` re-run clean.
+
+**Regression:** one line changed in `engine/cv/generate_cv.py`. No schema or call-site changes
+needed elsewhere.
+
+### Finding 64 (CONFIRMED, FIXED, moderate - two more real test fixtures were ticking time bombs for the exact same "hardcoded real date vs. real clock" rot a sibling pass just hit, found by auditing the whole suite rather than fixing the one known case)
+
+**Where:** `engine/discovery/test_kouga.py` (`rel["is_closed"] is False`, a real fixture closing
+29 Oct 2026) and `engine/discovery/test_gov_sources.py::test_merge()` (`not a["is_closed"]`, a real
+fixture closing 6 Nov 2026).
+
+**What was tested:** a sibling solution-architect review pass this same day (System-Status.md,
+"Finding 62") found and fixed `test_randwater.py`'s own version of this bug - a frozen fixture with
+a real closing date, asserted against `source_http.is_past()`'s real wall clock, which flipped from
+correct to wrong the moment real time crossed that date - and explicitly flagged: "any fixture with
+a hardcoded near-term real date will eventually flip the same way... auditing every such fixture
+across the discovery test suite is a separate, broader task" - without doing that broader audit
+themselves. Took that up directly: dispatched a read-only investigation across every `test_*.py`
+in `engine/` for the same shape (a frozen calendar date compared against the REAL current time, not
+a relative-to-a-captured-`TODAY` offset, which is the safe pattern already used correctly
+elsewhere - `test_watch_deadlines_urgency.py`, `test_principals_registrations.py`, etc.). Found two
+more real, not-yet-flipped instances: `test_kouga.py` (closing 2026-10-29, 6 days out) and
+`test_gov_sources.py` (closing 2026-11-06, 14 days out) - both compute `is_closed` via
+`source_http.release()`'s own `is_past(base["closing_date"])`, against `datetime.datetime.now(SAST)`,
+with no `now` override threaded through from either test. Confirmed each would actually flip, not
+just theoretically: froze the real clock to a point AFTER each fixture's own closing date (same
+mechanism, `sh.datetime.datetime` monkeypatched to a fixed subclass) and reproduced `is_closed`
+flipping from `False` to `True` exactly as the dates predict - the identical failure mode the
+sibling pass just fixed, just not yet due.
+
+**Why this is worth fixing now, not waiting for it to actually break:** these are ticking time
+bombs, not live bugs - today (2026-10-23) both assertions still pass. Waiting for them to flip
+means a future session re-derives the same root cause from scratch (exactly what the sibling pass
+spent real effort doing for `test_randwater.py`) instead of the fix already being in place.
+
+**Fix:** froze the clock for just the one call that computes `is_closed` in each test (`sh.datetime.datetime`
+monkeypatched to a fixed point BEFORE the fixture's real closing date, restored in a `finally`) -
+the same `FixedDateTime` pattern already established in `engine/test_form_field_audit.py`'s
+`test_today_iso_is_sast_not_naive_utc()`. This makes both assertions correct FOREVER, independent of
+when the test actually runs, rather than correct only until the next hardcoded date arrives -
+closing the actual pattern, not just today's two instances of it.
+
+**Verified directly (not a revert-and-confirm-red in the usual sense, since neither bug has
+actually manifested yet under real time):** reproduced each flip by freezing the clock to a point
+*after* the real closing date and confirming `is_closed` really does flip to `True` with the
+original, unfixed code path - the same proof a revert would have given, adapted to a bug that
+hasn't happened yet rather than one that has. Both full test files re-run clean after the fix
+(`test_kouga.py`: all checks pass; `test_gov_sources.py`: all `test_merge()` and `tender_changes`/
+`daily_digest` checks pass).
+
+**What was ruled out as safe, so a future pass doesn't re-check it:** `test_randwater.py` (already
+fixed by the sibling pass - a past date, correct forever), `test_lephalale.py` and
+`test_vaal_central_water.py` (already-past closing dates asserted `True` - correct forever, once
+past a date never becomes future again), `test_discovery_downgrades.py`/`test_discovery_fanout.py`
+(`closing_date: "2099-01-01..."` is ~73 years out - not a realistic near-term risk),
+`test_taxonomy.py` (`is_closed` is a hardcoded literal input, no date comparison at all),
+`test_pdf_merge.py` and `test_form_field_audit.py`'s own existing `FixedDateTime` tests (already
+decoupled from the real clock), every `engine/compliance/test_*.py` file (the safe
+captured-`TODAY`-plus-relative-offset pattern, never the real clock), `test_reminder_seen_db.py`
+(real `datetime.date.today()`, but only as a consistent relative base - correct whenever run),
+`test_general_bridge.py` (only an already-past expiry is asserted "EXPIRED"; future dates in the
+same file are inert fixture data), `test_award_prices.py` (pure string-parsing, no "now"
+comparison at all).
+
+**Regression:** only the two test files changed (one freeze each, around the single call that
+needed it). No production code touched - the same `datetime.datetime.now` monkeypatch pattern
+`fill_a_forms`/`fill_sbd_docx`'s own tests already use for a different module, applied here to
+`source_http` instead.

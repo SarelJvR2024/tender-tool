@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
-import { NEXT_STAGES, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { IN_PROGRESS_STAGES, NEXT_STAGES, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -142,7 +142,17 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
       .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, ${ECONOMICS_COLUMNS})`)
       .order("closing_date", { ascending: true }),
     // Discovery's fit verdict, where this tender came from the scored feed.
-    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories, downgraded_from, downgrade_acknowledged_at"),
+    // Scaling fix (see app/lib/discoveryPagination.ts's module comment for
+    // the root-cause writeup): discovered_opportunities accumulates one row
+    // per OCDS release ever scored against this company, forever, but this
+    // lookup only ever needs rows that became one of THIS company's own
+    // tenders (matched below by tender_id/ocid/contract_number against the
+    // `tenders` rows already loaded above) - every such row has `tender_id`
+    // set (pursue_discovered_opportunity() always backfills it the moment a
+    // tender is pursued, confirmed in migrations 0024/0051), so narrowing to
+    // `tender_id is not null` drops only opportunities nothing here reads,
+    // never one this page's matching still needs.
+    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories, downgraded_from, downgrade_acknowledged_at").not("tender_id", "is", null),
     // Who can get credit for a submission (item 26, migration 0034): the
     // company's people roster, same list the task assignee picker uses.
     supabase.from("people").select("id, name").order("name"),
@@ -257,7 +267,7 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   // only "value" this app tracks, same field the card itself shows),
   // submitted this month (submitted_at's calendar month = now's), win rate
   // (Awarded / (Awarded + Lost), the only two outcomes that exist).
-  const activeCards = [...byStage.found, ...byStage.bidding];
+  const activeCards = IN_PROGRESS_STAGES.flatMap((s) => byStage[s]);
   const activeBids = activeCards.length;
   const totalValueBeingBid = activeCards.reduce((sum, c) => sum + (toNumber(c.economics?.submitted_price_zar) ?? 0), 0);
   const now = new Date();

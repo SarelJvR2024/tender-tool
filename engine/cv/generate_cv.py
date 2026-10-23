@@ -285,9 +285,15 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         hdr[i].paragraphs[0].runs[0].bold = True
     for proj in shown:
         row = t.add_row().cells
-        row[0].text = _safe_text(proj.get("client_and_number", ""))
+        row[0].text = _safe_text(proj.get("client_and_number", ""))  # not-null column (0001_init_schema.sql)
         row[1].text = _safe_text(str(proj.get("value_rm", "")) if proj.get("value_rm") is not None else "")
-        row[2].text = _safe_text(proj.get("position_held", ""))
+        # position_held is nullable (0001_init_schema.sql) - dict.get(key, default) only
+        # substitutes default when the key is ABSENT, not when it's present with value None,
+        # and _safe_text(None) crashes (re.sub needs a string): a real project row with no
+        # captured position title failed CV generation for that person entirely, not just
+        # printed the word "None" like the sibling bug this file's own build_world_bank() had
+        # (Finding 49). QA pass, 2026-10-23.
+        row[2].text = _safe_text(proj.get("position_held", "") or "")
         row[3].text = _safe_text(proj.get("start", "") or "")
         row[4].text = _safe_text(proj.get("end", "") or "")
         row[5].text = _safe_text(proj.get("contact", "") or "")

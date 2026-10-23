@@ -1645,6 +1645,63 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventy-sixth run): finished the broader audit a sibling pass explicitly flagged but didn't do - two more test fixtures were ticking time bombs for the exact rot that just hit test_randwater.py
+
+Orientation: a sibling solution-architect pass this same day (top of this file, "Finding 62") fixed
+`test_randwater.py`'s own real-date-vs-real-clock rot and explicitly named the broader pattern as
+unaddressed: "any fixture with a hardcoded near-term real date will eventually flip the same way...
+a separate, broader task." Took that up directly rather than letting it sit for the next session to
+rediscover.
+
+**Finding 64 (CONFIRMED, FIXED, moderate).** Audited every `test_*.py` under `engine/` for the same
+shape. Found two more, neither flipped yet: `test_kouga.py` (closing 2026-10-29) and
+`test_gov_sources.py::test_merge()` (closing 2026-11-06), both computing `is_closed` via
+`source_http.release()`'s own `is_past()` against the real wall clock. Confirmed each would
+actually flip (not just theoretically) by freezing the clock to a point after the real closing
+date and reproducing `is_closed` flip from `False` to `True` with the original code.
+
+**Fix:** froze the clock to a point BEFORE each fixture's own closing date for just the one call
+that computes `is_closed` (same `FixedDateTime` monkeypatch pattern `test_form_field_audit.py`
+already uses for a different module) - correct forever now, not just until the next date arrives.
+Ruled out as already-safe (listed in Finding 64's own write-up, so a future pass doesn't re-check
+them): `test_lephalale.py`, `test_vaal_central_water.py`, every `engine/compliance/test_*.py`
+file, and several others using the real-clock-independent relative-`TODAY` pattern or dates far
+enough out (~73 years) not to be a near-term risk.
+
+**CI infrastructure note, not this session's code**: `bridge-worker-ci`'s `smoke-test` job has now
+hung on its "Install LibreOffice..." step for the full ~15 minutes before auto-cancelling on 3
+separate pushes today (Findings 59, 63, and 64's own CI runs) - each time with every real test
+step downstream showing `skipped`, never reached, and each time resolved cleanly by one
+`rerun_failed_jobs` retry. Three occurrences in one day crosses from "an occasional flake" to "a
+real, recurring CI infrastructure pattern" worth someone's attention - most likely an
+apt/Microsoft-package-repo mirror hiccup on the GitHub-hosted runner side, not a problem in this
+repo's own code (every other job and every actual test step has stayed green throughout). Not
+something a sandbox session can fix directly (it's GitHub's own runner infrastructure, not this
+repo's CI config); flagging here so it isn't mistaken for a code regression if it recurs again,
+and so whoever next touches `bridge-worker-ci.yml` knows this step in particular is worth watching
+(e.g. pinning the LibreOffice package/mirror, or giving that one step its own timeout+retry).
+
+## This pass (2026-10-23, standing QA/robustness review - seventy-fifth run): the sibling fix to Finding 49's "prints the word None" bug left one field unguarded, and this one crashed CV generation outright
+
+Orientation: rotated to CV. Finding 49 (run 60, 2026-10-21) fixed `build_world_bank()`'s
+`dict.get(key, default)`-vs-`None` bug and said `build_sanral_keyperson()` "already guards the
+identical fields correctly" - checked that claim against the actual code rather than taking it on
+faith.
+
+**Finding 63 (CONFIRMED, FIXED, moderate).** It mostly held, except for one field:
+`build_sanral_keyperson()`'s `position_held` (a real, nullable column) still had a bare
+`proj.get("position_held", "")`, no `or ""`. Worse than Finding 49's own bug - that one printed
+the wrong text; this one crashes `_safe_text(None)` outright (`TypeError`), failing a key person's
+CV generation job entirely for a real, plausible shape (a project entered without a captured
+position title).
+
+**Fix:** added the same `or ""` guard every other nullable field on that row already has.
+
+**Verified the regression test actually catches the regression:** new test in
+`test_generate_cv.py` with `position_held=None` and every other field valid. Reverted: failed
+with the exact predicted `TypeError` at the exact predicted line; restored: `0` failures. Full
+`test_generate_cv.py` (9 functions) and `test_extract_cv_fields.py` re-run clean.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-fourth run): a SANRAL addendum moving the delivery venue or extending the deadline could be silently outvoted by the original notice on a filename coin-flip
 
 Orientation: rotated to `engine/intake` - the most overdue area in the standing rotation (last

@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { byBuyer, byCategory, byProvince, fetchAllRows, tenderFrequencyTrend, type MarketRow } from "./marketPricing";
+import { describe, expect, it } from "vitest";
+import { byBuyer, byCategory, byProvince, tenderFrequencyTrend, type MarketRow } from "./marketPricing";
 
 /** A minimal, otherwise-"empty" market row - every field a real
  * public_tender_outcomes row has, defaulted to its own honest "nothing here"
@@ -85,56 +85,9 @@ describe("byCategory", () => {
   });
 });
 
-describe("fetchAllRows", () => {
-  // Found live, 2026-10-23: this project's PostgREST caps every response at
-  // 1000 rows (db-max-rows) no matter what .limit() a client requests - a
-  // direct check against the real table confirmed .limit(5000) still only
-  // ever returned rows 0-999 of 39,536. loadMarketOutcomes()/loadSegment()
-  // used to trust a bare .limit() and silently read a ~2.5% sample as if it
-  // were the whole table. These tests simulate that exact server behavior
-  // (a page() stub that never returns more than 1000 rows, however wide a
-  // range is requested) rather than asserting against the real network.
-  const PAGE_CAP = 1000;
-  function serverThatCapsAt(totalRows: number) {
-    return vi.fn(async (from: number, to: number) => {
-      const wanted = Array.from({ length: Math.min(to - from + 1, totalRows - from) }, (_, i) => from + i).filter((i) => i < totalRows);
-      const capped = wanted.slice(0, PAGE_CAP);
-      return { data: capped, error: null };
-    });
-  }
-
-  it("keeps paging past a single 1000-row server cap until the real data runs out", async () => {
-    const page = serverThatCapsAt(2500);
-    const { rows, error } = await fetchAllRows<number>(page, 10_000);
-    expect(error).toBeNull();
-    expect(rows).toHaveLength(2500);
-    expect(rows[0]).toBe(0);
-    expect(rows[2499]).toBe(2499);
-  });
-
-  it("never requests more than maxRows even if the server has more", async () => {
-    const page = serverThatCapsAt(10_000);
-    const { rows } = await fetchAllRows<number>(page, 2500);
-    expect(rows).toHaveLength(2500);
-  });
-
-  it("stops after one page when the real table is smaller than the page size", async () => {
-    const page = serverThatCapsAt(42);
-    const { rows } = await fetchAllRows<number>(page, 10_000);
-    expect(rows).toHaveLength(42);
-    expect(page).toHaveBeenCalledTimes(1);
-  });
-
-  it("surfaces an error from any page and keeps whatever was already fetched", async () => {
-    const page = vi
-      .fn()
-      .mockResolvedValueOnce({ data: Array.from({ length: 1000 }, (_, i) => i), error: null })
-      .mockResolvedValueOnce({ data: null, error: { message: "connection reset" } });
-    const { rows, error } = await fetchAllRows<number>(page, 10_000);
-    expect(error).toBe("connection reset");
-    expect(rows).toHaveLength(1000);
-  });
-});
+// fetchAllRows's own tests moved to lib/supabasePaging.spec.ts when the
+// helper itself moved to its own shared module (lib/supabasePaging.ts) -
+// see that file for why (so dashboard/analytics could reuse this exact fix).
 
 describe("byBuyer / byProvince", () => {
   it("groups by the exact buyer name, skipping rows with no buyer recorded", () => {

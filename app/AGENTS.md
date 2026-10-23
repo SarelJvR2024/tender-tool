@@ -1905,3 +1905,363 @@ feature was touched; `compliance-report.tsx`/`submission-pack.tsx`/`subcontracti
 `tender-templates.tsx` (the actual SANRAL-only screens) are unchanged, confirmed still gated
 correctly. `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways (`tsx --test` and
 the real CI invocation, `node --experimental-strip-types` per file).
+
+## App-wide counts & calculations audit (2026-10-23)
+
+Sarel, after seeing the real Active-bids 6-vs-1 discrepancy (PR #122, `fix/active-bids-count-mismatch`
+- same root cause shape cited throughout this pass): "run through the app all calculations and counts
+and make sure they are correct." A systematic read of every page that shows a computed stat, count,
+percentage or total - `dashboard/page.tsx`, `pipeline/page.tsx` (read-only per the file-overlap rule
+below), `analytics/page.tsx`, Company vault (`lib/companyReadinessData.ts`/`lib/readiness.ts`),
+`lib/savingsCounter*.ts`, `lib/marketPricing.ts` and everything reachable from them - checked against
+its own label, against every other place in the app computing what should logically be the same
+number, and against zero-row/one-row/null-field/wrong-company edge cases, same bar as the
+Audit-fix-cluster batches above.
+
+**File-overlap rule followed**: two other sessions were concurrently touching
+`app/app/discovery/page.tsx`, `app/app/pipeline/page.tsx` and `app/app/pipeline/pricing/page.tsx`
+(server-side pagination/filtering batch, and PR #122's own active-bids fix) - none of those three
+were edited in this pass, even though `pipeline/page.tsx`'s own `totalValueBeingBid`/
+`submittedThisMonth`/`winRate` were read and checked (see "found but not fixed" below for the one
+real issue that turned up there).
+
+**Fixed - real bug, same precedent as PR #111 ("silently reading a 2.5% sample, not the real
+table")**: `app/dashboard/page.tsx` and `app/analytics/page.tsx` both read the whole shared `tenders`
+table (migration 0001: "Shared across every company - not tenant-scoped", readable by every
+authenticated user for every non-manual row) with a plain `.select()` and **no `.range()`-based
+pagination at all** - `analytics/page.tsx`'s own read didn't even have an `.order()` clause. PostgREST
+caps any response at 1000 rows (db-max-rows) regardless of a client-side `.limit()`, confirmed live
+during the PR #111 QA pass against this exact project - once the shared `tenders` table (grown daily
+by the discovery pipeline, with nothing ever pruning closed/old rows) passes 1000 rows, both pages
+would silently see an arbitrary, truncated slice instead of the real set, undercounting "Active
+bids"/"Packs ready"/"Closing this week"/"Tenders tracked"/"Win rate" etc. for every company on the
+platform at once - not a single-company bug, a whole-platform one, the moment the row count crosses
+the cap. Grepped the whole codebase for every other `.select()` that could plausibly read more than
+1000 rows without `.range()`-based pagination (325 `.select()` calls checked) - every other one is
+either already paginated (`lib/marketPricing.ts`, PR #111) or inherently bounded by a real filter
+(`.eq("id", ...)`, a single company's own RLS-scoped rows, a `tender_packs!inner(...)` join that
+requires a real pack, a `.limit()` on a small capped list) - these two were the only genuine gaps.
+- **Extracted `fetchAllRows()`/`POSTGREST_PAGE_SIZE` out of `lib/marketPricing.ts` into a new shared
+  `lib/supabasePaging.ts`** (re-exported from `marketPricing.ts` so its own existing imports/tests
+  don't need to change) - this exact fix needed reusing in two more files, not redefining.
+- `dashboard/page.tsx`'s `tenders` read now pages through `fetchAllRows()` (keeping its existing
+  `.order("closing_date")`, needed for the "Closing soon" list's own ordering) capped at 20,000 rows
+  - headroom above any plausible current count, not a measurement, same reasoning
+  `loadMarketOutcomes()`'s own 60,000 cap documents.
+- `analytics/page.tsx`'s `tenders` read gets the same fix (no pre-existing `.order()` to preserve -
+  none was ever applied here, matching `lib/marketPricing.ts`'s own un-ordered
+  `loadSegment()`/`loadMarketOutcomes()` precedent for a `fetchAllRows()` caller).
+- **Test**: `lib/supabasePaging.spec.ts` (5 cases, moved from `marketPricing.spec.ts` + one new) -
+  including a direct regression case naming the exact old bug (a naive single `.range()` request
+  returns only 1000 of 1800 real rows) vs. the fix (returns the real 1800). The generic helper is
+  what's unit-tested (same as PR #111's own fix); neither `dashboard/page.tsx` nor
+  `analytics/page.tsx` can be unit-tested against a live-growing table in this environment (no
+  `SUPABASE_DB_URL` here either - same documented limitation as every other DB-dependent page in
+  this file), so correctness here rests on reusing the already-tested helper verbatim, not a new
+  page-level test.
+- **Before/after**: today's real row count is well under 1000, so this is forward-looking, not a
+  live-data fix visible in a screenshot right now - exactly the same situation PR #111 was in before
+  `public_tender_outcomes` crossed the cap for real. The bug is real and reproducible (the new
+  regression test proves it) even though it hasn't yet bitten in production.
+
+**Checked and confirmed correct (re-verified, not just trusted from the prior pass's own fix)**:
+- `lib/savingsCounter.ts`/`lib/savingsCounterData.ts` (this file's own "Spec §9" entry documents a
+  real past R0-savings bug) - `resolveBaseline()` is used consistently in both
+  `fetchSavingsCounterSummary()` and `fetchTenderSavingsBreakdown()`, `hoursSavedForTender()`'s
+  baseline cap and `extraCapacity()`'s divide-by-zero guard are both still correct against their own
+  26 unit tests. One real but very narrow edge case found, **not fixed**: `fetchSavingsCounterSummary()`'s
+  "this month" boundary (`new Date(now.getFullYear(), now.getMonth(), 1)`) uses the server's own local
+  time zone, not `Africa/Johannesburg` (unlike `dashboard/page.tsx`'s own `greetingFor()`, which
+  explicitly uses SAST) - on a server running in UTC, a step counted in the ~2-hour window around
+  midnight SAST at a month boundary could land in the wrong month's total. Narrow enough (a few hours,
+  once a month) that this pass judged it not worth the risk of a deploy-environment-dependent fix
+  without being able to confirm the real server's time zone here - flagged for whoever next touches
+  this file.
+- `lib/companyReadinessData.ts`/`lib/readiness.ts` - confirmed `app/dashboard/page.tsx`,
+  `app/company/page.tsx` and the onboarding end screen all ultimately feed the exact same
+  `computeBidReadiness()` pure function with field-for-field identical inputs;
+  `app/company/page.tsx` computes its own input object (rather than calling
+  `fetchCompanyReadiness()`) only to reuse data it had already fetched for other reasons on the same
+  page (the company row, the principal count) - checked every field one by one against
+  `fetchCompanyReadiness()`'s own mapping and found zero drift, so this is a legitimate fetch-path
+  optimization, not the "recomputing its own version" drift risk this audit was looking for.
+- `lib/documentExpiry.ts`/`lib/notifications.ts` - the vault's "N documents need attention" count and
+  the topbar bell read the same `COMPANY_EXPIRY_FIELDS`/tables, the bell's tighter 60-day vs. the
+  vault's 30-day window is a documented, deliberate difference (already in this file's own prior
+  entry), not a disagreement bug.
+- `app/pipeline/page.tsx`'s own `totalValueBeingBid`/`submittedThisMonth`/`winRate` (read-only, not
+  edited per the file-overlap rule) - all three check out: `winRate` uses the identical
+  `won/(won+lost)` formula (with the identical `decided === 0 -> null` guard) as
+  `analytics/page.tsx`'s own win rate, `submittedThisMonth` counts by `submitted_at`'s calendar
+  month regardless of current stage (correct - a tender submitted this month that was later decided
+  should still count), and `totalValueBeingBid` sums `submitted_price_zar` only across
+  found+bidding (not-yet-decided) cards, matching the field the pipeline card itself already shows.
+  The one real disagreement in this area - `pipeline/page.tsx`'s own "Active bids" (found+bidding
+  only) vs. `dashboard/page.tsx`'s (found+bidding+submitted, via `ACTIVE_PURSUIT_STAGES`) - is
+  exactly PR #122's own fix, already in flight; not re-fixed here to avoid colliding with it.
+- `lib/dealEconomics.ts`'s `median()` (odd/even length, empty array), `commissionRand()`'s
+  round-to-cents arithmetic, `lib/dates.ts`'s `daysUntil()` (NaN/malformed-date guard) - all read
+  correct against their call sites and existing tests; left alone.
+- `app/tenders/[id]/tender-readiness.ts`'s `computeTenderReadiness()` returning `score: 100` for
+  `totalCount === 0` is deliberate and already covered by its own 5-case test (an unmapped family or
+  zero-section pack reads as "nothing to assess yet", not "0% ready") - not a bug.
+- Confirmed no query anywhere in `app/`/`lib/` uses a service-role/admin Supabase client that bypasses
+  RLS (grepped for `service_role`/`SUPABASE_SERVICE_ROLE`/`supabaseAdmin` - the only hit is
+  `scripts/send-deadline-reminders.ts`, a standalone cron script, not a page) - **no tenant-isolation
+  leak found** in this pass. `discovered_opportunities`, `savings_counted_steps`, `tender_packs` all
+  confirmed to carry a real `company_id` + tenant-scoped RLS policy by reading their migrations
+  directly, not assumed from naming.
+
+**Found but NOT fixed here (file-overlap conflict with concurrent work - write-up only, per this
+batch's own instruction)**:
+- `app/app/pipeline/page.tsx`'s "Active bids" stat (found+bidding only) disagreeing with
+  `app/app/dashboard/page.tsx`'s "Active bids" (found+bidding+submitted, via
+  `ACTIVE_PURSUIT_STAGES`) - this is the exact bug PR #122 (`fix/active-bids-count-mismatch`) is
+  already open to fix; deliberately not touched a second time here to avoid a merge collision. See
+  that PR's own description for the fix (a shared `IN_PROGRESS_STAGES` constant in `lib/pipeline.ts`).
+- No other real counts/calculations bug was found specifically inside `discovery/page.tsx`,
+  `pipeline/page.tsx` or `pipeline/pricing/page.tsx` beyond the one above - both files were read in
+  full for this audit's own verification purposes (see "Checked and confirmed correct" above), not
+  skipped, just not edited.
+
+Verified: `rm -rf .next && npm run verify` - 0 errors (3 pre-existing warnings, unrelated to this
+pass - 2 `no-img-element` on `Logo.tsx`, 1 `no-unused-vars` on `analytics/page.tsx`'s own
+`STAGE_META` import, confirmed present on `origin/main` before this pass touched the file).
+`npx vitest run` - 145/145 (144 baseline + 1 new regression test; `supabasePaging.spec.ts`'s 5 cases
+replace the 4 `fetchAllRows` cases moved out of `marketPricing.spec.ts`). Full `node:test` sweep both
+ways: `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 76/76; the same
+set run individually via `node --experimental-strip-types --test <file>` - 76/76, zero failures.
+
+---
+
+### Opportunities/Bids/Pricing history: discovered_opportunities scaling fix (Sarel: "filtering tenders is going to be critical with the load, we need to be smart about how we manage that")
+
+**Root cause.** `discovered_opportunities` is a per-company table that accumulates one row for
+every OCDS release ever scored against that company, forever - there is no retention/archival
+(see the proposal at the end of this entry). Three call sites fetched the ENTIRE table, unbounded,
+on every page load: `app/discovery/page.tsx` (no `.range()`/`.limit()` at all, with every
+verdict/changed/reassessed filter done in JS over the full in-memory array), `app/pipeline/page.tsx`,
+and `app/pipeline/pricing/page.tsx` (the latter two only ever using rows to look up
+`categories`/`verdict` for tenders this company has actually pursued). **This is the same class of
+bug PR #111 fixed** ("Fix Market Intelligence silently reading a 2.5% sample, not the real table",
+`lib/marketPricing.ts`'s own `fetchAllRows()`/`POSTGREST_PAGE_SIZE` comment): PostgREST silently
+caps any single `.select()` response at 1000 rows (`db-max-rows`, confirmed live during that PR's
+own investigation) regardless of a client-side `.limit()` past it - so an unpaginated discovery
+fetch wasn't just slow, it would eventually start silently truncating and showing wrong
+counts/filters once a company's scored history passed 1000 rows. Treated as a real, found
+defect-in-waiting, not a hypothetical - exactly per the task brief.
+
+**Fixed, pure application-code, no schema/migration change** (the table was already indexed for
+exactly this access pattern - `discovered_opportunities_company_verdict_idx (company_id, verdict)`
+and `discovered_opportunities_company_first_seen_idx (company_id, first_seen desc)`, migration
+0004):
+
+1. **Pipeline + Pipeline Pricing**: both queries narrowed with `.not("tender_id", "is", null)`.
+   Verified safe by reading `pursue_discovered_opportunity()`'s full history across migrations
+   0018/0024/0051 - the 0024/0051 redefinitions (`create or replace function`, which wins) always
+   `update discovered_opportunities set tender_id = t_id where id = opp.id` the moment a tender is
+   pursued, and the opportunity upsert key is `(company_id, ocid)` (one row per company per ocid,
+   `seed_supabase_opportunities.py`), so every row either of these two pages' ocid/contract_number/
+   tender_id lookup can ever match already has `tender_id` set. Narrowing drops only opportunities
+   neither page reads anyway (never pursued into a `tenders` row), never one the lookup still needs.
+   Zero UI/behaviour change.
+2. **Discovery page pagination**: a growing `.range(0, show)` window (default 30, `PAGE_SIZE` in
+   the new `lib/discoveryPagination.ts`), fetching `show + 1` rows each time to know for certain
+   whether a further row exists (no extra count query) and capped at `MAX_SHOW = 300` (10 "Load
+   more" clicks). **Chosen over true keyset pagination** (which the task preferred and the index
+   supports directly) because expressing a keyset tuple comparison
+   (`WHERE (first_seen, id) < (cursor)`) in supabase-js means a hand-rolled `.or()`/`.and()`
+   PostgREST filter string, and this sandbox has no live Supabase project to verify that string
+   against (same standing gap as every other page in `docs/specs/System-Status.md`) - a silently-
+   wrong hand-rolled filter is a worse failure mode than the bug being fixed. The growing-limit
+   approach uses only ordinary `.order()`/`.range()` calls, never skips or duplicates rows under
+   concurrent inserts the way classic increasing-OFFSET pagination can (there is no offset - a new
+   row inserted between "Load more" clicks just appears at the top of a bigger, still fully
+   consistent window, like a refreshed inbox), at the cost of re-transferring already-seen rows on
+   every click instead of only the incremental delta - bounded and cheap given `MAX_SHOW`. True
+   keyset is a reasonable follow-up once there's a way to verify a compound PostgREST filter
+   against a real project. Full reasoning + the "open downgrade bump-to-top is now only within the
+   loaded window, not the whole table" tradeoff (addressed below) are in `discoveryPagination.ts`'s
+   own module comment and in the page's inline comments.
+3. **Verdict filter tabs pushed into the query.** Strong fit/Needs review/Not a fit are now
+   `.eq()`/`.in()` on the indexed `verdict` column server-side (`verdictQuerySpec()`, pure and unit
+   tested). Per-tab counts are their own `{count:"exact", head:true}` queries (5 total, run in
+   parallel, no row data transferred) instead of scanning the fetched array - and are real,
+   company-wide exact counts (`count:"exact"` is accurate even past PostgREST's 1000-row *data*
+   cap - only the row data is capped, confirmed by the same Content-Range behaviour PR #111 found).
+4. **Re-assessed turned out to be a real, full-history filter, not just a scoped one** - the task
+   flagged this as worth checking (`downgraded_from`/`downgrade_acknowledged_at` are real columns
+   on the row), and it checks out: `.not("downgraded_from", "is", null)` is both the main-query
+   predicate and its own exact count, so the Re-assessed tab now genuinely searches this company's
+   entire downgrade history (paginated the same growing-window way), not just whatever's loaded on
+   "All". **Changed is the one tab that stays an honest, scoped limitation** - it needs a
+   cross-reference against `tender_listing_changes`, which isn't a column on `discovered_opportunities`,
+   so it can't become a WHERE clause without a schema change (a dedicated view/function - see the
+   proposal below). It only searches whatever window is currently loaded (shown with its own
+   explanatory note on the page, and its count badge is only ever computed while that tab is open -
+   "–" otherwise rather than a fake number elsewhere).
+5. **The open-downgrade warning banner at the top of the page** got its own small, separately-scoped
+   query (`.not("downgraded_from","is",null).is("downgrade_acknowledged_at", null)`, row data capped
+   at 200 with an honest "200+" shown past that, but the *count* itself is always the true,
+   un-truncated total) so it stays accurate across the company's full history regardless of which
+   page/tab is currently in view - it no longer silently undercounts once history grows past
+   whatever's loaded. Its "Show re-assessed tenders" link is how every open downgrade stays
+   reachable even though the in-window bump-to-top (unchanged visual behaviour) can no longer
+   guarantee an old one appears on the very first screen of "All".
+6. **The `tender_listing_changes` ocid lookup** now naturally only chunks over the current window's
+   ocids (it operates on `rows`, which is now bounded) - fell out for free from the pagination
+   change, no separate work needed, confirmed by reading the data flow rather than assumed.
+7. **Interaction with `lib/marketPricing.ts`'s `MAX_PRICING_LOOKUPS = 40` cap** (PR #120,
+   Opportunities card enrichment): **not touched in this batch**, and worth noting precisely because
+   that PR is still open/draft, not merged (see the coordination note below, despite this task's
+   own brief describing it as "just-merged" - checked directly via the GitHub API, not assumed).
+   Once this pagination lands, that cap stops being load-bearing on its own (a page can no longer
+   show more than `MAX_SHOW` cards at once, so `MAX_PRICING_LOOKUPS` will rarely if ever actually
+   bind) - not a loose end, just worth whoever reconciles the two branches knowing why.
+
+**A real cross-session coordination finding, not assumed.** This task's own brief described PR #120
+as "just-merged" - it is not: `gh api repos/.../pulls/120` shows `draft: true, merged: false` as of
+this pass, and its diff substantially rewrites the same `renderDiscovery()` function this batch
+touches (countdown chips, compliance/pricing/"done similar tenders before" insight cards), including
+logic that scans the company's **full, unpaginated** `rows` array on purpose (`buildDoneHistory()`
+needs every tender this company has ever pursued, not just the current page, to answer "done N
+similar tenders before"). **This is a real, substantive merge/semantics conflict for whoever lands
+second, not just a textual diff conflict** - PR #120's "done similar tenders before" feature will
+need to either accept running over a bounded window too (losing some historical matches) or get its
+own separate, targeted query once this pagination merges. Flagging this explicitly here rather than
+leaving it only in chat/PR description, per this file's own standing discipline. PR #118
+(discovery-scoring-diagnosis) is also still open/draft but touches only `engine/discovery/`
+Python files, not `page.tsx` - no overlap there.
+
+**Verified**: `npm run verify` (0 errors, confirmed the two pre-existing warnings - `Logo.tsx`'s
+`<img>` and `analytics/page.tsx`'s unused `STAGE_META` import - predate this branch, both traced to
+commits before this work), `npx vitest run` 144/144 (unchanged - no vitest-covered logic touched),
+`npx tsx --test` over every `*.test.ts` file 88/88 (76 existing + 12 new in
+`discoveryPagination.test.ts`, covering `parseShowParam`/`nextShow`/`hasMore`/`canLoadMore` and the
+verdict-to-query-filter mapping), and `node --experimental-strip-types --test` per file individually
+- same 88/88, both sweeps agree. A temporary dev-only mock-data route
+(`app/design/screenshot-discovery`, deleted before commit - confirmed via `git status` showing only
+the real feature files) rendered the real pagination/filter logic from `lib/discoveryPagination.ts`
+(imported directly, not reimplemented) against an in-memory mock dataset at 1440x900 and 390x844 via
+Playwright (a temporary `playwright-core` dev install, removed again after - `npm uninstall
+playwright-core`, confirmed no `package.json`/`package-lock.json` diff remains): clicked "Load
+more" (window grew from 30 to 55 rows, button correctly disappeared once no more existed), clicked
+through Strong fit/Needs review/Not a fit/Changed/Re-assessed tabs (each filtered server-side
+correctly; Re-assessed showed all 5 ever-downgraded mock rows including 2 un-acknowledged ones
+bumped to the top with the warning border, confirming it is NOT scoped to a window; Changed showed
+its scoped-limitation note and only the 5 mock rows with a matching "listing change" inside the
+loaded window). Not verified: against a live Supabase project or real authenticated session (same
+standing gap as every other page in this file) - the mock route therefore also skipped `AppShell`
+(sidebar/topbar), which needs a real session and wasn't the part under test.
+
+**Explicitly out of scope - proposed for Sarel's own review, not built:**
+- **A real DB-side full-text/buyer/title search box** - would want a trigram index or similar, a
+  schema change.
+- **A dedicated SQL function/materialized view so "Changed" (and, if ever needed again, a cheap
+  "Changed" count) can search this company's FULL history, not just the loaded pages** - also
+  schema work. Re-assessed no longer needs this (see above - it turned out to reduce to a real
+  column predicate), so this follow-up is narrower than the original task brief anticipated: only
+  "Changed" (the `tender_listing_changes` cross-reference) would benefit.
+- **A retention/archival policy for old `discovered_opportunities` rows** (e.g. auto-dropping
+  `not_a_fit`/`closed` rows after N days) - could independently fix a lot of the scaling problem at
+  the source, but is a product/data-retention decision for Sarel, not something to decide here. The
+  pagination/filtering fix in this entry works regardless of whether such a policy ever exists, but
+  would need less of it (smaller `MAX_SHOW`, fewer "Load more" clicks to reach deep history) if one
+  did.
+
+---
+
+### Reconciling PR #120 (Opportunities card enrichment) onto the now-paginated Discovery page
+
+PR #120 (`feature/opportunities-card-enrichment`) built five real additions to each Opportunities
+card from Sarel's own live feedback (2026-10-22): a closes-in countdown, a company-readiness
+indicator, a "done N similar tenders before" history match, a market-pricing-range lookup, and
+conditional scope/pricing-model display. It was opened against the OLD, pre-pagination `main` and
+was never merged - PR #123 (the `discovered_opportunities` scaling fix directly above this entry)
+landed first and rewrote the same `renderDiscovery()` function PR #120 touches, which PR #123's own
+entry above flagged explicitly as "a real, substantive merge/semantics conflict for whoever lands
+second, not just a textual diff conflict." This entry is that reconciliation, done by hand (not a
+blind `git merge`/`git cherry-pick`) onto `main`'s current, already-paginated
+`app/app/discovery/page.tsx`.
+
+**The one real conflict, exactly as PR #123 diagnosed it.** PR #120's `buildDoneHistory()`
+(`lib/opportunityInsights.ts`) needs every past opportunity this company has pursued to at least a
+submitted bid, to answer "done N similar tenders before" honestly. Before PR #123, the page's own
+`rows` variable WAS this company's entire scored-opportunity history, so passing `rows` into
+`buildDoneHistory()` worked. After PR #123, `rows` is only the current bounded page/filter window
+(`PAGE_SIZE=30` by default, up to `MAX_SHOW=300`) - feeding that windowed `rows` into
+`buildDoneHistory()` would silently undercount history matches for any company with more pursued
+history than what's currently loaded on screen. Exactly the same class of bug this whole session's
+other PRs (#111, #122, #123, #124) have been hunting and fixing - this must not ship as a
+regression, and it doesn't.
+
+**The fix**: `buildDoneHistory()`'s own pure-function signature in `lib/opportunityInsights.ts` is
+UNCHANGED from PR #120 - only what `discovery/page.tsx` passes into it changed. The page now runs a
+second, dedicated, un-paginated query in the SAME `Promise.all(...)` as the existing queries (not
+serially after it):
+```
+supabase.from("discovered_opportunities").select("tender_id, buyer, categories").not("tender_id", "is", null)
+```
+identical in shape and reasoning to `app/app/pipeline/page.tsx`'s own query after its PR #123 fix -
+this is safe because `pursue_discovered_opportunity()` always backfills `tender_id` the moment a
+tender is pursued (verified across migrations 0018/0024/0051, same verification PR #123's own entry
+above already did for the pipeline page). A company's own pursued pipeline is naturally small - one
+row per OCDS release that became a real tender - unlike the full scored-opportunity table the page
+itself must paginate, so this query needs no pagination of its own. `buildDoneHistory()` is now fed
+these rows (`pursuedHistoryRows`), not the windowed `rows`, so it always sees this company's FULL
+pursued history regardless of which page/filter window is currently showing.
+
+**Proven with a real test, not just asserted**: `lib/opportunityInsights.test.ts` has a new case
+("a pursued match outside a 30-row paginated window is still counted") that builds a 400-row mock
+dataset with exactly one pursued/won match sitting at index 349 - well outside any default
+PAGE_SIZE=30 slice - and shows that feeding `buildDoneHistory()` a plain windowed slice silently
+drops the match to zero (the regression this whole fix exists to prevent), while feeding it the
+dedicated-query-shaped full set finds it correctly. This is the regression PR #123's own entry
+warned about, reproduced and then shown fixed, not just described.
+
+**The other four PR #120 features - verified unaffected by pagination, confirmed by reading the
+code, not assumed**:
+- **Closes-in countdown** (`closingCountdown()`, new export on `lib/dates.ts`) - operates per-card
+  only, no history dependency. Unaffected, unchanged from PR #120.
+- **Company-readiness/compliance indicator** (`fetchCompanyReadiness()`) - called once per page
+  render inside the same `Promise.all(...)` as everything else, company-wide, not per-row or
+  history-dependent. Unaffected, unchanged from PR #120.
+- **Market pricing range** (`pricingCategoriesFor()`/`pricingSegmentKey()`, `lib/marketPricing.ts`,
+  capped at `MAX_PRICING_LOOKUPS = 40`) - operates on whatever cards are in the CURRENT rendered
+  `visibleRows` window, which is fine: pagination (PR #123) already means fewer cards per page than
+  before PR #123 was ever drafted, so this cap will rarely if ever actually bind now. Noted plainly
+  here, not treated as something to "fix" - exactly the interaction PR #123's own entry above
+  predicted, and the cap is kept anyway as a correct belt-and-braces guard (see this constant's own
+  comment in `discovery/page.tsx`).
+- **Scope/pricing-model conditional display** (`tender_scope_records`, migration 0060) - per
+  already-pursued row within the current `visibleRows` window, not history-wide. Unaffected,
+  unchanged from PR #120 (still honestly rare today - `engine/discovery/tender_enrichment.py` is
+  still never invoked by the production discovery pipeline, same standing follow-up PR #120 itself
+  flagged, not re-litigated here).
+
+**Self-review, 3 full rounds**: round 1 - re-read `lib/discoveryPagination.ts`'s own module comment
+and the current (post-#123) `discovery/page.tsx` in full before writing anything, to work from the
+file's real current shape rather than PR #120's stale diff assumptions. Round 2 - traced every one
+of PR #120's five features through the new tabbed/paginated/windowed structure one at a time,
+confirming each renders correctly and that only the history-match feature had a real
+pagination-window dependency (matching PR #123's own diagnosis - no other hidden dependency found).
+Round 3 - confirmed directly in the diff that the new pursued-history query is a sibling array
+entry inside the existing `Promise.all(...)` (parallel), never a second `await` after it, and that
+`buildDoneHistory()`'s call site now reads from `pursuedHistoryRows`, never from `rows` or
+`visibleRows`.
+
+**Verified**: `rm -rf .next && npm run verify` - 0 errors (the same 3 pre-existing warnings as PR
+#123's own pass - `Logo.tsx`'s two `<img>` warnings and `analytics/page.tsx`'s unused `STAGE_META`
+import, confirmed present on `main` before this branch touched anything). `npx vitest run` -
+147/147 (unchanged from main's baseline - no vitest-covered logic touched by this reconciliation).
+Full `node:test` sweep both ways: `npx tsx --test $(find . -name "*.test.ts" -not -path
+"*/node_modules/*")` - 104/104 (88 baseline + 7 in `dates.test.ts` + 9 in
+`opportunityInsights.test.ts`, the latter including the new regression-proof case above); the same
+set run individually via `node --experimental-strip-types --test <file>` - 104/104, both sweeps
+agree (the same pre-existing 5 zero-test `app/tenders/[id]/*.test.ts` files PR #120's own entry
+already noted as an unrelated quirk of single-file invocation, not something this reconciliation
+introduced or touched).
+
+PR #120 itself is closed (superseded, not merged) once this reconciliation branch is open, with a
+comment pointing to the new PR - avoids leaving a stale, now-conflicting original open alongside its
+own replacement.
