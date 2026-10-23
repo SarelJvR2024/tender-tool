@@ -17,9 +17,10 @@ const labelClass = "mb-1 block text-xs font-semibold text-muted-foreground";
 /**
  * Sarel's own live feedback: "on the add person, allow option to add a CV
  * and have AI read and capture all the information instead of the user
- * capturing it." Leads with name + CV upload - see createPersonWithCv()'s
- * own comment (app/app/people/actions.ts) for exactly what this can and
- * can't do without a schema/engine change, and why the name is still typed.
+ * capturing it." UX audit re-review 2026-10-23: the name no longer has to
+ * be typed first when AI-extracting - see createPersonWithCv()'s own
+ * comment (app/app/people/actions.ts) for exactly how the real name gets
+ * from the CV into the review screen without a schema/engine change.
  */
 export function CvLedAddPerson() {
   const [name, setName] = useState("");
@@ -38,9 +39,11 @@ export function CvLedAddPerson() {
     setFile(files[0]);
   }
 
+  const canSkipName = !!file && mode === "ai_extract";
+
   function submit() {
-    if (!name.trim()) {
-      setError("Enter a name - you can correct it once AI reads the CV.");
+    if (!name.trim() && !canSkipName) {
+      setError("Enter a name, or choose a CV for AI to read it from.");
       return;
     }
     setError(null);
@@ -64,12 +67,12 @@ export function CvLedAddPerson() {
       </div>
 
       <div className="mb-3">
-        <label className={labelClass}>Full name *</label>
+        <label className={labelClass}>Full name{canSkipName ? "" : " *"}</label>
         <input
           className={fieldClass}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="As it appears on their CV - correct it after AI reads the CV if needed"
+          placeholder={canSkipName ? "Optional - AI will read it from the CV, or type it yourself" : "As it appears on their CV - correct it after AI reads the CV if needed"}
           disabled={pending}
         />
       </div>
@@ -123,8 +126,8 @@ export function CvLedAddPerson() {
         </div>
       )}
 
-      <Button type="button" variant="accent" size="lg" className="min-h-11" onClick={submit} disabled={pending || !name.trim()}>
-        {pending ? "Adding…" : "Add person"}
+      <Button type="button" variant="accent" size="lg" className="min-h-11" onClick={submit} disabled={pending || (!name.trim() && !canSkipName)}>
+        {pending ? "Adding…" : file && mode === "ai_extract" ? "Extract from CV" : "Add person"}
       </Button>
     </div>
   );
