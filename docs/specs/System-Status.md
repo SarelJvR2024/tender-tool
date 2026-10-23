@@ -8,6 +8,231 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~10:15 UTC: a busy cycle on `main` (13 commits, 6 merged PRs),
+merged forward with one specific check worth recording.** Since the last pass: CV-led "Add
+person" + bulk CV/people upload (#115), compliance-documents single-upload table view (#114), a
+real Market Intelligence bug fix (it was silently reading a 2.5% sample of the real table, not
+the whole thing - #111), portal date-sentinel rejection generalized beyond two known values
+(#113), Spec v3 Batch 9 (company-level ECSA/SACPCMP collapse + form width fixes - #112), a hung
+bridge-worker process-group kill fix (Finding 60), and - the one worth checking carefully -
+**PR #119, a third live-feedback round on the *general-family* tender workspace** (quick doc
+link, phase-grouped plan, action-type tags, tabs), touching `general-workspace.tsx`,
+`action-type-tag.tsx` (new), `workspace-tabs.tsx` (new), `submission-plan-view.tsx` and
+`submission-plan-logic.ts` - the same directory PR #74 adds its own card to.
+
+**Checked specifically**: PR #119 never touches `page.tsx` (confirmed - no line for it in the
+commit's own file list) or either of PR #74's own files (`narrative-documents.tsx`,
+`narrative-actions.ts`). `narrativeDocumentsSection` is rendered directly in `page.tsx`,
+unconditionally for both families (not delegated into `GeneralTenderWorkspace`/
+`general-workspace.tsx`, same pattern already noted for `submissionPackSection`/
+`packReviewSection`) - so PR #119's general-family-specific restructuring has nothing to collide
+with here, and once PR #74 merges its card will keep showing for general-family tenders exactly
+as the README already claims, not a gap this pass found.
+
+Merged cleanly into `feature/narrative-document-generator` (no conflicts, confirmed by a clean
+working tree after merge, not just the absence of conflict markers). Re-verified: 51/51 Python
+test files; `npm run verify` clean; `npx vitest run` - 144/144 (up from 129 - new
+`submission-plan-logic` and `marketPricing` coverage from this batch). PR #74 remains genuinely
+mergeable against `main`'s current tip.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
+**Standing review pass, 2026-10-23 ~08:15 UTC: merged forward again, no overlap, re-verified.**
+One new commit on `main` (`bed4360`, Finding 59 - `watch_deadlines.py`'s `days_until()` crashed on
+a non-string expiry value; fixed with an `isinstance` check up front, not another exception type
+bolted on). Touches only `engine/compliance/` - no overlap with PR #74. Migration numbering
+unchanged (`main` still ends at `0085`). Merged cleanly into
+`feature/narrative-document-generator`; re-verified: 51/51 Python test files, `npm run verify`
+clean, 129/129 vitest. PR #74 remains genuinely mergeable.
+
+This is now five consecutive passes where the only thing to report on PR #74's own branch is a
+clean merge-forward - worth saying plainly rather than padding each entry: the PR itself hasn't
+changed in substance since the AI-call-quality-standard retrofit two passes before this one, and
+is sitting ready, waiting on Sarel's own call to take it out of draft.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
+**Standing review pass, 2026-10-23 ~06:15 UTC: merged forward again, no overlap, re-verified.**
+Two things landed on `main` since the last pass: PR #110 (Spec v3 Batch 8 - company vault form
+density, `app/app/company/_components/*`) and `af512b9` (Finding 58 - parallelizes
+`watch_new_tenders.py`'s `fan_out()` document reads with a new concurrency test, pushed directly
+by the QA/robustness session). Neither touches `engine/narrative/`, `app/app/tenders/[id]/`, or
+any migration file - confirmed from both diffs directly, not assumed. Migration numbering
+re-checked again: `main` still ends at `0085`.
+
+Merged into `feature/narrative-document-generator` - clean auto-merge. Re-verified: all 51
+`engine/**/test_*.py` files, 0 failures; `npm run verify` clean; `npx vitest run` - 129/129 (no
+count change this pass - Batch 8's own new coverage was a static `react-dom/server` render check
+and a `node:test` pair, not a vitest spec). PR #74 remains genuinely mergeable against `main`'s
+current tip.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
+**Standing review pass, 2026-10-23 ~04:15 UTC: merged forward again, no overlap, re-verified.**
+Since the last pass, exactly one new commit landed on `main` directly (`d2de313`, "Fix
+open-redirect bypass in post-login/signup redirect" - Finding 57, same QA/robustness session as
+Finding 56): a real security fix - `startsWith("/")` alone doesn't block a WHATWG-spec
+backslash-as-path-separator bypass (`/\evil.com` resolves to `https://evil.com` in a real
+browser), and the OAuth callback route had no check on `next` at all. New shared
+`app/lib/safeRedirect.ts`, applied at all 4 redirect sites. Read the diff directly: touches
+`app/app/auth/callback/route.ts`, `app/app/company/document-scan/actions.ts`,
+`app/app/login/page.tsx`, `app/app/signup/page.tsx`, plus the new lib file and its own spec - no
+overlap with PR #74's own files. Migration numbering also re-checked: `main` still ends at
+`0085`, so PR #74's `0086_narrative_documents.sql` has no new collision.
+
+Merged into `feature/narrative-document-generator` - clean auto-merge, including this file.
+Re-verified after the merge: all 51 `engine/**/test_*.py` files, 0 failures; `npm run verify`
+clean; `npx vitest run` - 129/129 (the 8 new `safeRedirect.spec.ts` tests now included). PR #74
+remains genuinely mergeable against `main`'s current tip.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
+**Standing review pass, 2026-10-23 ~02:15 UTC: no overlap found, PR #74 merged forward, PR #82
+closed as fully superseded.** Since the last pass, exactly one commit landed on `main` directly
+(`273344e`, "Refuse ambiguous multi-list SANRAL backfill resume" - Finding 56, a different
+session's QA/robustness rotation): `engine/discovery/store_award_outcomes.py` plus its own test
+and two docs files. No file overlap with PR #74 or #82's own touched files - confirmed by reading
+the commit's diff directly, not assumed from the file list.
+
+Merged this into `feature/narrative-document-generator` (PR #74) - clean auto-merge, including
+`System-Status.md` itself. Re-verified after the merge: all 51 `engine/**/test_*.py` files run via
+each file's own `python3 <file>.py` entry point (not `pytest` - not installed in this sandbox, same
+as presumably every other session's environment) - 0 failures; `npm run verify`
+(typecheck/lint/build) clean; `npx vitest run` separately - 121/121. PR #74 remains genuinely
+mergeable against `main`'s current tip.
+
+**PR #82 (`chore/standing-review-2`) closed, not merged.** Read its full diff: one dated entry
+confirming the live DB migration gap (`0077`-`0085`) closed for real, with a table-count figure
+(58 → 63). That exact confirmation - same table-count figure, same RPC-count figure - already
+exists in this file's own "Live-infrastructure handover CLOSED, 2026-10-22 ~16:12 UTC" entry
+below, which is also chronologically *later* than PR #82's own ~20:15 UTC entry timestamp
+suggested (the handover-closed entry landed on `main` directly, never through this PR). The one
+other thing PR #82 repeats - the DB password pasted into chat needing rotation, still
+unconfirmed - is also already tracked in this file's own "Live-infrastructure handover CLOSED"
+entry below, word-for-word the same open item. Keeping PR #82 open any longer would only have
+meant maintaining a second, increasingly stale copy of information this file already carries in
+one place; closed it with a comment explaining why rather than merging a no-op or leaving it to
+rot. Nothing in PR #82 was lost - every real finding it carried is already here.
+
+**Still open, unconfirmed, same as every prior pass's own flag**: whether the Session Pooler
+password pasted into chat has actually been rotated. Not something I can check or do myself - it's
+on Sarel's own Supabase dashboard.
+
+---
+
+**Narrative generator (PR #74) brought into compliance with the new AI call quality standard,
+2026-10-23 ~00:30 UTC - retrofitted, not just flagged.** `docs/specs/AI-Call-Quality-Standard.md`
+(merged into `main` while PR #74 was still open, see the entry below) is Sarel's own standing
+rule, verbatim: "neve be stisfied with your first anser and output, always review it... run that
+3 times." `engine/narrative/generate_narrative.py` is exactly the kind of call this targets - it
+generates a document that goes into a real tender submission - and it was single-pass. Rather than
+merge PR #74 with a known gap against a standard that landed the same day, retrofitted it for real:
+
+- **`run_review_passes()`** (new, `generate_narrative.py`) chains up to 3 real self-review turns
+  onto the SAME conversation the draft was generated in - a genuine multi-turn exchange (the
+  model's own prior output as a real assistant turn, not a reconstructed prompt pretending to be
+  one), using the literal review-prompt template the standard specifies. Stops the moment a pass
+  reports nothing wrong; if the model is still finding (and fixing) real issues on the very last
+  allowed pass, `quality_flagged` comes back true - the same honest-flag discipline
+  `similarity_flagged` already uses, so a human decides rather than the system assuming the last
+  attempt was good enough.
+- **`call_llm()` generalized** to accept either a bare string (back-compatible, wrapped into a
+  single-turn message) or a real multi-turn messages list, and a per-call `schema` (generation
+  calls use the existing `output_schema()`; review calls use the new `review_output_schema()`,
+  which adds `no_issues_found`/`review_notes` without changing the `sections` shape downstream
+  code already depends on). Now returns the full parsed dict, not just `sections` - callers that
+  need the review-specific fields can read them; existing callers just read `parsed["sections"]`.
+- **Migration `0086_narrative_documents.sql` edited in place** (not a new migration) to add
+  `quality_review_passes`/`quality_flagged` columns - safe since this table has never been applied
+  anywhere real (PR #74 still unmerged; confirmed no collision with `main`'s current migration
+  numbering, still ends at `0086`). `process_narrative_jobs.py` persists both; the Tender Workspace
+  card (`narrative-documents.tsx`) shows a plainly-worded amber warning banner when
+  `quality_flagged` is true, same visual pattern as the existing red similarity-flagged banner -
+  "never present an output that failed its own quality check as if it passed" meant the UI, not
+  just the database row, had to actually show it.
+- **Real test coverage, not just "it compiles"**: `test_generate_narrative.py` proves the loop
+  stops early on a clean pass, chains corrections into the next pass's actual input (not the
+  original draft), caps at exactly 3 passes and flags honestly if still finding issues on the
+  last one, and sends a genuine multi-turn conversation (asserted against the real messages array
+  the stub client received) - not just that the function runs without error. Found and fixed one
+  real stub-harness bug along the way: `StubClient` was storing a reference to the mutable
+  `messages` list, not a snapshot, so later appends in the production code were leaking backward
+  into an earlier call's recorded state - a test-only bug (the real Anthropic SDK serializes the
+  request before returning), but a real bug in the test, caught by writing a test specific enough
+  to notice it, not assumed away.
+- **Re-verified everything after the retrofit**: fresh 76-migration replay (clean), full
+  tenant-isolation suite (`ALL PASSED`), all 5 `engine/narrative/test_*.py` files (0 failures,
+  including the new review-pass and schema tests), `npm run verify` clean.
+
+**Not done**: no real LLM call exercises this loop end to end (same standing sandbox limitation as
+everything else in this feature - no `ANTHROPIC_API_KEY` here). The review loop runs strictly
+*after* the uniqueness distinctness-retry settles, not interleaved with or re-checked against it -
+a deliberate ordering choice (documented in the function's own docstring) to avoid the two checks
+chasing each other, not an oversight. `docs/specs/AI-Call-Quality-Standard.md`'s own text names
+three *other*, pre-existing call sites (`company_documents.py`, `extract_cv_fields.py`,
+`classify_documents.py`) as still single-pass, explicitly calling that separate follow-up work -
+this pass only retrofitted the one call site it was already touching.
+
+---
+
+**Standing review pass, 2026-10-22 ~22:15 UTC: merged a substantial batch (Spec v3 batches 1-6,
+a real middleware auth gap fix, a real CI-red fix), confirmed no collision with PR #74.** Six
+"Spec v3" batches landed (onboarding collapsed from a 6-step wizard to 2 screens, the tender
+workspace now collapses sections once they're done via a new `CollapsibleSection` component,
+`/tools` became `/toolkit`, experience/people/intake and digest changes, savings-default/
+founding-rate copy fixes). Two real fixes also landed: a middleware auth gap that let
+unauthenticated visitors reach `billing`/`analytics`/`market-intelligence`/`sanral-schedules`
+(closed correctly - restoring intended access, not widening it), and a real CI-red fix (`app-ci`
+had been failing on `main` for 3 consecutive pushes over an unresolvable import alias).
+
+Checked `app/app/tenders/[id]/page.tsx` specifically, since Batch 5 explicitly touches tender
+workspace layout and PR #74 also edits this exact file - it auto-merged with no conflict, and a
+manual check confirmed the result is actually correct, not just conflict-free: the new
+`CollapsibleSection` wrapping only applies to sections whose JSX is built inline in `page.tsx`
+itself (`key-positions`, `readiness-report`), never to sections delegated to a separate async
+component (`submissionPackSection`, `packReviewSection`, and this PR's own
+`narrativeDocumentsSection`) - so leaving `narrativeDocumentsSection` unwrapped isn't an
+inconsistency this pass introduced, it matches every one of its sibling delegated sections
+exactly. `docs/specs/System-Status.md` itself had two real conflicts (stale "Resume here"
+content from before PR #80 merged, superseded rather than preserved; two genuinely additive
+blocks - this branch's own PR #74 entries and `main`'s handover-closure entries - kept both).
+
+Full re-verification after this merge: `npm run verify` clean, the full `vitest` suite (121/121,
+not the 80 this file's older entries cite - new specs landed with the merge), all 13 `*.test.ts`
+files run individually matching CI's own real invocation (the thing Finding 55 just fixed) - all
+pass, and the full Python sweep (50 files) clean.
+
+---
+
+**Standing review pass, 2026-10-23 ~12:20 UTC: real coordination gap found and fixed - the last
+7 standing-review entries above were never on `main`, only on PR #74's own branch.** Every one of
+these entries (this pass's own predecessors, from the `~02:15 UTC` "PR #82 closed" pass through
+the AI-call-quality-standard retrofit) had been committed and pushed only to
+`feature/narrative-document-generator`, because that was the branch I happened to be re-verifying
+each time - I never actually checked that this file, the one `CLAUDE.md` tells every session to
+read FIRST, was reaching `main` itself. Any other session reading `main`'s own copy during that
+window (several hours) would have seen none of it - the PR #82 closure, the open-redirect and
+fan_out findings, none of it. Found by actually diffing `main`'s own file against the branch's,
+not assumed clean. Ported the missing entries verbatim onto `main` directly (this commit), same
+as every other session's own small Finding/fix commits already do for this file - going forward,
+every pass's own entry lands on `main` directly, same commit as the merge-forward work, not only
+on PR #74's branch. No code changed, no QA re-run needed for this fix itself (it is the QA
+finding).
+
+---
+
 **Microsoft SSO fixed and enabled, 2026-10-22 ~19:00 UTC (PR #91, `app/app/login/page.tsx` +
 `app/app/signup/page.tsx`).** Closes the gap flagged throughout this file since 2026-10-18:
 Supabase's Azure OAuth provider had Google's credentials pasted into it by mistake, so
