@@ -45,6 +45,10 @@ import { computeTenderReadiness } from "./tender-readiness";
 import { DisqualificationGuard } from "./disqualification-guard";
 import { SubmissionPlanView } from "./submission-plan-view";
 import { CollapsibleSection } from "./collapsible-section";
+import { type SubmissionType, type DispatchStatus, printSignDeadline, operationalStatusMessage } from "@/lib/dispatchTriage";
+import { SubmissionModeBadge } from "./submission-mode-badge";
+import { SubmissionLogisticsForm } from "./submission-logistics-form";
+import { DispatchStatusButton } from "@/components/tt/dispatch-status-button";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -75,6 +79,14 @@ type TenderPack = {
   project_completed_at: string | null;
   project_completion_value_rm: number | string | null;
   project_completion_note: string | null;
+  // Submission logistics (migration 0090, Tender Command Center) - this
+  // company's own plan for physically getting this pack to the tender box.
+  submission_type: SubmissionType;
+  delivery_location: string | null;
+  estimated_print_hours: number;
+  estimated_transit_hours: number;
+  dispatch_status: DispatchStatus;
+  courier_contact: string | null;
 };
 
 type ProvenanceRow = {
@@ -248,7 +260,7 @@ export default async function TenderWorkspacePage({
   const { data: pack, error: packError } = await supabase
     .from("tender_packs")
     .select(
-      "id, status, pipeline_stage, submitted_at, submitted_price_zar, project_completed_at, project_completion_value_rm, project_completion_note",
+      "id, status, pipeline_stage, submitted_at, submitted_price_zar, project_completed_at, project_completion_value_rm, project_completion_note, submission_type, delivery_location, estimated_print_hours, estimated_transit_hours, dispatch_status, courier_contact",
     )
     .eq("tender_id", id)
     .maybeSingle();
@@ -376,6 +388,30 @@ export default async function TenderWorkspacePage({
     const snapshot = await loadGeneralPackReviewSnapshot(id);
     if (snapshot.mapped) tenderReadiness = computeTenderReadiness(snapshot.sections);
   }
+
+  // Tender Command Center (Sarel's own brief, 2026-10-24): "the system speaks
+  // to you" in the workspace header too, reusing tenderReadiness/
+  // openPositionsCount - both already computed above for the facts card and
+  // the primary-action disabled reason - rather than calling nextStepFor()
+  // again for a second summary that could disagree with the first.
+  const blockingSummary =
+    tenderReadiness && tenderReadiness.thingsLeft > 0
+      ? `${tenderReadiness.thingsLeft} thing${tenderReadiness.thingsLeft === 1 ? "" : "s"} left before you can submit`
+      : openPositionsCount > 0
+        ? `${openPositionsCount} key position${openPositionsCount === 1 ? "" : "s"} still need${openPositionsCount === 1 ? "s" : ""} confirming`
+        : null;
+  const dispatchLogistics =
+    tenderPack && !["submitted", "won", "lost"].includes(tenderPack.pipeline_stage)
+      ? {
+          closingDate: tenderFacts?.closing_date ?? null,
+          submissionType: tenderPack.submission_type,
+          estimatedPrintHours: tenderPack.estimated_print_hours,
+          estimatedTransitHours: tenderPack.estimated_transit_hours,
+          dispatchStatus: tenderPack.dispatch_status,
+        }
+      : null;
+  const printDeadline = dispatchLogistics ? printSignDeadline(dispatchLogistics) : null;
+  const operationalMessage = dispatchLogistics ? operationalStatusMessage(dispatchLogistics, blockingSummary) : null;
 
   // Section-level error recovery: each of these is a self-contained async
   // Server "component" doing its own several-query Supabase read - calling
@@ -575,6 +611,21 @@ export default async function TenderWorkspacePage({
                   {tenderFacts.briefing_time ? ` at ${tenderFacts.briefing_time}` : ""}
                   <span style={{ color: "var(--muted-foreground)" }}> - from the buyer&apos;s addendum (see below)</span>
                 </div>
+              )}
+
+              {/* Tender Command Center (Sarel's own brief, 2026-10-24):
+                  the submission-mode badge, always visible (never
+                  hover-only - see PR #131's own fix for why), with the
+                  print/transit math it's built from right there under it. */}
+              {dispatchLogistics && (
+                <SubmissionModeBadge
+                  submissionType={dispatchLogistics.submissionType}
+                  closingDate={dispatchLogistics.closingDate}
+                  estimatedPrintHours={dispatchLogistics.estimatedPrintHours}
+                  estimatedTransitHours={dispatchLogistics.estimatedTransitHours}
+                  printDeadline={printDeadline}
+                  operationalMessage={operationalMessage}
+                />
               )}
 
               {/* The actual record of submission (0021's trigger stamps this
@@ -1012,10 +1063,30 @@ export default async function TenderWorkspacePage({
                 {
                   id: "pack-compiler",
                   label: "Pack compiler",
-                  anchors: ["cover-page", "pack-review", "submission-pack", "general-pack", "general-pack-review", "narrative-documents"],
+                  anchors: ["submission-logistics", "cover-page", "pack-review", "submission-pack", "general-pack", "general-pack-review", "narrative-documents"],
                   badge: (generalSections?.badges.generalFixCount ?? 0) > 0 ? <TabBadge count={generalSections!.badges.generalFixCount} /> : undefined,
                   content: (
                     <>
+                      {/* Tender Command Center (Sarel's own brief, 2026-10-24):
+                          this company's own plan for getting the pack to the
+                          tender box, plus the real "tap to advance" dispatch
+                          tracker the Dashboard's Lane C also reads. */}
+                      {tenderPack && (
+                        <div id="submission-logistics" className="mb-4 flex flex-col gap-3">
+                          <SubmissionLogisticsForm
+                            tenderId={id}
+                            submissionType={tenderPack.submission_type}
+                            deliveryLocation={tenderPack.delivery_location}
+                            estimatedPrintHours={tenderPack.estimated_print_hours}
+                            estimatedTransitHours={tenderPack.estimated_transit_hours}
+                            courierContact={tenderPack.courier_contact}
+                          />
+                          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border bg-card px-4 py-3">
+                            <span className="text-xs font-semibold text-foreground">Dispatch status</span>
+                            <DispatchStatusButton tenderPackId={tenderPack.id} tenderId={id} status={tenderPack.dispatch_status} />
+                          </div>
+                        </div>
+                      )}
                       {showSubmissionPack && (
                         <CoverPagePreview
                           contractNo={tenderFacts.contract_no}
