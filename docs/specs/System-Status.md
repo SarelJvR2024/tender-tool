@@ -1266,6 +1266,41 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventy-second run): a non-string expiry value in a local company profile crashed the whole daily-digest run, not just that one item
+
+Orientation: rotated to `engine/notify` (not covered by any of the last dozen+ runs). Read
+`daily_digest.py`/`watch_deadlines.py` end to end; both make a point, in their own docstrings, that
+a malformed expiry date must never crash the whole run for everyone - worth checking whether that
+promise actually holds, not just assuming it does because it's well-commented.
+
+**Finding 59 (CONFIRMED, FIXED, moderate).** It didn't fully hold. `watch_deadlines.days_until()`
+guards a malformed date STRING (`except ValueError` around `fromisoformat()`) but never checked
+whether the value was a string at all - and `daily_digest.py --mode local`'s own
+`local_document_expiry`/`local_person_credential_expiry` read a hand-edited profile JSON with no
+schema behind it, exactly the kind of place a date could end up as a number, a bool, a list or a
+dict by mistake. Confirmed live: `days_until(20261231, today)` raises `TypeError` (slicing a
+non-string); a list raises a DIFFERENT `TypeError` one line later (`fromisoformat()` itself); a
+dict raises `KeyError` (`{}[:10]` is a dict lookup on a slice key, not a slice) - three exception
+classes, none of them the one line of code was built to catch. Both local-mode date helpers run
+once, BEFORE the per-roster-member loop that isolates one bad entry from the rest (that isolation
+was itself a prior fix) - so this crashed the entire local-mode digest run for every roster member,
+not just whoever's data was bad. Grep found zero existing tests calling `days_until()` at all,
+despite its own docstring's confident "confirmed this matters for real."
+
+**Fix:** `days_until()` checks `isinstance(date_str, str)` up front and records the same warning
+alert for any non-string truthy value, before `[:10]`/`fromisoformat()` ever run - catches all
+three (and any future) non-string shapes by construction, not by chasing exception types one at a
+time (tried first, rejected once the dict case needed a type `except (ValueError, TypeError)`
+didn't cover).
+
+**Verified the regression test actually catches the regression:** new test in
+`test_watch_deadlines_urgency.py` covering every non-string shape plus the existing string cases.
+Reverted to the old `except ValueError`-only version: failed on exactly the 4 predicted shapes
+with exactly the predicted exception types; restored: `0` failures. Full existing
+`engine/compliance` suite re-run clean - the fix changes nothing for the valid-string path every
+other test already exercises. One function changed; every call site (documents, person
+credentials, registrations, tasks, both digest helpers) gets the fix for free.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-first run): a real daily discovery run took 4.5 hours instead of ~20 minutes - fixed
 
 Orientation: rotated to discovery. This cycle's origin was a sibling session's own cross-session

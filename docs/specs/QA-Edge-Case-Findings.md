@@ -3652,3 +3652,64 @@ Restored the fix via `git apply`: all 28 checks green again.
 
 **Regression:** only `engine/discovery/watch_new_tenders.py` changed (plus the new test) - no
 schema, no API shape change. `test_discovery_fanout.py` part1/part1b: 28/28 pass.
+
+### Finding 59 (CONFIRMED, FIXED, moderate - a hand-edited local company profile with a non-string expiry date crashed the whole daily-digest run, not just that one item)
+
+**Where:** `engine/compliance/watch_deadlines.py`'s `days_until(date_str, today)` - the one
+shared function every expiry reminder in the system goes through (`find_due_documents`,
+`find_due_person_credentials`, `registration_reminders`'s due-registration/property-document
+checks, `find_due_tasks`, and `engine/notify/daily_digest.py --mode local`'s own
+`local_document_expiry`/`local_person_credential_expiry`, which read a hand-edited profile JSON
+with no schema behind it at all - unlike a live Postgres `date` column).
+
+**What was tested:** rotated to `engine/notify` this cycle (not recently covered) and read
+`daily_digest.py` end to end. Its own docstring and `days_until()`'s docstring both state plainly
+that a malformed date must never crash the whole run for everyone - "confirmed this matters for
+real" - but a grep across every test file in the repo found **zero tests that call `days_until()`
+at all**, directly or indirectly with a bad value. Constructed the "different company shape" this
+review exists for: a local-mode profile JSON where an expiry field is a number, a bool, a list or
+a dict instead of a string (an easy hand-edit mistake with no schema to catch it, unlike a live
+Supabase column). Reproduced directly:
+```
+daily_digest.local_document_expiry({"company": {"coid_letter_of_good_standing_expiry": 20261231}}, today, 30)
+```
+`TypeError: 'int' object is not subscriptable` - `date_str[:10]` on a non-string, raised *before*
+`fromisoformat()`'s own `except ValueError` guard ever runs. Three more shapes, three more
+exception types, none of them `ValueError`: `True`/`False` (`TypeError`, same as the int), a list
+(`['2026-12-31'][:10]` slices harmlessly, but `fromisoformat()` on the resulting list is a second,
+different `TypeError`), and a dict (`{'x': 1}[:10]` isn't a slice at all - a dict's `__getitem__`
+treats `slice(None, 10, None)` as a hashable key and raises `KeyError`, not `TypeError`). Four
+non-string shapes, three different exception classes between them, zero of them caught.
+
+**Why it matters:** `local_document_expiry`/`local_person_credential_expiry` run once, before the
+per-roster-member loop that isolates one bad roster entry from the rest (that loop's own isolation
+was itself a prior finding, enterprise-readiness audit round 2, 2026-10-20) - so this crash isn't
+isolated to one person's digest, it aborts the ENTIRE local-mode run for every roster member,
+exactly the blast-radius `days_until()`'s own docstring already names as the thing it exists to
+prevent for a malformed *string*. It just didn't occur to anyone that "malformed" could also mean
+"not a string at all" until a non-string value was actually tried.
+
+**Fix:** `days_until()` now checks `isinstance(date_str, str)` up front and records the same
+`system_alerts` warning (generalized to say "not a valid date" rather than assuming a string
+repr) for any non-string truthy value, before ever touching `[:10]` or `fromisoformat()`. Chasing
+the exception types one at a time (`except (ValueError, TypeError)`) was tried first and rejected
+once the dict case showed up as `KeyError` instead - there was no guarantee a fifth shape wouldn't
+raise something else again; checking the type once catches all of them the same way, by
+construction, not by enumeration.
+
+**Verified the regression test actually catches the regression:** new `days_until_malformed_inputs()`
+in `engine/compliance/test_watch_deadlines_urgency.py` - every non-string shape above, plus the
+existing string cases (malformed, empty, None, a valid date, a valid date+time, a past date).
+Reverted `days_until()` to the exact previous `except ValueError`-only version (saved patch +
+`git apply -R`, restored with `git apply`, not `git stash`): the new test failed on exactly the 4
+predicted shapes, with exactly the predicted exception types and messages (`TypeError` x2 on the
+int/bool, a different `TypeError` on the list, `KeyError` on the dict), while every valid-date and
+already-malformed-string check stayed green. Restored: `0` failures. Also re-ran the full existing
+`watch_deadlines` suite (`test_watch_person_credentials.py`, `test_principals_registrations.py`,
+`test_watch_conditional_registrations.py`, `test_reminder_seen_db.py`) - all green, confirming the
+`isinstance` guard changes nothing for the valid-string path every other test already exercises.
+
+**Regression:** only `engine/compliance/watch_deadlines.py` changed (one function); every call
+site (`find_due_documents`, `find_due_person_credentials`, `registration_reminders`,
+`find_due_tasks`, both `daily_digest.py --mode local` helpers) gets the fix for free, with no
+call-site changes needed.
