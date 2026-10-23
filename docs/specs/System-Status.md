@@ -100,8 +100,33 @@ several of its claimed routes/tab names didn't match this repo, several of its a
 directly conflicted with Command Center's just-shipped, just-reviewed shape. Sarel chose: merge
 Command Center first (done, above), then a separate, explicitly-scoped follow-up PR for only the
 confirmed-real gaps (vault drawers for CSD/Tax PIN/COIDA, ZAR/VAT formatting, copy cleanup, RFP
-quick-access link) - not the dashboard/tab rewrite. That follow-up is in progress, scoped by a
-fresh audit of what's real in each of those 4 areas before any code is written.
+quick-access link) - not the dashboard/tab rewrite.
+
+**PR #133 opened, 2 of the 4 follow-up items shipped - the other 2 explicitly deferred to a real
+design decision, not guessed at.** The audit fork's claim that "no Dialog/Sheet/Drawer pattern
+exists anywhere" was itself wrong - checked directly and corrected: `components/ui/sheet.tsx` and
+`dialog.tsx` both exist (used by the mobile sidebar flyout and the command palette respectively),
+and a working `Popover` pattern already ships in production (`NotificationsBell.tsx`) - reused
+directly for this PR's own document quick-access menu, same trigger/content structure. So a vault
+drawer is NOT "the first modal pattern ever built here," as first audited - it's "the first reuse
+of an existing, working pattern for tender content." That correction doesn't resolve the real
+question still blocking item 1 though: whether the drawer hosts the full upload→AI-classify→confirm
+flow (`VaultDocumentUploader` → `/company/document-scan`, a deliberate anti-overwrite design) or
+just plain-text fields - still Sarel's call, documented for whenever he picks it up.
+
+- **Copy cleanup (item 3)**: the 3 marketing paragraphs Sarel's brief quoted verbatim, replaced
+  with a subheading + `(?)` tooltip (the app's own `Tooltip` component, already wired into
+  `layout.tsx`, just never used outside the sidebar before this).
+- **Document quick-access (item 4)**: `tenders.document_urls` was real, already-read data
+  (`general-workspace.tsx`'s own extraction-status count) that was never actually linked anywhere
+  - confirmed by grep, not assumed. Now a "Tender documents" header popover for every tender,
+  family-agnostic, listing real published-document links plus this company's own
+  `tender_private_documents` (signed URLs, same pattern `private-documents.tsx` already uses). The
+  upload entry point only appears where that form actually exists today (general-family, shared
+  tenders) - confirmed via `isGeneralFamily`, never a dead link.
+- **Verified**: `npx tsc --noEmit` clean, `npx eslint .` clean (same 3 warnings), `npm run build`
+  clean (57 routes), `npx vitest run` 147/147, `node --test` 138/138. Not yet preview-verified with
+  real data - next step before merge.
 
 ---
 
