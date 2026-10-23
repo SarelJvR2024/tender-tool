@@ -49,6 +49,8 @@ import { type SubmissionType, type DispatchStatus, printSignDeadline, operationa
 import { SubmissionModeBadge } from "./submission-mode-badge";
 import { SubmissionLogisticsForm } from "./submission-logistics-form";
 import { DispatchStatusButton } from "@/components/tt/dispatch-status-button";
+import { TenderDocumentsMenu } from "./tender-documents-menu";
+import { TENDER_DOCS_BUCKET } from "@/lib/manualTender";
 
 // Reads the signed-in user's session (via RLS) and per-tender data on every
 // request - can't be prerendered. Same escape hatch as app/app/dashboard/page.tsx.
@@ -65,6 +67,15 @@ type TenderFacts = {
   family: string | null;
   source: string | null;
   buyer: string | null;
+  // Document quick-access (Sarel's "Master Overhaul" brief, item 4,
+  // 2026-10-24): document_urls is real, already-written data (Discovery's
+  // own scrape, or manual intake) this page already read for the general
+  // family's own extraction-status line - never actually linked anywhere
+  // until now. owner_company_id decides whether tender_private_documents
+  // (this company's own uploads) applies at all - same isShared check
+  // general-workspace.tsx already makes.
+  document_urls: { url: string | null; title: string | null }[] | null;
+  owner_company_id: string | null;
 };
 
 type TenderPack = {
@@ -210,7 +221,7 @@ export default async function TenderWorkspacePage({
 
   const { data: tender, error: tenderError } = await supabase
     .from("tenders")
-    .select("id, contract_no, nra_reference, description, closing_date, briefing_date, briefing_time, family, source, buyer")
+    .select("id, contract_no, nra_reference, description, closing_date, briefing_date, briefing_time, family, source, buyer, document_urls, owner_company_id")
     .eq("id", id)
     .maybeSingle();
 
@@ -373,6 +384,35 @@ export default async function TenderWorkspacePage({
   // general preparation flow instead of the SANRAL compliance report.
   const isGeneralFamily = tenderFacts?.family === GENERAL_FAMILY;
 
+  // Document quick-access (Sarel's "Master Overhaul" brief, item 4,
+  // 2026-10-24): real data, surfaced for the first time - see the
+  // TenderFacts.document_urls comment above for why. Private documents only
+  // apply to a shared tender (owner_company_id null, same isShared check
+  // general-workspace.tsx already makes) - a company-owned manual tender has
+  // no "other companies" to keep anything private from.
+  const docUrls = ((tenderFacts?.document_urls ?? []).filter((d) => d.url) as { url: string; title: string | null }[]) ?? [];
+  const isSharedTender = !!tenderFacts && !tenderFacts.owner_company_id;
+  let privateDocEntries: { id: string; title: string; href: string | null }[] = [];
+  if (isSharedTender) {
+    const { data: privateRows, error: privateDocsError } = await supabase
+      .from("tender_private_documents")
+      .select("id, title, storage_path")
+      .eq("tender_id", id)
+      .order("created_at");
+    if (privateDocsError) console.error("tender_private_documents select failed for tender", id, privateDocsError);
+    const rows = (privateRows ?? []) as { id: string; title: string; storage_path: string }[];
+    if (rows.length > 0) {
+      const signedResults = await Promise.all(rows.map((r) => supabase.storage.from(TENDER_DOCS_BUCKET).createSignedUrl(r.storage_path, 600)));
+      privateDocEntries = rows.map((r, i) => ({ id: r.id, title: r.title, href: signedResults[i].data?.signedUrl ?? null }));
+    }
+  }
+  // The upload entry point only has somewhere real to go on a general-family
+  // shared tender - private-documents.tsx's own card (#private-documents,
+  // rendered inside general-workspace.tsx's Overview content) is the only
+  // place that form exists today. Never link to a destination that isn't
+  // actually there.
+  const privateDocsUploadHref = isSharedTender && isGeneralFamily ? "#private-documents" : null;
+
   // Per-tender readiness (Product promise's Verify/Provide/Fix, app/AGENTS.md)
   // - reuses the exact same Pack Review snapshot the card further down the
   // page already reads (loadPackReviewSnapshot/loadGeneralPackReviewSnapshot
@@ -518,17 +558,20 @@ export default async function TenderWorkspacePage({
                 pack-review sections themselves, with no review gate before
                 this ships. The banner is additive and safe; the body stays
                 as the same sections, same order, same logic, as before. */}
-            <nav aria-label="Breadcrumb" className="mb-2 text-xs text-muted-foreground">
-              <a href="/pipeline" className="text-muted-foreground no-underline hover:text-foreground hover:underline">
-                Pipeline
-              </a>
-              {" / "}
-              <a href="/dashboard" className="text-muted-foreground no-underline hover:text-foreground hover:underline">
-                Tenders
-              </a>
-              {" / "}
-              <span className="text-foreground">{tenderFacts.contract_no ?? tenderFacts.nra_reference ?? "This tender"}</span>
-            </nav>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <nav aria-label="Breadcrumb" className="text-xs text-muted-foreground">
+                <a href="/pipeline" className="text-muted-foreground no-underline hover:text-foreground hover:underline">
+                  Pipeline
+                </a>
+                {" / "}
+                <a href="/dashboard" className="text-muted-foreground no-underline hover:text-foreground hover:underline">
+                  Tenders
+                </a>
+                {" / "}
+                <span className="text-foreground">{tenderFacts.contract_no ?? tenderFacts.nra_reference ?? "This tender"}</span>
+              </nav>
+              <TenderDocumentsMenu docUrls={docUrls} privateDocs={privateDocEntries} uploadHref={privateDocsUploadHref} />
+            </div>
 
             {/* Tender facts */}
             <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>

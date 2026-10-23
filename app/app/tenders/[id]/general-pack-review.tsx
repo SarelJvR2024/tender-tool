@@ -6,6 +6,7 @@ import { reviewStatusToBidTask, type ReviewStatus } from "./pack-review-logic";
 import { matchStrengthStatus } from "./general-pack-review-logic";
 import type { BidTaskStatus } from "./bid-task-status";
 import { formatDateTime } from "@/lib/dates";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * General (non-SANRAL) tender Pack Review: the confirm-before-compile
@@ -101,12 +102,22 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
 
   return (
     <div id="general-pack-review" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
-      <div className="mb-0.5 text-[15px] font-bold text-foreground">Pack review - confirm before you compile</div>
-      <div className="mb-3.5 text-xs text-muted-foreground">
-        Everything identified to go into this tender&apos;s submission pack: company details, tender questions, the
-        signature, supporting documents, the roles this tender names and who&apos;s tagged for them (with their CVs),
-        company experience evidence, and office location. Check each section, use the link to jump to where it&apos;s
-        edited, then confirm below - &quot;Generate submission pack&quot; needs this review first.
+      <div className="mb-3.5 flex items-center gap-1.5">
+        <div className="text-[15px] font-bold text-foreground">Pack review - confirm before you compile</div>
+        <Tooltip>
+          <TooltipTrigger
+            className="inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-semibold text-muted-foreground"
+            aria-label="How this works"
+          >
+            ?
+          </TooltipTrigger>
+          <TooltipContent>
+            Everything identified to go into this tender&apos;s submission pack: company details, tender
+            questions, the signature, supporting documents, the roles this tender names and who&apos;s tagged for
+            them (with their CVs), company experience evidence, and office location. Use the link to jump to
+            where any item is edited - &quot;Generate submission pack&quot; needs this review confirmed first.
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {allItems.length > 0 && (

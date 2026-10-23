@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AutoRefresh } from "../../_components/AutoRefresh";
 import { requestNarrativeDocument, uploadNarrativeFinal } from "./narrative-actions";
 import { formatDate, formatDateTime } from "@/lib/dates";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * Cover letter / methodology statement generator (migration 0087) -
@@ -102,12 +103,22 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
   return (
     <div id="narrative-documents" style={card}>
       <AutoRefresh active={active} />
-      <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B", marginBottom: 2 }}>Cover letter &amp; methodology statement</div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 14 }}>
-        AI-drafted from your company&apos;s own profile, people, past projects and how you describe your own
-        approach - never a generic template. Every draft for this tender is mechanically checked against every
-        other company&apos;s draft for the same tender, so two submissions can&apos;t end up reading the same.
-        Review it, export to Word, edit it as your own, then upload the final version back here.
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Cover letter &amp; methodology statement</div>
+        <Tooltip>
+          <TooltipTrigger
+            className="inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-semibold text-muted-foreground"
+            aria-label="How this works"
+          >
+            ?
+          </TooltipTrigger>
+          <TooltipContent>
+            AI-drafted from your company&apos;s own profile, people, past projects and how you describe your
+            own approach - checked against every other company&apos;s draft for the same tender so two
+            submissions can&apos;t read the same. Review, export to Word, then upload the final version back
+            here.
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {KINDS.map((kind) => {

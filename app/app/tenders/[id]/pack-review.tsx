@@ -5,6 +5,7 @@ import { PackChecklist } from "./pack-checklist";
 import { reviewStatusToBidTask } from "./pack-review-logic";
 import type { BidTaskStatus } from "./bid-task-status";
 import { formatDateTime } from "@/lib/dates";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * Pack Review: the pre-compile screen Sarel asked for (2026-10-18) - "share
@@ -65,12 +66,22 @@ export async function PackReview({ tenderId }: { tenderId: string }) {
 
   return (
     <div id="pack-review" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
-      <div className="mb-0.5 text-[15px] font-bold text-foreground">Pack review - confirm before you compile</div>
-      <div className="mb-3.5 text-xs text-muted-foreground">
-        Everything identified to go into this tender&apos;s submission pack: company data, key positions and CVs, form
-        answers, the signature, supporting documents, Form B7, and the JV/typical-share field if set. Check each
-        section, use &quot;Change&quot; to jump to where it&apos;s edited, then confirm below - &quot;Generate submission
-        pack&quot; needs this review first.
+      <div className="mb-3.5 flex items-center gap-1.5">
+        <div className="text-[15px] font-bold text-foreground">Pack review - confirm before you compile</div>
+        <Tooltip>
+          <TooltipTrigger
+            className="inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-semibold text-muted-foreground"
+            aria-label="How this works"
+          >
+            ?
+          </TooltipTrigger>
+          <TooltipContent>
+            Everything identified to go into this tender&apos;s submission pack: company data, key positions and
+            CVs, form answers, the signature, supporting documents, Form B7, and the JV/typical-share field if
+            set. Use &quot;Change&quot; to jump to where any item is edited - &quot;Generate submission pack&quot;
+            needs this review confirmed first.
+          </TooltipContent>
+        </Tooltip>
       </div>
 
       {allItems.length > 0 && (
