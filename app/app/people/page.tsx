@@ -73,9 +73,9 @@ function registrationSummary(p: PersonRow): { label: string; tone: Tone }[] {
 export default async function PeoplePage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; bulk?: string }>;
 }) {
-  const { error: errorParam } = await searchParams;
+  const { error: errorParam, bulk: bulkParam } = await searchParams;
   const supabase = await createClient();
 
   // Deliberately NOT selecting id_number here - this is a list/summary view, and
@@ -104,15 +104,26 @@ export default async function PeoplePage({
           title="People / CV Library"
           description="Staff on file for key-position matching against SANRAL tenders."
           actions={
-            <Link href="/people/new" className={buttonVariants({ variant: "accent", size: "lg", className: "min-h-11" })}>
-              + Add person
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/people/bulk-cv" className={buttonVariants({ variant: "outline", size: "lg", className: "min-h-11" })}>
+                Bulk upload CVs
+              </Link>
+              <Link href="/people/new" className={buttonVariants({ variant: "accent", size: "lg", className: "min-h-11" })}>
+                + Add person
+              </Link>
+            </div>
           }
         />
 
         {errorParam && (
           <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
             {decodeURIComponent(errorParam)}
+          </div>
+        )}
+
+        {bulkParam && (
+          <div className="mb-4 rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success">
+            {decodeURIComponent(bulkParam)}
           </div>
         )}
 

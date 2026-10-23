@@ -7,6 +7,7 @@ import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/dis
 import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { CvExtractionReview } from "./cv-review";
+import { CvLedAddPerson } from "../_components/cv-led-add-person";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
 import { EmptyState } from "@/components/tt/empty-state";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -432,6 +433,13 @@ export default async function PersonDetailPage({
             existingProjects={projects.map((p) => p.client_and_number)}
           />
         ))}
+
+        {isNew && <CvLedAddPerson />}
+        {isNew && (
+          <div className="mb-2.5 text-xs font-bold tracking-wide text-muted-foreground uppercase">
+            Or enter details manually
+          </div>
+        )}
 
         <form action={savePerson} className={cardClass}>
           <input type="hidden" name="id" value={isNew ? "new" : person!.id} />

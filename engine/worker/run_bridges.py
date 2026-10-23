@@ -61,6 +61,7 @@ no --once flag, give it one: that's the contract.
 """
 import argparse
 import os
+import signal
 import subprocess
 import sys
 
@@ -112,18 +113,34 @@ class BridgeRunner:
             if label in self._missing_reported:
                 self.log(f"{label}: {os.path.relpath(path, REPO_ROOT)} is now present, running it")
                 self._missing_reported.discard(label)
+            # start_new_session=True + Popen (not subprocess.run's own
+            # timeout=) so a timeout kill can take the WHOLE process group
+            # down, not just the bridge script's own PID. A bridge that
+            # shells out to soffice/LibreOffice (the docx -> pdf step every
+            # pack bridge needs) or anything else leaves that grandchild
+            # running forever otherwise: subprocess.run's own timeout
+            # handling only ever kills the immediate child it started, and
+            # confirmed directly - adding start_new_session=True to
+            # subprocess.run alone changes nothing, since nothing then
+            # targets the group it creates. QA pass, 2026-10-23.
+            p = subprocess.Popen([sys.executable, path, "--once"] + self.extra_args,
+                                 cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, start_new_session=True)
             try:
-                p = subprocess.run([sys.executable, path, "--once"] + self.extra_args,
-                                   cwd=REPO_ROOT, capture_output=True, text=True, timeout=self.timeout)
-            except subprocess.TimeoutExpired as e:
+                stdout, stderr = p.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # already gone between the timeout firing and here
+                stdout, stderr = p.communicate()
                 broken.append(f"{label} timed out after {self.timeout}s")
-                out = (e.stdout or b"") + (e.stderr or b"")
-                out = out.decode(errors="replace") if isinstance(out, bytes) else out
+                out = stdout + stderr
                 system_alerts.record("worker", f"The {label} bridge pass timed out after {self.timeout}s and was killed",
                                      "critical", detail=out[-8000:] or None,
                                      context={"bridge": label, "script": os.path.relpath(path, REPO_ROOT)})
                 continue
-            lines = [ln for ln in (p.stdout + p.stderr).splitlines() if ln.strip()]
+            lines = [ln for ln in (stdout + stderr).splitlines() if ln.strip()]
             meaningful = [ln for ln in lines if not ln.startswith(QUIET_PREFIXES)]
             if meaningful:
                 did_something += 1

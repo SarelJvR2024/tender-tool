@@ -1576,3 +1576,298 @@ viewport - the same sandbox credential-generation limitation every batch has hit
 fix is a span/gap class change on components that already render correctly per the static-render
 check above and the existing build/test suite, but nobody has seen the real page with real data
 in a real browser.
+
+### Spec v3 Batch 9: company-level ECSA/SACPCMP collapse + registrations/properties/principals field width
+
+Picks up the two gaps Batch 8 flagged rather than fixing: "the company-level 'Size & offices'
+section asks every company for ECSA/SACPCMP staff counts unconditionally" and "the identical
+grid-squeeze on registrations/properties/principals' 'Notes' fields - different component family".
+
+**Part 1 - company-level ECSA/SACPCMP (O23, one level up from Batch 4)**: `EditForm.tsx`'s "Size &
+offices (SANRAL Form B3)" section and its read-only counterpart `SizeOfficesSection.tsx` both
+rendered ECSA-registered/SACPCMP-registered staff-count fields unconditionally, the exact same
+"ECSA as the universal category" problem Batch 4 (#105) already fixed at the *person* level.
+Applied the identical convention here: `recorded = ecsa_registered_staff_count != null ||
+sacpcmp_registered_staff_count != null` (a real `0` counts as recorded - this section's own
+description already says "blank is never written as 0", same meaning as "held" at the person
+level). In edit mode, not-recorded collapses both fields behind a `<details>` disclosure
+("+ Add ECSA or SACPCMP staff counts - only engineering-focused companies need these"), wrapped in
+`col-span-full` so it doesn't disturb `fieldGridClass`'s row layout; recorded shows them inline, as
+before. In read-only mode, not-recorded simply omits the two `Field` rows (no "Not on file" pair to
+show, and there's nothing to "add" from a read-only view - that lives in edit mode). Verified via
+`grep` that both columns are read ONLY by `pack-review-data.ts` (lists the field name/value in a
+tender pack review, does not gate anything on it) and the company-select string in `page.tsx` -
+confirmed, same as Batch 4's own verification, that a display-only change cannot affect any
+compliance/assessment logic.
+
+**Part 2 - registrations/properties/principals field width**: all three sub-pages
+(`registrations/page.tsx`, `properties/page.tsx`, `principals/page.tsx`) have their own "Notes"
+field via `ui.tsx`'s shared `Area` component, sitting in the same `grid` (`grid-cols-1
+sm:grid-cols-2 lg:grid-cols-3`) as short fields like a registration number or a title deed
+number - the identical violation Batch 8 just fixed in the main vault form, confirmed as a
+"different component family" (`ui.tsx`'s `Area`/`Text`/`grid`, not `shared.tsx`'s `Field`/
+`EditForm.tsx`'s `TextInput`/`fieldGridClass`). Added the same optional `fullWidth` prop to `Area`
+(`col-span-full`, identical pattern to Batch 8's `Field`/`TextInput` fix) and applied it at all
+three call sites. No other `Text`/`Select`/`YesNo` field on any of the three pages holds a
+comparably long value - checked each page's own field list, none needed the same treatment.
+
+**Tested**: `npm run verify` 0 errors, 129/129 vitest (unchanged - this batch added no new test
+files), 76/76 node:test both ways (`tsx --test` and the real CI invocation, `node
+--experimental-strip-types` per file). A standalone `react-dom/server` static render of both
+`EditForm` and `SizeOfficesSection` across three states (`ecsa`/`sacpcmp` both null, `ecsa=0`,
+`sacpcmp=3`) confirmed: not-recorded renders exactly one `<details>` in edit mode and zero ECSA
+fields in read-only mode; a real `0` in either field correctly counts as recorded (no `<details>`,
+field shown) rather than being treated as blank; either field alone being set reveals both, same
+OR logic as Batch 4's `ecsaOrSacpcmpHeld`. No render threw in any of the three states.
+
+**Not tested**: an actual signed-in render of `/company`, `/company/registrations`,
+`/company/properties`, or `/company/principals` - same sandbox credential-generation limitation
+every batch has hit all night.
+
+### Compliance documents: one upload button, table view default (Sarel's own live feedback)
+
+Sarel's first real signed-in look at the app tonight, with two screenshots of `/company`'s
+"Compliance documents" section: "it is confusing having two buttons for files, make this easier
+with just one button to click to upload a file. these cards take up a lot of space, move towards
+a table row view and not these cards, or have the option to switch between cards and list view."
+Both are real, not new bugs - the exact documented gap from Batch 2 (`coid` kept its old two-
+control `<input type="file">` + Submit form, since it has no AI-classifier entry - see
+`VAULT_KIND_TO_DOCUMENT_KIND`'s own comment) and a layout choice (one card per document) nobody
+had pushed back on before now.
+
+**One button**: new `DirectVaultDocumentUploader.tsx` - the same `FileDropzone` single-action UI
+every other vault row already uses (upload starts automatically on file choice, spec v3 O12),
+wired to the EXISTING `uploadVaultDocument` server action instead of the AI-classify pipeline
+(`coid` still has no classifier entry - that's still a Python/schema change, still out of this
+fix's scope, still not silently worked around). `DocumentRow.tsx` now calls a new shared
+`DocumentUploadAction` helper (reviewable kinds -> `VaultDocumentUploader`, `coid` ->
+`DirectVaultDocumentUploader`) in both the card view and the new table view, so the two can never
+drift onto different upload behaviours. `MAX_UPLOAD_BYTES` (4.4 MB, the Server Action body cap),
+not onboarding's 25 MB - this path still goes through the action's own request body, unlike the AI
+path which uploads straight to storage first.
+
+**Table view**: new `ComplianceDocumentsView.tsx` (client component - the view choice is plain
+`useState`, not persisted anywhere, a display preference rather than data) replaces the section's
+direct card rendering. Defaults to a compact table row per document (Document + one-line detail +
+filename link | Expires | Status | upload action), matching spec v3 §29's own "Expiry / document
+lists" composition example; a toggle in the section header (`VaultSection`'s new `actions` slot -
+`SectionCard` already had one built for exactly this, "a link, a button, a menu trigger" beside the
+title, not crammed inside the `<CardTitle>` heading itself) switches to the original card view,
+unchanged in its own markup. Table rows stack to a compact block (no horizontal scroll) below
+`sm:`, per spec §27/§29's "mobile may use rows/cards... not a horizontally-scrolling table."
+`ComplianceDocumentsSection.tsx` now only computes one `ComplianceDocEntry[]` array (title, full
+card-view `lines`, a one-line `detail` for the table, a raw `expiry` date for the table's own
+column, status, path, url) and hands it to the view component - the same per-kind field logic as
+before, just captured once instead of being re-derived per view.
+
+**Self-review**: round 1 - a static `react-dom/server` render of `DirectVaultDocumentUploader`
+alone confirmed exactly one dropzone control, no second submit button; a render of
+`ComplianceDocumentsView` with a single `coid` entry confirmed the table header row, both toggle
+buttons, and the row-grid markup all present; a render of the post-refactor card-view `DocumentRow`
+for `coid` confirmed no regression there either. Round 2 - re-read against Sarel's own literal
+words: one button (confirmed), table as the default with cards one click away (confirmed, not the
+reverse). Round 3 - `VaultSection` has a dozen other callers across this page (`BeeCidbSection.tsx`,
+`CompanyIdentitySection.tsx`, `BankDetailsSection.tsx`, `EditForm.tsx` alone uses it 6 times,
+`HowWeWorkSection.tsx`, `LettersSection.tsx`, `RegisterLinks.tsx`, `SavingsBaselineSection.tsx`,
+`SizeOfficesSection.tsx`); `actions` is a new optional prop and every one of them still passes
+only `title`/`id`/`description` exactly as before - confirmed by grep, not just assumed from the
+type signature.
+
+**Tested**: `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways. **Not tested**: an
+actual signed-in render - same sandbox credential-generation limitation as every batch tonight,
+even with Sarel live and the strongest possible reason to find a workaround if one existed; none
+did. The static-render checks above are real evidence the new code paths don't throw and produce
+the right markup, not a substitute for him clicking it himself.
+
+---
+
+## CV-led "Add person" + bulk CV/people upload (Sarel's own live feedback, 2026-10-23)
+
+Direct quote (typos his own): "on the add person, allow uption to add a CV and have AI read and
+capture all the information instead of the user capturing it" and "also alow bulk upload of all
+People CVs, and bulk upload ofpeople CVs or bulkd uload of people with their details."
+
+**Investigation finding, before anything was built**: a fully CV-led, zero-typing "AI reads even
+the name off the CV, nothing saved until confirmed" flow is blocked by a hard schema constraint,
+not a missing feature. `cv_uploads.person_id` and `cv_extraction_results.person_id` are both
+`uuid not null references people(id)` (`0008_cv_uploads.sql`, `0023_cv_extraction_results.sql`) -
+nothing can be attached to or extracted for a person who doesn't exist in the `people` table yet.
+The one pipeline that doesn't need a person first - the generic company-level document classifier
+from spec v3 Batch 2 (`lib/onboardingScan.ts`) - can recognise "this is a CV" without a target, but
+deliberately extracts zero fields for that document kind (`cv: []`); real field/name extraction is
+`engine/cv/extract_cv_fields.py`'s job alone, and that only ever runs against an already-existing
+`cv_uploads.person_id`. Making this genuinely zero-typing needs either a schema change (a nullable
+`cv_uploads.person_id`, or a staging table for an unconfirmed person) or an engine change (teaching
+the generic classifier to also do name/field extraction, duplicating `extract_cv_fields.py`'s own
+job) - both out of scope for an autonomous merge under this repo's standing rule (no schema/engine
+change without Sarel's own review), and **neither was built**. Flagged here for his own call, not
+worked around silently.
+
+**What was built instead, in scope**: the smallest honest anchor, not a workaround that pretends
+otherwise. `/people/new` now leads with a new "Add from a CV" card
+(`CvLedAddPerson`, `app/app/people/_components/cv-led-add-person.tsx`) - full name (typed, the one
+field that has to be) plus an optional CV upload, calling a new `createPersonWithCv()` action
+(`app/app/people/actions.ts`). It creates the `people` row with only the typed name (everything
+else starts null, same as the existing blank form always left it), then - if a file was given -
+attaches it through the exact same `cv_uploads` row shape, storage-path convention and
+`extraction_requested` pipeline `uploadCv()` already uses for an existing person, so the CV then
+goes through the SAME `CvExtractionReview`/`applyCvExtraction()` confirm-or-correct card every
+other person's CV already gets. Nothing from the CV is trusted or saved without that review; only
+the name the human actually typed is saved immediately, and it's correctable there too. The old
+~20-field blank manual form is untouched and still there right below it ("Or enter details
+manually") - this is additive, not a replacement.
+
+**Bulk upload**, new `/people/bulk-cv` page (`bulk-cv/page.tsx`, `BulkCvUpload` component): drop
+several CV files at once, each row assigned - via filename-based fuzzy pre-matching
+(`bestPersonMatch`, all of an existing person's name parts must appear in the filename) as a
+non-binding starting guess only, never auto-submitted - to an existing person or a new one (name
+typed, same reason as above). A new `bulkUploadCvs()` action processes every assigned row in one
+call (existing `uploadCv()`/`createPersonWithCv()` each end in their own `redirect()`, which throws
+in a Server Action and can't run inside a loop, so the shared per-file logic was factored into a
+new non-throwing `attachCvToPerson()` helper instead of being duplicated a third time) and redirects
+once at the end to `/people?bulk=...` with a plain-English summary ("3 CVs uploaded, 1 new person
+added. 1 failed: ..."), which `/people/page.tsx` now actually renders (it previously only read
+`?error=`, so this banner would otherwise have silently done nothing). A "Bulk upload CVs" link
+was added next to "+ Add person" on `/people` - the page existed from the first draft but had no
+way to reach it from the UI until this pass caught it in round 3 of self-review.
+
+**Caught in round 2 of self-review (adversarial re-read against
+`Tender-Tool-Competitor-Feature-Deep-Dive.md`'s "CVs: upload once, never recapture" section,
+specifically the "Use as-is" sub-requirement)**: the first draft of both `createPersonWithCv()` and
+`bulkUploadCvs()` hardcoded `mode: "ai_extract"`, silently removing the as-is/AI-extract choice
+`uploadCv()` already requires for every other CV upload in this app ("AI extraction/reformatting
+must be optional, not forced"). Fixed before merge: both new client components now show the same
+two-option radio choice `uploadCv()`'s own form already uses, in the same wording ("AI-extract the
+fields for you to check..." / "Use as-is - attach this exact file to submissions, no AI involvement
+at all"), for `CvLedAddPerson` once a file is chosen and for `BulkCvUpload` as one choice applied to
+the whole batch (not per-file - keeps the bulk screen usable with many rows, and still a real,
+visible, un-hardcoded choice at the point of upload rather than a default silently forced through).
+
+**Known limitation, not built this pass**: no duplicate-person detection on either new path. This
+matches the existing baseline exactly - `savePerson()` never checked for an existing person with
+the same name either - so it's not a regression, but it's more likely to bite in the bulk flow
+specifically, where a CV's filename not matching any existing person's name (misspelling, nickname,
+initials-only) falls through to "new person" by default rather than failing closed. The UI always
+shows the "Existing person" dropdown as a manual override for exactly this reason, but nothing
+stops two rows for the same real person from being submitted as two separate new people if neither
+matches by filename. Worth a real dedup pass if duplicate people start showing up in practice.
+
+**Tested**: `npm run verify` 0 errors (clean typecheck, lint, build - `/people/bulk-cv` appears in
+the route list), 133/133 vitest, 76/76 node:test both ways (same 4 pre-existing
+`app/tenders/[id]/*.test.ts` files reporting 0 tests under the `node --experimental-strip-types`
+invocation specifically - confirmed by diffing against a fresh `origin/main` checkout that this is
+a pre-existing Node test-runner quirk with `[id]` bracket characters in a directory path, not
+something this pass caused; the same files pass fully under `tsx --test`, and nothing in this pass
+touches `app/tenders/`). **Live-tested further than the last several batches**: the sandbox still
+has no way to generate a real signed-in session (re-checked specifically for this pass, since Sarel
+was live - still blocked), but unlike a static `react-dom/server` render, this pass built a
+temporary, dev-only mock-data route (`app/dev-screenshot-cv/page.tsx` - never a route with a
+leading underscore, Next.js treats `_`-prefixed folders as private/non-routable and silently 404s
+them, caught immediately when the first screenshot came back blank), rendered both new components
+for real inside `next dev` + Chromium via Playwright, and drove them through actual browser
+interaction - a real `<input type="file">` set via `setInputFiles()`, not simulated. That confirmed
+the fuzzy-match logic genuinely works end to end (a file named `mock-cv-thabo-nkosi.pdf` auto-
+matched the mock person "Thabo Nkosi"; an unmatched file correctly defaulted to "New person" with a
+guessed name from its filename), not just that the markup renders. Screenshotted at 1440px and
+390px both before and after the round-2 mode-toggle fix - no horizontal scroll, touch-sized
+controls, toggle and rows all visible at both widths. The temporary route, `.env.local`, and the
+`playwright-core` dev install were all deleted again before commit (confirmed via `git status`
+showing only the real feature files) - this was a self-review aid, never meant to reach `main`.
+
+---
+
+### Tender workspace: quick doc link, phase-grouped plan, action-type tags, tabs (Sarel's own live feedback)
+
+Sarel's third live-feedback round tonight, screenshot of `/tenders/[id]#general-preparation`
+(RFP165/2026, DBSA, general family): "have a quick link to access all tender docs. change
+submission plan to be grouped by how to compile the tender pack and according to the timeline...
+not just one long list. also indicate if it requires a physical action, a decision, a document,
+info, review etc not just [a status badge]... you can still color code if it needs fixing or done
+or ready to submit. the tags in the standard forms section should be standard sizes. add a summary
+of how much is still needed per section... always displayed. see if you can streamline the page
+and move to different tabs, it is a very long list, even reduce some of the blabber on the
+questions." Seven distinct asks, all in `general-workspace.tsx`/`submission-plan-*.ts` (general
+family only - SANRAL's own `compliance-report.tsx` and `disqualification-guard.tsx` sit outside
+this page's biggest-complaint area and were left alone beyond one copy trim). The CV-pre-population/
+confidence-level closing line is the same ground `CV-led "Add person"` work (same night, different
+Claude session/PR) already covers - not re-scoped here to avoid two sessions racing the same code.
+
+**Action-type tags (new axis, not a status change)**: new `ActionType = "physical" | "decision" |
+"document" | "info" | "review"` and a pure `actionTypeForStep()` in `submission-plan-logic.ts`,
+derived from each step's existing `category` (+ `bidTaskStatus` for forms: engine-filled ->
+review, by-hand -> document) - no new data, no schema change. Rendered by new `ActionTypeTag`
+(`action-type-tag.tsx`) - deliberately a square-cornered, icon+outline tag, a different SHAPE from
+`BidTaskBadge`'s rounded pill, so the two read as two different kinds of information at a glance:
+the existing Fix/Provide/Verify status badge (kept, unchanged, still color-coded) stays the "is
+this OK" signal; the new tag is "what do I actually have to go and do." Never merged into one
+badge - Sarel's own words kept the two separate ("not just [status], it is not descriptive enough,
+you can still color code").
+
+**Submission plan regrouped by phase, not status**: `submission-plan-view.tsx` rewritten -
+`PHASE_ORDER` groups the exact same steps into "1. Confirm you qualify" (returnable, cidb_grading)
+-> "2. Assign your team" (role) -> "3. Complete the forms" (form, buyer_form) -> "4. Answer this
+tender's own questions" (question) -> "5. Attend the briefing" (briefing) -> "6. Known limitations"
+(gap) - the order a pack actually gets compiled in, derived purely from each step's existing
+`category` field (8 values already there, nothing new read). Status is still worst-first WITHIN
+each phase and still the row's own color-coded badge - grouping changed, the Fix/Provide/Verify
+model didn't. An always-visible "`N` of `M` ready · `fix` to fix · `provide` to provide · `verify`
+to verify" bar sits above the phases (item 5), plus a "`done` of `total` done" count per phase
+header, even while scrolled past it. An empty phase (e.g. no gaps) is skipped entirely rather than
+padded with an empty-state line - the old flat list's own `emptyText` strings are gone; a phase
+with zero items for this tender just isn't shown.
+
+**Tabs, scoped deliberately**: new `WorkspaceTabs` (`workspace-tabs.tsx`, client component) wraps
+ONLY `GeneralTenderWorkspace`'s 4 secondary sections (Documents/Questions/People/Pack) behind a tab
+bar - "What this tender needs" (has its own live blocker chips) stays always visible above the
+tabs, and the Disqualification guard + Submission plan (`page.tsx`, mounted above this whole
+component) were already structurally outside/above it before tonight - confirmed by reading
+`page.tsx` before starting. No blocker is ever hidden in a tab (spec v3 §16.E: "Do not bury
+blockers in a hidden tab"). Every tab's content is always rendered (same data already being
+fetched unconditionally before tabs existed) - only which one is VISIBLE changes, via the `hidden`
+attribute rather than unmounting, so an existing `JumpLink href="#general-documents"` style anchor
+still finds a real element. Since a `hidden` element can't be scrolled to, `WorkspaceTabs` listens
+for `hashchange` (a `JumpLink` click, or the page loading with a hash already in the URL) and
+switches tabs itself before re-doing the scroll the browser couldn't do while it was hidden; a
+tab's optional `anchors` list (used for `general-pack-review`, rendered inside the Pack tab but
+with its own id) covers a hash that isn't the tab's own id. Each tab carries a `TabBadge` - the
+same per-section "still outstanding" count Sarel asked for (item 5), on the bar itself so it's
+genuinely "always displayed" even while a different tab is open: Documents = `docsMissing`,
+Questions = `needAnswer`, People = `regGaps + roleGaps` (new, a small pure count from already-
+loaded `personRegs`/`roleRowsForTender`, not a new query), Pack = `generalFixCount` (already
+computed, reused).
+
+**Quick doc link + standard-size form tags + copy trim**: "Read from N documents" in "What this
+tender needs" is now a link to `#general-documents`/the Documents tab; that section gained a
+`<details>` disclosure listing every `manifest.documents[]` entry by name (with an unreadable/OCR
+note) - the one genuine gap found while investigating (the manifest's own document list was being
+counted everywhere but never itemized anywhere) - rather than inventing a download feature the
+schema doesn't have (checked: no `listing_url`/original-document storage exists beyond
+`tender_private_documents`, which IS already linked from inside the disclosure when present).
+`FormTag` (SBD/MBD code pills, "standard forms" section) got a `minWidth: 56` + centered text - the
+literal ask ("standard forms section tags should be standard sizes"); previously auto-width, so
+"SBD 1" and "SBD 6.1" visibly differed. Trimmed the Questions intro paragraph, the Submission plan
+intro, and the Disqualification guard's description to their load-bearing sentence each - the
+"blabber" complaint was about fixed wrapper copy, not per-question `help` text (that's extracted
+from the tender's own documents, not authored here).
+
+**Self-review (4 rounds, this page's size/risk)**: round 1 - re-read Sarel's own words item by
+item against the diff; the "info" fallback for a signatory-type question (`q.type === "person"`)
+is a known, accepted simplification - `PlanStep` carries no discriminator for it today, so it reads
+as generic "info" rather than "decision" (who signs); not silently missed, flagged here. Round 2 -
+confirmed `disqualification-guard.tsx`'s own `plan.steps.filter((s) => s.category === "role")`
+still works unchanged (category values untouched, only a new derived `ActionType` added alongside).
+Round 3 - a mock-data screenshot harness (`/design/screenshot-workspace-redesign`, temporary,
+deleted before finishing) rendered `ActionTypeTag` for all 5 types, the phase-grouped plan with 9
+mock steps across 5 phases, and `WorkspaceTabs` with its badges; confirmed visually at 1440px and
+390px, and confirmed a real click switches tabs (Playwright, `page.getByRole('tab').click()`).
+Round 4 - re-read the full restructured `general-workspace.tsx` end to end for the tab-content
+extraction itself (the highest-risk mechanical step): every section's own id, every prop/state
+closure (`tenderId`, `manifest`, `returnables`, `qStates`, etc.) still reads from the same
+surrounding closure as before, nothing duplicated or dropped in the move.
+
+**Tested**: `npm run build` clean, `npm run verify` 0 errors, 144/144 vitest (11 new
+`actionTypeForStep` cases added to the existing `submission-plan-logic.spec.ts`), 76/76 node:test
+both ways. **Not tested**: an actual signed-in render of `/tenders/[id]` - same sandbox credential-
+generation limitation as every batch tonight; the mock-data screenshot harness above is real
+evidence the new components render, lay out, and respond to clicks correctly, not a substitute for
+Sarel clicking through his own real tender.

@@ -33,10 +33,35 @@ export function EditForm({ company }: { company: CompanyRow }) {
         <div className={fieldGridClass}>
           <TextInput name="head_office" label="Head office (city/town)" defaultValue={company.head_office} />
           <NumberInput name="other_offices" label="Other offices (number)" defaultValue={company.other_offices} step="1" />
-          <NumberInput name="ecsa_registered_staff_count" label="ECSA-registered professionals" defaultValue={company.ecsa_registered_staff_count} step="1" />
-          <NumberInput name="sacpcmp_registered_staff_count" label="SACPCMP-registered professionals" defaultValue={company.sacpcmp_registered_staff_count} step="1" />
           <NumberInput name="total_employees" label="Total employees" defaultValue={company.total_employees} step="1" />
           <NumberInput name="typical_jv_share_pct" label="% share of JV agreement (usual; 100 when bidding alone)" defaultValue={company.typical_jv_share_pct} step="0.1" />
+          {(() => {
+            // Spec v3 O23, one level up from the person-level fix (Batch 4,
+            // app/people/[id]/page.tsx): ECSA/SACPCMP staff counts used to
+            // render unconditionally on every company, the same "ECSA as the
+            // universal category" problem - a non-engineering company saw
+            // two engineering-only fields by default, with nothing to enter.
+            // "Recorded" means either count is non-null - this section's own
+            // description says blank is never written as 0, so a real 0 is
+            // still a recorded answer, same meaning as "held" at the person
+            // level.
+            const recorded = company.ecsa_registered_staff_count != null || company.sacpcmp_registered_staff_count != null;
+            const fields = (
+              <>
+                <NumberInput name="ecsa_registered_staff_count" label="ECSA-registered professionals" defaultValue={company.ecsa_registered_staff_count} step="1" />
+                <NumberInput name="sacpcmp_registered_staff_count" label="SACPCMP-registered professionals" defaultValue={company.sacpcmp_registered_staff_count} step="1" />
+              </>
+            );
+            if (recorded) return fields;
+            return (
+              <details className="col-span-full mb-2.5">
+                <summary className="flex min-h-11 cursor-pointer items-center py-1.5 text-xs font-semibold text-accent">
+                  + Add ECSA or SACPCMP staff counts - only engineering-focused companies need these
+                </summary>
+                <div className={`${fieldGridClass} mt-2`}>{fields}</div>
+              </details>
+            );
+          })()}
         </div>
       </VaultSection>
 

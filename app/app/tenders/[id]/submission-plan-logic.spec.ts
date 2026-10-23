@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  actionTypeForStep,
   briefingStep,
   buyerFormStep,
   cidbGradingStep,
@@ -7,6 +8,7 @@ import {
   formStepStatus,
   gapStep,
   unrepresentedGaps,
+  type PlanStep,
 } from "./submission-plan-logic";
 import type { ManifestForm, RequirementManifest } from "@/lib/generalTender";
 
@@ -182,6 +184,51 @@ describe("unrepresentedGaps", () => {
       ],
     });
     expect(unrepresentedGaps(m)).toEqual(["A genuinely new limitation not tied to any form."]);
+  });
+});
+
+describe("actionTypeForStep", () => {
+  const step = (category: string, bidTaskStatus: PlanStep["bidTaskStatus"] = "verify"): PlanStep => ({
+    category,
+    id: `${category}:1`,
+    title: "t",
+    reviewStatus: "confirmed",
+    bidTaskStatus,
+    note: "n",
+  });
+
+  it("a compulsory briefing is a physical action", () => {
+    expect(actionTypeForStep(step("briefing"))).toBe("physical");
+  });
+  it("a key-personnel role is a decision", () => {
+    expect(actionTypeForStep(step("role"))).toBe("decision");
+  });
+  it("the CIDB grading comparison is a decision", () => {
+    expect(actionTypeForStep(step("cidb_grading"))).toBe("decision");
+  });
+  it("a returnable is a document", () => {
+    expect(actionTypeForStep(step("returnable"))).toBe("document");
+  });
+  it("a verified (engine-filled) form is a review, not a document", () => {
+    expect(actionTypeForStep(step("form", "verify"))).toBe("review");
+  });
+  it("a by-hand form (provide) is a document", () => {
+    expect(actionTypeForStep(step("form", "provide"))).toBe("document");
+  });
+  it("a verified buyer form is a review", () => {
+    expect(actionTypeForStep(step("buyer_form", "verify"))).toBe("review");
+  });
+  it("a by-hand buyer form is a document", () => {
+    expect(actionTypeForStep(step("buyer_form", "provide"))).toBe("document");
+  });
+  it("an unresolved gap is a review", () => {
+    expect(actionTypeForStep(step("gap", "fix"))).toBe("review");
+  });
+  it("a question is info", () => {
+    expect(actionTypeForStep(step("question"))).toBe("info");
+  });
+  it("an unknown category falls back to info", () => {
+    expect(actionTypeForStep(step("something_new"))).toBe("info");
   });
 });
 

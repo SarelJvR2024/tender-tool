@@ -15,16 +15,19 @@ export function VaultSection({
   id,
   title,
   description,
+  actions,
   children,
 }: {
   id?: string;
   title: React.ReactNode;
   description?: React.ReactNode;
+  /** A control beside the title (e.g. a view-mode toggle) - SectionCard's own slot, not crammed inside the heading. */
+  actions?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   return (
     <div id={id} className="scroll-mt-20">
-      <SectionCard title={title} description={description}>
+      <SectionCard title={title} description={description} actions={actions}>
         {children}
       </SectionCard>
     </div>

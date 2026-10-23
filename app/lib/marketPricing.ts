@@ -296,13 +296,42 @@ export function segmentsFor(args: { buyerLabel: string; isSanral: boolean; categ
   return out;
 }
 
+// PostgREST's own hard response cap on this project (db-max-rows) - confirmed
+// live 2026-10-23 during the Market Intelligence QA pass: requesting
+// .limit(5000) still only ever returned rows 0-999 (content-range
+// "0-999/39536" on a direct, unfiltered check). A client-side .limit() past
+// this is silently truncated, not an error - every caller below paginates
+// with .range() instead of trusting .limit() alone whenever more than this
+// many matching rows are plausible, which both loadSegment() (a buyer x
+// discipline segment, occasionally large for SANRAL/common disciplines) and
+// loadMarketOutcomes() (the whole table) now are.
+const POSTGREST_PAGE_SIZE = 1000;
+
+/** Pages through .range() in POSTGREST_PAGE_SIZE chunks until maxRows is hit
+ * or a page comes back short (no more rows) - see POSTGREST_PAGE_SIZE. */
+export async function fetchAllRows<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  maxRows: number,
+): Promise<{ rows: T[]; error: string | null }> {
+  const rows: T[] = [];
+  for (let offset = 0; offset < maxRows; offset += POSTGREST_PAGE_SIZE) {
+    const to = Math.min(offset + POSTGREST_PAGE_SIZE, maxRows) - 1;
+    const { data, error } = await page(offset, to);
+    if (error) return { rows, error: error.message };
+    rows.push(...(data ?? []));
+    if (!data || data.length < to - offset + 1) break;
+  }
+  return { rows, error: null };
+}
+
 /** Competitive published outcomes in a segment (numbers only - no registers). */
 export async function loadSegment(supabase: SupabaseClient, s: Segment): Promise<{ rows: OutcomeStats[]; error: string | null }> {
-  let q = supabase.from("public_tender_outcomes").select(STATS_COLUMNS).eq("competitive", true).overlaps("categories", s.categories);
-  if (s.sanralOnly) q = q.like("outcome_key", "sanral:%");
-  if (s.buyer) q = q.ilike("buyer", s.buyer.replace(/[%_]/g, (c) => `\\${c}`));
-  const { data, error } = await q.limit(5000);
-  return { rows: (data ?? []) as OutcomeStats[], error: error?.message ?? null };
+  return fetchAllRows<OutcomeStats>((from, to) => {
+    let q = supabase.from("public_tender_outcomes").select(STATS_COLUMNS).eq("competitive", true).overlaps("categories", s.categories);
+    if (s.sanralOnly) q = q.like("outcome_key", "sanral:%");
+    if (s.buyer) q = q.ilike("buyer", s.buyer.replace(/[%_]/g, (c) => `\\${c}`));
+    return q.range(from, to);
+  }, 5000);
 }
 
 /** Outcomes published for these tenders (tender_market_outcomes(), 0053), keyed by tender id. */
@@ -434,12 +463,18 @@ export function signedPct(v: number | null): string {
 export type MarketRow = OutcomeStats & Pick<TenderOutcome, "categories" | "buyer" | "province">;
 export const MARKET_ROW_COLUMNS = `${STATS_COLUMNS}, categories, buyer, province`;
 
-/** Every public_tender_outcomes row (capped), both statuses - register_published
- * counts toward "tenders seen" even before an award is published. No company
- * join, no RLS-scoped filter: this table is shared/authenticated-readable (0053). */
-export async function loadMarketOutcomes(supabase: SupabaseClient, limit = 20_000): Promise<{ rows: MarketRow[]; error: string | null }> {
-  const { data, error } = await supabase.from("public_tender_outcomes").select(MARKET_ROW_COLUMNS).limit(limit);
-  return { rows: (data ?? []) as MarketRow[], error: error?.message ?? null };
+/** Every public_tender_outcomes row (capped, paginated past PostgREST's own
+ * 1000-row response cap - see POSTGREST_PAGE_SIZE), both statuses -
+ * register_published counts toward "tenders seen" even before an award is
+ * published. No company join, no RLS-scoped filter: this table is
+ * shared/authenticated-readable (0053). 60,000 default cap is headroom
+ * above today's real ~39,500 rows (the SANRAL/eTenders backfill, 2026-10-22
+ * to 23), not an estimate - revisit upward as the real table grows past it,
+ * same "correct by construction now, revisit once real volume justifies
+ * more" reasoning as 0062's own comment on a live SQL function vs. a cached
+ * materialized view. */
+export async function loadMarketOutcomes(supabase: SupabaseClient, limit = 60_000): Promise<{ rows: MarketRow[]; error: string | null }> {
+  return fetchAllRows<MarketRow>((from, to) => supabase.from("public_tender_outcomes").select(MARKET_ROW_COLUMNS).range(from, to), limit);
 }
 
 export type MonthCount = { month: string; count: number };

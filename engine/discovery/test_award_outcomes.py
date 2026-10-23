@@ -52,6 +52,14 @@ for raw, want in cases.items():
     got = ao.parse_rand(raw)
     check(f"parse_rand({raw!r})", got == want, f"got {got}")
 check("portal 0001-01-01 is no date", ao.parse_portal_date("0001-01-01T00:00:00") is None)
+check("portal 1900-01-01 is no date", ao.parse_portal_date("1900-01-01T00:00:00") is None)
+check("portal 1753-01-01 (SQL Server's own DATETIME minimum) is no date",
+      ao.parse_portal_date("1753-01-01T00:00:00") is None)
+check("portal garbled-year date (seen live: '1025-10-13', almost certainly meant 2025) is no date",
+      ao.parse_portal_date("1025-10-13T00:00:00") is None)
+check("portal genuine old-but-real date is kept, not swept up by the sentinel bound",
+      ao.parse_portal_date("2009-07-01T00:00:00") == "2009-07-01")
+check("portal real recent date is kept", ao.parse_portal_date("2026-10-14T00:00:00") == "2026-10-14")
 check("SANRAL '21 April 2022'", ao.parse_sanral_date("21 April 2022") == "2022-04-21")
 check("SANRAL '08.12.2021' / '19-June-2026' / '03/08/2021'",
       [ao.parse_sanral_date(s) for s in ("08.12.2021", "19-June-2026", "03/08/2021")]
