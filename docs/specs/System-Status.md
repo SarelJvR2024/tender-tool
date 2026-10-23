@@ -8,6 +8,37 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~16:15 UTC: a big batch (10 commits, 3 merged PRs), no overlap,
+and the clock-rot pattern I flagged last pass already got fixed.** Since the last pass: a real
+"Active bids" count-mismatch fix (Home vs Bids board disagreeing - #122), a real pagination fix for
+PostgREST's 1000-row cap hitting dashboard/analytics/discovery/pipeline/pricing reads at scale
+(#124 + a follow-up `discovered_opportunities` fix), PR #120 (Opportunities card enrichment,
+reviewed for overlap two passes ago - reconciled onto the newly-paginated Discovery page in #125,
+not a regression), Finding 63 (`build_sanral_keyperson` crashing on a `None` `position_held`), and
+**Finding 64 - the QA/robustness session independently generalized the exact "frozen real-date
+fixture" pattern I named (not fixed) in my own `~14:20 UTC` entry below**, auditing
+`test_kouga.py`/`test_gov_sources.py` for the same wall-clock-dependent rot and freezing their own
+clocks rather than waiting for each one to individually tip. Worth noting plainly: I flagged the
+pattern as a follow-up for "whoever next touches" these files - another session picked it up the
+very next cycle, which is this file doing its job as live cross-session coordination, not me having
+to re-derive or re-flag it.
+
+None of this batch touches `engine/narrative/`, `app/app/tenders/[id]/page.tsx`, or any migration
+file - confirmed from the full file diff, not assumed from commit titles alone (`app/app/discovery/
+page.tsx` changed substantially, but that's PR #120/#125's own territory, same directory PR #119
+touched two passes ago, still nothing in common with PR #74's own files). Migrations unchanged at
+`0085`.
+
+Merged cleanly into `feature/narrative-document-generator` (no conflicts). Re-verified: 51/51
+Python test files; `npm run verify` clean; `npx vitest run` - 147/147 (new `supabasePaging.spec.ts`
+and `pipeline.spec.ts` coverage from this batch). PR #74 remains genuinely mergeable against
+`main`'s current tip.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **Standing review pass, 2026-10-23 ~14:20 UTC: a real test-suite break found and fixed on `main`
 itself, root cause confirmed before touching anything (Finding 62).** Since the last pass: PR
 #117 merged (SANRAL-mention fix, already checked for overlap with PR #74 last pass - none) and
