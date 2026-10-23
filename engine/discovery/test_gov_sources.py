@@ -250,7 +250,29 @@ def test_merge():
         sanral_site("NRA 2026/0021", "2026-11-02T12:00:00+02:00", slug="nra-2026-0021"),
         sanral_site("NRA 2026/0021 (B)", "2026-11-02T12:00:00+02:00", slug="nra-2026-0021-b"),
     ]
-    m = gov_sources.merge({"etenders_portal": portal, "sanral": site}, closed)
+    # gov_sources.merge() always recomputes is_closed from sh.is_past() against
+    # the REAL current time (sh.release() strips any given is_closed and
+    # computes its own - confirmed by reading the code, not assumed), and the
+    # "open on SANRAL, Closed on portal" check below hardcodes 2026-11-06 as
+    # still-open. Same bug class as the randwater fixture that already
+    # flipped (System-Status.md, Finding 62, 2026-10-23) - this one is a
+    # ticking time bomb for 2026-11-06, not yet flipped. Freezing the clock
+    # (same FixedDateTime pattern as test_kouga.py's own fix, same pass)
+    # makes it correct forever, not just until that date. QA pass, 2026-10-23.
+    import datetime as _real_datetime
+
+    class _FixedBeforeClosing(_real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = _real_datetime.datetime(2026, 10, 25, 9, 0, tzinfo=_real_datetime.timezone.utc)
+            return base.astimezone(tz) if tz else base
+
+    _real_dt = sh.datetime.datetime
+    sh.datetime.datetime = _FixedBeforeClosing
+    try:
+        m = gov_sources.merge({"etenders_portal": portal, "sanral": site}, closed)
+    finally:
+        sh.datetime.datetime = _real_dt
     by = {x["ocid"]: x for x in m}
     c = by["ocds-9t57fa-171756"]
     check("matched on the NRA bid number via SCM reference", [s["source"] for s in c["listing_sources"]] == ["etenders_portal", "sanral"])
