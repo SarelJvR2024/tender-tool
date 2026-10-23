@@ -1,11 +1,37 @@
 import type { StatusChip } from "@/lib/dates";
 import { filenameFromPath, VAULT_KIND_TO_DOCUMENT_KIND, type VaultDocumentKind } from "@/lib/vaultDocuments";
-import { uploadVaultDocument } from "../actions";
 import { ChipBadge } from "./shared";
-import { Button } from "@/components/ui/button";
 import { VaultDocumentUploader } from "./VaultDocumentUploader";
+import { DirectVaultDocumentUploader } from "./DirectVaultDocumentUploader";
 
-/** One vault document: its tracked facts, an expiry chip, a link to the uploaded copy, and an upload/replace form. */
+/**
+ * The upload/replace control for one vault document - whichever of the two
+ * real upload paths this kind actually uses (see VAULT_KIND_TO_DOCUMENT_KIND's
+ * own comment: 6 kinds go through the AI classify-and-review pipeline, 'coid'
+ * through a direct upload, same one button either way per spec v3 O12).
+ * Shared by DocumentRow's card body and the table view's own row, so the two
+ * views can never drift onto two different upload behaviours.
+ */
+export function DocumentUploadAction({
+  companyId,
+  kind,
+  title,
+  hasExisting,
+}: {
+  companyId: string;
+  kind: VaultDocumentKind;
+  title: string;
+  hasExisting: boolean;
+}) {
+  const reviewable = !!VAULT_KIND_TO_DOCUMENT_KIND[kind];
+  return reviewable ? (
+    <VaultDocumentUploader companyId={companyId} title={title} />
+  ) : (
+    <DirectVaultDocumentUploader companyId={companyId} kind={kind} title={title} hasExisting={hasExisting} />
+  );
+}
+
+/** One vault document: its tracked facts, an expiry chip, a link to the uploaded copy, and an upload/replace control. */
 export function DocumentRow({
   companyId,
   kind,
@@ -23,14 +49,7 @@ export function DocumentRow({
   path: string | null;
   url: string | undefined;
 }) {
-  const upload = uploadVaultDocument.bind(null, companyId);
   const filename = filenameFromPath(path);
-  // Spec v3 Batch 2: the 6 kinds the AI document-scan pipeline already
-  // classifies go through VaultDocumentUploader (upload -> classify ->
-  // review -> confirm, never a silent overwrite). 'coid' has no classifier
-  // entry (see VAULT_KIND_TO_DOCUMENT_KIND's own comment) and keeps the
-  // original direct-upload form below, unchanged.
-  const reviewable = !!VAULT_KIND_TO_DOCUMENT_KIND[kind];
   return (
     <div className="border-t border-border py-3 first:border-t-0">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -57,24 +76,7 @@ export function DocumentRow({
         </div>
         <ChipBadge status={status} />
       </div>
-      {reviewable ? (
-        <VaultDocumentUploader companyId={companyId} title={title} />
-      ) : (
-        <form action={upload} className="mt-2 flex flex-wrap items-center gap-2">
-          <input type="hidden" name="kind" value={kind} />
-          <input
-            type="file"
-            name="file"
-            required
-            accept=".pdf,.doc,.docx,.png,.jpg,.jpeg"
-            aria-label={`Upload ${title}`}
-            className="max-w-full text-xs text-foreground"
-          />
-          <Button type="submit" variant="outline" size="sm">
-            {filename ? "Replace" : "Upload"}
-          </Button>
-        </form>
-      )}
+      <DocumentUploadAction companyId={companyId} kind={kind} title={title} hasExisting={!!filename} />
     </div>
   );
 }

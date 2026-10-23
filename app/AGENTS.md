@@ -1623,3 +1623,58 @@ OR logic as Batch 4's `ecsaOrSacpcmpHeld`. No render threw in any of the three s
 **Not tested**: an actual signed-in render of `/company`, `/company/registrations`,
 `/company/properties`, or `/company/principals` - same sandbox credential-generation limitation
 every batch has hit all night.
+
+### Compliance documents: one upload button, table view default (Sarel's own live feedback)
+
+Sarel's first real signed-in look at the app tonight, with two screenshots of `/company`'s
+"Compliance documents" section: "it is confusing having two buttons for files, make this easier
+with just one button to click to upload a file. these cards take up a lot of space, move towards
+a table row view and not these cards, or have the option to switch between cards and list view."
+Both are real, not new bugs - the exact documented gap from Batch 2 (`coid` kept its old two-
+control `<input type="file">` + Submit form, since it has no AI-classifier entry - see
+`VAULT_KIND_TO_DOCUMENT_KIND`'s own comment) and a layout choice (one card per document) nobody
+had pushed back on before now.
+
+**One button**: new `DirectVaultDocumentUploader.tsx` - the same `FileDropzone` single-action UI
+every other vault row already uses (upload starts automatically on file choice, spec v3 O12),
+wired to the EXISTING `uploadVaultDocument` server action instead of the AI-classify pipeline
+(`coid` still has no classifier entry - that's still a Python/schema change, still out of this
+fix's scope, still not silently worked around). `DocumentRow.tsx` now calls a new shared
+`DocumentUploadAction` helper (reviewable kinds -> `VaultDocumentUploader`, `coid` ->
+`DirectVaultDocumentUploader`) in both the card view and the new table view, so the two can never
+drift onto different upload behaviours. `MAX_UPLOAD_BYTES` (4.4 MB, the Server Action body cap),
+not onboarding's 25 MB - this path still goes through the action's own request body, unlike the AI
+path which uploads straight to storage first.
+
+**Table view**: new `ComplianceDocumentsView.tsx` (client component - the view choice is plain
+`useState`, not persisted anywhere, a display preference rather than data) replaces the section's
+direct card rendering. Defaults to a compact table row per document (Document + one-line detail +
+filename link | Expires | Status | upload action), matching spec v3 §29's own "Expiry / document
+lists" composition example; a toggle in the section header (`VaultSection`'s new `actions` slot -
+`SectionCard` already had one built for exactly this, "a link, a button, a menu trigger" beside the
+title, not crammed inside the `<CardTitle>` heading itself) switches to the original card view,
+unchanged in its own markup. Table rows stack to a compact block (no horizontal scroll) below
+`sm:`, per spec §27/§29's "mobile may use rows/cards... not a horizontally-scrolling table."
+`ComplianceDocumentsSection.tsx` now only computes one `ComplianceDocEntry[]` array (title, full
+card-view `lines`, a one-line `detail` for the table, a raw `expiry` date for the table's own
+column, status, path, url) and hands it to the view component - the same per-kind field logic as
+before, just captured once instead of being re-derived per view.
+
+**Self-review**: round 1 - a static `react-dom/server` render of `DirectVaultDocumentUploader`
+alone confirmed exactly one dropzone control, no second submit button; a render of
+`ComplianceDocumentsView` with a single `coid` entry confirmed the table header row, both toggle
+buttons, and the row-grid markup all present; a render of the post-refactor card-view `DocumentRow`
+for `coid` confirmed no regression there either. Round 2 - re-read against Sarel's own literal
+words: one button (confirmed), table as the default with cards one click away (confirmed, not the
+reverse). Round 3 - `VaultSection` has a dozen other callers across this page (`BeeCidbSection.tsx`,
+`CompanyIdentitySection.tsx`, `BankDetailsSection.tsx`, `EditForm.tsx` alone uses it 6 times,
+`HowWeWorkSection.tsx`, `LettersSection.tsx`, `RegisterLinks.tsx`, `SavingsBaselineSection.tsx`,
+`SizeOfficesSection.tsx`); `actions` is a new optional prop and every one of them still passes
+only `title`/`id`/`description` exactly as before - confirmed by grep, not just assumed from the
+type signature.
+
+**Tested**: `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways. **Not tested**: an
+actual signed-in render - same sandbox credential-generation limitation as every batch tonight,
+even with Sarel live and the strongest possible reason to find a workaround if one existed; none
+did. The static-render checks above are real evidence the new code paths don't throw and produce
+the right markup, not a substitute for him clicking it himself.
