@@ -76,7 +76,11 @@ test("verdictQuerySpec: all and changed push no predicate down (changed needs a 
   assert.deepEqual(verdictQuerySpec("changed"), { kind: "none" });
 });
 
+test("verdictQuerySpec: declined is a real column predicate (interest_marker = 'declined', migration 0088) - a genuine full-history filter, not JS-scoped like changed", () => {
+  assert.deepEqual(verdictQuerySpec("declined"), { kind: "eq", column: "interest_marker", value: "declined" });
+});
+
 test("COUNTABLE_FILTERS: every filter except changed has a cheap exact count available", () => {
-  assert.deepEqual([...COUNTABLE_FILTERS].sort(), ["all", "needs_review", "not_a_fit", "reassessed", "strong_fit"].sort());
+  assert.deepEqual([...COUNTABLE_FILTERS].sort(), ["all", "declined", "needs_review", "not_a_fit", "reassessed", "strong_fit"].sort());
   assert.equal(COUNTABLE_FILTERS.includes("changed" as never), false);
 });

@@ -53,3 +53,58 @@ export async function acknowledgeDowngrade(formData: FormData) {
   if (back.startsWith("/tenders/")) revalidatePath(back.split("?")[0]);
   redirect(back.startsWith("/discovery") ? `${back}#opp-${opportunityId}` : `${back}#intake`);
 }
+
+export type OpportunityInterestMarker = "interested" | "declined" | null;
+
+/**
+ * Add/remove one of this company's own free-text tags on a Discovery row
+ * (migration 0088, Sarel's own live feedback on /discovery, 2026-10-22).
+ * Same reasoning as acknowledgeDowngrade above: discovered_opportunities has
+ * no client update policy (0004 - "service-role written"), so this goes
+ * through set_opportunity_tag(), a SECURITY DEFINER function that checks
+ * is_company_member() itself and does the add/remove + normalisation
+ * server-side. Called directly from OpportunityQuickActions inside
+ * startTransition() - same "tap it, it persists" shape as
+ * tenders/[id]/task-status-button.tsx - not a <form action>, so failures are
+ * logged, not surfaced inline; a failed tag write just leaves the chip
+ * unchanged on the next render; consistent with every other inline control in
+ * this codebase (task-status-button.tsx, task-assignee-select.tsx).
+ */
+export async function setOpportunityTag(opportunityId: string, tag: string, action: "add" | "remove") {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { error } = await supabase.rpc("set_opportunity_tag", {
+    p_opportunity_id: opportunityId,
+    p_tag: tag,
+    p_action: action,
+  });
+  if (error) {
+    console.error("set_opportunity_tag rpc failed", error);
+    return;
+  }
+  revalidatePath("/discovery");
+}
+
+/**
+ * Set (or clear, with null) this company's quick interest/decline mark on a
+ * Discovery row (migration 0088). Same shape as setOpportunityTag above -
+ * set_opportunity_interest() is the SECURITY DEFINER write path, since
+ * discovered_opportunities itself still has no client update policy.
+ */
+export async function setOpportunityInterest(opportunityId: string, marker: OpportunityInterestMarker) {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+
+  const { error } = await supabase.rpc("set_opportunity_interest", {
+    p_opportunity_id: opportunityId,
+    p_marker: marker,
+  });
+  if (error) {
+    console.error("set_opportunity_interest rpc failed", error);
+    return;
+  }
+  revalidatePath("/discovery");
+}

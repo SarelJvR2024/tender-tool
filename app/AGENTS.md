@@ -2899,3 +2899,80 @@ migration genuinely is not live yet - merging now would ship server actions and 
 a table that, until Sarel runs the SQL above in Supabase's own SQL Editor, does not exist, which
 both pages handle gracefully (empty preferences, board stays visible) but is still not the state
 this PR is meant to land in.
+## Opportunity tags + interest/decline: real schema + wiring (migration 0088, 2026-10-23)
+
+Sarel's own live feedback on `/discovery` (2026-10-22: "allow the company to add tags for how to
+search and prioritise opportunities. add quick tags to indicate interest or declines.") first
+shipped as a browser-only localStorage preview (PR #121, explicitly "DO NOT MERGE" - no schema
+existed yet). **Sarel has now reviewed and approved the schema** - this pass replaces the preview
+with the real thing: `company_tags text[]` + `interest_marker`/`interest_marked_at`/
+`interest_marked_by` on `discovered_opportunities`, real `setOpportunityTag()`/
+`setOpportunityInterest()` server actions, and `OpportunityQuickActions.tsx` now reads/writes the
+real row instead of `lib/opportunityTagsPreview.ts` (deleted).
+
+**The migration is NOT yet applied to the live database** - same standing limitation as every
+session tonight (see `docs/specs/System-Status.md`'s ~19:00 UTC addendum: this sandbox can reach
+Supabase over PostgREST but cannot run raw DDL). `0088_opportunity_tags_interest.sql` is committed
+and reviewed, but until Sarel pastes it into Supabase's own SQL Editor, every real call to
+`set_opportunity_tag()`/`set_opportunity_interest()` will fail with "function does not exist" -
+this PR stays in draft for exactly that reason.
+
+**A real gap found in the original PR's own RLS claim, fixed, not just trusted**: PR #121's
+description said no RLS change was needed because `discovered_opportunities` already has
+`is_company_member`-scoped RLS. True for reads, but reading every migration that touches this
+table's RLS (0004, 0048's own precedent, 0055, 0072) confirms `discovered_opportunities` has **no
+client UPDATE policy at all** - 0004's own header comment says it plainly ("service-role written"),
+and 0055's `acknowledge_discovery_downgrade()` exists for exactly this reason. A column-only
+migration with no write path would mean `setOpportunityTag`/`setOpportunityInterest` either need a
+new blanket UPDATE policy (a bigger surface than this needs) or fail outright. Instead, two new
+SECURITY DEFINER functions (`set_opportunity_tag`, `set_opportunity_interest`) were added to the
+same migration file, below Sarel's exact approved column SQL (left untouched, verbatim) - same
+shape as `acknowledge_discovery_downgrade`: check the row exists and `is_company_member(company_id)`
+inside the function, then write. No new RLS policy; the approved "no RLS change needed" conclusion
+holds, just not for the reason the original PR gave.
+
+**"Declined" filter tab (task item 4)**: added to the SAME exclusive, single-select tab list as the
+existing verdict filters (`lib/discoveryPagination.ts`'s `VerdictFilter`/`verdictQuerySpec`/
+`COUNTABLE_FILTERS`, `page.tsx`'s own `FILTERS`), not a second, independent toggle composed with
+them. Reasoning: this list was never strictly "verdict values" - `reassessed` is already
+`downgraded_from`, a different column, and `changed` isn't a column at all - it's "what the one row
+of filter tabs can show at a time", and Sarel asked for "a Declined filter chip/tab alongside the
+existing ones", not a second axis to intersect with the first. Selecting Declined shows every
+declined row regardless of verdict, the same way Re-assessed already ignores verdict. A composable
+second toggle would need its own query param, a two-dimensional WHERE clause and two
+simultaneously-highlighted controls - real complexity not asked for here. `interest_marker` has its
+own partial index (migration 0088), so - like `reassessed` - this is a genuine full-history filter
+with a real exact count, not a page-scoped JS filter like `changed`.
+
+**Tag suggestions, deliberately page-scoped**: `OpportunityQuickActions`'s "reuse a tag you already
+typed" datalist is built from `company_tags` across whatever window of `discovered_opportunities`
+is currently loaded (`page.tsx`'s own `allCompanyTags`), not a dedicated company-wide-vocabulary
+query - the same documented scoped-limitation `lib/discoveryPagination.ts` already applies to the
+`changed` tab. A tag only ever used on a row outside the current window won't suggest until that
+row is loaded too; worth a dedicated query later if Sarel wants it, not built blind here.
+
+**Self-review (3 rounds)**: round 1 - re-read the RLS claim adversarially against every migration
+touching `discovered_opportunities`'s policies (listed above) rather than trusting PR #121's own
+description; found and fixed the missing write path (above). Round 2 - re-verified pagination/count
+behaviour from PR #123/#125 is unaffected: `COUNTABLE_FILTERS`/`verdictQuerySpec`/`withVerdictSpec`
+are extended (one more case each), not rewritten - every existing filter's query shape is untouched,
+confirmed by re-running `discoveryPagination.test.ts`'s pre-existing cases alongside the two new
+ones. Round 3 - re-read `OpportunityQuickActions.tsx` end to end for the mock-to-real swap
+specifically: no `useSyncExternalStore`/localStorage read left anywhere, `tags`/`interest` always
+come from the prop the server component passed down (the real row), and every write path
+(add/remove tag, toggle interest) goes through `startTransition()` + the real server action, same
+shape as `task-status-button.tsx`/`task-assignee-select.tsx` - no stale "Preview" copy left in the
+UI.
+
+**Tested**: `npm run verify` (`rm -rf .next` first) - 0 errors. `npx vitest run` - 147/147 (no
+vitest files touched; this feature's new pure-logic test lives in `discoveryPagination.test.ts`,
+Node's test runner, same as the rest of that module). Full `node:test` sweep both ways - combined
+`npx tsx --test` across every `*.test.ts` file (105/105) and per-file `node --experimental-strip-types
+--test` (same count once the pre-existing `[id]`-bracketed-path glob quirk is worked around the way
+this repo's own CI does - `node --experimental-strip-types <path>` with no `--test` flag for those 5
+files specifically; not a regression, see System-Status.md's own prior notes on this). All green,
+including the 2 new `declined`-filter cases in `discoveryPagination.test.ts`.
+
+**Not done, by design**: the migration is not applied live (see above - Sarel's manual step, spelled
+out in the PR description). No new RLS policy (verified unnecessary, see above). No dedicated
+company-wide tag-vocabulary query (page-scoped suggestions, see above, a reasonable follow-up).
