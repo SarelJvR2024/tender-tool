@@ -10,7 +10,13 @@
 // Evidence for the seed: docs/specs/Discipline-Taxonomy-Findings.md.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DISCIPLINES, disciplineLabel } from "@/lib/experience";
+// Relative, not the "@/" alias (both resolve to the same file - this is the
+// same directory): opportunityDisciplineMatch.test.ts (node:test, task item
+// 5) is this file's first unit-test importer, and plain
+// `node --experimental-strip-types` has no tsconfig "paths" resolution for
+// "@/..." the way `tsx`/Next.js's bundler do - a relative import here is the
+// only form every one of this repo's required test runners can resolve.
+import { DISCIPLINES, disciplineLabel } from "./experience.ts";
 
 export type DisciplineCategory = {
   slug: string;

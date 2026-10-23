@@ -2563,3 +2563,339 @@ migration (none was needed - confirmed by reading migration 0060's own column co
 `app/lib/marketPricing.ts`, `app/app/discovery/page.tsx`, `app/app/pipeline/page.tsx`,
 `app/app/pipeline/pricing/page.tsx` (other sessions' own in-flight files tonight); the full historic
 backlog itself (sized and proposed above, deliberately not run).
+
+---
+
+### Opportunity preferences (SANRAL visibility + discipline interest) - UI preview + schema proposal, DRAFT, not mergeable as-is
+
+Sarel's own live feedback, this session (2026-10-23), after onboarding a new test company: (1) "the
+Opportunities list was empty right after onboarding ... to a new user it looks like it is empty",
+(2) "in the opportunities page we need to add options to set the opportunity preferences for a
+company", (3) "i see also there is by default a sanral bid pulled in, this shouldnt be tehere if the
+company is not interested in sanral projects." Items 2 and 3 are treated as ONE feature request (a
+company-level "what we care about" concept doesn't exist anywhere in the schema today), per this
+task's own framing - not two separate asks.
+
+**Why the Opportunities feed was empty (confirmed, not re-derived) - a real, already-partially-fixed
+timing gap, not a bug.** `.github/workflows/daily-discovery.yml`'s own header comment (written by an
+earlier session, 2026-10-22) confirms nothing in this repo had ever scheduled
+`engine/discovery/watch_new_tenders.py` - the only script that writes `discovered_opportunities`
+(migration 0004), which `/discovery` reads - until that session added a daily `cron: "45 2 * * *"`
+(02:45 UTC) schedule, since run successfully at least once. A company created between runs can still
+see an empty feed for up to ~24h. **Not re-triggered on demand here**: `watch_new_tenders.py` has no
+"score just this one company" mode - an on-demand `workflow_dispatch` right after onboarding would
+re-score the ENTIRE platform's tender backlog against EVERY company every time anyone signs up, a
+real, possibly large repeated cost/runtime decision that is this repo's engine-logic standing rule
+to defer, not build blind. **What a `--company-id` flag would need** (proposed, not built): a CLI
+flag on `watch_new_tenders.py` narrowing `all_company_profiles()` (engine/discovery/company_profiles.py)
+to one company, called from a new onboarding-completion hook (a Supabase Edge Function or a
+`workflow_dispatch` trigger from the Next.js side once a company finishes onboarding) instead of the
+nightly cron sweeping everyone. Cost tradeoff: one scored-against-full-backlog run per signup, vs.
+the current one run per day for everyone - cheaper per event but with a higher QPS ceiling risk if
+signups cluster. Sarel's own call, not decided here.
+
+**What's built instead (zero schema, zero engine change)**: the Discovery page's own "Nothing scored
+yet" empty-state copy (the `activeFilter === "all"` case only - the other cases were untouched) now
+says the scan "runs once a day, overnight" and that first results land "after tonight's run, not
+immediately" if a company just signed up or changed its profile - accurate to the real cadence,
+without promising anything instant or on-demand that doesn't exist. `app/app/discovery/page.tsx`,
+the one string in the existing `EmptyState description` ternary - not a new component, not a
+restructure of the filter-tab bar or pagination logic around it (both PR #123/#124/#125's own work,
+left untouched).
+
+**Why a SANRAL tender showed up for an unrelated new company (confirmed, not a bug) - two separate,
+real mechanisms, both re-verified by reading the actual code this session, not trusted from memory**:
+
+1. `engine/discovery/assess_tender.py`'s `assess_fit()` has its own `elif not known_disciplines:`
+   branch with its own code comment: "An empty disciplines list is 'we don't know yet', not 'we
+   checked and this is out of scope'" - a deliberate anti-regression fix (an earlier version
+   wrongly scored a real SANRAL roads tender as `not_a_fit` for a company with no tagged Experience
+   Library items yet). So a brand-new company gets `needs_review`, not `not_a_fit`, for ambiguous
+   tenders - confirmed correct/intentional, **not changed here**.
+2. Separately - and this is the one that actually explains Sarel's own screenshot - `app/app/pipeline/page.tsx`'s
+   "found" column (`renderPipeline()`'s own `if (!pack) { if (t.family === GENERAL_FAMILY || t.status
+   !== "open") continue; ... }`) reads the SHARED, un-tenant-scoped `tenders` table directly (migration
+   0001's own comment: "Shared across every company - not tenant-scoped") and shows every open,
+   non-general-family (i.e. SANRAL-conventional) tender with no pack yet to EVERY company by default,
+   regardless of fit score - a completely different code path from the scored `/discovery` feed.
+   Confirmed directly in the current (post-#122/#123/#125) `pipeline/page.tsx`, not assumed from an
+   older copy.
+
+**The real gap, confirmed**: there is no company-level concept anywhere in the schema of "we don't do
+SANRAL/road-construction work, don't show us that board by default" or "we only care about these
+disciplines." This step 5's own onboarding-wizard writeup already flagged exactly this ("Preferred
+buyers ... not tracked anywhere", "Disciplines you work in ... no company-level disciplines table
+exists") - this entry is that gap's first concrete UI pass, not a new discovery.
+
+**A directly relevant precedent, read and reused but NOT touched**: PR #121
+(`feature/opportunities-tags-interest-proposal`, still open/draft) already built the same
+preview-UI-plus-proposed-schema pattern for a DIFFERENT, adjacent need (per-opportunity company tags
++ interest/decline marker on `discovered_opportunities`, via `lib/opportunityTagsPreview.ts`'s
+`useSyncExternalStore`-over-`localStorage` technique). This entry's own preview store
+(`lib/opportunityPreferencesPreview.ts`, key `tt_opportunity_preferences_preview_v1`) is a
+deliberately SEPARATE module and a separate `localStorage` key - a per-COMPANY concept (which
+buyer boards/disciplines the company cares about at all), not a per-opportunity one - so the two
+previews cannot collide if Sarel later approves both schemas. PR #121's own files
+(`lib/opportunityTagsPreview.ts`, `app/app/discovery/OpportunityQuickActions.tsx`) are untouched -
+confirmed by diff: this branch adds no changes to either path.
+
+**What's built, as a real working UI interaction (not a static mock)**:
+- `app/lib/opportunityPreferencesPreview.ts` - the browser-only mock store (`localStorage`, read via
+  `useSyncExternalStore`, same technique as PR #121's own file, its own separate module). Shape:
+  `{ hideSanral: boolean, disciplines: string[] }`. Two pure, unit-tested helpers:
+  `sanitizePreferences()` (never trusts raw JSON blindly - degrades to the empty default on any
+  malformed shape) and `toggleDiscipline()` (on/off list toggle for the checkbox handler).
+- `app/app/discovery/OpportunityPreferencesPanel.tsx` - a collapsed-by-default `<details>` panel
+  (so a company that never opens it sees no visible change at all), mounted additively in
+  `discovery/page.tsx` just above the existing verdict filter-tab bar (the tab bar itself, and
+  everything below/around it, is byte-for-byte untouched - confirmed by diff). Contains: a "Don't
+  show me SANRAL / road-construction tenders" checkbox (`hideSanral`), and a discipline
+  picker reusing `lib/disciplineTaxonomy.ts`'s existing `taxonomyGroups()` (migration 0040's own
+  vocabulary - the SAME list Experience Library tagging and pricing already use, no new taxonomy
+  invented). Every interactive element carries a visible "Preview - not yet saved" badge plus
+  explanatory body copy: "every choice below lives only in this browser ... reloading on another
+  device or clearing your browser data loses it. Nothing here changes what you or your team are
+  shown today" - this is load-bearing honesty, not decoration: **nothing in this PR actually hides
+  the SANRAL board anywhere** (the Bids/`pipeline/page.tsx` "found" column is completely untouched
+  by this branch - a deliberate scope cut, since wiring the preview's `localStorage` state into a
+  SERVER-rendered board would mean either a client-side re-filter of server-rendered cards - a
+  half-real, confusing middle ground - or pretending a browser-local preview is company data, which
+  is exactly the dishonesty this whole pattern exists to avoid). The panel only lets Sarel react to
+  the interaction; it changes nothing about what anyone actually sees yet.
+- `app/lib/disciplineTaggingNudge.ts` + an additive banner in `discovery/page.tsx` (task item 3,
+  zero schema change): `hasNoTaggedDisciplines()` mirrors, read-side, EXACTLY what
+  `engine/discovery/company_profiles.py`'s `profile_from_company_rows()` computes for
+  `known_disciplines` (`sorted({d for i in items if i.get("tagged_at") for d in (i.get("disciplines")
+  or [])})`) - verified by reading that function directly this session, not assumed. The page now
+  runs one additional, RLS-scoped `supabase.from("experience_items").select("tagged_at,
+  disciplines")` query (same table, same two columns, same no-explicit-`company_id`-filter pattern
+  `app/app/experience/page.tsx` already uses, confirmed by reading that file directly before
+  committing to this being buildable without new schema) alongside the page's existing
+  `Promise.all(...)`. When the result says this company has never tagged a single Experience
+  Library item with a discipline, a plain-language banner explains WHY some tenders show "Needs
+  review" instead of a tighter verdict, and links to `/experience` to fix it - turning the
+  previously-opaque `assess_fit()` behaviour (confirmed correct, not touched) into something a
+  first-time user can actually act on.
+
+**Proposed schema (SQL below) - NOT applied, NOT a migration file in this branch** (kept out of
+`app/supabase/migrations/` on purpose, same discipline as PR #121), **for Sarel's own review**:
+
+```sql
+-- Proposed: company-level opportunity/visibility preferences (Sarel, this
+-- session, 2026-10-23: "set the opportunity preferences for a company" +
+-- the SANRAL visibility case). A new table, not new columns on `companies`
+-- (that table is already 60+ columns of compliance/registration facts per
+-- migration 0001 - this is a distinct, optional, UI-preference concern,
+-- same reasoning migration 0038's own discovery_seen_releases and 0041's
+-- reminder-seen-stores tables used for "a preference/state row that isn't
+-- a core company fact"). One row per company, upserted - never multiple
+-- rows, so a plain primary key on company_id, not a surrogate id + unique
+-- constraint.
+
+create table company_tender_preferences (
+  company_id uuid primary key references companies(id) on delete cascade,
+
+  -- Sarel's own concrete case: true = don't show this company SANRAL/
+  -- road-construction work by default. Column name intentionally generic
+  -- (not "hide_sanral") since the real mechanism this would gate is "the
+  -- shared, un-tenant-scoped SANRAL-conventional board on /pipeline" (see
+  -- this entry's own writeup on why that board shows every open SANRAL
+  -- tender to every company today) - a future second shared board (a
+  -- different buyer family) would reuse this same column's intent, not need
+  -- a new one, if the product ever adds one.
+  hide_sanral_board boolean not null default false,
+
+  -- discipline_categories (0040) slugs this company says it cares about -
+  -- reuses the SAME taxonomy Experience Library tagging/pricing already use
+  -- (no second vocabulary). Nullable/empty = no stated preference yet
+  -- (different from "we checked and care about nothing" - same "we don't
+  -- know yet" honesty principle assess_tender.py's own known_disciplines
+  -- branch already applies, carried into this table's own default).
+  interested_disciplines text[] not null default '{}',
+
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id)
+);
+
+create index company_tender_preferences_disciplines_idx
+  on company_tender_preferences using gin (interested_disciplines);
+
+comment on table company_tender_preferences is
+  'One row per company: opt-out of a shared buyer board (hide_sanral_board) and/or the disciplines this company says it cares about (interested_disciplines, discipline_categories 0040 slugs) - distinct from discovered_opportunities.categories (0004, per-tender fit-scoring output) and from PR #121''s proposed discovered_opportunities.company_tags (per-opportunity, free-text search tags) - this is a company-wide, structured statement of intent, read by the UI to filter/hide, never by the scoring engine itself.';
+
+alter table company_tender_preferences enable row level security;
+
+create policy company_tender_preferences_select on company_tender_preferences
+  for select to authenticated using (is_company_member(company_id));
+-- Same reasoning as 0038/0041's own seen-store tables: any company member
+-- may read and write their own company's preferences (not owner/admin-only -
+-- this is a shared team setting, not a sensitive compliance fact).
+create policy company_tender_preferences_upsert on company_tender_preferences
+  for insert to authenticated with check (is_company_member(company_id));
+create policy company_tender_preferences_update on company_tender_preferences
+  for update to authenticated using (is_company_member(company_id)) with check (is_company_member(company_id));
+```
+
+**What a real implementation would also need** (documented, NOT built - same "not in this PR"
+discipline as PR #120's own schema-gated half):
+- `setOpportunityPreferences(hideSanralBoard, interestedDisciplines)` - a server action in a new
+  `app/app/discovery/preferencesActions.ts`, upserting the row above (`is_company_member` already
+  covers the RLS check; the action itself would still re-check company membership server-side,
+  same pattern every other mutating action in this app follows).
+- `pipeline/page.tsx`'s own "found" column (`renderPipeline()`) would need its own, SEPARATE follow-
+  up change to actually read `hide_sanral_board` and skip those cards - **not built or touched by
+  this PR at all**, kept out deliberately (this task's own scope keeps `pipeline/page.tsx`
+  untouched, and wiring real visibility logic ahead of the schema landing would be exactly the kind
+  of "ships a preview that implies it's already real" this whole pattern exists to avoid).
+- `discovery/page.tsx` would read `interested_disciplines` to pre-filter or highlight matching
+  verdicts, and `OpportunityPreferencesPanel.tsx` would read/write through the server action instead
+  of `localStorage` once the schema exists - the panel's own props/shape were kept close to what
+  that real version would need (a flat `{hideSanral, disciplines}` object) specifically so this swap
+  is mechanical, not a rewrite.
+
+**Self-review, 3 full rounds** (per this task's own instruction):
+1. Re-read the finished `OpportunityPreferencesPanel.tsx` and its mounted position in `page.tsx` as
+   a first-time user would see it: collapsed by default, the badge and body copy are the first
+   things visible once opened, and no other part of the page (verdict chips, pursue buttons, the
+   Bids board) changes behavior based on anything stored here - confirmed by grep: no other file in
+   this branch reads `opportunityPreferencesPreview.ts`'s exports except the panel itself.
+2. Re-checked the empty-state copy against the real cron (`45 2 * * *` = 02:45 UTC, confirmed by
+   re-reading `.github/workflows/daily-discovery.yml` directly this session, not from memory) -
+   the new copy says "once a day, overnight" and "after tonight's run", never a specific clock time
+   that could drift from the actual schedule, and never implies an on-demand/instant path that
+   doesn't exist.
+3. Re-verified the discipline-tagging nudge's data source is genuinely readable from the app layer,
+   not assumed: read `engine/discovery/company_profiles.py`'s `profile_from_company_rows()` line by
+   line, matched its exact `known_disciplines` computation against `disciplineTaggingNudge.ts`'s
+   `hasNoTaggedDisciplines()`, and read `app/app/experience/page.tsx`'s own `experience_items` query
+   to confirm the same table/columns/RLS-reliance pattern this page's new query now also uses - no
+   new scoring-result field was needed, so this shipped as the real thing, not a proposal.
+
+**Verified**: `rm -rf .next && npm run verify` - 0 errors (the same 3 pre-existing warnings every
+recent pass on this area has reported - `Logo.tsx`'s two `<img>` warnings and `analytics/page.tsx`'s
+unused `STAGE_META` import, confirmed present on `main` before this branch touched anything).
+`npx vitest run` - 147/147 (unchanged - no vitest-covered logic touched). Full `node:test` sweep both
+ways: `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 118/118 (104
+baseline + 9 new in `opportunityPreferencesPreview.test.ts` + 5 new in
+`disciplineTaggingNudge.test.ts`); the same set via `node --experimental-strip-types --test <file>` -
+118/118, both sweeps agree.
+
+**This PR is intentionally left in draft, not merged.** Like PR #121, the real half of this feature
+(actually saving a preference, and actually hiding anything anywhere) is gated on Sarel's own review
+of the `company_tender_preferences` schema above - a database decision is his to make, never
+something to force through by shipping a preview that quietly implies it already works. The two
+engine-level items flagged above (a `--company-id` on-demand scan flag, and wiring
+`hide_sanral_board` into `pipeline/page.tsx` once the schema exists) are also explicitly deferred to
+him, not built.
+
+---
+
+### Opportunity preferences (SANRAL visibility + disciplines) - built for real, migration 0088 NOT yet applied live
+
+Sarel's explicit sign-off, this session (2026-10-23): he reviewed the `company_tender_preferences`
+schema proposed above and approved building the real feature against it - not just reacting to
+another preview. This entry replaces the preview end-to-end; `lib/opportunityPreferencesPreview.ts`
+and its test (the localStorage-only mock the entry above describes) are deleted, not kept alongside
+the real version - one source of truth, not two that could drift.
+
+**Migration**: `app/supabase/migrations/0088_company_tender_preferences.sql` - the exact SQL
+proposed above, unchanged (Sarel's own review covered that exact text), **renumbered 0087 -> 0088**
+while rebasing onto latest `main`: the same collision pattern this file's own earlier entries
+describe (`0084`->`0085`->`0086`->`0087`, each time a different, already-merged migration took the
+next number first) had already happened again - PR #74's own `0087_narrative_documents.sql` merged
+while this branch was open, so this migration moved to the next free number, same discipline, no
+other change. **NOT applied to the live
+database from this session** - this environment can reach the real Supabase project over
+PostgREST but genuinely cannot run raw DDL (confirmed, see this file's own 2026-10-23 ~19:00 UTC
+addendum and `docs/specs/System-Status.md`'s matching entry). **Sarel needs to paste this migration's
+SQL into Supabase's own SQL Editor (Project > SQL Editor) before merging** - every server action
+below will error with "relation does not exist" against a database that doesn't have this table
+yet (both pages degrade gracefully when that happens - see below - but nothing actually saves or
+filters until the table is real).
+
+**Server action**: `app/app/discovery/preferencesActions.ts`'s `setOpportunityPreferences(hideSanralBoard,
+interestedDisciplines)` - same `requireCompanyId()` tenant-check shape as every other mutating
+action in this app (`app/app/tenders/[id]/actions.ts`'s own copy, read directly before writing
+this one); companyId is derived server-side from the signed-in user's own `company_members` row,
+never taken from the client, so RLS (`is_company_member`, migration 0088) and this extra check
+agree by construction. Upserts both columns in one row (`onConflict: "company_id"`), re-validates
+every discipline slug against `SLUG_RE` (0040's own slug shape) rather than trusting the client
+array, and revalidates both `/discovery` and `/pipeline` since `hide_sanral_board` affects both.
+
+**Panel wiring**: `OpportunityPreferencesPanel.tsx` no longer reads/writes `localStorage` at all -
+prefilled from a real row `discovery/page.tsx` reads server-side
+(`company_tender_preferences.select("hide_sanral_board, interested_disciplines").maybeSingle()`,
+same no-explicit-company_id-filter pattern the page's own `experience_items` query already uses),
+and every toggle calls `setOpportunityPreferences()` directly inside `useTransition` - same
+direct-invoke-no-form shape as `task-status-button.tsx`'s `advanceTaskStatus` - with an optimistic
+local update that reverts and shows an error banner on a failed save. The "Preview - not yet saved"
+badge is gone; the body copy now says this is saved to the company's account.
+
+**`pipeline/page.tsx` wiring (task item 4 - explicitly deferred, not built, by the entry above)**:
+`renderPipeline()` now also reads `company_tender_preferences.hide_sanral_board` (same
+no-explicit-filter RLS read) and, inside the existing `if (!pack) { ... }` guard for the "found"
+column, `continue`s past a card when `hideSanralBoard` is true - every remaining branch of that
+guard is already narrowed to a non-general-family (i.e. SANRAL-conventional) tender by the
+`t.family === GENERAL_FAMILY` check just above it, so this is exactly the shared board the
+preference is about, nothing else. A pack that already exists (anything actually pursued) is
+completely unaffected - this only ever hides the un-tenant-scoped "found" suggestions, never a
+tender this company is already working.
+
+**`discovery/page.tsx` wiring (task item 5)** - deliberately additive, never a filter:
+`lib/opportunityDisciplineMatch.ts`'s `matchesInterestedDisciplines()` (new, unit-tested pure
+function - expands BOTH the company's stated disciplines and the tender's own categories via
+`disciplineTaxonomy.ts`'s existing `expandDisciplines()`, the same call the page's own
+market-pricing lookup already makes on an opportunity's categories, so a company that selected a
+whole group matches a tender tagged with one of its children and vice versa) is used only to sort
+matching tenders first within whatever verdict tab and pagination window is already active - same
+window, same count, same cards, nothing hidden or removed. A company with no stated preference
+(`interested_disciplines` empty, the default) sees exactly today's order, since the function
+returns `true` for everything in that case. A non-matching card (only shown when the company HAS
+stated a preference) gets a small muted "Outside your disciplines" badge next to its verdict chip,
+with a title explaining it was sorted lower, not hidden - the same honesty discipline every other
+badge on this page already follows.
+
+**A real, necessary one-line fix found along the way, not a scope change**: `disciplineTaxonomy.ts`
+itself imported `lib/experience.ts` via the `"@/lib/experience"` alias. That's fine for
+Next.js/`tsx` (both resolve `tsconfig.json`'s `paths`), but `opportunityDisciplineMatch.test.ts` is
+this file's first unit-test importer, and this task's own required sweep
+(`node --experimental-strip-types --test <file>`, no bundler, no tsconfig paths resolution) failed
+with `ERR_MODULE_NOT_FOUND` on the alias. Fixed by switching that one import to the equivalent
+relative path (`./experience.ts`, same directory, same file, same runtime behavior, confirmed by
+re-running the full app `verify`/`vitest`/both `node:test` sweeps below) - the only form every
+required test runner in this repo can resolve, same reasoning `tender-readiness.ts` already uses
+an explicit `.ts` relative import for.
+
+**Self-review, 3 full rounds** (per this task's own instruction):
+1. Re-read `discovery/page.tsx`'s diff adversarially: confirmed the new discipline-interest sort key
+   sits strictly between the existing open-downgrade sort and the original index tiebreak (never
+   overriding the downgrade bump), confirmed `visibleRows`/`changedVisible` for the "Changed" tab
+   still derive from the same (now-additionally-sorted) `rows`, and confirmed the "Outside your
+   disciplines" badge and the sort use the exact same `matchesInterestedDisciplines()` call so they
+   can never disagree with each other.
+2. Re-read `pipeline/page.tsx`'s diff adversarially: confirmed `hideSanralBoard` only short-circuits
+   inside the `if (!pack)` branch (a card with an existing pack - bidding/submitted/won/lost, or
+   already "found" via a manual load - is untouched), and confirmed it reads the same
+   `company_tender_preferences` table/column the panel writes, not a stale duplicate.
+3. Grepped the whole repo for every remaining reference to
+   `lib/opportunityPreferencesPreview`/`setHideSanralPreview`/`setDisciplinesPreview`/the old
+   "Preview - not yet saved" copy after deleting that module - none left outside this entry's own
+   explanatory prose (confirmed: a dangling import would also have failed `npm run typecheck`/`build`
+   below, which it didn't).
+
+**Verified**: `rm -rf app/.next && npm run verify` (`typecheck` + `lint` + `build`) - 0 errors, the
+same 3 pre-existing warnings every recent pass on this area has reported (`Logo.tsx`'s two `<img>`
+warnings, `analytics/page.tsx`'s unused `STAGE_META` import). `npx vitest run` - 147/147 (unchanged -
+no vitest-covered logic touched). Full `node:test` sweep both ways: combined
+`npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 116/116 (118 from the
+preview entry above, minus 9 deleted with `opportunityPreferencesPreview.test.ts`, plus 7 new in
+`opportunityDisciplineMatch.test.ts`); the same set run individually via
+`node --experimental-strip-types --test <file>` - also 116/116, including the new file (the fix
+above was specifically to make this per-file invocation pass, not just the combined one), both
+sweeps agree. No `engine/` file touched - Python sweep not re-run.
+
+**This PR stays in draft.** The schema is approved and the code is real (not a preview), but the
+migration genuinely is not live yet - merging now would ship server actions and page reads against
+a table that, until Sarel runs the SQL above in Supabase's own SQL Editor, does not exist, which
+both pages handle gracefully (empty preferences, board stays visible) but is still not the state
+this PR is meant to land in.

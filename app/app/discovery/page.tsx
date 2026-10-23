@@ -32,6 +32,9 @@ import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { buildDoneHistory, pricingCategoriesFor, pricingSegmentKey, similarTendersBefore } from "@/lib/opportunityInsights";
 import { MIN_SAMPLE, benchmark, loadSegment, segmentsFor, type Benchmark } from "@/lib/marketPricing";
 import { formatRand } from "@/lib/dealEconomics";
+import { OpportunityPreferencesPanel } from "./OpportunityPreferencesPanel";
+import { hasNoTaggedDisciplines } from "@/lib/disciplineTaggingNudge";
+import { matchesInterestedDisciplines } from "@/lib/opportunityDisciplineMatch";
 
 // Column list for the scope/pricing-model/value-band record (migration 0060,
 // engine/discovery/tender_enrichment.py). Honestly rare today: that script is
@@ -229,6 +232,8 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
     { data: openDowngradeRows, count: openDowngradeTotal, error: openDowngradeError },
     readiness,
     { data: pursuedHistoryRows, error: pursuedHistoryError },
+    { data: experienceDisciplineRows, error: experienceDisciplineError },
+    { data: preferencesRow, error: preferencesError },
   ] = await Promise.all([
     opportunityQuery.range(0, show), // show+1 rows: the "fetch one extra" trick, see hasMore()
     // RLS: this company's own packs - which re-assessed tenders it is working on.
@@ -275,10 +280,35 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
       .from("discovered_opportunities")
       .select("tender_id, buyer, categories")
       .not("tender_id", "is", null),
+    // Task item 3 (app/AGENTS.md): the "needs review because we don't know
+    // your disciplines yet" nudge - see lib/disciplineTaggingNudge.ts's own
+    // header comment for the exact engine condition this mirrors
+    // (profile_from_company_rows()'s known_disciplines). RLS-scoped to this
+    // company's own experience_items, same table app/app/experience/page.tsx
+    // already reads - no new table, no scoring change.
+    supabase.from("experience_items").select("tagged_at, disciplines"),
+    // This company's real, saved Opportunity preferences (migration 0088,
+    // company_tender_preferences) - RLS (is_company_member(company_id))
+    // already scopes this to at most one row with no explicit company_id
+    // filter, same no-explicit-filter pattern the experience_items query
+    // above uses. Table may not exist yet if the migration hasn't been
+    // applied live - degrades to "no preferences saved" rather than
+    // failing the whole page (same discipline as loadDisciplineTaxonomy's
+    // own table-missing fallback).
+    supabase.from("company_tender_preferences").select("hide_sanral_board, interested_disciplines").maybeSingle(),
   ]);
   if (error) console.error("discovered_opportunities select failed", error);
   if (openDowngradeError) console.error("open-downgrade banner count failed", openDowngradeError);
   if (pursuedHistoryError) console.error("pursued-history select failed (done-before history)", pursuedHistoryError);
+  if (experienceDisciplineError) console.error("experience_items select failed (discipline-tagging nudge)", experienceDisciplineError);
+  // Degrades to "no preferences saved" (same as a company that never opened
+  // the panel) rather than failing the whole page - covers both a genuine
+  // read error and, until Sarel applies migration 0088 live, the table not
+  // existing at all yet.
+  if (preferencesError) console.error("company_tender_preferences select failed", preferencesError);
+  const preferences = (preferencesRow ?? null) as { hide_sanral_board: boolean; interested_disciplines: string[] } | null;
+  const interestedDisciplines = preferences?.interested_disciplines ?? [];
+  const noTaggedDisciplines = hasNoTaggedDisciplines((experienceDisciplineRows ?? []) as { tagged_at: string | null; disciplines: string[] | null }[]);
   const { data: { user } } = await supabase.auth.getUser();
   const stageByTender = new Map<string, string>();
   // Any stage at all (not just ACTIVE_PURSUIT_STAGES) - "done before" needs
@@ -319,10 +349,24 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   // full-history filter (downgraded_from is not null, pushed into the
   // query itself) with its own "Load more" - so every open downgrade is
   // always reachable, just not always on the very first screen of "All".
+  // Task item 5 (app/AGENTS.md): additive discipline-interest sort, never a
+  // filter - a company that has stated interested_disciplines
+  // (company_tender_preferences, migration 0088) sees matching tenders
+  // first within whatever verdict tab is already open, same window, same
+  // count, same cards - nothing is hidden or removed, and a company that
+  // never set a preference (interestedDisciplines.length === 0) sees
+  // exactly the order it always has (matchesInterestedDisciplines()
+  // returns true for everything in that case, so this sort key is a no-op).
   const rows = fetchedRows
     .slice(0, show)
     .map((r, i) => ({ r, i }))
-    .sort((a, b) => Number(isOpenDowngrade(b.r)) - Number(isOpenDowngrade(a.r)) || a.i - b.i)
+    .sort(
+      (a, b) =>
+        Number(isOpenDowngrade(b.r)) - Number(isOpenDowngrade(a.r)) ||
+        Number(matchesInterestedDisciplines(taxonomy, interestedDisciplines, b.r.categories)) -
+          Number(matchesInterestedDisciplines(taxonomy, interestedDisciplines, a.r.categories)) ||
+        a.i - b.i,
+    )
     .map(({ r }) => r);
 
   const openDowngradeTenderIds = new Set(((openDowngradeRows ?? []) as { tender_id: string | null }[]).map((r) => r.tender_id).filter((id): id is string => !!id));
@@ -462,6 +506,33 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
           </div>
         )}
 
+        {/* Opportunity preferences - Sarel's own live feedback, now built
+            for real against migration 0088 (company_tender_preferences):
+            "add options to set the opportunity preferences for a company"
+            + the SANRAL case. A new, additive section - the filter-tab bar
+            and everything below it is untouched. Prefilled from the row
+            read above; hideSanral also gates pipeline/page.tsx's "found"
+            column, interestedDisciplines sorts matching tenders first
+            below (task items 4/5). */}
+        <OpportunityPreferencesPanel
+          taxonomy={taxonomy}
+          initialHideSanral={preferences?.hide_sanral_board ?? false}
+          initialDisciplines={interestedDisciplines}
+        />
+
+        {noTaggedDisciplines && (
+          // Task item 3: honest, zero-schema nudge - the real reason a
+          // brand-new company (or one that hasn't tagged any Experience
+          // Library items yet) sees "Needs review" on tenders that don't
+          // clearly match or not-match (see disciplineTaggingNudge.ts).
+          <div className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+            Your Experience Library has no tagged disciplines yet, so we can&apos;t yet tell which tenders are really
+            your kind of work - that&apos;s why some show as &quot;Needs review&quot; rather than a tighter match either
+            way. <Link href="/experience" className="font-semibold text-foreground underline">Tag your past projects</Link> to
+            get sharper results.
+          </div>
+        )}
+
         {openDowngradeCount > 0 && (
           <div
             className={cn(
@@ -540,7 +611,15 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                     ? "No listing changes among the tenders loaded so far - try \"Load more\" to check further back."
                     : activeFilter !== "all"
                       ? "Try \"All\" to see everything scored so far."
-                      : "The daily scan checks every open tender against your company profile automatically, or you can load a tender you've already found with the button above."
+                      : // Task item 4 (app/AGENTS.md): sharpened for the real
+                        // daily-cadence timing gap (.github/workflows/daily-
+                        // discovery.yml, scheduled 02:45 UTC) - a company
+                        // created between runs can see an empty feed for up
+                        // to ~24h, which is expected, not broken. Honest
+                        // about the cadence rather than implying anything
+                        // instant or on-demand (no on-demand scan exists or
+                        // is safe to add blind - see app/AGENTS.md).
+                        "The daily scan checks every open tender against your company profile automatically - it runs once a day, overnight. If you just signed up or changed your company profile, your first results land after tonight's run, not immediately. You can also load a tender you've already found with the button above."
                 }
               />
             </div>
@@ -556,6 +635,10 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
             const similar = similarTendersBefore({ tenderId: o.tender_id, buyer: o.buyer, categories: o.categories }, doneHistory);
             const pricing = pricingFor(o);
             const scope = o.tender_id ? scopeByTenderId.get(o.tender_id) ?? null : null;
+            // Task item 5: additive only - never hidden, just explained why
+            // it sorted lower than a matching tender when this company has
+            // stated a discipline preference.
+            const outsideInterest = interestedDisciplines.length > 0 && !matchesInterestedDisciplines(taxonomy, interestedDisciplines, o.categories);
             return (
               <div
                 key={o.id}
@@ -595,6 +678,14 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                     <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold", chip.chipClass)}>
                       {chip.label}
                     </span>
+                    {outsideInterest && (
+                      <span
+                        title="Sorted lower because it doesn't match any discipline you've selected in Opportunity preferences - still shown, nothing is hidden."
+                        className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground"
+                      >
+                        Outside your disciplines
+                      </span>
+                    )}
                     {isDowngraded(o) && (
                       <span
                         title="The verdict this tender had before it was re-assessed"
