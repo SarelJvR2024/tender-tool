@@ -8,6 +8,38 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~10:15 UTC: a busy cycle on `main` (13 commits, 6 merged PRs),
+merged forward with one specific check worth recording.** Since the last pass: CV-led "Add
+person" + bulk CV/people upload (#115), compliance-documents single-upload table view (#114), a
+real Market Intelligence bug fix (it was silently reading a 2.5% sample of the real table, not
+the whole thing - #111), portal date-sentinel rejection generalized beyond two known values
+(#113), Spec v3 Batch 9 (company-level ECSA/SACPCMP collapse + form width fixes - #112), a hung
+bridge-worker process-group kill fix (Finding 60), and - the one worth checking carefully -
+**PR #119, a third live-feedback round on the *general-family* tender workspace** (quick doc
+link, phase-grouped plan, action-type tags, tabs), touching `general-workspace.tsx`,
+`action-type-tag.tsx` (new), `workspace-tabs.tsx` (new), `submission-plan-view.tsx` and
+`submission-plan-logic.ts` - the same directory PR #74 adds its own card to.
+
+**Checked specifically**: PR #119 never touches `page.tsx` (confirmed - no line for it in the
+commit's own file list) or either of PR #74's own files (`narrative-documents.tsx`,
+`narrative-actions.ts`). `narrativeDocumentsSection` is rendered directly in `page.tsx`,
+unconditionally for both families (not delegated into `GeneralTenderWorkspace`/
+`general-workspace.tsx`, same pattern already noted for `submissionPackSection`/
+`packReviewSection`) - so PR #119's general-family-specific restructuring has nothing to collide
+with here, and once PR #74 merges its card will keep showing for general-family tenders exactly
+as the README already claims, not a gap this pass found.
+
+Merged cleanly into `feature/narrative-document-generator` (no conflicts, confirmed by a clean
+working tree after merge, not just the absence of conflict markers). Re-verified: 51/51 Python
+test files; `npm run verify` clean; `npx vitest run` - 144/144 (up from 129 - new
+`submission-plan-logic` and `marketPricing` coverage from this batch). PR #74 remains genuinely
+mergeable against `main`'s current tip.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **Standing review pass, 2026-10-23 ~08:15 UTC: merged forward again, no overlap, re-verified.**
 One new commit on `main` (`bed4360`, Finding 59 - `watch_deadlines.py`'s `days_until()` crashed on
 a non-string expiry value; fixed with an `isinstance` check up front, not another exception type
