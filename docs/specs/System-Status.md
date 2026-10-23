@@ -8,6 +8,44 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~14:20 UTC: a real test-suite break found and fixed on `main`
+itself, root cause confirmed before touching anything (Finding 62).** Since the last pass: PR
+#117 merged (SANRAL-mention fix, already checked for overlap with PR #74 last pass - none) and
+Finding 61 (ambiguous closing-time/delivery-address flagging in `engine/intake/classify_tender.py`
+- touches `engine/general/`, `engine/intake/`, no overlap with PR #74). Merged forward cleanly;
+while re-running the full Python sweep straight after, `engine/discovery/test_randwater.py` failed
+for the first time this session: `is_closed computed correctly from the real closing date (future
+-> not yet closed)` asserted `False` but got `True`.
+
+**Root-caused before fixing, not just re-run hoping it was a fluke**: this test's `FIXTURE_PAGE` is
+a real, frozen snapshot of Rand Water's own bids page (captured by Sarel 2026-10-20), and every one
+of its 4 real bids has a real closing date of `23 Oct 2026 16:00 SAST`. `is_closed` is computed via
+`source_http.is_past()` against the real wall clock (`datetime.now()`), not a fixed/frozen time -
+so the test's own assertion was correct on 2026-10-20 (closing date still in the future) and
+necessarily, permanently wrong from the moment the real clock crossed 2026-10-23 16:00 SAST
+onward, which happened mid-session today. Not a flake, not caused by anything this pass or any
+other session changed - the code (`is_past()`) was computing the honest, correct answer the whole
+time; the test's own frozen expectation simply aged past its own fixture's real date. Confirmed by
+reproducing the identical failure on a clean `main` checkout before writing any fix, not assumed
+from one failing run.
+
+**Fix**: flipped the assertion to `is True` with an explanatory comment (the closing date is a
+fixed point in time that has now passed and will stay passed) - not a workaround, not a skip, the
+simple truth once real time caught up to this fixture's own real date. Re-ran the full repo-wide
+Python sweep after: 51/51 files, 0 failures.
+
+**Worth flagging for whoever next touches this test file**: any fixture with a hardcoded near-term
+real date will eventually flip the same way, on whatever day the fixture's own date arrives - this
+is not specific to Rand Water or to today. Not fixing that general pattern here (it would mean
+auditing every such fixture across the discovery test suite, a separate, broader task), just
+naming it so the next person who hits one of these doesn't have to re-derive the same reasoning
+from scratch.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **Standing review pass, 2026-10-23 ~10:15 UTC: a busy cycle on `main` (13 commits, 6 merged PRs),
 merged forward with one specific check worth recording.** Since the last pass: CV-led "Add
 person" + bulk CV/people upload (#115), compliance-documents single-upload table view (#114), a
