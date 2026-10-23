@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, UserX } from "lucide-react";
 import { expiryStatus } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
-import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
+import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, retryCvExtraction, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
 import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
@@ -812,12 +812,30 @@ export default async function PersonDetailPage({
                         <div className="mt-0.5 text-[11px] text-muted-foreground">
                           {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {new Date(u.created_at).toLocaleDateString()}
                         </div>
-                        {u.status === "extraction_failed" && u.extraction_error && (
-                          <div className="mt-1 max-w-[480px] text-xs text-destructive">{u.extraction_error}</div>
+                        {u.status === "extraction_failed" && (
+                          // UX audit re-review 2026-10-23, item 3: this used to render
+                          // u.extraction_error verbatim - a raw provider error and
+                          // request id for anything that failed at the AI call itself
+                          // (engine/cv/extract_cv_fields.py now keeps that detail out of
+                          // the stored message, but this stays a fixed, generic line
+                          // regardless, rather than trusting whatever's in the column).
+                          <div className="mt-1 max-w-[480px] text-xs text-destructive">
+                            We couldn&apos;t read this file automatically. The original file is safe - retry, or
+                            upload the original Word/PDF export.
+                          </div>
                         )}
                       </div>
                       <div className="flex items-center gap-2.5">
                         <Pill tone={st.tone}>{st.label}</Pill>
+                        {u.status === "extraction_failed" && (
+                          <form action={retryCvExtraction}>
+                            <input type="hidden" name="cv_upload_id" value={u.id} />
+                            <input type="hidden" name="person_id" value={person!.id} />
+                            <button type="submit" className="text-xs font-semibold text-accent">
+                              Retry
+                            </button>
+                          </form>
+                        )}
                         {url && (
                           <a href={url} className="text-xs font-semibold text-accent">
                             Download

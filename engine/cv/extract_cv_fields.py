@@ -148,7 +148,21 @@ OCR_FIELD_WARNING = ("Read by OCR from a scan, not from a text layer - OCR can m
 
 
 class ExtractionFailed(Exception):
-    """A reason the user should see, in plain words. The job is marked failed."""
+    """A reason the user should see, in plain words. The job is marked failed.
+
+    `detail`, when given, is the raw technical cause (a provider error body,
+    a request id) - never shown to the customer, only passed to
+    system_alerts for an engineer to read. Re-review 2026-10-23 found this
+    contract broken for API rejections: `except anthropic.BadRequestError`
+    used to put the raw provider message straight into the exception's own
+    text, which both `fail_upload()` (customer-facing `extraction_error`,
+    rendered verbatim on the person's page) and system_alerts then shared
+    verbatim - a customer seeing "Error code: 400 - {'type': 'error', ...
+    'request_id': 'req_...'}" instead of a plain-words reason."""
+
+    def __init__(self, message, detail=None):
+        super().__init__(message)
+        self.detail = detail
 
 
 class SetupError(Exception):
@@ -492,11 +506,13 @@ def call_llm(text, client=None, model=None):
     except anthropic.RateLimitError:
         raise TransientError("Anthropic API rate limit reached; will retry on the next pass.")
     except anthropic.BadRequestError as e:
-        raise ExtractionFailed(f"The AI service rejected this CV's request: {e.message}")
+        raise ExtractionFailed("The AI service couldn't process this CV right now. Try again, or upload the "
+                               "original Word/PDF.", detail=f"BadRequestError: {e.message}")
     except anthropic.APIStatusError as e:
         if e.status_code >= 500:
             raise TransientError(f"Anthropic API server error {e.status_code}; will retry on the next pass.")
-        raise ExtractionFailed(f"The AI service returned an error ({e.status_code}): {e.message}")
+        raise ExtractionFailed("The AI service couldn't process this CV right now. Try again, or upload the "
+                               "original Word/PDF.", detail=f"APIStatusError {e.status_code}: {e.message}")
     except anthropic.APIConnectionError:
         raise TransientError("Could not reach the Anthropic API; will retry on the next pass.")
 
@@ -823,9 +839,10 @@ def process_upload(url, key, upload, client_factory=default_llm_client):
         return False
     except ExtractionFailed as e:
         _safe_update(lambda: fail_upload(url, key, upload, str(e)), upload, "mark as failed")
-        system_alerts.record("cv_extract", f"CV extraction refused an upload: {e}", "warning",
+        alert_detail = f" ({e.detail})" if e.detail else ""
+        system_alerts.record("cv_extract", f"CV extraction refused an upload: {e}{alert_detail}", "warning",
                              context={"cv_upload_id": upload["id"], "company_id": upload.get("company_id")})
-        print(f"[failed] cv_upload {upload['id']}: {e}")
+        print(f"[failed] cv_upload {upload['id']}: {e}{alert_detail}")
         return True
     except Exception as e:  # a bug, not a user problem - still never leave it 'extracting'
         system_alerts.record("cv_extract", f"CV extraction crashed: {type(e).__name__}: {e}", "error", exc=e,

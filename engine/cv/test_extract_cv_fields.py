@@ -198,18 +198,29 @@ def _person_as_wire_entries(person_dict):
     return [{"field": k, "value": v["value"], "evidence": v["evidence"]} for k, v in person_dict.items()]
 
 
-def _count_schema_params(schema):
-    """Every named property definition anywhere in the schema tree - what
-    the real API counts toward its limit (see output_schema()'s own 2026-10-23
-    comment: the old shape put ~51 of these in one request)."""
+def _count_union_params(schema):
+    """What the API's own error actually counts (2026-10-23 re-review,
+    QA-cv.pdf): 'N parameters with type arrays or anyOf' - only
+    union/nullable-typed properties, not every property. A first pass at
+    this check (`_count_schema_params`, counting every property regardless
+    of union-ness) overstated the real number and understated how much
+    `person`'s own fix already helped - it reported this schema at ~22
+    "total params" and left the real, API-relevant number (12, see below)
+    unverified. Counting only union-typed properties, recursively through
+    `properties`, array `items` and `anyOf` branches, is what actually
+    matches the provider's limit."""
     if not isinstance(schema, dict):
         return 0
-    n = len(schema.get("properties") or {})
-    for sub in (schema.get("properties") or {}).values():
-        n += _count_schema_params(sub)
+    n = 0
+    for v in (schema.get("properties") or {}).values():
+        if isinstance(v, dict) and ("anyOf" in v or isinstance(v.get("type"), list)):
+            n += 1
+        n += _count_union_params(v)
     items = schema.get("items")
     if isinstance(items, dict):
-        n += _count_schema_params(items)
+        n += _count_union_params(items)
+    for branch in schema.get("anyOf") or []:
+        n += _count_union_params(branch)
     return n
 
 
@@ -218,21 +229,20 @@ def test_validation(docx_path, tmp):
     import jsonschema
     jsonschema.validate(dict(GOOD_ANSWER, person=_person_as_wire_entries(GOOD_ANSWER["person"])), x.output_schema())
     check(True, "array-shaped test-double answer is valid against the real structured-output schema sent to the API")
-    n = _count_schema_params(x.output_schema())
-    # `person` (32 params, same fixed-object-per-field shape as the confirmed
-    # live bug in classify_documents.py's `fields`) is now 3. `projects`/
-    # `other_registrations` are deliberately NOT collapsed the same way in
-    # this pass: they're typed per-field records (a number field, two date
-    # fields, a shared per-project evidence quote `validate_proposal()`
-    # falls back to the client/body text for) with real verification logic
-    # built around that shape, not a simple flat value/evidence pair per
-    # field - flattening them changes what gets independently verified, a
-    # bigger behavioural change than fixing a schema-size bug, and neither
-    # was confirmed as part of the reported failure the way `person` was.
-    # 22 is the honest current number: a long way down from 51, with
-    # `person`'s own confirmed-pattern bug fixed; not asserted to be under
-    # the API's real limit the way classify_documents.py's rebuilt schema is.
-    check(n < 30, f"schema has {n} total parameter definitions - down from ~51 before `person` was fixed")
+    n = _count_union_params(x.output_schema())
+    # `person`'s own union count dropped from 32 (one value+evidence pair
+    # per field, the same fixed-object-per-field bug confirmed live in
+    # classify_documents.py's `fields`) to 2, by moving to an array of
+    # {field, value, evidence} entries. `projects`/`other_registrations`
+    # were deliberately left as typed per-field records rather than
+    # flattened the same way (a shared per-project evidence quote,
+    # `validate_proposal()`'s own verification logic built around that
+    # shape) - but counted correctly (union-typed properties only, matching
+    # the API's own "N parameters with type arrays or anyOf" wording, not
+    # every property regardless of union-ness), their 8 + 2 union params are
+    # well within the limit on their own. 12 total, confirmed under the
+    # real 16-param limit the API enforces - not just "smaller than before".
+    check(n < 16, f"schema has {n} union-typed parameters (API limit 16), down from 42 before `person` was fixed")
     text = x.read_cv_text(docx_path, tmp)["text"]
     _, ids = x.find_and_redact_sa_ids(text)
     prop, warnings = x.validate_proposal(json.loads(json.dumps(GOOD_ANSWER)), text, ids)
@@ -321,6 +331,31 @@ def test_llm_call():
     finally:
         if saved:
             os.environ["ANTHROPIC_API_KEY"] = saved
+
+    # Re-review 2026-10-23: a live upload exposed the raw provider error and
+    # request_id straight to the customer (ExtractionFailed used to embed
+    # e.message verbatim). A BadRequestError - the exact shape of the real
+    # "too many union parameters" rejection - must now come out as a clean,
+    # fixed customer message, with the technical detail only on `.detail`.
+    import anthropic
+    import httpx
+    raw = ("Schemas contains too many parameters with union types (42 parameters with type arrays or anyOf). "
+           "This causes exponential compilation cost. Reduce the number of nullable or union-typed parameters "
+           "(limit: 16 parameters with unions).")
+    resp = httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+                          json={"type": "error", "error": {"type": "invalid_request_error", "message": raw},
+                                "request_id": "req_test123"})
+
+    def boom(**kw):
+        raise anthropic.BadRequestError(raw, response=resp, body=resp.json())
+    bad_client = types.SimpleNamespace(beta=types.SimpleNamespace(messages=types.SimpleNamespace(create=boom)))
+    try:
+        x.call_llm("cv text", client=bad_client)
+        check(False, "BadRequestError should raise ExtractionFailed")
+    except x.ExtractionFailed as e:
+        check("Error code" not in str(e) and "request_id" not in str(e) and "42 parameters" not in str(e),
+              "customer-facing message has no raw provider error or request id")
+        check(e.detail and "42 parameters" in e.detail, "raw provider detail kept on .detail for system_alerts, not lost")
 
 
 class MemoryDb:

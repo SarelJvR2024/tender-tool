@@ -136,9 +136,10 @@ def process_upload(url, key, upload, client_factory=cd.default_llm_client):
         return False
     except cd.ClassificationFailed as e:
         _safe_update(lambda: fail_upload(url, key, upload, str(e)), upload, "mark as failed")
-        system_alerts.record("onboarding_scan", f"Onboarding document classification refused an upload: {e}", "warning",
+        alert_detail = f" ({e.detail})" if getattr(e, "detail", None) else ""
+        system_alerts.record("onboarding_scan", f"Onboarding document classification refused an upload: {e}{alert_detail}", "warning",
                              context={"onboarding_upload_id": upload["id"], "company_id": upload.get("company_id")})
-        print(f"[failed] onboarding_upload {upload['id']}: {e}")
+        print(f"[failed] onboarding_upload {upload['id']}: {e}{alert_detail}")
         return True
     except Exception as e:
         system_alerts.record("onboarding_scan", f"Onboarding document classification crashed: {type(e).__name__}: {e}",

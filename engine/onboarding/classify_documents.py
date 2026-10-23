@@ -122,7 +122,19 @@ NUMBER_FIELDS = {"cover_zar", "project_value_rm"}
 
 
 class ClassificationFailed(Exception):
-    """A reason the user should see, in plain words. The job is marked failed."""
+    """A reason the user should see, in plain words. The job is marked failed.
+
+    `detail`, when given, is the raw technical cause (a provider error body,
+    a request id) - never shown to the customer, only passed to
+    system_alerts for an engineer to read. Same fix as extract_cv_fields.py's
+    sibling ExtractionFailed (re-review, 2026-10-23): `except
+    anthropic.BadRequestError` used to put the raw provider message straight
+    into the exception's own text, which flowed into the customer-visible
+    classification_error column unchanged."""
+
+    def __init__(self, message, detail=None):
+        super().__init__(message)
+        self.detail = detail
 
 
 class SetupError(cvx.SetupError):
@@ -406,11 +418,13 @@ def call_llm(text, filename, client=None, model=None):
     except anthropic.RateLimitError:
         raise TransientError("Anthropic API rate limit reached; will retry on the next pass.")
     except anthropic.BadRequestError as e:
-        raise ClassificationFailed(f"The AI service rejected this document's request: {e.message}")
+        raise ClassificationFailed("The AI service couldn't process this document right now. Try again, or file "
+                                   "it manually.", detail=f"BadRequestError: {e.message}")
     except anthropic.APIStatusError as e:
         if e.status_code >= 500:
             raise TransientError(f"Anthropic API server error {e.status_code}; will retry on the next pass.")
-        raise ClassificationFailed(f"The AI service returned an error ({e.status_code}): {e.message}")
+        raise ClassificationFailed("The AI service couldn't process this document right now. Try again, or file "
+                                   "it manually.", detail=f"APIStatusError {e.status_code}: {e.message}")
     except anthropic.APIConnectionError:
         raise TransientError("Could not reach the Anthropic API; will retry on the next pass.")
 
