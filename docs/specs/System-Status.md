@@ -8,6 +8,56 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Tender Command Center & Operational Logistics Engine - new feature, built end-to-end on
+`tender-command-center` branch, not yet merged - 2026-10-24.** Full response to Sarel's own brief
+of the same name: the dashboard's "Closing soon" list is replaced with a real operational-triage
+view built around South African public-tender physical-submission logistics (printing, binding,
+transit all take real hours, and the real cutoff for a physical box is `closing_date -
+print_hours - transit_hours`, well before the tender's own closing time).
+
+- **Migration 0090** adds 6 columns to `tender_packs`: `submission_type`, `delivery_location`,
+  `estimated_transit_hours` (default 2), `estimated_print_hours` (default 4), `dispatch_status`
+  (6-value enum, default `not_ready`), `courier_contact`. Replayed clean (80 migrations) and
+  tenant-isolation-tested (`engine/security/test_tenant_isolation.py` → ALL PASSED). No new RLS
+  policy needed - the existing `tender_packs` tenant-isolation policy already covers every new
+  column.
+- **Deliberately NOT stored, by design**: `print_sign_deadline` and `blocking_items` are both
+  computed on read (`lib/dispatchTriage.ts`), never columns - the same "never a second number that
+  could disagree" rule this app already follows everywhere (`compliance-report.tsx`,
+  `tender-readiness.ts`). `decision_needed` is scoped to the 2 of 4 values with a real signal
+  anywhere in this schema (`attend_briefing`, `director_resolution`) - `GO_NO_GO` and
+  `PRICING_SIGNOFF` are not implemented, not fabricated: no sign-off workflow exists anywhere in
+  this app today (`financial_captures`, migration 0001, is still just draft/complete).
+- **Pure triage logic** (`lib/dispatchTriage.ts`) is unit-tested in isolation - 20 tests
+  (`dispatchTriage.test.ts`), covering the deadline arithmetic, the 4-bucket priority order, and
+  the decision-derivation edge cases (a fix-blocker more than 7 days out is still `none`; a past
+  briefing never fires `attend_briefing` again).
+- **Dashboard** (`app/dashboard/page.tsx`, `lib/dispatchDashboard.ts`, `components/tt/command-
+  center.tsx`): Zone 1 critical banner (single highest-urgency tender, honestly absent when
+  nothing's at risk - not a disguised "all clear"), 3-lane Zone 2 (Needs decision / Urgent actions
+  & blocked items / Dispatch & delivery), Zone 3 Radar collapsed by default. Every card reuses the
+  already-proven `lib/tenderNextStep.ts`'s `nextStepFor()` for its blocking-item summary - no
+  second extraction that could disagree with the Disqualification Guard's own.
+- **Tender Workspace integration** (`app/tenders/[id]/page.tsx`): a `SubmissionModeBadge` in the
+  sticky header - always visible via a native `<details>` element, deliberately not hover-only
+  (PR #131 fixed exactly this mistake on `PrimaryPackActionLink`'s disabled reason the same week;
+  no reason to reintroduce it here for logistics math that matters at least as much) - showing the
+  submission type and, for a physical box, the full Closing time / − transit / − print & bind /
+  Hard target breakdown. A `SubmissionLogisticsForm` + `DispatchStatusButton` live on the Pack
+  compiler tab, the one real write path for every column migration 0090 added.
+- **Pipeline board integration explicitly deferred, not silently dropped**: the brief asked for
+  "the system speaks to you" messaging in Dashboard, Pipeline, and Tender Workspace. This PR ships
+  2 of 3 (Dashboard, Tender Workspace). `app/pipeline/page.tsx` (616 lines, its own board-column
+  rendering) wasn't touched - wiring `loadDispatchCards()` into it is a real, separable follow-up,
+  not done here to keep this already-large diff (new migration + full dashboard rewrite + new
+  workspace header/tab content) reviewable as one piece.
+- **Verified**: `npx tsc --noEmit` clean, `npx eslint .` clean (same 3 pre-existing warnings),
+  `npm run build` clean (57 routes), `npx vitest run` 147/147, `node --test lib/*.test.ts` 138/138
+  (118 prior + 20 new `dispatchTriage` tests). Not yet reviewed on a live Vercel preview with real
+  data - that's the next step before merge, same discipline as PR #130's own preview verification.
+
+---
+
 **PR #130 revised: a mid-review brief was checked against the real repo before acting on it, not
 assumed - 2026-10-23.** A "Phase 2 Completion" brief arrived naming files that don't exist in this
 repo (`src/app/(dashboard)/tenders/[id]/page.tsx`, `src/components/layout/app-sidebar.tsx` - this
