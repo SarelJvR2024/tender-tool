@@ -53,8 +53,25 @@ print_hours - transit_hours`, well before the tender's own closing time).
   workspace header/tab content) reviewable as one piece.
 - **Verified**: `npx tsc --noEmit` clean, `npx eslint .` clean (same 3 pre-existing warnings),
   `npm run build` clean (57 routes), `npx vitest run` 147/147, `node --test lib/*.test.ts` 138/138
-  (118 prior + 20 new `dispatchTriage` tests). Not yet reviewed on a live Vercel preview with real
-  data - that's the next step before merge, same discipline as PR #130's own preview verification.
+  (118 prior + 20 new `dispatchTriage` tests).
+
+**Preview-verified, real finding, same pattern as PR #121/#127 - needs Sarel to apply the migration
+SQL first.** Logged into PR #132's Vercel preview as `reviewer@tenderready.com` and confirmed:
+login works, the dashboard loads with no console errors and no 500 (graceful degradation, not a
+crash), and a real tender workspace (`N.007-030-2026/1F`) renders all 5 tabs correctly with PR
+#130's own work intact. But the dashboard shows "Couldn't load tenders" and the tender workspace
+shows "Couldn't load this tender's pack" - both are migration 0090's own new `tender_packs` columns
+(`submission_type`, `dispatch_status`, ...) not existing yet on the real database this preview
+points at, because this environment genuinely cannot run DDL against it (confirmed again, same
+blocker as the 2026-10-23 ~19:00 UTC addendum below: `psql "$SUPABASE_DB_URL"` connects but hangs
+on raw Postgres-wire TCP, no Management API token present). Both error paths are the dashboard's
+and tender workspace's own pre-existing `{error}`/`packError` graceful-degradation handling doing
+exactly its job - not a bug this PR introduced, and proof the new logistics UI correctly no-ops
+(`{tenderPack && (...)}`) rather than crashing when its own data isn't there yet. **Sarel needs to
+paste `app/supabase/migrations/0090_submission_logistics.sql` into Supabase's own SQL Editor
+(same project the Preview/Production env vars point at) before the Command Center's dashboard
+lanes or the workspace's SubmissionModeBadge can be visually confirmed with real data** - the code
+itself is already fully built and tested; this is a data-layer step, not a code fix.
 
 ---
 
