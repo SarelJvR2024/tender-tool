@@ -226,7 +226,14 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // urgent" question this now answers directly, with a real physical-
   // submission cutoff instead of just the tender's own closing date.
   const activeBids: ActiveBidInput[] = rows
-    .filter((t) => (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t)))
+    // A tender with no tender_packs row yet (nobody's hit "Start a tender
+    // pack" on it - stageOf() falls back to "found" for exactly this case)
+    // has no real submission logistics to triage: nothing to print, nothing
+    // to dispatch. Excluding it here, not just trusting the stage filter,
+    // is what actually matters - t.tender_packs[0] below would otherwise be
+    // undefined and crash the whole dashboard the moment a company has any
+    // not-yet-started opportunity sitting in the pipeline.
+    .filter((t) => t.tender_packs.length > 0 && (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t)))
     .map((t) => {
       const pack = t.tender_packs[0];
       return {
