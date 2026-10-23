@@ -2979,3 +2979,64 @@ including the 2 new `declined`-filter cases in `discoveryPagination.test.ts`.
 **Not done, by design**: the migration is not applied live (see above - Sarel's manual step, spelled
 out in the PR description). No new RLS policy (verified unnecessary, see above). No dedicated
 company-wide tag-vocabulary query (page-scoped suggestions, see above, a reasonable follow-up).
+
+---
+
+## Standing UI/UX review pass, 2026-10-23: tender workspace primary action's disabled reason made visible, not hover-only
+
+Routine scheduled solution-architect-style UI/UX check-in. Reviewed real screens not touched by
+tonight's largest batches (`people/page.tsx`, `experience/page.tsx`, `billing/page.tsx`,
+`company/page.tsx` and its sub-nav/`VaultSection` anchor targets, `sanral-schedules/page.tsx`) -
+all already in good shape, no real gap found worth shipping (the company vault sub-nav's anchor
+links all resolve through `shared.tsx`'s own `VaultSection` wrapper, which already applies
+`scroll-mt-20` against the sticky top bar - confirmed by reading every section component the
+sub-nav links to, not assumed clean).
+
+**The one real gap, found in the Phase 2 batch that merged into `main` an hour before this pass
+(`8e5567f`), one file, not a duplicate of anything above**: the brand-new sticky header banner's
+`PrimaryPackActionLink` (`app/app/tenders/[id]/page.tsx`) renders its disabled state as a `<span
+title={disabledReason}>` - a hover-only tooltip, invisible on a touch device and never reached by
+keyboard. The actual real-action control this banner's own comment says it links to
+(`submission-pack.tsx`'s "Fill SANRAL schedules" button, a few hundred lines down the same page)
+already solved this exact problem for itself, with its own comment stating why in plain words:
+"title= (hover) doesn't reach touch devices - the same reason as visible text so a phone user isn't
+left guessing why it's grey" - a real, visible `<div className="text-warning">{disabledReason}</div>`
+under the button, confirmed by reading `submission-pack.tsx` lines ~293-307 directly. The new
+banner's primary action - the one piece of UI this whole Phase 2 pass added specifically to give
+users one clear next step - silently dropped that established pattern and shipped the tooltip-only
+half of it. On a phone (this app's own field-use case - checking a tender on site), the "Generate
+submission pack" button just sits there greyed out with zero explanation.
+
+**Fixed**: `PrimaryPackActionLink`'s disabled branch now renders the exact same
+tooltip-plus-visible-text pattern as `submission-pack.tsx`'s own disabled button - `aria-disabled="true"`
+and `title={disabledReason}` kept on the span (desktop hover convenience, no regression), plus a new
+sibling `<div style={{ color: "var(--warning)" }}>{disabledReason}</div>` underneath, always visible.
+No new copy invented - `disabledReason` is the exact same string this page was already computing
+server-side (same `!tenderPack` / `openPositionsCount` / `tenderReadiness.thingsLeft` checks,
+untouched). The enabled (ready) branch of the component is completely untouched.
+
+**Self-review, 3 rounds**: 1) re-read the diff - only the disabled branch's JSX changed, the ready
+branch and every caller/prop untouched, confirmed by `git diff --stat` showing one file, isolated
+hunk. 2) confirmed the fix matches an already-established, in-repo convention rather than inventing
+a new one - `submission-pack.tsx`'s own sibling button is the reference implementation, same file,
+same page, same "Generate submission pack" feature area. 3) confirmed the wrapping `<div>` added
+around the disabled span doesn't change layout elsewhere - it's the sole child of its own
+`marginTop`/`paddingTop`/`borderTop` block-level wrapper in `page.tsx`, not inside a flex row with
+siblings that would need to account for a new element.
+
+**Verified**: `rm -rf .next && npm run verify` (`typecheck` + `lint` + `build`) - 0 errors, same 3
+pre-existing warnings every recent pass on this area has reported (`Logo.tsx`'s two `<img>` warnings,
+`analytics/page.tsx`'s unused `STAGE_META` import). `npx vitest run` - 147/147 (unchanged - no
+vitest-covered logic touched, and no test covers this presentational component either way). Full
+`node:test` sweep both ways: combined `npx tsx --test $(find . -name "*.test.ts" -not -path
+"*/node_modules/*")` - 123/123 (the same pre-existing `[id]`-bracketed-path glob quirk silently
+drops 5 files from this combined invocation, not a regression - same quirk this file's own prior
+entries already document); the same 5 files run individually via `node --experimental-strip-types
+<path>` (no `--test` flag, same documented workaround) - 61/61; 184/184 real tests total, all green,
+none newly added or removed by this change.
+
+**Not done, by design**: did not touch the "Part 4 scope cut" question (a full 5-tab retab of this
+page) the Phase 2 entry above explicitly left open for Sarel - that's a sweeping redesign, not a
+single scoped improvement, and stays his own call. Did not touch anything under
+`app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
+standing carve-outs, untouched.
