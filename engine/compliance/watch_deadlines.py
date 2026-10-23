@@ -234,13 +234,34 @@ def days_until(date_str, today):
     abort the ENTIRE daily reminder run for EVERY company, not just the one
     with bad data. Recorded as a system alert (not raised) so the bad record
     is still visible and gets fixed, but doesn't block everyone else's
-    reminders until it is."""
+    reminders until it is.
+
+    "Malformed" covers more than an unparsable string (ValueError): a value
+    that isn't a string at all - a number, bool, or a list/dict, the kind of
+    thing a hand-edited local profile JSON (daily_digest.py --mode local's
+    own local_document_expiry/local_person_credential_expiry, which call this
+    with no schema behind the value at all, unlike a live Postgres `date`
+    column) can genuinely hold. `date_str[:10]` alone doesn't catch every
+    one of those: a number/bool raises TypeError, but a list slices
+    harmlessly and a dict raises KeyError (`{}[:10]` is `{}[slice(None, 10,
+    None)]`, a dict lookup, not a slice) - neither is a ValueError, and the
+    dict case isn't even a TypeError, so chasing exception types one at a
+    time would stay a step behind the next shape. Checking the type up
+    front instead catches all of them the same way (QA pass, 2026-10-23;
+    before this, any of them slipped past this function's own guard
+    entirely and crashed the whole run, exactly what this docstring says a
+    bad date must not do)."""
     if not date_str:
+        return None
+    if not isinstance(date_str, str):
+        system_alerts.record("deadlines", f"A tracked expiry date ({date_str!r}) is not a valid "
+                             "date - skipped, not treated as due, until it's corrected.",
+                             "warning", context={"date_str": str(date_str)})
         return None
     try:
         d = datetime.date.fromisoformat(date_str[:10])
     except ValueError:
-        system_alerts.record("deadlines", f"A tracked expiry date ('{date_str}') is not a valid "
+        system_alerts.record("deadlines", f"A tracked expiry date ({date_str!r}) is not a valid "
                              "date - skipped, not treated as due, until it's corrected.",
                              "warning", context={"date_str": date_str})
         return None

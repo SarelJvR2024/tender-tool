@@ -34,6 +34,10 @@ import urllib.parse
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import watch_deadlines as wd  # noqa: E402
+import system_alerts  # noqa: E402  (on the path via watch_deadlines)
+
+ALERTS = []
+system_alerts.set_sink(lambda payload: ALERTS.append(payload) or "test-alert")
 
 TODAY = datetime.date(2026, 10, 17)
 D = lambda n: (TODAY + datetime.timedelta(days=n)).isoformat()  # noqa: E731
@@ -99,8 +103,47 @@ def run(seen, today):
     return docs, tasks, before
 
 
+def days_until_malformed_inputs():
+    """days_until()'s own docstring promises a malformed date never crashes
+    the whole run - never actually exercised by a test anywhere in the repo
+    (confirmed by grep before writing this). Every one of these came from
+    reproducing engine/notify/daily_digest.py's --mode local reading a
+    hand-edited company profile JSON with no schema behind it (unlike a live
+    Postgres `date` column): `date_str[:10]` alone doesn't catch every bad
+    shape the same way - a number/bool raises TypeError, a list slices
+    harmlessly then fails fromisoformat() with ANOTHER TypeError, and a dict
+    raises KeyError (`{}[:10]` is a dict lookup on a slice key, not a slice)
+    - three different exception types for three different non-string shapes,
+    on top of the existing ValueError for a malformed string. QA pass,
+    2026-10-23."""
+    print("days_until(): malformed / boundary input never crashes")
+    today = datetime.date(2026, 10, 23)
+    bad = ("not-a-date", "2026-13-45", 20261231, True, False, ["2026-12-31"], {"x": 1}, "", None)
+    for value in bad:
+        ALERTS.clear()
+        try:
+            result = wd.days_until(value, today)
+        except Exception as e:
+            check(False, f"days_until({value!r}) must not raise, raised {type(e).__name__}: {e}")
+            continue
+        if value in ("", None, False):
+            check(result is None and not ALERTS, f"days_until({value!r}): falsy, no reminder, no alert ({result!r})")
+        else:
+            check(result is None and len(ALERTS) == 1 and ALERTS[0]["p_source"] == "deadlines"
+                  and ALERTS[0]["p_severity"] == "warning",
+                  f"days_until({value!r}): not a valid date, no reminder, one warning alert (got {result!r}, "
+                  f"{len(ALERTS)} alert(s))")
+    ALERTS.clear()
+    check(wd.days_until("2026-11-22", today) == 30, "a plain date string still works (30 days out)")
+    check(wd.days_until("2026-11-22T09:00:00+02:00", today) == 30,
+          "a date+time string still works (only the first 10 chars matter)")
+    check(wd.days_until("2026-10-16", today) == -7, "a past date still returns a negative count (already expired)")
+    check(not ALERTS, "none of the valid dates above raised a spurious alert")
+
+
 def main():
     wd.supabase_request = fake_request
+    days_until_malformed_inputs()
     seen = {}
     print(f"run 1 - {TODAY}")
     docs, tasks, before = run(seen, TODAY)
