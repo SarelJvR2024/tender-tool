@@ -101,6 +101,27 @@ function stageOf(tender: TenderRow): string {
   return tender.tender_packs?.[0]?.pipeline_stage ?? "found";
 }
 
+// Phase 2 targeted polish (2026-10-23): the greeting prefers csd_trading_name
+// already (below) - this only fires when a company has none on file and
+// falls back to its registered legal_name, which almost always carries a SA
+// entity-type suffix ("Reviewer Civils (Pty) Ltd") that reads badly in
+// "Good evening, ...". Strips one recognised suffix word (optionally
+// parenthesised) at a time from the end until none remain - display only,
+// never stored, never used for matching (lib/onboardingScan.ts's own
+// normalizeCompanyName() is the separate, comparison-oriented version of
+// this same idea, used to judge whether two names refer to the same
+// company, not to shorten one for display).
+const COMPANY_NAME_SUFFIX = /[,]?\s*\(?(pty\.?|proprietary|ltd\.?|limited|cc|close\s+corporation|inc\.?|incorporated|co\.?|company)\)?\.?$/i;
+function shortCompanyName(name: string): string {
+  let s = name.trim();
+  for (let i = 0; i < 6; i++) {
+    const next = s.replace(COMPANY_NAME_SUFFIX, "").trim();
+    if (next === s || next.length === 0) break;
+    s = next;
+  }
+  return s || name.trim();
+}
+
 function greetingFor(date: Date): string {
   const hour = Number(
     new Intl.DateTimeFormat("en-ZA", { timeZone: "Africa/Johannesburg", hour: "numeric", hour12: false }).format(date),
@@ -230,7 +251,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
     }
   }
 
-  const companyName = companyRow?.csd_trading_name ?? companyRow?.legal_name ?? null;
+  const companyName = companyRow?.csd_trading_name ?? (companyRow?.legal_name ? shortCompanyName(companyRow.legal_name) : null);
 
   // Empty-state setup checklist: a brand-new company (nothing tracked yet,
   // AND a readiness score low enough that it clearly hasn't finished the
@@ -302,7 +323,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
 
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard label="Active bids" value={activeBidsCount} />
-          <StatCard label="Packs ready" value={packsReadyCount} tone="success" />
+          <StatCard label="Packs ready" value={packsReadyCount} tone={packsReadyCount > 0 ? "success" : "default"} />
           <StatCard label="Closing this week" value={closingThisWeekCount} tone={closingThisWeekCount > 0 ? "warning" : "default"} />
           <StatCard label="Documents expiring" value={documentsExpiringCount} tone={documentsExpiringCount > 0 ? "destructive" : "default"} />
         </div>

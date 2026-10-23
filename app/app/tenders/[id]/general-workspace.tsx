@@ -30,7 +30,6 @@ import { PrivateDocuments, type PrivateDoc } from "./private-documents";
 import { GeneralPackReview } from "./general-pack-review";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { computeTenderReadiness } from "./tender-readiness";
-import { WorkspaceTabs, TabBadge, type WorkspaceTab } from "./workspace-tabs";
 import { formatDate, formatDateTime } from "@/lib/dates";
 
 /**
@@ -78,7 +77,28 @@ const JOB_BADGE_CLASS: Record<string, string> = {
 
 type Person = PersonCredentialFields & { id: string; name: string; signatory_capacity: string | null; role: string | null };
 
-export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tenderId: string; saved?: string | null }) {
+/**
+ * One section per returned key, so the Tender Workspace's top-level tabs
+ * (page.tsx, Phase 2 retab) can place each where it belongs (overview ->
+ * Overview & Scope, documents/questions -> Forms & Returnables, people ->
+ * Team & Key Personnel, pack -> Pack Review & Export) instead of this
+ * component's own internal tab bar - nothing here changed except the
+ * return shape; every read, every computed value, every piece of JSX is
+ * identical to before this split. "overview" is "What this tender needs"
+ * (manifest/forms/scoring summary) plus the private-documents card - the
+ * part that used to be mounted above this component's own WorkspaceTabs,
+ * always visible, never buried.
+ */
+export type GeneralWorkspaceSections = {
+  overview: React.ReactNode;
+  documents: React.ReactNode;
+  questions: React.ReactNode;
+  people: React.ReactNode | null;
+  pack: React.ReactNode;
+  badges: { docsMissing: number; needAnswer: number; peopleGaps: number; generalFixCount: number };
+};
+
+export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tenderId: string; saved?: string | null }): Promise<GeneralWorkspaceSections | null> {
   const supabase = await createClient();
   const { data: tender } = await supabase
     .from("tenders")
@@ -132,7 +152,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
     ) : null;
 
   if (!manifest) {
-    return (
+    const overview = (
       <>
       {privateCard}
       <div id="general-preparation" style={card}>
@@ -167,6 +187,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       </div>
       </>
     );
+    return { overview, documents: null, questions: null, people: null, pack: null, badges: { docsMissing: 0, needAnswer: 0, peopleGaps: 0, generalFixCount: 0 } };
   }
 
   // ----- supporting documents -----
@@ -579,39 +600,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
     </>
   );
 
-  const secondaryTabs: WorkspaceTab[] = [
-    {
-      id: "general-documents",
-      label: "Documents",
-      badge: docsMissing > 0 ? <TabBadge count={docsMissing} /> : undefined,
-      content: documentsTabContent,
-    },
-    {
-      id: "general-questions",
-      label: "Questions",
-      badge: needAnswer > 0 ? <TabBadge count={needAnswer} /> : undefined,
-      content: questionsTabContent,
-    },
-    ...(peopleSectionVisible
-      ? [
-          {
-            id: "general-people",
-            label: "People",
-            badge: peopleGaps > 0 ? <TabBadge count={peopleGaps} /> : undefined,
-            content: peopleTabContent,
-          },
-        ]
-      : []),
-    {
-      id: "general-pack",
-      label: "Pack",
-      anchors: ["general-pack-review"],
-      badge: generalFixCount > 0 ? <TabBadge count={generalFixCount} /> : undefined,
-      content: packTabContent,
-    },
-  ];
-
-  return (
+  const overview = (
     <>
       {privateCard}
       {/* 1. What this tender needs */}
@@ -698,19 +687,17 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           {manifest.briefing?.compulsory && <Chip label="Compulsory briefing" className="bg-destructive/10 text-destructive" />}
         </div>
       </div>
-
-      {/* Streamlined into tabs - Sarel's own live feedback: "see if you can
-          streamline the page and move to different tabs, it is a very long
-          list." Only these four secondary sections are tabbed; "What this
-          tender needs" above (has its own live blocker chips) and the
-          Disqualification guard/Submission plan (page.tsx, mounted above
-          this whole component) stay always visible - no blocker is ever
-          hidden inside a tab (spec v3 §16.E). Each tab's own badge is the
-          per-section "still outstanding" count (item 5), visible on the tab
-          bar itself even while a different tab is open. */}
-      <WorkspaceTabs tabs={secondaryTabs} />
     </>
   );
+
+  return {
+    overview,
+    documents: documentsTabContent,
+    questions: questionsTabContent,
+    people: peopleSectionVisible ? peopleTabContent : null,
+    pack: packTabContent,
+    badges: { docsMissing, needAnswer, peopleGaps, generalFixCount },
+  };
 }
 
 function SectionTitle({ title }: { title: string }) {

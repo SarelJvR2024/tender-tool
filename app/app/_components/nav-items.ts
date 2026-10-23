@@ -18,27 +18,49 @@ export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: s
 // (see the "4-tier scheme" entry below). Removed rather than replaced with
 // another invented segment name - "SANRAL schedules" already says what the
 // feature is without one.
-// Phase 2 nav restructure (2026-10-23, Sarel's own brief): the 6 primary
-// items below, in this exact order, are what the brief names explicitly -
-// "SANRAL schedules" moved out of this list into /toolkit itself (its own
-// featured card there), not deleted. Analytics/Billing/People & CVs/
-// Experience aren't named in the brief's own 6-item list either way - kept
-// here, appended after the named 6, rather than guessed-removed: the brief
-// never says to drop real functionality a paying customer already reaches
-// from here (Billing above all), and silently cutting a nav entry is a much
-// harder mistake to notice than leaving an unmentioned one in place.
+// Phase 2 targeted polish (2026-10-23, Sarel's own follow-up brief): grouped
+// into 3 labelled sections (Tendering / Company assets / Tools &
+// intelligence) plus Billing in the sidebar's bottom section next to the
+// account menu, replacing the single flat list the first Phase 2 pass used.
+// Each item is defined once below and shared between the flat NAV_ITEMS
+// (CommandPalette's own search list - a command palette has no use for
+// section headers) and the grouped NAV_GROUPS/BOTTOM_NAV_ITEMS (AppSidebar) -
+// one definition per destination, so the two lists can't silently drift
+// apart on label/icon/href.
+const DASHBOARD: NavItem = { href: "/dashboard", label: "Dashboard", icon: Home };
+const OPPORTUNITIES: NavItem = { href: "/discovery", label: "Opportunities", icon: Compass };
+const BID_PIPELINE: NavItem = { href: "/pipeline", label: "Bid pipeline", icon: Gavel };
+const COMPANY_VAULT: NavItem = { href: "/company", label: "Company vault", icon: Vault };
+const PEOPLE_CVS: NavItem = { href: "/people", label: "People & CVs", icon: Users };
+const EXPERIENCE: NavItem = { href: "/experience", label: "Experience", icon: GraduationCap };
+const MARKET_INTELLIGENCE: NavItem = { href: "/market-intelligence", label: "Market intelligence", icon: TrendingUp };
+const TOOLKIT: NavItem = { href: "/toolkit", label: "Toolkit", icon: Wrench };
+const ANALYTICS: NavItem = { href: "/analytics", label: "Analytics", icon: BarChart3 };
+const BILLING: NavItem = { href: "/billing", label: "Billing", icon: CreditCard };
+
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Dashboard", icon: Home },
-  { href: "/discovery", label: "Opportunities", icon: Compass },
-  { href: "/pipeline", label: "Bid pipeline", icon: Gavel },
-  { href: "/company", label: "Company vault", icon: Vault },
-  { href: "/market-intelligence", label: "Market intelligence", icon: TrendingUp },
-  { href: "/toolkit", label: "Toolkit", icon: Wrench },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/billing", label: "Billing", icon: CreditCard },
-  { href: "/people", label: "People & CVs", icon: Users },
-  { href: "/experience", label: "Experience", icon: GraduationCap },
+  DASHBOARD,
+  OPPORTUNITIES,
+  BID_PIPELINE,
+  COMPANY_VAULT,
+  MARKET_INTELLIGENCE,
+  TOOLKIT,
+  ANALYTICS,
+  BILLING,
+  PEOPLE_CVS,
+  EXPERIENCE,
 ];
+
+export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  { label: "Tendering", items: [DASHBOARD, OPPORTUNITIES, BID_PIPELINE] },
+  { label: "Company assets", items: [COMPANY_VAULT, PEOPLE_CVS, EXPERIENCE] },
+  { label: "Tools & intelligence", items: [MARKET_INTELLIGENCE, TOOLKIT, ANALYTICS] },
+];
+
+// Rendered in the sidebar's bottom section, directly above the account menu
+// - not its own labelled group, same footer area a "Billing" link belongs in
+// next to Profile/Privacy/Sign out.
+export const BOTTOM_NAV_ITEMS: NavItem[] = [BILLING];
 
 export const ADMIN_NAV_ITEM: NavItem = { href: "/admin", label: "Admin", icon: ShieldCheck };
 

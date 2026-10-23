@@ -4,8 +4,11 @@ import { RetryButton } from "./retry-button";
 import { ReviewButton } from "./review-button";
 import { TaskStatusButton } from "./task-status-button";
 import { TaskAssigneeSelect, type AssignablePerson } from "./task-assignee-select";
-import { ComplianceReport } from "./compliance-report";
-import { GeneralTenderWorkspace } from "./general-workspace";
+import { ComplianceReport, type ComplianceReportSections } from "./compliance-report";
+import { GeneralTenderWorkspace, type GeneralWorkspaceSections } from "./general-workspace";
+import { WorkspaceTabs, TabBadge, type WorkspaceTab } from "./workspace-tabs";
+import { Clock } from "lucide-react";
+import BeePreferencePointsClient from "../../tools/bee-preference-points/BeePreferencePointsClient";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
 import {
@@ -18,7 +21,6 @@ import {
   type TenderTaskStatus,
 } from "./actions";
 import { AppShell } from "../../_components/AppShell";
-import { ScrollFade } from "../../_components/ScrollFade";
 import { SubmissionPack } from "./submission-pack";
 import { CvCompare } from "./cv-compare";
 import { CoverPagePreview } from "./cover-page-preview";
@@ -134,6 +136,19 @@ const PACK_STATUS_LABEL: Record<string, { label: string; className: string }> = 
   suggested: { label: "Suggested - not yet confirmed", className: "bg-warning/10 text-warning" },
   confirmed: { label: "Confirmed", className: "bg-success/10 text-success" },
   filled: { label: "Filled", className: "bg-success/10 text-success" },
+};
+
+// Same labels as discovery/page.tsx's own local PRICING_MODEL_LABEL (for
+// tender_scope_records.pricing_model) - this file doesn't share that one
+// import since every other status/label map on this page is already its
+// own small local copy, not a shared lib export.
+const PRICING_MODEL_LABEL: Record<string, string> = {
+  lump_sum: "Lump sum",
+  schedule_of_rates: "Schedule of rates",
+  boq_based: "Bill of quantities",
+  cost_reimbursable: "Cost reimbursable",
+  remeasurement: "Remeasurement",
+  time_based: "Time-based",
 };
 
 // field_key is a dotted path like "a_forms.A8.litigation" or
@@ -313,6 +328,21 @@ export default async function TenderWorkspacePage({
 
   const countdown = closingCountdown(tenderFacts?.closing_date ?? null);
   const packStatus = tenderPack ? PACK_STATUS_LABEL[tenderPack.status] : null;
+
+  // Phase 2 brief (Part 4): "Value Estimate / Range (if available)" on the
+  // header's Key Metadata Bar, plus the fuller "Scope & pricing" card in the
+  // Pricing & Strategy tab (Phase 2 targeted polish). tender_scope_records
+  // (migration 0060, engine/discovery/tender_enrichment.py - see
+  // discovery/page.tsx's own SCOPE_RECORD_COLUMNS comment) is honestly rare
+  // today: that enrichment script isn't wired into the production fan-out,
+  // so these columns are null for almost every tender. Shown only when this
+  // tender genuinely has a value - never a fabricated number.
+  type ScopeRecordDetail = { scope_summary: string | null; pricing_model: string | null; value_band: string | null; confidence: string | null };
+  const { data: scopeRecord } = tenderFacts
+    ? await supabase.from("tender_scope_records").select("scope_summary, pricing_model, value_band, confidence").eq("tender_id", id).maybeSingle()
+    : { data: null };
+  const scopeRecordDetail = scopeRecord as ScopeRecordDetail | null;
+  const valueEstimate = scopeRecordDetail?.value_band ?? null;
   // Drives the at-a-glance summary chips on the facts card, so "are we ready
   // to submit" is answerable without scrolling past Tasks & Key positions.
   const overdueTaskCount = tasks.filter((t) => {
@@ -358,25 +388,37 @@ export default async function TenderWorkspacePage({
   // {data, error} pairs and degrades to []/null without throwing - this is
   // only for the handful of larger child components that could rethrow.
   let disqualificationGuardSection: React.ReactNode = null;
+  let disqualificationGuardFixCount = 0;
   if (isSanralFamily || isGeneralFamily) {
     try {
-      disqualificationGuardSection = await DisqualificationGuard({ tenderId: id, isSanralFamily, isGeneralFamily });
+      const guard = await DisqualificationGuard({ tenderId: id, isSanralFamily, isGeneralFamily });
+      disqualificationGuardSection = guard.content;
+      disqualificationGuardFixCount = guard.fixCount;
     } catch (err) {
       console.error("DisqualificationGuard failed to render for tender", id, err);
       disqualificationGuardSection = <ErrorBanner message="Couldn't load the Disqualification guard. If it keeps happening, let us know." />;
     }
   }
 
-  let complianceSection: React.ReactNode = null;
+  // Phase 2 retab (2026-10-23): both of these now return a plain object of
+  // named sections (one per returned key) instead of one bundled JSX tree,
+  // so the 5 top-level tabs below can place each section where it belongs
+  // - no change to either component's own reads or logic, only its return
+  // shape (see each file's own header comment). On a read failure, the same
+  // error banner is reused across every tab slot that section would have
+  // filled - an honest "this failed" in each place, not a silent gap.
+  let generalSections: GeneralWorkspaceSections | null = null;
+  let complianceSections: ComplianceReportSections | null = null;
+  let complianceError: React.ReactNode = null;
   try {
     if (isGeneralFamily) {
-      complianceSection = await GeneralTenderWorkspace({ tenderId: id, saved: saved ?? null });
+      generalSections = await GeneralTenderWorkspace({ tenderId: id, saved: saved ?? null });
     } else if (tenderFacts?.family) {
-      complianceSection = await ComplianceReport({ tenderId: id });
+      complianceSections = await ComplianceReport({ tenderId: id });
     }
   } catch (err) {
     console.error("Compliance/pack check failed to render for tender", id, err);
-    complianceSection = <ErrorBanner message="Couldn't load the compliance check. If it keeps happening, let us know." />;
+    complianceError = <ErrorBanner message="Couldn't load the compliance check. If it keeps happening, let us know." />;
   }
 
   let packReviewSection: React.ReactNode = null;
@@ -467,12 +509,29 @@ export default async function TenderWorkspacePage({
               <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 8 }}>
                 {tenderFacts.buyer ?? "No client on file"}
               </div>
-              <div style={{ fontSize: 13, color: "var(--muted-foreground)" }}>
-                Closes{" "}
-                {tenderFacts.closing_date ? (formatDate(tenderFacts.closing_date) ?? "—") : "- no closing date on file"}
+              <div style={{ fontSize: 13, color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span>
+                  Closes{" "}
+                  {tenderFacts.closing_date ? (formatDate(tenderFacts.closing_date) ?? "—") : "- no closing date on file"}
+                </span>
+                {/* Phase 2 brief (Part 4): "Closing Countdown: Badge with
+                    clock icon displaying exact remaining time." */}
                 {countdown && (
-                  <span style={{ marginLeft: 8, fontWeight: 600, color: countdown.urgent ? "var(--warning)" : "var(--muted-foreground)" }}>
-                    ({countdown.text})
+                  <span
+                    className={countdown.urgent ? "bg-warning/10 text-warning" : "bg-muted text-muted-foreground"}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 4, borderRadius: 100, padding: "2px 9px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
+                  >
+                    <Clock style={{ width: 11, height: 11 }} />
+                    {countdown.text}
+                  </span>
+                )}
+                {valueEstimate && (
+                  <span
+                    title="Estimated value range - a size indicator, not a price to bid (see the Pricing & Strategy tab)"
+                    className="bg-muted text-muted-foreground"
+                    style={{ display: "inline-flex", alignItems: "center", borderRadius: 100, padding: "2px 9px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                  >
+                    Est. value: {valueEstimate}
                   </span>
                 )}
               </div>
@@ -576,119 +635,15 @@ export default async function TenderWorkspacePage({
                 closing date changes everything below it. Nothing when none. */}
             <TenderUpdates tenderId={id} />
 
-            {/* Disqualification guard - the checks most likely to disqualify a
-                bid outright, read from the same data the rest of the page
-                already reads. Mounted early, right after the facts, since
-                it's meant to be the first thing a director checks. */}
-            {disqualificationGuardSection}
-
-            {/* Submission plan - the full assessment-engine step list (every
-                form/returnable/role/question/gap), not just the Guard's
-                curated disqualification-risk subset above. General-family
-                only: SANRAL has no requirements.py-shaped manifest to build
-                this from. */}
-            {isGeneralFamily && <SubmissionPlanView tenderId={id} />}
-
-            {/* Jump nav - this page stacks up to 9 report/management cards once
-                a pack exists, so a sticky row of anchors beats blind-scrolling
-                to find one (same idea as Stripe's data-dense dashboards: a
-                wayfinding strip, not more scrolling, when a screen gets long).
-                The pack link (the page's actual deliverable) leads the row in
-                its "primary" color, so it's never scrolled out of view on a
-                narrow screen behind the report links ahead of it.
-                A full SANRAL pack row can carry 13+ pills - more than this
-                page's 820px reading-width column fits at ANY viewport size,
-                not just on mobile, so there was nothing marking that the row
-                scrolls - the same stranded-content problem the pipeline board
-                and Discovery's right rail were fixed for. The fade-only
-                ScrollFade (no text hint - this bar is sticky, so a permanent
-                hint line would add height to something pinned on screen for
-                the whole page scroll) gives the same edge cue without that
-                cost. minWidthToHide is set unreachably high because the
-                overflow here doesn't depend on viewport width the way
-                Pipeline's board does - the column is capped at 820px, so it
-                never actually fits. */}
-            {(tenderPack || isSanralFamily) && (
-              <div
-                style={{
-                  position: "sticky",
-                  top: 0,
-                  zIndex: 5,
-                  background: "var(--card)",
-                  padding: "8px 2px",
-                  marginBottom: 12,
-                }}
-              >
-                {/* Spec v3 §16.E/§29: "Persistent context: tender title/
-                    reference, client, deadline, current step, blockers...
-                    Do not bury blockers in a hidden tab." The facts card
-                    above already shows all of this, but it scrolls away -
-                    this slim row repeats only the part that matters while
-                    scrolling (title, countdown, confirmed/review/provide/
-                    overdue counts), reusing the exact same values the facts
-                    card and JumpLink row already compute; no new data read. */}
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    flexWrap: "wrap",
-                    paddingBottom: 6,
-                    marginBottom: 6,
-                    borderBottom: "1px solid var(--border)",
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, minWidth: 0, overflow: "hidden" }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {tenderFacts.contract_no ?? tenderFacts.description ?? "Untitled tender"}
-                    </span>
-                    {countdown && (
-                      <span style={{ fontSize: 11, fontWeight: 600, color: countdown.urgent ? "var(--warning)" : "var(--muted-foreground)", whiteSpace: "nowrap" }}>
-                        {countdown.text}
-                      </span>
-                    )}
-                  </div>
-                  {tenderPack && provenance.length > 0 && (
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {missingRows.length > 0 && <SummaryChip count={missingRows.length} label="to provide" className="bg-warning/10 text-warning" />}
-                      {reviewRows.length > 0 && <SummaryChip count={reviewRows.length} label="to verify" className="bg-success/10 text-success" />}
-                      {overdueTaskCount > 0 && <SummaryChip count={overdueTaskCount} label={overdueTaskCount === 1 ? "overdue" : "overdue"} className="bg-destructive/10 text-destructive" />}
-                      {openPositionsCount > 0 && <SummaryChip count={openPositionsCount} label="positions open" className="bg-destructive/10 text-destructive" />}
-                    </div>
-                  )}
-                </div>
-                <div style={{ position: "relative" }}>
-                  <div style={{ display: "flex", gap: 6, overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
-                    {showSubmissionPack && <JumpLink href="#submission-pack" label="Submission pack" variant="primary" />}
-                    {showSubmissionPack && <JumpLink href="#cover-page" label="Cover page" />}
-                    {isGeneralFamily && <JumpLink href="#general-pack" label="Pack" variant="primary" />}
-                    {(isSanralFamily || isGeneralFamily) && <JumpLink href="#disqualification-guard" label="Guard" />}
-                    {isGeneralFamily && <JumpLink href="#submission-plan" label="Plan" />}
-                    {tenderFacts.source !== "sanral" && <JumpLink href="#intake" label="Intake" />}
-                    {tenderPack && provenance.length > 0 && <JumpLink href="#readiness-report" label="Readiness" />}
-                    {isSanralFamily && <JumpLink href="#compliance-check" label="Documents" />}
-                    {isSanralFamily && <JumpLink href="#key-people" label="Key people" />}
-                    {isSanralFamily && <JumpLink href="#company-experience" label="Experience" />}
-                    {isSanralFamily && <JumpLink href="#score-estimate" label="Score" />}
-                    {isGeneralFamily && <JumpLink href="#general-preparation" label="Needs" />}
-                    {isGeneralFamily && <JumpLink href="#general-documents" label="Documents" />}
-                    {isGeneralFamily && <JumpLink href="#general-questions" label="Questions" />}
-                    <JumpLink href="#market" label="Market" />
-                    <JumpLink href="#tasks-milestones" label="Tasks" />
-                    {tenderPack && tenderPack.pipeline_stage === "won" && <JumpLink href="#won-project" label="Won project" />}
-                    <JumpLink href="#activity" label="Notes & activity" />
-                    {tenderPack && (positions.length > 0 || isSanralPackFamily) && <JumpLink href="#key-positions" label="Key positions" />}
-                    {showSubmissionPack && <JumpLink href="#tender-templates" label="Templates" />}
-                    {showSubmissionPack && <JumpLink href="#form-b7" label="Form B7" />}
-                    {showSubmissionPack && <JumpLink href="#pack-review" label="Pack review" />}
-                    {isGeneralFamily && <JumpLink href="#general-pack-review" label="Pack review" />}
-                    <JumpLink href="#narrative-documents" label="Cover letter" />
-                  </div>
-                  <ScrollFade fadeColor="255, 255, 255" minWidthToHide={99999} hint={false} />
-                </div>
-              </div>
-            )}
+            {/* Disqualification guard moved into the Overview tab below
+                (Sarel's own follow-up brief, 2026-10-23: "Overview
+                (Default): ... and Disqualification Guard"). This is a
+                deliberate, explicit override of this file's own prior rule
+                (spec v3 §16.E: "Do not bury blockers in a hidden tab") - kept
+                visible from every OTHER tab instead via the Overview tab's
+                own fix-count badge (disqualificationGuardFixCount, below),
+                not by position, and Overview is the tab a visitor lands on
+                by default. */}
 
             {packError && <ErrorBanner message="Couldn't load this tender's pack. If it keeps happening, let us know." />}
 
@@ -719,310 +674,462 @@ export default async function TenderWorkspacePage({
               </div>
             )}
 
-            {tenderPack && (
-              <>
-                {provenanceError && <ErrorBanner message="Couldn't load the readiness report. If it keeps happening, let us know." />}
-
-                {provenance.length === 0 && !provenanceError && (
-                  <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "var(--muted-foreground)" }}>
-                    No readiness data recorded yet for this pack.
-                  </div>
-                )}
-
-                {provenance.length > 0 && (() => {
-                  // Spec v3 Batch 5: once there's nothing left to review or
-                  // provide, this grid is just a read-only list of already-
-                  // confirmed facts - a safe collapse-by-default candidate.
-                  // Any review/missing row (real work to do) keeps it open,
-                  // same rule as Key positions above.
-                  const grid = (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
-                      {/* Verify/Provide, the Product promise's own grouping (app/AGENTS.md) -
-                          "Already confirmed" and "Please review" merged into one Verify card
-                          (AI-filled, green once confirmed - same pattern compliance-report.tsx
-                          uses) since both are the same type of task, just at different points
-                          of being confirmed. "Needs your input" is Provide, not Fix: a missing
-                          intake fact isn't a disqualification risk the way a missing mandatory
-                          compliance document is, so it's recolored amber, not red. */}
-                      <ReportCard
-                      title="Verify"
-                      count={confirmedRows.length + reviewRows.length}
-                      className="bg-success/10 text-success"
-                      emptyText="Nothing to verify yet."
-                    >
-                      {reviewRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid var(--border)" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
-                            <ReviewButton fieldKey={row.field_key} />
-                          </div>
-                          <div style={{ fontSize: 12, color: "var(--muted-foreground)", wordBreak: "break-word", marginTop: 2 }}>{row.value ?? "-"}</div>
-                          {row.reason && (
-                            <div style={{ fontSize: 11, color: "var(--warning)", marginTop: 3 }}>{row.reason}</div>
-                          )}
-                        </div>
-                      ))}
-                      {confirmedRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
-                          <div style={{ fontSize: 12, color: "var(--muted-foreground)", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
-                        </div>
-                      ))}
-                    </ReportCard>
-
-                    <ReportCard
-                      title="Provide"
-                      count={missingRows.length}
-                      className="bg-warning/10 text-warning"
-                      emptyText="Nothing left for you to supply."
-                    >
-                      {missingRows.map((row) => (
-                        <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
-                          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
-                          {row.reason && (
-                            <div style={{ fontSize: 12, color: "var(--warning)", marginTop: 2 }}>{row.reason}</div>
-                          )}
-                        </div>
-                      ))}
-                      </ReportCard>
-                    </div>
-                  );
-                  const nothingOutstanding = missingRows.length === 0 && reviewRows.length === 0;
-                  return nothingOutstanding ? (
-                    <CollapsibleSection id="readiness-report" title="Readiness report" defaultOpen={false} closedSummary="All confirmed">
-                      {grid}
-                    </CollapsibleSection>
-                  ) : (
-                    <div id="readiness-report" style={{ marginBottom: 16 }}>
-                      {grid}
-                    </div>
-                  );
-                })()}
-              </>
-            )}
-
-            {/* Feature item 9: carry over last time's reusable answers /
-                key-position people from a submitted tender (reuse-past-submission.tsx). */}
-            <ReusePastSubmission tenderId={id} reuseFrom={reuseFrom} saved={saved} reused={reused} />
-
-            {/* Intake (0024): how the documents were read and routed - SANRAL
-                pack flow vs. general - and the fit for this company. */}
-            <IntakeCard tenderId={id} />
-
-            {/* Document/CV compliance + functionality score estimate for pursuing this tender.
-                A tender whose documents haven't been analysed yet (family
-                still null - a manual load waiting on its intake) has no
-                family to report against; the intake card says so. */}
-            {complianceSection}
-
-            {/* Published bids/awards for this tender + similar tenders (0044,
-                market-context.tsx): where this company's price sat, and how
-                crowded / price-driven this kind of tender is. */}
-            <MarketContext tender={{ id, buyer: tenderFacts.buyer, family: tenderFacts.family }} />
-
-            <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
-
-            {/* Won & completed projects (0065, feature 2): once the pipeline
-                board has this tender at 'won', record the actual completed
-                project and sync it into each confirmed team member's own
-                CV-feeding project history. */}
-            {tenderPack && tenderPack.pipeline_stage === "won" && (
-              <WonProjectCard
-                tenderId={id}
-                tenderPack={tenderPack}
-                positions={positions}
-                assignments={assignments}
-                peopleName={peopleName}
-              />
-            )}
-
-            {/* Notes + one chronological history of this tender (item 15; tender_comments, 0033). */}
-            <ActivityLog tenderId={id} showAll={activity === "all"} />
-
-            {tenderPack && (positions.length > 0 || isSanralPackFamily) && (() => {
-              // Spec v3 Batch 5 (§16.E/§29): "Completed groups can compact;
-              // blockers remain discoverable." An unconfirmed position is
-              // literally rendered as a red "Fix: no key person confirmed"
-              // badge below - a real blocker, so this section only collapses
-              // once there are none left. Same list/content either way;
-              // only the outer wrapper and whether it starts open differ.
-              const allConfirmed = positions.length > 0 && openPositionsCount === 0;
-              const header = (
+            {/* Phase 2 retab (2026-10-23): the long flat stack that used to
+                be here - readiness report, intake, compliance/general
+                workspace, market context, tasks, key positions, cover page,
+                templates, Form B7, pack review/export, cover letter - is now
+                5 top-level tabs (the brief's own "modular, tabbed
+                workspace"), built from these exact same section values
+                (nothing re-read, nothing re-computed) and handed to the
+                already-existing WorkspaceTabs. The Disqualification guard
+                and this "no pack yet" banner above stay outside the tabs on
+                purpose (never bury a blocker); Activity/notes stays outside
+                below the tabs, since a comment history belongs in view
+                regardless of which tab is open, not hidden behind a click. */}
+            {(() => {
+              const readinessReportSection = tenderPack ? (
                 <>
-                  {!allConfirmed && (
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
-                      <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)" }}>Key positions</div>
-                      {positions.length > 0 && (
-                        <span className="bg-warning/10 text-warning" style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
-                          {openPositionsCount} of {positions.length} to confirm
-                        </span>
-                      )}
+                  {provenanceError && <ErrorBanner message="Couldn't load the readiness report. If it keeps happening, let us know." />}
+
+                  {provenance.length === 0 && !provenanceError && (
+                    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "var(--muted-foreground)" }}>
+                      No readiness data recorded yet for this pack.
                     </div>
                   )}
-                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
-                    Choose who fills each position on this tender - the submission pack is built with exactly these
-                    people and won&apos;t generate until every position has one. Tender Ready suggests the best match among
-                    the people tagged on their People page as fitting the role (scored on their qualifications, projects
-                    and years against the position), with up to two alternatives - confirm it, or pick anyone else from the
-                    list. Once confirmed, you can request the tender-customized CV
-                    (requirement-matching cover page); our AI generates this in the background, so your customized CV
-                    will be ready for review within a few minutes.
-                  </div>
-                </>
-              );
-              const body = (
-                <>
-                {positions.length === 0 && (
-                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-                    No positions listed yet. They are read from this tender&apos;s own Technical Submission workbook (its
-                    SETUP sheet) - upload it under Blank tender templates below, and they appear here once the pack
-                    builder has read it.
-                  </div>
-                )}
-                {assignablePeople.length === 0 && positions.length > 0 && (
-                  <div style={{ fontSize: 12, color: "var(--warning)", marginBottom: 8 }}>
-                    No one is captured on the People page yet - add your key people there first.
-                  </div>
-                )}
-                {positions.map((code) => {
-                  const a = assignments.find((x) => x.position_code === code) ?? null;
-                  const req = requirementRows.find((r) => r.position_code === code) ?? null;
-                  const roleCode = roleCodeForPosition(code, req?.position_description ?? null);
-                  const taggedIds = new Set(roleCode ? roleTags.filter((t) => t.role_code === roleCode).map((t) => t.person_id) : []);
-                  const tagged = assignablePeople.filter((p) => taggedIds.has(p.id));
-                  const others = assignablePeople.filter((p) => !taggedIds.has(p.id));
-                  const confirmedId = a?.confirmed_person_id ?? null;
-                  const sugg = suggestForPosition({
-                    positionCode: code,
-                    description: req?.position_description ?? null,
-                    candidateScores: a?.candidate_scores ?? null,
-                    tags: roleTags,
-                    peopleIds: new Set(assignablePeople.map((p) => p.id)),
-                  });
-                  const positionJobs = generatedCvs.filter((g) => g.position_code === code);
-                  return (
-                    <div key={code} style={{ borderTop: "1px solid var(--border)", padding: "12px 0" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
-                        <div style={{ minWidth: 0, flex: "1 1 200px" }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{code}</div>
-                          {req?.position_description && (
-                            <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 1 }}>{req.position_description}</div>
-                          )}
-                          {confirmedId ? (
-                            <div style={{ fontSize: 12, color: "var(--success)", marginTop: 2, fontWeight: 600 }}>
-                              Confirmed: {a?.people?.name ?? peopleName.get(confirmedId) ?? "person on file"}
+
+                  {provenance.length > 0 && (() => {
+                    // Spec v3 Batch 5: once there's nothing left to review or
+                    // provide, this grid is just a read-only list of already-
+                    // confirmed facts - a safe collapse-by-default candidate.
+                    // Any review/missing row (real work to do) keeps it open,
+                    // same rule as Key positions below.
+                    const grid = (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
+                        <ReportCard
+                        title="Verify"
+                        count={confirmedRows.length + reviewRows.length}
+                        className="bg-success/10 text-success"
+                        emptyText="Nothing to verify yet."
+                      >
+                        {reviewRows.map((row) => (
+                          <div key={row.field_key} style={{ padding: "10px 0", borderTop: "1px solid var(--border)" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8, flexWrap: "wrap" }}>
+                              <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
+                              <ReviewButton fieldKey={row.field_key} />
                             </div>
-                          ) : (
-                            <div className="bg-destructive/10 text-destructive" style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700, marginTop: 4 }}>
-                              Fix: no key person confirmed - blocks the submission pack
-                            </div>
-                          )}
-                          {!confirmedId && roleCode && tagged.length === 0 && (
-                            <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>
-                              No one is tagged as fitting {roleTitles.get(roleCode) ?? code} yet (People page).
-                            </div>
-                          )}
-                        </div>
-                        <PositionPersonSelect
-                          tenderId={id}
-                          tenderPackId={tenderPack.id}
-                          positionCode={code}
-                          confirmedPersonId={confirmedId}
-                          tagged={tagged}
-                          others={others}
-                          roleTitle={roleCode ? roleTitles.get(roleCode) ?? null : null}
-                          suggestions={sugg}
-                        />
+                            <div style={{ fontSize: 12, color: "var(--muted-foreground)", wordBreak: "break-word", marginTop: 2 }}>{row.value ?? "-"}</div>
+                            {row.reason && (
+                              <div style={{ fontSize: 11, color: "var(--warning)", marginTop: 3 }}>{row.reason}</div>
+                            )}
+                          </div>
+                        ))}
+                        {confirmedRows.map((row) => (
+                          <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
+                            <div style={{ fontSize: 12, color: "var(--muted-foreground)", wordBreak: "break-word" }}>{row.value ?? "-"}</div>
+                          </div>
+                        ))}
+                      </ReportCard>
+
+                      <ReportCard
+                        title="Provide"
+                        count={missingRows.length}
+                        className="bg-warning/10 text-warning"
+                        emptyText="Nothing left for you to supply."
+                      >
+                        {missingRows.map((row) => (
+                          <div key={row.field_key} style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{humanizeFieldKey(row.field_key)}</div>
+                            {row.reason && (
+                              <div style={{ fontSize: 12, color: "var(--warning)", marginTop: 2 }}>{row.reason}</div>
+                            )}
+                          </div>
+                        ))}
+                        </ReportCard>
                       </div>
-                      {confirmedId && (
-                        <div style={{ marginTop: 8 }}>
-                          <form action={requestTenderCv} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                            <input type="hidden" name="tender_id" value={id} />
-                            <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
-                            <input type="hidden" name="position_code" value={code} />
-                            <input type="hidden" name="person_id" value={confirmedId} />
-                            <select name="format" defaultValue="sanral_keyperson" style={{ minHeight: 36, borderRadius: 7, border: "1px solid var(--border)", fontSize: 12, padding: "0 8px" }}>
-                              <option value="sanral_keyperson">SANRAL key-person</option>
-                              <option value="world_bank">World Bank format</option>
-                            </select>
-                            <select name="detail" defaultValue="summary" style={{ minHeight: 36, borderRadius: 7, border: "1px solid var(--border)", fontSize: 12, padding: "0 8px" }}>
-                              <option value="summary">Summary</option>
-                              <option value="detailed">Detailed</option>
-                            </select>
-                            <button
-                              type="submit"
-                              style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
-                            >
-                              Generate tender-specific CV
-                            </button>
-                          </form>
-                          <CvCompare tenderId={id} positionCode={code} personId={confirmedId} />
-                        </div>
-                      )}
-                      {positionJobs.length > 0 && (
-                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                          {positionJobs.map((g) => {
-                            const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, className: "bg-muted text-muted-foreground" };
-                            return (
-                              <div key={g.id} style={{ fontSize: 11, color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: 8 }}>
-                                <span>{g.format} / {g.detail}</span>
-                                <span className={st.className} style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600 }}>
-                                  {st.label}
-                                </span>
-                                {g.error_message && <span style={{ color: "var(--destructive)" }}>{g.error_message}</span>}
-                                {g.storage_path_docx && cvSignedUrls[g.storage_path_docx] && (
-                                  <a href={cvSignedUrls[g.storage_path_docx]} style={{ color: "var(--accent)", fontWeight: 600 }}>Word</a>
-                                )}
-                                {g.storage_path_pdf && cvSignedUrls[g.storage_path_pdf] && (
-                                  <a href={cvSignedUrls[g.storage_path_pdf]} style={{ color: "var(--accent)", fontWeight: 600 }}>PDF</a>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                    );
+                    const nothingOutstanding = missingRows.length === 0 && reviewRows.length === 0;
+                    return nothingOutstanding ? (
+                      <CollapsibleSection id="readiness-report" title="Readiness report" defaultOpen={false} closedSummary="All confirmed">
+                        {grid}
+                      </CollapsibleSection>
+                    ) : (
+                      <div id="readiness-report" style={{ marginBottom: 16 }}>
+                        {grid}
+                      </div>
+                    );
+                  })()}
                 </>
-              );
-              return allConfirmed ? (
-                <CollapsibleSection id="key-positions" title="Key positions" defaultOpen={false} closedSummary={`All ${positions.length} confirmed`}>
-                  {header}
-                  {body}
-                </CollapsibleSection>
-              ) : (
-                <div id="key-positions" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-                  {header}
-                  {body}
+              ) : null;
+
+              const keyPositionsSection = tenderPack && (positions.length > 0 || isSanralPackFamily) ? (() => {
+                // Spec v3 Batch 5 (§16.E/§29): "Completed groups can compact;
+                // blockers remain discoverable." An unconfirmed position is
+                // literally rendered as a red "Fix: no key person confirmed"
+                // badge below - a real blocker, so this section only collapses
+                // once there are none left. Same list/content either way;
+                // only the outer wrapper and whether it starts open differ.
+                const allConfirmed = positions.length > 0 && openPositionsCount === 0;
+                const header = (
+                  <>
+                    {!allConfirmed && (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 2 }}>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: "var(--foreground)" }}>Key positions</div>
+                        {positions.length > 0 && (
+                          <span className="bg-warning/10 text-warning" style={{ display: "inline-flex", padding: "3px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>
+                            {openPositionsCount} of {positions.length} to confirm
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
+                      Choose who fills each position on this tender - the submission pack is built with exactly these
+                      people and won&apos;t generate until every position has one. Tender Ready suggests the best match among
+                      the people tagged on their People page as fitting the role (scored on their qualifications, projects
+                      and years against the position), with up to two alternatives - confirm it, or pick anyone else from the
+                      list. Once confirmed, you can request the tender-customized CV
+                      (requirement-matching cover page); our AI generates this in the background, so your customized CV
+                      will be ready for review within a few minutes.
+                    </div>
+                  </>
+                );
+                const body = (
+                  <>
+                  {positions.length === 0 && (
+                    <div style={{ fontSize: 12, color: "var(--muted-foreground)", borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+                      No positions listed yet. They are read from this tender&apos;s own Technical Submission workbook (its
+                      SETUP sheet) - upload it under Blank tender templates (Forms & Returnables) below, and they appear
+                      here once the pack builder has read it.
+                    </div>
+                  )}
+                  {assignablePeople.length === 0 && positions.length > 0 && (
+                    <div style={{ fontSize: 12, color: "var(--warning)", marginBottom: 8 }}>
+                      No one is captured on the People page yet - add your key people there first.
+                    </div>
+                  )}
+                  {positions.map((code) => {
+                    const a = assignments.find((x) => x.position_code === code) ?? null;
+                    const req = requirementRows.find((r) => r.position_code === code) ?? null;
+                    const roleCode = roleCodeForPosition(code, req?.position_description ?? null);
+                    const taggedIds = new Set(roleCode ? roleTags.filter((t) => t.role_code === roleCode).map((t) => t.person_id) : []);
+                    const tagged = assignablePeople.filter((p) => taggedIds.has(p.id));
+                    const others = assignablePeople.filter((p) => !taggedIds.has(p.id));
+                    const confirmedId = a?.confirmed_person_id ?? null;
+                    const sugg = suggestForPosition({
+                      positionCode: code,
+                      description: req?.position_description ?? null,
+                      candidateScores: a?.candidate_scores ?? null,
+                      tags: roleTags,
+                      peopleIds: new Set(assignablePeople.map((p) => p.id)),
+                    });
+                    const positionJobs = generatedCvs.filter((g) => g.position_code === code);
+                    return (
+                      <div key={code} style={{ borderTop: "1px solid var(--border)", padding: "12px 0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+                          <div style={{ minWidth: 0, flex: "1 1 200px" }}>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{code}</div>
+                            {req?.position_description && (
+                              <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 1 }}>{req.position_description}</div>
+                            )}
+                            {confirmedId ? (
+                              <div style={{ fontSize: 12, color: "var(--success)", marginTop: 2, fontWeight: 600 }}>
+                                Confirmed: {a?.people?.name ?? peopleName.get(confirmedId) ?? "person on file"}
+                              </div>
+                            ) : (
+                              <div className="bg-destructive/10 text-destructive" style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700, marginTop: 4 }}>
+                                Fix: no key person confirmed - blocks the submission pack
+                              </div>
+                            )}
+                            {!confirmedId && roleCode && tagged.length === 0 && (
+                              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 4 }}>
+                                No one is tagged as fitting {roleTitles.get(roleCode) ?? code} yet (People page).
+                              </div>
+                            )}
+                          </div>
+                          <PositionPersonSelect
+                            tenderId={id}
+                            tenderPackId={tenderPack.id}
+                            positionCode={code}
+                            confirmedPersonId={confirmedId}
+                            tagged={tagged}
+                            others={others}
+                            roleTitle={roleCode ? roleTitles.get(roleCode) ?? null : null}
+                            suggestions={sugg}
+                          />
+                        </div>
+                        {confirmedId && (
+                          <div style={{ marginTop: 8 }}>
+                            <form action={requestTenderCv} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                              <input type="hidden" name="tender_id" value={id} />
+                              <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
+                              <input type="hidden" name="position_code" value={code} />
+                              <input type="hidden" name="person_id" value={confirmedId} />
+                              <select name="format" defaultValue="sanral_keyperson" style={{ minHeight: 36, borderRadius: 7, border: "1px solid var(--border)", fontSize: 12, padding: "0 8px" }}>
+                                <option value="sanral_keyperson">SANRAL key-person</option>
+                                <option value="world_bank">World Bank format</option>
+                              </select>
+                              <select name="detail" defaultValue="summary" style={{ minHeight: 36, borderRadius: 7, border: "1px solid var(--border)", fontSize: 12, padding: "0 8px" }}>
+                                <option value="summary">Summary</option>
+                                <option value="detailed">Detailed</option>
+                              </select>
+                              <button
+                                type="submit"
+                                style={{ minHeight: 36, padding: "0 14px", borderRadius: 8, background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" }}
+                              >
+                                Generate tender-specific CV
+                              </button>
+                            </form>
+                            <CvCompare tenderId={id} positionCode={code} personId={confirmedId} />
+                          </div>
+                        )}
+                        {positionJobs.length > 0 && (
+                          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                            {positionJobs.map((g) => {
+                              const st = GENERATED_CV_STATUS_LABEL[g.status] ?? { label: g.status, className: "bg-muted text-muted-foreground" };
+                              return (
+                                <div key={g.id} style={{ fontSize: 11, color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: 8 }}>
+                                  <span>{g.format} / {g.detail}</span>
+                                  <span className={st.className} style={{ display: "inline-flex", padding: "2px 8px", borderRadius: 100, fontSize: 10, fontWeight: 600 }}>
+                                    {st.label}
+                                  </span>
+                                  {g.error_message && <span style={{ color: "var(--destructive)" }}>{g.error_message}</span>}
+                                  {g.storage_path_docx && cvSignedUrls[g.storage_path_docx] && (
+                                    <a href={cvSignedUrls[g.storage_path_docx]} style={{ color: "var(--accent)", fontWeight: 600 }}>Word</a>
+                                  )}
+                                  {g.storage_path_pdf && cvSignedUrls[g.storage_path_pdf] && (
+                                    <a href={cvSignedUrls[g.storage_path_pdf]} style={{ color: "var(--accent)", fontWeight: 600 }}>PDF</a>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  </>
+                );
+                return allConfirmed ? (
+                  <CollapsibleSection id="key-positions" title="Key positions" defaultOpen={false} closedSummary={`All ${positions.length} confirmed`}>
+                    {header}
+                    {body}
+                  </CollapsibleSection>
+                ) : (
+                  <div id="key-positions" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
+                    {header}
+                    {body}
+                  </div>
+                );
+              })() : null;
+
+              // Honest per-tab "still outstanding" badges, from exactly the
+              // same counts the facts card above already uses - never a
+              // second, independently-computed number that could disagree.
+              const overviewBadgeCount = disqualificationGuardFixCount;
+              const formsBadgeCount = missingRows.length + (generalSections?.badges.docsMissing ?? 0) + (generalSections?.badges.needAnswer ?? 0);
+              const teamBadgeCount = openPositionsCount + (generalSections?.badges.peopleGaps ?? 0);
+
+              // Condensed title/status/countdown recap, sticky above the tab
+              // bar itself (Sarel's own follow-up brief, 2026-10-23: "Keep
+              // the contract title, closing badge, and status header sticky
+              // at the top above the tabs") - same values the facts card
+              // above already computes, never a second read.
+              const miniHeader = (
+                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-1.5">
+                  <div className="flex min-w-0 items-center gap-2 overflow-hidden">
+                    <span className="truncate text-[13px] font-bold text-foreground">
+                      {tenderFacts.contract_no ?? tenderFacts.description ?? "Untitled tender"}
+                    </span>
+                    <WorkspaceStatusBadge tenderPack={tenderPack} tenderReadiness={tenderReadiness} packStatus={packStatus} />
+                  </div>
+                  {countdown && (
+                    <span
+                      className={countdown.urgent ? "bg-warning/10 text-warning" : "bg-muted text-muted-foreground"}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 4, borderRadius: 100, padding: "2px 9px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
+                    >
+                      <Clock style={{ width: 11, height: 11 }} />
+                      {countdown.text}
+                    </span>
+                  )}
                 </div>
               );
+
+              const tabs: WorkspaceTab[] = [
+                {
+                  id: "overview",
+                  label: "Overview",
+                  anchors: ["disqualification-guard", "general-preparation", "private-documents", "score-estimate", "intake"],
+                  badge: overviewBadgeCount > 0 ? <TabBadge count={overviewBadgeCount} /> : undefined,
+                  content: (
+                    <>
+                      {complianceError}
+                      {/* Moved here from always-outside-the-tabs, Sarel's own
+                          follow-up brief (2026-10-23): "Overview (Default):
+                          ... and Disqualification Guard." Overview is the
+                          default tab, and this tab's own badge (above) keeps
+                          the fix-count visible from every other tab too. */}
+                      {disqualificationGuardSection}
+                      {generalSections?.overview}
+                      {complianceSections?.score}
+                      <IntakeCard tenderId={id} />
+                    </>
+                  ),
+                },
+                {
+                  id: "plan",
+                  label: "Plan",
+                  anchors: ["reuse-past", "submission-plan", "tasks-milestones"],
+                  badge: overdueTaskCount > 0 ? <TabBadge count={overdueTaskCount} /> : undefined,
+                  content: (
+                    <>
+                      {/* Feature item 9: carry over last time's reusable answers /
+                          key-position people from a submitted tender (reuse-past-submission.tsx). */}
+                      <ReusePastSubmission tenderId={id} reuseFrom={reuseFrom} saved={saved} reused={reused} />
+                      {/* The full assessment-engine step list (every form/
+                          returnable/role/question/gap, including briefing
+                          milestones) - general-family only: SANRAL has no
+                          requirements.py-shaped manifest to build this from. */}
+                      {isGeneralFamily && <SubmissionPlanView tenderId={id} />}
+                      <TaskTimeline tenderId={id} tasks={tasks} error={tasksError} people={assignablePeople} />
+                    </>
+                  ),
+                },
+                {
+                  id: "forms",
+                  label: "Forms & Documents",
+                  anchors: ["readiness-report", "compliance-check", "locality", "general-documents", "general-questions", "tender-templates", "form-b7"],
+                  badge: formsBadgeCount > 0 ? <TabBadge count={formsBadgeCount} /> : undefined,
+                  content: (
+                    <>
+                      {/* The 3-column Fix/Provide/Verify compliance checklist
+                          (SANRAL) + returnables (general) - Sarel's own
+                          follow-up brief names this tab after exactly this
+                          content. */}
+                      {readinessReportSection}
+                      {complianceSections?.documents}
+                      {complianceSections?.locality}
+                      {generalSections?.documents}
+                      {generalSections?.questions}
+                      {/* The tender's blank SANRAL templates, uploaded by hand (0025). */}
+                      {showSubmissionPack && <TenderTemplates tenderId={id} saved={saved === "template"} />}
+                      {/* SANRAL Form B7: the company's own subcontracting answer (0056) - gates the pack below. */}
+                      {showSubmissionPack && <SubcontractingPlan tenderId={id} saved={saved === "b7"} />}
+                    </>
+                  ),
+                },
+                {
+                  id: "people",
+                  label: "People & Experience",
+                  anchors: ["key-positions", "key-people", "company-experience", "general-people", "won-project"],
+                  badge: teamBadgeCount > 0 ? <TabBadge count={teamBadgeCount} /> : undefined,
+                  content: (
+                    <>
+                      {keyPositionsSection}
+                      {complianceSections?.people}
+                      {complianceSections?.experience}
+                      {generalSections?.people}
+                      {/* Won & completed projects (0065, feature 2): once the
+                          pipeline board has this tender at 'won', record the
+                          actual completed project and sync it into each
+                          confirmed team member's own CV-feeding project history. */}
+                      {tenderPack && tenderPack.pipeline_stage === "won" && (
+                        <WonProjectCard
+                          tenderId={id}
+                          tenderPack={tenderPack}
+                          positions={positions}
+                          assignments={assignments}
+                          peopleName={peopleName}
+                        />
+                      )}
+                    </>
+                  ),
+                },
+                {
+                  id: "pricing",
+                  label: "Pricing & Strategy",
+                  anchors: ["market", "scope-pricing", "preference-points"],
+                  content: (
+                    <>
+                      {/* Published bids/awards for this tender + similar
+                          tenders (0044) - this company's own real pricing
+                          intelligence, not a pricing input form (no bid
+                          price is ever typed in before submission - see
+                          submission-pack.tsx's own comment on that). */}
+                      <MarketContext tender={{ id, buyer: tenderFacts.buyer, family: tenderFacts.family }} />
+                      {/* Scope/pricing-model/value-band (migration 0060,
+                          engine/discovery/tender_enrichment.py) - the same
+                          honestly-rare, never-fabricated record the header's
+                          "Est. value" badge and discovery/page.tsx's own
+                          SCOPE_RECORD_COLUMNS read from; shown only when this
+                          tender genuinely has one. No bill-of-quantities /
+                          rate-input editor exists in this codebase yet (no
+                          schema for it) - not built here as a guess. */}
+                      {scopeRecordDetail && (scopeRecordDetail.scope_summary || scopeRecordDetail.pricing_model || scopeRecordDetail.value_band) && (
+                        <div id="scope-pricing" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+                          <div className="mb-0.5 text-[15px] font-bold text-foreground">Scope & pricing</div>
+                          {scopeRecordDetail.scope_summary && (
+                            <div className="mb-1.5 text-xs text-foreground">{scopeRecordDetail.scope_summary.slice(0, 280)}</div>
+                          )}
+                          <div className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                            {scopeRecordDetail.pricing_model && (
+                              <span>Pricing model: {PRICING_MODEL_LABEL[scopeRecordDetail.pricing_model] ?? scopeRecordDetail.pricing_model}</span>
+                            )}
+                            {scopeRecordDetail.value_band && <span>Estimated value: {scopeRecordDetail.value_band}</span>}
+                          </div>
+                          {scopeRecordDetail.confidence === "heuristic" && (
+                            <div className="mt-0.5 text-[10px] text-muted-foreground">Keyword-matched from the listing text, not document-confirmed - treat as a starting point.</div>
+                          )}
+                        </div>
+                      )}
+                      {/* Preference-points calculation (Sarel's own follow-up
+                          brief) - the real Toolkit calculator
+                          (/toolkit/bee-preference-points), embedded rather
+                          than re-built: it's a general B-BBEE/price formula
+                          with no tender-specific inputs of its own, so
+                          there's nothing tender-scoped to prefill. */}
+                      <div id="preference-points" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+                        <div className="mb-2 text-[15px] font-bold text-foreground">Preference points calculator</div>
+                        <BeePreferencePointsClient embedded />
+                      </div>
+                    </>
+                  ),
+                },
+                {
+                  id: "review",
+                  label: "Review & Submit",
+                  anchors: ["cover-page", "pack-review", "submission-pack", "general-pack", "general-pack-review", "narrative-documents"],
+                  badge: (generalSections?.badges.generalFixCount ?? 0) > 0 ? <TabBadge count={generalSections!.badges.generalFixCount} /> : undefined,
+                  content: (
+                    <>
+                      {showSubmissionPack && (
+                        <CoverPagePreview
+                          contractNo={tenderFacts.contract_no}
+                          nraReference={tenderFacts.nra_reference}
+                          description={tenderFacts.description}
+                          buyer={tenderFacts.buyer}
+                          closingDate={tenderFacts.closing_date}
+                        />
+                      )}
+                      {/* Pack review: the full pre-compile preview (pack_review_confirmations, 0059) - shown before the generate button. */}
+                      {packReviewSection}
+                      {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
+                      {submissionPackSection}
+                      {generalSections?.pack}
+                      {/* Cover letter / methodology statement generator (narrative_documents, 0085), applies to both families. */}
+                      {narrativeDocumentsSection}
+                    </>
+                  ),
+                },
+              ];
+
+              return <WorkspaceTabs tabs={tabs} sticky header={miniHeader} />;
             })()}
 
-            {showSubmissionPack && (
-              <CoverPagePreview
-                contractNo={tenderFacts.contract_no}
-                nraReference={tenderFacts.nra_reference}
-                description={tenderFacts.description}
-                buyer={tenderFacts.buyer}
-                closingDate={tenderFacts.closing_date}
-              />
-            )}
-
-            {/* The tender's blank SANRAL templates, uploaded by hand (0025). */}
-            {showSubmissionPack && <TenderTemplates tenderId={id} saved={saved === "template"} />}
-
-            {/* SANRAL Form B7: the company's own subcontracting answer (0056) - gates the pack below. */}
-            {showSubmissionPack && <SubcontractingPlan tenderId={id} saved={saved === "b7"} />}
-
-            {/* Pack review: the full pre-compile preview (pack_review_confirmations, 0059) - shown before the generate button. */}
-            {packReviewSection}
-
-            {/* SANRAL submission pack: technical pack + separate Envelope 2 PDF (pack_generation_jobs, 0017). */}
-            {submissionPackSection}
-
-            {/* Cover letter / methodology statement generator (narrative_documents, 0085). */}
-            {narrativeDocumentsSection}
+            {/* Notes + one chronological history of this tender (item 15;
+                tender_comments, 0033) - kept outside the tabs above, on
+                purpose: a comment thread is context for every tab, not
+                content that belongs to just one of them. */}
+            <ActivityLog tenderId={id} showAll={activity === "all"} />
           </>
         )}
       </div>
@@ -1474,35 +1581,6 @@ function SummaryChip({ count, label, className }: { count: number; label: string
     <span className={className} style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 100, fontSize: 11, fontWeight: 600 }}>
       {count} {label}
     </span>
-  );
-}
-
-// variant "primary" marks the jump-nav's one link to the page's actual
-// deliverable (the submission pack) - every other link is a report or an
-// input form along the way, so it shouldn't look like just one more pill
-// in the row once this page stacks up to 10 cards.
-function JumpLink({ href, label, variant = "default" }: { href: string; label: string; variant?: "default" | "primary" }) {
-  return (
-    <a
-      href={href}
-      className={variant === "primary" ? "bg-accent text-accent-foreground border-accent" : "bg-card text-foreground border-border"}
-      style={{
-        flexShrink: 0,
-        display: "inline-flex",
-        alignItems: "center",
-        minHeight: 32,
-        padding: "0 12px",
-        borderRadius: 100,
-        fontSize: 12,
-        fontWeight: variant === "primary" ? 700 : 600,
-        textDecoration: "none",
-        whiteSpace: "nowrap",
-        borderWidth: 1,
-        borderStyle: "solid",
-      }}
-    >
-      {label}
-    </a>
   );
 }
 

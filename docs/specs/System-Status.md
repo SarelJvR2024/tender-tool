@@ -8,6 +8,72 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Part 4 retab, done properly this time, on a branch/PR (not pushed to `main` directly) -
+2026-10-23.** The prior Phase 2 pass (see the entry below) deliberately shipped Part 4 as a
+header-only upgrade rather than retab the Tender Workspace's body, flagging that cut rather than
+risk an unreviewed structural rewrite of the app's riskiest page. Sarel then asked for the retab
+for real, via a PR this time - delivered on branch `phase2-part4-retab-tender-workspace`, then
+extended mid-task by a second, more specific brief (exact tab names/contents, sidebar grouping,
+3 dashboard fixes, 1 copy fix). What's actually built:
+
+- **`/tenders/[id]` is 6 real top-level tabs** (`WorkspaceTabs`, already existed for
+  `GeneralTenderWorkspace`'s own internal 4 tabs - that nested use is now gone, this is the
+  workspace's only tab bar): Overview, Plan, Forms & Documents, People & Experience, Pricing &
+  Strategy, Review & Submit. `ComplianceReport` and `GeneralTenderWorkspace` were split from one
+  bundled JSX return each into a plain object of named sections (`{documents, people, experience,
+  locality, score}` / `{overview, documents, questions, people, pack, badges}`) - **zero changes
+  to any read or to the 7-check/manifest logic itself**, only the return shape, so page.tsx can
+  place each section in the tab it belongs to. Every section kept its own element `id`; a tab's
+  own `anchors` list (an existing mechanism, not new) means every pre-existing deep link from
+  elsewhere in the app (`lib/tenderNextStep.ts`, `discovery/actions.ts`,
+  `sanral-schedules/page.tsx`, this file's own action redirects) still lands on the right tab and
+  scrolls to the right element - checked by grepping every `/tenders/${...}#...` link in the repo
+  against the new tab/anchor map, not assumed.
+- **Disqualification guard moved inside the Overview tab** (Sarel's own explicit instruction) -
+  a deliberate override of this file's own prior rule ("never bury a blocker in a hidden tab").
+  `DisqualificationGuard` now also returns its fix-count, badging the Overview tab itself so the
+  count stays visible from every other tab, not just by position - the honest middle ground, not
+  a silent rule break.
+- **Pricing & Strategy tab is real, not fabricated**: the tender's own market-pricing context
+  (`market-context.tsx`, moved here), an honest `tender_scope_records`-backed "Scope & pricing"
+  card (shown only when that migration-0060 enrichment record exists for this tender - still rare,
+  same as the header's own "Est. value" badge), and the real Toolkit B-BBEE preference-points
+  calculator (`BeePreferencePointsClient`, embedded as-is - it takes no tender-specific input, so
+  there's nothing to prefill). **No bill-of-quantities/rate-input editor was built** - no schema
+  for one exists anywhere in this codebase; inventing a fake one to match the brief's wording
+  would have been exactly the kind of fabrication this codebase's own standing discipline forbids.
+- **Sidebar regrouped into 3 labelled sections** (Tendering / Company assets / Tools &
+  intelligence, via `SidebarGroup`/`SidebarGroupLabel`, already available in `components/ui/sidebar.tsx`
+  but unused until now) + Billing moved to its own bottom-section link next to the account menu
+  (no longer duplicated inside that menu's own dropdown).
+- **3 dashboard fixes**: the greeting now strips a trailing SA entity suffix ("(Pty) Ltd"/"CC"/...)
+  from `legal_name` when there's no `csd_trading_name` to prefer instead (display-only, iterative
+  regex strip - an intentionally different, looser tool than `lib/onboardingScan.ts`'s own
+  comparison-oriented `normalizeCompanyName()`, which lowercases and would read badly in a
+  greeting); "Packs ready" is neutral foreground text at 0, success-green only once it's real;
+  the 1 genuinely broken button found (an error-state "Retry" link, unrelated to any submission-
+  pack action) was left alone - it's a deliberate destructive-tinted outline button, the same
+  pattern this app uses everywhere else for a real error state.
+- **1 item not confidently located**: "Start the submission pack buttons: consistent styling, no
+  faint peach borders" - the only place that exact text exists is `lib/tenderNextStep.ts`'s
+  `nextStepFor()`, surfaced via `NextBestActionCard` on `/dashboard`. Its "deadline" tone
+  (`border-destructive/20 bg-destructive/10`) is the same low-opacity destructive wash this app
+  uses everywhere for "needs fixing" - changing only this one spot would be inconsistent with the
+  rest of the design system, and nothing else matching "submission pack button" was found by grep.
+  Left unchanged rather than guess at a cosmetic change nobody could see verified. Flagged for
+  Sarel to point at directly (a screenshot, or which page) if it's still wrong after this deploys.
+
+**Re-verified before pushing**: `npx tsc --noEmit` clean, `npx eslint .` clean (same 3
+pre-existing, unrelated warnings as every prior pass), `npm run build` clean (all 57 routes),
+`npx vitest run` 147/147, every `node:test`-convention suite under `lib/*.test.ts` 118/118. **Not
+verified**: a real browser click-through. This container has real Supabase credentials
+(read-only risk is low; the real blocker is no login session for a human user) and no auth
+bypass was set up to get one - rather than fabricate a "visually verified" claim, this is pushed
+as a PR specifically so Sarel's own visual pass on the Vercel preview is the real check, not a
+rubber stamp from this session.
+
+---
+
 **Phase 2 (Visual Identity, Navigation Restructuring & Workspace Redesign) - delivered to `main`
 directly, by Sarel's own explicit choice - 2026-10-23.** Sarel's brief had 5 parts and explicit
 instructions to push directly to `main`, all at once, with no PR review; asked via

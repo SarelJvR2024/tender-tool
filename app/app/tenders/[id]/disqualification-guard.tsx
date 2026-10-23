@@ -44,6 +44,17 @@ const STATUS_LABEL: Record<BidTaskStatus, string> = {
   verify: "Clear",
 };
 
+export type DisqualificationGuardResult = { content: React.ReactNode; fixCount: number };
+
+/**
+ * Phase 2 targeted polish (2026-10-23, Sarel's own follow-up brief): this
+ * now returns { content, fixCount } instead of just content, so page.tsx
+ * can move the Guard's own content inside the Overview tab (per the new
+ * brief) while still badging that tab with its fix count from every other
+ * tab - the same "visible without a click" guarantee the old always-outside
+ * placement gave, kept through the tab's own badge instead of position.
+ * Nothing about the reads or the 7-check logic below changed.
+ */
 export async function DisqualificationGuard({
   tenderId,
   isSanralFamily,
@@ -52,7 +63,7 @@ export async function DisqualificationGuard({
   tenderId: string;
   isSanralFamily: boolean;
   isGeneralFamily: boolean;
-}) {
+}): Promise<DisqualificationGuardResult> {
   const rows: GuardRow[] = [];
   let mapped = false;
 
@@ -109,7 +120,9 @@ export async function DisqualificationGuard({
     }
   }
 
-  return (
+  const fixCount = rows.filter((r) => r.status === "fix").length;
+
+  const content = (
     <div id="disqualification-guard" className="mb-4 scroll-mt-20">
       <SectionCard
         title="Disqualification guard"
@@ -150,4 +163,6 @@ export async function DisqualificationGuard({
       </SectionCard>
     </div>
   );
+
+  return { content, fixCount };
 }
