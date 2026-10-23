@@ -477,17 +477,33 @@ def run_extraction(client, job, work_root, fetch=None):
             # for receipt of tenders is 12:00 on ..."), not a fixed one
             # (Form-Field-Audit 2026-10-18: 12:00 was always assumed - R.396's
             # time, not every SANRAL tender's).
-            notice_time = intake.find_closing_time(all_text)
+            closing_time = intake.find_closing_time(all_text)
+            notice_time = closing_time["value"] if closing_time else None
             patch["closing_date"] = f"{setup['closing_date']}T{notice_time or '12:00'}:00+02:00"
             intake_rec["notes"].append(
                 f"Closing date taken from the workbook's SETUP sheet ({setup['closing_date']}); "
                 + (f"the time ({notice_time}) from the Tender Notice." if notice_time else
                    "no closing time found in the documents read - 12:00 was used as a placeholder, check the "
                    "Tender Notice and correct it."))
+            if closing_time and closing_time["ambiguous"]:
+                # A real, common shape: an addendum extending the deadline on
+                # top of Book 1's own original notice. Which one this picked
+                # is not a "latest wins" choice (QA pass, 2026-10-23 - see
+                # find_closing_time()'s own docstring) - said plainly rather
+                # than trusted silently.
+                intake_rec["notes"].append(
+                    f"More than one different closing time was found across the documents read - {notice_time} was "
+                    "used, but check the Tender Notice and any addenda for the actual, correct closing time before "
+                    "relying on this.")
         # The tender box address, for the envelope covers (read, never assumed).
         delivery = intake.find_delivery_address(all_text)
         if delivery:
             intake_rec["delivery_address"] = delivery
+            if delivery["ambiguous"]:
+                intake_rec["notes"].append(
+                    "More than one different tender-box delivery address was found across the documents read - the "
+                    f"address above ({delivery['quote']}) was used, but check Book 1's Tender Notice and any addenda "
+                    "for the actual, correct venue before relying on this for the envelope covers.")
         else:
             intake_rec["notes"].append("No tender-box delivery address found in the documents read (it's in Book 1's "
                                        "Tender Notice) - the envelope covers will be printed without one.")
