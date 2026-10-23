@@ -39,7 +39,6 @@ export function returnableReviewStatus(check: ReturnableCheck): { reviewStatus: 
   return { reviewStatus, checklistStatus };
 }
 import type { ReviewItem, ReviewSection } from "./pack-review-data";
-import type { ChecklistRow } from "./pack-checklist";
 
 /**
  * General (non-SANRAL) tender Pack Review snapshot: the same "everything
@@ -51,21 +50,39 @@ import type { ChecklistRow } from "./pack-checklist";
  * general-workspace.tsx and engine/general/process_general_jobs.py
  * gather_pack_inputs() for the real shape of what the pack bridge reads.
  *
- * Reuses ReviewItem/ReviewSection (pack-review-data.ts) and ChecklistRow
- * (pack-checklist.tsx) - both generic shapes, not SANRAL-specific - and the
- * generic classifiers in general-pack-review-logic.ts. pack_review_confirmations
- * (migration 0059) is reused as-is: its schema is already just
- * (company_id, tender_id), not SANRAL-specific.
+ * Reuses ReviewItem/ReviewSection (pack-review-data.ts) - a generic shape,
+ * not SANRAL-specific - and the generic classifiers in
+ * general-pack-review-logic.ts. pack_review_confirmations (migration 0059)
+ * is reused as-is: its schema is already just (company_id, tender_id), not
+ * SANRAL-specific.
  *
- * Same per-item error-isolation discipline as pack-review-data.ts: every
- * section is its own try/catch so one bad record can't take the whole
- * screen down.
+ * `sections` is this snapshot's one list of items, each with its own
+ * ReviewStatus (Verify/Provide/Fix) - previously also mirrored, item-for-
+ * item, into a second `checklist: ChecklistRow[]` field rendered via a
+ * second `<PackChecklist>` card right below (general-pack-review.tsx). That
+ * was a real duplicate, not an intentional two-views design: every category
+ * that built a checklist row (returnables, roles & CVs, experience,
+ * locality - see this file's history) pushed the exact same title/status/
+ * note into both places from the same loop, `pages` was always hardcoded
+ * null (so it carried no information the real post-generation checklist
+ * adds), and company fields/plain questions were never pushed to it at all
+ * (only the signature question was) - an inconsistency, not a deliberate
+ * scope cut, since nothing explained why those categories alone were left
+ * out. The surviving `sections`/items view is the complete, actionable one
+ * (every category, a status pill, a match-strength badge, and a "Confirm or
+ * change" link to jump to the edit screen) - the checklist view added
+ * nothing a user couldn't already see there, so it and its `pushChecklist`
+ * plumbing were removed rather than kept as a second, non-actionable
+ * summary. See app/AGENTS.md's dated entry for this pass for the full
+ * reasoning. `PackChecklist`/`ChecklistRow` (pack-checklist.tsx) are
+ * untouched and still used for the REAL post-generation pack checklist
+ * (submission-pack.tsx, general-workspace.tsx) - that one is built from the
+ * actual generated job's manifest, not duplicated from this screen's data.
  */
 
 export type GeneralPackReviewSnapshot = {
   mapped: boolean; // false until this tender's documents have been read (document_requirements)
   sections: ReviewSection[];
-  checklist: ChecklistRow[];
   gapsCount: number;
   reviewed: { reviewedAt: string; reviewedBy: string | null } | null;
 };
@@ -88,14 +105,11 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
   ]);
   const manifest = ((ownPack?.document_requirements ?? tender?.document_requirements) as RequirementManifest | null) ?? null;
   if (!manifest || !tender) {
-    return { mapped: false, sections: [], checklist: [], gapsCount: 0, reviewed: null };
+    return { mapped: false, sections: [], gapsCount: 0, reviewed: null };
   }
   const closingDate = (tender.closing_date as string | null) ?? null;
 
   const sections: ReviewSection[] = [];
-  const checklist: ChecklistRow[] = [];
-  let checklistNo = 0;
-  const pushChecklist = (row: Omit<ChecklistRow, "no">) => checklist.push({ no: ++checklistNo, ...row });
 
   // --- Reviewed-so-far (pack_review_confirmations, 0059 - reused as-is) ----
   let reviewed: GeneralPackReviewSnapshot["reviewed"] = null;
@@ -142,7 +156,6 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
         const chosenId = value;
         const chosenPerson = chosenId ? people.find((p) => p.id === chosenId) ?? null : null;
         const sig = signatureAnswerStatus({ chosenId, chosenPerson, optional: q.optional ?? false });
-        pushChecklist({ title: q.label, envelope: "Signature", status: sig.checklistStatus, pages: null, note: sig.note });
         items.push({ key: `question-${q.key}`, label: q.label, value: sig.value, status: sig.reviewStatus, note: sig.note });
         continue;
       }
@@ -159,8 +172,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     const jvAnswer = answers.find((a) => a.field_key === "bidding_as_jv")?.value ?? null;
     const items: ReviewItem[] = manifest.returnables.map((r) => {
       const check = checkReturnable(r, company, closingDate, answers, jvAnswer === null ? null : jvAnswer === "yes");
-      const { reviewStatus, checklistStatus } = returnableReviewStatus(check);
-      pushChecklist({ title: check.label, envelope: "Supporting documents", status: checklistStatus, pages: null, note: check.status === "have" ? null : check.detail });
+      const { reviewStatus } = returnableReviewStatus(check);
       return {
         key: `returnable-${check.key}`, label: check.label, value: check.status === "have" ? "On file" : null, status: reviewStatus, note: check.detail,
         confidence: r.confidence ?? null, confidenceReason: r.confidence_reason ?? null,
@@ -188,8 +200,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
         const haveCv = new Set([...(gen ?? []).map((g) => g.person_id as string), ...(up ?? []).map((u) => u.person_id as string)]);
         withCv = taggedPeople.filter((p) => haveCv.has(p.id)).length;
       }
-      const { reviewStatus, checklistStatus, note } = roleStatus({ taggedCount: taggedPeople.length, taggedWithCvCount: withCv });
-      pushChecklist({ title: `${label} - CV(s)`, envelope: "Key personnel CVs", status: checklistStatus, pages: null, note });
+      const { reviewStatus, note } = roleStatus({ taggedCount: taggedPeople.length, taggedWithCvCount: withCv });
       items.push({
         key: `role-${mr.role_code}`,
         label,
@@ -218,8 +229,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
       });
       if (experience && !experience.error) {
         const evidenceEval = evaluateEvidence({ rule, source: "tender_document", otherRules: evidenceRules.length - 1 }, experience.items, false);
-        const { reviewStatus, checklistStatus } = docItemStatus(evidenceEval.status);
-        pushChecklist({ title: "Experience evidence", envelope: "Supporting documents", status: checklistStatus, pages: null, note: evidenceEval.status === "have" ? null : evidenceEval.detail });
+        const { reviewStatus } = docItemStatus(evidenceEval.status);
         items.push({
           key: "experience",
           label: "Qualifying experience",
@@ -242,8 +252,7 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
     const items: ReviewItem[] = [];
     if (locRows.length > 0 || mandatory) {
       const m = matchLocality(locRows.length > 0 ? locRows : mandatory ? [{ area: mandatory.area, level: "municipality", province: null, points: 0, system: null, kind: "specific_goals" }] : [], offices);
-      const { reviewStatus, checklistStatus } = localityStatus({ matchStatus: m.status, mandatory: !!mandatory, disqualifies: !!mandatory?.disqualifies });
-      pushChecklist({ title: "Office location", envelope: "Supporting documents", status: checklistStatus, pages: null, note: m.status === "matched" ? null : m.reason });
+      const { reviewStatus } = localityStatus({ matchStatus: m.status, mandatory: !!mandatory, disqualifies: !!mandatory?.disqualifies });
       items.push({ key: "locality", label: mandatory ? `Local office in ${mandatory.area}` : "Office location points", value: m.status === "matched" ? `${m.points ?? 0} pts` : null, status: reviewStatus, note: m.reason });
     }
     sections.push(section("locality", "Office location", "#general-people", "Confirm or change", items));
@@ -253,5 +262,5 @@ export const loadGeneralPackReviewSnapshot = cache(async (tenderId: string): Pro
 
   const gapsCount = sections.reduce((n, s) => n + s.items.filter((i) => i.status === "missing" || i.status === "warning").length, 0);
 
-  return { mapped: true, sections, checklist, gapsCount, reviewed };
+  return { mapped: true, sections, gapsCount, reviewed };
 });

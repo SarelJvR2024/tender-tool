@@ -1,3 +1,4 @@
+import { Info } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { AutoRefresh } from "../../_components/AutoRefresh";
 import { requestNarrativeDocument, uploadNarrativeFinal } from "./narrative-actions";
@@ -103,22 +104,25 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
   return (
     <div id="narrative-documents" style={card}>
       <AutoRefresh active={active} />
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
         <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Cover letter &amp; methodology statement</div>
         <Tooltip>
           <TooltipTrigger
-            className="inline-flex size-4 shrink-0 cursor-help items-center justify-center rounded-full border border-muted-foreground/40 text-[10px] font-semibold text-muted-foreground"
-            aria-label="How this works"
+            aria-label="How these drafts are written"
+            style={{ display: "inline-flex", flexShrink: 0, alignItems: "center", justifyContent: "center", width: 16, height: 16, borderRadius: 9999, color: "#5B6472" }}
           >
-            ?
+            <Info size={14} aria-hidden />
           </TooltipTrigger>
-          <TooltipContent>
-            AI-drafted from your company&apos;s own profile, people, past projects and how you describe your
-            own approach - checked against every other company&apos;s draft for the same tender so two
-            submissions can&apos;t read the same. Review, export to Word, then upload the final version back
-            here.
+          <TooltipContent className="max-w-xs text-left font-normal">
+            AI-drafted from your company&apos;s own profile, people, past projects and how you describe your own
+            approach - never a generic template. Every draft for this tender is mechanically checked against every
+            other company&apos;s draft for the same tender, so two submissions can&apos;t end up reading the same.
+            Review it, export to Word, edit it as your own, then upload the final version back here.
           </TooltipContent>
         </Tooltip>
+      </div>
+      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 14 }}>
+        AI-drafted from your own profile and past work - review, edit, then upload the final version.
       </div>
 
       {KINDS.map((kind) => {

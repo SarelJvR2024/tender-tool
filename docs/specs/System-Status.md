@@ -1,5 +1,35 @@
 # System Status
 
+**2026-10-23 ~22:10 UTC addendum — a real cross-session collision, caught before it compounded,
+pausing this session's own "Comprehensive Overhaul" batch sequence as a result.** Sarel sent two
+different sessions what look like related/overlapping briefs at close to the same time tonight:
+this session got a "Comprehensive Overhaul: Tender Workspace, Pack Compiler, and Urgent Logistics"
+spec; session `011NLr419YmLS44xgf1YM6n3` got (and already shipped, per the entry just above this
+one) "Tender Command Center & Operational Logistics Engine", then started a scoped follow-up
+(`PR #133`, branch `workspace-polish`) covering copy cleanup + document quick-access, explicitly
+deferring "vault slide-over drawers" and "canonical ZAR/VAT formatting" as open design questions
+for Sarel.
+
+This session's own Batch 1 (merged as `7030cd4`, PR #134) independently did near-identical
+marketing-paragraph-to-tooltip copy cleanup on the same files (`general-pack-review.tsx`,
+`narrative-documents.tsx`) at essentially the same time as PR #133 - confirmed the two efforts
+collided: PR #133's `mergeable_state` is now `dirty` against `main`, almost certainly because of
+this overlap. Neither session could have easily seen the other coming (both branches were already
+mid-flight before either PR existed on `main`), but the result is real duplicate work and a
+conflict for `session_011NLr419YmLS44xgf1YM6n3` to resolve on its own PR - not something this
+session should touch uninvited.
+
+**More importantly**: this session's planned Batch 3 (slide-over drawers for vault documents) and
+Batch 6 (bid price / VAT split formatting) are the *exact same two items* PR #133 already flagged
+as open design forks needing Sarel's own call - not independently-safe autonomous work. Continuing
+this session's own batch sequence past Batch 1 without his input risks a second, worse round of
+the same collision, or building something that contradicts whatever he decides for PR #133's two
+deferred questions. This session is pausing its own Batch 2+ dispatch pending Sarel's read on this,
+rather than pushing ahead "as far as possible without him" into known-colliding territory - the
+one exception to that instruction this session judged worth raising rather than just doing.
+
+---
+
 Maintained by the standing solution-architect review pass. This file reflects **current real
 state**, verified by reading code and running checks — not a history (see `git log` for that)
 and not a restatement of the phased feature list in
