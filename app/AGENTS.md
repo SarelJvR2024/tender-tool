@@ -1678,3 +1678,98 @@ actual signed-in render - same sandbox credential-generation limitation as every
 even with Sarel live and the strongest possible reason to find a workaround if one existed; none
 did. The static-render checks above are real evidence the new code paths don't throw and produce
 the right markup, not a substitute for him clicking it himself.
+
+---
+
+## CV-led "Add person" + bulk CV/people upload (Sarel's own live feedback, 2026-10-23)
+
+Direct quote (typos his own): "on the add person, allow uption to add a CV and have AI read and
+capture all the information instead of the user capturing it" and "also alow bulk upload of all
+People CVs, and bulk upload ofpeople CVs or bulkd uload of people with their details."
+
+**Investigation finding, before anything was built**: a fully CV-led, zero-typing "AI reads even
+the name off the CV, nothing saved until confirmed" flow is blocked by a hard schema constraint,
+not a missing feature. `cv_uploads.person_id` and `cv_extraction_results.person_id` are both
+`uuid not null references people(id)` (`0008_cv_uploads.sql`, `0023_cv_extraction_results.sql`) -
+nothing can be attached to or extracted for a person who doesn't exist in the `people` table yet.
+The one pipeline that doesn't need a person first - the generic company-level document classifier
+from spec v3 Batch 2 (`lib/onboardingScan.ts`) - can recognise "this is a CV" without a target, but
+deliberately extracts zero fields for that document kind (`cv: []`); real field/name extraction is
+`engine/cv/extract_cv_fields.py`'s job alone, and that only ever runs against an already-existing
+`cv_uploads.person_id`. Making this genuinely zero-typing needs either a schema change (a nullable
+`cv_uploads.person_id`, or a staging table for an unconfirmed person) or an engine change (teaching
+the generic classifier to also do name/field extraction, duplicating `extract_cv_fields.py`'s own
+job) - both out of scope for an autonomous merge under this repo's standing rule (no schema/engine
+change without Sarel's own review), and **neither was built**. Flagged here for his own call, not
+worked around silently.
+
+**What was built instead, in scope**: the smallest honest anchor, not a workaround that pretends
+otherwise. `/people/new` now leads with a new "Add from a CV" card
+(`CvLedAddPerson`, `app/app/people/_components/cv-led-add-person.tsx`) - full name (typed, the one
+field that has to be) plus an optional CV upload, calling a new `createPersonWithCv()` action
+(`app/app/people/actions.ts`). It creates the `people` row with only the typed name (everything
+else starts null, same as the existing blank form always left it), then - if a file was given -
+attaches it through the exact same `cv_uploads` row shape, storage-path convention and
+`extraction_requested` pipeline `uploadCv()` already uses for an existing person, so the CV then
+goes through the SAME `CvExtractionReview`/`applyCvExtraction()` confirm-or-correct card every
+other person's CV already gets. Nothing from the CV is trusted or saved without that review; only
+the name the human actually typed is saved immediately, and it's correctable there too. The old
+~20-field blank manual form is untouched and still there right below it ("Or enter details
+manually") - this is additive, not a replacement.
+
+**Bulk upload**, new `/people/bulk-cv` page (`bulk-cv/page.tsx`, `BulkCvUpload` component): drop
+several CV files at once, each row assigned - via filename-based fuzzy pre-matching
+(`bestPersonMatch`, all of an existing person's name parts must appear in the filename) as a
+non-binding starting guess only, never auto-submitted - to an existing person or a new one (name
+typed, same reason as above). A new `bulkUploadCvs()` action processes every assigned row in one
+call (existing `uploadCv()`/`createPersonWithCv()` each end in their own `redirect()`, which throws
+in a Server Action and can't run inside a loop, so the shared per-file logic was factored into a
+new non-throwing `attachCvToPerson()` helper instead of being duplicated a third time) and redirects
+once at the end to `/people?bulk=...` with a plain-English summary ("3 CVs uploaded, 1 new person
+added. 1 failed: ..."), which `/people/page.tsx` now actually renders (it previously only read
+`?error=`, so this banner would otherwise have silently done nothing). A "Bulk upload CVs" link
+was added next to "+ Add person" on `/people` - the page existed from the first draft but had no
+way to reach it from the UI until this pass caught it in round 3 of self-review.
+
+**Caught in round 2 of self-review (adversarial re-read against
+`Tender-Tool-Competitor-Feature-Deep-Dive.md`'s "CVs: upload once, never recapture" section,
+specifically the "Use as-is" sub-requirement)**: the first draft of both `createPersonWithCv()` and
+`bulkUploadCvs()` hardcoded `mode: "ai_extract"`, silently removing the as-is/AI-extract choice
+`uploadCv()` already requires for every other CV upload in this app ("AI extraction/reformatting
+must be optional, not forced"). Fixed before merge: both new client components now show the same
+two-option radio choice `uploadCv()`'s own form already uses, in the same wording ("AI-extract the
+fields for you to check..." / "Use as-is - attach this exact file to submissions, no AI involvement
+at all"), for `CvLedAddPerson` once a file is chosen and for `BulkCvUpload` as one choice applied to
+the whole batch (not per-file - keeps the bulk screen usable with many rows, and still a real,
+visible, un-hardcoded choice at the point of upload rather than a default silently forced through).
+
+**Known limitation, not built this pass**: no duplicate-person detection on either new path. This
+matches the existing baseline exactly - `savePerson()` never checked for an existing person with
+the same name either - so it's not a regression, but it's more likely to bite in the bulk flow
+specifically, where a CV's filename not matching any existing person's name (misspelling, nickname,
+initials-only) falls through to "new person" by default rather than failing closed. The UI always
+shows the "Existing person" dropdown as a manual override for exactly this reason, but nothing
+stops two rows for the same real person from being submitted as two separate new people if neither
+matches by filename. Worth a real dedup pass if duplicate people start showing up in practice.
+
+**Tested**: `npm run verify` 0 errors (clean typecheck, lint, build - `/people/bulk-cv` appears in
+the route list), 133/133 vitest, 76/76 node:test both ways (same 4 pre-existing
+`app/tenders/[id]/*.test.ts` files reporting 0 tests under the `node --experimental-strip-types`
+invocation specifically - confirmed by diffing against a fresh `origin/main` checkout that this is
+a pre-existing Node test-runner quirk with `[id]` bracket characters in a directory path, not
+something this pass caused; the same files pass fully under `tsx --test`, and nothing in this pass
+touches `app/tenders/`). **Live-tested further than the last several batches**: the sandbox still
+has no way to generate a real signed-in session (re-checked specifically for this pass, since Sarel
+was live - still blocked), but unlike a static `react-dom/server` render, this pass built a
+temporary, dev-only mock-data route (`app/dev-screenshot-cv/page.tsx` - never a route with a
+leading underscore, Next.js treats `_`-prefixed folders as private/non-routable and silently 404s
+them, caught immediately when the first screenshot came back blank), rendered both new components
+for real inside `next dev` + Chromium via Playwright, and drove them through actual browser
+interaction - a real `<input type="file">` set via `setInputFiles()`, not simulated. That confirmed
+the fuzzy-match logic genuinely works end to end (a file named `mock-cv-thabo-nkosi.pdf` auto-
+matched the mock person "Thabo Nkosi"; an unmatched file correctly defaulted to "New person" with a
+guessed name from its filename), not just that the markup renders. Screenshotted at 1440px and
+390px both before and after the round-2 mode-toggle fix - no horizontal scroll, touch-sized
+controls, toggle and rows all visible at both widths. The temporary route, `.env.local`, and the
+`playwright-core` dev install were all deleted again before commit (confirmed via `git status`
+showing only the real feature files) - this was a self-review aid, never meant to reach `main`.
