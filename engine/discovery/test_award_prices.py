@@ -51,6 +51,58 @@ def check(name, cond, detail=""):
         FAILS.append(name)
 
 
+def test_sanral_start_page_is_refused_for_more_than_one_list():
+    """QA Finding, 2026-10-23: --sanral-start-page resumes ONE list's own
+    pagination (fetch_sanral_list's next_page cursor) - 'awarded' and
+    'closed' paginate completely independently. The CLI used to apply one
+    shared start_page to BOTH when --sanral-lists named more than one
+    (its own default, 'awarded,closed'), which would resume whichever list
+    the operator meant to resume correctly but silently skip however many
+    pages of the OTHER list sit before that same page number - a permanent
+    gap no later chunk would ever cover. Confirmed live by mocking
+    fetch_sanral_outcomes and watching the real argument it received for
+    each list, before this fix: both got the exact same start_page."""
+    import unittest.mock as mock
+    import award_outcomes as ao
+
+    real_argv = sys.argv
+    calls = []
+
+    def fake_fetch(list_key, limit, pause=1.0, start_page=1):
+        calls.append((list_key, start_page))
+        return {"list": list_key, "total_filtered": 0, "rows_listed": 0, "fetched": 0,
+                "failed": [], "records": [], "next_page": None}
+
+    def run(argv):
+        # fetch_sanral_outcomes is mocked for every call this test makes,
+        # including the one expected to be refused before it ever reaches
+        # that function - so this test can never hit the real SANRAL site
+        # regardless of whether the guard it's checking for is present.
+        sys.argv = ["store_award_outcomes.py"] + argv
+        try:
+            with mock.patch.object(ao, "fetch_sanral_outcomes", fake_fetch):
+                sao.main()
+            return None
+        except SystemExit as e:
+            return str(e)
+        finally:
+            sys.argv = real_argv
+
+    msg = run(["--fetch", "--source", "sanral", "--sanral-start-page", "41", "--dry-run"])
+    check("resuming (start_page != 1) with the default multi-list value is refused, not silently wrong",
+          msg is not None and "per-list" in msg and not calls, msg)
+
+    calls.clear()
+    run(["--fetch", "--source", "sanral", "--sanral-lists", "closed", "--sanral-start-page", "41", "--dry-run"])
+    check("resuming exactly one named list is still allowed, and reaches only that list",
+          calls == [("closed", 41)], calls)
+
+    calls.clear()
+    run(["--fetch", "--source", "sanral", "--dry-run"])
+    check("the default (no resume, start_page=1, both lists) is unaffected",
+          sorted(calls) == [("awarded", 1), ("closed", 1)], calls)
+
+
 REFERENCES = {
     "R.396-010-2025/1F": ["R.396-010-2025/1F"],
     "NRA 2026/0756 (C)": ["NRA2026/756C"],
@@ -298,6 +350,7 @@ def part2(cmd):
 
 
 def main():
+    test_sanral_start_page_is_refused_for_more_than_one_list()
     part1()
     cmd = os.environ.get("AWARD_PRICES_PSQL")
     if cmd:
