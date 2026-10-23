@@ -159,7 +159,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
               <div>
                 The minimums below are R.396-010-2025/1F&apos;s table (Book 2/3, C3-14/C3-15), not a fact about this tender - other SANRAL
                 tenders set different registrations and years (N.011-010-2027-1F wants Pr Eng only for the Contract Engineer and 10-15
-                years for the RE). Run engine/seed_tender_evaluation_rules.py with this tender&apos;s Book 2/3 to replace them.
+                years for the RE). These will be replaced with this tender&apos;s own minimums once its Book 2/3 technical specification is read.
               </div>
               {keyPersonMinimums?.reason && <div style={{ marginTop: 3, color: "var(--muted-foreground)" }}>Last read: {keyPersonMinimums.reason}</div>}
             </>
@@ -362,8 +362,8 @@ function ExperienceSection({
       <div style={{ fontStyle: "italic", color: "var(--muted-foreground)", marginTop: 3, wordBreak: "break-word" }}>&ldquo;{rule.quote}&rdquo;</div>
       {source === "assumed" && (
         <div style={{ marginTop: 3 }}>
-          This is SANRAL&apos;s Form B6 pattern, not a fact about this tender. Run engine/seed_tender_evaluation_rules.py on
-          the tender document to replace it.
+          This is SANRAL&apos;s Form B6 pattern, not a fact about this tender. It will be replaced with this tender&apos;s own
+          rule once its evidence requirements are read from the document.
         </div>
       )}
       {chosen.otherRules > 0 && <div style={{ marginTop: 3 }}>The document states {chosen.otherRules} more experience rule(s) - check which one applies.</div>}

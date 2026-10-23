@@ -44,10 +44,18 @@ export default async function BillingPage({
   // UX audit 2026-10-23, item 6: "PayFast sandbox" was hardcoded into this
   // page's copy regardless of PAYFAST_MODE (lib/payfast.ts), so production
   // would keep telling paying customers their card wasn't being charged
-  // even once PAYFAST_MODE=live. Gate the copy on the same flag the real
-  // checkout/ITN routes already read - nothing else about going live
-  // changes here.
-  const isSandbox = payfastMode() === "sandbox";
+  // even once PAYFAST_MODE=live. First fix gated the copy on the real
+  // checkout/ITN routes' own flag; re-review 2026-10-23 asked for an
+  // explicit NEXT_PUBLIC_PAYFAST_SANDBOX switch instead, so it can be
+  // turned off here without touching PAYFAST_MODE's own effect on where
+  // checkout actually posts. CAUTION, not enforced in code: if this is set
+  // to "false" while PAYFAST_MODE is still "sandbox", the page will claim
+  // live payment while checkout is still hitting PayFast's sandbox - don't
+  // flip this ahead of PAYFAST_MODE actually going live. Unset falls back
+  // to the real mode, same safe default as before.
+  const isSandbox = process.env.NEXT_PUBLIC_PAYFAST_SANDBOX === undefined
+    ? payfastMode() === "sandbox"
+    : process.env.NEXT_PUBLIC_PAYFAST_SANDBOX === "true";
   const supabase = await createClient();
   const subscription = await fetchCompanySubscription(supabase);
 
@@ -194,7 +202,7 @@ function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: stri
           plan={plan}
           interval="yearly"
           disabled={isCurrent}
-          label={`Subscribe yearly - R${yearly.toLocaleString("en-ZA")} (2 months free)`}
+          label={`Subscribe yearly - R${yearly.toLocaleString("en-ZA")}/yr`}
           variant="outline"
         />
       </div>

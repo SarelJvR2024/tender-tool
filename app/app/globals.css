@@ -125,16 +125,12 @@
   --info: oklch(0.4949 0.1244 253.2); /* #2563A6 */
   --info-foreground: oklch(1 0 0);
 
-  /* Locked design system (§2, Tender-Ready-Claude-Spec_v1.md): "Money figures -
-     one dedicated accent colour, used only for Rand amounts" - deliberately a
-     different hue from --accent (the one blue reserved for buttons/links/the
-     screen's single highlighted action) and from --success (green, a pass/fail
-     verdict), so a Rand figure reads as its own category at a glance rather
-     than borrowing a color that already means something else. A violet sits
-     outside every other semantic hue in this palette (navy ink, blue accent,
-     green/amber/red status, blue info) - #7C3AED, the same family Tender
-     Ready's own chart/categorical set already avoids reusing. */
-  --money: oklch(0.5086 0.2302 302.8); /* #7C3AED */
+  /* Was its own dedicated violet (#7C3AED, deliberately a different hue from
+     --accent so a Rand figure read as its own category) - UX audit
+     re-review 2026-10-23 overrides that: the brand rule is Trust Blue only,
+     no purple anywhere on the site, full stop. Reuses --accent's own value
+     rather than inventing a second blue. */
+  --money: oklch(0.4882 0.2172 264.4); /* #1D4ED8, same as --accent */
   --money-foreground: oklch(1 0 0);
 
   --border: oklch(0.9053 0.0052 247.9); /* #DDE0E3 - neutral grey, not the old cream border */
@@ -213,10 +209,11 @@
   --info: oklch(0.6353 0.1211 250.0); /* #4C8FD1 */
   --info-foreground: oklch(0.2021 0.034 265.5);
 
-  /* Lighter than the light-mode --money for contrast against the dark navy
-     card/background, same relationship every other semantic token already
-     has between its light and dark variant. */
-  --money: oklch(0.7169 0.1763 302.9); /* #A78BFA */
+  /* Was a lighter violet for contrast against the dark navy card/background -
+     UX audit re-review 2026-10-23: no purple anywhere, reuses --info's own
+     blue (already proven readable on this dark surface) instead. Dark mode
+     itself is still dormant (see this block's own header comment above). */
+  --money: oklch(0.6353 0.1211 250.0); /* #4C8FD1, same as --info */
   --money-foreground: oklch(0.2021 0.034 265.5);
 
   --border: oklch(0.3356 0.0523 265.9); /* #2A3652 */
