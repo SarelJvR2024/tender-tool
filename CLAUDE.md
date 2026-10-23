@@ -19,3 +19,8 @@ anything else:
 
 `app/AGENTS.md` (inside the Next.js app itself) has the product's own design rules and
 conventions - read that too once you're working inside `app/`.
+
+Writing or changing any call to an LLM (a new engine, a new field extraction, anything that
+generates a document or submission content)? Read `docs/specs/AI-Call-Quality-Standard.md` first -
+a generic, one-size prompt and a single-pass "take the first answer" call both fail this
+standard, whatever else the code does right.

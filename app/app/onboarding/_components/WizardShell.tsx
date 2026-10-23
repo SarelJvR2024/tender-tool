@@ -30,7 +30,7 @@ export function WizardShell({
         <Progress value={(step / TOTAL_STEPS) * 100} />
       </div>
 
-      <h1 className="mb-1 font-display text-xl font-medium text-foreground">{title}</h1>
+      <h2 className="mb-1 font-display text-xl font-medium text-foreground">{title}</h2>
       {description && <p className="mb-6 text-sm text-muted-foreground">{description}</p>}
       {!description && <div className="mb-6" />}
 

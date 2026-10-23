@@ -97,7 +97,7 @@ export default function LoginPage() {
   return (
     <AuthShell>
       <div className="w-full max-w-[360px] rounded-xl border border-border bg-card p-9 text-center shadow-sm">
-        <h1 className="mb-1 font-display text-xl font-medium text-foreground">Welcome back</h1>
+        <h2 className="mb-1 font-display text-xl font-medium text-foreground">Welcome back</h2>
         <p className="mb-7 text-sm text-muted-foreground">Sign in to continue</p>
 
         <Button variant="outline" className="mb-2.5 h-11 w-full" onClick={() => signInWith("google")}>
