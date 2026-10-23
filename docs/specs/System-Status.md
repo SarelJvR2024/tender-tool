@@ -8,6 +8,50 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Resume here (2026-10-23 ~16:20 UTC).** Sarel gave a full 5-phase UX-audit correction brief (23
+Oct 2026 signed-in audit) and then explicitly said, twice, to do Phase 1 only and stop for his
+review before any later phase. **Phase 1's 6 items are done and in PR #128
+(`claude/optimistic-feynman-19miop` -> `main`, draft, not yet merged) — do not start Phase 2, 3,
+4, 5, or the acceptance checks (A1-A12) until Sarel confirms.** What Phase 1 actually was, and
+where each item landed:
+
+1. Onboarding doc-classification schema rejected ("54 params, limit 16") - **fixed**,
+   `classify_documents.py` + `extract_cv_fields.py`'s `person` block moved to a constant-size
+   array schema. Tests updated and passing.
+2. OCR/Tesseract on the worker - **not a code bug, a live deployment gap, not fixable from this
+   sandbox.** `engine/worker/Dockerfile` has installed `tesseract-ocr` since commit `f1a0d56`
+   (2026-10-21), confirmed on `main` right now. Production `system_alerts` as of 2026-10-23
+   16:01 UTC still logged "Tesseract OCR is not installed on this worker" on a real onboarding
+   upload and a real CV upload. Railway is documented (`Automated-Fulfillment-Deployment.md`) to
+   auto-rebuild on every push to `main`, so 2+ days without picking up a Dockerfile change that's
+   been on `main` the whole time points at the Railway service itself: check (in Railway's own
+   dashboard, which this sandbox cannot reach) whether `RAILWAY_DOCKERFILE_PATH` is actually set
+   to `engine/worker/Dockerfile`, whether the service tracks `main`, whether `OCR_DISABLED` got
+   set on that service's own variables, and the latest deploy's build log/timestamp. **Whoever
+   picks this up next: don't re-fix the code, verify the Railway build first.**
+3. CV/onboarding jobs dying mid-job, stuck "extracting"/"classifying" - **fixed**: 180s LLM
+   timeout, 30->10 min stale-reclaim window, defensive writes around the error-reporting path
+   itself (CV, onboarding, and `company_documents.py`'s own LLM client).
+4. "Start a pack for this tender" dead button - **fixed and live-verified against production**:
+   the DB write always succeeded; the bug was a `redirect()` to the exact URL already on screen,
+   which Next's router treats as a no-op. Reproduced with a real Playwright click against
+   `tender-tool-sandy.vercel.app` before fixing (left no test data behind - the test `tender_packs`
+   row was deleted after).
+5. `/admin` had no real access control, only RLS (which empties a non-admin's queries but still
+   renders the page) - **fixed**: `app/admin/layout.tsx` now checks `is_platform_admin()` and
+   404s a non-admin. **`platform_admins` was empty in production** - seeded Sarel's own account
+   into it (service role, per that migration's own documented instruction) so this guard doesn't
+   lock out the only real admin. Confirm with both Sarel's own account and a non-admin account
+   once this PR is live.
+6. "PayFast sandbox" copy hardcoded on Billing regardless of `PAYFAST_MODE` - **fixed**: gated
+   on the same flag the real checkout/ITN routes already read.
+
+All 6 items have passing local test suites (`engine/onboarding/test_classify_documents.py`,
+`engine/cv/test_extract_cv_fields.py`, `engine/company_documents.py`'s `test_company_documents.py`)
+and clean `tsc`/`eslint` on every changed app file. PR #128 is subscribed for CI/review activity.
+
+---
+
 **Standing review pass, 2026-10-23 ~14:20 UTC: a real test-suite break found and fixed on `main`
 itself, root cause confirmed before touching anything (Finding 62).** Since the last pass: PR
 #117 merged (SANRAL-mention fix, already checked for overlap with PR #74 last pass - none) and
