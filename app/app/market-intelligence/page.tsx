@@ -202,30 +202,32 @@ function BreakdownTable({ icon: Icon, title, rows, emptyText }: { icon: typeof B
       {rows.length === 0 ? (
         <p className="text-sm text-muted-foreground">{emptyText}</p>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-xs text-muted-foreground">
-              <th className="pb-2 font-medium">Name</th>
-              <th className="pb-2 font-medium">Tenders</th>
-              <th className="pb-2 font-medium">Median size</th>
-              <th className="pb-2 font-medium">Lowest won</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((b) => (
-              <tr key={b.key} className="border-t border-border">
-                <td className="min-w-0 max-w-[220px] truncate py-2 pr-2 text-foreground" title={b.label}>
-                  {b.label}
-                </td>
-                <td className="py-2 pr-2 text-muted-foreground">{b.n}</td>
-                <td className="py-2 pr-2 text-money">{b.benchmark.contractSize.median ? formatRand(b.benchmark.contractSize.median) : "-"}</td>
-                <td className="py-2 text-muted-foreground">
-                  {b.benchmark.lowestWon.n > 0 ? `${Math.round((b.benchmark.lowestWon.won / b.benchmark.lowestWon.n) * 100)}%` : "-"}
-                </td>
+        <div className="overflow-x-auto" style={{ WebkitOverflowScrolling: "touch" }}>
+          <table className="w-full min-w-[480px] text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted-foreground">
+                <th className="pb-2 pr-4 font-medium">Name</th>
+                <th className="pb-2 pr-4 font-medium">Tenders</th>
+                <th className="pb-2 pr-4 font-medium">Median size</th>
+                <th className="pb-2 font-medium">Lowest won</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((b) => (
+                <tr key={b.key} className="border-t border-border">
+                  <td className="min-w-0 max-w-[220px] truncate py-2 pr-4 text-foreground" title={b.label}>
+                    {b.label}
+                  </td>
+                  <td className="py-2 pr-4 text-muted-foreground">{b.n}</td>
+                  <td className="py-2 pr-4 text-money">{b.benchmark.contractSize.median ? formatRand(b.benchmark.contractSize.median) : "-"}</td>
+                  <td className="py-2 text-muted-foreground">
+                    {b.benchmark.lowestWon.n > 0 ? `${Math.round((b.benchmark.lowestWon.won / b.benchmark.lowestWon.n) * 100)}%` : "-"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </section>
   );
