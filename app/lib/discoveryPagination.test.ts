@@ -76,7 +76,7 @@ test("verdictQuerySpec: all and changed push no predicate down (changed needs a 
   assert.deepEqual(verdictQuerySpec("changed"), { kind: "none" });
 });
 
-test("verdictQuerySpec: declined is a real column predicate (interest_marker = 'declined', migration 0088) - a genuine full-history filter, not JS-scoped like changed", () => {
+test("verdictQuerySpec: declined is a real column predicate (interest_marker = 'declined', migration 0089) - a genuine full-history filter, not JS-scoped like changed", () => {
   assert.deepEqual(verdictQuerySpec("declined"), { kind: "eq", column: "interest_marker", value: "declined" });
 });
 

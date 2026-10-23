@@ -2899,7 +2899,10 @@ migration genuinely is not live yet - merging now would ship server actions and 
 a table that, until Sarel runs the SQL above in Supabase's own SQL Editor, does not exist, which
 both pages handle gracefully (empty preferences, board stays visible) but is still not the state
 this PR is meant to land in.
-## Opportunity tags + interest/decline: real schema + wiring (migration 0088, 2026-10-23)
+
+---
+
+## Opportunity tags + interest/decline: real schema + wiring (migration 0089, 2026-10-23)
 
 Sarel's own live feedback on `/discovery` (2026-10-22: "allow the company to add tags for how to
 search and prioritise opportunities. add quick tags to indicate interest or declines.") first
@@ -2912,7 +2915,7 @@ real row instead of `lib/opportunityTagsPreview.ts` (deleted).
 
 **The migration is NOT yet applied to the live database** - same standing limitation as every
 session tonight (see `docs/specs/System-Status.md`'s ~19:00 UTC addendum: this sandbox can reach
-Supabase over PostgREST but cannot run raw DDL). `0088_opportunity_tags_interest.sql` is committed
+Supabase over PostgREST but cannot run raw DDL). `0089_opportunity_tags_interest.sql` is committed
 and reviewed, but until Sarel pastes it into Supabase's own SQL Editor, every real call to
 `set_opportunity_tag()`/`set_opportunity_interest()` will fail with "function does not exist" -
 this PR stays in draft for exactly that reason.
@@ -2941,7 +2944,7 @@ existing ones", not a second axis to intersect with the first. Selecting Decline
 declined row regardless of verdict, the same way Re-assessed already ignores verdict. A composable
 second toggle would need its own query param, a two-dimensional WHERE clause and two
 simultaneously-highlighted controls - real complexity not asked for here. `interest_marker` has its
-own partial index (migration 0088), so - like `reassessed` - this is a genuine full-history filter
+own partial index (migration 0089), so - like `reassessed` - this is a genuine full-history filter
 with a real exact count, not a page-scoped JS filter like `changed`.
 
 **Tag suggestions, deliberately page-scoped**: `OpportunityQuickActions`'s "reuse a tag you already

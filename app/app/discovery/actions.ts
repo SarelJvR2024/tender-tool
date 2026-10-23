@@ -58,7 +58,7 @@ export type OpportunityInterestMarker = "interested" | "declined" | null;
 
 /**
  * Add/remove one of this company's own free-text tags on a Discovery row
- * (migration 0088, Sarel's own live feedback on /discovery, 2026-10-22).
+ * (migration 0089, Sarel's own live feedback on /discovery, 2026-10-22).
  * Same reasoning as acknowledgeDowngrade above: discovered_opportunities has
  * no client update policy (0004 - "service-role written"), so this goes
  * through set_opportunity_tag(), a SECURITY DEFINER function that checks
@@ -89,7 +89,7 @@ export async function setOpportunityTag(opportunityId: string, tag: string, acti
 
 /**
  * Set (or clear, with null) this company's quick interest/decline mark on a
- * Discovery row (migration 0088). Same shape as setOpportunityTag above -
+ * Discovery row (migration 0089). Same shape as setOpportunityTag above -
  * set_opportunity_interest() is the SECURITY DEFINER write path, since
  * discovered_opportunities itself still has no client update policy.
  */

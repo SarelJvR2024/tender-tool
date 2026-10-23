@@ -110,7 +110,7 @@ type OpportunityRow = Downgrade & {
   // `categories`, never used for the verdict. Null = not read.
   etenders_category: string | null;
   etenders_category_check: { status: "agrees" | "differs" | "generic" | "unmapped"; note: string; matching_categories: string[] } | null;
-  // 0088: company-defined tags + quick interest/decline mark - real columns
+  // 0089: company-defined tags + quick interest/decline mark - real columns
   // now (replacing the earlier browser-only localStorage preview).
   company_tags: string[] | null;
   interest_marker: "interested" | "declined" | null;
@@ -126,7 +126,7 @@ const XREF_STYLE: Record<string, { label: string; chipClass: string }> = {
 
 type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed" | "declined";
 
-// "Declined" (migration 0088, task item 4) is a different axis from the rest
+// "Declined" (migration 0089, task item 4) is a different axis from the rest
 // of this list - the company's own quick-decline mark (interest_marker),
 // not the engine-computed verdict - but it's added as one more entry in this
 // SAME exclusive, single-select tab list rather than a second, independent
@@ -152,7 +152,7 @@ const FILTERS: { key: VerdictFilter; label: string }[] = [
   { key: "changed", label: "Changed" },
   // 0055: a re-assessment made the verdict worse (still flagged or already seen).
   { key: "reassessed", label: "Re-assessed" },
-  // 0088: this company marked it "Not interested" - see the module comment above.
+  // 0089: this company marked it "Not interested" - see the module comment above.
   { key: "declined", label: "Declined" },
 ];
 
@@ -446,7 +446,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   const visibleRows = activeFilter === "changed" ? changedVisible : rows;
 
   // "Reuse a tag you already typed" suggestions (OpportunityQuickActions,
-  // migration 0088) - every distinct company_tags value across the current
+  // migration 0089) - every distinct company_tags value across the current
   // fetched window, the closest this page can get to a company-wide tag
   // vocabulary without its own dedicated query. Scoped to this window only,
   // the same documented limitation as the "Changed" tab above (see
@@ -804,7 +804,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                   )}
 
                   {/* Company tags + quick interest/decline marking (Sarel's own
-                      live feedback, 2026-10-22; migration 0088). Real
+                      live feedback, 2026-10-22; migration 0089). Real
                       persistence - see OpportunityQuickActions's own comment. */}
                   <OpportunityQuickActions
                     opportunityId={o.id}

@@ -9,7 +9,7 @@ import { setOpportunityInterest, setOpportunityTag, type OpportunityInterestMark
  * Company tags + quick interest/decline marking (Sarel's own live feedback
  * on /discovery, 2026-10-22: "allow the company to add tags for how to
  * search and prioritise opportunities. add quick tags to indicate interest
- * or declines."). Migration 0088 - real persistence now, via
+ * or declines."). Migration 0089 - real persistence now, via
  * setOpportunityTag()/setOpportunityInterest() (actions.ts), not the earlier
  * browser-only localStorage preview this PR first shipped with.
  *
