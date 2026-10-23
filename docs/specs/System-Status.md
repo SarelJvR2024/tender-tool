@@ -8,6 +8,28 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~04:15 UTC: merged forward again, no overlap, re-verified.**
+Since the last pass, exactly one new commit landed on `main` directly (`d2de313`, "Fix
+open-redirect bypass in post-login/signup redirect" - Finding 57, same QA/robustness session as
+Finding 56): a real security fix - `startsWith("/")` alone doesn't block a WHATWG-spec
+backslash-as-path-separator bypass (`/\evil.com` resolves to `https://evil.com` in a real
+browser), and the OAuth callback route had no check on `next` at all. New shared
+`app/lib/safeRedirect.ts`, applied at all 4 redirect sites. Read the diff directly: touches
+`app/app/auth/callback/route.ts`, `app/app/company/document-scan/actions.ts`,
+`app/app/login/page.tsx`, `app/app/signup/page.tsx`, plus the new lib file and its own spec - no
+overlap with PR #74's own files. Migration numbering also re-checked: `main` still ends at
+`0085`, so PR #74's `0086_narrative_documents.sql` has no new collision.
+
+Merged into `feature/narrative-document-generator` - clean auto-merge, including this file.
+Re-verified after the merge: all 51 `engine/**/test_*.py` files, 0 failures; `npm run verify`
+clean; `npx vitest run` - 129/129 (the 8 new `safeRedirect.spec.ts` tests now included). PR #74
+remains genuinely mergeable against `main`'s current tip.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **Standing review pass, 2026-10-23 ~02:15 UTC: no overlap found, PR #74 merged forward, PR #82
 closed as fully superseded.** Since the last pass, exactly one commit landed on `main` directly
 (`273344e`, "Refuse ambiguous multi-list SANRAL backfill resume" - Finding 56, a different
