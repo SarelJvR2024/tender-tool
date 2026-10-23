@@ -163,15 +163,9 @@ CLOSING_TIME_RE = re.compile(
     re.IGNORECASE)
 
 
-def find_delivery_address(all_text):
-    """{"lines": [...], "quote": "..."} - the address lines under the Tender
-    Notice's "tender box at:" heading, or None. Stops at a blank-run end, a
-    page footer (e.g. "T-6") or a sentence; never more than 7 lines."""
-    m = DELIVERY_RE.search(all_text or "")
-    if not m:
-        return None
+def _address_lines_after(all_text, end):
     lines = []
-    for raw in all_text[m.end():].split("\n")[:14]:
+    for raw in all_text[end:].split("\n")[:14]:
         line = re.sub(r"\s+", " ", raw).strip()
         if not line:
             if lines:
@@ -183,15 +177,61 @@ def find_delivery_address(all_text):
         lines.append(line)
         if re.fullmatch(r"\d{4}", line) or len(lines) >= 7:
             break
-    if not lines:
+    return lines
+
+
+def find_delivery_address(all_text):
+    """{"lines": [...], "quote": "...", "ambiguous": bool} - the address
+    lines under the Tender Notice's own "tender box at:" heading, or None if
+    none was found. Stops at a blank-run end, a page footer (e.g. "T-6") or
+    a sentence; never more than 7 lines.
+
+    `ambiguous` is True when more than one DIFFERENT address was found across
+    the documents read - a real, common shape: an addendum moving the
+    delivery venue, on top of Book 1's own original notice. The value
+    returned is still the FIRST address found (unchanged default, same as
+    before this fix), because collect_documents() feeds documents in
+    alphabetical filename order, not chronological/addendum order - there is
+    no reliable "the later one in the text is the correcting one" signal to
+    act on here, confirmed directly: swapping which of two conflicting
+    addresses appears first in `all_text` changes which one this function
+    returns, purely because of where each happened to sort by filename. Since
+    guessing isn't safe either way, this surfaces the conflict instead of
+    silently trusting an arbitrary pick - the same "silent wrong data is the
+    main risk" discipline this module already applies to a duplicate
+    workbook candidate (classify_documents()'s own AMBIGUOUS note). QA pass,
+    2026-10-23."""
+    first = None
+    quotes = set()
+    for m in DELIVERY_RE.finditer(all_text or ""):
+        lines = _address_lines_after(all_text, m.end())
+        if not lines:
+            continue
+        quotes.add(" / ".join(lines))
+        if first is None:
+            first = lines
+    if first is None:
         return None
-    return {"lines": lines, "quote": " / ".join(lines)}
+    return {"lines": first, "quote": " / ".join(first), "ambiguous": len(quotes) > 1}
 
 
 def find_closing_time(all_text):
-    """'HH:MM' from the Tender Notice's own "closing time ... is 12:00" sentence, or None."""
-    m = CLOSING_TIME_RE.search(all_text or "")
-    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else None
+    """{"value": "HH:MM", "ambiguous": bool}, or None - from the Tender
+    Notice's own "closing time ... is 12:00" sentence.
+
+    `ambiguous` is True when more than one DIFFERENT closing time was found
+    across the documents read - an addendum extending the deadline is common
+    and real (almost every SANRAL tender gets at least one), and - same
+    reasoning as find_delivery_address() above - the order documents appear
+    in `all_text` is filename-alphabetical, not chronological, so a plain
+    first-match search has no real basis for picking the extended time over
+    the original one, or vice versa. `value` stays the FIRST match found
+    (unchanged default); the caller is told to check rather than trust it
+    silently when there's more than one. QA pass, 2026-10-23."""
+    times = [f"{int(h):02d}:{m}" for h, m in CLOSING_TIME_RE.findall(all_text or "")]
+    if not times:
+        return None
+    return {"value": times[0], "ambiguous": len(set(times)) > 1}
 
 
 def check_fingerprint(technical_path, family, store=None):

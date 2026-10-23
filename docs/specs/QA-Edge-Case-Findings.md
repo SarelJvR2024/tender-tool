@@ -3778,3 +3778,68 @@ gets the fix for free, with no bridge-script changes needed. Also cleaned up two
 sandbox processes from reproducing this live (`sleep 300` fixtures from before the fix landed) -
 noted here only because the standing discipline (Finding 56) is to disclose any mid-task mistake,
 even a harmless one in a throwaway sandbox.
+
+### Finding 61 (CONFIRMED, FIXED, severe - a SANRAL tender's addendum moving the delivery venue or extending the deadline could be silently ignored in favour of the original, stale notice, with a coin-flip deciding which one wins)
+
+**Where:** `engine/intake/classify_tender.py`'s `find_delivery_address()` and `find_closing_time()`
+- read once per SANRAL tender to fill the envelope covers' tender-box address and, when the user
+didn't type one, the closing date/time, straight from the tender's own documents (Form-Field-Audit,
+2026-10-18: both used to be fixed defaults - SANRAL's head office address, a hardcoded 12:00 -
+before being changed to read the real ones off the Tender Notice).
+
+**What was tested:** rotated to `engine/intake` this cycle (last touched run 36, 2026-10-20 -
+the most overdue area in the standing rotation). Both functions use `re.search()`, which returns
+only the FIRST match in the tender's concatenated document text (`all_text`, built by
+`requirements.extract_requirements()` as `"\n".join(d["text"] for d in usable_docs)`, in
+`collect_documents()`'s own filename-alphabetical order - confirmed by reading that function, not
+assumed). A real, common SANRAL shape this misses entirely: an addendum extending the closing date
+or moving the tender-box venue, landing as its own document ALONGSIDE Book 1's original notice -
+almost every real SANRAL tender gets at least one such addendum. Constructed the adversarial case
+directly: synthetic Book 1 text (closing 12:00, tender box at "The Reception Area...") plus a
+synthetic Addendum text (closing 10:00, tender box moved to "SANRAL Southern Region Office..."),
+concatenated in both possible orders:
+```
+find_closing_time(book1 + addendum)   -> "12:00"  (Book 1's own, now-superseded time)
+find_closing_time(addendum + book1)   -> "10:00"  (the addendum's corrected time)
+```
+Confirmed directly which answer a tender gets is decided purely by which document's filename
+happens to sort first alphabetically - which has no relationship whatsoever to which notice is
+chronologically later or legally controlling. The same held for `find_delivery_address()`.
+
+**Why severe:** a SANRAL submission physically delivered to the WRONG venue, or stamped/expected at
+the WRONG closing time, because the envelope covers or closing-date field were silently built from
+whichever document sorted first alphabetically - this is exactly the kind of "silently wrong data"
+this whole standing review exists to catch, on the one artifact (the physical envelope) that can't
+be corrected after the fact if a company trusts it and submits.
+
+**Fix:** neither function can actually know which of two conflicting values is correct - there is
+no chronological signal available at this layer (filenames aren't addendum numbers, and
+`all_text` has already lost per-document boundaries by the time these run). Rather than invent a
+guess with no better grounding than the existing one (e.g. "last one wins" is just as arbitrary as
+"first one wins" given alphabetical-only ordering), both functions now also report whether more
+than one DISTINCT value was found (`ambiguous: True`), while still returning the same first-match
+value as before (unchanged default, so nothing regresses for the overwhelmingly common one-notice
+case). `process_general_jobs.py`'s two call sites now add an explicit note to `intake_rec["notes"]`
+when `ambiguous` is set, naming which value was used and telling a person to check the Tender
+Notice and any addenda before relying on it - the same "silent wrong data is the main risk"
+discipline this module already applies to a duplicate SANRAL workbook candidate (its own
+`classify_documents()` AMBIGUOUS note).
+
+**Verified the regression test actually catches the regression:** extended
+`engine/test_form_field_audit.py::test_intake_readers()` with the addendum-vs-Book-1 case in both
+orders, asserting `ambiguous=True` is set and the returned value matches whichever document was
+fed first (proving the ordering sensitivity directly, not just asserting a fixed expected value).
+Reverted `classify_tender.py`/`process_general_jobs.py` to their exact previous versions while
+KEEPING the new test (saved patch + `git apply -R` on the fix files only, restored with
+`git apply`): the new test failed immediately with `KeyError: 'ambiguous'` (the old return shape
+has no such key) - confirming the test actually exercises the new behaviour, not a no-op. Restored:
+`0` failures. Full existing `test_classify_tender.py`, `test_general_bridge.py` and
+`test_process_general_jobs.py` suites re-run clean - the fix is additive to both functions' return
+shape (an extra key / a wrapped `{"value", "ambiguous"}` dict instead of a bare string), and the
+two real call sites were updated to match; no other call site exists anywhere in the repo (checked
+by grep).
+
+**Regression:** `engine/intake/classify_tender.py` (2 functions), `engine/general/process_general_jobs.py`
+(2 call sites updated for the new `find_closing_time()` return shape, plus a new ambiguity note at
+each site), and the test file. No schema or API shape change - `intake_rec["delivery_address"]`
+gains one extra key (`ambiguous`), additive only.

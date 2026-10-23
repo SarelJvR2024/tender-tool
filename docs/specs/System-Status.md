@@ -1491,6 +1491,39 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventy-fourth run): a SANRAL addendum moving the delivery venue or extending the deadline could be silently outvoted by the original notice on a filename coin-flip
+
+Orientation: rotated to `engine/intake` - the most overdue area in the standing rotation (last
+touched run 36, 2026-10-20). Read `classify_tender.py` end to end; `find_delivery_address()` and
+`find_closing_time()` both use a plain `re.search()` (first match only) over the tender's whole
+document text - worth checking what happens when a real SANRAL tender's addendum (extending the
+deadline, or moving the venue - both common, real occurrences) lands as its own document alongside
+Book 1's original notice.
+
+**Finding 61 (CONFIRMED, FIXED, severe).** Confirmed directly: which of the two conflicting values
+(the original notice's vs. the addendum's) a tender ends up with is decided purely by which
+document's filename happens to sort first alphabetically in `collect_documents()`'s own ordering -
+swapping which text came first in the same synthetic input flipped the answer from "12:00" to
+"10:00" and from one venue to the other, with nothing in the code even aware two different answers
+existed. A real SANRAL submission physically delivered to the wrong venue, or built expecting the
+wrong closing time, because of a filename sort order - exactly the "silently wrong data" class this
+review exists to catch, on an artifact (a printed envelope) that can't be fixed after a company
+has already trusted and used it.
+
+**Fix:** neither function has a real chronological signal to decide which value is actually
+correct (filenames aren't addendum numbers) - guessing "last wins" would be exactly as arbitrary as
+the existing "first wins". Both now also report `ambiguous: True` when more than one distinct
+value was found, while keeping the same first-match value as the default (unchanged for the normal
+one-notice case). The two real call sites in `process_general_jobs.py` now add an explicit note
+telling a person to check the Tender Notice and any addenda when `ambiguous` is set - the same
+discipline this module already applies to a duplicate SANRAL workbook candidate.
+
+**Verified the regression test actually catches the regression:** extended
+`test_form_field_audit.py::test_intake_readers()` with the addendum-vs-Book-1 case in both text
+orders. Reverted the fix (keeping the new test): failed immediately with `KeyError: 'ambiguous'`;
+restored: `0` failures. Full `test_classify_tender.py`, `test_general_bridge.py` and
+`test_process_general_jobs.py` suites re-run clean.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-third run): a hung bridge pass's own timeout only killed its own PID, leaking a soffice-shaped grandchild forever on the real worker
 
 Orientation: rotated to `engine/worker` - the one area in the standing rotation with no dedicated
