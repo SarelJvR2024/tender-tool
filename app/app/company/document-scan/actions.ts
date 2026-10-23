@@ -367,3 +367,33 @@ export async function discardOnboardingDocument(formData: FormData) {
   revalidatePath(back);
   redirect(`${back}?saved=discarded`);
 }
+
+/**
+ * Re-queue a failed classification. UX audit re-review 2026-10-23, item 2:
+ * a file that failed classification (process_onboarding_jobs.py ->
+ * classification_failed) used to just vanish from this page - not counted
+ * in "still being read", never shown in "To review" since no
+ * onboarding_document_results row exists for it, no trace anywhere. The
+ * file itself is untouched in storage, so there's no need to ask for it
+ * again - just move it back where the worker picks it up.
+ */
+export async function retryOnboardingUpload(formData: FormData) {
+  const { supabase, companyId } = await requireCompanyId();
+  const uploadId = str(formData, "upload_id");
+  if (!uploadId) fail("Missing document.");
+
+  const { error } = await supabase
+    .from("onboarding_uploads")
+    .update({ status: "classification_requested", classification_error: null, classification_claimed_at: null, classification_completed_at: null })
+    .eq("id", uploadId)
+    .eq("company_id", companyId)
+    .eq("status", "classification_failed");
+  if (error) {
+    console.error("onboarding_uploads retry update failed", error);
+    fail("Could not retry this document - try again. If it keeps happening, let us know.");
+  }
+
+  const back = backTo(formData);
+  revalidatePath(back);
+  redirect(`${back}?saved=retrying`);
+}

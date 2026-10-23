@@ -301,6 +301,39 @@ export async function uploadCv(formData: FormData) {
 }
 
 /**
+ * Re-queue a failed CV extraction. UX audit re-review 2026-10-23, item 3:
+ * a failed upload had no way back except deleting the person and starting
+ * over - the file is still sitting in storage untouched, so there is no
+ * need to ask for it again. Only moves a row that is actually
+ * 'extraction_failed' and belongs to this company (RLS also enforces the
+ * company scope on the update itself) - clears the old error and claim
+ * timestamp and puts it back where extract_cv_fields.py's own queue picks
+ * it up (status extraction_requested, same as a fresh upload).
+ */
+export async function retryCvExtraction(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+
+  const uploadId = str(formData, "cv_upload_id");
+  const personId = str(formData, "person_id");
+  if (!uploadId || !personId) redirect("/people");
+
+  const { error } = await supabase
+    .from("cv_uploads")
+    .update({ status: "extraction_requested", extraction_error: null, extraction_claimed_at: null, extraction_completed_at: null })
+    .eq("id", uploadId)
+    .eq("company_id", companyId)
+    .eq("status", "extraction_failed");
+  if (error) {
+    console.error("cv_uploads retry update failed", error);
+    redirect(`/people/${personId}?error=${encodeURIComponent("Could not retry this CV - try again. If it keeps happening, let us know.")}`);
+  }
+
+  revalidatePath(`/people/${personId}`);
+  redirect(`/people/${personId}`);
+}
+
+/**
  * Sarel's own live feedback: "on the add person, allow option to add a CV
  * and have AI read and capture all the information instead of the user
  * capturing it." The old /people/new was a full ~20-field blank form -

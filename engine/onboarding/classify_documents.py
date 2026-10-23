@@ -122,7 +122,19 @@ NUMBER_FIELDS = {"cover_zar", "project_value_rm"}
 
 
 class ClassificationFailed(Exception):
-    """A reason the user should see, in plain words. The job is marked failed."""
+    """A reason the user should see, in plain words. The job is marked failed.
+
+    `detail`, when given, is the raw technical cause (a provider error body,
+    a request id) - never shown to the customer, only passed to
+    system_alerts for an engineer to read. Same fix as extract_cv_fields.py's
+    sibling ExtractionFailed (re-review, 2026-10-23): `except
+    anthropic.BadRequestError` used to put the raw provider message straight
+    into the exception's own text, which flowed into the customer-visible
+    classification_error column unchanged."""
+
+    def __init__(self, message, detail=None):
+        super().__init__(message)
+        self.detail = detail
 
 
 class SetupError(cvx.SetupError):
@@ -283,28 +295,43 @@ def read_document_text(path, work_dir):
 # 4. The LLM call
 # ============================================================================
 
-def _field(value_schema=None):
-    return {
-        "type": "object",
-        "properties": {"value": cvx._nullable(value_schema or {"type": "string"}), "evidence": cvx._nullable({"type": "string"})},
-        "required": ["value", "evidence"],
-        "additionalProperties": False,
-    }
+# Real failure, live, 2026-10-23 (UX audit): the previous schema gave `fields`
+# one named sub-object per entry in ALL_FIELDS (27 of them), each a {value,
+# evidence} pair with a nullable (union) type on both - 54 nested parameter
+# definitions in one request, rejected by the API ("54 parameters with union
+# types... limit 16"). Every upload failed outright, not just some.
+#
+# Fixed by making `fields` an ARRAY of {field, value, evidence} entries
+# instead of a fixed object with one named property per field. This is a
+# structural fix, not a today-sized one: the schema's parameter count is now
+# constant (a handful) no matter how many document kinds or fields exist -
+# adding a 28th field to KIND_FIELDS can never regress this again, unlike
+# trimming ALL_FIELDS down to fit under today's limit would have been.
+# validate_proposal() below accepts either shape for `data["fields"]` (a
+# list - what the API actually returns now - or a dict, kept for the
+# existing hand-written test fixtures, which test the verification/filtering
+# logic below, not this wire schema - test_validate_proposal_schema is the
+# one test that validates a fixture against output_schema() directly, so it
+# alone needed updating to the new array shape).
+FIELD_ENTRY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "field": {"type": "string", "enum": ALL_FIELDS},
+        "value": cvx._nullable({"type": "string"}),
+        "evidence": cvx._nullable({"type": "string"}),
+    },
+    "required": ["field", "value", "evidence"],
+    "additionalProperties": False,
+}
 
 
 def output_schema():
-    props = {}
-    for f in ALL_FIELDS:
-        if f in NUMBER_FIELDS:
-            props[f] = _field({"type": "number"})
-        else:
-            props[f] = _field()
     return {
         "type": "object",
         "properties": {
             "document_kind": {"type": "string", "enum": DOCUMENT_KINDS},
             "document_kind_reason": {"type": "string"},
-            "fields": {"type": "object", "properties": props, "required": ALL_FIELDS, "additionalProperties": False},
+            "fields": {"type": "array", "items": FIELD_ENTRY_SCHEMA},
             "parse_problems": {"type": "array", "items": {"type": "string"}},
         },
         "required": ["document_kind", "document_kind_reason", "fields", "parse_problems"],
@@ -333,18 +360,20 @@ First decide `document_kind`, one of exactly: {", ".join(DOCUMENT_KINDS)}.
 
 The filename may be given as a hint below - it is ONLY a hint. Decide from what the text actually says; a wrongly-named file is common and must not be trusted over the content.
 
-Then fill ONLY the fields that belong to that document_kind (every other field stays null):
+Then fill ONLY the fields that belong to that document_kind:
 {_kind_field_list()}
 
-For `cv`, fill nothing at all in `fields` - a person's CV and project history is handled by a separate, dedicated pipeline; your only job for a CV is to recognise it as one.
+`fields` is a list: add ONE entry {{"field": <name from the list above>, "value": ..., "evidence": ...}} for each field you actually found a real value for. Leave a field OUT of the list entirely if the document doesn't clearly state it - do not add an entry with a null value, and never add an entry for a field that doesn't belong to the document_kind you picked.
 
-How to fill each field actually used:
-- Every value needs `evidence`: a short verbatim quote copied character-for-character from the document's text that shows the value. The quote is searched for in the text afterwards; a value whose quote cannot be found is shown to the reviewer as unverified. If you cannot quote it, set both value and evidence to null.
+For `cv`, add no entries to `fields` at all - a person's CV and project history is handled by a separate, dedicated pipeline; your only job for a CV is to recognise it as one.
+
+How to fill each field entry you do add:
+- Every entry needs `evidence`: a short verbatim quote copied character-for-character from the document's text that shows the value. The quote is searched for in the text afterwards; a value whose quote cannot be found is shown to the reviewer as unverified.
 - Dates (`expiry_date`, `letter_date`, `completion_date`): `YYYY-MM-DD` only when the document gives the full date; `YYYY-MM` for month+year only; `YYYY` for year only. Never invent a day or month.
 - `grade_class` (CIDB): the grading as printed, e.g. "8CE" or "Grade 7GB".
 - `bee_level`: the B-BBEE status level as stated, e.g. "Level 2" or "Non-compliant".
 - `proof_type`: "certificate" for a SANAS verification certificate, "qse_affidavit" or "eme_affidavit" for a sworn affidavit - read which one the document itself is.
-- `cover_zar`/`project_value_rm`: a plain number in rand (cover_zar) or rand MILLIONS (project_value_rm; R150 million -> 150, R800 000 -> 0.8). Only when the document states a rand amount.
+- `cover_zar`/`project_value_rm`: a plain number in rand (cover_zar) or rand MILLIONS (project_value_rm; R150 million -> 150, R800 000 -> 0.8), written as a plain numeral string with no "R" or thousand separators (e.g. "5000000", "120"). Only when the document states a rand amount.
 - `full_name`/`holder_name`: the person's full name as printed.
 - `body` (professional_registration_other): the professional body/council's name as printed (e.g. "ECSA", "PSIRA"), not guessed from context.
 - Identity numbers have been removed from the text before you see it; ignore any placeholder.
@@ -389,11 +418,13 @@ def call_llm(text, filename, client=None, model=None):
     except anthropic.RateLimitError:
         raise TransientError("Anthropic API rate limit reached; will retry on the next pass.")
     except anthropic.BadRequestError as e:
-        raise ClassificationFailed(f"The AI service rejected this document's request: {e.message}")
+        raise ClassificationFailed("The AI service couldn't process this document right now. Try again, or file "
+                                   "it manually.", detail=f"BadRequestError: {e.message}")
     except anthropic.APIStatusError as e:
         if e.status_code >= 500:
             raise TransientError(f"Anthropic API server error {e.status_code}; will retry on the next pass.")
-        raise ClassificationFailed(f"The AI service returned an error ({e.status_code}): {e.message}")
+        raise ClassificationFailed("The AI service couldn't process this document right now. Try again, or file "
+                                   "it manually.", detail=f"APIStatusError {e.status_code}: {e.message}")
     except anthropic.APIConnectionError:
         raise TransientError("Could not reach the Anthropic API; will retry on the next pass.")
 
@@ -419,6 +450,17 @@ def call_llm(text, filename, client=None, model=None):
 #    extract_cv_fields's own quote/date/digit helpers outright).
 # ============================================================================
 
+def _fields_by_name(raw_fields):
+    """The model's real answer is a list of {field, value, evidence} entries
+    (output_schema()) - a dict keyed by field name is also accepted, kept
+    only so the hand-written test fixtures (which test the logic below, not
+    the wire schema) don't all need rewriting for this. Last entry for a
+    repeated field name wins, same as a dict literal would."""
+    if isinstance(raw_fields, list):
+        return {e.get("field"): e for e in raw_fields if isinstance(e, dict) and e.get("field")}
+    return raw_fields or {}
+
+
 def validate_proposal(data, text, local_ids):
     norm_text = cvx._norm(text)
     digits_text = cvx._digits(text)
@@ -427,14 +469,20 @@ def validate_proposal(data, text, local_ids):
     if kind not in DOCUMENT_KINDS:
         kind = "unknown"
 
+    raw_fields = _fields_by_name(data.get("fields"))
     fields = {}
     for f in KIND_FIELDS.get(kind, []):
-        item = (data.get("fields") or {}).get(f) or {}
+        item = raw_fields.get(f) or {}
         value, evidence = item.get("value"), item.get("evidence")
         if isinstance(value, str):
             value = value.strip() or None
         if value is None:
             continue
+        if f in NUMBER_FIELDS and isinstance(value, str):
+            try:
+                value = float(value.replace(",", "").replace(" ", ""))
+            except ValueError:
+                pass  # falls through to the "not a number" warning below, same as before
         warnings = []
         verified = cvx.evidence_in_text(evidence, norm_text)
         if not verified:
