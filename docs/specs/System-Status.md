@@ -8,6 +8,24 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**Standing review pass, 2026-10-23 ~08:15 UTC: merged forward again, no overlap, re-verified.**
+One new commit on `main` (`bed4360`, Finding 59 - `watch_deadlines.py`'s `days_until()` crashed on
+a non-string expiry value; fixed with an `isinstance` check up front, not another exception type
+bolted on). Touches only `engine/compliance/` - no overlap with PR #74. Migration numbering
+unchanged (`main` still ends at `0085`). Merged cleanly into
+`feature/narrative-document-generator`; re-verified: 51/51 Python test files, `npm run verify`
+clean, 129/129 vitest. PR #74 remains genuinely mergeable.
+
+This is now five consecutive passes where the only thing to report on PR #74's own branch is a
+clean merge-forward - worth saying plainly rather than padding each entry: the PR itself hasn't
+changed in substance since the AI-call-quality-standard retrofit two passes before this one, and
+is sitting ready, waiting on Sarel's own call to take it out of draft.
+
+**Still open, unconfirmed, same flag as every prior pass**: whether the Session Pooler password
+pasted into chat has actually been rotated.
+
+---
+
 **Standing review pass, 2026-10-23 ~06:15 UTC: merged forward again, no overlap, re-verified.**
 Two things landed on `main` since the last pass: PR #110 (Spec v3 Batch 8 - company vault form
 density, `app/app/company/_components/*`) and `af512b9` (Finding 58 - parallelizes
