@@ -287,7 +287,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
     // company's own experience_items, same table app/app/experience/page.tsx
     // already reads - no new table, no scoring change.
     supabase.from("experience_items").select("tagged_at, disciplines"),
-    // This company's real, saved Opportunity preferences (migration 0087,
+    // This company's real, saved Opportunity preferences (migration 0088,
     // company_tender_preferences) - RLS (is_company_member(company_id))
     // already scopes this to at most one row with no explicit company_id
     // filter, same no-explicit-filter pattern the experience_items query
@@ -303,7 +303,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   if (experienceDisciplineError) console.error("experience_items select failed (discipline-tagging nudge)", experienceDisciplineError);
   // Degrades to "no preferences saved" (same as a company that never opened
   // the panel) rather than failing the whole page - covers both a genuine
-  // read error and, until Sarel applies migration 0087 live, the table not
+  // read error and, until Sarel applies migration 0088 live, the table not
   // existing at all yet.
   if (preferencesError) console.error("company_tender_preferences select failed", preferencesError);
   const preferences = (preferencesRow ?? null) as { hide_sanral_board: boolean; interested_disciplines: string[] } | null;
@@ -351,7 +351,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   // always reachable, just not always on the very first screen of "All".
   // Task item 5 (app/AGENTS.md): additive discipline-interest sort, never a
   // filter - a company that has stated interested_disciplines
-  // (company_tender_preferences, migration 0087) sees matching tenders
+  // (company_tender_preferences, migration 0088) sees matching tenders
   // first within whatever verdict tab is already open, same window, same
   // count, same cards - nothing is hidden or removed, and a company that
   // never set a preference (interestedDisciplines.length === 0) sees
@@ -507,7 +507,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
         )}
 
         {/* Opportunity preferences - Sarel's own live feedback, now built
-            for real against migration 0087 (company_tender_preferences):
+            for real against migration 0088 (company_tender_preferences):
             "add options to set the opportunity preferences for a company"
             + the SANRAL case. A new, additive section - the filter-tab bar
             and everything below it is untouched. Prefilled from the row

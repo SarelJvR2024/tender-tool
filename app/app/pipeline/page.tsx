@@ -159,14 +159,14 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
     // Outcome facts (item 4) - tender_answers' own outcome:* keys, see
     // recordOutcomeAndMoveStage (pipeline/actions.ts) for why this table.
     supabase.from("tender_answers").select("tender_id, field_key, value").in("field_key", Object.values(OUTCOME_FIELD_KEYS)),
-    // This company's real, saved Opportunity preferences (migration 0087,
+    // This company's real, saved Opportunity preferences (migration 0088,
     // company_tender_preferences, set from the /discovery panel) -
     // hide_sanral_board gates the "found" column's own shared SANRAL feed
     // below. RLS (is_company_member(company_id)) already scopes this to at
     // most one row with no explicit company_id filter needed. Degrades to
     // "no preference saved" (board stays visible, today's behavior) rather
     // than failing the page - covers both a genuine read error and, until
-    // Sarel applies 0087 live, the table not existing yet.
+    // Sarel applies 0088 live, the table not existing yet.
     supabase.from("company_tender_preferences").select("hide_sanral_board").maybeSingle(),
   ]);
   if (preferencesError) console.error("company_tender_preferences select failed", preferencesError);
@@ -209,7 +209,7 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
       // was pursued by another company - not ours to show.
       if (t.family === GENERAL_FAMILY || t.status !== "open") continue;
       if (isPast(t.closing_date)) continue;
-      // Task item 4 (app/AGENTS.md): hide_sanral_board (migration 0087,
+      // Task item 4 (app/AGENTS.md): hide_sanral_board (migration 0088,
       // company_tender_preferences) - a company that's said it doesn't do
       // SANRAL/road-construction work doesn't get this shared,
       // un-tenant-scoped board shown to it by default. Every remaining

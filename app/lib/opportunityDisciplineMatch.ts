@@ -1,5 +1,5 @@
 // A company's stated discipline interest (company_tender_preferences.
-// interested_disciplines, migration 0087) vs. one discovered_opportunity's
+// interested_disciplines, migration 0088) vs. one discovered_opportunity's
 // own categories (discovered_opportunities.categories, migration 0004 - the
 // scoring engine's own fit-scoring output, discipline_categories/0040 slugs).
 // Used by app/app/discovery/page.tsx to sort matching opportunities first

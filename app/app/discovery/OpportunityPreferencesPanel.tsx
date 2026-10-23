@@ -17,7 +17,7 @@ function toggleDiscipline(current: string[], slug: string): string[] {
  * preferences for a company" + the SANRAL case ("this shouldnt be tehere if
  * the company is not interested in sanral projects"). Now the REAL, saved
  * version: Sarel reviewed and signed off on the `company_tender_preferences`
- * schema (migration 0087) this was originally only proposed against - see
+ * schema (migration 0088) this was originally only proposed against - see
  * app/AGENTS.md's dated entries for the full history (preview -> schema
  * review -> this).
  *

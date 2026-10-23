@@ -10,7 +10,7 @@ import { SLUG_RE } from "@/lib/disciplineTaxonomy";
  * requireCompanyId (which notes every actions.ts file in this app keeps its
  * own copy rather than a shared lib) - not a substitute for RLS
  * (company_tender_preferences' own is_company_member policies, migration
- * 0087), an extra belt-and-braces server-side check every mutating action
+ * 0088), an extra belt-and-braces server-side check every mutating action
  * in this app makes regardless of what RLS would already block.
  */
 async function requireCompanyId() {
@@ -29,7 +29,7 @@ async function requireCompanyId() {
 }
 
 /**
- * Saves this company's real Opportunity preferences (migration 0087,
+ * Saves this company's real Opportunity preferences (migration 0088,
  * company_tender_preferences) - the real version of
  * OpportunityPreferencesPanel.tsx, replacing its earlier localStorage-only
  * preview (lib/opportunityPreferencesPreview.ts, now removed). One row per

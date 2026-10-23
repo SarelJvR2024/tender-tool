@@ -2790,7 +2790,7 @@ him, not built.
 
 ---
 
-### Opportunity preferences (SANRAL visibility + disciplines) - built for real, migration 0087 NOT yet applied live
+### Opportunity preferences (SANRAL visibility + disciplines) - built for real, migration 0088 NOT yet applied live
 
 Sarel's explicit sign-off, this session (2026-10-23): he reviewed the `company_tender_preferences`
 schema proposed above and approved building the real feature against it - not just reacting to
@@ -2798,8 +2798,13 @@ another preview. This entry replaces the preview end-to-end; `lib/opportunityPre
 and its test (the localStorage-only mock the entry above describes) are deleted, not kept alongside
 the real version - one source of truth, not two that could drift.
 
-**Migration**: `app/supabase/migrations/0087_company_tender_preferences.sql` - the exact SQL
-proposed above, unchanged (Sarel's own review covered that exact text). **NOT applied to the live
+**Migration**: `app/supabase/migrations/0088_company_tender_preferences.sql` - the exact SQL
+proposed above, unchanged (Sarel's own review covered that exact text), **renumbered 0087 -> 0088**
+while rebasing onto latest `main`: the same collision pattern this file's own earlier entries
+describe (`0084`->`0085`->`0086`->`0087`, each time a different, already-merged migration took the
+next number first) had already happened again - PR #74's own `0087_narrative_documents.sql` merged
+while this branch was open, so this migration moved to the next free number, same discipline, no
+other change. **NOT applied to the live
 database from this session** - this environment can reach the real Supabase project over
 PostgREST but genuinely cannot run raw DDL (confirmed, see this file's own 2026-10-23 ~19:00 UTC
 addendum and `docs/specs/System-Status.md`'s matching entry). **Sarel needs to paste this migration's
@@ -2812,7 +2817,7 @@ filters until the table is real).
 interestedDisciplines)` - same `requireCompanyId()` tenant-check shape as every other mutating
 action in this app (`app/app/tenders/[id]/actions.ts`'s own copy, read directly before writing
 this one); companyId is derived server-side from the signed-in user's own `company_members` row,
-never taken from the client, so RLS (`is_company_member`, migration 0087) and this extra check
+never taken from the client, so RLS (`is_company_member`, migration 0088) and this extra check
 agree by construction. Upserts both columns in one row (`onConflict: "company_id"`), re-validates
 every discipline slug against `SLUG_RE` (0040's own slug shape) rather than trusting the client
 array, and revalidates both `/discovery` and `/pipeline` since `hide_sanral_board` affects both.
