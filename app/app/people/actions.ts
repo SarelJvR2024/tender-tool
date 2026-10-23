@@ -301,6 +301,230 @@ export async function uploadCv(formData: FormData) {
 }
 
 /**
+ * Sarel's own live feedback: "on the add person, allow option to add a CV
+ * and have AI read and capture all the information instead of the user
+ * capturing it." The old /people/new was a full ~20-field blank form -
+ * everything manually typed.
+ *
+ * This is still two of the SAME writes savePerson() and uploadCv() already
+ * make (same `people` insert shape, same cv_uploads storage-path convention
+ * and column values), not a parallel data model - they're a new function,
+ * not a reuse of those two, only because both already end in their own
+ * `redirect()` (which throws in a Server Action), so calling one then the
+ * other in sequence isn't possible without factoring both apart first. That
+ * refactor is a larger, riskier change to two already-working, already-
+ * tested actions; duplicating the ~15 lines of insert logic here is the
+ * smaller, safer change tonight.
+ *
+ * What this can't do: extract the person's NAME from the CV before the
+ * `people` row exists. cv_uploads.person_id and cv_extraction_results.person_id
+ * are both `not null references people(id)` (0008_cv_uploads.sql,
+ * 0023_cv_extraction_results.sql) - nothing can be attached to a person who
+ * doesn't exist yet. The generic company-level document-scan engine (Batch 2
+ * tonight) classifies a "cv" document kind without needing a person first,
+ * but deliberately extracts ZERO fields for it (lib/onboardingScan.ts:
+ * `cv: []`) - name/qualification extraction is engine/cv/extract_cv_fields.py's
+ * job alone, and that only ever runs against an already-existing
+ * cv_uploads.person_id. So the one field a human must still type is the name
+ * - not invented, just the smallest honest anchor needed to create the row at
+ * all. Once the AI extraction comes back, the SAME confirm-or-correct review
+ * card every existing person already gets (CvExtractionReview, this file's
+ * applyCvExtraction()) lets the user correct that name to whatever the CV
+ * itself says - the typed name is a starting point, not a committed fact.
+ *
+ * Making this fully CV-led (zero typing, including the name) needs either a
+ * schema change (a nullable cv_uploads.person_id, or a new staging table for
+ * an unconfirmed person) or an engine change (teaching the generic
+ * classifier to also do name/field extraction, duplicating
+ * extract_cv_fields.py's own job). Neither is done here - out of scope for
+ * an autonomous merge, flagged for Sarel's own review if he wants it built.
+ */
+export async function createPersonWithCv(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const name = str(formData, "name");
+  if (!name) {
+    redirect(`/people/new?error=${encodeURIComponent("Enter a name - you can correct it once AI reads the CV.")}`);
+  }
+  // Same "as-is vs AI-extract" choice uploadCv() already requires - AI
+  // extraction must stay optional (Tender-Tool-Competitor-Feature-Deep-Dive.md,
+  // "CVs: upload once, never recapture", the "Use as-is" option), not forced
+  // just because this is the new CV-led path.
+  const mode = str(formData, "mode") || "ai_extract";
+  if (mode !== "as_is" && mode !== "ai_extract") {
+    redirect(`/people/new?error=${encodeURIComponent("Choose how this CV should be used: as-is or AI-extract.")}`);
+  }
+
+  // Same `people` insert shape as savePerson() for a new row - only name is
+  // supplied here, everything else starts null and is filled in either by
+  // the CV review card below or by editing the person's own page later.
+  const { data, error: insertError2 } = await supabase
+    .from("people")
+    .insert({ company_id: companyId, name })
+    .select("id")
+    .single();
+  if (insertError2) {
+    console.error("people insert failed (createPersonWithCv)", insertError2);
+    redirect(`/people/new?error=${encodeURIComponent("Could not save this person - try again. If it keeps happening, let us know.")}`);
+  }
+  const personId = data!.id as string;
+
+  const file = formData.get("file") as File | null;
+  if (file && file.size > 0) {
+    // Same storage-path convention and cv_uploads row shape as uploadCv()
+    // above - this person just didn't exist yet when the file was chosen.
+    const safeName = safeFileName(file.name);
+    const storagePath = `${companyId}/people/${personId}/uploads/${randomUUID()}-${safeName}`;
+    const { error: uploadError2 } = await supabase.storage
+      .from("cv-documents")
+      .upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
+    if (uploadError2) {
+      console.error("cv upload failed (createPersonWithCv)", file.name, uploadError2);
+      // The person record itself was saved fine - only the CV attach failed.
+      // Land on their new page and say so, rather than losing the person too.
+      redirect(`/people/${personId}?error=${encodeURIComponent(`${name} was added, but the CV couldn't be uploaded - try adding it again from this page.`)}`);
+    }
+    const { error: cvInsertError } = await supabase.from("cv_uploads").insert({
+      company_id: companyId,
+      person_id: personId,
+      storage_path: storagePath,
+      original_filename: file.name,
+      mode,
+      status: mode === "as_is" ? "uploaded" : "extraction_requested",
+      uploaded_by: user?.id ?? null,
+    });
+    if (cvInsertError) {
+      console.error("cv_uploads insert failed (createPersonWithCv)", cvInsertError);
+      redirect(`/people/${personId}?error=${encodeURIComponent(`${name} was added, but the CV couldn't be saved - try adding it again from this page.`)}`);
+    }
+  }
+
+  revalidatePath("/people");
+  revalidatePath(`/people/${personId}`);
+  redirect(`/people/${personId}`);
+}
+
+/** Non-throwing core of one CV attach - shared by bulkUploadCvs() below so a
+ * mid-batch failure doesn't abort files already processed. Same storage-path
+ * convention and cv_uploads row shape as uploadCv()/createPersonWithCv()
+ * above; not reused directly from them only because both end in their own
+ * redirect(), which can't run per-file inside a loop. */
+async function attachCvToPerson(
+  supabase: SupabaseClient,
+  companyId: string,
+  userId: string | null,
+  personId: string,
+  file: File,
+  mode: "as_is" | "ai_extract",
+): Promise<string | null> {
+  const safeName = safeFileName(file.name);
+  const storagePath = `${companyId}/people/${personId}/uploads/${randomUUID()}-${safeName}`;
+  const { error: uploadError } = await supabase.storage
+    .from("cv-documents")
+    .upload(storagePath, file, { contentType: file.type || "application/octet-stream" });
+  if (uploadError) {
+    console.error("cv upload failed (bulkUploadCvs)", file.name, uploadError);
+    return `Could not upload ${file.name}.`;
+  }
+  const { error: insertError } = await supabase.from("cv_uploads").insert({
+    company_id: companyId,
+    person_id: personId,
+    storage_path: storagePath,
+    original_filename: file.name,
+    mode,
+    status: mode === "as_is" ? "uploaded" : "extraction_requested",
+    uploaded_by: userId,
+  });
+  if (insertError) {
+    console.error("cv_uploads insert failed (bulkUploadCvs)", insertError);
+    return `Could not save ${file.name}.`;
+  }
+  return null;
+}
+
+type SupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * Sarel's own live feedback: "allow bulk upload of all People CVs... or
+ * bulk upload of people with their details." One screen, multiple files at
+ * once (reuses the shared FileDropzone/uploadBatch pattern spec v3 Batch 2
+ * established for company documents) - each file is assigned, per row in
+ * the client UI, to either an existing person or a brand-new one (name
+ * typed, same one-field minimum as createPersonWithCv() above and for the
+ * exact same reason - a CV can't be AI-extracted before a person_id exists,
+ * see that function's own comment). Every file still goes through the
+ * SAME per-person AI-extraction review card as a single upload - this
+ * function only creates/attaches, it never confirms or applies anything
+ * extracted.
+ *
+ * Processes all assigned rows in one call and redirects ONCE at the end, to
+ * /people with a summary - NOT per-file, since uploadCv()/createPersonWithCv()
+ * above each throw their own redirect() and can't be called in a loop.
+ * FormData shape, built by the client component: for i = 0..count-1,
+ * `kind_<i>` is "existing" or "new", `file_<i>` is the File, and either
+ * `person_id_<i>` (existing) or `name_<i>` (new) names the target.
+ */
+export async function bulkUploadCvs(formData: FormData) {
+  const companyId = await requireCompanyId();
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+
+  const count = Number(formData.get("count") ?? 0);
+  // One as-is/AI-extract choice for the whole batch, same options
+  // uploadCv()/createPersonWithCv() offer per file - AI extraction must stay
+  // optional here too, not hardcoded just because this is a bulk action.
+  const modeRaw = str(formData, "mode");
+  const mode: "as_is" | "ai_extract" = modeRaw === "as_is" ? "as_is" : "ai_extract";
+  let created = 0;
+  let attached = 0;
+  const errors: string[] = [];
+
+  for (let i = 0; i < count; i++) {
+    const kind = str(formData, `kind_${i}`);
+    const file = formData.get(`file_${i}`) as File | null;
+    if (!kind || !file || file.size === 0) continue;
+
+    let personId: string | null = null;
+    if (kind === "existing") {
+      personId = str(formData, `person_id_${i}`);
+      if (!personId) {
+        errors.push(`${file.name}: no person chosen.`);
+        continue;
+      }
+    } else if (kind === "new") {
+      const name = str(formData, `name_${i}`);
+      if (!name) {
+        errors.push(`${file.name}: no name given for the new person.`);
+        continue;
+      }
+      const { data, error: insertError } = await supabase.from("people").insert({ company_id: companyId, name }).select("id").single();
+      if (insertError || !data) {
+        console.error("people insert failed (bulkUploadCvs)", insertError);
+        errors.push(`${file.name}: could not create ${name}.`);
+        continue;
+      }
+      personId = data.id as string;
+      created++;
+    } else {
+      continue;
+    }
+
+    const err = await attachCvToPerson(supabase, companyId, user?.id ?? null, personId!, file, mode);
+    if (err) {
+      errors.push(`${file.name}: ${err}`);
+    } else {
+      attached++;
+    }
+  }
+
+  revalidatePath("/people");
+  const summary = `${attached} CV${attached === 1 ? "" : "s"} uploaded${created > 0 ? `, ${created} new ${created === 1 ? "person" : "people"} added` : ""}${errors.length > 0 ? `. ${errors.length} failed: ${errors.join(" ")}` : ""}.`;
+  redirect(`/people?bulk=${encodeURIComponent(summary)}`);
+}
+
+/**
  * Queue the four standard CV formats for one person, unless a set is already
  * waiting to be built (re-confirming twice shouldn't stack duplicate jobs).
  * Returns true on failure, null on success.
