@@ -33,9 +33,24 @@ export function VaultSection({
 
 export const fieldGridClass = "grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-3";
 
-export function Field({ label, value }: { label: string; value: string | number | null }) {
+/**
+ * Spec v3 §10/§28: "names, email addresses and long values need enough
+ * width" - a postal address squeezed into a 1-of-3 grid column wraps onto
+ * many short lines instead of reading as the single block it is. `fullWidth`
+ * spans the field across the grid's full row (every breakpoint `fieldGridClass`
+ * defines) instead of sharing a column with short fields like a VAT number.
+ */
+export function Field({
+  label,
+  value,
+  fullWidth,
+}: {
+  label: string;
+  value: string | number | null;
+  fullWidth?: boolean;
+}) {
   return (
-    <div>
+    <div className={fullWidth ? "col-span-full" : undefined}>
       <div className="mb-0.5 text-xs text-muted-foreground">{label}</div>
       <div className="text-sm font-medium text-foreground">
         {value === null || value === undefined || value === "" ? (
