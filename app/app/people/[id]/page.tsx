@@ -883,8 +883,7 @@ export default async function PersonDetailPage({
               Project / reference history
             </h2>
             <div className="mb-3 text-xs text-muted-foreground">
-              Used by the pack-matching engine to score this person against a tender&apos;s key positions
-              (see engine/pack_generator/suggest_pack.py).
+              Used to match this person against a tender&apos;s key positions and suggest the best fit for each role.
             </div>
 
             {projects.length === 0 && (

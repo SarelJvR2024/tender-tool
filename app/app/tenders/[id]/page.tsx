@@ -818,8 +818,8 @@ export default async function TenderWorkspacePage({
                     the people tagged on their People page as fitting the role (scored on their qualifications, projects
                     and years against the position), with up to two alternatives - confirm it, or pick anyone else from the
                     list. Once confirmed, you can request the tender-customized CV
-                    (requirement-matching cover page); that is fulfilled out-of-band by engine/cv/process_cv_jobs.py, so it
-                    records a request, not an instant result.
+                    (requirement-matching cover page); our AI generates this in the background, so your customized CV
+                    will be ready for review within a few minutes.
                   </div>
                 </>
               );
