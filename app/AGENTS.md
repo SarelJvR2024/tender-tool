@@ -1871,3 +1871,37 @@ both ways. **Not tested**: an actual signed-in render of `/tenders/[id]` - same 
 generation limitation as every batch tonight; the mock-data screenshot harness above is real
 evidence the new components render, lay out, and respond to clicks correctly, not a substitute for
 Sarel clicking through his own real tender.
+
+---
+
+### Fix: stop naming SANRAL in the general (non-SANRAL) tender flow
+
+Sarel's own live feedback: "there is still sanral specific references and saying not sanral
+temple [template], dont do that, onlt when it is a sanral tender, then mention the sanral specs and
+tools and process." Grepped every `SANRAL` occurrence under `app/app/tenders/[id]/` to check each
+one was actually gated to a real SANRAL-route tender (most already were - `compliance-report.tsx`,
+`submission-pack.tsx`, `subcontracting-plan.tsx`, `tender-templates.tsx` are only rendered at all
+when `isSanralFamily`/`showSubmissionPack` is true, per `page.tsx`'s own conditional). Found three
+real leaks, all in files a general (non-SANRAL) tender's own user would actually see:
+
+- `general-workspace.tsx`'s "Tender preparation" intro used to open with "This isn't a SANRAL
+  tender, so..." - naming the one thing this screen explicitly isn't, to a user who may never deal
+  with SANRAL at all. Now opens directly with what the screen actually does: "What this tender
+  needs is read from its own documents...".
+- `intake-card.tsx`'s route chip said "General (non-SANRAL) flow" for every non-SANRAL tender -
+  now just "General flow". The chip for an actual SANRAL tender still correctly says "SANRAL pack
+  flow - {family}".
+- `intake-card.tsx`'s "reading the documents" loading message used to say "working out whether
+  this is a SANRAL template tender or a general one" - said to every tender while intake is still
+  running, before the route is even known. Reworded to describe what's actually happening ("working
+  out what this tender requires and how it fits your company") without leading with SANRAL.
+- `intake-card.tsx`'s generic "missing something?" prompt under the manual-upload form used "an
+  addendum, the SANRAL workbook, a readable copy of a scanned page" as its three examples
+  unconditionally - a general tender's own user saw "the SANRAL workbook" as a suggested example of
+  something THEY might be missing. Now conditional on `intake?.route === "sanral"`.
+
+Pure copy/conditional-rendering change - no calculation, routing decision, or SANRAL-specific
+feature was touched; `compliance-report.tsx`/`submission-pack.tsx`/`subcontracting-plan.tsx`/
+`tender-templates.tsx` (the actual SANRAL-only screens) are unchanged, confirmed still gated
+correctly. `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways (`tsx --test` and
+the real CI invocation, `node --experimental-strip-types` per file).

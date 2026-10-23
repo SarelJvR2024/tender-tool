@@ -138,7 +138,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         <SectionTitle title="Tender preparation" />
         {savedNote && <SavedBanner text={savedNote} />}
         <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
-          This isn&apos;t a SANRAL tender, so what it needs is read from <strong>its own documents</strong> - every buyer sets its own
+          What this tender needs is read from <strong>its own documents</strong> - every buyer sets its own
           forms and returnable list (some use National Treasury&apos;s SBD forms, municipalities the MBD twin, ESKOM its own).
           Nothing is listed here until those documents have been read.
         </div>
