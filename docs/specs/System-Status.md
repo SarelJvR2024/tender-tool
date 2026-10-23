@@ -8,6 +8,37 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
+**2026-10-23 ~19:00 UTC addendum — resolves part of task #78's "Live Supabase DB access" question,
+real finding, not a workaround.** Confirmed directly (not assumed from an old note): this
+environment can write to the real Supabase project over HTTPS/PostgREST (`$NEXT_PUBLIC_SUPABASE_URL/rest/v1/...`
+with `$SUPABASE_SERVICE_ROLE_KEY` — `curl` returns `200`, and `engine/discovery/tender_enrichment.py`'s
+own `RestClient` already proved this live in PR #126). **It canNOT run raw DDL** (`CREATE TABLE`/
+`ALTER TABLE`) from here: direct `psql "$SUPABASE_DB_URL"` connects (resolves the real pooler host,
+`aws-0-eu-west-1.pooler.supabase.com`) but then hangs indefinitely on the actual query — this
+environment's network policy allows HTTPS to allowlisted hosts but not raw Postgres-wire TCP;
+there is no Supabase Management API token (`SUPABASE_ACCESS_TOKEN` or similar) in this environment
+either, and a REST `OpenAPI` root listing shows no `exec_sql`/`run_sql`-style RPC deployed on this
+project. **Net effect**: a session here can propose, build, and verify app code against a new
+schema, and can run real backlog/engine jobs against *existing* tables — but actually applying a
+new migration (`CREATE TABLE`/`ALTER TABLE`) needs either Sarel pasting the SQL into Supabase's own
+SQL Editor himself, or a session with working `psql`/Management-API access (neither confirmed
+available anywhere yet, despite several sessions' notes suggesting otherwise — **DNS failure** and
+**"Production Reads" permission block** were the two blockers logged earlier tonight; a silent
+TCP-port network-policy block is a third, distinct one, now confirmed separately).
+
+**Separately, a real (if small) sandbox-packaging gap, now fixed locally, worth knowing about**:
+this container's Python has `anthropic==1.15.0` installed, but its actual `httpx` dependency was
+missing — `pip show` showed a `httpx2` package instead of real `httpx` (not something any commit
+caused; a base-image artifact of this particular container). This broke 2 pre-existing test files
+(`engine/cv/test_extract_cv_fields.py`, `engine/onboarding/test_classify_documents.py`) added by
+PR #128 (test coverage for a real BadRequestError-shape, which constructs a fake `httpx.Response`).
+Confirmed `engine/worker/requirements.txt` (what the real worker container actually installs) has
+no such gap — this was sandbox-only, not a real bug in anything merged. Fixed with `pip install
+httpx` in this session; both files now pass clean. Whoever next hits `ModuleNotFoundError: No
+module named 'httpx'` in this sandbox: this is the fix, not a code problem.
+
+---
+
 **Standing review pass, 2026-10-23 ~18:20 UTC: migration-numbering collision #3 (0086 taken by a
 real RLS fix), renumbered; `page.tsx` touched by the same batch, auto-merged correctly; a real
 sandbox-only test gap found and confirmed, not fixed.** A big batch landed since the last pass:
