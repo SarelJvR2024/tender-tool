@@ -1863,6 +1863,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-23, standing QA/robustness review - seventy-seventh run): the brand-new narrative-document generator's Word builder had no control-character guard at all, and crashed on a tender's own corrupted contract number
+
+Orientation: PR #74 (cover letter / methodology statement generator) merged earlier this session
+and had never had a dedicated adversarial QA pass - picked it over the literal next rotation slot
+since fresh, just-merged code is the highest-value place to look first.
+
+**Finding 66 (CONFIRMED, FIXED, severe).** `engine/narrative/build_docx.py` writes strings
+straight into a real .docx via python-docx, with no equivalent of the sibling CV generator's own
+`_safe_text()` guard against control characters/NULL bytes (python-docx/lxml raises `ValueError`
+on them). Reproduced directly: `subtitle` is a DIRECT, unsanitized passthrough of the tender's own
+`contract_no` - a field read off a real buyer's page or portal, not LLM output - so a single stray
+control byte in any tender's reference number crashes generation deterministically for every
+company requesting that document. The model-generated headings/paragraphs/bullets carry the same
+risk one level down (the prompt explicitly has the model echo a company's own free-text "how we
+work" in its own words).
+
+**Fix:** added the identical `_safe_text()` guard (same regex) to every string `build_docx()`
+writes - title, subtitle, every heading/paragraph/bullet.
+
+**Verified the regression test actually catches the regression:** new test in
+`test_build_docx.py` covering control characters in all 5 locations, including the real
+`contract_no` vector. Reverted: failed with the exact predicted `ValueError`; restored: `0`
+failures. Full narrative test suite (5 files) re-run clean.
+
+**Flagged, not fixed (not yet reachable under how this bridge actually runs today)**: the
+anti-collusion uniqueness check (`uniqueness.py`) compares a new draft only against other
+companies' already-`ready` documents for the same tender - safe today since `narrative` isn't
+wired into `run_bridges.py` yet and runs as one sequential process, but a real TOCTOU gap if it's
+ever run as more than one concurrent worker without routing same-tender jobs together. See
+Finding 66's own write-up for detail.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-sixth run): finished the broader audit a sibling pass explicitly flagged but didn't do - two more test fixtures were ticking time bombs for the exact rot that just hit test_randwater.py
 
 Orientation: a sibling solution-architect pass this same day (top of this file, "Finding 62") fixed

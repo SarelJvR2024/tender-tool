@@ -9,9 +9,29 @@ Color/visual preferences are applied to real paragraph/heading styles
 (python-docx), never to a hardcoded template, so the same builder works for
 every style combination.
 """
+import re
+
 import docx
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Pt, RGBColor
+
+# python-docx (via lxml) raises ValueError("All strings must be XML
+# compatible...") on a control character/NULL byte - same guard, same
+# pattern, as engine/cv/generate_cv.py's own _safe_text(). This builder
+# writes several strings no LLM ever touches (title/subtitle are a direct
+# passthrough of job metadata - subtitle is the tender's own contract_no,
+# read straight off a real buyer's page or portal, the exact kind of field
+# this codebase has already found OCR/scrape corruption in elsewhere) as
+# well as the model's own generated headings/paragraphs/bullets, which can
+# echo a company's own free-text "how we work"/user_guidance verbatim.
+# Confirmed directly: a contract_no with one stray control byte crashed
+# this whole builder before this fix, failing the job outright rather than
+# just that one odd character. QA pass, 2026-10-23.
+_XML_INVALID_RE = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
+
+def _safe_text(value):
+    return _XML_INVALID_RE.sub("", value) if value else value
 
 # A small, curated set of professional theme colors - not an arbitrary
 # color picker. Each is a (accent, heading_text) RGB pair; heading text is
@@ -57,7 +77,7 @@ def build_docx(
     _apply_title_style(document, color)
     _apply_heading_style(document, color)
 
-    title_paragraph = document.add_paragraph(title, style="Title")
+    title_paragraph = document.add_paragraph(_safe_text(title), style="Title")
     title_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
     if visual_style == "visual_rich":
         # A simple colored rule under the title - the one "visual" flourish
@@ -68,18 +88,18 @@ def build_docx(
         rule_run.font.color.rgb = color
         rule_run.font.size = Pt(8)
     if subtitle:
-        subtitle_paragraph = document.add_paragraph(subtitle)
+        subtitle_paragraph = document.add_paragraph(_safe_text(subtitle))
         subtitle_paragraph.runs[0].italic = True
         subtitle_paragraph.runs[0].font.size = Pt(11)
 
     for section in sections:
-        document.add_heading(section["heading"], level=1)
+        document.add_heading(_safe_text(section["heading"]), level=1)
         if section["kind"] == "bullet_list":
             for bullet in section.get("bullets") or []:
-                document.add_paragraph(bullet, style="List Bullet")
+                document.add_paragraph(_safe_text(bullet), style="List Bullet")
         else:
             for paragraph_text in section.get("paragraphs") or []:
-                document.add_paragraph(paragraph_text)
+                document.add_paragraph(_safe_text(paragraph_text))
 
     document.save(out_path)
     return out_path

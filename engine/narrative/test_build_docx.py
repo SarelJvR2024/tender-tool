@@ -80,6 +80,40 @@ def test_visual_rich_adds_a_rule_plain_does_not():
     check("plain does not include the decorative rule", "━" not in plain_text)
 
 
+def test_control_characters_are_stripped_not_crashed_on():
+    print("a control character / NULL byte anywhere in the document (title, subtitle, "
+          "heading, paragraph or bullet) must not crash the builder")
+    # Finding (2026-10-23): python-docx (via lxml) raises ValueError on a
+    # control character/NULL byte - the sibling generator (engine/cv/
+    # generate_cv.py's own _safe_text()) already guards every string it
+    # writes for exactly this; build_docx.py had no such guard at all.
+    # subtitle is a direct, un-sanitized passthrough of the tender's own
+    # contract_no (read off a real buyer's page/portal - this codebase has
+    # already found OCR/scrape corruption in fields exactly like this one),
+    # so this crashes deterministically from real data, not only from a
+    # hypothetical LLM echo of a company's own free-text "how we work".
+    sections = [
+        {"heading": "Our Approach\x01", "kind": "prose", "paragraphs": ["We build \x00 roads safely."], "bullets": []},
+        {"heading": "Key People", "kind": "bullet_list", "paragraphs": [], "bullets": ["Jane \x1f Doe"]},
+    ]
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = os.path.join(tmp, "out.docx")
+        try:
+            build_docx(sections, out_path, title="Cover\x02 Letter", subtitle="N.011-010\x00-2027/1F")
+        except Exception as e:
+            check("build_docx does not crash on a control character anywhere in its input", False, str(e))
+            return
+        doc = docx.Document(out_path)
+        all_text = "\n".join(p.text for p in doc.paragraphs)
+        check("build_docx does not crash on a control character anywhere in its input", True)
+        check("the title is stripped of its control character, not dropped entirely", "Cover Letter" in all_text)
+        check("the subtitle (a direct passthrough of contract_no) is stripped, not dropped entirely",
+              "N.011-010-2027/1F" in all_text)
+        check("a heading's control character is stripped", "Our Approach" in all_text)
+        check("a paragraph's control character is stripped", "We build  roads safely." in all_text)
+        check("a bullet's control character is stripped", "Jane  Doe" in all_text)
+
+
 def main():
     test_builds_a_real_readable_docx()
     test_bullets_use_the_list_bullet_style_not_plain_prose()
@@ -87,6 +121,7 @@ def main():
     test_color_theme_is_actually_applied_to_the_heading_style()
     test_unknown_color_theme_falls_back_to_default_rather_than_crashing()
     test_visual_rich_adds_a_rule_plain_does_not()
+    test_control_characters_are_stripped_not_crashed_on()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
