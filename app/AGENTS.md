@@ -3040,3 +3040,144 @@ page) the Phase 2 entry above explicitly left open for Sarel - that's a sweeping
 single scoped improvement, and stays his own call. Did not touch anything under
 `app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
 standing carve-outs, untouched.
+
+## Tender Workspace Comprehensive Overhaul, Batch 1: badge mashup, duplicate pack-review lists, marketing paragraphs (2026-10-23)
+
+Sarel's "Comprehensive Overhaul" spec for `/tenders/[id]` and the Pack Compiler is a large,
+multi-batch piece of work; a prior read-only investigation (no code changed) confirmed three real,
+safe, no-schema-change bugs and scoped this pass to exactly those three - no drawers, no VAT work,
+no pack-compiler restructuring, all of which are later batches.
+
+**Bug 1 - "Fix Strong match" badge mashup (`general-pack-review.tsx`)**: the per-item row rendered
+`<Pill status={item.status}/>` (Verify/Provide/Fix, `TASK_STYLE`) immediately next to
+`<MatchStrengthBadge confidence={...}/>` ("Strong match"/"Check this"/"Low confidence",
+`matchStrengthStatus()`) in the same `flex gap-1` badge column - two unrelated facts (an action
+needed vs. an extraction-quality score) reading as one phrase. Read the real rendered tree first
+(not just the quoted line range): `Pill` lives in its own leading badge column, matching
+`pack-review.tsx`'s (SANRAL's) own pattern for the exact same row shape. Fix: `Pill` stays alone in
+that leading column; `MatchStrengthBadge` moved out of it entirely, now rendered inline next to the
+item's own label/value line (same row as `{item.label} · {item.value}`) - the same place this
+screen already put the " · value" annotation, so match strength reads as a property of the
+extracted item, not a second status flag competing with the action pill. No color/tier change to
+either component.
+
+**Bug 2 - duplicate lists (`general-pack-review-data.ts` / `general-pack-review.tsx`) - decided:
+CONSOLIDATE, not clarify-both.** Read both consumers end to end before touching anything, per the
+task's own instruction, since a legitimate "scannable summary vs. detailed breakdown" design was a
+real possibility:
+
+- Consumer 1: `snapshot.sections[].items`, rendered as the per-category `<details>` list (Company
+  details/questions & signature, Supporting documents, Roles & CVs, Company experience evidence,
+  Office location) - each item has a `Pill`, a match-strength badge, label/value/note, and the
+  section's own "Confirm or change" link that jumps to where it's edited. This is the actionable,
+  complete view.
+- Consumer 2: `snapshot.checklist`, fed to `<PackChecklist rows={snapshot.checklist} title="What's
+  identified to go into this pack">` rendered directly below it. `PackChecklist` (`pack-checklist.tsx`)
+  is genuinely a shared, legitimate component elsewhere - it's the REAL post-generation checklist
+  (`submission-pack.tsx`, `general-workspace.tsx`), built from the actual generated job's own
+  manifest (real page numbers, real `checklistOf()`). Here, though, it was fed a hand-built
+  `ChecklistRow[]` from `pushChecklist()`, called inline in the SAME loop as `items.push()` for
+  returnables, roles & CVs, experience, and locality - same `title`, same `status` (same underlying
+  `ReviewStatus` just mapped to `ChecklistStatus` vocabulary via the very same classifier call),
+  same `note`. `pages` was hardcoded `null` on every single row, so unlike the real post-generation
+  checklist this echo carried zero information the per-section list didn't already have. Company
+  fields and plain tender questions (only the signature question) were never pushed to it at all -
+  not a deliberate scope cut (nothing documented why), just an inconsistency from being built ad hoc
+  inside each category's own loop.
+
+Evidence this is a real bug, not an intentional two-views design: (1) for every category that did
+feed the checklist, the two lists showed the user the exact same fact twice on one page, with no
+new information in the second copy; (2) the second list had no edit link and no match-strength
+badge - strictly less useful than the first, never more; (3) it was also incomplete (missing 2 of 6
+categories) with no stated reason, which a deliberate second "summary" view would not be; (4)
+nothing outside this one render call consumed `snapshot.checklist` or `gapsCount` (checked by
+grepping every caller of `loadGeneralPackReviewSnapshot` - `page.tsx`, `general-workspace.tsx`,
+`pipeline/page.tsx`, `lib/tenderNextStep.ts` - none read `.checklist`; `computeTenderReadiness()`
+(`tender-readiness.ts`) reads only `.sections`, so readiness scoring was never touched by either
+list). Decision: removed the `<PackChecklist>` render from `general-pack-review.tsx` and the
+`checklist`/`pushChecklist`/`ChecklistRow` plumbing from `general-pack-review-data.ts` (the field,
+the 5 `pushChecklist()` call sites, the now-unused `checklistStatus` destructures at each - careful
+to drop only the destructured binding, not the shared classifier functions themselves, since
+`returnableReviewStatus()` is also reused as-is by `submission-plan-data.ts`, which already only
+destructures `{ reviewStatus }` from it). `pack-checklist.tsx`'s `PackChecklist`/`ChecklistRow` are
+completely untouched - still exactly what `submission-pack.tsx`/`general-workspace.tsx`/the `/demo`
+page use for the real thing. SANRAL's own `pack-review.tsx`/`pack-review-data.ts` has the same
+`checklist`-alongside-`items` shape and was deliberately left alone - out of this batch's named
+scope (`general-pack-review-data.ts`/`general-pack-review.tsx` only), not reviewed here.
+
+**Bug 3 - marketing paragraph cleanup, 3 spots.** `general-pack-review.tsx`'s verbose intro
+paragraph replaced with the existing bold header + a small `Info`-icon tooltip trigger (one line of
+compact microcopy stays visible below the header; the full original sentence, verbatim, moved into
+the tooltip - nothing deleted, just deferred to hover/focus). Reused `components/ui/tooltip.tsx`
+(base-ui `Tooltip`/`TooltipTrigger`/`TooltipContent`, already wrapped around the whole app by
+`TooltipProvider` in `app/layout.tsx` via `components/ui/sidebar.tsx` - confirmed by reading both
+files - so no new client-boundary wiring needed) and the `Info` icon from `lucide-react`, already
+used the same way in this same directory (`action-type-tag.tsx`). A real `Tooltip` (hover AND focus
+accessible) was chosen over a bare `title=` attribute specifically because this codebase's own
+standing review already flagged `title=`-only tooltips as a real problem ("doesn't reach touch
+devices" - see the "primary-action disabled reason" entry above) - not worth reintroducing the same
+gap in new copy.
+
+Searched `submission-pack.tsx` and `narrative-documents.tsx` for the two paragraphs Sarel's spec
+quoted:
+- "AI-drafted from your company's own profile, people, past projects and how you describe your own
+  approach..." - found **verbatim** in `narrative-documents.tsx` (the cover letter/methodology
+  card's own intro). Same treatment applied: compact one-line microcopy kept visible, full original
+  paragraph moved into an `Info`-icon tooltip. This file styles with inline `style={{}}` objects,
+  not Tailwind classes (pre-dates the design-token migration batches) - the new header row and
+  tooltip trigger match that file's own existing inline-style convention (same hex colors,
+  `#16233B`/`#5B6472`) rather than mixing in Tailwind classes that nothing else in the file uses;
+  `TooltipContent` itself still uses its own component's existing Tailwind-based styling internally,
+  which is self-contained and doesn't require the host file to adopt Tailwind.
+- "One ordered PDF: contents page, the forms filled from your data and answers..." - **not found
+  verbatim** in either named file. It's actually `general-workspace.tsx`'s own intro paragraph (the
+  general/non-SANRAL tender's one-PDF pack card) - out of this batch's named scope (only
+  `submission-pack.tsx` and `narrative-documents.tsx` were to be searched), left untouched. The
+  closest equivalent explanatory paragraph that IS in `submission-pack.tsx` is that card's own intro
+  ("Two PDFs, one per sealed envelope..." - SANRAL's two-envelope structure, naturally worded
+  differently from the general-tender one-PDF copy since the two tender families have a genuinely
+  different pack shape). Same treatment applied there: full paragraph verbatim into the tooltip,
+  compact one-line microcopy ("Two sealed-envelope PDFs - Technical and Financial - each with its
+  own contents page and checklist.") left visible by default.
+
+No copy was fabricated in any of the three spots - every compact line is a condensation of facts
+already stated in that same paragraph (never a new claim), and the full original text is preserved
+verbatim, unedited, inside each tooltip.
+
+**Self-review, 3 rounds.** Round 1: re-read every diff hunk adversarially against the stated bug -
+confirmed `general-pack-review-data.ts`'s diff touches only `pushChecklist` plumbing and the now-
+unused `checklistStatus` destructures (not the shared classifier functions' return shapes, not any
+`items.push()` value), confirmed `general-pack-review.tsx`'s diff is exactly the header/tooltip
+swap, the Pill/MatchStrengthBadge column split, and the `<PackChecklist>` removal, confirmed
+`submission-pack.tsx`/`narrative-documents.tsx` diffs touch only their own intro block. Round 2:
+checked the `Tooltip`/`TooltipTrigger`/`TooltipContent` choice doesn't introduce a layout or
+server/client-boundary regression - `TooltipRoot` "doesn't render its own HTML element" (confirmed
+by reading its source), so wrapping existing flex rows with `<Tooltip>` adds no extra DOM node to
+account for; these are React Server Components rendering a client component as a leaf, the same
+pattern `sidebar.tsx` already establishes for the whole app via its own `TooltipProvider`. Round 3:
+confirmed no regression to readiness scoring or the disqualification guard - `computeTenderReadiness()`
+reads only `ReviewSection[].items` (never `.checklist`/`.gapsCount`), and nothing in this diff
+changes any `items.push()` call's value, only which downstream calls read the already-computed
+`reviewStatus`/`note`/etc. Confirmed via `git status --short` that exactly the 4 intended files
+changed - nothing under `app/supabase/migrations/`, no billing/entitlement file, no
+`engine/sanral_fill.py` or its callers.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s unused
+`STAGE_META`), all 57 routes build. `npx vitest run` - 147/147, unchanged (confirmed identical on a
+fresh `origin/main` checkout run in parallel, same 147/147). Full `node:test` sweep both ways:
+combined `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 123/123 (same
+pre-existing `[id]`-bracketed-path glob quirk drops the same 5 files from this combined invocation);
+those 5 files individually via `node --experimental-strip-types <path>` (no `--test` flag) - 61/61;
+184/184 total, identical counts on a fresh `origin/main` baseline run the same way. No test file
+touches `general-pack-review-data.ts`/`general-pack-review.tsx` directly - the only test coverage in
+this area (`general-pack-review-logic.test.ts`, 20/20) exercises the pure classifiers in
+`general-pack-review-logic.ts`, which this pass never touched.
+
+**Not done, by design**: SANRAL's own `pack-review.tsx`/`pack-review-data.ts` (same
+checklist-duplicates-items shape) - out of this batch's named files, not this pass's call to make.
+`general-workspace.tsx`'s own verbose intro paragraph (the actual source of the "One ordered PDF..."
+quote) - out of the two files this bug named to search. Drawers, VAT, briefing banners, and any
+pack-compiler restructuring - explicitly later batches, not attempted here. Did not touch anything
+under `app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its
+callers - standing carve-outs.

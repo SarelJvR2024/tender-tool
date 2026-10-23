@@ -1,11 +1,12 @@
 import Link from "next/link";
+import { Info } from "lucide-react";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { confirmGeneralPackReview } from "./general-pack-review-actions";
-import { PackChecklist } from "./pack-checklist";
 import { reviewStatusToBidTask, type ReviewStatus } from "./pack-review-logic";
 import { matchStrengthStatus } from "./general-pack-review-logic";
 import type { BidTaskStatus } from "./bid-task-status";
 import { formatDateTime } from "@/lib/dates";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * General (non-SANRAL) tender Pack Review: the confirm-before-compile
@@ -101,12 +102,26 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
 
   return (
     <div id="general-pack-review" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
-      <div className="mb-0.5 text-[15px] font-bold text-foreground">Pack review - confirm before you compile</div>
+      <div className="mb-0.5 flex items-center gap-1.5">
+        <div className="text-[15px] font-bold text-foreground">Pack review - confirm before you compile</div>
+        <Tooltip>
+          <TooltipTrigger
+            aria-label="What this review covers"
+            className="inline-flex size-4 flex-none items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+          >
+            <Info className="size-3.5" aria-hidden />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs text-left font-normal">
+            Everything identified to go into this tender&apos;s submission pack: company details, tender questions,
+            the signature, supporting documents, the roles this tender names and who&apos;s tagged for them (with
+            their CVs), company experience evidence, and office location. Check each section, use the link to jump
+            to where it&apos;s edited, then confirm below - &quot;Generate submission pack&quot; needs this review
+            first.
+          </TooltipContent>
+        </Tooltip>
+      </div>
       <div className="mb-3.5 text-xs text-muted-foreground">
-        Everything identified to go into this tender&apos;s submission pack: company details, tender questions, the
-        signature, supporting documents, the roles this tender names and who&apos;s tagged for them (with their CVs),
-        company experience evidence, and office location. Check each section, use the link to jump to where it&apos;s
-        edited, then confirm below - &quot;Generate submission pack&quot; needs this review first.
+        Company details, documents, people and signature - check each section below, then confirm.
       </div>
 
       {allItems.length > 0 && (
@@ -155,14 +170,16 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
               ) : (
                 s.items.map((item) => (
                   <div key={item.key} className="flex items-start gap-2 border-t border-border py-1.5 text-xs">
-                    <span className="mt-px flex flex-none flex-wrap gap-1">
+                    <span className="mt-px flex-none">
                       <Pill status={item.status} />
-                      <MatchStrengthBadge confidence={item.confidence} reason={item.confidenceReason} />
                     </span>
                     <div className="min-w-0 flex-1">
-                      <div className="font-semibold break-words text-foreground">
-                        {item.label}
-                        {item.value && <span className="font-normal text-muted-foreground"> &middot; {item.value}</span>}
+                      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                        <div className="font-semibold break-words text-foreground">
+                          {item.label}
+                          {item.value && <span className="font-normal text-muted-foreground"> &middot; {item.value}</span>}
+                        </div>
+                        <MatchStrengthBadge confidence={item.confidence} reason={item.confidenceReason} />
                       </div>
                       {item.note && <div className="break-words text-muted-foreground">{item.note}</div>}
                     </div>
@@ -173,8 +190,6 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
           </details>
         ))}
       </div>
-
-      <PackChecklist rows={snapshot.checklist} title="What's identified to go into this pack" />
 
       <form action={confirmGeneralPackReview} className="mt-3.5 flex items-center gap-2.5">
         <input type="hidden" name="tender_id" value={tenderId} />

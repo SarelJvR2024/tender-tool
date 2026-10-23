@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Info } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { loadTenderCompliance, packReadiness, complianceItemLabel, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 import { loadB7State } from "./b7-data";
@@ -14,6 +15,7 @@ import { DownloadAllButton } from "./download-all-button";
 import { fetchTenderSavingsBreakdown, recordSavingsStep } from "@/lib/savingsCounterData";
 import { formatRand, SAVINGS_STEP_ORDER } from "@/lib/savingsCounter";
 import { formatDateTime } from "@/lib/dates";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 /**
  * "Generate submission pack" - the whole SANRAL pack (filled workbook, Form B
@@ -214,17 +216,31 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
           SANRAL schedules - usually 6 to 8 hours by hand. We fill them in minutes.
         </div>
       </div>
-      <div className="mb-0.5 text-[15px] font-bold text-foreground">Submission pack</div>
+      <div className="mb-0.5 flex items-center gap-1.5">
+        <div className="text-[15px] font-bold text-foreground">Submission pack</div>
+        <Tooltip>
+          <TooltipTrigger
+            aria-label="What's in the submission pack"
+            className="inline-flex size-4 flex-none items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+          >
+            <Info className="size-3.5" aria-hidden />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs text-left font-normal">
+            Two PDFs, one per sealed envelope, each in submission order with a contents page and page numbers. The
+            submission pack: outer cover, then Envelope 1 (Technical) - authority letter, A-Forms, your vault
+            documents, Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B5, and Form B7 from your
+            own subcontracting answer when it applies (otherwise listed as not included, with why). Envelope 2
+            (Financial), separately: its cover, the Form of Offer and the printed Financial workbook - kept out of
+            the technical pack because it is opened only after technical evaluation. The filled .xlsm workbooks come
+            with them. Each contents page doubles as the pack&apos;s checklist - every document with its status
+            (included, included with a warning such as an expired certificate that must be replaced, or not included
+            and why) - and the same checklist is shown here under each pack. Signatures, pricing and the B4/B5
+            write-ups stay with you.
+          </TooltipContent>
+        </Tooltip>
+      </div>
       <div className="mb-3 text-xs text-muted-foreground">
-        Two PDFs, one per sealed envelope, each in submission order with a contents page and page numbers. The
-        submission pack: outer cover, then Envelope 1 (Technical) - authority letter, A-Forms, your vault documents,
-        Contract Data, Forms B1-B2 with each key person&apos;s CV, Forms B3-B5, and Form B7 from your own
-        subcontracting answer when it applies (otherwise listed as not included, with why). Envelope 2 (Financial), separately: its
-        cover, the Form of Offer and the printed Financial workbook - kept out of the technical pack because it is
-        opened only after technical evaluation. The filled .xlsm workbooks come with them. Each contents page doubles as
-        the pack&apos;s checklist - every document with its status (included, included with a warning such as an
-        expired certificate that must be replaced, or not included and why) - and the same checklist is shown here
-        under each pack. Signatures, pricing and the B4/B5 write-ups stay with you.
+        Two sealed-envelope PDFs - Technical and Financial - each with its own contents page and checklist.
       </div>
 
       {blockers.length > 0 && (
