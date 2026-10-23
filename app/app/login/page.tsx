@@ -10,14 +10,20 @@ import { PasswordInput } from "../_components/PasswordInput";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { safeRedirectPath } from "@/lib/safeRedirect";
 
 // Read directly off window.location rather than useSearchParams(), which
 // would force this already-"use client" page behind a Suspense boundary
 // just to avoid a build-time prerender error - not worth it for one param.
+// safeRedirectPath (not a bare startsWith("/") check, an open-redirect
+// bypass - see lib/safeRedirect.ts) matters here more than almost anywhere
+// else in the app: `next` ends up both in router.push() after a real login
+// and in the OAuth redirectTo URL passed to /auth/callback, so an unsafe
+// value here is a direct phishing vector right after real authentication.
 function nextParam(): string {
   if (typeof window === "undefined") return "/dashboard";
   const v = new URLSearchParams(window.location.search).get("next");
-  return v && v.startsWith("/") ? v : "/dashboard";
+  return safeRedirectPath(v, "/dashboard");
 }
 
 /**

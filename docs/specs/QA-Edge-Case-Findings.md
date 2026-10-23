@@ -3546,3 +3546,47 @@ caught and stopped mid-run, then rewritten to mock unconditionally.
 
 **Regression:** full `test_award_prices.py` (Part 1, offline): all checks pass.
 `test_discovery_fanout.py` and `test_gov_sources.py`: both clean, unaffected.
+
+### Finding 57 (CONFIRMED, FIXED, severe - a real open-redirect bypass in the post-login/signup redirect, and a redirect sink with no validation at all)
+
+**Where:** three places reading a redirect target from user-controlled input, each with its own
+incomplete guard, plus one actual redirect SINK with no guard at all:
+`app/app/login/page.tsx` / `app/app/signup/page.tsx`'s `nextParam()` (a `?next=` query param, used
+in `router.push()` after email/password login and passed into the OAuth `redirectTo` URL),
+`app/app/company/document-scan/actions.ts`'s `backTo()` (a hidden `return_to` form field, added
+this same day for Spec v3 Batch 4's `/experience` upload wiring), and `app/app/auth/callback/route.ts`
+(the OAuth callback - the actual `NextResponse.redirect()` call right after a real sign-in
+succeeds), which read `next` straight off the query string with **zero validation**.
+
+**What was tested:** the three guarded call sites all checked only `value.startsWith("/")`
+(`actions.ts`'s own comment explicitly calls this "an open-redirect guard" - the intent was
+right, the implementation wasn't complete). Every real browser implements the WHATWG URL spec's
+"a backslash is treated as a path separator for a special scheme" rule - confirmed directly with
+Node's own WHATWG-compliant URL parser (the identical algorithm Chrome/Firefox/Safari use):
+`new URL("/\\evil.com", "https://tender-ready.vercel.app").href` is `"https://evil.com/"`, not a
+same-origin path. `"/\\evil.com"` passes `value.startsWith("/") && !value.startsWith("//")` (it
+starts with one `/`, not two) - every one of the 3 "guarded" call sites would have accepted it.
+The 4th site (`/auth/callback`) had no check at all, so a plain `"@evil.com"` (the classic
+userinfo-authority trick: `new URL("https://origin@evil.com/")` navigates to `evil.com`, confirmed
+the same way) would have passed straight through there too.
+
+**Why severe:** `next`/`return_to` on `/login`, `/signup` and the OAuth callback is the single
+highest-value real-world open-redirect target - a crafted link sends a victim through a genuine
+sign-in (or signup) on the real site, then redirects their already-authenticated browser straight
+to an attacker's phishing page immediately afterward, trading on the trust of having "just signed
+into Tender Ready."
+
+**Fix:** new shared `lib/safeRedirect.ts` (`isSafeRedirectPath`/`safeRedirectPath`), matching the
+same "one shared helper, not N independently-drifting inline copies" convention this project
+already uses for `safeFileName.ts`. The check is `/^\/(?!\/|\\)/` - exactly one leading `/`, next
+character neither `/` nor `\`. Applied at all 4 sites, including `/auth/callback` (which had none
+before) - a redirect SINK validating its own input is defense in depth, not redundant, the same
+discipline this project already applies to path-traversal checks.
+
+**Verified the regression test actually catches the bug:** new `lib/safeRedirect.spec.ts` (8
+checks: ordinary paths accepted, bare root accepted, protocol-relative rejected, the backslash
+bypass rejected in 3 forms, the no-leading-slash/`@`-trick cases rejected, empty/null/undefined
+rejected). Reverted `isSafeRedirectPath()` to the exact old `startsWith("/") && !startsWith("//")`
+check: 2 of 8 tests failed with exactly the predicted backslash-bypass value passing through;
+restored the fix: `8/8`. Full app suite (`npx vitest run`): 12 files, 129 tests, all pass. `npm run
+typecheck`/`lint`: clean (0 errors). Every `*.test.ts` file run the same way CI runs them: clean.
