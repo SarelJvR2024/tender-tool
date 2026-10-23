@@ -1576,3 +1576,50 @@ viewport - the same sandbox credential-generation limitation every batch has hit
 fix is a span/gap class change on components that already render correctly per the static-render
 check above and the existing build/test suite, but nobody has seen the real page with real data
 in a real browser.
+
+### Spec v3 Batch 9: company-level ECSA/SACPCMP collapse + registrations/properties/principals field width
+
+Picks up the two gaps Batch 8 flagged rather than fixing: "the company-level 'Size & offices'
+section asks every company for ECSA/SACPCMP staff counts unconditionally" and "the identical
+grid-squeeze on registrations/properties/principals' 'Notes' fields - different component family".
+
+**Part 1 - company-level ECSA/SACPCMP (O23, one level up from Batch 4)**: `EditForm.tsx`'s "Size &
+offices (SANRAL Form B3)" section and its read-only counterpart `SizeOfficesSection.tsx` both
+rendered ECSA-registered/SACPCMP-registered staff-count fields unconditionally, the exact same
+"ECSA as the universal category" problem Batch 4 (#105) already fixed at the *person* level.
+Applied the identical convention here: `recorded = ecsa_registered_staff_count != null ||
+sacpcmp_registered_staff_count != null` (a real `0` counts as recorded - this section's own
+description already says "blank is never written as 0", same meaning as "held" at the person
+level). In edit mode, not-recorded collapses both fields behind a `<details>` disclosure
+("+ Add ECSA or SACPCMP staff counts - only engineering-focused companies need these"), wrapped in
+`col-span-full` so it doesn't disturb `fieldGridClass`'s row layout; recorded shows them inline, as
+before. In read-only mode, not-recorded simply omits the two `Field` rows (no "Not on file" pair to
+show, and there's nothing to "add" from a read-only view - that lives in edit mode). Verified via
+`grep` that both columns are read ONLY by `pack-review-data.ts` (lists the field name/value in a
+tender pack review, does not gate anything on it) and the company-select string in `page.tsx` -
+confirmed, same as Batch 4's own verification, that a display-only change cannot affect any
+compliance/assessment logic.
+
+**Part 2 - registrations/properties/principals field width**: all three sub-pages
+(`registrations/page.tsx`, `properties/page.tsx`, `principals/page.tsx`) have their own "Notes"
+field via `ui.tsx`'s shared `Area` component, sitting in the same `grid` (`grid-cols-1
+sm:grid-cols-2 lg:grid-cols-3`) as short fields like a registration number or a title deed
+number - the identical violation Batch 8 just fixed in the main vault form, confirmed as a
+"different component family" (`ui.tsx`'s `Area`/`Text`/`grid`, not `shared.tsx`'s `Field`/
+`EditForm.tsx`'s `TextInput`/`fieldGridClass`). Added the same optional `fullWidth` prop to `Area`
+(`col-span-full`, identical pattern to Batch 8's `Field`/`TextInput` fix) and applied it at all
+three call sites. No other `Text`/`Select`/`YesNo` field on any of the three pages holds a
+comparably long value - checked each page's own field list, none needed the same treatment.
+
+**Tested**: `npm run verify` 0 errors, 129/129 vitest (unchanged - this batch added no new test
+files), 76/76 node:test both ways (`tsx --test` and the real CI invocation, `node
+--experimental-strip-types` per file). A standalone `react-dom/server` static render of both
+`EditForm` and `SizeOfficesSection` across three states (`ecsa`/`sacpcmp` both null, `ecsa=0`,
+`sacpcmp=3`) confirmed: not-recorded renders exactly one `<details>` in edit mode and zero ECSA
+fields in read-only mode; a real `0` in either field correctly counts as recorded (no `<details>`,
+field shown) rather than being treated as blank; either field alone being set reveals both, same
+OR logic as Batch 4's `ecsaOrSacpcmpHeld`. No render threw in any of the three states.
+
+**Not tested**: an actual signed-in render of `/company`, `/company/registrations`,
+`/company/properties`, or `/company/principals` - same sandbox credential-generation limitation
+every batch has hit all night.

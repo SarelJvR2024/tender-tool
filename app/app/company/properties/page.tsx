@@ -192,7 +192,7 @@ function PropertyForm({ p }: { p?: PropertyRow }) {
         <Select name="sapoa_grade" label="SAPOA grade" defaultValue={p?.sapoa_grade} options={[{ value: "", label: "Not graded" }, ...SAPOA_GRADES.map((g) => ({ value: g, label: `Grade ${g}` }))]} />
         <YesNo name="ground_floor_space" label="Space on the ground floor?" value={p?.ground_floor_space} />
         <YesNo name="wheelchair_accessible" label="Wheelchair accessible (ramp, ablutions)?" value={p?.wheelchair_accessible} />
-        <Area name="notes" label="Notes" defaultValue={p?.notes} />
+        <Area name="notes" label="Notes" defaultValue={p?.notes} fullWidth />
       </div>
       <div className="mt-3">
         <Submit>{p ? "Save changes" : "Add building"}</Submit>

@@ -307,7 +307,7 @@ function PrincipalForm({ p, people }: { p?: PrincipalRow; people: { id: string; 
       </div>
       <div className={`${grid} mt-3`}>
         <Text name="popia_consent_on" label="Consent to use their details for tenders, given on" type="date" defaultValue={p?.popia_consent_on} />
-        <Area name="notes" label="Notes" defaultValue={p?.notes} />
+        <Area name="notes" label="Notes" defaultValue={p?.notes} fullWidth />
       </div>
       <div className="my-2.5 text-[11px] leading-relaxed text-muted-foreground">
         Race and disability are special personal information under POPIA. Record them only to claim B-BBEE / specific-goals ownership,

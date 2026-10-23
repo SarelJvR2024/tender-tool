@@ -263,7 +263,7 @@ function HeldForm({ h, holders, types }: { h?: HeldRegistration; holders: Holder
         <Text name="issued_on" label="Issued on" type="date" defaultValue={h?.issued_on} />
         <Text name="expiry_date" label="Expires / renewal due" type="date" defaultValue={h?.expiry_date} />
         <Text name="certified_on" label="Copy certified on (if certified)" type="date" defaultValue={h?.certified_on} />
-        <Area name="notes" label="Notes" defaultValue={h?.notes} />
+        <Area name="notes" label="Notes" defaultValue={h?.notes} fullWidth />
       </div>
       <div className="my-3">
         <div className="mb-1.5 text-[11.5px] font-semibold text-foreground">
