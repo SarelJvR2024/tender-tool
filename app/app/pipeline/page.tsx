@@ -142,7 +142,17 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
       .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, ${ECONOMICS_COLUMNS})`)
       .order("closing_date", { ascending: true }),
     // Discovery's fit verdict, where this tender came from the scored feed.
-    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories, downgraded_from, downgrade_acknowledged_at"),
+    // Scaling fix (see app/lib/discoveryPagination.ts's module comment for
+    // the root-cause writeup): discovered_opportunities accumulates one row
+    // per OCDS release ever scored against this company, forever, but this
+    // lookup only ever needs rows that became one of THIS company's own
+    // tenders (matched below by tender_id/ocid/contract_number against the
+    // `tenders` rows already loaded above) - every such row has `tender_id`
+    // set (pursue_discovered_opportunity() always backfills it the moment a
+    // tender is pursued, confirmed in migrations 0024/0051), so narrowing to
+    // `tender_id is not null` drops only opportunities nothing here reads,
+    // never one this page's matching still needs.
+    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories, downgraded_from, downgrade_acknowledged_at").not("tender_id", "is", null),
     // Who can get credit for a submission (item 26, migration 0034): the
     // company's people roster, same list the task assignee picker uses.
     supabase.from("people").select("id, name").order("name"),

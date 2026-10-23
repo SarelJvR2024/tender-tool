@@ -114,7 +114,14 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
       .select(`tender_id, pipeline_stage, submitted_at, ${ECONOMICS_COLUMNS}, tenders(contract_no, title, description, buyer, family, ocid)`)
       .in("pipeline_stage", ["bidding", "submitted", "won", "lost"]),
     supabase.from("people").select("id, name").order("name"),
-    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, categories"),
+    // Scaling fix (see app/lib/discoveryPagination.ts's module comment for
+    // the root-cause writeup): only used below to look up `categories` for
+    // tenders already in this company's own pack history (`packs` above) -
+    // every discovered_opportunities row that can match one of those packs
+    // has `tender_id` set (pursue_discovered_opportunity() always backfills
+    // it once a tender is pursued), so this never drops a row the lookup
+    // below still needs.
+    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, categories").not("tender_id", "is", null),
   ]);
   const people = (peopleRows ?? []) as CreditPerson[];
   const taxonomy = await loadDisciplineTaxonomy(supabase);

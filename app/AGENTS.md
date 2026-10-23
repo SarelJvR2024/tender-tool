@@ -2031,3 +2031,140 @@ pass - 2 `no-img-element` on `Logo.tsx`, 1 `no-unused-vars` on `analytics/page.t
 replace the 4 `fetchAllRows` cases moved out of `marketPricing.spec.ts`). Full `node:test` sweep both
 ways: `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 76/76; the same
 set run individually via `node --experimental-strip-types --test <file>` - 76/76, zero failures.
+
+---
+
+### Opportunities/Bids/Pricing history: discovered_opportunities scaling fix (Sarel: "filtering tenders is going to be critical with the load, we need to be smart about how we manage that")
+
+**Root cause.** `discovered_opportunities` is a per-company table that accumulates one row for
+every OCDS release ever scored against that company, forever - there is no retention/archival
+(see the proposal at the end of this entry). Three call sites fetched the ENTIRE table, unbounded,
+on every page load: `app/discovery/page.tsx` (no `.range()`/`.limit()` at all, with every
+verdict/changed/reassessed filter done in JS over the full in-memory array), `app/pipeline/page.tsx`,
+and `app/pipeline/pricing/page.tsx` (the latter two only ever using rows to look up
+`categories`/`verdict` for tenders this company has actually pursued). **This is the same class of
+bug PR #111 fixed** ("Fix Market Intelligence silently reading a 2.5% sample, not the real table",
+`lib/marketPricing.ts`'s own `fetchAllRows()`/`POSTGREST_PAGE_SIZE` comment): PostgREST silently
+caps any single `.select()` response at 1000 rows (`db-max-rows`, confirmed live during that PR's
+own investigation) regardless of a client-side `.limit()` past it - so an unpaginated discovery
+fetch wasn't just slow, it would eventually start silently truncating and showing wrong
+counts/filters once a company's scored history passed 1000 rows. Treated as a real, found
+defect-in-waiting, not a hypothetical - exactly per the task brief.
+
+**Fixed, pure application-code, no schema/migration change** (the table was already indexed for
+exactly this access pattern - `discovered_opportunities_company_verdict_idx (company_id, verdict)`
+and `discovered_opportunities_company_first_seen_idx (company_id, first_seen desc)`, migration
+0004):
+
+1. **Pipeline + Pipeline Pricing**: both queries narrowed with `.not("tender_id", "is", null)`.
+   Verified safe by reading `pursue_discovered_opportunity()`'s full history across migrations
+   0018/0024/0051 - the 0024/0051 redefinitions (`create or replace function`, which wins) always
+   `update discovered_opportunities set tender_id = t_id where id = opp.id` the moment a tender is
+   pursued, and the opportunity upsert key is `(company_id, ocid)` (one row per company per ocid,
+   `seed_supabase_opportunities.py`), so every row either of these two pages' ocid/contract_number/
+   tender_id lookup can ever match already has `tender_id` set. Narrowing drops only opportunities
+   neither page reads anyway (never pursued into a `tenders` row), never one the lookup still needs.
+   Zero UI/behaviour change.
+2. **Discovery page pagination**: a growing `.range(0, show)` window (default 30, `PAGE_SIZE` in
+   the new `lib/discoveryPagination.ts`), fetching `show + 1` rows each time to know for certain
+   whether a further row exists (no extra count query) and capped at `MAX_SHOW = 300` (10 "Load
+   more" clicks). **Chosen over true keyset pagination** (which the task preferred and the index
+   supports directly) because expressing a keyset tuple comparison
+   (`WHERE (first_seen, id) < (cursor)`) in supabase-js means a hand-rolled `.or()`/`.and()`
+   PostgREST filter string, and this sandbox has no live Supabase project to verify that string
+   against (same standing gap as every other page in `docs/specs/System-Status.md`) - a silently-
+   wrong hand-rolled filter is a worse failure mode than the bug being fixed. The growing-limit
+   approach uses only ordinary `.order()`/`.range()` calls, never skips or duplicates rows under
+   concurrent inserts the way classic increasing-OFFSET pagination can (there is no offset - a new
+   row inserted between "Load more" clicks just appears at the top of a bigger, still fully
+   consistent window, like a refreshed inbox), at the cost of re-transferring already-seen rows on
+   every click instead of only the incremental delta - bounded and cheap given `MAX_SHOW`. True
+   keyset is a reasonable follow-up once there's a way to verify a compound PostgREST filter
+   against a real project. Full reasoning + the "open downgrade bump-to-top is now only within the
+   loaded window, not the whole table" tradeoff (addressed below) are in `discoveryPagination.ts`'s
+   own module comment and in the page's inline comments.
+3. **Verdict filter tabs pushed into the query.** Strong fit/Needs review/Not a fit are now
+   `.eq()`/`.in()` on the indexed `verdict` column server-side (`verdictQuerySpec()`, pure and unit
+   tested). Per-tab counts are their own `{count:"exact", head:true}` queries (5 total, run in
+   parallel, no row data transferred) instead of scanning the fetched array - and are real,
+   company-wide exact counts (`count:"exact"` is accurate even past PostgREST's 1000-row *data*
+   cap - only the row data is capped, confirmed by the same Content-Range behaviour PR #111 found).
+4. **Re-assessed turned out to be a real, full-history filter, not just a scoped one** - the task
+   flagged this as worth checking (`downgraded_from`/`downgrade_acknowledged_at` are real columns
+   on the row), and it checks out: `.not("downgraded_from", "is", null)` is both the main-query
+   predicate and its own exact count, so the Re-assessed tab now genuinely searches this company's
+   entire downgrade history (paginated the same growing-window way), not just whatever's loaded on
+   "All". **Changed is the one tab that stays an honest, scoped limitation** - it needs a
+   cross-reference against `tender_listing_changes`, which isn't a column on `discovered_opportunities`,
+   so it can't become a WHERE clause without a schema change (a dedicated view/function - see the
+   proposal below). It only searches whatever window is currently loaded (shown with its own
+   explanatory note on the page, and its count badge is only ever computed while that tab is open -
+   "–" otherwise rather than a fake number elsewhere).
+5. **The open-downgrade warning banner at the top of the page** got its own small, separately-scoped
+   query (`.not("downgraded_from","is",null).is("downgrade_acknowledged_at", null)`, row data capped
+   at 200 with an honest "200+" shown past that, but the *count* itself is always the true,
+   un-truncated total) so it stays accurate across the company's full history regardless of which
+   page/tab is currently in view - it no longer silently undercounts once history grows past
+   whatever's loaded. Its "Show re-assessed tenders" link is how every open downgrade stays
+   reachable even though the in-window bump-to-top (unchanged visual behaviour) can no longer
+   guarantee an old one appears on the very first screen of "All".
+6. **The `tender_listing_changes` ocid lookup** now naturally only chunks over the current window's
+   ocids (it operates on `rows`, which is now bounded) - fell out for free from the pagination
+   change, no separate work needed, confirmed by reading the data flow rather than assumed.
+7. **Interaction with `lib/marketPricing.ts`'s `MAX_PRICING_LOOKUPS = 40` cap** (PR #120,
+   Opportunities card enrichment): **not touched in this batch**, and worth noting precisely because
+   that PR is still open/draft, not merged (see the coordination note below, despite this task's
+   own brief describing it as "just-merged" - checked directly via the GitHub API, not assumed).
+   Once this pagination lands, that cap stops being load-bearing on its own (a page can no longer
+   show more than `MAX_SHOW` cards at once, so `MAX_PRICING_LOOKUPS` will rarely if ever actually
+   bind) - not a loose end, just worth whoever reconciles the two branches knowing why.
+
+**A real cross-session coordination finding, not assumed.** This task's own brief described PR #120
+as "just-merged" - it is not: `gh api repos/.../pulls/120` shows `draft: true, merged: false` as of
+this pass, and its diff substantially rewrites the same `renderDiscovery()` function this batch
+touches (countdown chips, compliance/pricing/"done similar tenders before" insight cards), including
+logic that scans the company's **full, unpaginated** `rows` array on purpose (`buildDoneHistory()`
+needs every tender this company has ever pursued, not just the current page, to answer "done N
+similar tenders before"). **This is a real, substantive merge/semantics conflict for whoever lands
+second, not just a textual diff conflict** - PR #120's "done similar tenders before" feature will
+need to either accept running over a bounded window too (losing some historical matches) or get its
+own separate, targeted query once this pagination merges. Flagging this explicitly here rather than
+leaving it only in chat/PR description, per this file's own standing discipline. PR #118
+(discovery-scoring-diagnosis) is also still open/draft but touches only `engine/discovery/`
+Python files, not `page.tsx` - no overlap there.
+
+**Verified**: `npm run verify` (0 errors, confirmed the two pre-existing warnings - `Logo.tsx`'s
+`<img>` and `analytics/page.tsx`'s unused `STAGE_META` import - predate this branch, both traced to
+commits before this work), `npx vitest run` 144/144 (unchanged - no vitest-covered logic touched),
+`npx tsx --test` over every `*.test.ts` file 88/88 (76 existing + 12 new in
+`discoveryPagination.test.ts`, covering `parseShowParam`/`nextShow`/`hasMore`/`canLoadMore` and the
+verdict-to-query-filter mapping), and `node --experimental-strip-types --test` per file individually
+- same 88/88, both sweeps agree. A temporary dev-only mock-data route
+(`app/design/screenshot-discovery`, deleted before commit - confirmed via `git status` showing only
+the real feature files) rendered the real pagination/filter logic from `lib/discoveryPagination.ts`
+(imported directly, not reimplemented) against an in-memory mock dataset at 1440x900 and 390x844 via
+Playwright (a temporary `playwright-core` dev install, removed again after - `npm uninstall
+playwright-core`, confirmed no `package.json`/`package-lock.json` diff remains): clicked "Load
+more" (window grew from 30 to 55 rows, button correctly disappeared once no more existed), clicked
+through Strong fit/Needs review/Not a fit/Changed/Re-assessed tabs (each filtered server-side
+correctly; Re-assessed showed all 5 ever-downgraded mock rows including 2 un-acknowledged ones
+bumped to the top with the warning border, confirming it is NOT scoped to a window; Changed showed
+its scoped-limitation note and only the 5 mock rows with a matching "listing change" inside the
+loaded window). Not verified: against a live Supabase project or real authenticated session (same
+standing gap as every other page in this file) - the mock route therefore also skipped `AppShell`
+(sidebar/topbar), which needs a real session and wasn't the part under test.
+
+**Explicitly out of scope - proposed for Sarel's own review, not built:**
+- **A real DB-side full-text/buyer/title search box** - would want a trigram index or similar, a
+  schema change.
+- **A dedicated SQL function/materialized view so "Changed" (and, if ever needed again, a cheap
+  "Changed" count) can search this company's FULL history, not just the loaded pages** - also
+  schema work. Re-assessed no longer needs this (see above - it turned out to reduce to a real
+  column predicate), so this follow-up is narrower than the original task brief anticipated: only
+  "Changed" (the `tender_listing_changes` cross-reference) would benefit.
+- **A retention/archival policy for old `discovered_opportunities` rows** (e.g. auto-dropping
+  `not_a_fit`/`closed` rows after N days) - could independently fix a lot of the scaling problem at
+  the source, but is a product/data-retention decision for Sarel, not something to decide here. The
+  pagination/filtering fix in this entry works regardless of whether such a policy ever exists, but
+  would need less of it (smaller `MAX_SHOW`, fewer "Load more" clicks to reach deep history) if one
+  did.

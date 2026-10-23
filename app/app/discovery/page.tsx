@@ -26,6 +26,7 @@ import { ErrorState } from "@/components/tt/error-state";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Inbox } from "lucide-react";
+import { canLoadMore, COUNTABLE_FILTERS, hasMore, nextShow, parseShowParam, verdictQuerySpec } from "@/lib/discoveryPagination";
 
 // Reads the signed-in user's company via RLS on every request (same reasoning
 // as app/app/dashboard/page.tsx) - can't be prerendered.
@@ -88,16 +89,6 @@ const FILTERS: { key: VerdictFilter; label: string }[] = [
 const SAST_DATE: Intl.DateTimeFormatOptions = { timeZone: "Africa/Johannesburg", day: "numeric", month: "short", year: "numeric" };
 const SAST_DATETIME: Intl.DateTimeFormatOptions = { ...SAST_DATE, hour: "2-digit", minute: "2-digit" };
 
-// "needs_review" groups assess_tender.py's "possible" and "needs_review" verdicts -
-// both mean "a human should look at this", just at different confidence levels
-// (see assess_fit()'s docstring/logic in engine/discovery/assess_tender.py).
-function matchesFilter(verdict: string, filter: VerdictFilter): boolean {
-  if (filter === "all" || filter === "changed") return true;
-  if (filter === "reassessed") return false; // handled on the row (isDowngraded)
-  if (filter === "needs_review") return verdict === "possible" || verdict === "needs_review";
-  return verdict === filter;
-}
-
 // Design-system audit fix (2026-10-21): soft-tint token classes, not stale hex.
 function verdictChip(verdict: string): { label: string; chipClass: string } {
   switch (verdict) {
@@ -119,15 +110,18 @@ function verdictChip(verdict: string): { label: string; chipClass: string } {
 export default async function DiscoveryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ verdict?: string; error?: string }>;
+  searchParams: Promise<{ verdict?: string; error?: string; show?: string }>;
 }) {
-  const { verdict: verdictParam, error: actionError } = await searchParams;
+  const { verdict: verdictParam, error: actionError, show: showParam } = await searchParams;
   const activeFilter: VerdictFilter = FILTERS.some((f) => f.key === verdictParam)
     ? (verdictParam as VerdictFilter)
     : "all";
+  // Scaling fix (see lib/discoveryPagination.ts): a growing "show" window
+  // instead of fetching this company's entire scored history on every load.
+  const show = parseShowParam(showParam);
 
   try {
-    return await renderDiscovery(activeFilter, actionError);
+    return await renderDiscovery(activeFilter, actionError, show);
   } catch (e) {
     console.error("discovery page failed to load", e);
     return (
@@ -146,22 +140,69 @@ export default async function DiscoveryPage({
   }
 }
 
-async function renderDiscovery(activeFilter: VerdictFilter, actionError: string | undefined) {
+// Applies the verdictQuerySpec() predicate (lib/discoveryPagination.ts) to a
+// discovered_opportunities query builder. Kept as one tiny function so the
+// main row query and every count query build their WHERE clause from the
+// exact same pure mapping - no risk of the two drifting apart.
+function withVerdictSpec<Q extends { eq: (c: string, v: string) => Q; in: (c: string, v: string[]) => Q; not: (c: string, op: string, v: null) => Q }>(
+  query: Q,
+  filter: VerdictFilter,
+): Q {
+  const spec = verdictQuerySpec(filter);
+  if (spec.kind === "eq") return query.eq(spec.column, spec.value);
+  if (spec.kind === "in") return query.in(spec.column, spec.values);
+  if (spec.kind === "not_null") return query.not(spec.column, "is", null);
+  return query;
+}
+
+async function renderDiscovery(activeFilter: VerdictFilter, actionError: string | undefined, show: number) {
   const supabase = await createClient();
   const taxonomy = await loadDisciplineTaxonomy(supabase); // category labels (0040)
 
-  // Scoped to the signed-in user's company via RLS (is_company_member) -
-  // this query shape works the same regardless of which company is asking.
-  const [{ data: opportunities, error }, { data: packRows }, { data: labelRows }] = await Promise.all([
-    supabase
-      .from("discovered_opportunities")
-      .select(`id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status, etenders_category, etenders_category_check, ${DOWNGRADE_COLUMNS}`)
-      .order("first_seen", { ascending: false }),
+  // Scaling fix (Sarel, 2026-10-23: "filtering tenders is going to be
+  // critical with the load" - see lib/discoveryPagination.ts's own module
+  // comment for the full root-cause writeup and the marketPricing.ts/PR #111
+  // precedent). discovered_opportunities accumulates one row per OCDS
+  // release ever scored against this company, forever - this used to
+  // `.select()` that whole table, unbounded, on every load. Now: a growing
+  // `.range(0, show)` window (fetching show+1 to know if "Load more" should
+  // show), the verdict filter tabs pushed into the query itself (`eq`/`in`
+  // on the indexed `verdict` column, or `downgraded_from is not null` for
+  // Re-assessed - a real column predicate, not a JS scan), and the per-tab
+  // counts as their own {count:"exact", head:true} queries (no row data
+  // transferred) rather than scanning the full in-memory array.
+  let opportunityQuery = supabase
+    .from("discovered_opportunities")
+    .select(`id, contract_number, buyer, title, closing_date, categories, verdict, reasons, document_urls, first_seen, score_outlook, tender_id, source, ocid, listing_sources, province, tender_type, briefing, listing_status, etenders_category, etenders_category_check, ${DOWNGRADE_COLUMNS}`)
+    .order("first_seen", { ascending: false })
+    .order("id", { ascending: false }); // deterministic tiebreak only - not an indexed column, just keeps "top N" stable across requests
+  opportunityQuery = withVerdictSpec(opportunityQuery, activeFilter);
+
+  const [{ data: opportunities, error }, { data: packRows }, { data: labelRows }, { data: openDowngradeRows, count: openDowngradeTotal, error: openDowngradeError }] = await Promise.all([
+    opportunityQuery.range(0, show), // show+1 rows: the "fetch one extra" trick, see hasMore()
     // RLS: this company's own packs - which re-assessed tenders it is working on.
     supabase.from("tender_packs").select("tender_id, pipeline_stage"),
     supabase.rpc("company_member_labels"),
+    // The "no longer as good a fit" banner needs an ACCURATE count across the
+    // company's full history, not just this page - downgraded_from/
+    // downgrade_acknowledged_at are real columns, so this is a real,
+    // separately-scoped query (never the full table: only ever-downgraded,
+    // not-yet-acknowledged rows, which in practice stays small - these are
+    // exactly the rows someone still needs to act on). count:"exact" is
+    // accurate even past PostgREST's 1000-row *data* cap (same Content-Range
+    // "0-999/39536" behaviour marketPricing.ts's own fix found - the count is
+    // never truncated, only the row data is); the row data itself is capped
+    // at 200 for the "N you are working on" sub-count below, with an honest
+    // "+" shown if a company somehow has more open downgrades than that.
+    supabase
+      .from("discovered_opportunities")
+      .select("tender_id", { count: "exact" })
+      .not("downgraded_from", "is", null)
+      .is("downgrade_acknowledged_at", null)
+      .range(0, 199),
   ]);
   if (error) console.error("discovered_opportunities select failed", error);
+  if (openDowngradeError) console.error("open-downgrade banner count failed", openDowngradeError);
   const { data: { user } } = await supabase.auth.getUser();
   const stageByTender = new Map<string, string>();
   for (const p of (packRows ?? []) as { tender_id: string; pipeline_stage: string | null }[]) {
@@ -171,16 +212,53 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   for (const r of (labelRows ?? []) as { user_id: string; label: string }[]) labels.set(r.user_id, r.label);
   const whoAcknowledged = (id: string | null) => (!id ? null : id === user?.id ? "you" : labels.get(id) ?? "a former member");
 
-  // A downgrade nobody has marked seen yet comes first (the order is otherwise newest found first).
-  const rows = ((opportunities ?? []) as unknown as OpportunityRow[])
+  const fetchedRows = (opportunities ?? []) as unknown as OpportunityRow[];
+  const moreBeyondWindow = hasMore(fetchedRows.length, show);
+  // A downgrade nobody has marked seen yet comes first within this window
+  // (the order is otherwise newest-found-first) - same bump as before,
+  // just now scoped to the loaded window rather than the full table: an
+  // open downgrade older than whatever's currently loaded on the "All" tab
+  // won't visually float to the top the way it used to when everything was
+  // fetched at once. That's fine, not a silent loss - the banner above is
+  // computed from its own full-history, un-paginated count (openDowngradeCount,
+  // below) so it always tells the truth about how many exist, and its "Show
+  // re-assessed tenders" link goes to the Re-assessed tab, which IS a real
+  // full-history filter (downgraded_from is not null, pushed into the
+  // query itself) with its own "Load more" - so every open downgrade is
+  // always reachable, just not always on the very first screen of "All".
+  const rows = fetchedRows
+    .slice(0, show)
     .map((r, i) => ({ r, i }))
     .sort((a, b) => Number(isOpenDowngrade(b.r)) - Number(isOpenDowngrade(a.r)) || a.i - b.i)
     .map(({ r }) => r);
-  const openDowngrades = rows.filter(isOpenDowngrade);
-  const openPursued = openDowngrades.filter((r) => r.tender_id && stageByTender.has(r.tender_id));
+
+  const openDowngradeTenderIds = new Set(((openDowngradeRows ?? []) as { tender_id: string | null }[]).map((r) => r.tender_id).filter((id): id is string => !!id));
+  const openDowngradeCount = openDowngradeTotal ?? openDowngradeTenderIds.size;
+  const openDowngradeCountTruncated = openDowngradeCount > 200 && (openDowngradeRows ?? []).length >= 200;
+  let openPursuedCount = 0;
+  for (const id of openDowngradeTenderIds) if (stageByTender.has(id)) openPursuedCount++;
+
+  // Per-tab counts: one cheap {count:"exact", head:true} query per countable
+  // filter, run in parallel - never a full-table scan. "changed" has no
+  // count here (see below); "all"'s count is likewise a real query, not
+  // `rows.length`, since `rows` is only the current window. Kicked off here
+  // (depends on nothing computed from `rows`) so it runs concurrently with
+  // the listing-changes lookup just below, not after it.
+  const countEntriesPromise = Promise.all(
+    COUNTABLE_FILTERS.map(async (f) => {
+      let q = supabase.from("discovered_opportunities").select("id", { count: "exact", head: true });
+      q = withVerdictSpec(q, f);
+      const { count, error: countError } = await q;
+      if (countError) console.error(`discovered_opportunities count failed for filter=${f}`, countError);
+      return [f, count ?? 0] as const;
+    }),
+  );
 
   // Listing changes on these tenders (public listing facts, readable by any
-  // signed-in user - 0051). Chunked so the in.() list stays a sane URL length.
+  // signed-in user - 0051). Scoped to this window's ocids only now that the
+  // window itself is bounded (item 5: falls out for free from pagination,
+  // no separate work needed) - chunked so the in.() list stays a sane URL
+  // length regardless.
   const ocids = [...new Set(rows.map((r) => r.ocid).filter((o): o is string => !!o))];
   const changeRows: ListingChange[] = [];
   for (let i = 0; i < ocids.length; i += 150) {
@@ -193,20 +271,19 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   const changesByOcid = groupByOcid(changeRows);
   const changesFor = (r: OpportunityRow) => (r.ocid ? changesByOcid.get(r.ocid) ?? [] : []);
 
-  const counts: Record<VerdictFilter, number> = {
-    all: rows.length,
-    strong_fit: rows.filter((r) => r.verdict === "strong_fit").length,
-    needs_review: rows.filter((r) => r.verdict === "possible" || r.verdict === "needs_review").length,
-    not_a_fit: rows.filter((r) => r.verdict === "not_a_fit").length,
-    changed: rows.filter((r) => changesFor(r).length > 0).length,
-    reassessed: rows.filter(isDowngraded).length,
-  };
+  // "Changed" is the one tab that genuinely can't reduce to a WHERE clause
+  // (it needs tender_listing_changes, which isn't a column on this row) -
+  // an honest, scoped limitation (see app/AGENTS.md): it only ever searches
+  // whatever window is currently loaded, not this company's full history.
+  // Computed without an extra query only when that tab is actually active;
+  // counts[] below is null for "changed" otherwise rather than a fake number.
+  const changedVisible = activeFilter === "changed" ? rows.filter((r) => changesFor(r).length > 0) : rows;
 
-  const visibleRows = rows.filter((r) =>
-    activeFilter === "reassessed"
-      ? isDowngraded(r)
-      : matchesFilter(r.verdict, activeFilter) && (activeFilter !== "changed" || changesFor(r).length > 0),
-  );
+  const countEntries = await countEntriesPromise;
+  const counts: Record<VerdictFilter, number | null> = { changed: activeFilter === "changed" ? changedVisible.length : null } as Record<VerdictFilter, number | null>;
+  for (const [f, c] of countEntries) counts[f] = c;
+
+  const visibleRows = activeFilter === "changed" ? changedVisible : rows;
 
   return (
     <AppShell>
@@ -240,20 +317,23 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
           </div>
         )}
 
-        {openDowngrades.length > 0 && (
+        {openDowngradeCount > 0 && (
           <div
             className={cn(
               "mb-4 rounded-lg border px-4 py-3 text-sm",
-              openPursued.length ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-warning/30 bg-warning/10 text-warning",
+              openPursuedCount ? "border-destructive/20 bg-destructive/10 text-destructive" : "border-warning/30 bg-warning/10 text-warning",
             )}
           >
             <strong>
-              &#9888; {openDowngrades.length} tender{openDowngrades.length === 1 ? " is" : "s are"} no longer as good a fit as when
-              {openDowngrades.length === 1 ? " it was" : " they were"} found
+              &#9888; {openDowngradeCountTruncated ? `${openDowngradeCount}+` : openDowngradeCount} tender{openDowngradeCount === 1 ? " is" : "s are"} no longer as good a fit as when
+              {openDowngradeCount === 1 ? " it was" : " they were"} found
             </strong>
-            {openPursued.length > 0 && <> - including {openPursued.length} you are working on</>}.{" "}
-            {openDowngrades.length === 1 ? "It was" : "They were"} scored again (usually because your company profile changed) and came out
-            worse. {openDowngrades.length === 1 ? "It is" : "Each is"} flagged below until someone in your company marks it as seen.{" "}
+            {openPursuedCount > 0 && (
+              <> - including {openPursuedCount}
+                {openDowngradeCountTruncated ? "+" : ""} you are working on</>
+            )}.{" "}
+            {openDowngradeCount === 1 ? "It was" : "They were"} scored again (usually because your company profile changed) and came out
+            worse. {openDowngradeCount === 1 ? "It is" : "Each is"} flagged below until someone in your company marks it as seen.{" "}
             <a href="/discovery?verdict=reassessed" className="font-semibold text-foreground">Show re-assessed tenders</a>
           </div>
         )}
@@ -273,12 +353,13 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                 >
                   {f.label}
                   <span
+                    title={counts[f.key] === null ? "Only counted while this tab is open - see the note below" : undefined}
                     className={cn(
                       "flex min-w-[18px] items-center justify-center rounded-full px-1.5 py-0.5 text-[10px] font-bold",
                       isActive ? "bg-background/20 text-background" : "bg-muted text-muted-foreground",
                     )}
                   >
-                    {counts[f.key]}
+                    {counts[f.key] ?? "–"}
                   </span>
                 </a>
               );
@@ -290,6 +371,19 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
           <ScrollFade fadeColor="244, 245, 247" minWidthToHide={900} />
         </div>
 
+        {activeFilter === "changed" && (
+          // Honest, scoped limitation (task item 4 / app/AGENTS.md): Changed
+          // needs a cross-reference against tender_listing_changes, which
+          // isn't a column on discovered_opportunities, so it can't be an
+          // indexed WHERE clause the way Re-assessed now is. It only ever
+          // searches whatever window is loaded below, not this company's
+          // full scored history - "Load more" extends how far back it looks.
+          <div className="mb-4 rounded-lg border border-border bg-card px-4 py-3 text-xs text-muted-foreground">
+            Showing listing changes found among the {Math.min(show, rows.length)} most recently discovered tenders only - older
+            history isn&apos;t scanned yet. Click &quot;Load more&quot; below to check further back.
+          </div>
+        )}
+
         <div className="flex flex-col gap-2.5">
           {visibleRows.length === 0 && !error && (
             <div className="rounded-lg border border-border bg-card">
@@ -297,9 +391,11 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                 icon={Inbox}
                 title={activeFilter !== "all" ? "Nothing matches this filter" : "Nothing scored yet"}
                 description={
-                  activeFilter !== "all"
-                    ? "Try \"All\" to see everything scored so far."
-                    : "The daily scan checks every open tender against your company profile automatically, or you can load a tender you've already found with the button above."
+                  activeFilter === "changed"
+                    ? "No listing changes among the tenders loaded so far - try \"Load more\" to check further back."
+                    : activeFilter !== "all"
+                      ? "Try \"All\" to see everything scored so far."
+                      : "The daily scan checks every open tender against your company profile automatically, or you can load a tender you've already found with the button above."
                 }
               />
             </div>
@@ -523,6 +619,22 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
             );
           })}
         </div>
+
+        {canLoadMore(show, moreBeyondWindow) && (
+          <div className="mt-4 flex justify-center">
+            <a
+              href={`/discovery?verdict=${activeFilter}&show=${nextShow(show)}`}
+              className={buttonVariants({ variant: "outline", className: "min-h-11" })}
+            >
+              Load more
+            </a>
+          </div>
+        )}
+        {!canLoadMore(show, moreBeyondWindow) && moreBeyondWindow && (
+          <p className="mt-4 text-center text-xs text-muted-foreground">
+            Showing the {show} most recent matches - narrow with a filter tab above to see further back.
+          </p>
+        )}
       </div>
     </AppShell>
   );
