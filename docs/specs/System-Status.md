@@ -8,8 +8,8 @@ this for *what actually exists right now, and what's inconsistent between agents
 
 ---
 
-**Tender Command Center & Operational Logistics Engine - new feature, built end-to-end on
-`tender-command-center` branch, not yet merged - 2026-10-24.** Full response to Sarel's own brief
+**Tender Command Center & Operational Logistics Engine - merged to `main` as PR #132
+(`576914e`), real data confirmed working - 2026-10-23/24.** Full response to Sarel's own brief
 of the same name: the dashboard's "Closing soon" list is replaced with a real operational-triage
 view built around South African public-tender physical-submission logistics (printing, binding,
 transit all take real hours, and the real cutoff for a physical box is `closing_date -
@@ -67,11 +67,41 @@ blocker as the 2026-10-23 ~19:00 UTC addendum below: `psql "$SUPABASE_DB_URL"` c
 on raw Postgres-wire TCP, no Management API token present). Both error paths are the dashboard's
 and tender workspace's own pre-existing `{error}`/`packError` graceful-degradation handling doing
 exactly its job - not a bug this PR introduced, and proof the new logistics UI correctly no-ops
-(`{tenderPack && (...)}`) rather than crashing when its own data isn't there yet. **Sarel needs to
-paste `app/supabase/migrations/0090_submission_logistics.sql` into Supabase's own SQL Editor
-(same project the Preview/Production env vars point at) before the Command Center's dashboard
-lanes or the workspace's SubmissionModeBadge can be visually confirmed with real data** - the code
-itself is already fully built and tested; this is a data-layer step, not a code fix.
+(`{tenderPack && (...)}`) rather than crashing when its own data isn't there yet. Sarel applied
+migration 0090 himself via Supabase's SQL Editor.
+
+**Real bug, only surfaced once migration 0090 was applied to real data, found and fixed before
+merge.** Re-verified the preview immediately after Sarel confirmed the migration was applied: the
+dashboard now threw to its generic whole-page `ErrorState` (not the soft `{error}` banner from
+before) - a genuine crash, not graceful degradation. Root cause: `renderDashboard()`'s new
+`activeBids` builder filtered on `IN_PROGRESS_STAGES.includes(stageOf(t))`, and `stageOf()` falls
+back to `"found"` (itself an in-progress stage) for any tender with **no `tender_packs` row at
+all** (i.e. every opportunity nobody has clicked "Start a tender pack" on yet) - so
+`t.tender_packs[0].id` read `.id` off `undefined` and crashed the whole page the moment this
+company had any not-yet-started tender in its pipeline (this test account had 7). Only showed up
+with real data because the pre-migration preview's own `{error}` banner masked it entirely (the
+`tenders` select itself was failing first, before `activeBids` ever ran). Fixed by filtering on
+`tender_packs.length > 0` before building triage cards - a tender with no pack yet has nothing
+real to triage anyway, consistent with the feature's own premise. Re-verified clean on the live
+preview after the fix: dashboard's 3 lanes populate correctly (7 active bids, one real Dispatch &
+delivery card with a working tap-to-advance `DispatchStatusButton`), the workspace's
+`SubmissionModeBadge` shows the real Closing time / − transit / − print & bind / Hard target
+breakdown, the Pack compiler tab's logistics form saves correctly - all with zero console errors.
+Full local suite re-run green after the fix (tsc/eslint/build/vitest 147/147/node-test 138/138).
+**Merged to `main`** (`576914e`); `app-ci`/`bridge-worker-ci` triggered, status being tracked.
+
+**Deliberately scoped as a separate follow-up PR, per Sarel's own explicit sequencing decision**:
+a much larger "Master Overhaul" IA brief arrived mid-session proposing a near-total rewrite of
+every top-level page (Dashboard shape, Tender Workspace tab names/order, a vault slide-over-drawer
+editing pattern, ZAR/VAT formatting, copy cleanup, an RFP quick-access link). Audited against the
+real repo before touching anything (same discipline as the earlier "Phase 2 Completion" catch):
+several of its claimed routes/tab names didn't match this repo, several of its asks already exist
+(Pipeline's Kanban+List views, the sticky workspace header), and its dashboard/tab proposals
+directly conflicted with Command Center's just-shipped, just-reviewed shape. Sarel chose: merge
+Command Center first (done, above), then a separate, explicitly-scoped follow-up PR for only the
+confirmed-real gaps (vault drawers for CSD/Tax PIN/COIDA, ZAR/VAT formatting, copy cleanup, RFP
+quick-access link) - not the dashboard/tab rewrite. That follow-up is in progress, scoped by a
+fresh audit of what's real in each of those 4 areas before any code is written.
 
 ---
 
