@@ -32,6 +32,8 @@ import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { buildDoneHistory, pricingCategoriesFor, pricingSegmentKey, similarTendersBefore } from "@/lib/opportunityInsights";
 import { MIN_SAMPLE, benchmark, loadSegment, segmentsFor, type Benchmark } from "@/lib/marketPricing";
 import { formatRand } from "@/lib/dealEconomics";
+import { OpportunityPreferencesPanel } from "./OpportunityPreferencesPanel";
+import { hasNoTaggedDisciplines } from "@/lib/disciplineTaggingNudge";
 
 // Column list for the scope/pricing-model/value-band record (migration 0060,
 // engine/discovery/tender_enrichment.py). Honestly rare today: that script is
@@ -229,6 +231,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
     { data: openDowngradeRows, count: openDowngradeTotal, error: openDowngradeError },
     readiness,
     { data: pursuedHistoryRows, error: pursuedHistoryError },
+    { data: experienceDisciplineRows, error: experienceDisciplineError },
   ] = await Promise.all([
     opportunityQuery.range(0, show), // show+1 rows: the "fetch one extra" trick, see hasMore()
     // RLS: this company's own packs - which re-assessed tenders it is working on.
@@ -275,10 +278,19 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
       .from("discovered_opportunities")
       .select("tender_id, buyer, categories")
       .not("tender_id", "is", null),
+    // Task item 3 (app/AGENTS.md): the "needs review because we don't know
+    // your disciplines yet" nudge - see lib/disciplineTaggingNudge.ts's own
+    // header comment for the exact engine condition this mirrors
+    // (profile_from_company_rows()'s known_disciplines). RLS-scoped to this
+    // company's own experience_items, same table app/app/experience/page.tsx
+    // already reads - no new table, no scoring change.
+    supabase.from("experience_items").select("tagged_at, disciplines"),
   ]);
   if (error) console.error("discovered_opportunities select failed", error);
   if (openDowngradeError) console.error("open-downgrade banner count failed", openDowngradeError);
   if (pursuedHistoryError) console.error("pursued-history select failed (done-before history)", pursuedHistoryError);
+  if (experienceDisciplineError) console.error("experience_items select failed (discipline-tagging nudge)", experienceDisciplineError);
+  const noTaggedDisciplines = hasNoTaggedDisciplines((experienceDisciplineRows ?? []) as { tagged_at: string | null; disciplines: string[] | null }[]);
   const { data: { user } } = await supabase.auth.getUser();
   const stageByTender = new Map<string, string>();
   // Any stage at all (not just ACTIVE_PURSUIT_STAGES) - "done before" needs
@@ -462,6 +474,27 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
           </div>
         )}
 
+        {/* Opportunity preferences (preview) - Sarel's own live feedback,
+            this session: "add options to set the opportunity preferences
+            for a company" + the SANRAL case. A new, additive section - the
+            filter-tab bar and everything below it is untouched. See
+            OpportunityPreferencesPanel.tsx's own header comment for why this
+            is a preview, not the real saved feature. */}
+        <OpportunityPreferencesPanel taxonomy={taxonomy} />
+
+        {noTaggedDisciplines && (
+          // Task item 3: honest, zero-schema nudge - the real reason a
+          // brand-new company (or one that hasn't tagged any Experience
+          // Library items yet) sees "Needs review" on tenders that don't
+          // clearly match or not-match (see disciplineTaggingNudge.ts).
+          <div className="mb-4 rounded-lg border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground">
+            Your Experience Library has no tagged disciplines yet, so we can&apos;t yet tell which tenders are really
+            your kind of work - that&apos;s why some show as &quot;Needs review&quot; rather than a tighter match either
+            way. <Link href="/experience" className="font-semibold text-foreground underline">Tag your past projects</Link> to
+            get sharper results.
+          </div>
+        )}
+
         {openDowngradeCount > 0 && (
           <div
             className={cn(
@@ -540,7 +573,15 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                     ? "No listing changes among the tenders loaded so far - try \"Load more\" to check further back."
                     : activeFilter !== "all"
                       ? "Try \"All\" to see everything scored so far."
-                      : "The daily scan checks every open tender against your company profile automatically, or you can load a tender you've already found with the button above."
+                      : // Task item 4 (app/AGENTS.md): sharpened for the real
+                        // daily-cadence timing gap (.github/workflows/daily-
+                        // discovery.yml, scheduled 02:45 UTC) - a company
+                        // created between runs can see an empty feed for up
+                        // to ~24h, which is expected, not broken. Honest
+                        // about the cadence rather than implying anything
+                        // instant or on-demand (no on-demand scan exists or
+                        // is safe to add blind - see app/AGENTS.md).
+                        "The daily scan checks every open tender against your company profile automatically - it runs once a day, overnight. If you just signed up or changed your company profile, your first results land after tonight's run, not immediately. You can also load a tender you've already found with the button above."
                 }
               />
             </div>
