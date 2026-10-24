@@ -81,7 +81,7 @@ export function infoCard(rows: { label: string; value: string; emphasis?: Tone }
     })
     .join("");
   return `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CARD_BACKGROUND};border:1px solid ${FOOTER_BORDER};border-radius:8px;padding:12px 20px;margin:0 0 20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CARD_BACKGROUND};border:1px solid ${FOOTER_BORDER};border-radius:8px;padding:16px 20px;margin:0 0 20px;">
       ${rowsHtml}
     </table>`;
 }
@@ -115,7 +115,7 @@ export function briefingDetailCard(opts: { whenLabel: string; attendanceLabel?: 
       : "",
   ].join("");
   return `
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CARD_BACKGROUND};border:1px solid ${FOOTER_BORDER};border-radius:8px;padding:12px 20px;margin:0 0 20px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CARD_BACKGROUND};border:1px solid ${FOOTER_BORDER};border-radius:8px;padding:16px 20px;margin:0 0 20px;">
       ${rows}
     </table>`;
 }
@@ -179,7 +179,7 @@ export function tenderHeader(opts: { reference: string; title?: string | null; b
     opts.title && opts.title.length > 110 ? `${opts.title.slice(0, 109)}\u2026` : opts.title;
   return `
     <p style="margin:8px 0 4px;font-size:20px;font-weight:700;color:${INK};">${escapeHtml(opts.reference)}</p>
-    ${truncatedTitle ? `<p style="margin:0 0 16px;font-size:14px;font-weight:500;color:${FOOTER_MUTED};line-height:20px;">${escapeHtml(truncatedTitle)}</p>` : ""}
+    ${truncatedTitle ? `<p style="margin:0 0 16px;font-size:14px;font-weight:500;color:#475569;line-height:20px;">${escapeHtml(truncatedTitle)}</p>` : ""}
     ${!truncatedTitle && opts.buyerShortName ? `<p style="margin:0 0 16px;font-size:13px;color:${FOOTER_MUTED};">${escapeHtml(opts.buyerShortName)}</p>` : ""}
   `;
 }
