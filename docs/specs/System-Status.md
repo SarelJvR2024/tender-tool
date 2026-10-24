@@ -42,6 +42,18 @@ that PR (which upload flow a vault slide-over drawer should host; which of two e
 identical `formatRand()` implementations becomes canonical) are unaffected by this collision and
 still open, whenever he picks them up.
 
+**2026-10-24 ~00:12 UTC, standing review pass - a second, smaller, self-inflicted conflict found
+and fixed.** This same entry got edited into slightly different final wording on two different
+branches within minutes of each other tonight (`main` directly, and `workspace-polish` - both by
+this session, fixing the same dangling-reference wording independently). Caught by this review
+pass's own routine `git fetch`/merge check, not reported by anyone: `PR #133`'s `mergeable_state`
+had flipped back to `dirty`. Resolved by taking `main`'s wording (self-contained, no dangling
+reference to branch-only content) - no code touched, no content lost. `app-ci`/`bridge-worker-ci`
+don't run on this branch's own pushes (push-to-`main`-only triggers, confirmed earlier tonight), so
+`npx tsc --noEmit`/`npx eslint .` re-run clean locally is this pass's own verification. No other
+open branch shows new activity since the PR #134 batch paused itself (last push `22:02 UTC`) - no
+further duplication risk live right now. PR #133 remains open, unreviewed, waiting on Sarel.
+
 ---
 
 Maintained by the standing solution-architect review pass. This file reflects **current real
@@ -144,8 +156,40 @@ several of its claimed routes/tab names didn't match this repo, several of its a
 directly conflicted with Command Center's just-shipped, just-reviewed shape. Sarel chose: merge
 Command Center first (done, above), then a separate, explicitly-scoped follow-up PR for only the
 confirmed-real gaps (vault drawers for CSD/Tax PIN/COIDA, ZAR/VAT formatting, copy cleanup, RFP
-quick-access link) - not the dashboard/tab rewrite. That follow-up is in progress, scoped by a
-fresh audit of what's real in each of those 4 areas before any code is written.
+quick-access link) - not the dashboard/tab rewrite.
+
+**PR #133 opened, 2 of the 4 follow-up items shipped - the other 2 explicitly deferred to a real
+design decision, not guessed at.** The audit fork's claim that "no Dialog/Sheet/Drawer pattern
+exists anywhere" was itself wrong - checked directly and corrected: `components/ui/sheet.tsx` and
+`dialog.tsx` both exist (used by the mobile sidebar flyout and the command palette respectively),
+and a working `Popover` pattern already ships in production (`NotificationsBell.tsx`) - reused
+directly for this PR's own document quick-access menu, same trigger/content structure. So a vault
+drawer is NOT "the first modal pattern ever built here," as first audited - it's "the first reuse
+of an existing, working pattern for tender content." That correction doesn't resolve the real
+question still blocking item 1 though: whether the drawer hosts the full upload→AI-classify→confirm
+flow (`VaultDocumentUploader` → `/company/document-scan`, a deliberate anti-overwrite design) or
+just plain-text fields - still Sarel's call, documented for whenever he picks it up.
+
+- **Copy cleanup (item 3)**: the 3 marketing paragraphs Sarel's brief quoted verbatim, replaced
+  with a subheading + `(?)` tooltip (the app's own `Tooltip` component, already wired into
+  `layout.tsx`, just never used outside the sidebar before this).
+- **Document quick-access (item 4)**: `tenders.document_urls` was real, already-read data
+  (`general-workspace.tsx`'s own extraction-status count) that was never actually linked anywhere
+  - confirmed by grep, not assumed. Now a "Tender documents" header popover for every tender,
+  family-agnostic, listing real published-document links plus this company's own
+  `tender_private_documents` (signed URLs, same pattern `private-documents.tsx` already uses). The
+  upload entry point only appears where that form actually exists today (general-family, shared
+  tenders) - confirmed via `isGeneralFamily`, never a dead link.
+- **Verified**: `npx tsc --noEmit` clean, `npx eslint .` clean (same 3 warnings), `npm run build`
+  clean (57 routes), `npx vitest run` 147/147, `node --test` 138/138. Preview-verified with real
+  data too: the "Tender documents" popover renders correctly including an honest empty state (a
+  tender with nothing on file shows "No documents on file for this tender yet", not a fabricated
+  placeholder), the "Pack review" tooltip shows the real explanation on hover, zero console errors.
+  **PR #133 opened, marked ready for review (not draft) - intentionally not merged by this
+  session**: unlike #132, Sarel hasn't seen this diff yet; it changes user-facing copy and adds a
+  new UI element, worth his own look before it ships, especially since he said he'd check in
+  tomorrow. Screenshots sent to him directly. Items 1 and 2 remain open, waiting on his design
+  call, whenever he picks them up.
 
 ---
 
