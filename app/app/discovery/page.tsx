@@ -929,18 +929,31 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                   {/* Company-wide bid readiness, not a per-tender compliance
                       check - see the fetchCompanyReadiness() comment above
                       for why no per-tender requirement exists to check
-                      against before a tender is pursued. */}
+                      against before a tender is pursued. Used to put the
+                      blocker list only in a hover `title` - invisible on
+                      every touch device, i.e. to most of this app's own
+                      users checking opportunities on their phone. Now shown
+                      as real text under the link, same "Fix, visible, not
+                      hover-only" rule this app already applies elsewhere
+                      (dashboard's own readiness blockers list,
+                      `PrimaryPackActionLink`'s disabled reason). */}
                   <Link
                     href="/company"
-                    title={
-                      readiness.blockers.length === 0
-                        ? "All tracked compliance criteria are met"
-                        : `${readiness.blockers.length} outstanding item${readiness.blockers.length === 1 ? "" : "s"}: ${readiness.blockers.slice(0, 3).map((b) => b.label).join(", ")}`
-                    }
-                    className="mb-2.5 block text-xs font-semibold text-muted-foreground no-underline hover:text-foreground"
+                    className="block text-xs font-semibold text-muted-foreground no-underline hover:text-foreground"
                   >
                     Company profile {readiness.percent}% ready
                   </Link>
+                  {readiness.blockers.length > 0 ? (
+                    <div
+                      title={readiness.blockers.map((b) => b.label).join(", ")}
+                      className="mb-2.5 truncate text-[11px] font-medium text-warning"
+                    >
+                      {readiness.blockers.length} open: {readiness.blockers.slice(0, 2).map((b) => b.label).join(", ")}
+                      {readiness.blockers.length > 2 ? "…" : ""}
+                    </div>
+                  ) : (
+                    <div className="mb-2.5" />
+                  )}
                   {/* Into the Tender Workspace: what this tender needs, the questions
                       only you can answer, and a generated pack (migration 0018). */}
                   {o.verdict !== "closed" && !changes.some((c) => c.change_type === "cancelled") && (
