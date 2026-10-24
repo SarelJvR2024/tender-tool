@@ -108,3 +108,88 @@ export function deadlineReminderEmail(opts: {
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
+
+// Operational Notification Engine (Sarel's own brief): standard subject
+// line for all 3 alerts below - "[Tender Ref] - [Level]: [Specific
+// Subject]", e.g. "[N.007-030-2026/1F] - ACTION REQUIRED: Physical print &
+// sign deadline in 24 hours" (his own example). `refLabel` is the tender
+// reference for the 2 tender-scoped alerts; the compliance-expiry alert
+// isn't about one tender, so it uses the company's own name in that
+// position instead - same bracket format, the one honest adaptation this
+// alert type needs.
+export type OperationalAlertLevel = "URGENT" | "ACTION REQUIRED" | "NOTICE";
+
+function operationalSubject(refLabel: string, level: OperationalAlertLevel, specific: string): string {
+  return `[${refLabel}] - ${level}: ${specific}`;
+}
+
+export function printCutoffEmail(opts: {
+  contractLabel: string;
+  printSignDeadline: string; // ISO datetime - lib/dispatchTriage.ts's own printSignDeadline()
+  hoursLeft: number;
+  appUrl: string;
+  tenderId: string;
+}): { subject: string; html: string; text: string } {
+  const hoursRounded = Math.max(0, Math.round(opts.hoursLeft));
+  const whenText = hoursRounded <= 0 ? "has passed" : `in ${hoursRounded} hour${hoursRounded === 1 ? "" : "s"}`;
+  const subject = operationalSubject(opts.contractLabel, "URGENT", `Physical print & sign deadline ${whenText}`);
+  const deadlineText = new Date(opts.printSignDeadline).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const html = layout(
+    `
+      <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:${DESTRUCTIVE};text-transform:uppercase;letter-spacing:0.04em;">Print &amp; transit cutoff</p>
+      <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.contractLabel)}</p>
+      <p style="margin:0 0 20px;">This tender&apos;s own print, binding and courier window closes <strong>${deadlineText}</strong> - your own print and transit hour estimates, counted back from the tender box closing time. After that there isn&apos;t enough time left to print, bind and deliver a physical submission before it closes.</p>
+      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}#pack-compiler`, "Open pack compiler")}</p>
+    `,
+    `${opts.contractLabel}: print & sign cutoff ${whenText}.`
+  );
+  const text = `${opts.contractLabel}: print & sign cutoff ${whenText} (${deadlineText}).\n\n${opts.appUrl}/tenders/${opts.tenderId}#pack-compiler`;
+  return { subject, html, text };
+}
+
+export function briefingReminderEmail(opts: {
+  contractLabel: string;
+  briefingDate: string;
+  briefingTime: string | null;
+  daysLeft: number;
+  appUrl: string;
+  tenderId: string;
+}): { subject: string; html: string; text: string } {
+  const urgent = opts.daysLeft <= 1;
+  const level: OperationalAlertLevel = urgent ? "ACTION REQUIRED" : "NOTICE";
+  const color = urgent ? WARNING : ACCENT;
+  const whenText = opts.daysLeft <= 1 ? "in 24 hours" : `in ${opts.daysLeft} days`;
+  const subject = operationalSubject(opts.contractLabel, level, `Briefing session ${whenText}`);
+  const whenDetail = `${opts.briefingDate}${opts.briefingTime ? ` at ${opts.briefingTime}` : ""}`;
+  const html = layout(
+    `
+      <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.04em;">Briefing session</p>
+      <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.contractLabel)}</p>
+      <p style="margin:0 0 20px;">This tender&apos;s briefing session is ${whenText} - ${escapeHtml(whenDetail)}. Check the tender notice for whether attendance is compulsory and confirm who from your team is going.</p>
+      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open this tender")}</p>
+    `,
+    `${opts.contractLabel}: briefing session ${whenText}.`
+  );
+  const text = `${opts.contractLabel}: briefing session ${whenText} (${whenDetail}).\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text };
+}
+
+export function complianceExpiryEmail(opts: {
+  companyName: string;
+  fieldLabel: string;
+  daysLeft: number;
+  appUrl: string;
+}): { subject: string; html: string; text: string } {
+  const subject = operationalSubject(opts.companyName, "ACTION REQUIRED", `${opts.fieldLabel} expires in ${opts.daysLeft} days`);
+  const html = layout(
+    `
+      <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:${WARNING};text-transform:uppercase;letter-spacing:0.04em;">Compliance document expiring</p>
+      <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.fieldLabel)}</p>
+      <p style="margin:0 0 20px;">Your company&apos;s ${escapeHtml(opts.fieldLabel)} expires in ${opts.daysLeft} days. A lapsed document here can disqualify a tender submission - renew it and update your Company vault before it expires.</p>
+      <p style="margin:0;">${button(`${opts.appUrl}/company`, "Open Company vault")}</p>
+    `,
+    `${opts.fieldLabel} expires in ${opts.daysLeft} days.`
+  );
+  const text = `${opts.companyName}: ${opts.fieldLabel} expires in ${opts.daysLeft} days.\n\n${opts.appUrl}/company`;
+  return { subject, html, text };
+}
