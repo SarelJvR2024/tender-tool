@@ -2544,6 +2544,40 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-24, standing QA/robustness review - eighty-sixth run): a tender closing near midnight SAST could report its own closing day as one real day late, in a customer-facing compliance reminder
+
+Orientation: synced two sibling landings since the last run - PR #144 (Operational Notification
+Engine, TypeScript-only: `sent_operational_alerts`/migration `0092`/`scripts/send-operational-alerts.ts`,
+no `engine/` files touched, confirmed by diff) and a documented cross-session collision on that
+same feature, resolved by direct coordination before either side pushed conflicting work - neither
+affects this pass. Rotated to compliance/reminders - the most overdue standing area (last dedicated
+pass the seventy-eighth run, 2026-10-23).
+
+**Finding 72 (CONFIRMED, FIXED, severe).** `find_documents_lapsing_before_closing()`'s own comment
+says it computes "calendar day in SAST, like app/lib/dates.ts closingDayOf()" - checked that claim
+against the real TypeScript rather than trusting it. `closingDayOf()` normalizes to an absolute UTC
+instant FIRST, then adds 2h (correct for any input offset, since JS's `Date` always normalizes).
+The Python port instead added the 2h directly to the still-timezone-AWARE parsed value - which only
+shifts wall-clock fields while keeping the ORIGINAL offset attached, a different operation that's
+only correct when the input happens to already be UTC. Confirmed `tenders.closing_date` genuinely
+carries BOTH conventions in real data: `gov_sources.iso_sast()` and `process_general_jobs.py`'s own
+SANRAL intake tag it "+02:00" (SAST); `watch_tender_updates.apply_closing_date()` writes whatever a
+raw OCDS feed gives, genuine UTC. For a "+02:00" value between 22:00-23:59 SAST, the bug rolled the
+calculated closing day one real day late - confirmed directly
+(`"2026-10-22T23:00:00+02:00"`, real day the 22nd, came back as the 23rd). The existing test for
+this exact function only ever used "+00:00" fixtures, so this never surfaced despite being
+reachable from two real write paths, and the wrong date is shown directly in a customer-facing
+compliance reminder's own `closing_date` field.
+
+**Fix:** `closing_day` now converts to UTC (`closing_ts.astimezone(datetime.timezone.utc)`) before
+adding the 2-hour SAST shift, matching `closingDayOf()`'s own normalize-then-shift order.
+
+**Verified the regression test actually catches the regression:** new
+`closing_day_handles_a_sast_tagged_offset_correctly()` in `test_watch_deadlines_urgency.py` (a
+"+02:00"-tagged closing time at 23:00 SAST). Reverted the fix: the reported date came back one real
+day late, exactly as predicted; restored: `0 failures`. Every other compliance/notify suite that
+touches this module re-run clean.
+
 ## This pass (2026-10-24, standing QA/robustness review - eighty-fifth run): a broken formula in a buyer's BOQ workbook could be silently read as a confirmed zero rate/amount, not an unknown value
 
 Orientation: rotated to discovery - the most overdue standing area - but checked `git log`/open

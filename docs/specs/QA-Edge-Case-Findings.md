@@ -4278,3 +4278,53 @@ clean - no other caller ever encounters or expects an error-typed cell.
 error-code string, affecting only cells Excel itself marks as errored, which is `#DIV/0!`-only
 reachable incorrect behaviour before this fix, confirmed by grep across the repo for any caller
 expecting an error-code string back).
+
+### Finding 72 (CONFIRMED, FIXED, severe - a "+02:00"-tagged tender closing time near midnight SAST could report its own closing day as one real day later than it actually is, in a customer-facing compliance reminder)
+
+**Where:** `engine/compliance/watch_deadlines.py`'s `find_documents_lapsing_before_closing()` -
+the function that warns a company when a document will lapse before a pursued tender's own
+closing date, even though it's still outside the normal renewal window.
+
+**What was tested:** rotated to compliance/reminders - the most overdue standing area - and
+re-read this function's own "calendar day in SAST, like app/lib/dates.ts closingDayOf()" comment
+against the actual TypeScript it claims to mirror. `closingDayOf()` (`app/lib/dates.ts`) uses JS's
+`Date`, which always normalizes to an absolute instant first - so its unconditional "+2h, then take
+the date" is correct for ANY input offset. The Python port instead does `aware_dt + timedelta(hours=2)`
+directly on the parsed, still timezone-AWARE value - which only shifts the wall-clock fields while
+KEEPING the original tzinfo attached; it does NOT normalize to UTC first. That is a different
+operation, and it is only equivalent to the TypeScript version when the input is already tagged
+UTC ("+00:00"/"Z").
+
+**Finding (CONFIRMED, severe).** Confirmed `tenders.closing_date` genuinely carries BOTH
+conventions in real data, not just UTC: `gov_sources.py`'s `iso_sast()` and
+`process_general_jobs.py`'s own SANRAL-intake write (`f"...T{notice_time}:00+02:00"`) both tag the
+value with a literal "+02:00" SAST offset; `watch_tender_updates.apply_closing_date()` writes
+whatever a raw OCDS feed's `tenderPeriod.endDate` gives, which is genuine UTC. For a "+02:00"-
+tagged value with a time between 22:00 and 23:59 SAST, the old code's second, un-normalized +2h
+shift rolled the calculated closing day forward by one real day. Confirmed directly:
+`"2026-10-22T23:00:00+02:00"` (real SAST day the 22nd) came back as the 23rd. The existing test
+fixture for this exact function (`test_watch_deadlines_urgency.py`) only ever used "+00:00"-tagged
+closing dates - which happen to work correctly under the old code purely because no UTC-to-SAST
+normalization was actually needed for them - so this never showed up in any test despite being
+reachable from two different real write paths. The wrong date is shown directly in the reminder
+item's own `closing_date` field, which daily_digest.py/the compliance report surface to a real
+person.
+
+**Fix:** `closing_day` now converts the aware timestamp to UTC first
+(`closing_ts.astimezone(datetime.timezone.utc)`) before adding the 2-hour SAST shift and taking
+`.date()` - the same normalize-then-shift order `closingDayOf()` already does, for both offset
+conventions this column actually carries.
+
+**Verified the regression test actually catches the regression:** new
+`closing_day_handles_a_sast_tagged_offset_correctly()` in `test_watch_deadlines_urgency.py`, a
+self-contained fixture (a "+02:00"-tagged tender closing at 23:00 SAST). Reverted the fix: the
+reported `closing_date` came back one real day late, exactly as predicted; restored: `0
+failures`. `test_principals_registrations.py`, `test_watch_person_credentials.py`,
+`test_watch_conditional_registrations.py`, `test_reminder_seen_db.py` and
+`test_digest_live.py` (daily_digest.py's own live-mode consumer of this exact function) all
+re-run clean.
+
+**Regression:** `engine/compliance/watch_deadlines.py` only - one function, additive (a correct
+UTC-normalize step before the existing +2h shift). No schema or call-site changes;
+`find_due_documents()`/`find_due_tasks()`/`registration_reminders.py` don't use this calculation at
+all.

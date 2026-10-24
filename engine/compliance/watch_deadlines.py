@@ -432,7 +432,22 @@ def find_documents_lapsing_before_closing(url, key, seen, today, lead_days=DEFAU
                                  "is not a valid date - its lapsing-before-closing check was skipped.",
                                  "warning", context={"tender_id": tender["id"], "closing_date": tender["closing_date"]})
             continue
-        closing_day = (closing_ts + datetime.timedelta(hours=2)).date() if closing_ts.tzinfo else closing_ts.date()
+        # closingDayOf() in app/lib/dates.ts normalizes to an absolute UTC
+        # instant FIRST, then adds 2h - correct for any input offset. This
+        # used to add the 2h directly to the aware value instead, which only
+        # shifts its wall-clock fields while keeping its ORIGINAL tzinfo -
+        # not the same operation. tenders.closing_date is written with a
+        # literal "+02:00" offset by several real callers (gov_sources.py's
+        # iso_sast(), process_general_jobs.py's own SANRAL intake) as well as
+        # genuine UTC/"Z" values straight from an OCDS feed
+        # (watch_tender_updates.apply_closing_date()) - both really occur.
+        # For a "+02:00" value, the old code added a SECOND, wrong 2h shift
+        # on top of an already-SAST wall-clock time: a tender closing between
+        # 22:00 and 23:59 SAST rolled its calculated closing day forward by
+        # one real day. Confirmed directly: "2026-10-22T23:00:00+02:00" (real
+        # SAST day 22nd) came back as the 23rd. QA pass, 2026-10-24.
+        closing_day = ((closing_ts.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=2)).date()
+                       if closing_ts.tzinfo else closing_ts.date())
         to_closing = (closing_day - today).days
         if to_closing < 0:
             continue
