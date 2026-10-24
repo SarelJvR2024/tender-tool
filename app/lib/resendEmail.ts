@@ -77,6 +77,14 @@ export function adminNotificationEmail(): string | null {
 
 export type EmailAttachment = { filename: string; content: string };
 
+/** The 2 headers RFC 8058 requires together for a real one-click unsubscribe - List-Unsubscribe alone (no -Post) only gets a mail client to show an "Unsubscribe" affordance that still opens a browser; both together let it POST silently with zero user interaction. unsubscribeUrl is app/api/unsubscribe's own POST endpoint (`${appUrl}/api/unsubscribe?token=...`). Tier 0 (lifecycle) mail only - every other tier is non-optional, see migration 0093's own comment. */
+export function unsubscribeHeaders(unsubscribeUrl: string): Record<string, string> {
+  return {
+    "List-Unsubscribe": `<${unsubscribeUrl}>`,
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  };
+}
+
 // EmailCategory ("bids" | "compliance") was PR #144's own name for this
 // same idea - kept here as a deprecated alias (mapped onto SenderProfile)
 // rather than silently dropped, since scripts/send-operational-alerts.ts
@@ -97,6 +105,8 @@ export type SendEmailInput = {
   /** Overrides the default support@tenderready.app reply-to for this one send, if a notification ever needs a different one. */
   replyTo?: string;
   attachments?: EmailAttachment[];
+  /** Custom headers - in practice, unsubscribeHeaders() for Tier 0 mail. */
+  headers?: Record<string, string>;
 };
 
 export type SendEmailResult = { status: "sent"; resendId: string } | { status: "skipped_no_api_key" } | { status: "failed"; error: string };
@@ -121,6 +131,7 @@ export async function sendTransactionalEmail(input: SendEmailInput): Promise<Sen
       html: input.html,
       text: input.text,
       attachments: input.attachments,
+      headers: input.headers,
     });
     if (error) {
       console.error("Resend rejected the send", error);

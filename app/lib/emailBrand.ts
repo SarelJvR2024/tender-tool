@@ -34,6 +34,13 @@ export const DESTRUCTIVE = "#B3261E";
 // body never has two different blues competing for attention) and from
 // WARNING/DESTRUCTIVE (which this file's pill() already owns for urgency).
 export const SUCCESS = "#1E7A3D";
+// Footer-only color (Sarel's own explicit spec, 2026-10-24), deliberately
+// NOT the same as MUTED (#5C6374) - a touch lighter, for the one region of
+// the email that should read as the quietest thing on the page (legal
+// text, links a recipient reads maybe once). Scoped to the footer only;
+// everything else keeps using MUTED.
+export const FOOTER_MUTED = "#64748B";
+export const FOOTER_BORDER = "#E2E8F0";
 
 export type Tone = "urgent" | "warning" | "info" | "neutral" | "success";
 
@@ -59,9 +66,16 @@ export function pill(label: string, tone: Tone = "info"): string {
   return `<span style="display:inline-block;background:${bg};color:${fg};font-size:11px;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;padding:4px 10px;border-radius:999px;">${escapeHtml(label)}</span>`;
 }
 
-/** The primary call-to-action - exactly one per email, bold Trust Blue, rounded, an explicit action verb per the brief's own copy rule. */
+/** The primary call-to-action - exactly one per email, bold Trust Blue, rounded, an explicit action verb per the brief's own copy rule. Centered in its own block (a table, not text-align on a <p>, for Outlook's sake) so every template's CTA sits the same way without each one having to wrap it itself. */
 export function button(href: string, label: string): string {
-  return `<a href="${escapeHtml(href)}" style="display:inline-block;background:${ACCENT};color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:6px;">${escapeHtml(label)}</a>`;
+  return `
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:4px 0;">
+      <tr>
+        <td align="center">
+          <a href="${escapeHtml(href)}" style="display:inline-block;background:${ACCENT};color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;padding:12px 24px;border-radius:6px;">${escapeHtml(label)}</a>
+        </td>
+      </tr>
+    </table>`;
 }
 
 /** A bordered key/value detail box - "Closing Date", "Physical Cutoff", "Venue" etc. as clean two-column rows, instead of the same facts buried in a paragraph. */
@@ -127,11 +141,52 @@ export function buildIcs(opts: { uid: string; title: string; description: string
   return { filename: "briefing.ics", content: lines.join("\r\n") };
 }
 
-/** The shared page shell every template renders its body into - monogram + wordmark header, white card, legal/preferences footer. */
-export function layout(bodyHtml: string, preheader: string, opts?: { preferencesUrl?: string }): string {
-  const prefsLink = opts?.preferencesUrl
-    ? `<a href="${escapeHtml(opts.preferencesUrl)}" style="color:${MUTED};text-decoration:underline;">Manage notification preferences</a>`
+/** Why this recipient is getting this email - the footer's own "contextual notification explanation" (Sarel's own spec, 2026-10-24): a tender-scoped alert names the tender and company; an account-level alert (compliance, admin) names just the company. Callers pass whichever shape matches what the email is actually about - never guessed inside layout() itself. */
+export type RecipientContext =
+  | { kind: "tender"; tenderReference: string; companyName: string }
+  | { kind: "account"; companyName: string };
+
+function recipientContextLine(context: RecipientContext): string {
+  if (context.kind === "tender") {
+    return `You received this because you are assigned to tender ${escapeHtml(context.tenderReference)} at ${escapeHtml(context.companyName)} on Tender Ready.`;
+  }
+  return `You received this because you are an admin on the ${escapeHtml(context.companyName)} account on Tender Ready.`;
+}
+
+/** The shared page shell every template renders its body into - wordmark header (+ optional tier badge), white card, and the full footer: a help callout, why-you-got-this, a links row, and the legal/POPIA block. */
+export function layout(
+  bodyHtml: string,
+  preheader: string,
+  opts?: {
+    appUrl: string;
+    badgeText?: string;
+    recipientContext?: RecipientContext;
+    /** Tier 0 (lifecycle) mail only - set to app/api/unsubscribe's own one-click URL (already carrying ?token=...) to show the Unsubscribe link. Every other tier is non-optional and must leave this unset - see migration 0093's own comment on why. */
+    unsubscribeUrl?: string;
+  }
+): string {
+  const badge = opts?.badgeText
+    ? `<td align="right"><span style="display:inline-block;background:${TONE_COLORS.neutral.bg};color:${TONE_COLORS.neutral.fg};font-size:12px;font-weight:600;padding:4px 8px;border-radius:4px;">${escapeHtml(opts.badgeText)}</span></td>`
     : "";
+
+  const appUrl = opts?.appUrl ?? "https://tenderready.app";
+  // Each link gets its own padding (not just a gap between them) so the
+  // TAPPABLE area, not just the visible text, clears 8px on all sides -
+  // "link has 8px of space around it" is what actually matters for a
+  // thumb on a phone screen, not just the gap between two link labels.
+  const linkStyle = `color:${FOOTER_MUTED};text-decoration:none;font-size:12px;padding:4px 8px;display:inline-block;`;
+  const footerLinks = [
+    `<a href="${appUrl}/company" style="${linkStyle}">Notification Settings</a>`,
+    `<a href="${appUrl}/privacy" style="${linkStyle}">Privacy Policy</a>`,
+    opts?.unsubscribeUrl ? `<a href="${escapeHtml(opts.unsubscribeUrl)}" style="${linkStyle}">Unsubscribe</a>` : null,
+  ]
+    .filter((l): l is string => l !== null)
+    .join("");
+
+  const contextLine = opts?.recipientContext
+    ? `<p style="margin:0 0 10px;font-size:12px;line-height:18px;color:${FOOTER_MUTED};">${recipientContextLine(opts.recipientContext)}</p>`
+    : "";
+
   return `<!doctype html>
 <html>
   <head>
@@ -147,24 +202,30 @@ export function layout(bodyHtml: string, preheader: string, opts?: { preferences
         <td align="center">
           <table role="presentation" width="100%" style="max-width:560px;background:#FFFFFF;border:1px solid ${BORDER};border-radius:12px;overflow:hidden;">
             <tr>
-              <td style="background:${INK};padding:18px 28px;">
-                <table role="presentation" cellpadding="0" cellspacing="0">
+              <td style="padding:20px 28px 0;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
                   <tr>
-                    <td style="background:#FFFFFF;color:${INK};width:28px;height:28px;border-radius:6px;text-align:center;font-size:14px;font-weight:800;line-height:28px;">TR</td>
-                    <td style="padding-left:10px;color:#FFFFFF;font-size:15px;font-weight:700;vertical-align:middle;">Tender Ready</td>
+                    <td style="color:${ACCENT};font-size:18px;font-weight:700;">Tender Ready</td>
+                    ${badge}
                   </tr>
                 </table>
               </td>
             </tr>
             <tr>
-              <td style="padding:28px;color:${INK};font-size:14px;line-height:1.6;">
+              <td style="padding:20px 28px 28px;color:${INK};font-size:14px;line-height:1.6;">
                 ${bodyHtml}
               </td>
             </tr>
             <tr>
-              <td style="padding:16px 28px;border-top:1px solid ${BORDER};color:${MUTED};font-size:11px;line-height:1.7;">
-                Tender Ready - your tender department, without hiring one.<br />
-                This is a transactional notification about your account or an active tender. ${prefsLink}
+              <td style="padding:0 28px 20px;">
+                <p style="margin:0 0 16px;font-size:12px;line-height:18px;color:${FOOTER_MUTED};">
+                  Need help? Reply directly to this email or contact us at <a href="mailto:support@tenderready.app" style="color:${FOOTER_MUTED};">support@tenderready.app</a>
+                </p>
+                <hr style="border:none;border-top:1px solid ${FOOTER_BORDER};margin:0 0 16px;" />
+                ${contextLine}
+                <p style="margin:0 0 12px;">${footerLinks}</p>
+                <p style="margin:0 0 4px;font-size:12px;line-height:18px;color:${FOOTER_MUTED};">Tender Ready (Pty) Ltd &middot; Cape Town, South Africa</p>
+                <p style="margin:0;font-size:12px;line-height:18px;color:${FOOTER_MUTED};">POPIA-compliant tender compilation. Bid documents, pricing schedules, and proprietary company assets remain private and strictly confidential.</p>
               </td>
             </tr>
           </table>

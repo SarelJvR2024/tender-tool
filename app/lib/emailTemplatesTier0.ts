@@ -29,40 +29,53 @@
 // the brief's own assumed names.
 import { formatDate } from "./dates.ts";
 import { button, escapeHtml, infoCard, layout, pill } from "./emailBrand.ts";
+import { unsubscribeHeaders } from "./resendEmail.ts";
 import { lifecycleSubject } from "./emailSubjects.ts";
 import type { NotificationEmail } from "./notificationEngine.ts";
 
-export function nudgeVaultKickstartEmail(opts: { companyName: string; vaultDocsOnFile: number; appUrl: string }): NotificationEmail {
+// The 5 functions below (nudge x2, trial x3) are Tier 0's own genuinely
+// recurring/promotional mail - the only ones a real unsubscribe applies to
+// (migration 0093's own comment on why welcome/invite/admin-alert stay
+// exempt). Each takes an optional unsubscribeUrl - the caller's own
+// app/api/unsubscribe one-click link, built from
+// lifecycle_unsubscribe_token_for() - and passes it straight to layout(),
+// which both renders the visible link and (via
+// lib/notificationEngine.ts's own NotificationEmail.headers) is where the
+// real List-Unsubscribe/-Post headers get set; this file never builds
+// those headers itself, see whichever sender script ends up calling
+// sendNotification() for these.
+
+export function nudgeVaultKickstartEmail(opts: { companyName: string; vaultDocsOnFile: number; appUrl: string; unsubscribeUrl?: string }): NotificationEmail {
   const subject = lifecycleSubject("Two documents start your vault - here's a fast way to add them");
   const html = layout(
     `
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">Finish setting up ${escapeHtml(opts.companyName)}'s vault</p>
-      <p style="margin:0 0 16px;">Your vault has ${opts.vaultDocsOnFile} of the documents a submission pack usually needs on file. Most teams start with their CSD summary and SARS Tax Compliance PIN - both take a couple of minutes once you have the file.</p>
-      <p style="margin:0 0 24px;">${button(`${opts.appUrl}/company`, "Add to your vault")}</p>
-      <p style="margin:0;color:#5C6374;font-size:12px;">Any questions, just reply to this email.</p>
+      <p style="margin:0 0 20px;">Your vault has ${opts.vaultDocsOnFile} of the documents a submission pack usually needs on file. Most teams start with their CSD summary and SARS Tax Compliance PIN - both take a couple of minutes once you have the file.</p>
+      ${button(`${opts.appUrl}/company`, "Add to your vault")}
     `,
-    "A couple of documents will get your vault ready for your first submission."
+    "A couple of documents will get your vault ready for your first submission.",
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName }, unsubscribeUrl: opts.unsubscribeUrl }
   );
   const text = `Finish setting up ${opts.companyName}'s vault - ${opts.vaultDocsOnFile} documents on file so far. Most teams start with their CSD summary and SARS Tax Compliance PIN.\n\n${opts.appUrl}/company`;
-  return { subject, html, text };
+  return { subject, html, text, headers: opts.unsubscribeUrl ? unsubscribeHeaders(opts.unsubscribeUrl) : undefined };
 }
 
-export function nudgeFirstTenderEmail(opts: { companyName: string; appUrl: string }): NotificationEmail {
+export function nudgeFirstTenderEmail(opts: { companyName: string; appUrl: string; unsubscribeUrl?: string }): NotificationEmail {
   const subject = lifecycleSubject("Ready to shortlist your first tender?");
   const html = layout(
     `
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">Find a tender worth bidding on</p>
-      <p style="margin:0 0 16px;">${escapeHtml(opts.companyName)} hasn't shortlisted a tender yet. Discovery is already scoring live SANRAL, municipal and national listings against your company's own discipline and registration profile - open it to see what's already a fit.</p>
-      <p style="margin:0 0 24px;">${button(`${opts.appUrl}/discovery`, "Open Discovery")}</p>
-      <p style="margin:0;color:#5C6374;font-size:12px;">Any questions, just reply to this email.</p>
+      <p style="margin:0 0 20px;">${escapeHtml(opts.companyName)} hasn't shortlisted a tender yet. Discovery is already scoring live SANRAL, municipal and national listings against your company's own discipline and registration profile - open it to see what's already a fit.</p>
+      ${button(`${opts.appUrl}/discovery`, "Open Discovery")}
     `,
-    "Discovery is already scoring live tenders against your company's profile."
+    "Discovery is already scoring live tenders against your company's profile.",
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName }, unsubscribeUrl: opts.unsubscribeUrl }
   );
   const text = `${opts.companyName} hasn't shortlisted a tender yet. Discovery is already scoring live listings against your company's profile.\n\n${opts.appUrl}/discovery`;
-  return { subject, html, text };
+  return { subject, html, text, headers: opts.unsubscribeUrl ? unsubscribeHeaders(opts.unsubscribeUrl) : undefined };
 }
 
-export function trialDay7MilestoneEmail(opts: { companyName: string; trialEndsAt: string; packsBuiltSoFar: number; appUrl: string }): NotificationEmail {
+export function trialDay7MilestoneEmail(opts: { companyName: string; trialEndsAt: string; packsBuiltSoFar: number; appUrl: string; unsubscribeUrl?: string }): NotificationEmail {
   const subject = lifecycleSubject(`You're halfway through your trial - here's what you've built`);
   const html = layout(
     `
@@ -72,43 +85,45 @@ export function trialDay7MilestoneEmail(opts: { companyName: string; trialEndsAt
         { label: "Submission packs built", value: String(opts.packsBuiltSoFar) },
         { label: "Trial ends", value: escapeHtml(formatDate(opts.trialEndsAt) ?? opts.trialEndsAt) },
       ])}
-      <p style="margin:0 0 24px;">${button(`${opts.appUrl}/billing`, "See plans")}</p>
-      <p style="margin:0;color:#5C6374;font-size:12px;">Any questions, just reply to this email.</p>
+      ${button(`${opts.appUrl}/billing`, "See plans")}
     `,
-    `${opts.packsBuiltSoFar} pack(s) built so far - your trial ends ${formatDate(opts.trialEndsAt)}.`
+    `${opts.packsBuiltSoFar} pack(s) built so far - your trial ends ${formatDate(opts.trialEndsAt)}.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName }, unsubscribeUrl: opts.unsubscribeUrl }
   );
   const text = `${opts.companyName}'s trial, day 7: ${opts.packsBuiltSoFar} pack(s) built so far. Trial ends ${formatDate(opts.trialEndsAt)}.\n\n${opts.appUrl}/billing`;
-  return { subject, html, text };
+  return { subject, html, text, headers: opts.unsubscribeUrl ? unsubscribeHeaders(opts.unsubscribeUrl) : undefined };
 }
 
-export function trialExpiring48hEmail(opts: { companyName: string; trialEndsAt: string; appUrl: string }): NotificationEmail {
+export function trialExpiring48hEmail(opts: { companyName: string; trialEndsAt: string; appUrl: string; unsubscribeUrl?: string }): NotificationEmail {
   const subject = lifecycleSubject(`Your trial ends in 48 hours`);
   const html = layout(
     `
       <p style="margin:0 0 16px;">${pill("TRIAL ENDING", "warning")}</p>
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.companyName)}'s trial ends ${escapeHtml(formatDate(opts.trialEndsAt) ?? opts.trialEndsAt)}</p>
       <p style="margin:0 0 20px;">Pick a plan now to keep everything - your Company vault, People &amp; CVs, and every tender you're tracking stay exactly as they are either way.</p>
-      <p style="margin:0;">${button(`${opts.appUrl}/billing`, "Choose a plan")}</p>
+      ${button(`${opts.appUrl}/billing`, "Choose a plan")}
     `,
-    `${opts.companyName}'s trial ends ${formatDate(opts.trialEndsAt)}.`
+    `${opts.companyName}'s trial ends ${formatDate(opts.trialEndsAt)}.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName }, unsubscribeUrl: opts.unsubscribeUrl }
   );
   const text = `${opts.companyName}'s trial ends ${formatDate(opts.trialEndsAt)}. Pick a plan to keep everything.\n\n${opts.appUrl}/billing`;
-  return { subject, html, text };
+  return { subject, html, text, headers: opts.unsubscribeUrl ? unsubscribeHeaders(opts.unsubscribeUrl) : undefined };
 }
 
-export function trialExpiredEmail(opts: { companyName: string; appUrl: string }): NotificationEmail {
+export function trialExpiredEmail(opts: { companyName: string; appUrl: string; unsubscribeUrl?: string }): NotificationEmail {
   const subject = lifecycleSubject(`Your trial has ended - your data is safe`);
   const html = layout(
     `
       <p style="margin:0 0 16px;">${pill("TRIAL ENDED", "neutral")}</p>
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.companyName)}'s trial has ended</p>
       <p style="margin:0 0 20px;">Your Company vault, People &amp; CVs and tender history are all still on file - nothing has been deleted. Pick a plan to pick up exactly where you left off.</p>
-      <p style="margin:0;">${button(`${opts.appUrl}/billing`, "Choose a plan")}</p>
+      ${button(`${opts.appUrl}/billing`, "Choose a plan")}
     `,
-    `${opts.companyName}'s trial has ended - your data is safe.`
+    `${opts.companyName}'s trial has ended - your data is safe.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName }, unsubscribeUrl: opts.unsubscribeUrl }
   );
   const text = `${opts.companyName}'s trial has ended. Your vault, people and tender history are all still on file.\n\n${opts.appUrl}/billing`;
-  return { subject, html, text };
+  return { subject, html, text, headers: opts.unsubscribeUrl ? unsubscribeHeaders(opts.unsubscribeUrl) : undefined };
 }
 
 // Data source: company_invites (migration 0077) - this function only
@@ -123,9 +138,10 @@ export function teamInviteEmail(opts: { companyName: string; inviterName: string
     `
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">You've been invited to ${escapeHtml(opts.companyName)}</p>
       <p style="margin:0 0 20px;">${escapeHtml(opts.inviterName)} has invited you to join as ${escapeHtml(opts.role)} on Tender Ready - the shared workspace for ${escapeHtml(opts.companyName)}'s tender submissions.</p>
-      <p style="margin:0;">${button(`${opts.appUrl}/invite/${opts.token}`, "Accept invitation")}</p>
+      ${button(`${opts.appUrl}/invite/${opts.token}`, "Accept invitation")}
     `,
-    `${opts.inviterName} invited you to join ${opts.companyName} on Tender Ready.`
+    `${opts.inviterName} invited you to join ${opts.companyName} on Tender Ready.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName } }
   );
   const text = `${opts.inviterName} invited you to join ${opts.companyName} on Tender Ready as ${opts.role}.\n\n${opts.appUrl}/invite/${opts.token}`;
   return { subject, html, text };
@@ -139,9 +155,10 @@ export function adminNewSignupEmail(opts: { companyName: string; signedUpAt: str
       <p style="margin:0 0 16px;">${pill("NEW SIGNUP", "success")}</p>
       <p style="margin:0 0 20px;font-size:17px;font-weight:700;">${escapeHtml(opts.companyName)}</p>
       <p style="margin:0 0 20px;color:#5C6374;font-size:13px;">Signed up ${escapeHtml(formatDate(opts.signedUpAt) ?? opts.signedUpAt)}.</p>
-      <p style="margin:0;">${button(`${opts.appUrl}/admin`, "Open Admin Console")}</p>
+      ${button(`${opts.appUrl}/admin`, "Open Admin Console")}
     `,
-    `${opts.companyName} just signed up.`
+    `${opts.companyName} just signed up.`,
+    { appUrl: opts.appUrl }
   );
   const text = `New signup: ${opts.companyName} (${formatDate(opts.signedUpAt)}).\n\n${opts.appUrl}/admin`;
   return { subject, html, text };
@@ -159,9 +176,10 @@ export function adminPaidConversionEmail(opts: { companyName: string; planTier: 
         { label: "Plan", value: escapeHtml(opts.planTier) },
         { label: "Billing", value: opts.billingInterval === "yearly" ? "Yearly" : "Monthly" },
       ])}
-      <p style="margin:0;">${button(`${opts.appUrl}/admin`, "Open Admin Console")}</p>
+      ${button(`${opts.appUrl}/admin`, "Open Admin Console")}
     `,
-    `${opts.companyName} converted to a paid ${opts.planTier} plan.`
+    `${opts.companyName} converted to a paid ${opts.planTier} plan.`,
+    { appUrl: opts.appUrl }
   );
   const text = `Paid conversion: ${opts.companyName} - ${opts.planTier} (${opts.billingInterval}).\n\n${opts.appUrl}/admin`;
   return { subject, html, text };

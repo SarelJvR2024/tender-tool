@@ -26,10 +26,10 @@ export function welcomeEmail(opts: { companyName: string; appUrl: string }): { s
       <p style="margin:0 0 16px;font-size:18px;font-weight:700;">Welcome, ${escapeHtml(opts.companyName)}.</p>
       <p style="margin:0 0 16px;">Your 14-day free trial has started, with full access to everything - SANRAL workbook fill, the general pack builder, your Company vault, Discovery and People &amp; CVs.</p>
       <p style="margin:0 0 20px;">Next step: finish setting up your Company vault (CSD, tax, B-BBEE and CIDB details) so your packs can be filled straight from real data, not typed by hand each time.</p>
-      <p style="margin:0 0 24px;">${button(`${opts.appUrl}/dashboard`, "Go to your dashboard")}</p>
-      <p style="margin:0;color:#5C6374;font-size:12px;">Any questions, just reply to this email.</p>
+      ${button(`${opts.appUrl}/dashboard`, "Go to your dashboard")}
     `,
-    `Your 14-day Tender Ready trial has started.`
+    `Your 14-day Tender Ready trial has started.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName } }
   );
   const text = `Welcome to Tender Ready, ${opts.companyName}.\n\nYour 14-day free trial has started, with full access to everything.\n\nNext step: finish setting up your Company vault so your packs can be filled from real data.\n\n${opts.appUrl}/dashboard`;
   return { subject, html, text };
@@ -51,9 +51,10 @@ export function deadlineReminderEmail(opts: {
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.contractLabel)}</p>
       ${infoCard([{ label: "Closes", value: escapeHtml(opts.closingDate), emphasis: urgent ? "urgent" : "warning" }])}
       <p style="margin:0 0 20px;">This tender ${whenText}. Make sure your submission pack is ready before then.</p>
-      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open this tender")}</p>
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open this tender")}
     `,
-    `${opts.contractLabel} ${whenText}.`
+    `${opts.contractLabel} ${whenText}.`,
+    { appUrl: opts.appUrl }
   );
   const text = `${opts.contractLabel} ${whenText} (${opts.closingDate}).\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
   return { subject, html, text };
@@ -130,9 +131,10 @@ export function printCutoffEmail(opts: {
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.contractLabel)}</p>
       ${infoCard([{ label: "Print & sign cutoff", value: escapeHtml(deadlineText), emphasis: "urgent" }])}
       <p style="margin:0 0 20px;">This tender's own print, binding and courier window closes then - your own print and transit hour estimates, counted back from the tender box closing time. After that there isn't enough time left to print, bind and deliver a physical submission before it closes.</p>
-      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}#pack-compiler`, "Open pack compiler")}</p>
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}#pack-compiler`, "Open pack compiler")}
     `,
-    `${opts.contractLabel}: print & sign cutoff ${whenText}.`
+    `${opts.contractLabel}: print & sign cutoff ${whenText}.`,
+    { appUrl: opts.appUrl }
   );
   const text = `${opts.contractLabel}: print & sign cutoff ${whenText} (${deadlineText}).\n\n${opts.appUrl}/tenders/${opts.tenderId}#pack-compiler`;
   return { subject, html, text };
@@ -158,9 +160,10 @@ export function briefingReminderEmail(opts: {
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.contractLabel)}</p>
       ${infoCard([{ label: "Briefing session", value: escapeHtml(whenDetail), emphasis: tone }])}
       <p style="margin:0 0 20px;">This tender's briefing session is ${whenText}. Check the tender notice for whether attendance is compulsory and confirm who from your team is going.</p>
-      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open this tender")}</p>
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open this tender")}
     `,
-    `${opts.contractLabel}: briefing session ${whenText}.`
+    `${opts.contractLabel}: briefing session ${whenText}.`,
+    { appUrl: opts.appUrl }
   );
   const text = `${opts.contractLabel}: briefing session ${whenText} (${whenDetail}).\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
   return { subject, html, text };
@@ -179,9 +182,10 @@ export function complianceExpiryEmail(opts: {
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.fieldLabel)}</p>
       ${infoCard([{ label: "Expires", value: `in ${opts.daysLeft} day${opts.daysLeft === 1 ? "" : "s"}`, emphasis: "warning" }])}
       <p style="margin:0 0 20px;">Your company's ${escapeHtml(opts.fieldLabel)} expires in ${opts.daysLeft} days. A lapsed document here can disqualify a tender submission - renew it and update your Company vault before it expires.</p>
-      <p style="margin:0;">${button(`${opts.appUrl}/company`, "Open Company vault")}</p>
+      ${button(`${opts.appUrl}/company`, "Open Company vault")}
     `,
-    `${opts.fieldLabel} expires in ${opts.daysLeft} days.`
+    `${opts.fieldLabel} expires in ${opts.daysLeft} days.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName } }
   );
   const text = `${opts.companyName}: ${opts.fieldLabel} expires in ${opts.daysLeft} days.\n\n${opts.appUrl}/company`;
   return { subject, html, text };

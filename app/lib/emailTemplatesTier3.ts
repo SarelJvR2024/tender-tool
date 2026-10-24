@@ -41,9 +41,10 @@ export function scoutAnomalyEmail(opts: {
       <p style="margin:0 0 20px;color:#5C6374;font-size:12px;">Source: ${escapeHtml(opts.source)} - first seen ${escapeHtml(formatDateTime(opts.firstSeenAt) ?? opts.firstSeenAt)}${opts.occurrences > 1 ? ` - ${opts.occurrences} occurrences` : ""}</p>
       ${opts.detail ? `<pre style="margin:0 0 16px;padding:12px;background:#F4F5F7;border:1px solid #DDE0E3;border-radius:6px;font-size:11px;white-space:pre-wrap;word-break:break-word;color:#0B1F3A;">${escapeHtml(opts.detail.slice(0, 2000))}</pre>` : ""}
       ${contextRows.length > 0 ? infoCard(contextRows) : ""}
-      <p style="margin:0;">${button(`${opts.appUrl}/admin`, "Inspect Job in Admin Triage Queue")}</p>
+      ${button(`${opts.appUrl}/admin`, "Inspect Job in Admin Triage Queue")}
     `,
-    opts.message
+    opts.message,
+    { appUrl: opts.appUrl }
   );
   const text = `[${opts.severity.toUpperCase()}] ${opts.message}\nSource: ${opts.source} (${opts.occurrences}x since ${formatDateTime(opts.firstSeenAt)})\n${opts.detail ?? ""}\n\n${opts.appUrl}/admin`;
   return { subject, html, text };
@@ -84,9 +85,10 @@ export function founderDailyDigestEmail(opts: {
         { label: "Active bids closing within 48h", value: String(opts.closingWithin48h), emphasis: opts.closingWithin48h > 0 ? "warning" : undefined },
         { label: "Scout backlog (flagged items)", value: String(opts.scoutBacklogCount), emphasis: opts.scoutBacklogCount > 0 ? "warning" : undefined },
       ])}
-      <p style="margin:0;">${button(`${opts.appUrl}/admin`, "Open Admin Console")}</p>
+      ${button(`${opts.appUrl}/admin`, "Open Admin Console")}
     `,
-    `${opts.closingWithin48h} active bids closing within 48h, ${opts.scoutBacklogCount} flagged items.`
+    `${opts.closingWithin48h} active bids closing within 48h, ${opts.scoutBacklogCount} flagged items.`,
+    { appUrl: opts.appUrl }
   );
   const text = `Daily digest - ${opts.date}\nWorker success: ${successPct !== null ? `${successPct}%` : "no jobs"}\nNew signups (24h): ${opts.newSignupsLast24h}\nActive subscriptions: ${opts.activeSubscriptions}\nClosing within 48h: ${opts.closingWithin48h}\nScout backlog: ${opts.scoutBacklogCount}\n\n${opts.appUrl}/admin`;
   return { subject, html, text };

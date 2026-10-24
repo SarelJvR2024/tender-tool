@@ -36,7 +36,7 @@ mkdirSync(outDir, { recursive: true });
 
 const samples: Record<string, { subject: string; html: string; text: string }> = {
   "00-welcome-user": welcomeEmail({ companyName: "Reviewer Civils (Pty) Ltd", appUrl: APP_URL }),
-  "00-nudge-vault-kickstart": nudgeVaultKickstartEmail({ companyName: "Reviewer Civils (Pty) Ltd", vaultDocsOnFile: 1, appUrl: APP_URL }),
+  "00-nudge-vault-kickstart": nudgeVaultKickstartEmail({ companyName: "Reviewer Civils (Pty) Ltd", vaultDocsOnFile: 1, appUrl: APP_URL, unsubscribeUrl: `${APP_URL}/api/unsubscribe?token=sample-unsub-token` }),
   "00-nudge-first-tender": nudgeFirstTenderEmail({ companyName: "Reviewer Civils (Pty) Ltd", appUrl: APP_URL }),
   "00-trial-day-7-milestone": trialDay7MilestoneEmail({ companyName: "Reviewer Civils (Pty) Ltd", trialEndsAt: "2026-11-07", packsBuiltSoFar: 2, appUrl: APP_URL }),
   "00-trial-expiring-48h": trialExpiring48hEmail({ companyName: "Reviewer Civils (Pty) Ltd", trialEndsAt: "2026-10-26", appUrl: APP_URL }),
@@ -47,6 +47,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
 
   "01-briefing-5-days": briefingReminderDetailedEmail({
     reference: "N.007-030-2026/1F",
+    companyName: "Reviewer Civils (Pty) Ltd",
     buyerShortName: "SANRAL",
     briefingDate: "2026-10-29",
     briefingTime: "10:00",
@@ -59,6 +60,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   "01-briefing-24h": briefingReminderDetailedEmail({
     reference: "RFP 165/2026",
     buyerShortName: "DBSA",
+    companyName: "Reviewer Civils (Pty) Ltd",
     briefingDate: "2026-10-25",
     briefingTime: "09:00",
     venueOrLink: "https://teams.microsoft.com/l/meetup-join/sample",
@@ -70,6 +72,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   "01-print-sign-cutoff-48h": printSignCutoffEmail({
     reference: "N.007-030-2026/1F",
     buyerShortName: "SANRAL",
+    companyName: "Reviewer Civils (Pty) Ltd",
     closingDateTime: "2026-10-28T11:00:00+02:00",
     deliveryLocation: "SANRAL Head Office, Tender Box Room 2, Ground Floor, 48 Tambo House, Pretoria",
     outstandingItems: [
@@ -84,6 +87,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   "01-corrigendum-alert": corrigendumAlertEmail({
     reference: "N.007-030-2026/1F",
     buyerShortName: "SANRAL",
+    companyName: "Reviewer Civils (Pty) Ltd",
     changes: [
       { kind: "closing_date", date: "2026-11-04", previousDate: "2026-10-28", quote: "The closing date is hereby extended to 04 November 2026 at 11:00." },
       { kind: "other", label: "Technical specification", quote: "Clause 3.4.2 amended: minimum CIDB grading changed from 6CE to 7CE." },

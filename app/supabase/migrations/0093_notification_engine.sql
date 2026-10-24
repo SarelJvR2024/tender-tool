@@ -156,3 +156,75 @@ comment on function record_notification_sent(text, text, text, uuid, uuid, text,
   'Writes one notification_logs row. Called by the same sendNotification() helper (lib/notificationEngine.ts) right after a Resend send attempt, whether it succeeded or failed - called from both the anon/authenticated context (a Server Action with no service-role key, e.g. the welcome email) and service-role scripts (which could insert directly, but go through the same function for one consistent write path and one place that enforces the status check).';
 revoke all on function record_notification_sent(text, text, text, uuid, uuid, text, text, text, text) from public;
 grant execute on function record_notification_sent(text, text, text, uuid, uuid, text, text, text, text) to anon, authenticated;
+
+-- Tier 0 one-click unsubscribe (RFC 8058) - added in this same migration
+-- (still unmerged at the time of this addition, so extending it directly
+-- rather than fragmenting one feature's schema across two files - this
+-- project's own "never edit an already-possibly-live migration" rule
+-- doesn't apply to a migration that was never live). Only Tier 0
+-- (onboarding/lifecycle) mail is ever opt-out-able - every other tier is
+-- an operational/compliance alert the brief itself says must stay
+-- mandatory (0093's own header comment on why notification_preferences
+-- wasn't built as a generalised table).
+--
+-- Token-based, not session-based, on purpose: RFC 8058's one-click
+-- List-Unsubscribe-Post must work when a mail CLIENT (not the recipient's
+-- browser, no cookies, no login) POSTs it automatically - the exact same
+-- "possession of an unguessable bearer token is the authorization" model
+-- company_invites (0077) and apply_payfast_itn (0078) already use for the
+-- identical reason (a caller with no Supabase session).
+alter table company_members
+  add column lifecycle_email_opt_out boolean not null default false;
+comment on column company_members.lifecycle_email_opt_out is
+  'Opted OUT, via the one-click unsubscribe link, of Tier 0''s own RECURRING nudge/milestone mail only (nudge_vault_kickstart, nudge_first_tender, trial_day_7_milestone, trial_expiring_48h, trial_expired) - the genuinely promotional half of Tier 0. welcome_user (a one-time signup confirmation) and team_invite (a specific, needed action for a specific invitee) stay exempt, same as admin_new_signup/admin_paid_conversion (sent to Sarel about his own platform, not to an end-user subscriber at all) - none of those four are "lifecycle marketing" a recipient would reasonably want to opt out of. Defaults false. Every notification tier outside Tier 0 ignores this column entirely - they are operational/compliance alerts, not optional.';
+
+create table lifecycle_unsubscribe_tokens (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  token text not null unique default encode(gen_random_bytes(24), 'hex'),
+  created_at timestamptz not null default now()
+);
+comment on table lifecycle_unsubscribe_tokens is
+  'One unguessable token per user, lazily created the first time a Tier 0 email needs one (lifecycle_unsubscribe_token_for). The token itself is the bearer credential app/app/api/unsubscribe/route.ts accepts with no login - same model as company_invites'' own token.';
+alter table lifecycle_unsubscribe_tokens enable row level security;
+
+create or replace function lifecycle_unsubscribe_token_for(p_user_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_token text;
+begin
+  insert into lifecycle_unsubscribe_tokens (user_id) values (p_user_id)
+    on conflict (user_id) do nothing;
+  select token into v_token from lifecycle_unsubscribe_tokens where user_id = p_user_id;
+  return v_token;
+end;
+$$;
+comment on function lifecycle_unsubscribe_token_for(uuid) is
+  'Get-or-create this user''s unsubscribe token, for whoever is about to send them a Tier 0 email to embed in the unsubscribe link/List-Unsubscribe header. Never regenerates an existing token (a previously-sent email''s link must keep working).';
+revoke all on function lifecycle_unsubscribe_token_for(uuid) from public;
+grant execute on function lifecycle_unsubscribe_token_for(uuid) to anon, authenticated;
+
+create or replace function unsubscribe_lifecycle_email(p_token text)
+returns boolean -- true = a real token was found and opted out; false = unknown token (don't reveal which - the route still responds success-shaped either way)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_user_id uuid;
+begin
+  select user_id into v_user_id from lifecycle_unsubscribe_tokens where token = p_token;
+  if v_user_id is null then
+    return false;
+  end if;
+  update company_members set lifecycle_email_opt_out = true where user_id = v_user_id;
+  return true;
+end;
+$$;
+comment on function unsubscribe_lifecycle_email(text) is
+  'The one-click unsubscribe itself - called by app/app/api/unsubscribe/route.ts with no auth (RFC 8058: a mail client POSTs this with zero user interaction, so it cannot require a session). Idempotent - unsubscribing an already-opted-out user is a harmless no-op.';
+revoke all on function unsubscribe_lifecycle_email(text) from public;
+grant execute on function unsubscribe_lifecycle_email(text) to anon, authenticated;

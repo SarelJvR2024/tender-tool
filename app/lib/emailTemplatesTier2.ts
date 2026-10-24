@@ -64,9 +64,10 @@ export function complianceDigestEmail(opts: { companyName: string; items: Compli
       <p style="margin:0 0 20px;font-size:17px;font-weight:700;">${escapeHtml(opts.companyName)}</p>
       <p style="margin:0 0 16px;">The following compliance item${opts.items.length === 1 ? " needs" : "s need"} attention before they lapse (each is a link to where to fix it):</p>
       ${infoCard(rows)}
-      <p style="margin:0;">${button(`${opts.appUrl}/company`, "Open Company Vault")}</p>
+      ${button(`${opts.appUrl}/company`, "Open Company Vault")}
     `,
-    `${opts.companyName}: ${action}.`
+    `${opts.companyName}: ${action}.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName } }
   );
   const text = `${opts.companyName} - compliance items needing attention:\n${sorted
     .map((i) => `- ${i.label}: ${i.daysLeft < 0 ? `expired ${Math.abs(i.daysLeft)}d ago` : `${i.daysLeft}d left`} (${formatDate(i.expiryDate)}) - ${opts.appUrl}${i.href}`)

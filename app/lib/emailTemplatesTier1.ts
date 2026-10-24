@@ -25,6 +25,7 @@ import type { NotificationEmail } from "./notificationEngine.ts";
 export function briefingReminderDetailedEmail(opts: {
   reference: string;
   buyerShortName: string;
+  companyName: string;
   briefingDate: string; // tenders.briefing_date, YYYY-MM-DD
   briefingTime: string | null; // tenders.briefing_time, "HH:MM", null = date known, time not
   venueOrLink: string | null;
@@ -67,7 +68,8 @@ export function briefingReminderDetailedEmail(opts: {
       <p style="margin:0 0 12px;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "View Briefing Details & RFP")}</p>
       ${ics ? `<p style="margin:0;color:#5C6374;font-size:12px;">A calendar invite (${escapeHtml(ics.filename)}) is attached to this email.</p>` : ""}
     `,
-    `${opts.reference} briefing ${when}.`
+    `${opts.reference} briefing ${when}.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "tender", tenderReference: opts.reference, companyName: opts.companyName } }
   );
   const text = `${opts.reference} (${opts.buyerShortName}) - compulsory briefing ${when}.\n${opts.isVirtual ? "Link" : "Venue"}: ${opts.venueOrLink ?? "see tender documents"}\n\nFailure to attend disqualifies your bid automatically.\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
   return { subject, html, text, attachments: ics ? [ics] : undefined };
@@ -89,6 +91,7 @@ export function briefingReminderDetailedEmail(opts: {
 export function printSignCutoffEmail(opts: {
   reference: string;
   buyerShortName: string;
+  companyName: string;
   closingDateTime: string; // tenders.closing_date, full ISO timestamp
   deliveryLocation: string | null;
   outstandingItems: ChecklistItem[];
@@ -115,9 +118,10 @@ export function printSignCutoffEmail(opts: {
       ])}
       <p style="margin:0 0 8px;font-weight:700;">${missing > 0 ? `${missing} item${missing === 1 ? "" : "s"} still outstanding:` : "Everything on this checklist is complete."}</p>
       ${checklist(opts.outstandingItems)}
-      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open Tender Workspace & Resolve Blockers")}</p>
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open Tender Workspace & Resolve Blockers")}
     `,
-    `${opts.reference}: ${missing} item(s) outstanding before the print/sign cutoff.`
+    `${opts.reference}: ${missing} item(s) outstanding before the print/sign cutoff.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "tender", tenderReference: opts.reference, companyName: opts.companyName } }
   );
   const text = `${opts.reference} (${opts.buyerShortName})\nClosing: ${formatDateTime(opts.closingDateTime)}\nPrint/sign cutoff: ${deadline ? formatDateTime(deadline.toISOString()) : "n/a"}\nDelivery: ${opts.deliveryLocation ?? "not set"}\n\nOutstanding (${missing}):\n${opts.outstandingItems.filter((i) => !i.done).map((i) => `- ${i.label}`).join("\n")}\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
   return { subject, html, text };
@@ -141,6 +145,7 @@ export type TenderChange =
 export function corrigendumAlertEmail(opts: {
   reference: string;
   buyerShortName: string;
+  companyName: string;
   changes: TenderChange[];
   appUrl: string;
   tenderId: string;
@@ -165,9 +170,10 @@ export function corrigendumAlertEmail(opts: {
       <p style="margin:0 0 20px;color:#5C6374;font-size:13px;">${escapeHtml(opts.buyerShortName)}</p>
       <p style="margin:0 0 16px;">The buyer has published an addendum to this tender. Summary of what changed:</p>
       ${infoCard(rows)}
-      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Review Addendum Changes")}</p>
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Review Addendum Changes")}
     `,
-    `${opts.reference}: the buyer published an addendum.`
+    `${opts.reference}: the buyer published an addendum.`,
+    { appUrl: opts.appUrl, recipientContext: { kind: "tender", tenderReference: opts.reference, companyName: opts.companyName } }
   );
   const text = `${opts.reference} (${opts.buyerShortName}) - addendum published.\n${rows.map((r) => `${r.label}: ${r.value.replace(/<[^>]+>/g, "")}`).join("\n")}\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
   return { subject, html, text };

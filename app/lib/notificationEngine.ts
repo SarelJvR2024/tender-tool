@@ -40,7 +40,7 @@ export type NotificationType =
   | "scout_anomaly"
   | "founder_daily_digest";
 
-export type NotificationEmail = { subject: string; html: string; text: string; attachments?: EmailAttachment[] };
+export type NotificationEmail = { subject: string; html: string; text: string; attachments?: EmailAttachment[]; headers?: Record<string, string> };
 
 export type SendNotificationInput = {
   /** The dedupe key for this exact notification - e.g. `briefing-24h-<tender_id>-<company_id>`. Must be stable across retries/re-runs of the same logical send and unique across every OTHER notification this engine ever sends. */
@@ -97,6 +97,7 @@ export async function sendNotification(supabase: SupabaseClient<any>, input: Sen
     text: input.email.text,
     from: input.senderProfile,
     attachments: input.email.attachments,
+    headers: input.email.headers,
   });
 
   const { error: logError } = await supabase.rpc("record_notification_sent", {
