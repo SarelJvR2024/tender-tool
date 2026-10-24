@@ -285,6 +285,23 @@ def test_intake_readers():
           and addr_addendum_first["lines"][0] == "SANRAL Southern Region Office" and addr_addendum_first["ambiguous"] is True,
           "two different delivery addresses: which one wins again depends purely on sort order, both flagged ambiguous")
 
+    # Finding 70, QA pass 2026-10-24: find_nra_reference() picks the
+    # MOST-REPEATED number, not the first match - worse than a plain sort-
+    # order tiebreak here, since Book 1's own running page footer repeats the
+    # same (possibly stale/typo'd) reference many times over, while a single
+    # addendum correcting it is mentioned only once and would always lose a
+    # repetition count regardless of document order.
+    book1_footer = "\n".join(["Page footer: NRA: 2026/0071"] * 8)
+    addendum_fix = "ADDENDUM No 1: please note the correct reference is NRA: 2026/0017, not as printed in Book 1."
+    single = c.find_nra_reference("Book 1 cover: NRA: 2026/0071")
+    check(single == {"value": "NRA 2026/0071", "ambiguous": False},
+          "a single NRA reference mention is read correctly, not flagged ambiguous")
+    check(c.find_nra_reference("no reference here at all") is None, "no NRA reference -> None, never a default")
+    outvoted = c.find_nra_reference(book1_footer + "\n" + addendum_fix)
+    check(outvoted == {"value": "NRA 2026/0071", "ambiguous": True},
+          f"a correcting addendum mentioned once is outvoted by a stale reference repeated many times in Book 1's "
+          f"own footer ({outvoted}), so this is correctly flagged ambiguous=True rather than trusted silently")
+
 
 def test_financial_rows():
     print("Financial workbook rows (fill_financial.py)")

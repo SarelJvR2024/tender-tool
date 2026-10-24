@@ -2238,6 +2238,38 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-24, standing QA/robustness review - eighty-second run): a SANRAL addendum correcting a typo'd NRA reference could be outvoted by the stale number simply because it's repeated more often on Book 1's own page footer
+
+Orientation: synced a sibling session's merge (`c1fb95b`, PR #137, TypeScript-only Market
+Intelligence chart fix - no collision). Rotated to `engine/intake` - the most overdue area in the
+standing rotation (last dedicated pass the seventy-fourth run, 2026-10-23). Finding 61 (that run)
+and Finding 68 (seventy-ninth run) both fixed the same "plain first-match silently picks a
+filename-order winner" bug class elsewhere in this module - worth checking whether a third field
+in the same file still had the unflagged version.
+
+**Finding 70 (CONFIRMED, FIXED, severe).** `find_nra_reference()` doesn't even use first-match -
+it returns whichever NRA number is MOST FREQUENT across the documents read, with no ambiguity
+signal at all (a bare string or `None`, unlike its two siblings). That's worse than a sort-order
+coin-flip: SANRAL's NRA reference is often repeated many times over on Book 1's own running page
+footer, while a real addendum correcting a typo in it is realistically mentioned only once -
+repetition count is actively anti-correlated with which value is actually correct. Confirmed
+directly: a synthetic Book 1 footer repeating "NRA: 2026/0071" 8 times plus a single addendum line
+correcting it to "NRA: 2026/0017" - the function returned the stale, already-wrong number, with
+nothing anywhere aware two different numbers existed. This reference feeds the real envelope
+covers and authority letter SANRAL requires and is stored directly on `tenders.nra_reference`.
+
+**Fix:** same shape as Finding 61/68 - `find_nra_reference()` now returns
+`{"value": "NRA ...", "ambiguous": bool}` (or `None`), most-frequent value unchanged as the
+default, `ambiguous` set when more than one distinct number was found. Updated the one real call
+site in `process_general_jobs.py`: the plain-text DB column gets `nra["value"]`; the intake
+record's notes gain an extra sentence when `ambiguous` is set.
+
+**Verified the regression test actually catches the regression:** extended
+`test_form_field_audit.py::test_intake_readers()` with the single-mention, no-match, and real
+outvoting cases. Reverted the fix (keeping the new tests): both new checks failed exactly as
+predicted; restored: `0 failures`. `test_classify_tender.py` and `test_process_general_jobs.py`
+re-run clean.
+
 ## This pass (2026-10-24, standing QA/robustness review - eighty-first run): rotated to notify (engine/notify) - thorough review, no new bug found this time
 
 Orientation: synced a sibling session's merge (`6314725`, PR #136, TypeScript-only analytics fix -

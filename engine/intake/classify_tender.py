@@ -136,15 +136,29 @@ NRA_RE = re.compile(r"\bNRA\s*:?\s*(?:No\.?\s*)?(\d{4}\s*/\s*\d{3,5})\b")
 
 def find_nra_reference(all_text):
     """SANRAL's NRA number, as printed on Book 1's cover ("NRA: 2026/0071",
-    R.396-010-2025/1F). Returned in the seed's own format ("NRA 2026/0071")
-    - the envelope covers and authority letter refuse to invent it."""
+    R.396-010-2025/1F). {"value": "NRA 2026/0071", "ambiguous": bool}, or
+    None if none was found. `value` is in the seed's own format
+    ("NRA 2026/0071") - the envelope covers and authority letter refuse to
+    invent it.
+
+    `ambiguous` is True when more than one DISTINCT NRA number was found
+    across the documents read - an addendum correcting a typo'd reference is
+    a real, common shape, mentioned once, while the original (wrong) number
+    is often repeated many times over on Book 1's own running page
+    footer/header. The most-repeated value stays the default (unchanged
+    behaviour for the normal single-reference case), but repetition count is
+    not a reliability signal - a stale number printed on every page can
+    outvote a single correcting mention - so this surfaces the conflict
+    instead of silently trusting whichever counted highest, same "silent
+    wrong data is the main risk" discipline as find_closing_time()/
+    find_delivery_address() above. QA pass, 2026-10-24."""
     counts = {}
     for m in NRA_RE.finditer(all_text or ""):
         v = re.sub(r"\s+", "", m.group(1))
         counts[v] = counts.get(v, 0) + 1
     if not counts:
         return None
-    return "NRA " + max(counts, key=counts.get)
+    return {"value": "NRA " + max(counts, key=counts.get), "ambiguous": len(counts) > 1}
 
 
 # The tender's own delivery address and closing time, as its Tender Notice

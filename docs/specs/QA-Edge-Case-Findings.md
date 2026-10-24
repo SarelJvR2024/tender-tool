@@ -4179,3 +4179,50 @@ predicted (`fill() returned with no error for ...`); restored: `ALL PASSED`.
 **Regression:** `engine/test_sanral_b7.py` and `engine/test_form_field_audit.py` (both touch
 `sanral_fill.Workbook`/the SANRAL pack area) re-run clean - no other test exercises
 `fill_financial_hours.py` directly, confirmed by grep before this pass.
+
+### Finding 70 (CONFIRMED, FIXED, severe - a SANRAL addendum correcting a typo'd NRA reference could be silently outvoted by the stale number simply because it's repeated more often, worse than a plain filename-order tiebreak)
+
+**Where:** `engine/intake/classify_tender.py`'s `find_nra_reference()`, called from
+`engine/general/process_general_jobs.py`'s SANRAL-route intake branch whenever a tender's
+`nra_reference` column isn't already set.
+
+**What was tested:** Finding 61 (run 74) and Finding 68 (run 79) both already fixed the same
+"plain `re.search()`/first-match silently picks a filename-order winner" bug class for SANRAL
+closing time/delivery address and non-SANRAL CIDB grading respectively - worth checking whether
+any other field in the same intake module still had the unflagged version. `find_nra_reference()`
+does NOT use first-match at all - it counts every distinct NRA number found across `all_text` and
+returns whichever is MOST FREQUENT (`max(counts, key=counts.get)`), with no `ambiguous` signal of
+any kind (it returns a bare string or `None`, unlike its two siblings above).
+
+**Finding (CONFIRMED, severe).** This is not just the same bug class - it's a worse version of it.
+SANRAL's Book 1 cover prints its NRA reference once, but real tenders often repeat it in a running
+page footer/header across many pages. An addendum correcting a typo in that reference is realistically
+mentioned only ONCE. Confirmed directly: a synthetic Book 1 footer with "NRA: 2026/0071" repeated 8
+times plus a single addendum line "the correct reference is NRA: 2026/0017" - `find_nra_reference()`
+returned "NRA 2026/0071", the STALE, already-known-wrong number, purely because it was repeated more
+times, with zero indication two different references were ever found. Unlike the sort-order tiebreak
+Finding 61/68 fixed (at least a coin-flip), this heuristic actively prefers whichever number happens
+to be printed more often, which has no correlation with which one is actually correct - a correcting
+addendum is structurally guaranteed to lose a repetition count against the document it's correcting.
+This reference feeds the real printed envelope covers and authority letter SANRAL requires
+(`find_nra_reference()`'s own docstring: "the envelope covers and authority letter refuse to invent
+it") and is stored directly on the `tenders.nra_reference` column.
+
+**Fix:** `find_nra_reference()` now returns `{"value": "NRA ...", "ambiguous": bool}` (or `None`),
+`ambiguous` set when more than one distinct NRA number was found - same shape, same "surface the
+conflict, don't guess a smarter default" discipline as Finding 61/68. The most-frequent value stays
+the default (unchanged behaviour for the normal single-reference case). Updated the one real call
+site (`process_general_jobs.py`): `patch["nra_reference"]` is set from `nra["value"]` (the DB column
+is plain `text`, confirmed against migration `0001`), and `intake_rec["notes"]` gets an extra sentence
+telling a person to check the tender notice and any addenda when `ambiguous` is set.
+
+**Verified the regression test actually catches the regression:** extended
+`test_form_field_audit.py::test_intake_readers()` with the single-mention case (not ambiguous),
+the no-match case (`None`), and the real outvoting case (ambiguous, stale value still returned).
+Reverted the fix (keeping the new tests): both new checks failed exactly as predicted (the bare
+string no longer matched the expected dict shape); restored: `0 failures`. Full
+`test_classify_tender.py` and `test_process_general_jobs.py` suites re-run clean.
+
+**Regression:** `engine/intake/classify_tender.py` (additive return shape - the only caller was
+updated in the same commit) and `engine/general/process_general_jobs.py` (one call site). No
+schema change - `tenders.nra_reference` stays a plain string column, unchanged on disk.

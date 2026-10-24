@@ -465,8 +465,12 @@ def run_extraction(client, job, work_root, fetch=None):
         if not tender.get("nra_reference"):
             nra = intake.find_nra_reference(all_text)
             if nra:
-                patch["nra_reference"] = nra
-                intake_rec["notes"].append(f"NRA reference {nra} read from the tender documents.")
+                patch["nra_reference"] = nra["value"]
+                note = f"NRA reference {nra['value']} read from the tender documents."
+                if nra["ambiguous"]:
+                    note += (" More than one different NRA reference was found across the documents read - check "
+                             "the tender notice and any addenda for the correct one before relying on this.")
+                intake_rec["notes"].append(note)
             else:
                 intake_rec["notes"].append("No NRA reference found (it's on SANRAL's Book 1 cover, e.g. 'NRA: 2026/0071') - "
                                            "upload Book 1, otherwise the envelope covers and the authority letter are left out of the pack.")
