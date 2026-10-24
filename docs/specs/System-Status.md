@@ -1,5 +1,41 @@
 # System Status
 
+**2026-10-24 ~16:00 UTC — PR #141 opened: Batch 2B (discovery/workspace copy cleanup, SA formats),
+two real findings worth any other session knowing before touching the same areas.** Full brief:
+discipline-match copy leak, duplicate discovery button, closing-time midnight default, redundant
+workspace sub-header, empty Compliance box, date-input locale, pack-compiler closing placeholder,
+Overview submission-logistics summary, Preference Points Calculator currency formatting, Team & CVs
+text-wall condensing. PR: https://github.com/SarelJvR2024/tender-tool/pull/141 (branch
+`tender-workspace-batch-2b`), marked ready for review after live verification - not self-merged.
+
+- **`assess_tender.py`'s `labels()` helper used to append the raw taxonomy slug in parens after
+  every discipline label** (`"Generators & Backup Power (generators_backup_power)"`) - a debugging
+  artifact that reached real `/discovery` copy. Fixed at the root (the helper itself, plus one
+  reason string that bypassed it entirely). **Caveat for any session checking this live**:
+  `opportunities.reasons` is written once by the discovery pipeline (`watch_new_tenders.py` →
+  `assess_fit()`), not recomputed on page render - the live preview still shows the *old* leaked
+  text for every already-scraped opportunity until the daily discovery run reassesses it. Confirmed
+  via `test_taxonomy.py`'s real regression fixtures that the fix itself is correct; did not force a
+  production rescrape to prove it live (that's a real side-effecting action against the shared
+  database and real government sites, out of scope for a text-copy fix).
+- **4 sources (Rand Water, Kouga, Vaal Central Water, Lephalale) confirmed date-only, never a time**
+  for their closing date - `parse_sast()`'s generic midnight default then displayed as a literal
+  "00:00". Added `iso_sast_closing()` (`source_http.py`), used only at these 4 call sites, defaulting
+  to 11:00 SAST - the generic `iso_sast()`/`parse_sast()` is untouched since it also backs
+  `published_date` everywhere, where midnight is a harmless marker, not a fabricated deadline. Same
+  go-forward-only caveat as above applies to already-stored rows.
+- **`<html lang="en-ZA">` does NOT control the native `<input type="date">` picker's display
+  order - tested directly, confirmed wrong, don't repeat this assumption.** The brief asked for SA
+  dd/mm/yyyy date inputs instead of US mm/dd/yyyy; the obvious-looking fix (set the document's own
+  `lang`) was tried, verified empirically (an isolated `lang="en"` vs `lang="en-ZA"` date input, same
+  value, screenshotted - both rendered `01/15/2026`), and found not to work. A browser's native date
+  picker format follows the *browser's own UI language setting*, not the page's `lang` attribute -
+  confirmed by Chrome's own engineering FAQ (no standard web-author hook exists for this at all).
+  `lang="en-ZA"` is still in the PR (harmless, correct for other reasons - accessibility, spellcheck,
+  `Intl` calls) but does not achieve the stated goal. A real fix needs a custom date-input component
+  (text input + mask, replacing the native control) across 4 date fields - flagged as a scoped
+  follow-up for Sarel's own call, not built speculatively.
+
 **2026-10-24 ~14:20 UTC, standing review pass — PR #139 now ready for review (Sarel's own
 action), no new collision risk, QA tooling fix confirmed still in place.** Orientation: `git fetch
 origin main` clean, working tree matches `origin/main` exactly, no uncommitted drift. Sarel himself
