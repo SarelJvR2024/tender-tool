@@ -2238,6 +2238,45 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-24, standing QA/robustness review - eighty-first run): rotated to notify (engine/notify) - thorough review, no new bug found this time
+
+Orientation: synced a sibling session's merge (`6314725`, PR #136, TypeScript-only analytics fix -
+no collision with this pass). Picked `engine/notify` - the most overdue area in the standing
+8-area rotation (last dedicated pass was the seventy-second run, 2026-10-23; every area since has
+been a different one). Read `daily_digest.py` (880 lines) and `send_digest_emails.py` (282 lines,
+no dedicated test file at all) end to end and tried to construct real adversarial cases; none held
+up as a genuinely new, reachable bug - this area has had unusually heavy, repeated prior attention
+(19th run, 61st-era, 72nd run):
+
+- `build_digest_for_person()`'s `role = person["tender_role"]` is a bare bracket access with no
+  default - looked like a live crash risk (a roster entry missing the key) until tracing both
+  loaders: `load_roster_live()` and `load_roster_local()` both already normalize a missing/null
+  value to `DEFAULT_ROLE` before the person dict is ever built, and `company_members.tender_role`
+  carries its own DB `check` constraint (migration `0010`) restricting it to the 5 valid roles or
+  null - no path exists for an invalid or missing role to reach this line for real.
+- `send_digest_emails.py`'s per-digest/per-send error handling was read in full looking for an
+  unguarded crash point (string/bool/negative-style inputs, the exact bug class Finding 69 just
+  found in the SANRAL area): every candidate (a non-dict `digest["person"]`, a non-string email, a
+  malformed Retry-After header, a URLError vs. HTTPError split) is already caught - either by
+  `send_one()`'s own guards or by `main()`'s per-entry `try/except` (added "Enterprise-readiness
+  audit round 2, 2026-10-20" per its own comment).
+- The role-visibility matrix (`SECTION_VISIBILITY`), the `CV_KEYWORDS`/`FINANCE_KEYWORDS` heuristic
+  classifiers (`classify_text()` safely lowercases and treats `None` as `""`), and the per-roster-
+  entry isolation in `main()`'s digest-building loop (`try/except` around each person, added same
+  round-2 audit) all held up.
+- Spent remaining time on `engine/worker` (second-most-overdue, last dedicated pass the
+  seventy-third run) as a secondary check: `poll_loop.py`'s signal handling/stop-event/max-runtime
+  logic and `run_bridges.py`'s per-bridge timeout/exit-code/alerting path (both already hardened by
+  Finding 60, 8 runs ago) held up too. One cosmetic-only observation, not fixed: `run_once()`
+  raising one combined `RuntimeError` when multiple bridges are broken in the same pass means
+  `poll_forever()`'s own `jobs handled` stat undercounts for that cycle (the jobs still get
+  processed and alerted correctly; only the log line's count is off) - not worth a special-cased
+  fix for a stats-only cosmetic gap.
+
+No Python file changed this pass. Logging this as a genuine clean sweep of two real areas, not a
+skipped cycle - same discipline as the sixty-seventh run's own SANRAL-pack clean sweep, so the next
+pass through either area starts further ahead, not from zero.
+
 ## This pass (2026-10-24, standing QA/robustness review - eightieth run): a human-typed typo in fill_financial_hours.py's own capture file could silently corrupt a real SANRAL financial workbook's fee formula
 
 Orientation: rotated to SANRAL pack - most overdue literal rotation slot (last dedicated run was
