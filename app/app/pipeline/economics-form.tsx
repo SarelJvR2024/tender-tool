@@ -59,7 +59,7 @@ export function EconomicsForm({
 
   const summary =
     price !== null
-      ? `${formatRand(price)}${economics?.submitted_price_incl_vat === false ? " excl. VAT" : ""}${person ? ` · ${person.name}` : ""}`
+      ? `${formatRand(price, { vat: economics?.submitted_price_incl_vat === false ? "excl" : "incl" })}${person ? ` · ${person.name}` : ""}`
       : person
         ? `No price yet · ${person.name}`
         : null;

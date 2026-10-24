@@ -41,6 +41,7 @@ import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestio
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { formatDate } from "@/lib/dates";
+import { formatZAR } from "@/lib/formatZAR";
 import { computeTenderReadiness } from "./tender-readiness";
 import { DisqualificationGuard } from "./disqualification-guard";
 import { SubmissionPlanView } from "./submission-plan-view";
@@ -1519,7 +1520,7 @@ function WonProjectCard({
       {completed && (
         <div style={{ fontSize: 13, color: "var(--success)", fontWeight: 600, marginBottom: 2 }}>
           Completed {(formatDate(tenderPack.project_completed_at!) ?? "—")}
-          {completionValue != null && `, valued at R${Number(completionValue).toLocaleString("en-ZA")}m`}
+          {completionValue != null && `, valued at ${formatZAR(Number(completionValue) * 1_000_000, { compact: true })}`}
         </div>
       )}
       {completed && tenderPack.project_completion_note && (

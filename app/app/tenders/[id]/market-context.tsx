@@ -208,7 +208,7 @@ function ThisTender({ outcome, position, submitted, stage, inclVat }: { outcome:
         )}
         {p.recordedDiffers && (
           <div className={`mt-1 ${mutedClass}`}>
-            The register shows {formatRand(p.price)}; you recorded {formatRand(submitted)} ({inclVat ? "incl." : "excl."} VAT). Buyers rarely say
+            The register shows {formatRand(p.price)}; you recorded {formatRand(submitted, { vat: inclVat ? "incl" : "excl" })}. Buyers rarely say
             whether a register amount includes VAT - check which is right.
           </div>
         )}

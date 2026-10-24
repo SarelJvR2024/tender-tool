@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { loadTenderCompliance } from "./compliance-data";
-import { type ComplianceItem, type ComplianceStatus } from "@/lib/tenderCompliance";
+import { type ComplianceItem, type ComplianceStatus, type CompanyVault } from "@/lib/tenderCompliance";
 import { classifyComplianceItem, type BidTaskStatus } from "./bid-task-status";
+import { QuickBlockerDrawer, VAULT_DRAWER_CONFIG } from "./quick-blocker-drawer";
 import { estimateSanralConventional, type Range } from "@/lib/sanralScoring";
 import { DOCUMENT_TYPES, disciplineLabel, isScoreableEvidence, labelFor, type ExperienceItem } from "@/lib/experience";
 import { acceptedDocTypes, describeRule, type ChosenRule, type EvaluationRules } from "@/lib/experienceEvidence";
@@ -140,7 +141,7 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }): Prom
               {rows.length === 0 ? (
                 <div style={{ fontSize: 12, color: "var(--muted-foreground)", paddingTop: 6 }}>{g.empty}</div>
               ) : (
-                rows.map(({ item, task }) => <BidTaskRow key={item.key} item={item} task={task} />)
+                rows.map(({ item, task }) => <BidTaskRow key={item.key} item={item} task={task} tenderId={tenderId} company={company} />)
               )}
             </div>
           );
@@ -518,7 +519,25 @@ function RangeBar({ range, max, threshold }: { range: Range; max: number; thresh
   );
 }
 
-function BidTaskRow({ item, task }: { item: ComplianceItem; task: ReturnType<typeof classifyComplianceItem> }) {
+function BidTaskRow({
+  item,
+  task,
+  tenderId,
+  company,
+}: {
+  item: ComplianceItem;
+  task: ReturnType<typeof classifyComplianceItem>;
+  tenderId: string;
+  company: (CompanyVault & { id: string }) | null;
+}) {
+  const fixColor = task.status === "fix" ? "var(--destructive)" : "var(--warning)";
+  // The Quick Blocker Resolver drawer (Sarel's own Batch 3 brief,
+  // 2026-10-24) only replaces the plain Link for the compliance keys that
+  // actually map to a real company-vault shape (quick-blocker-drawer.tsx's
+  // own VAULT_DRAWER_CONFIG) - everything else keeps its existing Link to
+  // /company, unchanged.
+  const drawerConfig = company ? VAULT_DRAWER_CONFIG[item.key] : undefined;
+
   return (
     <div style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -533,8 +552,22 @@ function BidTaskRow({ item, task }: { item: ComplianceItem; task: ReturnType<typ
       <div style={{ marginTop: 5 }}>
         {task.confirmed ? (
           <Chip label="Confirmed" className="bg-success/10 text-success" />
+        ) : drawerConfig && company ? (
+          <QuickBlockerDrawer
+            tenderId={tenderId}
+            companyId={company.id}
+            config={drawerConfig}
+            currentValues={Object.fromEntries(
+              drawerConfig.fields.map((f) => {
+                const raw = (company as unknown as Record<string, string | number | null>)[f.name];
+                return [f.name, raw === null || raw === undefined ? "" : String(raw)];
+              }),
+            )}
+            triggerElement={<button type="button" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, fontWeight: 600, color: fixColor }} />}
+            triggerLabel={`${task.fixLabel} →`}
+          />
         ) : (
-          <Link href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: task.status === "fix" ? "var(--destructive)" : "var(--warning)" }}>
+          <Link href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: fixColor }}>
             {task.fixLabel} →
           </Link>
         )}
