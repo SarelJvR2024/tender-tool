@@ -1,5 +1,20 @@
 # System Status
 
+**2026-10-24 ~23:07 UTC — PR #148 merged (`f6cd4e7`); live verification dispatch of `founder-digest.yml`/`scout-alerts.yml` ran, both exited 0, but every notification attempt inside both failed at `claim_notification` - zero emails actually sent.** Sarel: migrations `0094`/`0095` applied to the live DB, merge PR #148, dispatch the two Resend-only workflows as a real end-to-end test. Both dispatched via `workflow_dispatch`, both jobs completed with `conclusion: success` (the script's own top-level `main()` didn't throw) - but reading the actual job logs shows every single `sendNotification()` call inside both scripts failed before ever reaching Resend:
+
+```
+claim_notification failed for founder-digest-2026-10-25 { code: 'PGRST202', message: 'Could not find the function public.claim_notification(p_idempotency_key, p_notification_type) in the schema cache' }
+Founder daily digest (25 Oct 2026): failed.
+
+Quality Scout anomaly alerts: 0 sent, out of 15 candidate(s) (47 open alert(s) total).
+```
+
+`PGRST202` is PostgREST's "this function isn't in my schema cache" error - distinct from "the function doesn't exist in Postgres at all". `claim_notification`/`record_notification_sent` are migration `0093`'s own functions (part of PR #145, merged earlier this session) - **not** `0094`/`0095` (those only add `company_notification_recipients`, which neither `founder-digest.yml` nor `scout-alerts.yml` even calls - they don't read company recipients at all, so this run did not actually exercise `0094`/`0095` either way). Two honest possibilities, not distinguishable from this sandbox: (a) migration `0093` itself was never applied to the live DB (only `0094`/`0095` were, per Sarel's own message - those two don't depend on `0093` existing, so they could have been applied cleanly even with `0093` still missing), or (b) `0093` is applied but PostgREST's schema cache is stale and needs a reload - a well-known Supabase gotcha when SQL is run directly via the dashboard SQL editor instead of `supabase db push` (the fix is either waiting ~60s for the automatic reload, or Settings → API → "Reload schema", or `NOTIFY pgrst, 'reload schema';`).
+
+**Net result, stated plainly: the live verification test did not confirm delivery - it confirmed the opposite.** Zero emails were sent by either run; there is no Resend delivery ID to report, because `sendTransactionalEmail()` is never reached when `claim_notification` fails first. Not a new code bug - the same migration-application gap this file already flagged twice (migration `0094`'s own entry, and the "no CI step applies migrations" note). Waiting on Sarel to confirm `0093` is live and the PostgREST schema cache is fresh before re-dispatching.
+
+---
+
 **2026-10-24 ~22:55 UTC — PR #147 merged (`6234f5d`); zero-recipients bug fixed on both live cron scripts, Python+Gmail system-alert mechanism retired, follow-up branch `fix/operational-alerts-recipients` open.** Sarel's own 4 explicit decisions on the findings the previous entry flagged, actioned in order:
 
 1. **Zero-recipients bug fixed, in both affected scripts, not just the one flagged.** While wiring this, `scripts/send-deadline-reminders.ts` (the original, oldest cron script - "closing in 3/24 hours") turned out to call `company_member_labels()` the exact same broken way `send-operational-alerts.ts` does - same bug, same silent zero-recipients failure, not previously flagged since it predates PR #144/#145 entirely. Both now go through a new shared `lib/notificationRecipients.ts` (`operationalRecipients()`), itself calling `company_notification_recipients()` - extended in migration `0095_notification_recipients_digest_opt_in.sql` to also return `daily_digest_opt_in` (0094's own version only had `lifecycle_email_opt_out`, Tier 0's flag). Verified against a real replayed Postgres (85 migrations) - the extended RPC returns the correct row with the correct `daily_digest_opt_in` value under `service_role`, and `authenticated` is still denied with `insufficient_privilege`.
