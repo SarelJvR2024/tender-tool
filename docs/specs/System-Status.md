@@ -1,5 +1,54 @@
 # System Status
 
+**2026-10-24 ~20:45 UTC — PR #143 merged to `main` (`c39cbc0`): `/sanral-schedules` was silently
+dropping the tender title whenever a contract number existed.** Seventh pass of the standing
+UI/UX review routine tonight. `git fetch origin main` + open-PR check first: `#141`
+(`tender-workspace-batch-2b`, pushed within the hour - still the hard exclusion for
+`app/app/tenders/[id]/`) and `#118` (Python-only, stale, no UI overlap) were the only two open PRs
+at the start of this pass; `#141` itself merged (`f08cb21`) while this pass's own PR was in
+flight - confirmed no file overlap (this pass touched only `app/app/sanral-schedules/page.tsx` +
+`app/AGENTS.md`; `#141`'s own merge commit shows `discovery/page.tsx`, `tenders/[id]/*`, and the
+B6 estimator client - no collision).
+
+**The bug, found by grepping every scoped directory for the same hover/truncation issue class the
+last six passes fixed, but this one is worse - not hover-only, no workaround at all.**
+`/sanral-schedules` (the premium-feature front door for the SANRAL Technical/Financial-workbook
+automation) rendered each tender with `{t.contract_no || t.title || "Tender"}`. Both fields are
+populated throughout the real scraping/engine pipeline (42 files under `engine/` read `contract_no`
+alongside `title`), so whenever a tender had both - the normal case - the title was never rendered
+anywhere on the page, not even as a hover `title=`. A company running more than one SANRAL tender
+at once saw only bare contract numbers (`SANRAL/ADK/0071/2017`) and had to open each one to tell
+them apart. Fixed by giving contract number its own small mono line above the title (matching
+`pipeline/page.tsx`'s existing convention of showing both as distinct identifying info), title on
+its own line below, falling back to a bare "Tender" label only when neither field exists. No
+query/data-shape change. PR: https://github.com/SarelJvR2024/tender-tool/pull/143 (branch
+`fix/sanral-schedules-hidden-title`), self-merged per the standing autonomous-non-schema-UI-work
+authorization once green.
+
+Verification, fresh in this pass's own shell both pre-merge (worktree) and post-merge (real
+`main`): `rm -rf app/.next && npm run verify` - 0 errors, same 3 pre-existing warnings, all 57
+routes build; `npx vitest run` - 147/147 (markup-only change, nothing vitest-covered touched);
+full `node:test` sweep (`npx tsx --test $(find . -name "*.test.ts" -not -path
+"*/node_modules/*")`) - 156/156 both times, matching the sixth pass's own freshly-reconfirmed
+baseline exactly. `app/AGENTS.md` updated with this pass's own dated entry. Worktree
+(`/tmp/sanral-schedules-hidden-title`) and local branch removed after merge; the remote branch
+`fix/sanral-schedules-hidden-title` could **not** be deleted - this session's `gh api -X DELETE
+.../git/refs/heads/...` was refused by the proxy ("Write access to this GitHub API path is not
+permitted through this proxy") - left behind as an orphaned, already-merged source branch, same
+harmless shape as `claude/loving-galileo-3o1byr` noted two passes ago; no action needed from
+anyone, just flagged so a future pass's branch scan doesn't mistake it for in-flight work.
+
+Not done, by design: `pipeline/page.tsx`'s owner-initials-circle hover-only `title=` (flagged
+lower-stakes by the third/fifth/sixth passes) is still untouched - re-confirmed this pass as a
+real but smaller gap than the SANRAL page's outright-missing-title bug. Did not touch
+`app/app/tenders/[id]/` (hard exclusion), `app/app/discovery/page.tsx`,
+`app/app/analytics/page.tsx`, `app/app/market-intelligence/page.tsx`,
+`app/app/_components/NotificationsBell.tsx`, or `app/app/people/[id]/page.tsx`'s role-source
+tooltips (prior passes' own fixes), `app/supabase/migrations/`, billing/entitlement logic, or
+`engine/sanral_fill.py` and its callers.
+
+---
+
 **2026-10-24 ~20:15 UTC, standing review pass — PR #141 synced to current `main` again (Finding
 71 landed in between, no overlap), no new collision, QA tooling still sound.** Orientation:
 fast-forwarded `main` to `74e66a9` (another session's own standing pass: Finding 71, a real bug -
