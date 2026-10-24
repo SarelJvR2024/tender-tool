@@ -198,6 +198,16 @@ export default async function AnalyticsPage() {
                         {p.lost > 0 && <div className="w-full rounded-t-sm bg-destructive/60" style={{ height: `${(p.lost / trendMax) * 100}%` }} />}
                         {p.won > 0 && <div className="w-full rounded-t-sm bg-success" style={{ height: `${(p.won / trendMax) * 100}%` }} />}
                       </div>
+                      {/* The won/lost counts used to live only in the title= above - invisible on
+                          touch and unreachable by hover on the bar itself once the cursor is busy
+                          elsewhere. Same "real information, hover-only" bug this app's own standing
+                          review already fixed twice (PrimaryPackActionLink, Discovery readiness
+                          blockers) - title kept as a free desktop-hover convenience, not load-bearing
+                          here either. */}
+                      <span className="text-[9px] font-semibold tabular-nums">
+                        <span className={p.won > 0 ? "text-success" : "text-muted-foreground"}>{p.won}W</span>{" "}
+                        <span className={p.lost > 0 ? "text-destructive" : "text-muted-foreground"}>{p.lost}L</span>
+                      </span>
                       <span className="text-[10px] text-muted-foreground">{monthLabel(p.month)}</span>
                     </div>
                   ))}

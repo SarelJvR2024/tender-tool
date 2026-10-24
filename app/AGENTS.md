@@ -3260,3 +3260,68 @@ submit" fact the way the readiness blockers are - left as-is rather than reworki
 tooltip on the page in one pass; a real follow-up, not silently dropped. Did not touch anything
 under `app/app/tenders/[id]/` (this pass's hard exclusion), `app/supabase/migrations/`,
 billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (third pass tonight): Analytics win/loss trend chart made readable without hovering
+
+Routine scheduled solution-architect-style UI/UX check-in. Same hard exclusion as the last two
+passes (`app/app/tenders/[id]/` - PR #133 still open, unreviewed, its two design questions still
+waiting on Sarel) plus `app/app/discovery/page.tsx` (fixed last pass, PR #135) and the three Batch 1
+files. `git fetch origin main` + `gh api .../pulls?state=open` first: only two open PRs, `#133`
+(`workspace-polish`, the hard exclusion) and `#118` (`fix/discovery-scoring-diagnosis`, `engine/
+discovery/` and `engine/intake/` Python only - no UI overlap). `git log --oneline -30 --name-only`
+showed nothing touching `company/`, `people/`, `experience/`, `billing/`, `analytics/`,
+`sanral-schedules/`, `onboarding/`, `pipeline/`, `tools/`, `admin/` in recent history - no
+collision risk picking from any of those.
+
+**The gap, same bug class as the last two passes' own fixes (`PrimaryPackActionLink`'s disabled
+reason, Discovery's per-card readiness blockers) - found by grepping every `title={` across those
+ten directories for one carrying real, non-decorative data**: `app/analytics/page.tsx`'s "Win/loss
+trend (last 6 months)" chart rendered each month as a plain stacked bar (won/lost segments, no
+numbers anywhere in the DOM) with the actual counts - `${monthLabel} : ${won} won, ${lost} lost` -
+living *only* in a `title=` attribute on the bar's own container div. Worse than the two prior
+hover-only findings in one respect: there was no visible fallback at all, not even an approximate
+one - a bar's height is relative to that 6-month window's own max (`trendMax`), not an absolute
+scale, so a short bar could mean "1 lost" or "2 won, 1 lost" and nothing on screen said which. On a
+touch device (this app's own stated field-use case - a director checking in from their phone) the
+exact figures behind every bar in this core "Track" widget were completely unreachable, not just
+inconvenient to get to.
+
+**Fixed**: added a small always-visible `{won}W {lost}L` line under each bar, color-coded to match
+the existing bar/legend colors (`text-success` when `won > 0`, `text-destructive` when `lost > 0`,
+`text-muted-foreground` otherwise - including for a quiet month showing `0W 0L`, which is itself
+real information: "no decisions that month", not a gap to hide). `tabular-nums` so the two-column
+figures don't jitter against each other month to month. The `title=` attribute stays on the bar
+div itself, same as Discovery's fix kept its own `title` - a free desktop-hover convenience now,
+not load-bearing. No change to `lib/analyticsLogic.ts` (`buildWinLossTrend`/`monthLabel`) or any
+other computed value - `p.won`/`p.lost`/`trendMax` are read exactly as before, this is markup-only.
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly one file changed,
+`app/app/analytics/page.tsx`; re-read the diff hunk - it touches only the one `<div>` between the
+bar container and the month-label `<span>`, nothing else in the card. Round 2: checked the
+narrow-column case (6 months across, `flex-1` columns) - the two counts have a natural wrap point
+(a literal space between the `W`/`L` spans, not a non-breaking one), so a very narrow viewport
+wraps to two short lines rather than overflowing or clipping; `min-w-0` on the parent column already
+handled shrinking before this change, unaffected. Round 3: confirmed this is markup-only - `trend`,
+`trendMax`, `monthLabel()` and the `decided === 0` empty-state branch above are all read exactly as
+before; `lib/analyticsLogic.spec.ts`'s 6 tests (the only coverage on the logic this chart reads)
+weren't touched and still pass unchanged.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import - present before this change too, confirmed by the same warning showing in last
+pass's own verify output), all 57 routes build. `npx vitest run` - **147/147**, unchanged. Full
+`node:test` sweep, `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` -
+**143/143**, matching last pass's freshly-reconfirmed baseline exactly (re-checked fresh in this
+pass's own shell before concluding anything, per this file's own standing instruction not to assume
+either the 123+61 split or the 143 figure without re-running it).
+
+**Not done, by design**: the chart's underlying scale is still relative-to-window (`trendMax`), not
+an absolute Y-axis - the new counts fix the "can't tell what a bar means" problem directly without
+needing one; adding gridlines/an absolute scale would be a real but separable chart upgrade, not
+attempted here. The other non-chart `title=`-only spots elsewhere on this page (none carrying
+load-bearing data, same audit) and on `pipeline/page.tsx` (the card-footer owner-avatar initials,
+the secondary "Back" button's target-stage name) were left as-is - lower-value than a chart with
+zero visible fallback, a real follow-up rather than silently dropped. Did not touch anything under
+`app/app/tenders/[id]/` (hard exclusion), `app/app/discovery/page.tsx` (last pass's own fix),
+`app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
+standing carve-outs.
