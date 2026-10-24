@@ -29,6 +29,15 @@
 // (missing RESEND_API_KEY: every stage exits early and claims nothing, same
 // rule as send-deadline-reminders.ts - a dedupe claim is one-time-only, so
 // claiming it without actually sending would permanently waste it).
+//
+// Recipient emails resolved via lib/notificationRecipients.ts's
+// operationalRecipients() (company_notification_recipients() RPC, migration
+// 0094/0095) - NOT company_member_labels() (0033), which this script called
+// until 2026-10-24: that RPC gates on auth.uid(), NULL for this script's
+// service-role caller, so it silently returned zero rows every run - this
+// script was very likely sending nobody an operational alert since PR #144
+// merged. Real bug, found while wiring Tier 0/3 (PR #147), fixed here same
+// day Sarel asked for it - see docs/specs/System-Status.md.
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "../lib/dates.ts";
 import { printCutoffCandidates, type PrintCutoffTenderPackRow, type PrintCutoffTenderRow } from "../lib/printCutoffReminders.ts";
@@ -37,27 +46,9 @@ import { complianceExpiryCandidates, COMPLIANCE_EXPIRY_THRESHOLD_DAYS, type Comp
 import { printCutoffEmail, briefingReminderEmail, complianceExpiryEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { printSignDeadline } from "../lib/dispatchTriage.ts";
+import { operationalRecipients as companyRecipients } from "../lib/notificationRecipients.ts";
 
 type SupabaseService = SupabaseClient;
-
-async function companyRecipients(supabase: SupabaseService, companyId: string): Promise<string[]> {
-  // Same consent flag every existing reminder email reuses
-  // (company_members.daily_digest_opt_in, migration 0073) - "reuse this
-  // existing infrastructure rather than building a second, parallel opt-in"
-  // (scripts/send-deadline-reminders.ts's own header comment).
-  const { data: members, error: membersError } = await supabase
-    .from("company_members")
-    .select("user_id")
-    .eq("company_id", companyId)
-    .eq("daily_digest_opt_in", true);
-  if (membersError || !members || members.length === 0) return [];
-  const { data: labelRows, error: labelError } = await supabase.rpc("company_member_labels");
-  if (labelError) return [];
-  const emailByUserId = new Map(((labelRows ?? []) as { user_id: string; label: string }[]).map((r) => [r.user_id, r.label]));
-  return (members as { user_id: string }[])
-    .map((m) => emailByUserId.get(m.user_id))
-    .filter((e): e is string => !!e && e.includes("@"));
-}
 
 async function claim(supabase: SupabaseService, alertType: string, tenderId: string | null, companyId: string, thresholdKey: string): Promise<boolean> {
   const { data: claimed, error } = await supabase.rpc("record_operational_alert_sent", {
