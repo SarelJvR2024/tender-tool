@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, Gavel, PackageCheck, Radar } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDate, formatDateTime, daysUntil } from "@/lib/dates";
+import { formatDate, formatDateTime, formatClosingDateTime, daysUntil } from "@/lib/dates";
 import { operationalStatusMessage, hoursUntilPrintSignDeadline, type DecisionNeeded } from "@/lib/dispatchTriage";
 import type { DispatchCard } from "@/lib/dispatchDashboard";
 import { DeadlineChip } from "./deadline-chip";
@@ -144,7 +144,7 @@ export function UrgentActionsLane({ cards }: { cards: DispatchCard[] }) {
             <CardShell key={c.tenderId} card={c}>
               <div className="rounded-md bg-warning/10 px-2.5 py-1.5 text-xs text-warning">⚠️ {c.blockingSummary}</div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                <span>⏱️ Tender box deadline: {c.closingDate ? formatDateTime(c.closingDate) : "—"}</span>
+                <span>⏱️ Tender box deadline: {c.closingDate ? formatClosingDateTime(c.closingDate) : "—"}</span>
                 {deadlineText && <span className="font-semibold text-foreground">🖨️ Print & bind cutoff: {deadlineText}</span>}
               </div>
               <Link href={c.blockingHref ?? `/tenders/${c.tenderId}`} className="w-fit text-xs font-semibold text-accent no-underline hover:underline">

@@ -44,7 +44,18 @@ function CurrencyInput({
       type="text"
       inputMode="decimal"
       value={display}
-      onFocus={() => setFocused(true)}
+      onFocus={(e) => {
+        setFocused(true);
+        // select() has to run AFTER the display switches from the blurred
+        // "R 1,000,000.00" formatting to the raw digit string (the setFocused
+        // above, applied on React's next render) - selecting immediately
+        // selects the about-to-be-replaced formatted text, and a controlled
+        // input's value changing out from under an existing selection
+        // collapses it, so the very next keystroke landed at the end instead
+        // of replacing everything (live-tested, PR #141 follow-up).
+        const input = e.target;
+        requestAnimationFrame(() => input.select());
+      }}
       onBlur={() => setFocused(false)}
       onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
       className={INPUT}
@@ -140,7 +151,7 @@ export default function BeePreferencePointsClient({ embedded = false }: { embedd
 
         <div className="mb-4">
           <label className={LABEL} htmlFor="lp">Lowest acceptable tender price, Pmin (Rand)</label>
-          <input id="lp" type="number" min={0} value={lowestPrice} onChange={(e) => setLowestPrice(e.target.value)} className={INPUT} />
+          <CurrencyInput id="lp" value={lowestPrice} onChange={setLowestPrice} />
         </div>
 
         <div className="mb-4">

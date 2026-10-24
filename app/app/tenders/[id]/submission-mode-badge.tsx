@@ -1,4 +1,4 @@
-import { formatDateTime } from "@/lib/dates";
+import { formatDateTime, formatClosingDateTime } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 import type { SubmissionType } from "@/lib/dispatchTriage";
 
@@ -61,7 +61,7 @@ export function SubmissionModeBadge({
         {isPhysical ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-muted-foreground">
             <dt>Closing time</dt>
-            <dd className="text-right text-foreground">{closingDate ? formatDateTime(closingDate) : "—"}</dd>
+            <dd className="text-right text-foreground">{closingDate ? formatClosingDateTime(closingDate) : "—"}</dd>
             <dt>Less transit</dt>
             <dd className="text-right">- {estimatedTransitHours}h</dd>
             <dt>Less print &amp; bind buffer</dt>

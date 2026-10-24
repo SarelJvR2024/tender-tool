@@ -2,7 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
-import { expandDisciplines, loadDisciplineTaxonomy, taxonomyLabel } from "@/lib/disciplineTaxonomy";
+import { expandDisciplines, loadDisciplineTaxonomy, taxonomyLabel, stripLeakedTaxonomySlugs } from "@/lib/disciplineTaxonomy";
 import { pursueOpportunity } from "./actions";
 import {
   CHANGE_LABELS,
@@ -27,7 +27,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Inbox } from "lucide-react";
 import { canLoadMore, COUNTABLE_FILTERS, hasMore, nextShow, parseShowParam, verdictQuerySpec } from "@/lib/discoveryPagination";
-import { closingCountdown } from "@/lib/dates";
+import { closingCountdown, formatClosingDateTime } from "@/lib/dates";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { buildDoneHistory, pricingCategoriesFor, pricingSegmentKey, similarTendersBefore } from "@/lib/opportunityInsights";
 import { MIN_SAMPLE, benchmark, loadSegment, segmentsFor, type Benchmark } from "@/lib/marketPricing";
@@ -820,7 +820,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                     <ul className="list-disc pl-4.5 text-xs text-muted-foreground">
                       {(o.reasons ?? []).map((r, i) => (
                         <li key={i} className="mb-0.5">
-                          {r}
+                          {stripLeakedTaxonomySlugs(r)}
                         </li>
                       ))}
                     </ul>
@@ -901,7 +901,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                 <div className="flex-1 basis-full text-left sm:flex-none sm:basis-[180px] sm:text-right">
                   <div className="mb-0.5 text-[11px] text-muted-foreground">Closes</div>
                   <div className="mb-0.5 text-sm font-semibold text-foreground">
-                    {o.closing_date ? new Date(o.closing_date).toLocaleString("en-ZA", SAST_DATETIME) : "-"}
+                    {o.closing_date ? formatClosingDateTime(o.closing_date) : "-"}
                   </div>
                   {countdown ? (
                     <div className={cn("mb-2.5 text-xs font-semibold", countdown.urgent ? "text-destructive" : "text-muted-foreground")}>
