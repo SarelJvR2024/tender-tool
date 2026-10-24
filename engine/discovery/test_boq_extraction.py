@@ -40,7 +40,14 @@ def check(cond, msg):
 # sanral_fill.py's own "no openpyxl" discipline.
 # ---------------------------------------------------------------------------
 
+class ExcelError(str):
+    """Marks a cell as a real formula ERROR (t="e"), e.g. ExcelError("#DIV/0!") -
+    distinct from a plain string value landing in the same spot."""
+
+
 def _cell_xml(ref, value):
+    if isinstance(value, ExcelError):
+        return f'<c r="{ref}" t="e"><v>{value}</v></c>'
     if isinstance(value, str):
         escaped = value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         return f'<c r="{ref}" t="inlineStr"><is><t>{escaped}</t></is></c>'
@@ -238,6 +245,26 @@ def test_unreadable_file_returns_honest_note_never_crashes():
     check("opened" in result["note"], f"the note should say it couldn't be opened, got {result['note']!r}")
 
 
+def test_formula_error_cell_is_null_not_a_fabricated_zero():
+    """QA pass, 2026-10-24: a broken rate/amount formula (e.g. dividing by a
+    blank cell) shows as #DIV/0! in the real workbook - of the standard Excel
+    error codes, #DIV/0! is the only one containing a literal digit, so
+    Workbook's own cell decode used to let award_outcomes.parse_rand() read
+    it as the number 0.0: a BROKEN, unknown value looking exactly like a
+    confirmed zero rate/amount. Quantity (a real number on this row) must
+    still come through - only the broken columns go null."""
+    data = make_workbook_bytes({"BOQ": [
+        ["Description", "Unit", "Qty", "Rate", "Amount"],
+        ["Supply and lay pipe - rate TBC", "m", 450, ExcelError("#DIV/0!"), ExcelError("#DIV/0!")],
+    ]})
+    result = boq.parse_boq_workbook(io.BytesIO(data))
+    check(len(result["items"]) == 1, f"the row should still be kept (quantity is real) - got {result['items']}")
+    item = result["items"][0]
+    check(item["quantity"] == 450, f"quantity should be read normally, got {item['quantity']!r}")
+    check(item["rate_zar"] is None, f"a #DIV/0! rate must be null, not a fabricated 0.0 - got {item['rate_zar']!r}")
+    check(item["amount_zar"] is None, f"a #DIV/0! amount must be null, not a fabricated 0.0 - got {item['amount_zar']!r}")
+
+
 def main():
     test_basic_boq_parsed_with_totals_excluded()
     test_header_wording_variants_still_detected()
@@ -246,6 +273,7 @@ def main():
     test_footer_note_in_the_description_column_is_not_fabricated_as_an_item()
     test_skips_cover_sheet_and_finds_the_real_table_on_a_later_sheet()
     test_unreadable_file_returns_honest_note_never_crashes()
+    test_formula_error_cell_is_null_not_a_fabricated_zero()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

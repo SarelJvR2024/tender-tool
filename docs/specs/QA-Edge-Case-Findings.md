@@ -4226,3 +4226,55 @@ string no longer matched the expected dict shape); restored: `0 failures`. Full
 **Regression:** `engine/intake/classify_tender.py` (additive return shape - the only caller was
 updated in the same commit) and `engine/general/process_general_jobs.py` (one call site). No
 schema change - `tenders.nra_reference` stays a plain string column, unchanged on disk.
+
+### Finding 71 (CONFIRMED, FIXED, severe - a broken formula in a buyer's own BOQ workbook could be silently read as a confirmed zero rate or amount, not an unknown/broken value)
+
+**Where:** `engine/sanral_fill.py`'s `Workbook.cached()` and `Workbook._decode_cell_value()` -
+the shared, general-purpose Excel-cell decoder used by every caller of `Workbook` across this
+repo, including the brand-new `engine/discovery/boq_extraction.py` (real BOQ line-item parsing,
+landed this week - the same feature whose missing `lxml` dependency broke both daily cron
+workflows earlier today).
+
+**What was tested:** rotated to discovery - the most overdue standing area - but several of its
+reader files (`kouga.py`/`lephalale.py`/`randwater.py`/`vaal_central_water.py`/`source_http.py`/
+`assess_tender.py`) have live, uncollided in-flight work on an open PR (#141, branch
+`tender-workspace-batch-2b`), so picked a different, untouched corner instead: `boq_extraction.py`,
+brand new and under heavy scrutiny today for an unrelated reason (the `lxml` production break).
+Read both cell decoders end to end. Both treat Excel's `t="str"` (a literal string formula result)
+and `t="e"` (a FORMULA ERROR - `#DIV/0!`, `#REF!`, `#VALUE!`, ...) identically, just returning
+`v.text` either way - but an error cell's "value" is an error CODE, not real data.
+
+**Finding (CONFIRMED, severe).** Of the standard Excel error codes, `#DIV/0!` is the only one that
+contains a literal digit (the others - `#REF!`, `#NAME?`, `#N/A`, `#NULL!`, `#NUM!`, `#VALUE!` -
+have none). `award_outcomes.parse_rand()` (reused by `boq_extraction.py` for every quantity/rate/
+amount cell) strips everything but digits/commas/periods before parsing - so `#REF!` etc. correctly
+strip to nothing and return `None`, but `#DIV/0!` strips to `"0"` and parses to the float `0.0`.
+Confirmed directly end to end (not just unit-testing `parse_rand()` in isolation): built a real,
+minimal `.xlsx` with a BOQ row whose Rate/Amount cells are genuine `t="e"` formula-error cells
+(`#DIV/0!` - a completely realistic real-world case: a rate-per-unit formula dividing by a blank
+denominator), ran it through the real `boq_extraction.parse_boq_workbook()` - the item came back
+with `rate_zar: 0.0, amount_zar: 0.0`, indistinguishable from a genuinely, confirmedly free line
+item. A real tender's BOQ with one broken formula cell would have that line item's cost silently
+recorded as zero rather than unknown, understating whatever downstream total reads it - the exact
+"silent wrong data is the main risk" class this review exists to catch, and arguably worse than a
+crash: nothing anywhere would ever notice.
+
+**Fix:** split the `t in ("str", "e")` branch in both decoders - `"str"` is unchanged (still
+returns the literal string); `"e"` now returns `None`. No other code in this repo relies on an
+error-cell's string value surviving (confirmed by grep before changing shared code two other
+modules also depend on).
+
+**Verified the regression test actually catches the regression:** new
+`test_formula_error_cell_is_null_not_a_fabricated_zero()` in `test_boq_extraction.py`, plus a small
+`ExcelError` marker added to the file's own in-memory `.xlsx` builder so a test can represent a
+real `t="e"` cell (previously only plain strings/numbers were representable). Reverted the fix:
+failed exactly as predicted (`rate_zar`/`amount_zar` both came back `0.0` again); restored: `0
+failures`. Every other test that exercises `Workbook.cached()`/`sheet_grid()` in this repo
+(`test_sanral_b7.py`, `test_classify_tender.py`, `test_fill_financial_hours.py`,
+`test_form_field_audit.py`, `test_tender_enrichment.py`, `test_tender_enrichment_cli.py`) re-run
+clean - no other caller ever encounters or expects an error-typed cell.
+
+**Regression:** `engine/sanral_fill.py` only (two decoders, additive - `None` instead of the raw
+error-code string, affecting only cells Excel itself marks as errored, which is `#DIV/0!`-only
+reachable incorrect behaviour before this fix, confirmed by grep across the repo for any caller
+expecting an error-code string back).
