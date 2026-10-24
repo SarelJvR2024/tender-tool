@@ -2238,6 +2238,46 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## 2026-10-24 ~09:50 UTC addendum - real production break, caught while checking this pass's own CI: both daily cron workflows had been silently dead since this morning
+
+**What happened:** while confirming Finding 70's CI (below) went green, noticed `daily-digest.yml`
+run 5 (08:24 UTC) and `daily-discovery.yml` run 2 (07:36 UTC) - both real scheduled runs against
+the real Supabase project, not test CI - had `conclusion: failure`. Both were green the day before
+(run 4, 2026-10-23). Root cause, identical in both: `engine/discovery/gov_sources.py`'s own
+`attach_scope_enrichment()` (part of the real BOQ/scope extraction engine that landed since these
+two workflows were last written) added a new, unconditional import chain -
+`tender_enrichment.py -> boq_extraction.py -> sanral_fill.py -> \`from lxml import etree\`` -
+that nobody updated either workflow for. Both failed with the identical
+`ModuleNotFoundError: No module named 'lxml'`:
+- `daily-digest.yml`: inside `fetch_releases()`, after a ~14-minute feed read, right before the
+  final `digest_report.json` write - that day's digest build never completed for anyone (0 people
+  were opted in at the time, so no actual email was lost today, but the next person to opt in
+  would have silently gotten nothing).
+- `daily-discovery.yml`: inside `gov_sources.fetch_all()`, near the start of the run - the
+  **entire discovery pass** (the one job that populates every company's own Discovery page) never
+  ran at all today.
+
+`bridge-worker-ci.yml`'s own CI never caught this because it already installs the full
+`engine/worker/requirements.txt` (`python-docx` pulls `lxml` in transitively) before running
+`test_gov_sources.py` - these two real cron workflows have their own, separate, minimal
+"nothing to install" setup (deliberately, per each workflow's own comment, written before this
+import chain existed) and were never updated when it did.
+
+**Fix:** added one `pip install lxml==6.1.3` step to each workflow (pinned to the version already
+verified elsewhere in this repo) - `lxml` alone, not the whole `python-docx` that normally pulls
+it in, since neither script otherwise touches `python-docx`. Reproduced the exact failure in
+isolation (blocked the `lxml` import, got the identical `ModuleNotFoundError`), confirmed the
+import chain resolves cleanly with it installed. Commits `1e1580e` (daily-digest.yml), `d867e7a`
+(daily-discovery.yml).
+
+**Not done unilaterally, flagged for Sarel:** both fixes will take effect on tomorrow's scheduled
+runs (daily-discovery 02:45 UTC, daily-digest 03:45 UTC) automatically. Today's discovery pass
+never ran at all - whether to manually re-run it now (via `workflow_dispatch`, which its own
+docstring says is safe/idempotent) to recover today's data, versus just letting tomorrow's
+scheduled run catch up, is Sarel's call, not run unilaterally here: `daily-discovery.yml` writes
+to the real database and real Storage, and `daily-digest.yml`'s last step sends real email via
+Resend if anyone is opted in by the time it's next run.
+
 ## This pass (2026-10-24, standing QA/robustness review - eighty-second run): a SANRAL addendum correcting a typo'd NRA reference could be outvoted by the stale number simply because it's repeated more often on Book 1's own page footer
 
 Orientation: synced a sibling session's merge (`c1fb95b`, PR #137, TypeScript-only Market
