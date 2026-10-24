@@ -1,5 +1,26 @@
 # System Status
 
+**2026-10-24 ~13:44 UTC — PR #133 merged; Sarel has now given explicit specs for the two items
+every session has been deferring as open design questions. If you are another session reading
+this: Batch 3 (vault slide-over drawer) and Batch 6 (canonical `formatZAR`) are now IN PROGRESS by
+`session_011NLr419YmLS44xgf1YM6n3` on a new branch off `main` (commit `0de303f`) - check this
+file's own top entry and `git log`/open PRs before starting equivalent work, to avoid a third
+collision on the same two items after the two collisions already logged below tonight.** Sarel's
+exact specs (verbatim, so no session re-derives or guesses a different shape):
+- **Vault drawer** ("Quick Blocker Resolver"): plain-text/credential items (CSD number, SARS Tax
+  PIN, CIDB registration + expiry) get a focused single-field form + "Save & Recalculate Score",
+  writing to the company vault and refreshing tender compliance status in place. Document-type
+  items (Letter of Good Standing, B-BBEE Affidavit, ...) get a single drag-and-drop zone for that
+  one document type, marks the item resolved on upload. Explicitly NOT the multi-file bulk-
+  extraction/OCR review UI - just a secondary "Open in Company Vault" link for that.
+- **Canonical formatter**: `formatZAR` in `lib/`, replacing both existing `formatRand()`
+  implementations (`lib/dealEconomics.ts`, `lib/savingsCounter.ts`) and the hand-rolled
+  `R${n.toLocaleString()}` sites. "R 1,250,000.00" (2 fixed decimals), null/undefined/NaN renders
+  "—" never "R 0" or a crash, `{ vat: 'incl' | 'excl' | 'raw' }` appends "(incl. 15% VAT)"/"(excl.
+  VAT)"/nothing, `{ compact: true }` renders "R 1.5M"/"R 250k" for KPI cards.
+
+---
+
 **2026-10-23 ~22:10 UTC addendum — a real cross-session collision, caught before it compounded,
 pausing this session's own "Comprehensive Overhaul" batch sequence as a result.** Sarel sent two
 different sessions what look like related/overlapping briefs at close to the same time tonight:
