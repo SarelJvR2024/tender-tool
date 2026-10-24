@@ -3381,3 +3381,75 @@ label) is a different and lower-stakes pattern - left alone, not the same bug cl
 anything under `app/app/tenders/[id]/` (hard exclusion), `app/app/discovery/page.tsx` or
 `app/app/analytics/page.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
 billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (fifth pass tonight): notification titles no longer silently cut off with zero fallback
+
+Routine scheduled solution-architect-style UI/UX check-in. Same hard exclusion as the last four
+passes (`app/app/tenders/[id]/` - PR #133 still open, unreviewed, its two design questions still
+waiting on Sarel) plus `app/app/discovery/page.tsx` (PR #135), `app/app/analytics/page.tsx`
+(PR #136) and `app/app/market-intelligence/page.tsx` (PR #137). `git fetch origin main` + `gh api
+.../pulls?state=open` first: only two open PRs, `#133` (`workspace-polish`, the hard exclusion)
+and `#118` (`fix/discovery-scoring-diagnosis`, Python-only, `engine/discovery/` and
+`engine/intake/`, no UI overlap). `git log --oneline -30` showed nothing new touching
+`company/`, `people/`, `experience/`, `billing/`, `sanral-schedules/`, `onboarding/`, `pipeline/`,
+`dashboard/`, `tools/`, `admin/`, or the notifications bell since PR #137 merged - no collision
+risk.
+
+**Checked first whether the last four passes' own hover-only-`title=` bug class had a clear new
+instance anywhere in the remaining directories (per this pass's own instruction not to force that
+exact pattern a fifth time) - grepped every `title={` across all of `company/`, `people/`,
+`experience/`, `billing/`, `sanral-schedules/`, `onboarding/`, `pipeline/`, `dashboard/`, `tools/`,
+`admin/`, `notifications/`.** Nothing comparable turned up: `pipeline/page.tsx`'s own
+owner-initials and "Back"-target-stage `title=`s are real but already documented (last pass's own
+"Not done, by design" note) as lower-stakes than a chart with zero visible fallback, and nothing
+else carried load-bearing data behind a hover-only attribute. So this pass picked a genuinely
+different kind of improvement instead, per instruction - not the same pattern a fifth time.
+
+**The gap**: `app/app/notifications/` doesn't exist as a route - the actual notifications feature
+is the topbar bell, `app/app/_components/NotificationsBell.tsx` (rendered globally via
+`TopBar.tsx` on every authenticated page), fed by `lib/notifications.ts`'s `getNotifications()`.
+Its per-item title line was `className="truncate text-sm font-medium text-foreground"` with **no
+`title=` attribute at all** - strictly worse than the hover-only bug class the last four passes
+fixed, because there was no fallback of any kind, not even a desktop hover. And the titles here
+are routinely long enough to need one: `lib/notifications.ts` builds a person-expiry title as
+`` `${label} - ${p.name}` `` (e.g. "ECSA registration - [a two-part surname]") and a
+tender-deadline title as `t.contract_no ?? t.description`, falling back to the tender's full
+description text when no contract number exists yet - both regularly overflow a single line in
+the popover's `w-80` (320px) column. Worse, the line below it (`n.detail`, e.g. "Expires in 5
+days") had no `truncate` and always rendered in full, so the *less* important half of each row
+was guaranteed visible while the identifying half - which document, whose registration, which
+tender - was the one silently cut off.
+
+**Fixed**: replaced `truncate` with `line-clamp-2 break-words` on the title line, and added
+`title={n.title}` as a free desktop-hover convenience for the rare case a title still overflows
+two lines - same "visible by default, hover is just extra" convention the last four passes'
+fixes already established, just applied to a truncation gap instead of a chart. No change to
+`lib/notifications.ts` - `n.title`, `n.detail`, `n.severity`, `n.href` are all read exactly as
+before; this is markup-only on one `<div>`.
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly one file changed,
+`app/app/_components/NotificationsBell.tsx`; re-read the diff hunk - it touches only the one
+title `<div>`'s className plus adding `title=`, nothing else in the row (the severity dot, the
+detail line, the `Link` wrapper are all untouched). Round 2: checked the popover's own layout -
+the row already uses `items-start` (not `items-center`), so a title that now wraps to 2 lines
+doesn't misalign the severity dot or push the detail line oddly; `max-h-80 overflow-y-auto` on the
+list container means a taller row just takes more scroll space, not a layout break. Round 3:
+confirmed this is the one and only notifications UI in the app (`grep -rl NotificationsBell`
+across `app/` returns only the component itself and `TopBar.tsx`) - no other copy of this row
+markup exists to drift out of sync, and no test file references `NotificationsBell` or asserts on
+its className, so nothing needed updating there.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same
+3 pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 57 routes build. `npx vitest run` - **147/147**, unchanged (no
+vitest-covered logic touched). Full `node:test` sweep, `npx tsx --test $(find . -name "*.test.ts"
+-not -path "*/node_modules/*")` - **143/143**, matching the last four passes' freshly-reconfirmed
+baseline exactly.
+
+**Not done, by design**: `pipeline/page.tsx`'s owner-initials and "Back"-button `title=`s (flagged
+by the third pass as a real but lower-value follow-up) are still untouched - re-confirmed this
+pass as lower-stakes than a notification row that could hide *which* tender or registration is
+expiring, not revisited here. Did not touch anything under `app/app/tenders/[id]/` (hard
+exclusion), `app/app/discovery/page.tsx`, `app/app/analytics/page.tsx`, or
+`app/app/market-intelligence/page.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
+billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
