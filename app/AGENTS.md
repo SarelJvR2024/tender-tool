@@ -3325,3 +3325,59 @@ zero visible fallback, a real follow-up rather than silently dropped. Did not to
 `app/app/tenders/[id]/` (hard exclusion), `app/app/discovery/page.tsx` (last pass's own fix),
 `app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
 standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (fourth pass tonight): Market Intelligence frequency chart made readable without hovering
+
+Routine scheduled solution-architect-style UI/UX check-in. Same hard exclusion as the last three
+passes (`app/app/tenders/[id]/` - PR #133 still open, unreviewed, its two design questions still
+waiting on Sarel) plus `app/app/discovery/page.tsx` (PR #135) and `app/app/analytics/page.tsx`
+(PR #136). `git fetch origin main` + `gh api .../pulls?state=open` first: only two open PRs,
+`#133` (`workspace-polish`, the hard exclusion) and `#118` (`fix/discovery-scoring-diagnosis`,
+Python-only, no UI overlap). `origin/main` carried one new doc-only commit since the last pass
+(`017cb9f`, an `engine/notify`/`engine/worker` clean sweep, no findings, no UI touched) - no
+collision risk.
+
+**The gap, same bug class as the last three passes' own fixes (`PrimaryPackActionLink`'s disabled
+reason, Discovery's per-card readiness blockers, Analytics' win/loss trend) - found by grepping
+every `title={` across `company/`, `people/`, `experience/`, `billing/`, `sanral-schedules/`,
+`onboarding/`, `pipeline/`, `dashboard/`, `tools/`, `admin/`, `market-intelligence/` for one
+carrying real, non-decorative data**: `app/app/market-intelligence/page.tsx`'s "Tender frequency
+(last 12 months)" bar chart had the exact same shape as Analytics' pre-fix trend chart - each
+month a plain bar, height relative to that 12-month window's own max (`frequencyMax`), with the
+real count (`${monthLabel} : ${count} tender(s)`) living only in a `title=` attribute. Same
+touch-device unreachability, same "a short bar could mean anything" ambiguity, on a page whose own
+module comment frames it as a real bidding-decision input, not decoration.
+
+**Fixed**: added a small always-visible count (`{p.count}`) under each bar, `text-accent` when
+`count > 0` (matching the bar's own `bg-accent` fill) and `text-muted-foreground` for a quiet
+month (`0`, itself real information - no tenders that month, not a gap to hide), `tabular-nums` so
+single- and double-digit counts don't jitter the column width month to month. The `title=`
+attribute stays on the bar's own container div, same convention as the three prior fixes - a free
+desktop-hover convenience now, not load-bearing. No change to `lib/marketPricing.ts`
+(`tenderFrequencyTrend`) or any other computed value - `p.count`, `frequencyMax`, `monthLabel()`
+are all read exactly as before; this is markup-only.
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly one file changed,
+`app/app/market-intelligence/page.tsx`; re-read the diff hunk - it touches only the one new
+`<span>` between the bar container and the month-label `<span>`, nothing else in the section.
+Round 2: this chart's per-column content is a single short number (unlike Analytics' two-part
+`{won}W {lost}L`), so there's no wrap-point concern at narrow widths; the existing `min-w-0
+flex-1` column sizing is unaffected by the addition. Round 3: confirmed markup-only -
+`tenderFrequencyTrend`'s return type (`MonthCount = { month: string; count: number }`),
+`frequencyMax`, and `monthLabel()` are all read exactly as before; `lib/marketPricing.spec.ts`'s 9
+tests (the only coverage on the logic this chart reads) weren't touched and still pass unchanged.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same
+3 pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 57 routes build. `npx vitest run` - **147/147**, unchanged. Full
+`node:test` sweep, `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` -
+**143/143**, matching the last three passes' freshly-reconfirmed baseline exactly.
+
+**Not done, by design**: the chart's underlying scale is still relative-to-window
+(`frequencyMax`), not an absolute Y-axis - same reasoning as the Analytics fix, the new counts
+solve the "can't tell what a bar means" problem directly without one. `BreakdownTable`'s own
+`title={b.label}` (line 218, truncation-overflow convenience on an already-visible, just-clipped
+label) is a different and lower-stakes pattern - left alone, not the same bug class. Did not touch
+anything under `app/app/tenders/[id]/` (hard exclusion), `app/app/discovery/page.tsx` or
+`app/app/analytics/page.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
+billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.

@@ -121,6 +121,15 @@ export default async function MarketIntelligencePage() {
                     <div className="flex h-24 w-full flex-col justify-end" title={`${monthLabel(p.month)}: ${p.count} tender(s)`}>
                       <div className="w-full rounded-t-sm bg-accent" style={{ height: `${(p.count / frequencyMax) * 100}%` }} />
                     </div>
+                    {/* The count used to live only in the title= above - invisible on touch and
+                        unreachable by hover on the bar itself once the cursor is busy elsewhere;
+                        same bug class this standing review has fixed three times already
+                        (PrimaryPackActionLink's disabled reason, Discovery's readiness blockers,
+                        Analytics' win/loss trend) - title kept as a free desktop-hover convenience,
+                        not load-bearing here either. */}
+                    <span className={`text-[9px] font-semibold tabular-nums ${p.count > 0 ? "text-accent" : "text-muted-foreground"}`}>
+                      {p.count}
+                    </span>
                     <span className="text-[10px] text-muted-foreground">{monthLabel(p.month)}</span>
                   </div>
                 ))}
