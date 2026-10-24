@@ -1,38 +1,69 @@
 # System Status
 
-**2026-10-24 ~21:20 UTC — real cross-session collision on the Operational Notification Engine,
-caught before either side pushed conflicting work, resolved by direct session-to-session
-coordination.** PR #144 (this session, merged to `main` as `b7305de`) built Tier 1 (briefing, print
-cutoff) + partial Tier 2 (SARS PIN, COID) of the notification engine: `sent_operational_alerts`
-(migration `0092`), `scripts/send-operational-alerts.ts` + `operational-alerts.yml`,
-`lib/printCutoffReminders.ts`/`briefingReminders.ts`/`complianceExpiryReminders.ts`, and 3 email
-templates in `lib/emailTemplates.ts` using the existing bare `layout()`/`button()` helpers.
+**2026-10-24 ~21:35 UTC — a real cross-session collision on the Resend notification-engine brief,
+caught before either side pushed a conflicting PR, resolved by the two sessions coordinating
+directly rather than either one picking a direction unilaterally. Reconciliation now complete and
+merged (this entry supersedes both sessions' own earlier, separate accounts of the same event).**
+Sarel gave essentially the same "Multi-Tier Transactional Notification Engine (Resend)" brief (plus
+a Tier 0 onboarding addendum) to two different sessions at close to the same time.
+`session_011NLr419YmLS44xgf1YM6n3` (the Solution Architect) built and merged `PR #144` first -
+`sent_operational_alerts` (migration `0092`),
+`lib/{printCutoffReminders,briefingReminders,complianceExpiryReminders}.ts`, real candidate-
+selection queries, `scripts/send-operational-alerts.ts` and `.github/workflows/operational-
+alerts.yml` - real, tested, already-scheduled cron coverage for Tier 1 (briefing, print cutoff) plus
+a 2-field slice of Tier 2 (SARS PIN, COID; correctly left CSD out - no expiry field exists for it).
+`session_01DZfrLTsnZtiZGmTHPxQqAX` (dedicated to `feat/notifications-resend`) built the rest of the
+same brief in parallel, unaware of PR #144 until fetching `main` right before its own push: all of
+Tier 0 (9 onboarding/lifecycle templates), Tier 3 (Scout anomaly + founder digest), a generalised
+`notification_claims`/`notification_logs` idempotency+audit schema across every notification type,
+and a new shared visual system (`lib/emailBrand.ts` - pill badges, info cards, consolidated
+checklists, `.ics` attachments) PR #144's own 3 templates hadn't adopted yet.
 
-Session `session_01DZfrLTsnZtiZGmTHPxQqAX` was independently given the same underlying brief and,
-in parallel, built Tier 0 (9 onboarding/lifecycle email templates: welcome, vault/first-tender
-nudges, trial day-7/48h/expired, team-invite, admin new-signup/paid-conversion) and Tier 3 (Quality
-Scout anomaly alerts wired to `system_alerts`, founder daily digest), plus a generalized
-`notification_claims`/`notification_logs` schema (one idempotency pattern across all 17 email types,
-vs. this PR's own narrower `sent_operational_alerts`) and a new shared visual system
-(`lib/emailBrand.ts` - pill badges, info cards, consolidated checklists, `.ics` attachments) -
-already reviewed twice by Sarel for correctness/polish, screenshots of all 17 already sent to him.
-Neither session knew about the other's work until that session checked `main` just before pushing
-and found PR #144 already merged - caught at exactly the right moment (nothing of theirs was public
-yet), not after a real conflict landed.
+**Caught, not shipped twice; resolved by direct coordination, not unilateral choice.** The second
+session fetched `main`, saw the collision (same migration number `0092`, same two files touched,
+independently-converged sender-address scheme), stopped before pushing, and - per Sarel's own
+explicit call when asked how to handle it ("ask the other session directly", the same instinct that
+resolved the PR #133/#134 collision on 2026-10-23) - messaged the first session to coordinate. That
+session confirmed no further work in flight beyond the merged PR #144, agreed the split, and both
+sessions independently cross-confirmed CSD has no expiry field anywhere in this schema (presence-
+only, `companies.csd_supplier_number`) while flagging that `companies.cidb_expiry`
+(`COMPANY_EXPIRY_FIELDS`, `lib/notifications.ts`) *is* real and already tracked - PR #144's own
+narrower trigger left it out, the second session's broader Tier 2 template already covers it.
 
-**Resolved by direct session coordination** (Sarel's own instruction when asked: "ask the other
-session directly"), no code changes on this session's side: this PR's `sent_operational_alerts`
-table, `send-operational-alerts.ts` cron, and the 3 candidate-selection modules stay exactly as
-merged - tested, migration-replayed, not touched. The other session will rebase onto current `main`,
-renumber its own migration past `0092`, upgrade this PR's 3 existing email templates to its new
-`emailBrand.ts` visual system (same copy/data/logic, presentation only), and add Tier 0 + Tier 3
-cron coverage on top, as one coherent follow-up PR rather than a competing one. Also cross-confirmed
-independently by both sessions: CSD has no expiry field anywhere in this schema (presence-only,
-`companies.csd_supplier_number`) - flagged by both without prompting each other. One correction
-surfaced in the hand-off: `companies.cidb_expiry` (`COMPANY_EXPIRY_FIELDS`, `lib/notifications.ts`)
-*is* a real, already-tracked expiry field this PR's own `complianceExpiryReminders.ts` left out
-(Sarel's literal brief named only "SARS PIN or CSD" for this trigger) - worth adding to whichever
-module ends up owning Tier 2 compliance-expiry coverage going forward.
+**What the reconciliation actually did:** the second session merged `main` (carrying PR #144) into
+its own branch. `sent_operational_alerts`, its 3 candidate-selection modules and
+`scripts/send-operational-alerts.ts` were kept byte-for-byte - real, live, tested cron automation,
+untouched. The one real name collision (`briefingReminderEmail` - both sessions used it, different
+signatures) was resolved by renaming the second session's own, not-yet-wired version to
+`briefingReminderDetailedEmail` rather than touching the one `send-operational-alerts.ts` actually
+depends on. PR #144's 3 templates (`printCutoffEmail`, `briefingReminderEmail`,
+`complianceExpiryEmail`) were restyled onto the new `emailBrand.ts` visual system - same params,
+same return shape, same subject text (left as the original `[Ref] - LEVEL: Specific` format rather
+than force-fitting the brief's full `[Ref] Action | Buyer` standard, since that needs a buyer-name
+parameter neither function nor `send-operational-alerts.ts` currently carries - a real follow-up,
+not quietly done). The second session's own migration was renumbered `0092` -> `0093` (separate
+tables, zero overlap). Verified after merging: `tsc`/`eslint`/`npm run build` clean, `vitest`
+162/162 (PR #144's own 15 new tests included), a full Postgres replay of all 83 migrations, and the
+real adversarial tenant-isolation suite (18 cases, all pass) against both migrations together.
+
+**Real env vars, set by Sarel mid-session (GitHub Actions + Vercel):** `RESEND_API_KEY`,
+`RESEND_FROM_ADDRESS` (Tier 0), `RESEND_FROM_BIDS` (Tier 1), `RESEND_FROM_COMPLIANCE` (Tier 2),
+`RESEND_FROM_SCOUT` (Tier 3), `RESEND_REPLY_TO`, `ADMIN_NOTIFICATION_EMAIL` (Sarel's own inbox for
+Tier 3). Caught a real bug before it shipped: the second session's own sender-resolution code
+originally treated `RESEND_FROM_ADDRESS` as a blanket override for every tier (a leftover from
+testing, before real per-tier addresses existed) - with Sarel's actual env vars set, that would
+have silently routed every tier's mail through the Tier 0 address. Fixed to resolve each tier's
+address independently before these env vars were ever live against this code. Neither session's
+sandbox container holds these vars directly (GitHub Actions/Vercel secrets only) - nothing has
+actually been sent yet; 20 templates (17 of the second session's own, plus PR #144's 3 restyled
+ones) were rendered and screenshotted for Sarel's visual review instead.
+
+**Still open, not done in this pass:** the actual Tier 0/Tier 3 cron/sender scripts (which real rows
+to scan, on what schedule, wired through `lib/notificationEngine.ts`'s `sendNotification()`) -
+templates and the engine exist, the candidate-selection + schedule layer for the new tiers doesn't
+yet. Bringing PR #144's 3 operational templates' subject format into full `[Ref] Action | Buyer`
+compliance needs a buyer-name parameter neither function nor `send-operational-alerts.ts` currently
+carries.
 
 ---
 
