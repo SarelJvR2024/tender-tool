@@ -1,5 +1,19 @@
 # System Status
 
+**2026-10-24 ~20:15 UTC, standing review pass — PR #141 synced to current `main` again (Finding
+71 landed in between, no overlap), no new collision, QA tooling still sound.** Orientation:
+fast-forwarded `main` to `74e66a9` (another session's own standing pass: Finding 71, a real bug -
+`sanral_fill.py` wrote an Excel formula-error code string (e.g. `#DIV/0!`) straight into a BOQ cell
+instead of treating it as unreadable, now returns `None`; `test_boq_extraction.py` covers it, 0
+failures locally). No overlap with anything PR #141 owns. Merged `main` into
+`tender-workspace-batch-2b` (clean, `tsc --noEmit` re-confirmed), pushed as `0ea4754`.
+
+Collision check: still only 2 open PRs - `#141` and `#118` (unchanged). `git fetch --prune` surfaced
+no new branches this pass. QA tooling re-check: `lxml==6.1.3` still pinned in both workflow files.
+No new small-safe fixes found; nothing new needs Sarel's judgment call.
+
+---
+
 **2026-10-24 ~18:15 UTC, standing review pass — PR #141 synced to current `main` (PR #142 landed
 in between, no overlap), no new collision, QA tooling still sound.** Orientation: fast-forwarded
 `main` to `2acffd9` (picked up PR #142, `session_01HsxN8YLz5vfgFpz9qcdDVV`'s "People: role-source
