@@ -303,7 +303,10 @@ def assess_fit(categories, signals, depth, profile):
         outside = [c for c in outside if c not in served]
     discipline_match = False
     uncategorized = all(c.startswith("uncategorized") for c in categories)
-    labels = lambda cs: ", ".join(f"{tax.label(c)} ({c})" if c in tax.by_slug else c for c in cs)  # noqa: E731
+    # Human label only - the raw taxonomy slug (e.g. "generators_backup_power")
+    # used to be appended in parens here for internal debugging, but it leaked
+    # straight into user-facing discovery copy (Sarel's own live feedback).
+    labels = lambda cs: ", ".join(tax.label(c) if c in tax.by_slug else c for c in cs)  # noqa: E731
     if exact and not outside:
         discipline_match = True
         reasons.append(f"Discipline match: {labels(exact)} is within scope"
@@ -360,7 +363,7 @@ def assess_fit(categories, signals, depth, profile):
         verdict = "needs_review"
     else:
         reasons.append(f"Discipline ({labels(categories)}) doesn't match the company's known disciplines "
-                        f"({', '.join(known_disciplines)}).")
+                        f"({labels(known_disciplines)}).")
         verdict = "not_a_fit"
 
     if signals.get("cidb_grading"):

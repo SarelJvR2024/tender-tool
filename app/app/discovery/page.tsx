@@ -728,22 +728,6 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                         was {verdictLabel(o.downgraded_from)}
                       </span>
                     )}
-                    {/* On a phone, the matching button in the right rail sits
-                        below badges, a title, reasons and a "how it's
-                        scored" box - a lot to scroll past for the one action
-                        that matters. A compact copy up here, next to the
-                        verdict chip, keeps it reachable without scrolling. */}
-                    {o.verdict !== "closed" && !changes.some((c) => c.change_type === "cancelled") && (
-                      <form action={pursueOpportunity} className="ml-auto">
-                        <input type="hidden" name="opportunity_id" value={o.id} />
-                        <button
-                          type="submit"
-                          className="min-h-11 whitespace-nowrap rounded-full bg-primary px-3 text-[11px] font-semibold text-primary-foreground"
-                        >
-                          {o.tender_id ? "Open in workspace" : "Prepare this tender"}
-                        </button>
-                      </form>
-                    )}
                   </div>
                   <div className="mb-0.5 text-sm font-semibold text-foreground">
                     {displayTenderTitle(o.title) || "(untitled)"}

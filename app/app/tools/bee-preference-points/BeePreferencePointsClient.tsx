@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { PPR_2022_THRESHOLD_ZAR, calculatePreferencePoints, systemForValue, type BeeLevel } from "@/lib/preferencePoints";
+import { formatZAR } from "@/lib/formatZAR";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
 
 // Design-system migration (2026-10-21): raw inline-CSSProperties ->
@@ -18,6 +19,37 @@ const INPUT = "min-h-11 w-full rounded-lg border border-border px-3 text-sm";
 // static-prerendered page. Formatted by hand instead.
 function formatThousands(n: number): string {
   return Math.round(n).toString().replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+}
+
+// Canonical ZAR display on blur (Batch 2B: "R 20,000,000.00", not a raw
+// "20000000") while keeping a plain digit string as the real value a native
+// number input can't show currency formatting at all, so this is a text
+// input instead; typing is unrestricted while focused (raw digits, easy to
+// edit) and reformats through formatZAR() the moment focus leaves.
+function CurrencyInput({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const [focused, setFocused] = useState(false);
+  const n = Number(value);
+  const display = focused || !Number.isFinite(n) ? value : formatZAR(n);
+  return (
+    <input
+      id={id}
+      type="text"
+      inputMode="decimal"
+      value={display}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onChange={(e) => onChange(e.target.value.replace(/[^0-9.]/g, ""))}
+      className={INPUT}
+    />
+  );
 }
 
 const LEVEL_OPTIONS: { value: string; label: string }[] = [
@@ -80,7 +112,7 @@ export default function BeePreferencePointsClient({ embedded = false }: { embedd
       <div className={`${CARD} mb-5`}>
         <div className="mb-4">
           <label className={LABEL} htmlFor="cv">Contract/tender value (Rand, incl. VAT)</label>
-          <input id="cv" type="number" min={0} value={contractValue} onChange={(e) => setContractValue(e.target.value)} className={INPUT} />
+          <CurrencyInput id="cv" value={contractValue} onChange={setContractValue} />
           {defaultSystem && (
             <p className="mt-1.5 text-[11px] text-muted-foreground">
               {`R50 million threshold -> defaults to the ${defaultSystem} system for this value.`}
@@ -103,7 +135,7 @@ export default function BeePreferencePointsClient({ embedded = false }: { embedd
 
         <div className="mb-4">
           <label className={LABEL} htmlFor="tp">Your tendered price (Rand)</label>
-          <input id="tp" type="number" min={0} value={tenderPrice} onChange={(e) => setTenderPrice(e.target.value)} className={INPUT} />
+          <CurrencyInput id="tp" value={tenderPrice} onChange={setTenderPrice} />
         </div>
 
         <div className="mb-4">

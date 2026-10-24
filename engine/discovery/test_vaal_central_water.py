@@ -328,8 +328,9 @@ check("a real site typo in a document label is preserved, not corrected",
 rel = vcw.normalize(*vcw380)
 check("ocid is source-namespaced, stable, no OCDS id to fake", rel["ocid"] == "vaal_central_water:VCW380/PWLPLM/24", rel["ocid"])
 check("contract_number is the real reference", rel["contract_number"] == "VCW380/PWLPLM/24")
-check("closing_date parsed to real SAST ISO (full month name, not an abbreviation)",
-      rel["closing_date"] == "2026-10-09T00:00:00+02:00", rel["closing_date"])
+check("closing_date parsed to real SAST ISO (full month name, not an abbreviation), defaulted to 11:00 "
+      "- the listing gives no time (Batch 2B: never a literal midnight)",
+      rel["closing_date"] == "2026-10-09T11:00:00+02:00", rel["closing_date"])
 check("published_date parsed from 'Date uploaded'", rel["published_date"] == "2026-09-11T00:00:00+02:00", rel["published_date"])
 check("buyer is Vaal Central Water Board", rel["buyer"] == "Vaal Central Water Board")
 check("source/source_id/source_url set for listing_sources",

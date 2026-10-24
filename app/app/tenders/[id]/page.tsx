@@ -40,7 +40,7 @@ import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
-import { formatDate } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatZAR } from "@/lib/formatZAR";
 import { computeTenderReadiness } from "./tender-readiness";
 import { DisqualificationGuard } from "./disqualification-guard";
@@ -792,11 +792,10 @@ export default async function TenderWorkspacePage({
                 <>
                   {provenanceError && <ErrorBanner message="Couldn't load the readiness report. If it keeps happening, let us know." />}
 
-                  {provenance.length === 0 && !provenanceError && (
-                    <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", fontSize: 13, color: "var(--muted-foreground)" }}>
-                      No readiness data recorded yet for this pack.
-                    </div>
-                  )}
+                  {/* Batch 2B: an empty box here ("No readiness data recorded
+                      yet for this pack") read as a stray debug placeholder to
+                      Sarel - removed rather than replaced; a pack with no
+                      readiness rows yet simply shows nothing in this slot. */}
 
                   {provenance.length > 0 && (() => {
                     // Spec v3 Batch 5: once there's nothing left to review or
@@ -1030,31 +1029,6 @@ export default async function TenderWorkspacePage({
               const complianceGuardBadgeCount = disqualificationGuardFixCount + formsBadgeCount;
               const teamBadgeCount = openPositionsCount + (generalSections?.badges.peopleGaps ?? 0);
 
-              // Condensed title/status/countdown recap, sticky above the tab
-              // bar itself (Sarel's own follow-up brief, 2026-10-23: "Keep
-              // the contract title, closing badge, and status header sticky
-              // at the top above the tabs") - same values the facts card
-              // above already computes, never a second read.
-              const miniHeader = (
-                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2 border-b border-border pb-1.5">
-                  <div className="flex min-w-0 items-center gap-2 overflow-hidden">
-                    <span className="truncate text-[13px] font-bold text-foreground">
-                      {tenderFacts.contract_no ?? tenderFacts.description ?? "Untitled tender"}
-                    </span>
-                    <WorkspaceStatusBadge tenderPack={tenderPack} tenderReadiness={tenderReadiness} packStatus={packStatus} />
-                  </div>
-                  {countdown && (
-                    <span
-                      className={countdown.urgent ? "bg-warning/10 text-warning" : "bg-muted text-muted-foreground"}
-                      style={{ display: "inline-flex", alignItems: "center", gap: 4, borderRadius: 100, padding: "2px 9px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
-                    >
-                      <Clock style={{ width: 11, height: 11 }} />
-                      {countdown.text}
-                    </span>
-                  )}
-                </div>
-              );
-
               const tabs: WorkspaceTab[] = [
                 {
                   id: "overview",
@@ -1063,6 +1037,26 @@ export default async function TenderWorkspacePage({
                   badge: overdueTaskCount > 0 ? <TabBadge count={overdueTaskCount} /> : undefined,
                   content: (
                     <>
+                      {/* Batch 2B: the submission logistics (print/transit
+                          hours) now read directly against the closing
+                          countdown, right on Overview - same printDeadline/
+                          dispatchLogistics the header's own Submission Mode
+                          disclosure and the Dashboard's Lane C already use,
+                          never a second calculation. */}
+                      {dispatchLogistics?.closingDate && (
+                        <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-border bg-card px-4 py-3 text-xs">
+                          <span>
+                            <span className="font-semibold text-foreground">Official closing:</span>{" "}
+                            {formatDateTime(dispatchLogistics.closingDate)}
+                          </span>
+                          {printDeadline && (
+                            <span>
+                              <span className="font-semibold text-foreground">Physical print &amp; sign deadline:</span>{" "}
+                              <span className="font-semibold text-warning">{formatDateTime(printDeadline.toISOString())}</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {complianceError}
                       {generalSections?.overview}
                       {complianceSections?.score}
@@ -1229,7 +1223,12 @@ export default async function TenderWorkspacePage({
                 },
               ];
 
-              return <WorkspaceTabs tabs={tabs} sticky header={miniHeader} />;
+              // Batch 2B (Sarel's own live feedback): the sticky mini-header
+              // used to repeat the contract reference, status badge, and
+              // closing countdown that the facts card above already shows -
+              // removed, not replaced; the facts card is the one source for
+              // all three.
+              return <WorkspaceTabs tabs={tabs} sticky />;
             })()}
 
             {/* Notes + one chronological history of this tender (item 15;

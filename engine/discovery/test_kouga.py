@@ -264,8 +264,9 @@ finally:
     sh.datetime.datetime = _real_dt
 check("ocid is source-namespaced, stable", rel["ocid"] == "kouga:225/2026", rel["ocid"])
 check("contract_number is the real reference", rel["contract_number"] == "225/2026")
-check("closing_date parsed to real SAST ISO (DMY-with-month-abbreviation format)",
-      rel["closing_date"] == "2026-10-29T00:00:00+02:00", rel["closing_date"])
+check("closing_date parsed to real SAST ISO (DMY-with-month-abbreviation format), defaulted to 11:00 "
+      "- Kouga's own card gives no time (Batch 2B: never a literal midnight)",
+      rel["closing_date"] == "2026-10-29T11:00:00+02:00", rel["closing_date"])
 check("published_date parsed from 'Start Date'", rel["published_date"] == "2026-09-29T00:00:00+02:00", rel["published_date"])
 check("buyer is Kouga Local Municipality", rel["buyer"] == "Kouga Local Municipality")
 check("source/source_id set for listing_sources", rel["source"] == "kouga" and rel["source_id"] == "225/2026")
