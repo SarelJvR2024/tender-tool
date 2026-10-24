@@ -186,7 +186,13 @@ class Workbook:
         if t == "inlineStr": return "".join(c.find("m:is", N).itertext())
         if v is None: return None
         if t == "s": return self._shared[int(v.text)]
-        if t in ("str", "e"): return v.text
+        # t == "e": a FORMULA ERROR (#DIV/0!, #REF!, #VALUE!, ...), not a real
+        # string value - v.text is the error code itself. #DIV/0! is the one
+        # code that contains a literal digit, so returning it as a string let
+        # a downstream rand-amount parser silently read it as 0.0 (QA pass,
+        # 2026-10-24) - an unknown/broken value, not a confirmed zero.
+        if t == "e": return None
+        if t == "str": return v.text
         if t == "b": return v.text == "1"
         f = float(v.text); return int(f) if f.is_integer() else f
 
@@ -217,7 +223,12 @@ class Workbook:
                 return self._shared[int(v.text)]
             except (ValueError, IndexError):
                 return None
-        if t in ("str", "e"):
+        # t == "e": a FORMULA ERROR (#DIV/0!, #REF!, #VALUE!, ...), not a real
+        # string value - see cached()'s own identical fix for why this
+        # matters (#DIV/0! silently parsed as the number 0.0 downstream).
+        if t == "e":
+            return None
+        if t == "str":
             return v.text
         if t == "b":
             return v.text == "1"

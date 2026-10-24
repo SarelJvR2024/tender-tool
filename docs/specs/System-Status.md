@@ -2414,6 +2414,43 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-24, standing QA/robustness review - eighty-fifth run): a broken formula in a buyer's BOQ workbook could be silently read as a confirmed zero rate/amount, not an unknown value
+
+Orientation: rotated to discovery - the most overdue standing area - but checked `git log`/open
+branches first and found live, uncollided in-flight work on PR #141 (`tender-workspace-batch-2b`)
+touching several discovery reader files (`kouga.py`/`lephalale.py`/`randwater.py`/
+`vaal_central_water.py`/`source_http.py`/`assess_tender.py`, plus one block of
+`process_general_jobs.py`'s closing-time default) - deliberately avoided all of those per the
+standing "never overwrite another agent's in-flight work" rule, and picked a different, untouched
+corner of the same area instead: `engine/discovery/boq_extraction.py`, the brand-new real BOQ
+line-item parser (the same feature whose missing `lxml` dependency broke both daily cron workflows
+earlier today - under heavy scrutiny today for an unrelated reason, good odds something else in it
+hadn't been looked at this closely yet).
+
+**Finding 71 (CONFIRMED, FIXED, severe).** `sanral_fill.Workbook`'s two cell decoders (`cached()`,
+`_decode_cell_value()`) treat a literal string formula result (`t="str"`) and a FORMULA ERROR
+(`t="e"` - `#DIV/0!`, `#REF!`, etc.) identically. Of the standard Excel error codes, `#DIV/0!` is
+the only one containing a literal digit - `award_outcomes.parse_rand()` (reused by
+`boq_extraction.py` for every quantity/rate/amount cell) strips everything but digits before
+parsing, so every OTHER error code correctly returns `None`, but `#DIV/0!` strips to `"0"` and
+parses to the float `0.0`. Confirmed end to end with a real, minimal `.xlsx`: a BOQ row with a
+genuinely broken Rate/Amount formula (dividing by a blank cell, a completely realistic real-world
+case) came back from the real `parse_boq_workbook()` as `rate_zar: 0.0, amount_zar: 0.0` -
+indistinguishable from a confirmed, genuinely free line item.
+
+**Fix:** both decoders now return `None` for `t="e"`, instead of grouping it with `t="str"`. No
+other code anywhere in this repo relies on an error-cell's string value (confirmed by grep before
+touching this shared class).
+
+**Verified the regression test actually catches the regression:** new
+`test_formula_error_cell_is_null_not_a_fabricated_zero()` in `test_boq_extraction.py`, plus a small
+`ExcelError` marker added to that file's own in-memory `.xlsx` builder so a test can represent a
+real error-typed cell. Reverted the fix: both new checks failed exactly as predicted (`0.0` instead
+of `None`); restored: `0 failures`. Every other test touching `Workbook` in this repo
+(`test_sanral_b7.py`, `test_classify_tender.py`, `test_fill_financial_hours.py`,
+`test_form_field_audit.py`, `test_tender_enrichment.py`, `test_tender_enrichment_cli.py`) re-run
+clean.
+
 ## This pass (2026-10-24, standing QA/robustness review - eighty-fourth run): closed `docs/AUDIT_MULTI_TENANT_SECURITY.md`'s Finding 1 (search_path hardening regression)
 
 Orientation: synced Sarel's own `f734a31` ("Add multi-tenant security & enterprise-readiness
