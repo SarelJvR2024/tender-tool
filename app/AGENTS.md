@@ -3521,3 +3521,63 @@ under `app/app/tenders/[id]/` (hard exclusion - PR #141 in flight), `app/app/dis
 `app/app/analytics/page.tsx`, `app/app/market-intelligence/page.tsx`, or
 `app/app/_components/NotificationsBell.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
 billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (seventh pass tonight): `/sanral-schedules` was silently dropping the tender title whenever a contract number existed
+
+Routine scheduled solution-architect-style UI/UX check-in. `git fetch origin main` + `gh api
+.../pulls?state=open` first: fast-forwarded `main` to `9ede13a` (picked up Finding 71,
+`sanral_fill.py`'s own fix for Excel formula-error codes in BOQ cells - no UI overlap). Two open
+PRs: `#141` (`tender-workspace-batch-2b`, pushed within the hour - still the hard exclusion for
+`app/app/tenders/[id]/`) and `#118` (`fix/discovery-scoring-diagnosis`, Python-only, no UI overlap,
+confirmed stale since 2026-10-23).
+
+**Not the same hover-only bug class this routine has fixed the last several passes - a worse one:
+real information silently dropped, with no workaround at all, not even hovering.** `/sanral-
+schedules` (the premium-feature front door for the SANRAL Technical/Financial-workbook
+automation) listed each SANRAL tender with `{t.contract_no || t.title || "Tender"}` - when a
+tender had *both* a contract number and a title (the normal case; both fields are populated
+throughout the real scraping/engine pipeline, `engine/**` has 42 files reading `contract_no`
+alongside `title`), the actual tender title was never rendered anywhere on the page, not even as
+a hover `title=`. A company with more than one SANRAL tender in flight saw only bare contract
+numbers like `SANRAL/ADK/0071/2017` in the list and had to open each one to find out which tender
+it actually was. The pipeline board (`pipeline/page.tsx`) already shows contract number and title
+as two distinct lines for the exact same reason they're two distinct pieces of identifying
+information - this page just hadn't followed that same convention.
+
+**Fixed**: contract number (when present) now renders as its own small mono line above the title,
+title renders on its own line below it (falling back to a bare "Tender" label only when *neither*
+field exists - the genuine last-resort case, not the common one). No data layer or query change -
+`TenderRow`'s shape, the Supabase query, and the rest of the page (`DeadlineChip`, job status
+badge, the "Fill SANRAL schedules" link) are all untouched.
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly one file changed,
+`app/app/sanral-schedules/page.tsx`; re-read the diff hunk - only the one `<div className="min-
+w-0">` block changed, nothing else on the page (the buyer line, the deadline chip, the job-status
+badge, the CTA link are all untouched). Round 2: confirmed no test file references this page or
+asserts on its markup (`grep -rl sanral-schedules **/*.test.ts*` - none), so no test needed
+updating; confirmed the three real shapes render correctly - contract number + title (both shown,
+two lines), title only (no contract-number line, no empty gap above it), neither (falls back to
+"Tender", same as before). Round 3: confirmed this is the only place in the app that built this
+particular `||` fallback across contract number and title (`grep -rn contract_no.*||.*title` across
+`app/app` - only this one site; `pipeline/pricing/page.tsx`'s own `r.contractNo || r.title` is a
+single compact summary line for an unrelated banner listing several tenders by name, not a
+per-tender identity row, and out of this pass's scope regardless since `pipeline/` isn't where the
+bug actually lives there).
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same
+3 pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 57 routes build. `npx vitest run` - **147/147**, unchanged (no
+vitest-covered logic touched, markup-only change). Full `node:test` sweep, `npx tsx --test
+$(find . -name "*.test.ts" -not -path "*/node_modules/*")` - **156/156**, re-confirmed fresh in
+this pass's own shell (matches the sixth pass's own freshly-reconfirmed baseline exactly, no new
+test files landed in between).
+
+**Not done, by design**: `pipeline/page.tsx`'s owner-initials-circle hover-only `title=` (flagged
+lower-stakes by the third/fifth/sixth passes) is still untouched - re-confirmed this pass as a real
+but smaller gap (the owner is still visible via the readiness/stage context around it; the SANRAL
+page's bug hid the tender's own identity outright, a bigger single fix). Did not touch anything
+under `app/app/tenders/[id]/` (hard exclusion - PR #141 in flight), `app/app/discovery/page.tsx`,
+`app/app/analytics/page.tsx`, `app/app/market-intelligence/page.tsx`,
+`app/app/_components/NotificationsBell.tsx`, or `app/app/people/[id]/page.tsx`'s role-source
+tooltips (prior passes' own fixes), `app/supabase/migrations/`, billing/entitlement logic, or
+`engine/sanral_fill.py` and its callers - standing carve-outs.

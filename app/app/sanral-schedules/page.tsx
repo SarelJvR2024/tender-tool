@@ -137,9 +137,18 @@ export default async function SanralSchedulesPage() {
               return (
                 <div key={t.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
                   <div className="min-w-0">
-                    <div className="truncate font-medium text-foreground">
-                      {t.contract_no || t.title || "Tender"}
-                    </div>
+                    {/* Contract number and title are different pieces of identifying
+                        info (same as the pipeline board, pipeline/page.tsx) - a tender
+                        with both used to show only the contract number here, dropping
+                        the actual tender title entirely (not even reachable by hover),
+                        so a company working several SANRAL tenders at once couldn't
+                        tell them apart from this list without opening each one. */}
+                    {t.contract_no && (
+                      <div className="truncate font-mono text-[11px] font-semibold text-muted-foreground">{t.contract_no}</div>
+                    )}
+                    {(t.title || !t.contract_no) && (
+                      <div className="truncate font-medium text-foreground">{t.title || "Tender"}</div>
+                    )}
                     <div className="truncate text-xs text-muted-foreground">{t.buyer ?? "No client on file"}</div>
                   </div>
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
