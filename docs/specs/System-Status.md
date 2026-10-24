@@ -1,5 +1,25 @@
 # System Status
 
+**2026-10-24 ~18:15 UTC, standing review pass — PR #141 synced to current `main` (PR #142 landed
+in between, no overlap), no new collision, QA tooling still sound.** Orientation: fast-forwarded
+`main` to `2acffd9` (picked up PR #142, `session_01HsxN8YLz5vfgFpz9qcdDVV`'s "People: role-source
+citations reachable without a mouse, not hover-only" - `app/AGENTS.md`, `app/app/people/[id]/
+page.tsx`, a new `role-source-info.tsx`; doesn't touch `System-Status.md` or anything PR #141 owns).
+Merged `main` into `tender-workspace-batch-2b` locally first (`git merge --no-commit` to confirm
+clean before pushing, same discipline as every pass tonight) - genuinely no overlap, merge was
+trivial, pushed as `4df4187`. PR #141 now based on current `main`, `tsc --noEmit` re-confirmed clean
+after the merge.
+
+Collision check: still only 2 open PRs - `#141` (above) and `#118` (draft, unchanged since
+2026-10-23, not this session's to touch). Re-scanned every remote branch for in-flight work: newest
+non-`main` activity anywhere is `fix/discovery-readiness-visible-blockers` at 2026-10-24 00:41 UTC -
+over 17 hours stale, nothing new since the last pass. QA tooling re-check: `lxml==6.1.3` still
+pinned in both `daily-digest.yml`/`daily-discovery.yml` (static check, unchanged). No new small-safe
+fixes found this pass; nothing new needs Sarel's judgment call beyond what's already queued (PR
+#141's merge decision, and its own open question on the date-input component follow-up).
+
+---
+
 **2026-10-24 ~16:15 UTC, standing review pass — PR #141 confirmed clean and ready, no new
 collision, QA tooling still sound.** Orientation: fast-forwarded `main` clean (`f158430`), picked up
 `f734a31`/`a07a6d5` (another session's multi-tenant security audit, already landed, Finding 1
