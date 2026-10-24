@@ -1,0 +1,174 @@
+// Tier 1 - Tender Operational Alerts (notification engine brief, section 3,
+// Tier 1). Sent to the active bidding team. Every fact rendered here comes
+// from a column or computation that already exists in this schema - no new
+// "briefing venue" or "checklist" source was invented for this file (see
+// each function's own comment for exactly where its data comes from).
+import { formatDate, formatDateTime } from "./dates.ts";
+import { button, buildIcs, checklist, type ChecklistItem, escapeHtml, infoCard, layout, pill } from "./emailBrand.ts";
+import { tenderSubject } from "./emailSubjects.ts";
+import { printSignDeadline, type DispatchLogisticsInput } from "./dispatchTriage.ts";
+import type { NotificationEmail } from "./notificationEngine.ts";
+
+// 1.1 Compulsory Briefing / Clarification Meeting Alert
+// --------------------------------------------------------------------------
+// Data source: tenders.briefing_date / briefing_time (migration 0048,
+// written by engine/discovery/watch_tender_updates.py from a real buyer
+// addendum, or accepted by a person). There is NO briefing venue/meeting-
+// link column on `tenders` itself - the only place a venue is ever
+// captured is discovered_opportunities.briefing->>'venue' (migration 0051,
+// the pre-pursuit discovery snapshot), which nothing currently copies onto
+// `tenders` once a company pursues it. venueOrLink is therefore an
+// honestly OPTIONAL input here: a caller that still has the
+// discovered_opportunities row can pass it through; one that doesn't gets
+// a fallback line pointing at the tender's own documents rather than a
+// fabricated address.
+export function briefingReminderEmail(opts: {
+  reference: string;
+  buyerShortName: string;
+  briefingDate: string; // tenders.briefing_date, YYYY-MM-DD
+  briefingTime: string | null; // tenders.briefing_time, "HH:MM", null = date known, time not
+  venueOrLink: string | null;
+  isVirtual: boolean;
+  appUrl: string;
+  tenderId: string;
+  window: "5_days" | "24_hours";
+}): NotificationEmail {
+  const when = opts.briefingTime ? `${formatDate(opts.briefingDate)}, ${opts.briefingTime} SAST` : formatDate(opts.briefingDate) ?? opts.briefingDate;
+  const action = opts.window === "24_hours" ? "Compulsory Briefing in 24h" : "Compulsory Briefing in 5 Days";
+  const subject = tenderSubject({ reference: opts.reference, action: opts.isVirtual ? `${action} (Virtual Link Attached)` : action, buyer: opts.buyerShortName });
+  const tone = opts.window === "24_hours" ? "urgent" : "warning";
+
+  const venueLine = opts.venueOrLink
+    ? opts.isVirtual
+      ? `<a href="${escapeHtml(opts.venueOrLink)}" style="color:#1D4ED8;">${escapeHtml(opts.venueOrLink)}</a>`
+      : escapeHtml(opts.venueOrLink)
+    : `See this tender's documents for the venue - not captured on this tender's record yet.`;
+
+  const ics = opts.briefingTime
+    ? buildIcs({
+        uid: `briefing-${opts.tenderId}@tenderready.app`,
+        title: `Briefing - ${opts.reference}`,
+        description: `Compulsory briefing for ${opts.reference} (${opts.buyerShortName}). Failure to attend disqualifies your bid automatically.`,
+        startIso: `${opts.briefingDate}T${opts.briefingTime}:00+02:00`,
+        location: opts.venueOrLink ?? undefined,
+      })
+    : null;
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill(opts.window === "24_hours" ? "24H TO BRIEFING" : "BRIEFING IN 5 DAYS", tone)}</p>
+      <p style="margin:0 0 4px;font-size:17px;font-weight:700;">${escapeHtml(opts.reference)}</p>
+      <p style="margin:0 0 20px;color:#5C6374;font-size:13px;">${escapeHtml(opts.buyerShortName)}</p>
+      ${infoCard([
+        { label: "Briefing date", value: escapeHtml(when), emphasis: tone },
+        { label: opts.isVirtual ? "Meeting link" : "Venue", value: venueLine },
+      ])}
+      <p style="margin:0 0 20px;font-weight:700;color:#B3261E;">Failure to attend disqualifies your bid automatically.</p>
+      <p style="margin:0 0 12px;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "View Briefing Details & RFP")}</p>
+      ${ics ? `<p style="margin:0;color:#5C6374;font-size:12px;">A calendar invite (${escapeHtml(ics.filename)}) is attached to this email.</p>` : ""}
+    `,
+    `${opts.reference} briefing ${when}.`
+  );
+  const text = `${opts.reference} (${opts.buyerShortName}) - compulsory briefing ${when}.\n${opts.isVirtual ? "Link" : "Venue"}: ${opts.venueOrLink ?? "see tender documents"}\n\nFailure to attend disqualifies your bid automatically.\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text, attachments: ics ? [ics] : undefined };
+}
+
+// 1.2 48-Hour & 24-Hour Physical Print & Sign Cutoff
+// --------------------------------------------------------------------------
+// Data source: tender_packs.submission_type/estimated_print_hours/
+// estimated_transit_hours/dispatch_status (migration 0090) and
+// tenders.closing_date, run through lib/dispatchTriage.ts's own
+// printSignDeadline() - the SAME function the dashboard's Command Center
+// uses, so this email can never disagree with what the app itself shows
+// for "when do I actually need to print by" (this app's own "never a
+// second number that could disagree" rule). The checklist is NOT computed
+// here either: outstandingItems is a caller-supplied list built from the
+// one real source (lib/tenderNextStep.ts / disqualification-guard.tsx),
+// per dispatchTriage.ts's own module header on why this file never
+// re-derives blocking_items itself.
+export function printSignCutoffEmail(opts: {
+  reference: string;
+  buyerShortName: string;
+  closingDateTime: string; // tenders.closing_date, full ISO timestamp
+  deliveryLocation: string | null;
+  outstandingItems: ChecklistItem[];
+  appUrl: string;
+  tenderId: string;
+  dispatch: DispatchLogisticsInput;
+}): NotificationEmail {
+  const deadline = printSignDeadline(opts.dispatch);
+  const hoursLeft = deadline ? (deadline.getTime() - Date.now()) / (60 * 60 * 1000) : null;
+  const urgent = hoursLeft !== null && hoursLeft <= 24;
+  const action = urgent ? "24h to Physical Cutoff (Print & Sign)" : "48h to Physical Cutoff (Print & Sign)";
+  const subject = tenderSubject({ reference: opts.reference, action, buyer: opts.buyerShortName });
+  const missing = opts.outstandingItems.filter((i) => !i.done).length;
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill(urgent ? "48H CUTOFF" : "PRINT & SIGN CUTOFF", urgent ? "urgent" : "warning")}</p>
+      <p style="margin:0 0 4px;font-size:17px;font-weight:700;">${escapeHtml(opts.reference)}</p>
+      <p style="margin:0 0 20px;color:#5C6374;font-size:13px;">${escapeHtml(opts.buyerShortName)}</p>
+      ${infoCard([
+        { label: "Official closing", value: escapeHtml(formatDateTime(opts.closingDateTime) ?? opts.closingDateTime) },
+        { label: "Physical print/sign cutoff", value: deadline ? escapeHtml(formatDateTime(deadline.toISOString()) ?? "") : "Not applicable (digital submission)", emphasis: urgent ? "urgent" : "warning" },
+        { label: "Delivery address", value: opts.deliveryLocation ? escapeHtml(opts.deliveryLocation) : "Not yet set - open the Tender Workspace" },
+      ])}
+      <p style="margin:0 0 8px;font-weight:700;">${missing > 0 ? `${missing} item${missing === 1 ? "" : "s"} still outstanding:` : "Everything on this checklist is complete."}</p>
+      ${checklist(opts.outstandingItems)}
+      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open Tender Workspace & Resolve Blockers")}</p>
+    `,
+    `${opts.reference}: ${missing} item(s) outstanding before the print/sign cutoff.`
+  );
+  const text = `${opts.reference} (${opts.buyerShortName})\nClosing: ${formatDateTime(opts.closingDateTime)}\nPrint/sign cutoff: ${deadline ? formatDateTime(deadline.toISOString()) : "n/a"}\nDelivery: ${opts.deliveryLocation ?? "not set"}\n\nOutstanding (${missing}):\n${opts.outstandingItems.filter((i) => !i.done).map((i) => `- ${i.label}`).join("\n")}\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text };
+}
+
+// 1.3 Buyer Corrigenda / Addenda Alert
+// --------------------------------------------------------------------------
+// Data source: tender_watched_documents.changes (migration 0039 -
+// {closing_date: {date, previous_date, quote}, briefing: {...}, other_changes:
+// [{kind, quote}]}), delivered to companies via tender_update_notifications
+// (migration 0048 - one row per (company, watched_document), "pursuers
+// only" per engine/discovery/test_tender_updates.py). This function only
+// renders; the un-alerted-row scan and alerted_at write happen in the
+// sender script, reusing that table's own existing "already notified" flag
+// instead of a second dedupe mechanism for the same fact.
+export type TenderChange =
+  | { kind: "closing_date"; date: string; previousDate: string | null; quote: string }
+  | { kind: "briefing"; date: string; previousDate: string | null; quote: string }
+  | { kind: "other"; label: string; quote: string };
+
+export function corrigendumAlertEmail(opts: {
+  reference: string;
+  buyerShortName: string;
+  changes: TenderChange[];
+  appUrl: string;
+  tenderId: string;
+}): NotificationEmail {
+  const closingChange = opts.changes.find((c) => c.kind === "closing_date");
+  const action = closingChange ? "Closing Date Changed (Addendum)" : "Addendum Published";
+  const subject = tenderSubject({ reference: opts.reference, action, buyer: opts.buyerShortName });
+
+  const rows = opts.changes.map((c) => {
+    if (c.kind === "closing_date" || c.kind === "briefing") {
+      const label = c.kind === "closing_date" ? "Closing date" : "Briefing date";
+      const direction = c.previousDate && new Date(c.date) > new Date(c.previousDate) ? "moved later" : c.previousDate ? "moved earlier" : "now set";
+      return { label, value: `${escapeHtml(formatDate(c.date) ?? c.date)} (${direction}${c.previousDate ? `, was ${escapeHtml(formatDate(c.previousDate) ?? c.previousDate)}` : ""})`, emphasis: "warning" as const };
+    }
+    return { label: c.label, value: escapeHtml(c.quote.slice(0, 160)) };
+  });
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill("ADDENDUM", "info")}</p>
+      <p style="margin:0 0 4px;font-size:17px;font-weight:700;">${escapeHtml(opts.reference)}</p>
+      <p style="margin:0 0 20px;color:#5C6374;font-size:13px;">${escapeHtml(opts.buyerShortName)}</p>
+      <p style="margin:0 0 16px;">The buyer has published an addendum to this tender. Summary of what changed:</p>
+      ${infoCard(rows)}
+      <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Review Addendum Changes")}</p>
+    `,
+    `${opts.reference}: the buyer published an addendum.`
+  );
+  const text = `${opts.reference} (${opts.buyerShortName}) - addendum published.\n${rows.map((r) => `${r.label}: ${r.value.replace(/<[^>]+>/g, "")}`).join("\n")}\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text };
+}

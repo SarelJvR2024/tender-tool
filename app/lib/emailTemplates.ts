@@ -1,79 +1,33 @@
-// Transactional email HTML templates (welcome, deadline reminder). Plain
-// South African English, matching the rest of this app's copy rules.
+// Transactional email HTML templates (welcome, deadline reminder) - the
+// two templates that pre-date the notification engine (2026-10-24). Now
+// built on lib/emailBrand.ts's shared layout/pill/button components, the
+// same visual system every Tier 0-3 template uses, instead of each
+// template owning its own bare inline layout. Function signatures are
+// UNCHANGED from before this upgrade - both existing callers
+// (app/onboarding/actions.ts, scripts/send-deadline-reminders.ts) keep
+// working exactly as they did.
 //
-// Hex colors here are LITERAL, copied straight from app/globals.css's own
-// light-mode token values (--foreground #0B1F3A, --accent #1D4ED8,
-// --background #F4F5F7, --border #DDE0E3, --muted-foreground #5C6374,
-// --warning #B5590E, --destructive #B3261E) - the one deliberate exception
-// to "tokens only, no hardcoded hex" this app's design rules allow: email
-// HTML cannot read a CSS custom property or a Tailwind class (no stylesheet
-// is loaded in an inbox), so there is nothing else these values COULD be.
-// If app/globals.css's tokens ever change, these need a matching manual
-// update - flagged here so that's not a surprise later.
+// Framework-agnostic (no Next.js import) on purpose, same reasoning as
+// every other file here: both the Next.js app and the standalone
+// scripts/send-deadline-reminders.ts script import this directly.
 //
-// Framework-agnostic (no Next.js import) on purpose: both the Next.js app
-// (the welcome email, triggered from a Server Action) and the standalone
-// scripts/send-deadline-reminders.ts script (run by its own GitHub Actions
-// workflow, not through Next.js at all) import this file directly.
-
-const INK = "#0B1F3A";
-const ACCENT = "#1D4ED8";
-const BACKGROUND = "#F4F5F7";
-const BORDER = "#DDE0E3";
-const MUTED = "#5C6374";
-const WARNING = "#B5590E";
-const DESTRUCTIVE = "#B3261E";
-
-function layout(bodyHtml: string, preheader: string): string {
-  return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tender Ready</title>
-  </head>
-  <body style="margin:0;padding:0;background:${BACKGROUND};font-family:Arial,Helvetica,sans-serif;">
-    <span style="display:none;max-height:0;overflow:hidden;opacity:0;">${preheader}</span>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BACKGROUND};padding:32px 16px;">
-      <tr>
-        <td align="center">
-          <table role="presentation" width="100%" style="max-width:520px;background:#FFFFFF;border:1px solid ${BORDER};border-radius:12px;overflow:hidden;">
-            <tr>
-              <td style="background:${INK};padding:20px 28px;">
-                <span style="color:#FFFFFF;font-size:16px;font-weight:700;">Tender Ready</span>
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:28px;color:${INK};font-size:14px;line-height:1.6;">
-                ${bodyHtml}
-              </td>
-            </tr>
-            <tr>
-              <td style="padding:16px 28px;border-top:1px solid ${BORDER};color:${MUTED};font-size:11px;">
-                Tender Ready - your tender department, without hiring one.
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  </body>
-</html>`;
-}
-
-function button(href: string, label: string): string {
-  return `<a href="${href}" style="display:inline-block;background:${ACCENT};color:#FFFFFF;text-decoration:none;font-weight:700;font-size:14px;padding:12px 22px;border-radius:8px;">${label}</a>`;
-}
+// Tier 1-3 templates now live in their own files (lib/emailTemplatesTier0/
+// 1/2/3.ts) rather than growing this one file to 17 functions - re-exported
+// below so an existing `import { X } from "./emailTemplates.ts"` still finds
+// every template in one place if that's ever more convenient than
+// importing a specific tier file directly.
+import { button, escapeHtml, infoCard, layout, pill } from "./emailBrand.ts";
 
 export function welcomeEmail(opts: { companyName: string; appUrl: string }): { subject: string; html: string; text: string } {
   const subject = "Welcome to Tender Ready";
   const html = layout(
     `
+      <p style="margin:0 0 16px;">${pill("WELCOME", "success")}</p>
       <p style="margin:0 0 16px;font-size:18px;font-weight:700;">Welcome, ${escapeHtml(opts.companyName)}.</p>
       <p style="margin:0 0 16px;">Your 14-day free trial has started, with full access to everything - SANRAL workbook fill, the general pack builder, your Company vault, Discovery and People &amp; CVs.</p>
       <p style="margin:0 0 20px;">Next step: finish setting up your Company vault (CSD, tax, B-BBEE and CIDB details) so your packs can be filled straight from real data, not typed by hand each time.</p>
       <p style="margin:0 0 24px;">${button(`${opts.appUrl}/dashboard`, "Go to your dashboard")}</p>
-      <p style="margin:0;color:${MUTED};font-size:12px;">Any questions, just reply to this email.</p>
+      <p style="margin:0;color:#5C6374;font-size:12px;">Any questions, just reply to this email.</p>
     `,
     `Your 14-day Tender Ready trial has started.`
   );
@@ -89,14 +43,14 @@ export function deadlineReminderEmail(opts: {
   tenderId: string;
 }): { subject: string; html: string; text: string } {
   const urgent = opts.daysLeft <= 1;
-  const color = urgent ? DESTRUCTIVE : WARNING;
   const whenText = opts.daysLeft <= 0 ? "closes today" : opts.daysLeft === 1 ? "closes tomorrow (within 24 hours)" : `closes in ${opts.daysLeft} days`;
   const subject = urgent ? `Closing in 24 hours: ${opts.contractLabel}` : `Closing in 3 days: ${opts.contractLabel}`;
   const html = layout(
     `
-      <p style="margin:0 0 4px;font-size:12px;font-weight:700;color:${color};text-transform:uppercase;letter-spacing:0.04em;">Closing soon</p>
+      <p style="margin:0 0 16px;">${pill(urgent ? "24H TO CLOSING" : "CLOSING SOON", urgent ? "urgent" : "warning")}</p>
       <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.contractLabel)}</p>
-      <p style="margin:0 0 20px;">This tender ${whenText} - ${escapeHtml(opts.closingDate)}. Make sure your submission pack is ready before then.</p>
+      ${infoCard([{ label: "Closes", value: escapeHtml(opts.closingDate), emphasis: urgent ? "urgent" : "warning" }])}
+      <p style="margin:0 0 20px;">This tender ${whenText}. Make sure your submission pack is ready before then.</p>
       <p style="margin:0;">${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open this tender")}</p>
     `,
     `${opts.contractLabel} ${whenText}.`
@@ -105,6 +59,21 @@ export function deadlineReminderEmail(opts: {
   return { subject, html, text };
 }
 
-function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
+export {
+  briefingReminderEmail,
+  corrigendumAlertEmail,
+  printSignCutoffEmail,
+  type TenderChange,
+} from "./emailTemplatesTier1.ts";
+export { complianceDigestEmail, SARS_PIN_RISK_NOTE, type ComplianceItem } from "./emailTemplatesTier2.ts";
+export { founderDailyDigestEmail, scoutAnomalyEmail } from "./emailTemplatesTier3.ts";
+export {
+  adminNewSignupEmail,
+  adminPaidConversionEmail,
+  nudgeFirstTenderEmail,
+  nudgeVaultKickstartEmail,
+  teamInviteEmail,
+  trialDay7MilestoneEmail,
+  trialExpiredEmail,
+  trialExpiring48hEmail,
+} from "./emailTemplatesTier0.ts";
