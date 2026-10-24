@@ -141,7 +141,12 @@ export function DateField({
           <CalendarIcon className="size-4" />
         </PopoverTrigger>
         <PopoverContent align="end" className="w-auto p-0">
-          <Calendar mode="single" selected={isoToDate(iso ?? "")} defaultMonth={isoToDate(iso ?? "") ?? new Date()} onSelect={handleCalendarSelect} />
+          {/* Keyed on `open` (found live, PR #144): react-day-picker only
+              reads `defaultMonth` on its own first mount, so without
+              remounting on every open, the calendar kept showing whatever
+              month it happened to open to the very first time rather than
+              navigating to the currently selected date. */}
+          <Calendar key={open ? iso : "closed"} mode="single" selected={isoToDate(iso ?? "")} defaultMonth={isoToDate(iso ?? "") ?? new Date()} onSelect={handleCalendarSelect} />
         </PopoverContent>
       </Popover>
     </div>
