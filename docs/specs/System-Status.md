@@ -1,5 +1,46 @@
 # System Status
 
+**2026-10-24 ~14:20 UTC, standing review pass — PR #139 now ready for review (Sarel's own
+action), no new collision risk, QA tooling fix confirmed still in place.** Orientation: `git fetch
+origin main` clean, working tree matches `origin/main` exactly, no uncommitted drift. Sarel himself
+converted PR #139 from draft to ready-for-review and its Vercel preview redeployed green
+(`mergeable_state: clean`, single required status `Vercel: Deployment has completed` ->
+`success`) - no code action needed from this pass, PR #139 is exactly where the entry below left
+it: fully built, bug-fixed, verified on live data, awaiting Sarel's own merge call (not self-merged
+- he asked for a build and a log, not an instruction to merge).
+
+Collision check: only 2 open PRs repo-wide - `#139` (this session's own, above) and `#118` (draft,
+`session_01HsxN8YLz5vfgFpz9qcdDVV`'s discovery-scoring fix, unchanged since 2026-10-23 09:49 UTC -
+stale but not this session's to touch; its Python engine change is explicitly gated on Sarel's own
+review per the standing rule, and its own "[ ] CI green" checkbox will never tick on its own - see
+next paragraph). Scanned every other remote branch for undisclosed in-flight work: 8 branches sit
+exactly 1-2 commits ahead of `main` (`rescue/demo-company-seed-oct21`,
+`sanral-schedules-premium-feature`, `spec-v3/batch-1-broken-journeys`,
+`spec-v3/batch-2-document-intake`, `uiux/primary-action-visible-disabled-reason`,
+`ux-fix/opportunity-table-filter-labels` x2, `fix/discovery-scoring-diagnosis`/PR #118) - all stale
+(last push 2026-10-21 to 2026-10-23, nothing today), none with an open PR besides #118. No new
+duplication risk live right now.
+
+QA tooling re-check (this pass's own verification, not just trusting the earlier commit message):
+confirmed directly in the current `.github/workflows/*.yml` that the `lxml==6.1.3` fix for this
+morning's real `daily-digest`/`daily-discovery` production break (documented below, `d867e7a`/
+`1e1580e`/`cf68023`) is still present in both files - the fix hasn't been reverted or drifted.
+Neither schedule has fired again since the fix landed (both are once-daily; next real run is
+tomorrow morning), so this is a static-file check, not a fresh green run - flagged honestly rather
+than claimed as re-verified live. Also re-confirmed `app-ci.yml`/`bridge-worker-ci.yml` both still
+trigger on `push: branches: [main]` only, no `pull_request` trigger at all - unchanged from the
+00:12 UTC entry below, a standing characteristic (CI gates `main` after merge, not a PR before it),
+not a regression.
+
+No new small-safe fixes found this pass - today's earlier passes already ran an unusually heavy
+adversarial sweep (Finding 68-70, the hours-validation fix, two chart-visibility fixes, the
+notifications-bell truncation fix, the lxml break) across most of the codebase's live areas, so
+this pass's own orientation + collision + QA-tooling check is the honest scope of what needed doing
+right now. Nothing here needs Sarel's judgment call beyond what's already queued: PR #139's own
+merge decision.
+
+---
+
 **2026-10-24 ~14:05 UTC — PR #139 opened: Batch 3 (vault drawer) + Batch 6 (canonical `formatZAR`)
 built end-to-end, both from Sarel's own explicit specs.** If you are another session reading this:
 `PR #139` (https://github.com/SarelJvR2024/tender-tool/pull/139, branch
