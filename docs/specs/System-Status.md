@@ -42,6 +42,18 @@ that PR (which upload flow a vault slide-over drawer should host; which of two e
 identical `formatRand()` implementations becomes canonical) are unaffected by this collision and
 still open, whenever he picks them up.
 
+**2026-10-24 ~00:12 UTC, standing review pass - a second, smaller, self-inflicted conflict found
+and fixed.** This same entry got edited into slightly different final wording on two different
+branches within minutes of each other tonight (`main` directly, and `workspace-polish` - both by
+this session, fixing the same dangling-reference wording independently). Caught by this review
+pass's own routine `git fetch`/merge check, not reported by anyone: `PR #133`'s `mergeable_state`
+had flipped back to `dirty`. Resolved by taking `main`'s wording (self-contained, no dangling
+reference to branch-only content) - no code touched, no content lost. `app-ci`/`bridge-worker-ci`
+don't run on this branch's own pushes (push-to-`main`-only triggers, confirmed earlier tonight), so
+`npx tsc --noEmit`/`npx eslint .` re-run clean locally is this pass's own verification. No other
+open branch shows new activity since the PR #134 batch paused itself (last push `22:02 UTC`) - no
+further duplication risk live right now. PR #133 remains open, unreviewed, waiting on Sarel.
+
 ---
 
 Maintained by the standing solution-architect review pass. This file reflects **current real
