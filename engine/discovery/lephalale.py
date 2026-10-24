@@ -164,7 +164,9 @@ def normalize(internal_ref, tnumber, desc, closing_dt, batch_url, batch_label):
     return sh.release(
         ocid=f"lephalale:{ref}",
         contract_number=ref, title=title, description=title, buyer=BUYER,
-        closing_date=sh.iso_sast(closing_dt),
+        # Lephalale's own batch PDF gives a date only, never a time - see
+        # iso_sast_closing()'s own docstring.
+        closing_date=sh.iso_sast_closing(closing_dt),
         documents=[{"title": batch_label, "url": batch_url}],
         source=SOURCE, source_id=ref, source_url=LIST_URL,
         status="advertised", tender_type="Tender",

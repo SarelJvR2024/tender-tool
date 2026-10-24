@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { loadTenderCompliance } from "./compliance-data";
 import { type ComplianceItem, type ComplianceStatus, type CompanyVault } from "@/lib/tenderCompliance";
 import { classifyComplianceItem, type BidTaskStatus } from "./bid-task-status";
@@ -160,35 +162,45 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }): Prom
           against the records on file as a cross-check, the CV on file and the tender-specific CV status.
         </div>
         {/* Whose C3.1.11 table the minimums come from - same banner pattern as the experience-evidence rule. */}
-        <div
-          className={
-            ownMinimums && assumedPositions.length === 0
-              ? "border border-border bg-card text-foreground"
-              : "border border-warning/40 bg-warning/10 text-warning"
-          }
-          style={{ borderRadius: 9, padding: "9px 12px", margin: "0 0 10px", fontSize: 12 }}
-        >
-          {ownMinimums ? (
-            <>
-              <div style={{ fontWeight: 700, marginBottom: 2 }}>Minimum requirements read from this tender&apos;s own C3.1.11 table</div>
-              <div>
-                {ownMinimums.rows.length} position row{ownMinimums.rows.length === 1 ? "" : "s"} read from {evaluationRules?.source_document ?? "the tender document"}.
-                {assumedPositions.length > 0 &&
-                  ` ${assumedPositions.join(", ")} ha${assumedPositions.length === 1 ? "s" : "ve"} no row in it - for ${assumedPositions.length === 1 ? "that position" : "those"} the R.396-010-2025/1F minimum is used and marked "Assumed rule".`}
-              </div>
-            </>
-          ) : (
-            <>
-              <div style={{ fontWeight: 700, marginBottom: 2 }}>Assumed rule - this tender&apos;s own C3.1.11 minimum-requirements table hasn&apos;t been read</div>
-              <div>
-                The minimums below are R.396-010-2025/1F&apos;s table (Book 2/3, C3-14/C3-15), not a fact about this tender - other SANRAL
-                tenders set different registrations and years (N.011-010-2027-1F wants Pr Eng only for the Contract Engineer and 10-15
-                years for the RE). These will be replaced with this tender&apos;s own minimums once its Book 2/3 technical specification is read.
-              </div>
-              {keyPersonMinimums?.reason && <div style={{ marginTop: 3, color: "var(--muted-foreground)" }}>Last read: {keyPersonMinimums.reason}</div>}
-            </>
-          )}
-        </div>
+        {ownMinimums ? (
+          <div
+            className="border border-border bg-card text-foreground"
+            style={{ borderRadius: 9, padding: "9px 12px", margin: "0 0 10px", fontSize: 12 }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>Minimum requirements read from this tender&apos;s own C3.1.11 table</div>
+            <div>
+              {ownMinimums.rows.length} position row{ownMinimums.rows.length === 1 ? "" : "s"} read from {evaluationRules?.source_document ?? "the tender document"}.
+              {assumedPositions.length > 0 &&
+                ` ${assumedPositions.join(", ")} ha${assumedPositions.length === 1 ? "s" : "ve"} no row in it - for ${assumedPositions.length === 1 ? "that position" : "those"} the R.396-010-2025/1F minimum is used and marked "Assumed rule".`}
+            </div>
+          </div>
+        ) : (
+          // Batch 2B: the multi-paragraph "Assumed rule" yellow callout read
+          // as a text wall - condensed to a badge, with the same technical
+          // detail (which tender's table this estimate borrows, why, and
+          // when it's replaced) moved into a tooltip rather than dropped.
+          <div style={{ margin: "0 0 10px", display: "flex", alignItems: "center", gap: 5 }}>
+            <span className="border border-warning/40 bg-warning/10 text-warning" style={{ borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700 }}>
+              Standard SANRAL Criteria (Estimated)
+            </span>
+            <Tooltip>
+              <TooltipTrigger
+                aria-label="Why this estimate is used"
+                className="inline-flex size-4 flex-none items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+              >
+                <Info className="size-3.5" aria-hidden />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs text-left font-normal">
+                This tender&apos;s own C3.1.11 minimum-requirements table hasn&apos;t been read yet. The minimums below
+                are R.396-010-2025/1F&apos;s table (Book 2/3, C3-14/C3-15), not a fact about this tender - other SANRAL
+                tenders set different registrations and years (N.011-010-2027-1F wants Pr Eng only for the Contract
+                Engineer and 10-15 years for the RE). These will be replaced with this tender&apos;s own minimums once
+                its Book 2/3 technical specification is read.
+                {keyPersonMinimums?.reason && <div style={{ marginTop: 6 }}>Last read: {keyPersonMinimums.reason}</div>}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
         {positionRows.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
             No key positions recorded for this tender yet - they come from the tender pack once it&apos;s created.

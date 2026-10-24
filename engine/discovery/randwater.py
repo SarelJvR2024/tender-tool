@@ -99,7 +99,10 @@ def normalize(ref, closing, title):
     return sh.release(
         ocid=f"randwater:{ref}",
         contract_number=ref, title=title, description=title, buyer=BUYER,
-        closing_date=sh.iso_sast(closing),
+        # Rand Water's own listing gives a date only, never a time (confirmed
+        # from a real saved page) - iso_sast_closing() defaults the time to
+        # 11:00 SAST rather than a literal (and misleading) midnight.
+        closing_date=sh.iso_sast_closing(closing),
         # Per-bid documents sit behind a DevExpress AJAX popup, not read here
         # - see this module's own docstring.
         documents=[],

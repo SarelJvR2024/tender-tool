@@ -480,14 +480,17 @@ def run_extraction(client, job, work_root, fetch=None):
             # The time from the tender's OWN notice ("The closing time and date
             # for receipt of tenders is 12:00 on ..."), not a fixed one
             # (Form-Field-Audit 2026-10-18: 12:00 was always assumed - R.396's
-            # time, not every SANRAL tender's).
+            # time, not every SANRAL tender's). When no time is found at all,
+            # fall back to 11:00 - the standard SA public-tender closing time
+            # (Batch 2B, Sarel's own live feedback: 12:00 isn't the default
+            # most general/non-SANRAL tenders actually use).
             closing_time = intake.find_closing_time(all_text)
             notice_time = closing_time["value"] if closing_time else None
-            patch["closing_date"] = f"{setup['closing_date']}T{notice_time or '12:00'}:00+02:00"
+            patch["closing_date"] = f"{setup['closing_date']}T{notice_time or '11:00'}:00+02:00"
             intake_rec["notes"].append(
                 f"Closing date taken from the workbook's SETUP sheet ({setup['closing_date']}); "
                 + (f"the time ({notice_time}) from the Tender Notice." if notice_time else
-                   "no closing time found in the documents read - 12:00 was used as a placeholder, check the "
+                   "no closing time found in the documents read - 11:00 was used as a placeholder, check the "
                    "Tender Notice and correct it."))
             if closing_time and closing_time["ambiguous"]:
                 # A real, common shape: an addendum extending the deadline on
