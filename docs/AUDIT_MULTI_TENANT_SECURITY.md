@@ -36,7 +36,7 @@ actions) — those stand as written.
 | API routes / server actions | 🟢 **PASS** | Only 2 Next.js API routes and 21 server-action files exist. Authorization is consistently delegated to RLS or to `SECURITY DEFINER` functions that check `is_company_member()` / `is_platform_admin()` themselves — verified by reading every admin and payment-adjacent one, not assumed. |
 | Document storage isolation | 🟢 **PASS** | All 9 Storage buckets are `public = false`. Cross-company object listing/read/write is refused — confirmed live in the test suite (case 10), not just by reading policy SQL. |
 | Background worker / scheduled job health | 🟡 **WARNING** | Design is sound (per-item failure isolation, `system_alerts` instead of silent drops, safe no-op when secrets are missing) but one real production outage already happened this week and one workflow's timeout is an unverified estimate. Not a tenant-isolation issue — flagged for completeness since it was explicitly in scope. |
-| Hygiene regression | 🟡 **WARNING** | Two `SECURITY DEFINER` functions reintroduce a `search_path` gap this project explicitly closed once already (migration `0074`). Not currently exploitable (see Finding 1), but it is a drift from an established, deliberate hardening convention. |
+| Hygiene regression | 🟢 **PASS** (closed 2026-10-24) | Two `SECURITY DEFINER` functions had reintroduced a `search_path` gap this project explicitly closed once already (migration `0074`). Never exploitable (see Finding 1) — closed by migration `0091`, re-verified live: 0 of 51 `SECURITY DEFINER` functions now missing `pg_temp`. |
 
 **No CRITICAL findings.** No path was found by which Company A can read, write, or infer Company
 B's tender prices, CVs, draft methodologies, vault documents, or any other tenant-owned data. The
@@ -231,7 +231,16 @@ failed on a timeout yet, but this is unverified headroom, not a verified one.
 
 ## 7. Findings
 
-### Finding 1 — `search_path` hardening regression (LOW severity, not currently exploitable)
+### Finding 1 — `search_path` hardening regression (LOW severity, not currently exploitable) — **closed 2026-10-24**
+
+**Closed by the standing QA/robustness review pass, 2026-10-24**: migration
+`0091_search_path_consistency_2.sql` lands exactly the two `alter function` statements this
+finding recommended, mirroring `0074` precisely. Verified live, not just applied: replayed every
+migration (now 81 files) onto a fresh scratch Postgres via `engine/security/replay_schema.sh`,
+re-ran this audit's own `pg_proc` query — **0** of this schema's 51 `SECURITY DEFINER` functions
+are now missing `pg_temp` (was 2) — and re-ran the full adversarial `test_tenant_isolation.py`
+suite (Part 2, real RLS against the replayed schema): all 18 checks still pass. No behavior
+change, purely additive, as this finding predicted.
 
 - **File:** `app/supabase/migrations/0089_opportunity_tags_interest.sql:42-43` and `:82-83`
 - **Functions:** `set_opportunity_tag(uuid, text, text)`, `set_opportunity_interest(uuid, text)`
@@ -294,9 +303,10 @@ failed on a timeout yet, but this is unverified headroom, not a verified one.
 
 ## 8. Recommended remediation, in priority order
 
-1. **(5 minutes, no risk)** Land a small migration pinning `search_path = public, pg_temp` on
+1. ~~**(5 minutes, no risk)** Land a small migration pinning `search_path = public, pg_temp` on
    `set_opportunity_tag` and `set_opportunity_interest`, per Finding 1. Mirrors an already-accepted
-   pattern (`0074`) exactly; purely additive, no behavior change.
+   pattern (`0074`) exactly; purely additive, no behavior change.~~ **closed 2026-10-24** —
+   `0091_search_path_consistency_2.sql`, see Finding 1.
 2. **(No code change, process only)** Once `daily-digest.yml` / `daily-discovery.yml` have each
    completed one real scheduled run, record the actual duration in the workflow's own comment and
    confirm or tighten `timeout-minutes` (Finding 3).

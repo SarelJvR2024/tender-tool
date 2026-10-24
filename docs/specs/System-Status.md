@@ -2335,6 +2335,32 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-24, standing QA/robustness review - eighty-fourth run): closed `docs/AUDIT_MULTI_TENANT_SECURITY.md`'s Finding 1 (search_path hardening regression)
+
+Orientation: synced Sarel's own `f734a31` ("Add multi-tenant security & enterprise-readiness
+audit") landing on `main` since the last run - its own Finding 1 is a real, well-specified, "5
+minutes, no risk" remediation item (a migration mirroring the already-accepted `0074` pattern for
+two `SECURITY DEFINER` functions missing `pg_temp` from `search_path`), explicitly marked safe to
+batch into a routine migration whenever one is next cut. A deliberate, one-time deviation from the
+usual rotation this run - picking up an already-diagnosed, already-prescribed fix is better use of
+this cycle than searching for a new bug when a human just handed one over, ready to land.
+
+**Closed Finding 1.** New migration `0091_search_path_consistency_2.sql`:
+`alter function set_opportunity_tag(uuid, text, text) set search_path = public, pg_temp;` and the
+same for `set_opportunity_interest(uuid, text)` - the exact two statements the audit recommended,
+mirroring `0074` exactly (never editing `0089` itself, per this project's own standing rule against
+editing an already-possibly-live migration).
+
+**Verified live, not just applied, same methodology the audit itself used:** replayed all 81
+migrations (through `0091`) onto a fresh scratch Postgres via `engine/security/replay_schema.sh`;
+queried `pg_proc` directly and confirmed **0** of this schema's 51 `SECURITY DEFINER` functions are
+now missing `pg_temp` (was 2); re-ran the real adversarial `test_tenant_isolation.py` suite (Part
+2, actual RLS enforcement against the replayed schema, not the in-memory Part 1) - all 18 checks
+still pass, confirming the migration changed nothing behaviorally. Updated
+`docs/AUDIT_MULTI_TENANT_SECURITY.md` itself (Finding 1, its summary-table row, and remediation
+item 1) to record the closure with the same `~~struck~~ **closed**` convention this file already
+uses for closed compliance gaps.
+
 ## This pass (2026-10-24, standing QA/robustness review - eighty-third run): rotated to CV (engine/cv) - thorough review, no new bug found this time
 
 Orientation: synced sibling merges (`58aee57` notification-bell TS fix, `b599593` gitignore,
