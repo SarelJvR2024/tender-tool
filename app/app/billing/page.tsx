@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { fetchCompanySubscription } from "@/lib/companySubscription";
+import { formatZAR } from "@/lib/formatZAR";
 import {
   PAYABLE_PLAN_TIERS,
   PLAN_LABEL,
@@ -184,7 +185,7 @@ function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: stri
       title={PLAN_LABEL[plan]}
       description={
         <>
-          <span className="text-2xl font-semibold text-money">R{monthly.toLocaleString("en-ZA")}</span>
+          <span className="text-2xl font-semibold text-money">{formatZAR(monthly)}</span>
           <span className="text-sm text-muted-foreground">/month</span>
         </>
       }
@@ -197,12 +198,12 @@ function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: stri
         {plan === "professional" && <li className="font-medium text-accent">&bull; For companies tendering regularly</li>}
       </ul>
       <div className="flex flex-col gap-2">
-        <CheckoutLink plan={plan} interval="monthly" disabled={isCurrent} label={`Subscribe monthly - R${monthly.toLocaleString("en-ZA")}`} />
+        <CheckoutLink plan={plan} interval="monthly" disabled={isCurrent} label={`Subscribe monthly - ${formatZAR(monthly)}`} />
         <CheckoutLink
           plan={plan}
           interval="yearly"
           disabled={isCurrent}
-          label={`Subscribe yearly - R${yearly.toLocaleString("en-ZA")}/yr`}
+          label={`Subscribe yearly - ${formatZAR(yearly)}/yr`}
           variant="outline"
         />
       </div>

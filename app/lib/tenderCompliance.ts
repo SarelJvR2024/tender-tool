@@ -74,11 +74,15 @@ export type CompanyVault = {
   legal_name: string | null;
   csd_supplier_number: string | null;
   income_tax_number: string | null;
+  coid_registration_number: string | null;
   coid_letter_of_good_standing_number: string | null;
   coid_letter_of_good_standing_expiry: string | null;
   bee_level: number | null;
+  black_ownership_pct: number | null;
+  bee_procurement_recognition_pct: number | null;
   status: string | null; // e.g. "QSE"
   bank_name: string | null;
+  bank_branch_code: string | null;
   director_name: string | null;
   // 0014_vault_compliance_documents.sql
   coid_letter_document_path: string | null;
@@ -87,6 +91,7 @@ export type CompanyVault = {
   sars_tcs_pin_document_path: string | null;
   pi_insurance_insurer: string | null;
   pi_insurance_policy_number: string | null;
+  pi_insurance_cover_zar: number | null;
   pi_insurance_expiry: string | null;
   pi_insurance_document_path: string | null;
   iso_9001_certified: boolean | null;
@@ -102,8 +107,13 @@ export type CompanyVault = {
 };
 
 /** Column list for a supabase select() of CompanyVault. */
+// Extended 2026-10-24 (Batch 3, Quick Blocker Resolver) with the few real
+// CompanyVault fields that weren't needed here before this drawer: the
+// drawer pre-fills every field it offers to edit from this same row, so it
+// can never show a stale or blank value next to a document that's actually
+// on file.
 export const COMPANY_VAULT_COLUMNS =
-  "id, legal_name, csd_supplier_number, income_tax_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, status, bank_name, director_name, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path";
+  "id, legal_name, csd_supplier_number, income_tax_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, bank_name, bank_branch_code, director_name, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path";
 
 const RENEW_SOON_DAYS = 60; // same threshold as app/lib/dates.ts expiryStatus()
 
