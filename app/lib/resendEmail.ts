@@ -15,14 +15,21 @@
 // Sender profiles (notification engine brief, section 1.2): routing
 // different notification categories from different sub-addresses so a
 // recipient's own mail rules can separate them, all replying to one
-// support inbox. Every address below needs tenderready.app verified as a
-// sending domain in Resend before it will actually deliver - until then,
-// RESEND_FROM_ADDRESS (a single env var) overrides every profile at once,
-// so this keeps working against whatever sandbox/testing address is
-// already verified (unchanged behaviour from before this file had
-// profiles at all). A profile can also be overridden individually
-// (RESEND_FROM_OPS / RESEND_FROM_COMPLIANCE / RESEND_FROM_SCOUT /
-// RESEND_FROM_SYSTEM) for testing one category without touching the rest.
+// support inbox. Real values (Sarel, 2026-10-24, set as GitHub Actions +
+// Vercel env vars):
+//   RESEND_FROM_ADDRESS     - Tier 0 (general/onboarding/welcome/trial) -
+//                             ALSO this file's pre-existing single-sender
+//                             default, so a caller that passes no profile
+//                             at all (the "system" profile) keeps using
+//                             exactly this var, unchanged from before this
+//                             file had profiles.
+//   RESEND_FROM_BIDS        - Tier 1 (live tender alerts, briefings, cutoffs)
+//   RESEND_FROM_COMPLIANCE  - Tier 2 (CSD/SARS/COIDA/CIDB expiry)
+//   RESEND_FROM_SCOUT       - Tier 3 (system health / Quality Scout, to admin)
+//   RESEND_REPLY_TO         - support@tenderready.app, every tier
+// Each is independently optional - an unset one falls back to this file's
+// own hardcoded default address below, so a partially-configured
+// environment degrades per-tier rather than failing every send.
 import { Resend } from "resend";
 
 const DEFAULT_FROM = "Tender Ready <onboarding@resend.dev>";
@@ -32,30 +39,40 @@ export type SenderProfile = "system" | "ops" | "compliance" | "scout";
 
 const SENDER_PROFILE_DEFAULTS: Record<SenderProfile, string> = {
   system: DEFAULT_FROM,
-  ops: "Tender Ready Ops <bids@tenderready.app>",
+  ops: "Tender Ready Bids <bids@tenderready.app>",
   compliance: "Tender Ready Compliance <compliance@tenderready.app>",
   scout: "Quality Scout <scout@tenderready.app>",
 };
 
+// One env var per profile, each resolved independently - no single var
+// overrides every profile at once any more (an earlier version of this
+// file had RESEND_FROM_ADDRESS do exactly that, for "the domain isn't
+// verified yet, route everything through one working address" testing -
+// but Sarel has now set 4 DIFFERENT real addresses, one per tier, so a
+// blanket override would silently route Tier 1/2/3 mail through the Tier 0
+// address instead of their own. If every tier ever does need to collapse
+// onto one address again, unset the other 3 and only RESEND_FROM_ADDRESS
+// will be live.
 const SENDER_PROFILE_ENV_VAR: Record<SenderProfile, string> = {
-  system: "RESEND_FROM_SYSTEM",
-  ops: "RESEND_FROM_OPS",
+  system: "RESEND_FROM_ADDRESS",
+  ops: "RESEND_FROM_BIDS",
   compliance: "RESEND_FROM_COMPLIANCE",
   scout: "RESEND_FROM_SCOUT",
 };
 
 function resolveFromAddress(profile: SenderProfile): string {
-  // A single blanket override wins over everything, for exactly the "the
-  // real domain isn't verified yet, route every profile through one
-  // already-working address" situation.
-  if (process.env.RESEND_FROM_ADDRESS) return process.env.RESEND_FROM_ADDRESS;
-  const perProfileEnv = process.env[SENDER_PROFILE_ENV_VAR[profile]];
-  return perProfileEnv || SENDER_PROFILE_DEFAULTS[profile];
+  const envValue = process.env[SENDER_PROFILE_ENV_VAR[profile]];
+  return envValue || SENDER_PROFILE_DEFAULTS[profile];
 }
 
 /** Whether a send would actually go out right now. notificationEngine.ts checks this BEFORE claiming an idempotency key - see its own comment on why claiming without a real send would permanently waste a one-time claim (same rule send-deadline-reminders.ts already follows for the same reason). */
 export function resendApiKeyConfigured(): boolean {
   return Boolean(process.env.RESEND_API_KEY);
+}
+
+/** Sarel's own inbox for Tier 3 (founder digest, Quality Scout anomaly alerts) - set as ADMIN_NOTIFICATION_EMAIL (2026-10-24). Null, not a guessed fallback, when unset - a Tier 3 sender script must treat that as "nowhere to send this yet" and skip cleanly, never silently drop it onto some other address. */
+export function adminNotificationEmail(): string | null {
+  return process.env.ADMIN_NOTIFICATION_EMAIL || null;
 }
 
 export type EmailAttachment = { filename: string; content: string };
