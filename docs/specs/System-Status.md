@@ -35,9 +35,12 @@ PR #134's changes are a strict superset: the same tooltip treatment plus a real 
 and duplicate-checklist removal PR #133 never touched), kept PR #133's own remaining unique work
 (`pack-review.tsx`'s SANRAL-family tooltip, the new `tender-documents-menu.tsx` quick-access).
 Re-verified clean after (tsc/eslint/build/vitest 147/147/node-test 138/138) - PR #133's diff is now
-3 files instead of 5, no duplication left. PR #133 itself is still left for Sarel's own review
-(not self-merged - see its own entry below for why); his two open design questions (vault drawers,
-canonical ZAR/VAT formatter) are unaffected by this collision and still open.
+3 files instead of 5, no duplication left. PR #133 itself (https://github.com/SarelJvR2024/tender-tool/pull/133)
+is still open, marked ready for review, intentionally not self-merged by this session - it changes
+user-facing copy and adds a new UI element Sarel hasn't seen yet. His two open design questions on
+that PR (which upload flow a vault slide-over drawer should host; which of two existing, non-
+identical `formatRand()` implementations becomes canonical) are unaffected by this collision and
+still open, whenever he picks them up.
 
 ---
 
