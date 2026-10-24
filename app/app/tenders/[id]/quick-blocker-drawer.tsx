@@ -11,6 +11,7 @@ import { FileDropzone, validateFiles } from "../../_components/document-intake/F
 import { uploadBatch, partitionBatch } from "../../_components/document-intake/uploadBatch";
 import { saveVaultQuickFields, uploadCoidQuickFix } from "./vault-quick-fix-actions";
 import type { QuickFixFieldSpec, QuickFixConfig } from "./quick-fix-config";
+import { DateField } from "@/components/ui/date-field";
 
 function FieldInput({ field, defaultValue, onChange }: { field: QuickFixFieldSpec; defaultValue: string; onChange: (name: string, value: string) => void }) {
   const common = "w-full rounded-md border border-border bg-background px-2.5 py-2 text-sm text-foreground";
@@ -20,7 +21,7 @@ function FieldInput({ field, defaultValue, onChange }: { field: QuickFixFieldSpe
     );
   }
   if (field.kind === "date") {
-    return <input type="date" defaultValue={defaultValue} className={common} onChange={(e) => onChange(field.name, e.target.value)} />;
+    return <DateField defaultValue={defaultValue} onChange={(v) => onChange(field.name, v)} />;
   }
   return (
     <input type="text" defaultValue={defaultValue} placeholder={field.placeholder} className={common} onChange={(e) => onChange(field.name, e.target.value)} />

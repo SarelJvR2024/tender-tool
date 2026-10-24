@@ -9,9 +9,9 @@
 // Run: node --experimental-strip-types scripts/render-email-samples.ts
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { welcomeEmail, deadlineReminderEmail } from "../lib/emailTemplates.ts";
+import { welcomeEmail, deadlineReminderEmail, printCutoffEmail, briefingReminderEmail, complianceExpiryEmail } from "../lib/emailTemplates.ts";
 import {
-  briefingReminderEmail,
+  briefingReminderDetailedEmail,
   corrigendumAlertEmail,
   printSignCutoffEmail,
 } from "../lib/emailTemplatesTier1.ts";
@@ -45,7 +45,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   "00-admin-new-signup": adminNewSignupEmail({ companyName: "Reviewer Civils (Pty) Ltd", signedUpAt: new Date().toISOString(), appUrl: APP_URL, companyId: "sample" }),
   "00-admin-paid-conversion": adminPaidConversionEmail({ companyName: "Reviewer Civils (Pty) Ltd", planTier: "SANRAL Pro", billingInterval: "monthly", appUrl: APP_URL }),
 
-  "01-briefing-5-days": briefingReminderEmail({
+  "01-briefing-5-days": briefingReminderDetailedEmail({
     reference: "N.007-030-2026/1F",
     buyerShortName: "SANRAL",
     briefingDate: "2026-10-29",
@@ -56,7 +56,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
     tenderId: "sample-tender-1",
     window: "5_days",
   }),
-  "01-briefing-24h": briefingReminderEmail({
+  "01-briefing-24h": briefingReminderDetailedEmail({
     reference: "RFP 165/2026",
     buyerShortName: "DBSA",
     briefingDate: "2026-10-25",
@@ -128,6 +128,31 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
     daysLeft: 1,
     appUrl: APP_URL,
     tenderId: "sample-tender-1",
+  }),
+
+  // PR #144's own 3 operational-alert templates (lib/emailTemplates.ts),
+  // restyled onto emailBrand.ts during reconciliation - same params,
+  // same cron script, new visual system only.
+  "04-print-cutoff-operational": printCutoffEmail({
+    contractLabel: "N.007-030-2026/1F",
+    printSignDeadline: "2026-10-28T05:00:00+02:00",
+    hoursLeft: 18,
+    appUrl: APP_URL,
+    tenderId: "sample-tender-1",
+  }),
+  "04-briefing-operational": briefingReminderEmail({
+    contractLabel: "N.007-030-2026/1F",
+    briefingDate: "2026-10-29",
+    briefingTime: "10:00",
+    daysLeft: 1,
+    appUrl: APP_URL,
+    tenderId: "sample-tender-1",
+  }),
+  "04-compliance-expiry-operational": complianceExpiryEmail({
+    companyName: "Reviewer Civils (Pty) Ltd",
+    fieldLabel: "SARS Tax Compliance PIN",
+    daysLeft: 14,
+    appUrl: APP_URL,
   }),
 };
 

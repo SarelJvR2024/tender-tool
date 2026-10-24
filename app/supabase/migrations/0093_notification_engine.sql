@@ -2,6 +2,21 @@
 -- Tier Transactional Notification Engine (Resend)" + the Tier 0 onboarding
 -- addendum, 2026-10-24).
 --
+-- Numbered 0093, not 0092: two sessions independently built overlapping
+-- notification-engine work from the same brief at the same time. 0092 is
+-- session_011NLr419YmLS44xgf1YM6n3's own 0092_operational_alerts_dedupe.sql
+-- (merged to main first, as PR #144) - sent_operational_alerts, scoped to
+-- 3 already-cron-wired alert types (print cutoff, briefing, a 2-field
+-- compliance expiry). This migration is additive, not a replacement:
+-- separate table names, separate functions, zero overlap, reconciled by
+-- the two sessions directly (send_message, 2026-10-24) rather than either
+-- one silently overwriting the other - see docs/specs/System-Status.md for
+-- the full account. notification_claims/notification_logs below cover
+-- what 0092 doesn't: Tier 0 (onboarding/lifecycle), Tier 3 (founder/Scout),
+-- and a generalised, audit-logged idempotency pattern for every type
+-- beyond those first 3 - sent_operational_alerts stays exactly as it is,
+-- live and unmodified.
+--
 -- This is deliberately NOT a from-scratch build. Real sending infrastructure
 -- already existed before this migration (lib/resendEmail.ts, the welcome
 -- email, scripts/send-deadline-reminders.ts) with its own established

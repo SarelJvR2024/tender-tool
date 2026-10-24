@@ -22,7 +22,7 @@ import type { NotificationEmail } from "./notificationEngine.ts";
 // discovered_opportunities row can pass it through; one that doesn't gets
 // a fallback line pointing at the tender's own documents rather than a
 // fabricated address.
-export function briefingReminderEmail(opts: {
+export function briefingReminderDetailedEmail(opts: {
   reference: string;
   buyerShortName: string;
   briefingDate: string; // tenders.briefing_date, YYYY-MM-DD

@@ -41,6 +41,7 @@ import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestio
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { formatDate, formatDateTime } from "@/lib/dates";
+import { DateField } from "@/components/ui/date-field";
 import { formatZAR } from "@/lib/formatZAR";
 import { computeTenderReadiness } from "./tender-readiness";
 import { DisqualificationGuard } from "./disqualification-guard";
@@ -1374,12 +1375,7 @@ function TaskTimeline({
         </div>
         <div>
           <label htmlFor="new-task-due-date" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Due date</label>
-          <input
-            id="new-task-due-date"
-            type="date"
-            name="due_date"
-            style={{ minHeight: 40, padding: "9px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 13, fontFamily: "inherit" }}
-          />
+          <DateField id="new-task-due-date" name="due_date" />
         </div>
         <div>
           <label htmlFor="new-task-assigned-to" style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Assign to (optional)</label>
@@ -1444,13 +1440,7 @@ function ReminderForm({
       </div>
       <div>
         <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Date</label>
-        <input
-          type="date"
-          name="due_date"
-          defaultValue={existing?.due_date ?? ""}
-          required
-          style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontFamily: "inherit" }}
-        />
+        <DateField name="due_date" defaultValue={existing?.due_date ?? ""} required />
       </div>
       <button
         type="submit"
@@ -1546,13 +1536,7 @@ function WonProjectCard({
         <input type="hidden" name="tender_pack_id" value={tenderPack.id} />
         <div>
           <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Completion date</label>
-          <input
-            type="date"
-            name="project_completed_at"
-            defaultValue={tenderPack.project_completed_at ?? ""}
-            required
-            style={{ minHeight: 38, padding: "8px 11px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 12, fontFamily: "inherit" }}
-          />
+          <DateField name="project_completed_at" defaultValue={tenderPack.project_completed_at ?? ""} required />
         </div>
         <div>
           <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "var(--foreground)", marginBottom: 4 }}>Value (R million)</label>

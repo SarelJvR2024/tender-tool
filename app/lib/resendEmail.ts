@@ -77,6 +77,14 @@ export function adminNotificationEmail(): string | null {
 
 export type EmailAttachment = { filename: string; content: string };
 
+// EmailCategory ("bids" | "compliance") was PR #144's own name for this
+// same idea - kept here as a deprecated alias (mapped onto SenderProfile)
+// rather than silently dropped, since scripts/send-operational-alerts.ts
+// still calls sendTransactionalEmail with `category`, not `from`. New
+// callers should use `from`/SenderProfile directly; this alias exists only
+// so that script needed zero changes to keep working through this merge.
+export type EmailCategory = "bids" | "compliance";
+
 export type SendEmailInput = {
   to: string;
   subject: string;
@@ -84,6 +92,8 @@ export type SendEmailInput = {
   text: string;
   /** Which sender sub-address this notification is routed from. Defaults to "system" (the pre-existing single-sender behaviour) - every Tier 1/2/3 caller should pass its own tier's profile. */
   from?: SenderProfile;
+  /** @deprecated use `from` with a SenderProfile instead - kept only for scripts/send-operational-alerts.ts's existing call sites. Takes priority over `from` if both are somehow set. */
+  category?: EmailCategory;
   /** Overrides the default support@tenderready.app reply-to for this one send, if a notification ever needs a different one. */
   replyTo?: string;
   attachments?: EmailAttachment[];
@@ -98,7 +108,8 @@ export async function sendTransactionalEmail(input: SendEmailInput): Promise<Sen
     return { status: "skipped_no_api_key" };
   }
 
-  const from = resolveFromAddress(input.from ?? "system");
+  const profile: SenderProfile = input.category === "bids" ? "ops" : input.category === "compliance" ? "compliance" : (input.from ?? "system");
+  const from = resolveFromAddress(profile);
   const replyTo = input.replyTo ?? process.env.RESEND_REPLY_TO ?? DEFAULT_REPLY_TO;
   try {
     const resend = new Resend(apiKey);
