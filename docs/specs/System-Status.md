@@ -33,7 +33,26 @@ does NOT touch `lib/savingsCounter.ts`'s own `formatRand()` - a different, alrea
 format (5 passing tests) for a different kind of number (an estimated "hours/Rand saved" counter,
 not a financial/tender-value/BOQ figure); folding it in would have broken a written spec and its
 tests for no real gain. Verified: tsc/eslint/build clean, vitest 147/147, full `node --test` sweep
-green (13 new `formatZAR` tests). Not yet preview-verified with real data - next step before merge.
+green (13 new `formatZAR` tests).
+
+**Real bug, only found on the live preview, not locally - fixed and re-verified.** The drawer's own
+config (`VAULT_DRAWER_CONFIG`) originally lived inside `quick-blocker-drawer.tsx`'s `"use client"`
+module. On the deployed preview every Fix/Provide link silently stayed a plain `<a>` - 0
+`data-slot="sheet-trigger"` elements anywhere on the page, zero console errors to hint at why.
+Root cause: a server component (`compliance-report.tsx`) reading a plain data export across a
+`"use client"` module boundary isn't reliable in Next.js's RSC model - `VAULT_DRAWER_CONFIG[item.key]`
+came back `undefined` for every single key, every time, so the Link branch of the ternary always
+won. tsc/eslint/build/vitest all stayed green through this the whole time - this class of bug is
+invisible to every check this session runs except actually opening the page. Fixed by moving the
+config (and its `QuickFixConfig`/`QuickFixFieldSpec` types) into a new plain module
+(`quick-fix-config.ts`, no `"use client"`) both sides of the boundary import from. Re-verified on
+the preview after the fix: all 7 drawer-eligible items (csd, tax, insurance, quality_system, coid,
+bbbee, bank) render as real buttons; a full save-and-refresh cycle confirmed end to end - saved a
+real CSD number through the drawer, watched the item move live from the "Fix" column into "Verify"
+and the readiness score update (30 → 29 things left), no page reload, zero console errors. Billing
+page confirmed showing the new canonical format ("R 1,490.00/month" etc.) too. PR #139 marked ready
+for review; not self-merged - Sarel asked for this build and a log once ready, not an instruction
+to merge on his behalf.
 
 ---
 
