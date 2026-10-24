@@ -13,3 +13,4 @@ packs/generated/
 
 # Claude Code's own local tooling state (e.g. isolated agent worktrees)
 .claude/
+.worktrees/
