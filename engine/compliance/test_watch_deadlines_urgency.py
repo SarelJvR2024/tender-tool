@@ -198,10 +198,62 @@ def supabase_request_pages_past_the_1000_row_server_cap():
           "a caller's own order= is kept as-is, not overridden by the default")
 
 
+def closing_day_handles_a_sast_tagged_offset_correctly():
+    """Finding 71 (QA pass, 2026-10-24): tenders.closing_date is written with
+    a literal "+02:00" offset by real callers (gov_sources.iso_sast(),
+    process_general_jobs.py's own SANRAL intake), not just genuine UTC/"Z"
+    (watch_tender_updates.apply_closing_date() from a raw OCDS feed) - this
+    fixture's own ROWS above only ever used "+00:00", so this exact real-
+    world shape was never exercised. For a "+02:00"-tagged closing time in
+    the last 2 hours of the day, the old code added a SECOND, wrong 2h shift
+    on top of an already-SAST wall-clock time, reporting the closing day as
+    one real day LATER than it actually is - a wrong date shown directly in
+    a customer-facing compliance reminder."""
+    print("find_documents_lapsing_before_closing(): a '+02:00'-tagged closing time near midnight SAST")
+    today = datetime.date(2026, 10, 20)
+    expiry = (today + datetime.timedelta(days=90)).isoformat()  # past the 60-day lead window
+    closing_day = today + datetime.timedelta(days=95)  # after the expiry, before the bug's +1 day drift
+    rows = {
+        "companies": [{"id": "co2", "legal_name": "Late Closer Co", "sars_tcs_pin_expiry": expiry}],
+        "tender_packs": [{"company_id": "co2", "tender_id": "t3"}],
+        "tenders": [{"id": "t3", "contract_no": "Y", "title": "closes late", "status": "open",
+                    "closing_date": f"{closing_day.isoformat()}T23:00:00+02:00"}],  # real SAST day: closing_day
+    }
+
+    def fake(url, key, path):
+        table, _, query = path.partition("?")
+        out = [dict(r) for r in rows.get(table, [])]
+        for part in query.split("&"):
+            if not part or part.startswith(("select=", "order=")):
+                continue
+            col, _, cond = part.partition("=")
+            if cond.startswith("eq."):
+                out = [r for r in out if str(r.get(col)) == cond[3:]]
+            elif cond.startswith("in.("):
+                vals = set(re.findall(r"[^,()]+", cond[3:]))
+                out = [r for r in out if str(r.get(col)) in vals]
+            elif cond == "not.is.null":
+                out = [r for r in out if r.get(col) is not None]
+        return out
+
+    real_request = wd.supabase_request
+    wd.supabase_request = fake
+    try:
+        before = wd.find_documents_lapsing_before_closing("u", "k", {}, today, wd.DEFAULT_DOC_LEAD_DAYS)
+    finally:
+        wd.supabase_request = real_request
+    check(len(before) == 1, f"the PIN should be reported against the late-closing tender, got {before}")
+    if before:
+        check(before[0]["closing_date"] == closing_day.isoformat(),
+              f"reported closing_date should be the real SAST day ({closing_day.isoformat()}), "
+              f"got {before[0]['closing_date']!r}")
+
+
 def main():
     supabase_request_pages_past_the_1000_row_server_cap()  # before supabase_request itself is replaced below
     wd.supabase_request = fake_request
     days_until_malformed_inputs()
+    closing_day_handles_a_sast_tagged_offset_correctly()
     seen = {}
     print(f"run 1 - {TODAY}")
     docs, tasks, before = run(seen, TODAY)
