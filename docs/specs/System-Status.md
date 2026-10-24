@@ -1,5 +1,41 @@
 # System Status
 
+**2026-10-24 ~21:20 UTC — real cross-session collision on the Operational Notification Engine,
+caught before either side pushed conflicting work, resolved by direct session-to-session
+coordination.** PR #144 (this session, merged to `main` as `b7305de`) built Tier 1 (briefing, print
+cutoff) + partial Tier 2 (SARS PIN, COID) of the notification engine: `sent_operational_alerts`
+(migration `0092`), `scripts/send-operational-alerts.ts` + `operational-alerts.yml`,
+`lib/printCutoffReminders.ts`/`briefingReminders.ts`/`complianceExpiryReminders.ts`, and 3 email
+templates in `lib/emailTemplates.ts` using the existing bare `layout()`/`button()` helpers.
+
+Session `session_01DZfrLTsnZtiZGmTHPxQqAX` was independently given the same underlying brief and,
+in parallel, built Tier 0 (9 onboarding/lifecycle email templates: welcome, vault/first-tender
+nudges, trial day-7/48h/expired, team-invite, admin new-signup/paid-conversion) and Tier 3 (Quality
+Scout anomaly alerts wired to `system_alerts`, founder daily digest), plus a generalized
+`notification_claims`/`notification_logs` schema (one idempotency pattern across all 17 email types,
+vs. this PR's own narrower `sent_operational_alerts`) and a new shared visual system
+(`lib/emailBrand.ts` - pill badges, info cards, consolidated checklists, `.ics` attachments) -
+already reviewed twice by Sarel for correctness/polish, screenshots of all 17 already sent to him.
+Neither session knew about the other's work until that session checked `main` just before pushing
+and found PR #144 already merged - caught at exactly the right moment (nothing of theirs was public
+yet), not after a real conflict landed.
+
+**Resolved by direct session coordination** (Sarel's own instruction when asked: "ask the other
+session directly"), no code changes on this session's side: this PR's `sent_operational_alerts`
+table, `send-operational-alerts.ts` cron, and the 3 candidate-selection modules stay exactly as
+merged - tested, migration-replayed, not touched. The other session will rebase onto current `main`,
+renumber its own migration past `0092`, upgrade this PR's 3 existing email templates to its new
+`emailBrand.ts` visual system (same copy/data/logic, presentation only), and add Tier 0 + Tier 3
+cron coverage on top, as one coherent follow-up PR rather than a competing one. Also cross-confirmed
+independently by both sessions: CSD has no expiry field anywhere in this schema (presence-only,
+`companies.csd_supplier_number`) - flagged by both without prompting each other. One correction
+surfaced in the hand-off: `companies.cidb_expiry` (`COMPANY_EXPIRY_FIELDS`, `lib/notifications.ts`)
+*is* a real, already-tracked expiry field this PR's own `complianceExpiryReminders.ts` left out
+(Sarel's literal brief named only "SARS PIN or CSD" for this trigger) - worth adding to whichever
+module ends up owning Tier 2 compliance-expiry coverage going forward.
+
+---
+
 **2026-10-24 ~20:45 UTC — PR #143 merged to `main` (`c39cbc0`): `/sanral-schedules` was silently
 dropping the tender title whenever a contract number existed.** Seventh pass of the standing
 UI/UX review routine tonight. `git fetch origin main` + open-PR check first: `#141`
