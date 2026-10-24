@@ -93,7 +93,8 @@ rel = lephalale.normalize(*sept_rows[0], "https://example.org/batch.pdf", "Septe
 check("ocid is source-namespaced on the real unique key (internal ref, not the reused T-number)",
       rel["ocid"] == "lephalale:8/2/837", rel["ocid"])
 check("contract_number is the internal ref", rel["contract_number"] == "8/2/837")
-check("closing_date is a real SAST ISO string", rel["closing_date"] == "2026-10-19T00:00:00+02:00", rel["closing_date"])
+check("closing_date is a real SAST ISO string, defaulted to 11:00 - the batch PDF gives no time "
+      "(Batch 2B: never a literal midnight)", rel["closing_date"] == "2026-10-19T11:00:00+02:00", rel["closing_date"])
 check("buyer is Lephalale Local Municipality", rel["buyer"] == "Lephalale Local Municipality")
 check("source/source_id/source_url set for listing_sources",
       rel["source"] == "lephalale" and rel["source_id"] == "8/2/837")

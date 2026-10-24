@@ -178,6 +178,27 @@ def iso_sast(value):
     return dt.isoformat() if dt else None
 
 
+def iso_sast_closing(value):
+    """Like iso_sast(), but for a CLOSING date/time specifically, from a
+    source confirmed to give a date only, never a time (Rand Water, Kouga,
+    Vaal Central Water, Lephalale's own batch PDFs - each checked at its own
+    call site). parse_sast()'s midnight default is correct there as a generic
+    "no time given" marker (it also backs published_date, where midnight is
+    harmless), but a real tender closing deadline is never actually midnight
+    - no SA public-tender submission window runs through the night - so for
+    this field specifically a bare date defaults to 11:00 SAST, the standard
+    closing time, same as the General pack compiler's own placeholder
+    (Batch 2B, Sarel's own live feedback). Only call this where the source is
+    already known date-only; a source that can genuinely report a real
+    midnight closing time should keep using iso_sast()."""
+    dt = parse_sast(value) if not isinstance(value, datetime.datetime) else value
+    if dt is None:
+        return None
+    if dt.hour == 0 and dt.minute == 0 and dt.second == 0:
+        dt = dt.replace(hour=11)
+    return dt.isoformat()
+
+
 def is_past(value, now=None):
     dt = parse_sast(value)
     if dt is None:

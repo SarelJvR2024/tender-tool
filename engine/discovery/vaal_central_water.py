@@ -121,7 +121,9 @@ def normalize(ref, title, uploaded, closing, docs):
     return sh.release(
         ocid=f"vaal_central_water:{ref}",
         contract_number=ref, title=title, description=title, buyer=BUYER,
-        closing_date=sh.iso_sast(closing),
+        # Vaal Central Water's own listing gives a date only, never a time -
+        # see iso_sast_closing()'s own docstring.
+        closing_date=sh.iso_sast_closing(closing),
         published_date=sh.iso_sast(uploaded),
         documents=[{"title": label or None, "url": url} for url, label in docs if url],
         source=SOURCE, source_id=ref, source_url=LIST_URL,
