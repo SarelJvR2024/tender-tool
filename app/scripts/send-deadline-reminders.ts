@@ -22,6 +22,15 @@
 // task's own instruction: "reuse this existing infrastructure... rather
 // than building a second, parallel email-sending mechanism").
 //
+// Recipient emails resolved via lib/notificationRecipients.ts's
+// operationalRecipients() (company_notification_recipients() RPC, migration
+// 0094/0095) - NOT company_member_labels() (0033), which this script called
+// until 2026-10-24: that RPC gates on auth.uid(), NULL for this script's
+// service-role caller, so it silently returned zero rows every run - this
+// script was very likely sending nobody a deadline reminder. Real bug,
+// found and fixed same day Sarel asked for it - see
+// docs/specs/System-Status.md.
+//
 // Run: node --experimental-strip-types scripts/send-deadline-reminders.ts
 // Needs: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY
 // (missing RESEND_API_KEY: this run exits early and claims NOTHING via
@@ -32,6 +41,7 @@ import { daysUntil } from "../lib/dates.ts";
 import { deadlineReminderCandidates, type DeadlineReminderTenderRow } from "../lib/deadlineReminders.ts";
 import { deadlineReminderEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
+import { operationalRecipients } from "../lib/notificationRecipients.ts";
 
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -97,26 +107,11 @@ async function main() {
       continue;
     }
 
-    const { data: members, error: membersError } = await supabase
-      .from("company_members")
-      .select("user_id")
-      .eq("company_id", companyId)
-      .eq("daily_digest_opt_in", true);
-    if (membersError) {
-      console.error(`Could not read company_members for company ${companyId}`, membersError);
-      continue;
-    }
-    if (!members || members.length === 0) {
+    const recipients = await operationalRecipients(supabase, companyId);
+    if (recipients.length === 0) {
       skippedNoOptedInMembers++;
       continue;
     }
-
-    const { data: labelRows, error: labelError } = await supabase.rpc("company_member_labels");
-    if (labelError) {
-      console.error("company_member_labels rpc failed", labelError);
-      continue;
-    }
-    const emailByUserId = new Map(((labelRows ?? []) as { user_id: string; label: string }[]).map((r) => [r.user_id, r.label]));
 
     const contractLabel = tender.contract_no || tender.description || "Tender";
     const { subject, html, text } = deadlineReminderEmail({
@@ -127,9 +122,7 @@ async function main() {
       tenderId: tender.id,
     });
 
-    for (const m of members as { user_id: string }[]) {
-      const email = emailByUserId.get(m.user_id);
-      if (!email || !email.includes("@")) continue;
+    for (const email of recipients) {
       const result = await sendTransactionalEmail({ to: email, subject, html, text });
       if (result.status === "sent") sent++;
       else console.log(`  ${result.status} -> ${email} (${contractLabel})`);

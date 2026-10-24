@@ -80,7 +80,6 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const cvStats = cvStatsRows?.[0] as CvDocumentStats | undefined;
   const open = (openAlerts ?? []) as SystemAlert[];
   const resolved = (resolvedAlerts ?? []) as SystemAlert[];
-  const newCount = open.filter((a) => !a.reported_at).length;
 
   if (error) console.error("admin_harness_runs select failed", error);
   if (alertsError) console.error("system_alerts select failed", alertsError);
@@ -131,9 +130,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <p className="mb-4 text-[13px] text-muted-foreground">
             Every failure the engines and the bridge worker hit (a job that crashed, a scoring error, OCR that
             couldn&apos;t run, a worker pass that broke) - one row per problem, counted each time it happens again.
-            New alerts are e-mailed by the scheduled check-in (engine/alerts/check_system_alerts.py); mark one resolved
-            once it is fixed.{" "}
-            {open.length === 0 ? "Nothing open." : `${open.length} open${newCount > 0 ? `, ${newCount} not yet e-mailed` : ""}.`}
+            Error/critical alerts are e-mailed within minutes by scripts/send-scout-alerts.ts; every open alert is also
+            summarised in the 07:00 SAST founder digest - mark one resolved once it is fixed.{" "}
+            {open.length === 0 ? "Nothing open." : `${open.length} open.`}
           </p>
           {alertsError && (
             <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
