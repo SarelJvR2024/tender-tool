@@ -83,6 +83,40 @@ check("CIDB grading with no company grading on file reads needs_input",
 check("CIDB grading with a company grading on file reads review (compare, don't assume pass)",
       _step(plan_low_cidb, "cidb_grading")["status"] == "review")
 
+# --- ambiguous CIDB grading across documents (Finding, 2026-10-24): an -----
+#     addendum correcting the grading requirement must not be silently -----
+#     outvoted by the original notice, the exact bug class Finding 61 -------
+#     already fixed for SANRAL closing time/delivery address --------------
+
+CIDB_NOTICE = "This tender requires CIDB contractor grading of at least 6CE for interested bidders.\n"
+CIDB_ADDENDUM = "ADDENDUM No 1: CIDB grading of at least 8CE is now required for this contract.\n"
+
+
+def _plan_for_files(texts, company=None):
+    with tempfile.TemporaryDirectory() as d:
+        paths = []
+        for i, text in enumerate(texts):
+            path = os.path.join(d, f"doc{i}.txt")
+            with open(path, "w") as f:
+                f.write(text)
+            paths.append(path)
+        manifest = req.extract_requirements(paths, work_dir=tempfile.mkdtemp(prefix="tt_plan_test_"))
+        return manifest, sp.compile_plan(manifest, company)
+
+
+_, plan_single_cidb_mention = _plan_for_files([CIDB_NOTICE])
+check("a single CIDB grading mention is not flagged ambiguous",
+      not _step(plan_single_cidb_mention, "cidb_grading")["detail"].count("More than one different CIDB grading"))
+
+manifest_two_cidb, plan_two_cidb_mentions = _plan_for_files([CIDB_NOTICE, CIDB_ADDENDUM], {"cidb_grading": "9GB"})
+check("two different CIDB gradings across documents are detected as ambiguous in the manifest",
+      manifest_two_cidb["cidb"]["ambiguous"] is True, manifest_two_cidb["cidb"])
+check("the FIRST mention (6CE, the now-superseded original) is still the one shown - unchanged default, "
+      "same as before this fix - but the step's own detail says to check for a conflict",
+      _step(plan_two_cidb_mentions, "cidb_grading")["title"] == "CIDB grading 6CE required"
+      and "More than one different CIDB grading was found" in _step(plan_two_cidb_mentions, "cidb_grading")["detail"],
+      _step(plan_two_cidb_mentions, "cidb_grading"))
+
 # --- de-duplication: a gap restating a by-hand/overlay form's own reason is -
 #     dropped, since that form already has its own step with the same text --
 

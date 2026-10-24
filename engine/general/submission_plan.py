@@ -145,18 +145,29 @@ def compile_plan(manifest, company=None, tender=None):
     if manifest.get("cidb"):
         grading = manifest["cidb"]["grading"]
         have = (company or {}).get("cidb_grading")
-        ok = bool(have) and have.upper().replace(" ", "") >= grading.upper().replace(" ", "")
         # "Confirm" rather than a hard pass/fail: CIDB grading comparison
         # (numeral + class letter, e.g. "6CE" vs "4CE") isn't a simple string
         # compare and this module doesn't own that logic - requirements.py's
         # own CIDB_RE just reads the number named in the text, nothing more.
+        detail = (f"Company has no CIDB grading on file - confirm it meets {grading} before bidding."
+                   if not have else
+                   f"Company's own grading on file is {have} - confirm this actually meets or exceeds {grading} "
+                   "(Tender Tool doesn't compare grading levels for you).")
+        if manifest["cidb"].get("ambiguous"):
+            # Finding, 2026-10-24: more than one different CIDB grading was
+            # found across the documents read (e.g. an addendum correcting
+            # the original notice) - requirements.py has no reliable signal
+            # for which one is the actual, current requirement, so this is
+            # surfaced rather than silently trusted (same "silent wrong data
+            # is the main risk" discipline as Finding 61's own ambiguity
+            # flags).
+            detail += (f" More than one different CIDB grading was found across the documents read - {grading} is "
+                       "shown, but check the tender notice and any addenda for the actual, current requirement "
+                       "before relying on this.")
         steps.append({
             "category": "cidb_grading", "id": "cidb_grading", "title": f"CIDB grading {grading} required",
             "status": "needs_input" if not have else "review",
-            "detail": (f"Company has no CIDB grading on file - confirm it meets {grading} before bidding."
-                       if not have else
-                       f"Company's own grading on file is {have} - confirm this actually meets or exceeds {grading} "
-                       "(Tender Tool doesn't compare grading levels for you)."),
+            "detail": detail,
             "quote": manifest["cidb"].get("quote"),
         })
 

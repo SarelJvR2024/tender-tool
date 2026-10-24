@@ -4078,3 +4078,54 @@ re-run clean.
 **Regression:** one function changed (`supabase_request()`), plus a new, purely additive
 `_fetch_page()` helper; every one of its 7 callers across `watch_deadlines.py` and
 `registration_reminders.py` gets the fix for free, with no call-site changes needed.
+
+### Finding 68 (CONFIRMED, FIXED, severe - a general (non-SANRAL) tender's addendum correcting the required CIDB grading could be silently outvoted by the original notice, the exact SANRAL bug class fixed two findings ago, just for a different field)
+
+**Where:** `engine/general/requirements.py`'s CIDB-grading extraction (`CIDB_RE.search(all_text)`)
+and its one real consumer, `submission_plan.py`'s `compile_plan()` (the "CIDB grading X required"
+step of a tender's submission plan).
+
+**What was tested:** rotated to `engine/general` (non-SANRAL pack) this cycle - most overdue
+literal rotation slot. Finding 61 (this same session, run 74) found and fixed the exact "a plain
+`re.search()` only ever returns the FIRST mention across a tender's whole document set, so an
+addendum correcting an earlier value is silently outvoted by the original, stale one" pattern for
+SANRAL closing time/delivery address - worth checking whether the same shape exists anywhere in
+the general (non-SANRAL) pack's own extraction, since it reads tender documents the identical way
+(`all_text`, every document concatenated). It does, for CIDB grading: `cidb_m = CIDB_RE.search(all_text)`
+takes only the first match. Reproduced directly with two real-shaped documents - an original
+notice ("CIDB contractor grading of at least 6CE") and a correcting addendum ("CIDB grading of at
+least 8CE is now required for this contract") - `extract_requirements()` picked up `"6CE"`, the
+superseded original, never `"8CE"`, the actual current requirement.
+
+**Why severe:** the CIDB grading step is the one place a company's own submission-plan checklist
+tells them what minimum grading the tender actually asks for - a company relying on the stale,
+lower value from before an addendum could bid believing they qualify (or don't) against the wrong
+number, a compliance-critical error on exactly the kind of silent, unannounced data this review
+exists to catch.
+
+**Fix:** same remediation shape as Finding 61 (no better signal exists here either - plain text
+concatenation order is not a chronological/addendum-order signal): `requirements.py` now also
+collects every DISTINCT grading found (`CIDB_RE.finditer()`) and sets `manifest["cidb"]["ambiguous"]`
+when more than one exists, while keeping the same first-match value as the default (unchanged for
+the overwhelmingly common single-mention case). `submission_plan.py`'s CIDB step appends an
+explicit note when `ambiguous` is set, telling the user to check the tender notice and any addenda
+before relying on the shown value - same "silent wrong data is the main risk" discipline as
+Finding 61's own ambiguity notes. Also removed a genuinely dead, unused `ok = ...` CIDB-grading
+string comparison in `compile_plan()` while in the same function - `>=` on `"10CE"` vs `"9CE"`
+compares lexicographically (wrong for real two-digit grades), computed but never once read by any
+branch; left in place it was a trap for whoever next touched this function and assumed it did
+something.
+
+**Verified the regression test actually catches the regression:** new checks in
+`test_submission_plan.py` - a single-mention document (not flagged), and the real two-document
+addendum-correction case (flagged `ambiguous=True` in the manifest, the step's own title still
+shows the first/stale value as before, but its detail now says to check for a conflict). Reverted
+`requirements.py`/`submission_plan.py` to their exact previous versions (saved patch + `git apply
+-R`, restored with `git apply`): the new test failed with the exact predicted `KeyError: 'ambiguous'`;
+restored: `ALL PASSED`. Full `test_requirements.py`, `test_general_bridge.py` and
+`test_process_general_jobs.py` suites re-run clean.
+
+**Regression:** `engine/general/requirements.py` (CIDB extraction, additive - one new key on an
+existing dict) and `engine/general/submission_plan.py` (one step's detail text, plus the dead-code
+removal). No schema or other call-site changes - `assess_tender.py`/`app/`'s own
+`submission-plan-logic.ts` read `manifest["cidb"]["grading"]` unchanged.

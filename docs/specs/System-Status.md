@@ -2238,6 +2238,34 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-24, standing QA/robustness review - seventy-ninth run): a non-SANRAL tender's addendum correcting the required CIDB grading could be silently outvoted by the original notice, same bug class as Finding 61 just for a different field
+
+Orientation: rotated to `engine/general` (non-SANRAL pack) - most overdue literal rotation slot.
+Finding 61 (run 74) fixed a "plain `re.search()` only ever returns the first mention, so an
+addendum correcting an earlier value is silently outvoted" bug for SANRAL closing time/delivery
+address - worth checking whether the general (non-SANRAL) pack's own extraction has the same
+shape, since it reads documents the identical way.
+
+**Finding 68 (CONFIRMED, FIXED, severe).** It does, for CIDB grading:
+`requirements.py`'s `CIDB_RE.search(all_text)` takes only the first mention. Reproduced directly:
+an original notice ("6CE") plus a correcting addendum ("8CE is now required") - the manifest
+picked up "6CE", the superseded value, never the current one. The CIDB step is the one place a
+company's own submission-plan checklist tells them the tender's actual minimum grading - a stale
+value there is a compliance-critical silent error.
+
+**Fix:** same shape as Finding 61 (no better signal exists here either) -
+`manifest["cidb"]["ambiguous"]` is set when more than one distinct grading is found across the
+documents, while the first-match value stays the default; `submission_plan.py`'s CIDB step adds
+an explicit note when ambiguous. Also removed a genuinely dead `ok = ...` CIDB string comparison
+in the same function (lexicographic `>=` on grade strings - wrong for real two-digit grades,
+computed but never read by any branch, a trap for whoever next assumed it did something).
+
+**Verified the regression test actually catches the regression:** new checks in
+`test_submission_plan.py` - single-mention (not flagged) and the real two-document
+addendum-correction case (flagged, detail says to check). Reverted: failed with the exact
+predicted `KeyError: 'ambiguous'`; restored: `ALL PASSED`. Full `test_requirements.py`,
+`test_general_bridge.py` and `test_process_general_jobs.py` re-run clean.
+
 ## This pass (2026-10-23, standing QA/robustness review - seventy-eighth run): every compliance/registration reminder would silently stop past the 1000th company, person, registration or task
 
 Orientation: rotated to `engine/compliance` (most overdue literal rotation slot). This exact
