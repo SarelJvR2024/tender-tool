@@ -2238,6 +2238,40 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-24, standing QA/robustness review - eighty-third run): rotated to CV (engine/cv) - thorough review, no new bug found this time
+
+Orientation: synced sibling merges (`58aee57` notification-bell TS fix, `b599593` gitignore,
+neither touching `engine/`) and confirmed no activity yet on the two daily-cron fixes from the
+addendum below (next scheduled runs are tomorrow). Picked CV - the most overdue area in the
+standing rotation (last dedicated pass the seventy-fifth run, 2026-10-23, which only checked one
+function in `generate_cv.py`). Read `process_cv_jobs.py` (498 lines, no dedicated test file - only
+`--self-test`), `generate_cv.py`'s `build_sanral_keyperson`/`build_world_bank` in full, and
+`extract_cv_fields.py`'s SA-ID redaction (`find_and_redact_sa_ids`/`_plausible_sa_id`) and bridge
+layer (`process_upload`/`_safe_update`) end to end; tried several real adversarial cases, none
+held up as a new, reachable bug - this area has had unusually heavy, repeated prior hardening
+("UX audit 2026-10-23" alone touched most of what was checked):
+
+- `fetch_job_context()`'s tender-ownership check (`tender_row.get("owner_company_id") not in
+  (None, job["company_id"])`) looked like it would silently build an empty tender context for a
+  deleted tender rather than failing loudly - ruled out: `generated_cvs.tender_id references
+  tenders(id) on delete cascade` (migration `0008`), so the job row itself is deleted along with
+  its tender; an orphaned `tender_id` on a still-`requested` row isn't reachable.
+- `build_world_bank()`'s employment-record fields (Finding 49) and `build_sanral_keyperson()`'s
+  `position_held` (Finding 63) are both still correctly guarded; no other field in either builder
+  has the same `dict.get(key, default)`-vs-`None` gap.
+- `extract_cv_fields.py`'s storage-path check (`sp.startswith(f"{company_id}/")` plus `".."`/`"//"`
+  rejection) correctly blocks cross-tenant file reads; the SA-ID regex/Luhn/checksum redaction
+  already has its own documented OCR-misread fallback (`redact_all_13_digit`).
+- `fail_stale_jobs()`'s bare `datetime.fromisoformat(claimed.replace(...))` (no try/except) is a
+  real repo-wide pattern, not unique to this file - identical in `process_pack_jobs.py` and
+  `process_general_jobs.py` - and the timestamp is always machine-written into a real `timestamptz`
+  column by this same script's own `claim_job()`, never user input, so not a realistically
+  reachable crash.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle -
+same discipline as the sixty-seventh (SANRAL pack) and eighty-first (notify/worker) runs' own
+clean sweeps.
+
 ## 2026-10-24 ~09:50 UTC addendum - real production break, caught while checking this pass's own CI: both daily cron workflows had been silently dead since this morning
 
 **What happened:** while confirming Finding 70's CI (below) went green, noticed `daily-digest.yml`
