@@ -3453,3 +3453,71 @@ expiring, not revisited here. Did not touch anything under `app/app/tenders/[id]
 exclusion), `app/app/discovery/page.tsx`, `app/app/analytics/page.tsx`, or
 `app/app/market-intelligence/page.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
 billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (sixth pass tonight): role-source citations on `/people/[id]` made reachable without a mouse
+
+Routine scheduled solution-architect-style UI/UX check-in. `git fetch origin main` + `gh api
+.../pulls?state=open` first: two open PRs, `#141` (`tender-workspace-batch-2b`, last pushed ~20
+min ago - the new hard exclusion for this pass, superseding the now-resolved PR #133 vault-drawer/
+ZAR-formatting questions it was based on) and `#118` (`fix/discovery-scoring-diagnosis`,
+Python-only, no UI overlap). Also read `docs/AUDIT_MULTI_TENANT_SECURITY.md` (added `f734a31`,
+Finding 1 already closed `a07a6d5`) - a read-only RLS/auth audit, confirmed no UI overlap with this
+pass's own remit.
+
+**Same hover-only bug class the last five passes fixed (chart counts, notification titles), found
+in a different shape**: grepped every `title={` across `company/`, `people/`, `experience/`,
+`billing/`, `sanral-schedules/`, `onboarding/`, `pipeline/`, `dashboard/`, `tools/`, `admin/` (the
+directories this pass is scoped to, `tenders/[id]/` excluded). `people/[id]/page.tsx`'s "Tender
+roles this CV qualifies for" checklist - the per-role checkbox `<label>` carried `title={r.source}`
+(`tender_roles.source`, migration 0016: real per-role evidence text, e.g. which SANRAL Book 1
+table/matrix sheet or which other buyer's tender a role code comes from, not decoration), and the
+section's own intro copy says outright **"Hover a role to see which tender it came from"** - an
+explicit instruction to use an interaction that doesn't exist on any touch device and is invisible
+to a screen reader. Worse than the chart cases: there are 47 roles across 6 families
+(`ROLE_FAMILY_LABEL`), so this is 47 citations, not one.
+
+**Fixed**: replaced the bare `title=` with a small `(?)` `Tooltip`-backed icon
+(`app/app/people/_components/role-source-info.tsx`, new file) reusing the exact accessible,
+already-proven pattern this app uses for its section-level "how this works" tooltips
+(`pack-review.tsx`, `submission-pack.tsx`, `narrative-documents.tsx`, all built on `components/ui/
+tooltip.tsx`'s base-ui `Tooltip`, which has real touch-pointer handling, not just `:hover` CSS).
+Each role row is now `<input id="role-{code}"> <label htmlFor="role-{code}">…</label>
+<RoleSourceInfo source={r.source} roleTitle={r.title} />` instead of one `<label>` wrapping the
+checkbox - the checkbox's own `id`/`htmlFor` pairing keeps "click the text to toggle" working
+exactly as before, and moving the tooltip icon *outside* the label (not nested inside it) means
+tapping it to read the source never also toggles the checkbox, with no `stopPropagation` hack
+needed. `saveRoleEligibility`'s own form read (`name="role_code"`, `app/app/people/actions.ts`) is
+untouched - same checkbox, same value, same name. Intro copy updated from "Hover a role..." to
+"Tap the (?) on a role..." (matches this app's own existing "tap to advance" copy convention,
+`tenders/[id]/task-status-button.tsx`).
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly the 2 expected files
+(`people/[id]/page.tsx` edited, `role-source-info.tsx` new); re-read the diff hunk - only the one
+role-row block and the one import line changed, nothing else in the 1000+ line page. Round 2:
+confirmed `r.code` is unique per role across the whole catalog (each role belongs to exactly one
+family, `familyRoles = roleCatalog.filter(r => r.family === family)`), so the new `id="role-{code}"`
+values can't collide with each other or with any other `id` on the page; confirmed this checklist
+renders exactly once per page load (one person per `/people/[id]` route), so no duplicate-id risk
+across re-renders either. Round 3: confirmed `RoleSourceInfo` is a genuinely new, separately-"use
+client" file (required - `people/[id]/page.tsx` is a Server Component, and Base UI's `Tooltip` is a
+Client Component; a Server Component can render it directly but can't hand it an inline event
+handler, which is exactly why the label/icon click-conflict was solved by DOM structure - keeping
+the icon outside the `<label>` - rather than a `stopPropagation` prop that couldn't have been
+passed across that boundary anyway).
+
+**Verified**: this worktree needed its own fresh `npm install` (standard for a new worktree, not a
+regression). `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 57 routes build. `npx vitest run` - **147/147**, unchanged (no
+vitest-covered logic touched). Full `node:test` sweep, `npx tsx --test $(find . -name "*.test.ts"
+-not -path "*/node_modules/*")` - **156/156** (re-confirmed fresh in this pass's own shell per this
+file's own standing instruction not to assume a stale baseline figure; grown from the fifth pass's
+143 as PR #139/#141 landed real new test files in between).
+
+**Not done, by design**: `pipeline/page.tsx`'s owner-initials and "Back"-button `title=`s (flagged
+lower-stakes by the third/fifth passes, re-confirmed still lower-stakes than 47 real evidence
+citations with an explicit "hover to see" instruction) are still untouched. Did not touch anything
+under `app/app/tenders/[id]/` (hard exclusion - PR #141 in flight), `app/app/discovery/page.tsx`,
+`app/app/analytics/page.tsx`, `app/app/market-intelligence/page.tsx`, or
+`app/app/_components/NotificationsBell.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
+billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
