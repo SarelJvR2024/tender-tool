@@ -47,6 +47,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
 
   "01-briefing-5-days": briefingReminderDetailedEmail({
     reference: "N.007-030-2026/1F",
+    tenderTitle: "Upgrading of the N.7 National Route Section 30 from Berg River to Paarl, including the rehabilitation of three bridge structures and associated stormwater works",
     companyName: "Reviewer Civils (Pty) Ltd",
     buyerShortName: "SANRAL",
     briefingDate: "2026-10-29",
@@ -59,6 +60,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   }),
   "01-briefing-24h": briefingReminderDetailedEmail({
     reference: "RFP 165/2026",
+    tenderTitle: "Appointment of a professional service provider for infrastructure feasibility studies",
     buyerShortName: "DBSA",
     companyName: "Reviewer Civils (Pty) Ltd",
     briefingDate: "2026-10-25",
@@ -71,6 +73,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   }),
   "01-print-sign-cutoff-48h": printSignCutoffEmail({
     reference: "N.007-030-2026/1F",
+    tenderTitle: "Upgrading of the N.7 National Route Section 30 from Berg River to Paarl",
     buyerShortName: "SANRAL",
     companyName: "Reviewer Civils (Pty) Ltd",
     closingDateTime: "2026-10-28T11:00:00+02:00",
@@ -86,6 +89,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   }),
   "01-corrigendum-alert": corrigendumAlertEmail({
     reference: "N.007-030-2026/1F",
+    tenderTitle: "Upgrading of the N.7 National Route Section 30 from Berg River to Paarl",
     buyerShortName: "SANRAL",
     companyName: "Reviewer Civils (Pty) Ltd",
     changes: [
@@ -139,6 +143,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   // same cron script, new visual system only.
   "04-print-cutoff-operational": printCutoffEmail({
     contractLabel: "N.007-030-2026/1F",
+    tenderTitle: "Upgrading of the N.7 National Route Section 30 from Berg River to Paarl",
     printSignDeadline: "2026-10-28T05:00:00+02:00",
     hoursLeft: 18,
     appUrl: APP_URL,
@@ -146,6 +151,7 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
   }),
   "04-briefing-operational": briefingReminderEmail({
     contractLabel: "N.007-030-2026/1F",
+    tenderTitle: "Upgrading of the N.7 National Route Section 30 from Berg River to Paarl",
     briefingDate: "2026-10-29",
     briefingTime: "10:00",
     daysLeft: 1,

@@ -16,7 +16,7 @@
 // below so an existing `import { X } from "./emailTemplates.ts"` still finds
 // every template in one place if that's ever more convenient than
 // importing a specific tier file directly.
-import { button, escapeHtml, infoCard, layout, pill, type Tone } from "./emailBrand.ts";
+import { button, escapeHtml, formatSastDateTime, infoCard, layout, pill, tenderHeader, type Tone } from "./emailBrand.ts";
 
 export function welcomeEmail(opts: { companyName: string; appUrl: string }): { subject: string; html: string; text: string } {
   const subject = "Welcome to Tender Ready";
@@ -115,6 +115,7 @@ function operationalSubject(refLabel: string, level: OperationalAlertLevel, spec
 
 export function printCutoffEmail(opts: {
   contractLabel: string;
+  tenderTitle?: string | null;
   printSignDeadline: string; // ISO datetime - lib/dispatchTriage.ts's own printSignDeadline()
   hoursLeft: number;
   appUrl: string;
@@ -123,12 +124,12 @@ export function printCutoffEmail(opts: {
   const hoursRounded = Math.max(0, Math.round(opts.hoursLeft));
   const whenText = hoursRounded <= 0 ? "has passed" : `in ${hoursRounded} hour${hoursRounded === 1 ? "" : "s"}`;
   const subject = operationalSubject(opts.contractLabel, "URGENT", `Physical print & sign deadline ${whenText}`);
-  const deadlineText = new Date(opts.printSignDeadline).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const deadlineText = formatSastDateTime(opts.printSignDeadline) ?? opts.printSignDeadline;
   const { label, tone } = operationalLevelPill("URGENT");
   const html = layout(
     `
       <p style="margin:0 0 12px;">${pill(label, tone)}</p>
-      <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.contractLabel)}</p>
+      ${tenderHeader({ reference: opts.contractLabel, title: opts.tenderTitle })}
       ${infoCard([{ label: "Print & sign cutoff", value: escapeHtml(deadlineText), emphasis: "urgent" }])}
       <p style="margin:0 0 20px;">This tender's own print, binding and courier window closes then - your own print and transit hour estimates, counted back from the tender box closing time. After that there isn't enough time left to print, bind and deliver a physical submission before it closes.</p>
       ${button(`${opts.appUrl}/tenders/${opts.tenderId}#pack-compiler`, "Open pack compiler")}
@@ -142,6 +143,7 @@ export function printCutoffEmail(opts: {
 
 export function briefingReminderEmail(opts: {
   contractLabel: string;
+  tenderTitle?: string | null;
   briefingDate: string;
   briefingTime: string | null;
   daysLeft: number;
@@ -152,13 +154,14 @@ export function briefingReminderEmail(opts: {
   const level: OperationalAlertLevel = urgent ? "ACTION REQUIRED" : "NOTICE";
   const whenText = opts.daysLeft <= 1 ? "in 24 hours" : `in ${opts.daysLeft} days`;
   const subject = operationalSubject(opts.contractLabel, level, `Briefing session ${whenText}`);
-  const whenDetail = `${opts.briefingDate}${opts.briefingTime ? ` at ${opts.briefingTime}` : ""}`;
+  const briefingIso = opts.briefingTime ? `${opts.briefingDate}T${opts.briefingTime}:00+02:00` : null;
+  const whenDetail = briefingIso ? formatSastDateTime(briefingIso) ?? opts.briefingDate : opts.briefingDate;
   const { label, tone } = operationalLevelPill(level);
   const html = layout(
     `
       <p style="margin:0 0 12px;">${pill(label, tone)}</p>
-      <p style="margin:0 0 16px;font-size:17px;font-weight:700;">${escapeHtml(opts.contractLabel)}</p>
-      ${infoCard([{ label: "Briefing session", value: escapeHtml(whenDetail), emphasis: tone }])}
+      ${tenderHeader({ reference: opts.contractLabel, title: opts.tenderTitle })}
+      ${infoCard([{ label: "Briefing session", value: escapeHtml(whenDetail ?? opts.briefingDate), emphasis: tone }])}
       <p style="margin:0 0 20px;">This tender's briefing session is ${whenText}. Check the tender notice for whether attendance is compulsory and confirm who from your team is going.</p>
       ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open this tender")}
     `,
