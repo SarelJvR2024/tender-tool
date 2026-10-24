@@ -59,7 +59,7 @@ export function NotificationsBell({
               >
                 <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", n.severity === "destructive" ? "bg-destructive" : "bg-warning")} />
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium text-foreground">{n.title}</div>
+                  <div title={n.title} className="line-clamp-2 text-sm font-medium break-words text-foreground">{n.title}</div>
                   <div className="text-xs text-muted-foreground">{n.detail}</div>
                 </div>
               </Link>
