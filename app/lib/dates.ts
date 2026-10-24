@@ -29,6 +29,26 @@ export function formatDateTime(dateStr: string | null | undefined): string | nul
   return d.toLocaleString("en-ZA", SAST_DATETIME_OPTIONS);
 }
 
+/**
+ * Closing date/time with a real time - "23 Oct 2026 (Time TBC in RFP)" when
+ * the stored value's SAST time is exactly midnight. parse_sast()
+ * (engine/discovery/source_http.py) defaults a date-only ingest value - no
+ * time given at all by the source - to SAST midnight as a generic "unknown"
+ * marker; harmless for a published/briefing date, but shown as a tender's
+ * own closing TIME it reads as a real (and highly improbable) deadline
+ * rather than what it actually is: unspecified (Batch 2B Touch-ups, Sarel's
+ * live feedback). Returns null for an unreadable date, same as
+ * formatDate()/formatDateTime().
+ */
+export function formatClosingDateTime(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  const sastTime = d.toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit", hour12: false });
+  if (sastTime === "00:00") return `${formatDate(dateStr)} (Time TBC in RFP)`;
+  return formatDateTime(dateStr);
+}
+
 // Shared "N days until a date" math, used anywhere a closing date or expiry
 // date needs a day count: tenders closing (dashboard), documents expiring
 // (company vault). Normalizes "today" to midnight first so the count is

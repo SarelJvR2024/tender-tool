@@ -80,6 +80,23 @@ export function parentOf(t: DisciplineTaxonomy, slug: string): string | null {
 }
 
 /**
+ * Strips a leaked taxonomy slug from a stored opportunity "reason" string -
+ * "Label (slug)" -> "Label". engine/discovery/assess_tender.py's labels()
+ * used to append the raw slug in parens after its own human label "for
+ * internal debugging", but it leaked into this user-facing discovery copy
+ * (Batch 2B's own fix for that, Sarel's live feedback) - discovered_opportunities.reasons
+ * is only ever rewritten when a tender is re-scored for a company that
+ * hasn't already seen it, so a row scored before that fix keeps the old
+ * text verbatim. Only strips a parenthetical made entirely of lowercase
+ * snake_case characters - a real parenthetical already in a label (e.g.
+ * "(UPS)", "(Re-Advert)") never matches that shape, so this can't eat
+ * genuine content.
+ */
+export function stripLeakedTaxonomySlugs(text: string): string {
+  return text.replace(/ \([a-z][a-z0-9_]*\)/g, "");
+}
+
+/**
  * A group stands for every discipline in it: experience tagged
  * "road_maintenance" is roads_civil experience. Returns the slugs plus the
  * children of any group among them, for the experience_matches() overlap

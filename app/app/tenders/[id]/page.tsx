@@ -40,7 +40,7 @@ import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime, formatClosingDateTime } from "@/lib/dates";
 import { DateField } from "@/components/ui/date-field";
 import { formatZAR } from "@/lib/formatZAR";
 import { computeTenderReadiness } from "./tender-readiness";
@@ -1048,7 +1048,7 @@ export default async function TenderWorkspacePage({
                         <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-lg border border-border bg-card px-4 py-3 text-xs">
                           <span>
                             <span className="font-semibold text-foreground">Official closing:</span>{" "}
-                            {formatDateTime(dispatchLogistics.closingDate)}
+                            {formatClosingDateTime(dispatchLogistics.closingDate)}
                           </span>
                           {printDeadline && (
                             <span>

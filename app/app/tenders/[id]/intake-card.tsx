@@ -1,4 +1,5 @@
 import { DowngradeFlag } from "../../discovery/downgrade-flag";
+import { stripLeakedTaxonomySlugs } from "@/lib/disciplineTaxonomy";
 import { ACTIVE_PURSUIT_STAGES, DOWNGRADE_COLUMNS, isDowngraded, isOpenDowngrade, verdictLabel, type Downgrade } from "@/lib/discoveryReassessment";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_STATUS_STYLE, type EngineJob } from "@/lib/generalTender";
@@ -169,7 +170,7 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
             )}
           </div>
           <ul className="m-0 pl-4 text-xs text-muted-foreground">
-            {(opp.reasons ?? []).map((r, i) => <li key={i}>{r}</li>)}
+            {(opp.reasons ?? []).map((r, i) => <li key={i}>{stripLeakedTaxonomySlugs(r)}</li>)}
             {(opp.score_outlook?.summary ?? []).map((r, i) => <li key={`s${i}`} className="text-muted-foreground">{r}</li>)}
           </ul>
         </div>

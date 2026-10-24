@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { PPR_2022_THRESHOLD_ZAR, calculatePreferencePoints, systemForValue, type BeeLevel } from "@/lib/preferencePoints";
 import { formatZAR } from "@/lib/formatZAR";
 import { OtherTools, ToolsHeader } from "../_components/ToolsHeader";
@@ -36,10 +36,29 @@ function CurrencyInput({
   onChange: (next: string) => void;
 }) {
   const [focused, setFocused] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
   const n = Number(value);
   const display = focused || !Number.isFinite(n) ? value : formatZAR(n);
+
+  // select() has to run AFTER the display switches from the blurred
+  // "R 1,000,000.00" formatting to the raw digit string (the setFocused
+  // below, applied on the next render) - selecting immediately selects the
+  // about-to-be-replaced formatted text, and a controlled input's value
+  // changing out from under an existing selection collapses it. A
+  // requestAnimationFrame callback was tried first and genuinely raced
+  // against fast typing: it worked against the slower dev server but lost
+  // the field's first keystroke against the real (faster) production build
+  // (live-tested on this PR's own Vercel preview, not just locally) -
+  // useLayoutEffect runs synchronously right after the DOM reflects the new
+  // value, before the browser can process another keystroke, so there's no
+  // race to lose.
+  useLayoutEffect(() => {
+    if (focused) inputRef.current?.select();
+  }, [focused]);
+
   return (
     <input
+      ref={inputRef}
       id={id}
       type="text"
       inputMode="decimal"
@@ -140,7 +159,7 @@ export default function BeePreferencePointsClient({ embedded = false }: { embedd
 
         <div className="mb-4">
           <label className={LABEL} htmlFor="lp">Lowest acceptable tender price, Pmin (Rand)</label>
-          <input id="lp" type="number" min={0} value={lowestPrice} onChange={(e) => setLowestPrice(e.target.value)} className={INPUT} />
+          <CurrencyInput id="lp" value={lowestPrice} onChange={setLowestPrice} />
         </div>
 
         <div className="mb-4">

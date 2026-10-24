@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
-import { formatDateTime } from "@/lib/dates";
+import { formatClosingDateTime } from "@/lib/dates";
 
 /**
  * Cover-page preview (prompt 10, item 3). Read-only: shows exactly what
@@ -64,7 +64,7 @@ export async function CoverPagePreview({
         {nraReference && <div className="text-xs font-bold text-foreground">{nraReference}</div>}
         <div className="text-xs font-bold text-foreground uppercase">{description ?? "- no description on file"}</div>
         <div className="mt-2.5 text-xs font-bold text-foreground">
-          TENDER CLOSES: {closingDate ? (formatDateTime(closingDate) ?? "—") : "- no closing date on file"}
+          TENDER CLOSES: {closingDate ? (formatClosingDateTime(closingDate) ?? "—") : "- no closing date on file"}
         </div>
         <div className="mt-2.5 text-[11px] text-muted-foreground">Client: {buyer ?? "No client on file"}</div>
         <div className="mt-1.5 text-[11px] text-muted-foreground">TENDERER: {company?.legal_name ?? "No company name on file"}</div>
