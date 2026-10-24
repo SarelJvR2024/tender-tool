@@ -2238,6 +2238,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-24, standing QA/robustness review - eightieth run): a human-typed typo in fill_financial_hours.py's own capture file could silently corrupt a real SANRAL financial workbook's fee formula
+
+Orientation: rotated to SANRAL pack - most overdue literal rotation slot (last dedicated run was
+the sixty-seventh, 2026-10-22; runs since then covered intake/CV/worker/notify/discovery/
+compliance/non-SANRAL in between). Read the form-fill scripts not yet given a dedicated look this
+session (`fill_a_forms.py`, `fill_authority_letter.py`, `fill_conventional.py`, `fill_financial.py`,
+`fill_financial_hours.py`, `fill_docx_forms.py`, `make_envelope_covers.py`). `fill_financial_hours.py`
+stood out: it had no test file at all anywhere in the repo, and it's the one module in this area
+that writes genuinely human-typed data (planning hours) rather than deriving a value - exactly
+where a typo is most likely to reach real code untested.
+
+**Finding 69 (CONFIRMED, FIXED, severe).** `fill()`'s own "refuse while null" rule only ever
+checked `hours is None` before writing straight to the workbook. Confirmed directly against the
+real fixture (`templates/samples/financial/R.334-030-2025.1F_Financial_Submission_ran.xlsm`) that
+the target cell (`"Hours Roadworks"!E8`) feeds a real formula (`G8 = ROUND(F8*E8, 2)`, rolling up
+into FORM C2.4 FIN / SUMMARY TENDERED FEE) - then reproduced a human capture.yaml typo (`"40h"`
+instead of `40`): `fill()` returned successfully, with no error, and wrote the literal string into
+the cell as an Excel inline-string value. Same silent pass-through for a stray YAML boolean and for
+a negative number. The provenance log would even mark the garbage value `confirmed`. A real,
+reachable "silently wrong data" bug on a scored evaluation form and the tendered fee itself.
+
+**Fix:** one validation check added right after the existing null check in `fill()` - reject
+(name the field and the actual value) anything that isn't a real non-negative `int`/`float`,
+explicitly excluding `bool` (matching the existing `isinstance(lvl, int) or isinstance(lvl, bool)`
+guard convention already in `sanral_b7.py`).
+
+**Verified the regression test actually catches the regression:** wrote this module's first-ever
+test file (`engine/test_fill_financial_hours.py`) against the real financial-workbook fixture.
+Reverted the fix (keeping the new test): the string/bool/negative cases failed exactly as
+predicted; restored: `ALL PASSED`. `test_sanral_b7.py` and `test_form_field_audit.py` re-run clean.
+
 ## This pass (2026-10-24, standing QA/robustness review - seventy-ninth run): a non-SANRAL tender's addendum correcting the required CIDB grading could be silently outvoted by the original notice, same bug class as Finding 61 just for a different field
 
 Orientation: rotated to `engine/general` (non-SANRAL pack) - most overdue literal rotation slot.

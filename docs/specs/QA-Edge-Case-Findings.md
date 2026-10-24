@@ -4129,3 +4129,53 @@ restored: `ALL PASSED`. Full `test_requirements.py`, `test_general_bridge.py` an
 existing dict) and `engine/general/submission_plan.py` (one step's detail text, plus the dead-code
 removal). No schema or other call-site changes - `assess_tender.py`/`app/`'s own
 `submission-plan-logic.ts` read `manifest["cidb"]["grading"]` unchanged.
+
+### Finding 69 (CONFIRMED, FIXED, severe - a human-typed capture.yaml typo could silently corrupt a real SANRAL Financial Submission workbook's own fee-computation formula, with no error raised anywhere)
+
+**Where:** `engine/fill_financial_hours.py`'s `fill()` - the one module in the SANRAL pack area
+that captures genuinely human-typed planning data (hours per discipline/category/key-person) into
+the real Financial Submission workbook, rather than deriving it.
+
+**What was tested:** this module had no dedicated regression test at all before this pass (checked:
+no `test_fill_financial_hours.py` existed anywhere in the repo). Read it end to end: `fill()`'s own
+"refuse while null" rule (the module's own stated discipline - never silently turn "not supplied
+yet" into a completed zero) only ever checks `hours is None` before calling
+`Workbook.set_value(sheet, f"E{row}", hours)`. Confirmed directly against the real fixture
+(`templates/samples/financial/R.334-030-2025.1F_Financial_Submission_ran.xlsm`, the same file this
+module's own docstring says it was built from) that `"Hours Roadworks"!E8` (Category A, PL) is the
+real unlocked input cell with no formula, and `"Hours Roadworks"!G8` computes
+`ROUND(F8*E8, 2)` - a plain arithmetic formula reading E8 directly, rolling up into FORM C2.4 FIN
+and ultimately SUMMARY TENDERED FEE.
+
+**Finding (CONFIRMED, severe).** Ran `fill()` with a `capture.yaml` value of `"40h"` (a completely
+realistic human typo - capture.yaml is hand-edited per `suggest()`'s own instructions) for one
+position's hours: it returned successfully, with no error, and wrote the literal string into E8 as
+an Excel inline-string cell (`t="inlineStr"`) - confirmed by reading the written cell back. The
+same silent pass-through happens for a stray YAML boolean (e.g. a human typing `yes`/`true` where a
+number was meant - PyYAML's `safe_load` coerces this) and for a negative number. Every one of these
+corrupts the real `G8 = ROUND(F8*E8, 2)` formula input on a document that gets submitted to SANRAL,
+with nothing in the pipeline - not `fill()`, not `Workbook.set_value()`, not the provenance log -
+ever noticing. The provenance log would even record the garbage value as `log.confirmed(...)`,
+i.e. "known and verified," which is the opposite of true. Same "silently wrong data is the main
+risk" class this review exists to catch, on a real evaluation-scored form (Workplan
+Appropriateness, 30 of 100 points) and the tendered fee itself.
+
+**Fix:** added one validation check in `fill()`, right after the existing null check: reject (raise
+`ValueError`, naming the field and the actual bad value) any hours value that isn't a real,
+non-negative `int`/`float` - explicitly excluding `bool` (a plain `isinstance(x, int)` check alone
+accepts booleans in Python), matching the same `isinstance(lvl, int) or isinstance(lvl, bool)`
+guard convention already used in `sanral_b7.py`. Same "refuse and name the problem, don't guess"
+discipline as this module's own existing null-refusal rule and as Finding 56/61/68's own precedent
+elsewhere in this review.
+
+**Verified the regression test actually catches the regression:** wrote the module's first-ever
+test file, `engine/test_fill_financial_hours.py`, against the real financial-workbook fixture (not
+a synthetic stand-in) - confirms E8/G8's real layout directly, then the string/bool/negative
+rejection cases, then that valid ints, `0` (explicitly tendered, distinct from null), and floats
+are still accepted and written correctly, and that `None` still reads as "missing" rather than a
+validation error. Reverted the fix (keeping the new test): the 3 bad-input cases failed exactly as
+predicted (`fill() returned with no error for ...`); restored: `ALL PASSED`.
+
+**Regression:** `engine/test_sanral_b7.py` and `engine/test_form_field_audit.py` (both touch
+`sanral_fill.Workbook`/the SANRAL pack area) re-run clean - no other test exercises
+`fill_financial_hours.py` directly, confirmed by grep before this pass.

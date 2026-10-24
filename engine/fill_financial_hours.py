@@ -93,6 +93,11 @@ def fill(tpl, capture_path, out, provenance_out=None):
                 if hours is None:
                     missing.append(f"{sheet_key}/{cat}/{pos}")
                     continue
+                if not isinstance(hours, (int, float)) or isinstance(hours, bool) or hours < 0:
+                    raise ValueError(
+                        f"{sheet_key}/{cat}/{pos}: hours must be a non-negative number, got {hours!r} "
+                        f"({type(hours).__name__}) - fix the capture file, don't guess"
+                    )
                 row = base + KEY_PERSON_OFFSET[pos]
                 wb.set_value(sheet, f"E{row}", hours)
                 # Confirmed, not computed: this number came straight from a human-
