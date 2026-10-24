@@ -3181,3 +3181,82 @@ quote) - out of the two files this bug named to search. Drawers, VAT, briefing b
 pack-compiler restructuring - explicitly later batches, not attempted here. Did not touch anything
 under `app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its
 callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24: Discovery's own per-card readiness blockers made visible, not hover-only
+
+Routine scheduled solution-architect-style UI/UX check-in. The Tender Workspace / Pack Compiler
+area (`app/app/tenders/[id]/` - `general-pack-review.tsx`, `submission-pack.tsx`,
+`narrative-documents.tsx`, `page.tsx`, `workspace-tabs.tsx`, `general-workspace.tsx` and everything
+else in that directory) was a hard exclusion for this pass: it has an open, actively-worked PR
+(`#133`, `workspace-polish`) plus two unresolved design questions explicitly waiting on Sarel
+(vault slide-over drawers, ZAR/VAT formatting), documented at the top of `System-Status.md` as the
+site of a real same-night cross-session collision (`PR #133` vs. this repo's own `PR #134`,
+resolved before this pass started). Picked this pass's improvement from elsewhere entirely, per
+that instruction - `company/`, `people/`, `experience/`, `billing/`, `analytics/`,
+`sanral-schedules/`, `onboarding/`, `pipeline/`, `discovery/` - and checked `git log`/open PRs
+first for anything another session had touched in the last hour (nothing in those directories had;
+the one other open PR, `#118`/`fix/discovery-scoring-diagnosis`, only touches `engine/discovery/`
+and `engine/intake/` Python files, confirmed by reading its file list - no overlap).
+
+**The gap, found by grepping every `title={` in these directories for one that carries real,
+non-decorative information** (the same "hover-only is a real bug on a touch-first app" pattern this
+repo's own 2026-10-23 standing-review entry above already fixed once, on
+`PrimaryPackActionLink`'s disabled reason): `app/discovery/page.tsx`'s per-tender "Company profile
+N% ready" link put its entire blocker list - which of the company's own tracked compliance criteria
+(CSD, Tax PIN, B-BBEE, CIDB, bank letter, principals, people with CVs, experience projects) are
+still outstanding - only in a `title` attribute on the `<Link>` itself. Two compounding problems,
+not one: (1) `title` tooltips never fire on a touch device at all - the real audience for this
+screen (a director checking tenders on their phone, exactly this app's own stated field-use case),
+and (2) even on desktop, this was a hover tooltip on something that is also a clickable `<Link>` -
+a mouse click fires navigation to `/company` before any hover-delay tooltip has a chance to appear,
+so the information was functionally unreachable there too, not just on mobile. This sits on every
+single opportunity card in Discovery - the screen this app's own "Find" stage is built around,
+checked constantly, read far more often than the Company vault page the link points to - so the one
+piece of information that would tell a user why their readiness score isn't 100% (and whether it's
+worth fixing before pursuing this specific tender) was never actually visible anywhere.
+
+**Fixed**: the `title` attribute is gone from the `<Link>`. Its visible text is unchanged ("Company
+profile N% ready"), but when `readiness.blockers.length > 0` a new sibling line renders underneath,
+always visible, no hover required - `{n} open: {label, label…}`, the top 2 blockers by the same
+weight-sorted order `readiness.blockers` already returns (`lib/readiness.ts`'s own documented
+"sorted by weight (highest first)" contract, unchanged), with a trailing `…` when there are more
+than 2. Styled `text-warning` - this app's own established amber "Provide/gap" token, already used
+the same way for blocker-style content elsewhere (`DeadlineChip`, `bid-task-badge.tsx`,
+`bid-readiness-card.tsx`, and the Dashboard's own visible readiness-blockers list in its empty
+state, `app/dashboard/page.tsx` ~line 389 - the direct in-repo precedent this fix follows, not a
+new pattern invented for Discovery). No new copy invented - every blocker's `label` is the exact
+same string `lib/readiness.ts`'s `computeBidReadiness()` already produces; nothing about the
+scoring, weighting, or criteria set changed. Kept `title` on the new div too (the full blocker list,
+comma-joined) purely as a free desktop-hover convenience on top of the now-always-visible text - not
+load-bearing the way the old `title`-only version was.
+
+**Self-review, 3 rounds.** Round 1: re-read the diff hunk directly - confirmed it touches only this
+one `<Link>` + the new conditional div immediately below it, nothing else in the card (`git status
+--short` after the edit showed exactly one file, `app/discovery/page.tsx`). Round 2: checked the
+`mb-2.5` spacing that used to live on the `<Link>` itself - moved it onto whichever of the two new
+branches renders (the blockers-present div, or the existing empty-spacer div for the
+zero-blockers case), so the card's vertical rhythm below this line is unchanged either way, not
+doubled or dropped. Round 3: confirmed `readiness.blockers` (`lib/readiness.ts`'s `Criterion[]`,
+each with a `label`/`href`/`weight`) is read the exact same way the Dashboard's own precedent reads
+it - no new type, no new sort, no change to `computeBidReadiness()` or anything upstream of it;
+`readiness.percent`, the link's own primary visible text, is completely untouched.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings every recent pass on this repo has reported (`Logo.tsx`'s two `<img>`
+warnings, `analytics/page.tsx`'s unused `STAGE_META` import), all 57 routes build. `npx vitest run`
+- 147/147, unchanged (no vitest-covered logic touched - this is a presentational-only change, and
+`lib/readiness.spec.ts`'s own 6 tests, unaffected, confirm `computeBidReadiness()` itself wasn't
+touched). Full `node:test` sweep: `npx tsx --test $(find . -name "*.test.ts" -not -path
+"*/node_modules/*")` - **143/143**, all 20 test files included (the `[id]`-bracketed-path glob quirk
+earlier entries documented as dropping 5 files from this combined invocation did not reproduce in
+this pass's shell - re-confirmed identical, 143/143, on a fresh `origin/main` checkout run with the
+exact same command before concluding anything, so this is the real current baseline, not a
+regression or an improvement over the figure earlier entries recorded under a different shell).
+
+**Not done, by design**: the other `title=`-only spots this same grep turned up on `discovery/page.tsx`
+(the "similar tenders"/market-pricing-range badges, the eTenders-category cross-reference note, the
+filter-chip count explainer) carry real but secondary, non-blocking context, not a "why can't I
+submit" fact the way the readiness blockers are - left as-is rather than reworking every hover
+tooltip on the page in one pass; a real follow-up, not silently dropped. Did not touch anything
+under `app/app/tenders/[id]/` (this pass's hard exclusion), `app/supabase/migrations/`,
+billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
