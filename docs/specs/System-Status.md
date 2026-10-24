@@ -1,12 +1,11 @@
 # System Status
 
-**2026-10-24 ~13:44 UTC — PR #133 merged; Sarel has now given explicit specs for the two items
-every session has been deferring as open design questions. If you are another session reading
-this: Batch 3 (vault slide-over drawer) and Batch 6 (canonical `formatZAR`) are now IN PROGRESS by
-`session_011NLr419YmLS44xgf1YM6n3` on a new branch off `main` (commit `0de303f`) - check this
-file's own top entry and `git log`/open PRs before starting equivalent work, to avoid a third
-collision on the same two items after the two collisions already logged below tonight.** Sarel's
-exact specs (verbatim, so no session re-derives or guesses a different shape):
+**2026-10-24 ~14:05 UTC — PR #139 opened: Batch 3 (vault drawer) + Batch 6 (canonical `formatZAR`)
+built end-to-end, both from Sarel's own explicit specs.** If you are another session reading this:
+`PR #139` (https://github.com/SarelJvR2024/tender-tool/pull/139, branch
+`tender-workspace-batches-2-6`) already covers both items - check it before starting equivalent
+work, to avoid a third collision on the same two after the two collisions already logged below
+tonight. Sarel's exact specs (verbatim, so no session re-derives or guesses a different shape):
 - **Vault drawer** ("Quick Blocker Resolver"): plain-text/credential items (CSD number, SARS Tax
   PIN, CIDB registration + expiry) get a focused single-field form + "Save & Recalculate Score",
   writing to the company vault and refreshing tender compliance status in place. Document-type
@@ -18,6 +17,42 @@ exact specs (verbatim, so no session re-derives or guesses a different shape):
   `R${n.toLocaleString()}` sites. "R 1,250,000.00" (2 fixed decimals), null/undefined/NaN renders
   "—" never "R 0" or a crash, `{ vat: 'incl' | 'excl' | 'raw' }` appends "(incl. 15% VAT)"/"(excl.
   VAT)"/nothing, `{ compact: true }` renders "R 1.5M"/"R 250k" for KPI cards.
+
+**What's actually built, as of PR #139's own real state - not every detail of the spec above
+turned out to match the real schema exactly, corrected rather than forced.** The brief's own
+"CIDB registration + expiry" turned out to be document-only in this schema (no separate text
+field exists - confirmed directly, `companies` has no `cidb_registration_number`/`cidb_grading`
+column at all) - CIDB was left out of the drawer's scope rather than inventing a field. The 7 real
+compliance keys the drawer covers instead (verified against `lib/companyProfileUpdate.ts`'s own
+field whitelist): csd, tax, insurance, quality_system, coid, bbbee, bank. For the 6 AI-classified
+document kinds, "marks the item resolved on upload" is honestly softened to "uploaded, pending
+confirmation" with a link to the real review screen - spec v3's own anti-overwrite rule (a new
+document must never silently overwrite verified data) still applies inside this drawer; only COID
+(no AI classifier entry) gets the instant resolve the brief describes. `formatZAR` deliberately
+does NOT touch `lib/savingsCounter.ts`'s own `formatRand()` - a different, already spec-pinned
+format (5 passing tests) for a different kind of number (an estimated "hours/Rand saved" counter,
+not a financial/tender-value/BOQ figure); folding it in would have broken a written spec and its
+tests for no real gain. Verified: tsc/eslint/build clean, vitest 147/147, full `node --test` sweep
+green (13 new `formatZAR` tests).
+
+**Real bug, only found on the live preview, not locally - fixed and re-verified.** The drawer's own
+config (`VAULT_DRAWER_CONFIG`) originally lived inside `quick-blocker-drawer.tsx`'s `"use client"`
+module. On the deployed preview every Fix/Provide link silently stayed a plain `<a>` - 0
+`data-slot="sheet-trigger"` elements anywhere on the page, zero console errors to hint at why.
+Root cause: a server component (`compliance-report.tsx`) reading a plain data export across a
+`"use client"` module boundary isn't reliable in Next.js's RSC model - `VAULT_DRAWER_CONFIG[item.key]`
+came back `undefined` for every single key, every time, so the Link branch of the ternary always
+won. tsc/eslint/build/vitest all stayed green through this the whole time - this class of bug is
+invisible to every check this session runs except actually opening the page. Fixed by moving the
+config (and its `QuickFixConfig`/`QuickFixFieldSpec` types) into a new plain module
+(`quick-fix-config.ts`, no `"use client"`) both sides of the boundary import from. Re-verified on
+the preview after the fix: all 7 drawer-eligible items (csd, tax, insurance, quality_system, coid,
+bbbee, bank) render as real buttons; a full save-and-refresh cycle confirmed end to end - saved a
+real CSD number through the drawer, watched the item move live from the "Fix" column into "Verify"
+and the readiness score update (30 → 29 things left), no page reload, zero console errors. Billing
+page confirmed showing the new canonical format ("R 1,490.00/month" etc.) too. PR #139 marked ready
+for review; not self-merged - Sarel asked for this build and a log once ready, not an instruction
+to merge on his behalf.
 
 ---
 
