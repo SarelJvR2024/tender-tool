@@ -539,11 +539,11 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
             </span>
           )}
           {owner && (
-            <span
-              title={`Owner: ${owner}`}
-              className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground"
-            >
-              {initials(owner)}
+            <span className="inline-flex min-w-0 items-center gap-1" title={`Owner: ${owner}`}>
+              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground">
+                {initials(owner)}
+              </span>
+              <span className="max-w-20 truncate text-[10px] text-muted-foreground">{owner}</span>
             </span>
           )}
         </div>
