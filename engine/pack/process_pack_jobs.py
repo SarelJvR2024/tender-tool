@@ -204,9 +204,20 @@ def _num(v):
 def adapt_company(row):
     pi = None
     if row.get("pi_insurance_cover_zar") is not None and row.get("pi_insurance_policy_number"):
-        pi = {"insurer": row.get("pi_insurance_insurer"), "policy_number": row["pi_insurance_policy_number"],
+        # Each of these 4 columns is independently nullable (migration 0014,
+        # no check constraint tying them together) - a company can genuinely
+        # have the cover amount and policy number on file with the insurer
+        # name or expiry date still blank. period_from already got its own
+        # "not on file" placeholder for this exact reason; insurer/period_to
+        # didn't, so a real company in that shape had the literal word "None"
+        # printed into a field_provenance entry marked log.confirmed() below -
+        # the same "prints the word None" bug class as Finding 49, just in a
+        # new field. QA pass, 2026-10-25.
+        pi = {"insurer": row.get("pi_insurance_insurer") or "(insurer not on file)",
+              "policy_number": row["pi_insurance_policy_number"],
               "limit_of_indemnity_zar": _num(row["pi_insurance_cover_zar"]),
-              "period_from": "(start date not on file)", "period_to": row.get("pi_insurance_expiry")}
+              "period_from": "(start date not on file)",
+              "period_to": row.get("pi_insurance_expiry") or "(expiry not on file)"}
     return {
         "legal_name": row["legal_name"],
         "csd_trading_name": row.get("csd_trading_name"),

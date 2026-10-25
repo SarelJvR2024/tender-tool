@@ -4328,3 +4328,43 @@ re-run clean.
 UTC-normalize step before the existing +2h shift). No schema or call-site changes;
 `find_due_documents()`/`find_due_tasks()`/`registration_reminders.py` don't use this calculation at
 all.
+
+### Finding 73 (CONFIRMED, FIXED, moderate - a real company's professional indemnity insurance could print the literal word "None" twice in a field_provenance entry marked as confirmed, the same bug class as Finding 49 in a field nobody had checked yet)
+
+**Where:** `engine/pack/process_pack_jobs.py`'s `adapt_company()` - the Supabase-row-to-profile-dict
+adapter `fill_a_forms.py` (A17, professional indemnity cover) and `fill_docx_forms.py` read.
+
+**What was tested:** rotated to SANRAL pack - the most overdue standing area. `fill_a_forms.py`'s
+A17 section builds its professional-indemnity line from 5 dict keys
+(`insurer`/`policy_number`/`limit_of_indemnity_zar`/`period_from`/`period_to`) and logs it
+`log.confirmed(...)` - a field_provenance entry the Tender Workspace shows as trustworthy, not
+flagged for review. `adapt_company()` already gives `period_from` its own `"(start date not on
+file)"` placeholder, with a comment explaining why - worth checking whether the other two nullable
+fields in the same dict (`insurer`, `period_to`) got the same treatment. They hadn't. No dedicated
+test exists anywhere in the repo for `adapt_company()` at all (confirmed by grep).
+
+**Finding (CONFIRMED, moderate).** `pi_insurance_insurer`, `pi_insurance_policy_number`,
+`pi_insurance_cover_zar` and `pi_insurance_expiry` (migration `0014`) are four independently
+nullable columns with no check constraint tying them together - a real company can have the cover
+amount and policy number on file while the insurer name or expiry date are still blank (entered in
+stages, or never finished). `adapt_company()` only guards against `pi` being built at all when
+cover/policy-number are missing; once built, `insurer`/`period_to` pass through as a bare `None`.
+Confirmed directly: a row with cover=R5,000,000 and a real policy number but no insurer/expiry on
+file produced `{"insurer": None, ..., "period_to": None}`, and `fill_a_forms.py`'s real f-string
+rendered `"R5,000,000 (policy POL123456, None, valid (start date not on file) to None)"` - the
+literal word "None", twice, in a provenance entry marked `confirmed`. Same bug class as Finding 49
+(`build_world_bank()`'s employment record), just a field nobody had checked for it yet.
+
+**Fix:** `insurer`/`period_to` now default to `"(insurer not on file)"`/`"(expiry not on file)"`
+when blank, mirroring the existing `period_from` placeholder convention in the exact same dict.
+
+**Verified the regression test actually catches the regression:** new
+`engine/pack/test_adapt_company.py` (this adapter's first-ever test) covering the partial-data
+case, the fully-populated case (unaffected), and the no-cover-at-all case (`pi` stays `None`, not a
+fabricated half-built dict). Reverted the fix: all 3 "no None" checks failed exactly as predicted,
+reproducing the literal rendered string; restored: `ALL PASSED`. `test_form_field_audit.py` and
+`process_cv_jobs.py --self-test` (both exercise the same CV/forms pipeline) re-run clean.
+
+**Regression:** `engine/pack/process_pack_jobs.py`'s `adapt_company()` only - two keys in one
+nested dict, additive (a placeholder string instead of `None`, never changes a non-null value).
+No schema or other call-site changes.

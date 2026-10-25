@@ -2700,6 +2700,36 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-25, standing QA/robustness review - eighty-eighth run): a real company's professional indemnity insurance could print the literal word "None" twice in a field_provenance entry marked confirmed
+
+Orientation: synced a sibling landing (`4703382`, worker/job-queue area: the narrative bridge
+registered in `run_bridges.py`'s poll list, already tested) - deliberately did NOT also pick
+worker/job-queue this cycle to avoid any overlap risk, even though it's a different specific
+change. Checked `daily-discovery.yml`/`daily-digest.yml`'s real scheduled runs for today
+(02:45/03:45 UTC) - neither had appeared yet as of this pass; not acted on further (GitHub's own
+documented delay/drop risk for scheduled workflows, nothing actionable from here). Rotated to
+SANRAL pack - the most overdue standing area (last dedicated pass the eightieth run, 2026-10-24).
+
+**Finding 73 (CONFIRMED, FIXED, moderate).** `process_pack_jobs.adapt_company()` already gives its
+professional-indemnity `period_from` key its own `"(start date not on file)"` placeholder, with a
+comment explaining why (the real column is blank and a bare `None` shouldn't reach the generated
+document) - worth checking whether the other two nullable fields in the same dict (`insurer`,
+`period_to`) got the same treatment. They hadn't, and no test anywhere in the repo covers
+`adapt_company()` at all. The 4 source columns (migration `0014`) are independently nullable with
+no check constraint tying them together - confirmed directly: cover=R5,000,000 + a real policy
+number but no insurer/expiry on file produced `fill_a_forms.py`'s real A17 line as
+`"R5,000,000 (policy POL123456, None, valid (start date not on file) to None)"` - the literal word
+"None", twice, in a `field_provenance` entry marked `log.confirmed()` (shown as trustworthy on the
+Tender Workspace, not flagged for review). Same bug class as Finding 49, a field nobody had
+checked for it yet.
+
+**Fix:** `insurer`/`period_to` now get the same placeholder treatment `period_from` already has.
+
+**Verified the regression test actually catches the regression:** new
+`engine/pack/test_adapt_company.py` (this adapter's first-ever test). Reverted the fix: all 3 "no
+None" checks failed exactly as predicted, reproducing the real rendered string; restored:
+`ALL PASSED`. `test_form_field_audit.py` and `process_cv_jobs.py --self-test` re-run clean.
+
 ## This pass (2026-10-25, standing QA/robustness review - eighty-seventh run): rotated to non-SANRAL pack (engine/general) - thorough review, no new bug found this time
 
 Orientation: synced sibling landings since the last run (PR #149/#150, UI-only hover-fix/icon
