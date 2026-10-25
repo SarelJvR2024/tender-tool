@@ -1,5 +1,54 @@
 # System Status
 
+**2026-10-25 ~22:16 UTC — standing review pass: real review given to PR #155 (the System Admin
+Command Center), which self-merged with zero human review earlier tonight - found sound, no fix
+needed; one minor scalability note for later. QA tooling re-confirmed clean, no regressions.**
+Orientation: local checkout was 2 commits behind `origin/main` - fast-forwarded before starting
+(the stale-checkout mistake this routine has been bitten by twice before). Two new commits since
+this routine's own last pass: `bddd22e` (PR #155, merged, zero reviews - `get_reviews` returned
+`[]`, confirmed directly via the GitHub API, not assumed) and a docs-only clean-sweep entry for the
+compliance/reminders area. A new draft PR (#156, same notification-engine session, left correctly
+open/unmerged) and the pre-existing stale draft `#118` are the only other open PRs - no collision.
+Stayed entirely clear of the PR #131/#134-143/#149/#150/#151-155 self-merge incident itself (not
+reverting or re-investigating any of it) - but PR #155 landed real, functioning, previously-
+unreviewed application code and a new migration (`0098`), which is exactly the gap a review pass
+exists to close, so it became this cycle's actual review target instead of hunting a fresh bug
+elsewhere.
+
+**What was checked, concretely, not just read**: `0098`'s two new functions
+(`platform_admin_companies()`, `platform_admin_company_readiness_data()`) - both correctly
+`security definer` + `is_platform_admin()`-gated, both revoke-from-public/grant-to-authenticated,
+matching every sibling platform-admin RPC's own established shape. The new `/admin/notifications`
+page relies on `notification_logs`' own RLS policy (`0093`, "platform admins can select") - verified
+that policy is correctly `is_platform_admin()`-scoped, not just present. More importantly, verified
+`app/app/admin/layout.tsx` (the UX-audit fix from 2026-10-23, item 5 - RLS alone leaves a non-admin
+seeing a real, blank internal page instead of being turned away) wraps the ENTIRE `/admin/*`
+segment, so the new page inherits that `notFound()` gate automatically - double-gated (layout +
+RLS), not relying on RLS alone the way the pre-audit pages used to.
+
+**One minor, not-urgent finding, documented rather than fixed**: `app/app/admin/customers/page.tsx`
+calls the new `platform_admin_company_readiness_data()` RPC once per company row
+(`rows.map(c => supabase.rpc(...))`, via `Promise.all` - parallel, not sequential, so not
+catastrophically slow) rather than one batched query. Fine at today's company count; worth a single
+batched RPC if the customer list grows into the hundreds. Not fixed this pass - genuinely minor, and
+not something to touch unasked on code that just landed from someone else's PR tonight.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings), `npx vitest run` 189/189 (matches `main`'s own current baseline - PR #156's own claimed
+192/192 is on its still-open, unmerged branch, not reflected here). No code changed this pass -
+docs-only.
+
+**Backlog waiting on Sarel, re-confirmed not assumed**: migration `0096` (pack-quota trial-expiry)
+and the new migration `0098` (this PR's own test plan explicitly flags it as "needs to be run in the
+Supabase SQL Editor... not applied from this sandbox") are both still outstanding. The
+`narrative_documents` PostgREST schema-cache reload was still unresolved as of the last confirmed
+check earlier tonight - not re-verified this pass, don't assume it's since cleared without checking.
+Migrations `0093`/`0094`/`0095` are genuinely resolved (verified end-to-end with real sends earlier
+tonight, not just re-asserted here). PayFast idempotency design question: still open, still not
+urgent, sandbox-only.
+
+---
+
 **2026-10-25 ~20:16 UTC — standing review pass: no new fix this cycle, by choice - 8 commits landed
 since the last pass, nearly all of it the notification-engine session resolving real production
 migration gaps (0087/0097/0094/0095 all confirmed applied live, PR #151/#152 merged), which matters
