@@ -3581,3 +3581,86 @@ under `app/app/tenders/[id]/` (hard exclusion - PR #141 in flight), `app/app/dis
 `app/app/_components/NotificationsBell.tsx`, or `app/app/people/[id]/page.tsx`'s role-source
 tooltips (prior passes' own fixes), `app/supabase/migrations/`, billing/entitlement logic, or
 `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-25 (eighth pass): Tender Command Center's raw emoji glyphs replaced with the app's own icon convention
+
+Routine scheduled solution-architect-style UI/UX check-in. `git fetch origin main` + `gh`/MCP
+open-PR check first: fast-forwarded `main` to `0e52aa8` (picked up PR #149, pipeline owner-name
+visibility - already fixed, confirmed in place, not re-touched). Only one open PR repo-wide -
+`#118` (`fix/discovery-scoring-diagnosis`, Python-only, draft, stale since 2026-10-23, no UI
+overlap). No PR currently touches `app/app/tenders/[id]/` - the usual hard exclusion didn't apply
+this pass, but the highest-value real issue found was elsewhere anyway. Scanned every remote branch
+again for undisclosed in-flight work: the handful sitting 1-2 commits ahead of `main`
+(`uiux/primary-action-visible-disabled-reason`, `ux-fix/opportunity-table-filter-labels`,
+`ux-fix/task-assignee-aria-label`, `uiux/brand-accessibility-fixes`, etc.) are all stale, abandoned
+branches whose actual fixes already landed on `main` separately (confirmed by re-reading each
+branch's diff against the current file content directly, not just trusting the branch name) - dead
+branches, not in-flight work, nothing to collide with.
+
+**The bug**: the brand-new Tender Command Center (`components/tt/command-center.tsx`, Sarel's own
+brief from 2026-10-24, now the dashboard's primary "what's urgent" view - the first thing every
+signed-in user sees) rendered its Urgent Actions lane with three raw emoji glyphs mixed directly
+into alert text - `⚠️ {c.blockingSummary}`, `⏱️ Tender box deadline: ...`, `🖨️ Print & bind cutoff:
+...` - with no `aria-hidden`, unlike every other icon anywhere else in this app (all `lucide-react`
+SVGs with `aria-hidden`, confirmed by grepping every other decorative-icon usage in the file itself
+- `AlertTriangle`/`Gavel`/`PackageCheck`/`Radar` all follow this pattern two lines away from the
+three emoji that didn't). Checked the rest of the codebase for the same emoji-as-glyph pattern
+before concluding this was scoped right: `submission-mode-badge.tsx` and `submission-pack.tsx` both
+already wrap their own decorative emoji in `<span aria-hidden>` - so even the two other places this
+app uses raw emoji follow the accessibility convention properly; this file's three were the one
+regression, not an established exception. Three real problems from using raw unicode glyphs here
+specifically: (1) no `aria-hidden` means a screen reader announces the glyph's own name ("warning
+sign", "stopwatch", "printer") ahead of the actual text, on the dashboard's single most
+attention-demanding lane; (2) emoji render with their own OS/browser-supplied colors and don't
+respect this app's `text-warning`/`text-foreground` tokens, so the glyph's color drifts out of the
+design system's control (and would look wrong the moment dark mode, which the tokens already
+support, ever gets a toggle); (3) emoji font fallback differs by platform (Windows/Mac/Linux/mobile
+all render these differently sized and styled), breaking the "confident & premium" visual
+consistency every other migrated screen in this app already holds to.
+
+**Fixed**: replaced the three raw emoji with the exact `lucide-react` equivalents already used
+elsewhere in this same codebase for the same concepts (`Clock` - already imported by
+`deadline-chip.tsx` for deadline urgency; `Printer` - new import, matches the "print & bind"
+concept directly) plus the file's own already-imported `AlertTriangle`, each `size-3.5 shrink-0
+aria-hidden`, matching `RadarSection`'s existing `Radar` icon treatment two functions below in the
+same file. No copy change, no logic change, no data-shape change - purely swapping the icon
+mechanism these three lines use, in the one file that broke the established convention.
+
+**Self-review, 3 rounds.** Round 1: `git diff` showed exactly one file changed,
+`components/tt/command-center.tsx` - one import line and the three emoji sites, nothing else in the
+233-line file touched (the other four exported components - `CriticalDispatchBanner`,
+`NeedsDecisionLane`, `DispatchLane`, `RadarSection` - are untouched). Round 2: confirmed via a
+full-codebase Unicode-range grep (`\U0001F300-\U0001FAFF`, `☀-➿`) that no other file in
+`app/`/`lib`/`components` has the same unwrapped-emoji-in-alert-text pattern - the two existing
+emoji usages elsewhere (`submission-mode-badge.tsx`, `submission-pack.tsx`) are already correctly
+`aria-hidden`-wrapped and out of this pass's scope; `pipeline/page.tsx`'s own single `"⚠ "` prefix
+and `review-button.tsx`'s `"✓"` are single-glyph, lower-stakes, and left untouched to avoid any file
+overlap with the just-merged PR #149 in `pipeline/page.tsx`. Round 3: confirmed the new
+`inline-flex items-center gap-1` wrapper spans don't break the surrounding `flex flex-wrap gap-x-4
+gap-y-1` layout - icon and its own text stay paired as one flex item when the row wraps at narrow
+widths, rather than the icon and text separating onto different lines; confirmed `Printer`/`Clock`
+both exist in the installed `lucide-react` version before using them (checked directly, not
+assumed).
+
+**Verified**: this worktree needed its own fresh `npm install` (standard for a new worktree, not a
+regression). `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 58 routes build (grown from the seventh pass's 57 - new routes landed
+with the recent notification-feature work, not a regression). `npx vitest run` -
+**185/185** (grown from the seventh pass's 147 as the notification-feature PRs #145/#147/#148 landed
+real new test files in between - markup-only change here, nothing vitest-covered touched). Full
+`node:test` sweep, `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` -
+**156/156**, re-confirmed fresh in this pass's own shell per this file's own standing instruction
+not to assume a stale baseline figure - unchanged from the seventh pass's own freshly-reconfirmed
+figure (no new `.test.ts` files landed between that pass and this one).
+
+**Not done, by design**: `pipeline/page.tsx`'s own `"⚠ "` prefix and `review-button.tsx`'s `"✓"`
+(found by the same sweep, both single-glyph and lower-stakes than three unwrapped emoji on the
+dashboard's primary urgent-action lane) are still untouched - flagged here so a future pass doesn't
+need to re-run the same sweep from scratch. Did not touch `app/app/tenders/[id]/` beyond confirming
+no open PR currently excludes it, `app/app/discovery/page.tsx`, `app/app/analytics/page.tsx`,
+`app/app/market-intelligence/page.tsx`, `app/app/_components/NotificationsBell.tsx`,
+`app/app/people/[id]/page.tsx`'s role-source tooltips, `app/app/sanral-schedules/page.tsx`, or
+`app/app/pipeline/page.tsx`'s owner-initials line (all prior passes' own fixes),
+`app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
+standing carve-outs.
