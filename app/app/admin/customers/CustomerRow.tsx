@@ -10,13 +10,41 @@ export type Customer = {
   id: string;
   legal_name: string;
   csd_trading_name: string | null;
+  csd_supplier_number: string | null;
   is_test_company: boolean;
   created_at: string;
   member_count: number;
   people_count: number;
   tenders_pursued_count: number;
+  active_tenders_count: number;
   last_activity_at: string | null;
+  plan_tier: string | null;
+  subscription_status: string | null;
+  trial_ends_at: string | null;
   members: CustomerMember[];
+  /** null when readiness couldn't be computed (no readiness data row, e.g. a company somehow missing). */
+  readinessPercent: number | null;
+  primaryContact: string | null;
+  /** Only meaningful when subscription_status === "trialing"; null otherwise. Can be negative (trial already expired). */
+  trialDaysRemaining: number | null;
+};
+
+const PLAN_LABEL: Record<string, string> = {
+  starter: "Starter", professional: "Professional", business: "Business", enterprise: "Enterprise",
+  // Pre-rename plan names (migration 0078's original check constraint) - a
+  // company seeded before the Starter/Professional/Business/Enterprise
+  // rename could still carry one of these; shown rather than falling back
+  // to a raw unlabelled slug.
+  watch: "Watch (legacy)", pro: "Pro (legacy)", sanral_pro: "SANRAL Pro (legacy)",
+};
+
+const SUBSCRIPTION_STATUS_TONE: Record<string, "success" | "warning" | "destructive"> = {
+  active: "success", trialing: "warning", past_due: "destructive", cancelled: "destructive",
+};
+const STATUS_CHIP_CLASS: Record<"success" | "warning" | "destructive", string> = {
+  success: "bg-success/10 text-success border-success/20",
+  warning: "bg-warning/10 text-warning border-warning/20",
+  destructive: "bg-destructive/10 text-destructive border-destructive/20",
 };
 
 // Client-only for the expand/collapse, same pattern as SystemAlertRow and
@@ -33,9 +61,16 @@ export type Customer = {
 // its own top line, the 3 counts + joined date as their own wrapped meta
 // line underneath. `sm:` and up collapses back to the original single-row
 // layout, which has room for all of it.
+//
+// Plan/trial chip + CSD/contact/readiness line (System Admin Command Center
+// brief, 2026-10-25): extends this same row rather than a separate page -
+// see migration 0098's own header for why platform_admin_companies() grew
+// these columns instead of a parallel "Tenants" RPC.
 export default function CustomerRow({ customer }: { customer: Customer }) {
   const [open, setOpen] = useState(false);
   const name = customer.csd_trading_name || customer.legal_name;
+  const statusTone = customer.subscription_status ? SUBSCRIPTION_STATUS_TONE[customer.subscription_status] : undefined;
+  const planLabel = customer.plan_tier ? (PLAN_LABEL[customer.plan_tier] ?? customer.plan_tier) : null;
 
   return (
     <div className="border-t border-border first:border-t-0">
@@ -55,12 +90,21 @@ export default function CustomerRow({ customer }: { customer: Customer }) {
               test company
             </span>
           )}
+          {statusTone && (
+            <span className={`inline-flex shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-semibold ${STATUS_CHIP_CLASS[statusTone]}`}>
+              {planLabel ?? "no plan"}
+              {customer.subscription_status === "trialing" && customer.trialDaysRemaining !== null
+                ? ` - trial ${customer.trialDaysRemaining >= 0 ? `${customer.trialDaysRemaining}d left` : "expired"}`
+                : ""}
+            </span>
+          )}
           <span className="ml-auto shrink-0 text-xs text-accent sm:hidden">{open ? "hide ▲" : "open ▼"}</span>
         </span>
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           <span>{customer.member_count} member{customer.member_count === 1 ? "" : "s"}</span>
           <span>{customer.people_count} people</span>
-          <span>{customer.tenders_pursued_count} pack{customer.tenders_pursued_count === 1 ? "" : "s"}</span>
+          <span>{customer.active_tenders_count} active tender{customer.active_tenders_count === 1 ? "" : "s"}</span>
+          {customer.readinessPercent !== null && <span>{customer.readinessPercent}% vault ready</span>}
           <span className="text-[11px]">
             joined {(formatDate(customer.created_at) ?? "—")}
             <span className="ml-1.5 hidden text-accent sm:inline">{open ? "hide ▲" : "open ▼"}</span>
@@ -70,8 +114,11 @@ export default function CustomerRow({ customer }: { customer: Customer }) {
 
       {open && (
         <div className="bg-card px-4.5 pb-4.5 pt-1">
-          <div className="mb-2.5 text-xs text-muted-foreground">
-            Last activity {customer.last_activity_at ? (formatDateTime(customer.last_activity_at) ?? "—") : "none recorded"}
+          <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <span>Last activity {customer.last_activity_at ? (formatDateTime(customer.last_activity_at) ?? "—") : "none recorded"}</span>
+            <span>CSD supplier number: {customer.csd_supplier_number ?? "not on file"}</span>
+            <span>Primary contact: {customer.primaryContact ?? "no members"}</span>
+            <span>{customer.tenders_pursued_count} pack{customer.tenders_pursued_count === 1 ? "" : "s"} total ({customer.active_tenders_count} active)</span>
           </div>
 
           <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
