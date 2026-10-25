@@ -334,6 +334,18 @@ def test_quote_verification_gate():
     prop, _ = cd.validate_proposal(bad_date, text, [])
     check(not prop["fields"]["expiry_date"]["verified"], "year-only placeholder date never pre-ticked")
 
+    # Regression guard: a date value normalise_date() can't parse at all
+    # (iso is None, not just low-precision) used to vanish from `fields`
+    # with its warning silently lost - the reviewer saw no sign the
+    # document ever mentioned an expiry date at all. Fixed to surface the
+    # same warning at the document level instead.
+    unreadable_date = json.loads(json.dumps(CIDB_ANSWER))
+    unreadable_date["fields"]["expiry_date"] = {"value": "see addendum", "evidence": "Expiry: see addendum"}
+    prop, overall = cd.validate_proposal(unreadable_date, text + " Expiry: see addendum.", [])
+    check("expiry_date" not in prop["fields"], "an unparseable date is dropped from fields, not proposed as-is")
+    check(any("expiry date" in o and "see addendum" in o for o in overall),
+          "the warning survives at the document level instead of vanishing with the dropped field")
+
 
 # ----------------------------------------------------------------------------
 # 5. call_llm() request shape + stop-reason handling (stub client).

@@ -1,5 +1,56 @@
 # System Status
 
+**2026-10-25 ~14:18 UTC — standing review pass: a real onboarding-scan bug fixed (an unparseable
+expiry date vanished with its own warning, not just the field) - reproduced, fixed, re-verified; QA
+tooling sound; no collisions.** Orientation: `git fetch origin main` showed one new commit since this
+routine's own last pass (`b892303`, the sibling Edge-case QA routine's `suggest_pack.py` fix, Finding
+76 - no overlap, different area). Caught and corrected a stale local checkout before trusting any
+"nothing changed" read (now a standing habit after getting burned by this twice before) -
+`git rev-parse HEAD` didn't match `origin/main` on first check, fast-forwarded before starting the
+real review. Collision check: only open PR is `#118` (draft, stale, unrelated); every other remote
+branch is an orphaned, already-merged source branch. Stayed entirely clear of the PR
+#143/#149/#150 (and #131/#134-#138/#142) self-merge incident, as directed - that's in Sarel's own
+hands across two parallel conversations.
+
+**The finding**: `engine/onboarding/classify_documents.py`'s `validate_proposal()` runs every
+date-shaped field (`expiry_date`, `letter_date`, `completion_date`) through `normalise_date()`. When
+that function can't parse the value at all (returns `iso=None` - as opposed to a low-precision but
+parseable year/month-only value, which is already handled and tested), the field falls through to
+the generic "drop it if the value is None" branch at the bottom of the loop - silently discarding not
+just the field, but the warning `normalise_date()` itself generated explaining *why* ("isn't a date
+that could be read; enter it by hand"). Reproduced directly: a CIDB registration whose expiry field
+read "see addendum" (a real, plausible value an AI extraction could return for a document that
+defers its own expiry to an attached addendum) came back with `expiry_date` simply absent from
+`fields` and **zero warnings anywhere, document-level included** - indistinguishable, from the
+reviewer's side, from the document never mentioning an expiry date at all. Every *other* "couldn't
+determine X" case in this same function (the id_document "no valid SA ID number found" branch) already
+surfaces through `overall` (the document-level warnings list shown in the review UI); this one
+silently didn't.
+
+**Fix**: when `iso is None`, append a plain-English note to `overall` naming the field and the raw
+value that couldn't be parsed, before the field still correctly drops out of `fields` (it never had a
+usable value, so it shouldn't be proposed as one - that part of the existing behaviour was right).
+Verified properly, not just read: reverted the fix, confirmed the new regression test fails with
+exactly the predicted "field present, zero warnings anywhere" result, restored, confirmed it now
+surfaces `"expiry date was mentioned in the document but couldn't be read as a date ('see addendum') -
+check it and enter it by hand if needed."` at the document level. Added as a permanent regression test
+in `test_classify_documents.py` (next to the existing year-only-placeholder-date test, same function).
+Full `engine/onboarding/test_classify_documents.py` suite and `engine/cv/test_extract_cv_fields.py`
+(shares the same `normalise_date()` helper via `cvx`) both clean before and after.
+
+**Pushed directly to `main`, no PR, no self-merge** - logic/test-only Python change with its own
+test coverage, no schema touched, same commit as this entry.
+
+**Not acted on, just noting the backlog hasn't grown**: still exactly 3 items queued for Sarel's own
+call from the last two passes - migration `0093`'s live/schema-cache status (the active blocker on
+the notification engine), migration `0096`, migration `0097`, plus the separate PayFast idempotency
+design question. Nothing new added to that list this pass.
+
+**QA tooling**: sound - `tsc --noEmit`/`eslint`/`npx vitest run` (185/185) all clean, unaffected by a
+Python-only change. Both touched Python suites clean, detailed above.
+
+---
+
 **2026-10-25 ~12:15 UTC — standing review pass: a real billing idempotency gap found and reproduced
 live in `apply_payfast_itn()` - NOT fixed this pass, flagged for Sarel's own call.** Orientation:
 `git fetch origin main` showed no new commits since this routine's own last pass (`fd30549`) -

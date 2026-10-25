@@ -493,6 +493,17 @@ def validate_proposal(data, text, local_ids):
                 warnings.append(w)
             if iso is None:
                 verified = False
+                # Falls through to the "value is not None" check below and
+                # is dropped from `fields` entirely - so without this, the
+                # warning above is lost with it, and the reviewer sees no
+                # sign the document ever mentioned this field (reproduced:
+                # an expiry_date of "see addendum" vanished with zero
+                # warning anywhere, indistinguishable from the document
+                # never mentioning an expiry date at all). Every other
+                # "couldn't determine X" case in this function surfaces
+                # through `overall`, so this one does too.
+                overall.append(f"{f.replace('_', ' ')} was mentioned in the document but couldn't be read as a "
+                                f"date ({value!r}) - check it and enter it by hand if needed.")
             elif precision != "day":
                 verified = False
             value = iso
