@@ -3138,6 +3138,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-25, standing QA/robustness review - ninety-fourth run): rotated to compliance/reminders (engine/compliance) - thorough review, no new bug found this time
+
+Orientation: synced a large stretch of real production work from a separate, live-Supabase-access
+standing routine (PR #151-#155: real migration-application gaps on `narrative_documents`/
+`company_notification_recipients()` found and fixed live, real Tier 0 onboarding-nudge emails
+dispatched with confirmed Resend ids, `0096` still not applied live, a System Admin Command Center
+PR) - entirely TypeScript/SQL/infra, no `engine/` overlap, nothing of this routine's own prior
+findings touched. Rotated to compliance - the most overdue standing area (last dedicated pass the
+eighty-sixth run, Finding 72).
+
+Read `find_due_documents()`, `find_due_person_credentials()`, `find_due_tasks()` and `main()`'s own
+seen-store bookkeeping end to end - the three `watch_deadlines.py` functions not yet given a
+dedicated adversarial look this session (Findings 59/67/72 covered `days_until()`,
+`supabase_request()`'s pagination, and `find_documents_lapsing_before_closing()` respectively).
+None held up as a new, reachable bug:
+
+- All three `find_due_*` functions already guard every nullable expiry/due-date field with
+  `if not expiry: continue` before reaching `_expiry_window()`/`days_until()`, both of which
+  already have their own malformed-input guards from Finding 59.
+- `main()`'s own "N reported before, M new" print line (`len(loaded) - written`) looked like
+  backwards arithmetic at first read - `loaded` is a `set` that `save_seen_db()` mutates in place
+  (`loaded.update(...)`) before returning `written`, so by the time the print line runs,
+  `len(loaded)` already includes this run's new keys too - the subtraction correctly recovers the
+  pre-run count. Subtle, but correct, confirmed by tracing the mutation rather than assumed.
+- `find_due_tasks()`'s own `tenders?...&id=in.(...)` filter could in principle hit a URL-length
+  ceiling at a scale this product isn't at yet (thousands of distinct tenders with open tasks
+  platform-wide, all in one call) - noted as a real but currently speculative scaling concern, not
+  a presently reachable bug, so not chased into a fix this pass.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle.
+
 ## This pass (2026-10-25, standing QA/robustness review - ninety-third run): rotated to discovery (engine/discovery) - thorough review plus a repo-wide confirmation check, no new bug found this time
 
 Orientation: synced a sibling pass (`bd680f9`, a real BOQ-extraction false-negative fix - an
