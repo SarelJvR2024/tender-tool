@@ -2640,6 +2640,40 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-25, standing QA/robustness review - eighty-seventh run): rotated to non-SANRAL pack (engine/general) - thorough review, no new bug found this time
+
+Orientation: synced sibling landings since the last run (PR #149/#150, UI-only hover-fix/icon
+work; a documented live-dispatch finding on the new Operational Notification Engine's
+`claim_notification` PostgREST schema-cache gap - TypeScript/infra, explicitly awaiting Sarel's own
+confirmation, no `engine/` overlap) - no collision risk. Rotated to `engine/general` - the most
+overdue standing area (last dedicated pass the seventy-ninth run, 2026-10-24). Read
+`requirements.py`'s `find_person_registrations()`, `fill_sbd_docx.py`'s `values_for()`/
+`bee_proof_lapse()`/`fill_sbd_document()`, `fill_flat_pdf.py`'s `fill_flat_pdf()` (including its
+own field-collision detection and write-then-read-back verification) and `build_general_pack.py`'s
+section-assembly loop end to end, and tried several real adversarial cases; none held up as a new,
+reachable bug:
+
+- `fill_flat_pdf.values_for()`'s `yn()` helper (`(v or "").lower() if ... in ("yes","no") else None`)
+  would crash on a Python `bool` rather than a `"yes"/"no"` string - but `tender_answers.value` is a
+  plain `text` column (migration `0018`), so every real value read back from Supabase is always a
+  string or `None`, never a boolean; not reachable from the real data flow.
+- `fill_sbd_docx.bee_proof_lapse()`'s string-lexicographic date comparison (`exp < ref`) looked
+  like it could misbehave on a malformed `closing_date` - ruled out: `tenders.closing_date` is a
+  real `timestamptz` column, always a well-formed ISO string or null when read back, never
+  freeform text.
+- `fill_flat_pdf()`'s own collision handling (two fields matching the same spot -> neither typed)
+  and write-then-verify-by-reading-back discipline (a placement that doesn't read back from the
+  written PDF is downgraded to "check by eye", never silently trusted) held up under reading - this
+  module already has the same "never guess, never trust unverified" discipline Finding 71 (BOQ
+  extraction, same session) found missing elsewhere.
+- `build_general_pack.py`'s form-filling/overlay-section assembly loop (standard forms, flat-PDF
+  overlays, by-hand fallbacks) is already wrapped in per-document `try/except` at every risky step
+  (a buyer's own broken `.docx` edition, an unreadable PDF), degrading to "by hand" with a named
+  reason rather than crashing the whole pack build.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle - same
+discipline as the sixty-seventh, eighty-first and eighty-third runs' own clean sweeps.
+
 ## This pass (2026-10-24, standing QA/robustness review - eighty-sixth run): a tender closing near midnight SAST could report its own closing day as one real day late, in a customer-facing compliance reminder
 
 Orientation: synced two sibling landings since the last run - PR #144 (Operational Notification
