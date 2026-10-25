@@ -458,7 +458,14 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
             row[0].text = _safe_text(desc or "")
             row[1].text = _safe_text(inst or "")
             row[2].text = _safe_text(date or "")
-            log.confirmed(f"cv.wb.education.{desc}", f"{inst}, {date}")
+            # inst/date are independently nullable (0001_init_schema.sql) -
+            # the document cells above already guard with `or ""`, but this
+            # provenance entry interpolated them raw, so a qualification
+            # captured with a description but no institution/graduation date
+            # yet logged as "confirmed" with the literal word "None" in it -
+            # same bug class as Finding 49/73 (QA pass, 2026-10-25).
+            log.confirmed(f"cv.wb.education.{desc}",
+                          f"{inst or '(institution not on file)'}, {date or '(graduation date not on file)'}")
     else:
         d.add_paragraph("MISSING")
         log.missing("cv.wb.education", reason="No qualifications on file for this person.")

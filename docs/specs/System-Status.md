@@ -1,5 +1,50 @@
 # System Status
 
+**2026-10-25 ~04:11 UTC — standing review pass: one real "prints the word None" bug fixed (CV
+education provenance), same bug class as Findings 49/73, pushed directly to main per the guardrail;
+QA tooling re-confirmed sound; no collisions.** Orientation: caught my own first local checkout
+sitting one commit behind `origin/main` (commit `9ed2d93`, the Finding-73 PI-insurance fix) before
+touching anything - `git pull --ff-only` fixed it; flagging this again since it's now happened twice
+across two different passes of this same routine, worth a standing habit of running `git rev-parse
+HEAD` against `git rev-parse origin/main` before trusting any "nothing changed" read. Collision
+check: only open PR is `#118` (draft, stale since 2026-10-23, unrelated) - no in-flight work to
+avoid.
+
+**The fix**: `engine/cv/generate_cv.py`'s `build_world_bank()` - the "10. Education" table - logged
+each qualification's provenance as `log.confirmed(f"cv.wb.education.{desc}", f"{inst}, {date}")`,
+interpolating `highest_institution`/`highest_graduated` (and the same for the "initial" pair) raw.
+Those two columns are independently nullable (`0001_init_schema.sql`'s `people` table, no check
+constraint tying them to `highest_description`) - a real person can have a qualification description
+on file with the institution or graduation date not yet captured. The document's own table cells
+already guard with `or ""` (render blank, correctly), but the provenance log entry didn't, so it
+recorded status `confirmed` with the literal string "None, None" (or "Some University, None") in a
+record this app treats as trustworthy - same bug class as Finding 49 (`build_world_bank`'s own
+project rows) and Finding 73 (PI-insurance insurer/expiry, this routine's own prior pass, a few hours
+ago) - a sibling instance in the same file, not yet caught by either. Fixed with the same `or
+"(... not on file)"` placeholder pattern already established for exactly this reason. New regression
+test (`engine/cv/test_generate_cv.py`, `test_world_bank_education_with_null_institution_...`) -
+reverted the fix to confirm it fails with the exact predicted `"None, None"` value, restored to
+confirm green, same verification discipline as Finding 73's own test.
+
+Verified: `engine/cv/test_generate_cv.py` (12/12, including the new test), `engine/cv/test_extract_cv_fields.py`,
+`engine/pack/test_adapt_company.py`, `engine/pack/test_pdf_merge.py` all clean. `tsc --noEmit`/`eslint`
+clean (0 errors, same 3 pre-existing warnings - no TypeScript/UI surface touched by this change at
+all, Python-only).
+
+**Pushed directly to `main` - no PR, per the guardrail**: a two-line interpolation fix plus its own
+new regression test, no schema change, no UI change needing visual review.
+
+**Not investigated further this pass, in case it's worth a future rotation**: the same `log.confirmed(f"...")`
+raw-interpolation pattern appears in several other places across `engine/fill_a_forms.py`,
+`engine/fill_docx_forms.py`, `engine/general/fill_sbd_docx.py`, and elsewhere in `generate_cv.py`
+itself - most of the ones checked directly this pass are already correctly guarded (either by an
+`if all(...)` -style gate before the confirmed branch, or an inline `or` fallback), but this file is
+large enough that a full sweep for every remaining instance was out of scope for a single light-touch
+pass. Worth the Edge-case & robustness QA routine's own rotation picking this up as a named pattern
+to check for, rather than only the specific fields already found.
+
+---
+
 **2026-10-25 ~02:11 UTC — standing review pass: a fabricated self-merge "authorization" traced
 across 3 PRs, one real worker-registration gap fixed, QA tooling re-confirmed sound.** Orientation:
 `git fetch origin main` showed 3 new commits since this routine's own last pass (PR #149) - PR #150
