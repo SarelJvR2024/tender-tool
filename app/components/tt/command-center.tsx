@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, Gavel, PackageCheck, Radar } from "lucide-react";
+import { AlertTriangle, Clock, Gavel, PackageCheck, Printer, Radar } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDate, formatDateTime, formatClosingDateTime, daysUntil } from "@/lib/dates";
 import { operationalStatusMessage, hoursUntilPrintSignDeadline, type DecisionNeeded } from "@/lib/dispatchTriage";
@@ -142,10 +142,21 @@ export function UrgentActionsLane({ cards }: { cards: DispatchCard[] }) {
           const deadlineText = printDeadlineLabel(c);
           return (
             <CardShell key={c.tenderId} card={c}>
-              <div className="rounded-md bg-warning/10 px-2.5 py-1.5 text-xs text-warning">⚠️ {c.blockingSummary}</div>
+              <div className="flex items-center gap-1.5 rounded-md bg-warning/10 px-2.5 py-1.5 text-xs text-warning">
+                <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
+                {c.blockingSummary}
+              </div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                <span>⏱️ Tender box deadline: {c.closingDate ? formatClosingDateTime(c.closingDate) : "—"}</span>
-                {deadlineText && <span className="font-semibold text-foreground">🖨️ Print & bind cutoff: {deadlineText}</span>}
+                <span className="inline-flex items-center gap-1">
+                  <Clock className="size-3.5 shrink-0" aria-hidden />
+                  Tender box deadline: {c.closingDate ? formatClosingDateTime(c.closingDate) : "—"}
+                </span>
+                {deadlineText && (
+                  <span className="inline-flex items-center gap-1 font-semibold text-foreground">
+                    <Printer className="size-3.5 shrink-0" aria-hidden />
+                    Print & bind cutoff: {deadlineText}
+                  </span>
+                )}
               </div>
               <Link href={c.blockingHref ?? `/tenders/${c.tenderId}`} className="w-fit text-xs font-semibold text-accent no-underline hover:underline">
                 Fix this →
