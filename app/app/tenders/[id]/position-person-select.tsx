@@ -73,8 +73,20 @@ export function PositionPersonSelect({
         <div className="rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
-              <div className="text-[10px] font-bold tracking-wide text-warning">
-                {confirmedPersonId ? "SUGGESTED INSTEAD" : "SUGGESTED"}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold tracking-wide text-warning">
+                  {confirmedPersonId ? "SUGGESTED INSTEAD" : "SUGGESTED"}
+                </span>
+                {/* Keyword-overlap ratio, not a calibrated probability - see
+                    lib/positionSuggestions.ts's own Suggestion.matchPercent comment. */}
+                {suggestion.matchPercent !== null && (
+                  <span
+                    title="Share of this position's own keywords this person has evidence of - a quick signal, not a certified score"
+                    className="rounded-full bg-muted px-1.5 py-px text-[10px] font-semibold text-muted-foreground"
+                  >
+                    {suggestion.matchPercent}% match
+                  </span>
+                )}
               </div>
               <div className="text-[13px] font-bold text-foreground">{suggestion.name}</div>
               <div className={`text-[11px] ${suggestion.specialismWarning ? "text-destructive" : "text-muted-foreground"}`}>{suggestion.why}</div>
@@ -85,7 +97,7 @@ export function PositionPersonSelect({
               onClick={() => choose(suggestion.id)}
               className={`min-h-9 rounded-lg border-none bg-foreground px-3.5 text-xs font-semibold whitespace-nowrap text-white ${isPending ? "cursor-default opacity-60" : "cursor-pointer"}`}
             >
-              Confirm {suggestion.name.split(" ")[0]}
+              Confirm {suggestion.name.split(" ")[0]} for bid
             </button>
           </div>
           {suggestions.tied && alternatives[0] && (
@@ -104,6 +116,9 @@ export function PositionPersonSelect({
               <div key={s.id} className="flex items-center justify-between gap-2 border-t border-border pt-1 text-xs text-foreground">
                 <div className="min-w-0">
                   <span className="font-semibold">Alternative: {s.name}</span>
+                  {s.matchPercent !== null && (
+                    <span className="ml-1.5 rounded-full bg-muted px-1.5 py-px text-[10px] font-semibold text-muted-foreground">{s.matchPercent}% match</span>
+                  )}
                   <span className={s.specialismWarning ? "text-destructive" : "text-muted-foreground"}> - {s.why}</span>
                 </div>
                 <button
@@ -112,7 +127,7 @@ export function PositionPersonSelect({
                   onClick={() => choose(s.id)}
                   className={`min-h-8 rounded-md border border-border bg-card px-2.5 text-[11px] font-semibold whitespace-nowrap text-foreground ${isPending ? "cursor-default" : "cursor-pointer"}`}
                 >
-                  Use
+                  Swap candidate
                 </button>
               </div>
             ))}

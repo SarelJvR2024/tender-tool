@@ -64,8 +64,29 @@ const STRENGTH_STYLE: Record<"strong" | "check" | "low", string> = {
  * not LLM-backed). Deliberately a small badge, not a banner: at the low end
  * it just means "worth double-checking yourself", not that anything is
  * broken.
+ *
+ * Never shown alongside a "Fix" pill (System Admin/Tender Workspace brief,
+ * 2026-10-25: eliminate "Fix ... Strong match ... No CSD supplier number on
+ * file"-style contradictions). Confidence here measures how confidently the
+ * requirement's own TEXT was extracted from the RFP - it says nothing about
+ * whether the company's own data satisfies it, so pairing a high "Strong
+ * match" reading with a "Fix" (missing/blocking) status reads as the two
+ * signals disagreeing when they're actually answering different questions.
+ * Exported so general-workspace.tsx's returnables list (lib/generalTender.ts's
+ * ReturnableCheck, same confidence/confidence_reason engine) can reuse this
+ * exact badge rather than a second, re-implemented copy.
  */
-function MatchStrengthBadge({ confidence, reason }: { confidence: number | null | undefined; reason: string | null | undefined }) {
+export function MatchStrengthBadge({
+  confidence,
+  reason,
+  hideWhenBlocking,
+}: {
+  confidence: number | null | undefined;
+  reason: string | null | undefined;
+  /** true when the item this badge would sit beside is already in a "Fix"/blocking state - suppresses the badge entirely rather than showing a confusing pair. */
+  hideWhenBlocking?: boolean;
+}) {
+  if (hideWhenBlocking) return null;
   const strength = matchStrengthStatus(confidence);
   if (!strength) return null;
   return (
@@ -179,7 +200,11 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
                           {item.label}
                           {item.value && <span className="font-normal text-muted-foreground"> &middot; {item.value}</span>}
                         </div>
-                        <MatchStrengthBadge confidence={item.confidence} reason={item.confidenceReason} />
+                        <MatchStrengthBadge
+                          confidence={item.confidence}
+                          reason={item.confidenceReason}
+                          hideWhenBlocking={reviewStatusToBidTask(item.status) === "fix"}
+                        />
                       </div>
                       {item.note && <div className="break-words text-muted-foreground">{item.note}</div>}
                     </div>

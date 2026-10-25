@@ -576,21 +576,34 @@ export default async function TenderWorkspacePage({
             </div>
 
             {/* Tender facts */}
-            <div style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+            <div className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
+              <div className="mb-2.5 flex flex-wrap items-start justify-between gap-2.5">
                 <div>
-                  <div style={{ fontFamily: "monospace", fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{tenderFacts.contract_no ?? "No contract number"}</div>
-                  <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{tenderFacts.nra_reference ?? "No NRA reference"}</div>
+                  <div className="font-mono text-[13px] font-bold text-foreground">{tenderFacts.contract_no ?? "No contract number"}</div>
+                  <div className="text-[11px] text-muted-foreground">{tenderFacts.nra_reference ?? "No NRA reference"}</div>
                 </div>
                 <WorkspaceStatusBadge tenderPack={tenderPack} tenderReadiness={tenderReadiness} packStatus={packStatus} />
               </div>
-              <h1 style={{ fontSize: 18, fontWeight: 700, color: "var(--foreground)", margin: "0 0 2px", lineHeight: 1.35 }}>
+              <h1 className="mb-0.5 text-lg font-bold leading-[1.35] text-foreground">
                 {tenderFacts.description ?? "Untitled tender"}
               </h1>
-              <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 8 }}>
-                {tenderFacts.buyer ?? "No client on file"}
-              </div>
-              <div style={{ fontSize: 13, color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              {/* Buyer pill (Tender Workspace overhaul, 2026-10-25) - was
+                  plain muted text; no other screen in this app has an
+                  established "buyer pill" convention to match (checked
+                  discovery/pipeline), so this uses the same soft-tint,
+                  informational (non-judgement) tag shape the admin
+                  customer list's "test company" pill already uses. */}
+              {tenderFacts.buyer && (
+                <div className="mb-2">
+                  <span className="inline-flex rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                    {tenderFacts.buyer}
+                  </span>
+                </div>
+              )}
+              {!tenderFacts.buyer && (
+                <div className="mb-2 text-xs text-muted-foreground">No client on file</div>
+              )}
+              <div className="flex flex-wrap items-center gap-2 text-[13px] text-muted-foreground">
                 <span>
                   Closes{" "}
                   {tenderFacts.closing_date ? (formatDate(tenderFacts.closing_date) ?? "—") : "- no closing date on file"}
@@ -599,62 +612,49 @@ export default async function TenderWorkspacePage({
                     clock icon displaying exact remaining time." */}
                 {countdown && (
                   <span
-                    className={countdown.urgent ? "bg-warning/10 text-warning" : "bg-muted text-muted-foreground"}
-                    style={{ display: "inline-flex", alignItems: "center", gap: 4, borderRadius: 100, padding: "2px 9px", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
+                    className={`inline-flex items-center gap-1 rounded-full px-[9px] py-0.5 text-[11px] font-bold whitespace-nowrap ${countdown.urgent ? "bg-warning/10 text-warning" : "bg-muted text-muted-foreground"}`}
                   >
-                    <Clock style={{ width: 11, height: 11 }} />
+                    <Clock className="h-[11px] w-[11px]" />
                     {countdown.text}
                   </span>
                 )}
                 {valueEstimate && (
                   <span
                     title="Estimated value range - a size indicator, not a price to bid (see the Pricing & Market tab)"
-                    className="bg-muted text-muted-foreground"
-                    style={{ display: "inline-flex", alignItems: "center", borderRadius: 100, padding: "2px 9px", fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}
+                    className="inline-flex items-center rounded-full bg-muted px-[9px] py-0.5 text-[11px] font-semibold whitespace-nowrap text-muted-foreground"
                   >
                     Est. value: {valueEstimate}
                   </span>
                 )}
               </div>
               {tenderReadiness && (
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, paddingTop: 10, borderTop: "1px solid var(--border)" }}>
+                <div className="mt-2.5 flex items-center gap-2.5 border-t border-border pt-2.5">
                   <span
-                    className={
+                    className={`inline-flex h-[38px] w-[38px] flex-none items-center justify-center rounded-full text-[13px] font-bold ${
                       tenderReadiness.thingsLeft === 0
                         ? "bg-success/10 text-success"
                         : tenderReadiness.fix.length > 0
                           ? "bg-destructive/10 text-destructive"
                           : "bg-warning/10 text-warning"
-                    }
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      width: 38,
-                      height: 38,
-                      flex: "0 0 auto",
-                      borderRadius: "50%",
-                      fontSize: 13,
-                      fontWeight: 700,
-                    }}
+                    }`}
                   >
                     {tenderReadiness.score}
                   </span>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: "var(--foreground)" }}>
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-semibold text-foreground">
                       {tenderReadiness.thingsLeft === 0
                         ? "Ready to submit"
                         : `${tenderReadiness.thingsLeft} thing${tenderReadiness.thingsLeft === 1 ? "" : "s"} left before you can submit`}
                     </div>
-                    <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>Readiness score</div>
+                    <div className="text-[11px] text-muted-foreground">Readiness score</div>
                   </div>
                 </div>
               )}
               {tenderFacts.briefing_date && (
-                <div style={{ fontSize: 13, color: "var(--muted-foreground)", marginTop: 2 }}>
+                <div className="mt-0.5 text-[13px] text-muted-foreground">
                   Briefing {formatDay(tenderFacts.briefing_date)}
                   {tenderFacts.briefing_time ? ` at ${tenderFacts.briefing_time}` : ""}
-                  <span style={{ color: "var(--muted-foreground)" }}> - from the buyer&apos;s addendum (see below)</span>
+                  <span className="text-muted-foreground"> - from the buyer&apos;s addendum (see below)</span>
                 </div>
               )}
 
@@ -678,13 +678,13 @@ export default async function TenderWorkspacePage({
                   - separate from the submission-deadline reminder below,
                   which is "remind us before it's due". */}
               {tenderPack && ["submitted", "won", "lost"].includes(tenderPack.pipeline_stage) && tenderPack.submitted_at && (
-                <div style={{ fontSize: 13, color: "var(--success)", fontWeight: 600, marginTop: 6 }}>
+                <div className="mt-1.5 text-[13px] font-semibold text-success">
                   Submitted on {(formatDate(tenderPack.submitted_at) ?? "—")}
                 </div>
               )}
 
               {tenderPack && provenance.length > 0 && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--border)" }}>
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
                   {confirmedRows.length > 0 && (
                     <SummaryChip count={confirmedRows.length} label="confirmed" className="bg-success/10 text-success" />
                   )}
@@ -708,7 +708,7 @@ export default async function TenderWorkspacePage({
                   two that could disagree. Disabled (with why) until there is
                   a pack to generate from and nothing still blocking it. */}
               {(showSubmissionPack || isGeneralFamily) && (
-                <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
+                <div className="mt-3.5 border-t border-border pt-3.5">
                   <PrimaryPackActionLink
                     href={showSubmissionPack ? "#submission-pack" : "#general-pack"}
                     ready={!!tenderPack && (!tenderReadiness || tenderReadiness.thingsLeft === 0) && openPositionsCount === 0}

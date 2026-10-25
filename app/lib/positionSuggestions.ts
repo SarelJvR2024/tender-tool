@@ -30,6 +30,18 @@ export type Suggestion = {
   id: string;
   name: string;
   score: number;
+  /**
+   * How much of the position's own distinguishing keywords this person has
+   * evidence of, as a plain percentage (matched / (matched + missing)) -
+   * NOT a rescaled version of `score` itself, which is an open-ended count
+   * (len(overlap) * 3 + ...) with no fixed maximum, so it can't honestly be
+   * read as a "%" on its own. null when the position's description has no
+   * specific (non-generic) keywords to measure against at all. Same
+   * "never call a regex/heuristic read AI confidence" care as
+   * general-pack-review-logic.ts's matchStrengthStatus() - this is a
+   * keyword-overlap ratio, not a calibrated probability.
+   */
+  matchPercent: number | null;
   why: string;
   specialismWarning: boolean;
 };
@@ -64,10 +76,18 @@ export function whySuggested(c: CandidateScore): string {
   return parts.length > 0 ? parts.join(", ") : "no matching or conflicting evidence on file";
 }
 
+function matchPercentOf(c: CandidateScore): number | null {
+  const matched = c.matched?.length ?? 0;
+  const missing = c.missing?.length ?? 0;
+  const total = matched + missing;
+  return total > 0 ? Math.round((matched / total) * 100) : null;
+}
+
 const toSuggestion = (c: CandidateScore): Suggestion => ({
   id: c.person_id,
   name: c.name,
   score: c.score,
+  matchPercent: matchPercentOf(c),
   why: whySuggested(c),
   specialismWarning: !!c.specialism_warning,
 });

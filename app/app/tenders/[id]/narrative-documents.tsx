@@ -19,6 +19,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * for why this directly reopens an earlier, deliberate decision to cut
  * AI-drafted executive summaries/methodology from scope, and what mitigates
  * the same risk this time (Sarel, 2026-10-22).
+ *
+ * Color-token migration (Tender Workspace overhaul, 2026-10-25): this file
+ * was missed by the earlier design-system color-migration initiative
+ * (app/AGENTS.md's own "batch 1-5" history) and was still on the pre-
+ * 2026-10-21 literal-hex scheme throughout - converted to the same
+ * Tailwind token classes every other migrated file in this directory uses.
+ * COLOR_OPTIONS below is the one deliberate exception: those 5 hex values
+ * are the actual generated-document theme colors (kept in sync with
+ * engine/narrative/build_docx.py's own COLOR_THEMES), not UI chrome - a
+ * color swatch picker's own swatches are real content, same exception this
+ * app's email-template hex already has for the identical reason.
  */
 
 type NarrativeKind = "cover_letter" | "methodology";
@@ -43,11 +54,11 @@ const KINDS: { value: NarrativeKind; label: string; blurb: string }[] = [
   { value: "methodology", label: "Methodology statement", blurb: "How you'll deliver this specific scope of work." },
 ];
 
-const STATUS: Record<NarrativeStatus, { label: string; bg: string; color: string }> = {
-  requested: { label: "Requested - waiting for the AI writer", bg: "#FEF3C7", color: "#B45309" },
-  generating: { label: "Writing…", bg: "#FEF3C7", color: "#B45309" },
-  ready: { label: "Draft ready", bg: "#DCFCE7", color: "#15803D" },
-  failed: { label: "Failed", bg: "#FEE2E2", color: "#B91C1C" },
+const STATUS: Record<NarrativeStatus, { label: string; className: string }> = {
+  requested: { label: "Requested - waiting for the AI writer", className: "bg-warning/10 text-warning" },
+  generating: { label: "Writing…", className: "bg-warning/10 text-warning" },
+  ready: { label: "Draft ready", className: "bg-success/10 text-success" },
+  failed: { label: "Failed", className: "bg-destructive/10 text-destructive" },
 };
 
 const LENGTH_OPTIONS = [
@@ -66,7 +77,8 @@ const VISUAL_OPTIONS = [
   { value: "visual_rich", label: "Visually rich" },
 ];
 // Same hex values as engine/narrative/build_docx.py's own COLOR_THEMES - keep
-// these two in sync if either changes.
+// these two in sync if either changes. Deliberately literal, not tokens -
+// see this file's own header comment.
 const COLOR_OPTIONS: { value: string; label: string; hex: string }[] = [
   { value: "navy", label: "Navy", hex: "#1A2E4C" },
   { value: "charcoal", label: "Charcoal", hex: "#333333" },
@@ -74,8 +86,6 @@ const COLOR_OPTIONS: { value: string; label: string; hex: string }[] = [
   { value: "burgundy", label: "Burgundy", hex: "#6B1E2B" },
   { value: "slate", label: "Slate", hex: "#3C4A5C" },
 ];
-
-const card: React.CSSProperties = { background: "#FFFFFF", border: "1px solid #E3E6EA", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
 export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
   const supabase = await createClient();
@@ -102,14 +112,14 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
   }
 
   return (
-    <div id="narrative-documents" style={card}>
+    <div id="narrative-documents" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
       <AutoRefresh active={active} />
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#16233B" }}>Cover letter &amp; methodology statement</div>
+      <div className="mb-0.5 flex items-center gap-1.5">
+        <div className="text-[15px] font-bold text-foreground">Cover letter &amp; methodology statement</div>
         <Tooltip>
           <TooltipTrigger
             aria-label="How these drafts are written"
-            style={{ display: "inline-flex", flexShrink: 0, alignItems: "center", justifyContent: "center", width: 16, height: 16, borderRadius: 9999, color: "#5B6472" }}
+            className="inline-flex size-4 flex-none items-center justify-center rounded-full text-muted-foreground"
           >
             <Info size={14} aria-hidden />
           </TooltipTrigger>
@@ -121,7 +131,7 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
           </TooltipContent>
         </Tooltip>
       </div>
-      <div style={{ fontSize: 12, color: "#5B6472", marginBottom: 14 }}>
+      <div className="mb-3.5 text-xs text-muted-foreground">
         AI-drafted from your own profile and past work - review, edit, then upload the final version.
       </div>
 
@@ -130,12 +140,12 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
         const kindActive = kindDocs.some((d) => d.status === "requested" || d.status === "generating");
 
         return (
-          <div key={kind.value} style={{ borderTop: "1px solid #ECEEF1", paddingTop: 14, marginTop: 14 }}>
-            <div style={{ fontSize: 13, fontWeight: 700, color: "#16233B" }}>{kind.label}</div>
-            <div style={{ fontSize: 11, color: "#8A93A0", marginBottom: 10 }}>{kind.blurb}</div>
+          <div key={kind.value} className="mt-3.5 border-t border-border pt-3.5">
+            <div className="text-[13px] font-bold text-foreground">{kind.label}</div>
+            <div className="mb-2.5 text-[11px] text-muted-foreground">{kind.blurb}</div>
 
             {!kindActive && (
-              <form action={requestNarrativeDocument} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <form action={requestNarrativeDocument} className="flex flex-col gap-2.5">
                 <input type="hidden" name="tender_id" value={tenderId} />
                 <input type="hidden" name="kind" value={kind.value} />
 
@@ -143,29 +153,29 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
                   name="user_guidance"
                   placeholder="Anything specific you want this to cover or emphasise (optional) - e.g. 'focus on our bridge experience' or 'keep it to one page'."
                   rows={2}
-                  style={{ fontSize: 12, padding: "8px 10px", borderRadius: 8, border: "1px solid #E3E6EA", resize: "vertical", fontFamily: "inherit" }}
+                  className="resize-y rounded-lg border border-border px-2.5 py-2 font-[inherit] text-xs"
                 />
 
-                <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "#5B6472" }}>
+                <div className="flex flex-wrap gap-3.5">
+                  <label className="flex flex-col gap-[3px] text-[11px] text-muted-foreground">
                     Length
-                    <select name="style_length" defaultValue="standard" style={{ minHeight: 32, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 6px" }}>
+                    <select name="style_length" defaultValue="standard" className="min-h-8 rounded-[7px] border border-border px-1.5 text-xs">
                       {LENGTH_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
                   </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "#5B6472" }}>
+                  <label className="flex flex-col gap-[3px] text-[11px] text-muted-foreground">
                     Detail
-                    <select name="style_detail" defaultValue="detailed" style={{ minHeight: 32, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 6px" }}>
+                    <select name="style_detail" defaultValue="detailed" className="min-h-8 rounded-[7px] border border-border px-1.5 text-xs">
                       {DETAIL_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
                     </select>
                   </label>
-                  <label style={{ display: "flex", flexDirection: "column", gap: 3, fontSize: 11, color: "#5B6472" }}>
+                  <label className="flex flex-col gap-[3px] text-[11px] text-muted-foreground">
                     Visual style
-                    <select name="style_visual" defaultValue="structured" style={{ minHeight: 32, borderRadius: 7, border: "1px solid #E3E6EA", fontSize: 12, padding: "0 6px" }}>
+                    <select name="style_visual" defaultValue="structured" className="min-h-8 rounded-[7px] border border-border px-1.5 text-xs">
                       {VISUAL_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>{o.label}</option>
                       ))}
@@ -173,25 +183,28 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
                   </label>
                 </div>
 
-                <fieldset style={{ border: "none", padding: 0, margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11, color: "#5B6472" }}>Color</span>
+                <fieldset className="flex items-center gap-2 border-none p-0">
+                  <span className="text-[11px] text-muted-foreground">Color</span>
                   {COLOR_OPTIONS.map((c, i) => (
-                    <label key={c.value} style={{ display: "inline-flex", cursor: "pointer" }} title={c.label}>
+                    <label key={c.value} className="inline-flex cursor-pointer" title={c.label}>
                       <input
                         type="radio"
                         name="style_color"
                         value={c.value}
                         defaultChecked={i === 0}
-                        style={{ position: "absolute", opacity: 0, width: 0, height: 0 }}
+                        className="absolute h-0 w-0 opacity-0"
                       />
-                      <span style={{ width: 18, height: 18, borderRadius: "50%", background: c.hex, border: "2px solid #FFFFFF", boxShadow: "0 0 0 1px #E3E6EA" }} />
+                      <span
+                        className="h-[18px] w-[18px] rounded-full border-2 border-card shadow-[0_0_0_1px_var(--border)]"
+                        style={{ background: c.hex }}
+                      />
                     </label>
                   ))}
                 </fieldset>
 
                 <button
                   type="submit"
-                  style={{ alignSelf: "flex-start", minHeight: 36, padding: "0 16px", borderRadius: 8, background: "#16233B", color: "#FFFFFF", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer" }}
+                  className="min-h-9 cursor-pointer self-start rounded-lg border-none bg-foreground px-4 text-xs font-semibold whitespace-nowrap text-white"
                 >
                   {kindDocs.length > 0 ? "Generate another draft" : `Generate ${kind.label.toLowerCase()}`}
                 </button>
@@ -199,29 +212,29 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
             )}
 
             {kindDocs.length > 0 && (
-              <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="mt-3 flex flex-col gap-2.5">
                 {kindDocs.slice(0, 3).map((d) => {
-                  const st = STATUS[d.status] ?? { label: d.status, bg: "#ECEEF1", color: "#5B6472" };
+                  const st = STATUS[d.status] ?? { label: d.status, className: "bg-muted text-muted-foreground" };
                   return (
-                    <div key={d.id} style={{ fontSize: 12, color: "#4B5563" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: st.bg, color: st.color }}>
+                    <div key={d.id} className="text-xs text-muted-foreground">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className={`inline-flex rounded-full px-[9px] py-0.5 text-[11px] font-semibold ${st.className}`}>
                           {st.label}
                         </span>
-                        <span style={{ color: "#8A93A0" }}>requested {(formatDateTime(d.requested_at) ?? "—")}</span>
+                        <span className="text-muted-foreground">requested {(formatDateTime(d.requested_at) ?? "—")}</span>
                         {d.status === "ready" && d.generated_storage_path && signed[d.generated_storage_path] && (
-                          <a href={signed[d.generated_storage_path]} style={{ color: "#D97706", fontWeight: 700 }}>
+                          <a href={signed[d.generated_storage_path]} className="font-bold text-accent">
                             Download draft (Word)
                           </a>
                         )}
                       </div>
 
                       {d.status === "failed" && d.error_message && (
-                        <div style={{ color: "#B91C1C", marginTop: 4 }}>{d.error_message}</div>
+                        <div className="mt-1 text-destructive">{d.error_message}</div>
                       )}
 
                       {d.status === "ready" && d.similarity_flagged && (
-                        <div style={{ background: "#FEE2E2", border: "1px solid #FCA5A5", borderRadius: 8, padding: "8px 10px", marginTop: 6, color: "#B91C1C" }}>
+                        <div className="mt-1.5 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-destructive">
                           This draft reads similar to another submission for this tender, even after being
                           rewritten once for distinctness. Read it carefully and put it in your own words before
                           using it - two similar submissions risk disqualification.
@@ -229,7 +242,7 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
                       )}
 
                       {d.status === "ready" && d.quality_flagged && (
-                        <div style={{ background: "#FEF3C7", border: "1px solid #F5D08A", borderRadius: 8, padding: "8px 10px", marginTop: 6, color: "#92400E" }}>
+                        <div className="mt-1.5 rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-warning">
                           This draft still had issues on its own final review pass - read it closely before
                           using it. It&apos;s a starting point for you to correct, not a finished document.
                         </div>
@@ -239,14 +252,14 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
                         <form
                           action={uploadNarrativeFinal}
                           encType="multipart/form-data"
-                          style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}
+                          className="mt-1.5 flex flex-wrap items-center gap-2"
                         >
                           <input type="hidden" name="tender_id" value={tenderId} />
                           <input type="hidden" name="narrative_document_id" value={d.id} />
-                          <input type="file" name="file" required accept=".doc,.docx" style={{ fontSize: 11, maxWidth: 200 }} />
+                          <input type="file" name="file" required accept=".doc,.docx" className="max-w-[200px] text-[11px]" />
                           <button
                             type="submit"
-                            style={{ minHeight: 30, padding: "0 10px", borderRadius: 7, background: "#FFFFFF", color: "#16233B", border: "1px solid #E3E6EA", fontSize: 11, fontWeight: 600, cursor: "pointer" }}
+                            className="min-h-[30px] cursor-pointer rounded-md border border-border bg-card px-2.5 text-[11px] font-semibold text-foreground"
                           >
                             Upload your edited version
                           </button>
@@ -254,17 +267,17 @@ export async function NarrativeDocuments({ tenderId }: { tenderId: string }) {
                       )}
 
                       {d.final_storage_path && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-                          <span style={{ display: "inline-flex", padding: "2px 9px", borderRadius: 100, fontSize: 11, fontWeight: 600, background: "#DCFCE7", color: "#15803D" }}>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                          <span className="inline-flex rounded-full bg-success/10 px-[9px] py-0.5 text-[11px] font-semibold text-success">
                             Final version uploaded
                           </span>
                           {signed[d.final_storage_path] && (
-                            <a href={signed[d.final_storage_path]} style={{ color: "#D97706", fontWeight: 700 }}>
+                            <a href={signed[d.final_storage_path]} className="font-bold text-accent">
                               {d.final_original_filename ?? "Download"}
                             </a>
                           )}
                           {d.final_uploaded_at && (
-                            <span style={{ color: "#8A93A0" }}>{(formatDate(d.final_uploaded_at) ?? "—")}</span>
+                            <span className="text-muted-foreground">{(formatDate(d.final_uploaded_at) ?? "—")}</span>
                           )}
                         </div>
                       )}
