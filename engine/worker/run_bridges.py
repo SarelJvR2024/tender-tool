@@ -80,6 +80,15 @@ BRIDGES = {
     # bulk onboarding document scan (0063): onboarding_uploads -> onboarding_document_results;
     # needs ANTHROPIC_API_KEY once a document is queued, same as cv_extract
     "onboarding": "engine/onboarding/process_onboarding_jobs.py",
+    # cover letter / methodology statement drafting: narrative_documents ->
+    # generated_documents. Built on the identical poll/claim contract as every
+    # bridge above (its own process_narrative_jobs.py, its own test suite) but
+    # was never added here, so a customer's "Generate narrative" request sat
+    # as a 'requested' row with nothing ever polling it - found during a
+    # standing review pass (2026-10-25), not a deliberate exclusion anyone
+    # could point to (no cost/rate-limit note anywhere in this engine's own
+    # docs explaining why it would be held back from the other five).
+    "narrative": "engine/narrative/process_narrative_jobs.py",
 }
 
 # A pass that finds nothing prints exactly this kind of line. In loop mode that
