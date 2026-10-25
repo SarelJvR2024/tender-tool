@@ -1,5 +1,62 @@
 # System Status
 
+**2026-10-25 ~10:20 UTC — standing review pass: a real cross-tenant reference gap closed on
+`narrative_documents` (migration `0097`) - reproduced live, fixed, re-verified against the full
+tenant-isolation suite; QA tooling re-confirmed sound; no collisions.** Orientation: `git fetch
+origin main` showed one new commit since this routine's own last pass (`f019289`, the Edge-case QA
+routine's own fix for the narrative bridge leaking raw exceptions to customers, Finding 75 - no
+overlap, different file). No open-PR collision (`#118` only, draft, stale). Checked every remote
+branch's last-commit timestamp directly rather than trusting a stale assumption - nothing active in
+the last ~10 hours. Stayed entirely clear of the PR #143/#149/#150 (and #131/#134-138/#142)
+self-merge incident, as directed.
+
+**The finding**: the 2026-10-17 cross-tenant-integrity audit (migration `0043`,
+docs/specs/POPIA-Security-Audit.md) attached a `tt_same_company` trigger to every tenant table with
+a `tender_id` column, so a company can only ever reference a tender it can actually see (shared, or
+its own private one) - never another company's private tender by UUID alone, even though RLS itself
+has no opinion on that (`is_company_member(company_id)` only checks whose row it is, never what the
+row points at). `narrative_documents` (migration `0087`, the cover-letter/methodology generator) has
+exactly that same shape - `company_id` + `tender_id` - but was added 44 migrations after the audit
+and was never given the guard every sibling table already has (`tender_tasks`, `tender_packs`,
+`tender_answers`, `financial_captures`, `generated_documents`, `generated_cvs`,
+`pack_generation_jobs`, `tender_comments`, `tender_private_documents`).
+
+Reproduced live, not assumed: replayed all 96 migrations onto a scratch Postgres
+(`engine/security/replay_schema.sh`, clean exit), created two companies and a PRIVATE tender owned
+by company B, confirmed `tt_tender_visible_to()` itself correctly says company A cannot see it, then
+inserted a `narrative_documents` row as company A pointing `tender_id` straight at B's private
+tender - the insert succeeded. Real impact, same shape 0043's own header already describes for every
+table it covers: the always-on worker (service role, bypasses RLS by design) reads the referenced
+tender's own buyer/description/closing-date to ground the AI-drafted text, so a company holding only
+B's tender UUID (not a secret - a URL in a screenshot or an old e-mail is enough, 0043's own stated
+threat model) could confirm a private tender exists and pull its details into its own generated
+document. It would also pollute `narrative_documents_tender_kind_ready_idx`, the exact index the
+anti-collusion similarity check (0087's own stated reason for existing) queries across every
+company for that tender - a planted row could falsely similarity-flag the tender's real owner's own
+later, legitimate draft.
+
+Fix (migration `0097_narrative_documents_tenant_integrity.sql`): added `narrative_documents` to
+`tt_check_same_company()`'s existing tender-visibility branch (the same shared function every
+sibling table already uses, `create or replace` from its current 0066-fixed body, not the older
+0043 one) and attached the trigger on `(company_id, tender_id)` - the only two columns this table
+needs guarded (no `person_id`/`tender_pack_id` reference here unlike `generated_cvs`/
+`pack_generation_jobs`). Re-verified against the same replayed database after the fix, 3 real cases:
+the identical exploit now fails with `"narrative_documents: this tender is another company's private
+tender"` (42501); a request on a SHARED tender still succeeds; B requesting on its own private
+tender still succeeds - confirmed the fix doesn't over-block the feature's real use. Then re-ran the
+full `engine/security/test_tenant_isolation.py` suite (Part 1 in-memory + Part 2 DB-backed, every
+case: shared templates, deletion, employee role) against a second fresh replay including this
+migration - **ALL PASSED**, no regression anywhere else this shared trigger function touches. Also
+re-ran `engine/narrative/test_process_narrative_jobs.py` and `test_generate_narrative.py` (both
+clean, unaffected - this is a pure SQL/trigger change, no Python touched) and the full TS suite:
+`tsc --noEmit`/`eslint` clean (same 3 pre-existing warnings), `npx vitest run` 185/185 unchanged.
+
+**Flagged for Sarel, same standing gap this file already notes repeatedly**: applying migration
+`0097` to the live Supabase DB is his own step - no CI/CD here applies migrations automatically.
+Until it's applied, this specific gap remains live in production exactly as reproduced above.
+
+---
+
 **2026-10-25 ~08:17 UTC — standing review pass: a real, reproduced pack-quota bypass fixed
 (migration `0096`) - a trial that lapsed weeks ago, never converted to paid, could still claim its
 one free bid pack indefinitely; pushed directly to main per the guardrail; QA tooling re-confirmed
