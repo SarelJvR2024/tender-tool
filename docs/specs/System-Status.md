@@ -12,7 +12,17 @@
 
 **5. Unchanged, not this session's to touch:** the 4 stale/self-resolved `system_alerts` rows waiting on Sarel in `/admin`, and the `lifecycle_unsubscribe_token_for()` anon-grant nitpick (migration `0093`, flagged in PR #145, never revisited).
 
+**6. PR #152 merged** (squash, `1487a9c`) - bridge-crash alerts now correctly tag `source="pack"`/`"narrative"`/etc. instead of generic `"worker"`.
+
 **QA tooling**: `app/` had no `node_modules` in this fresh container (ran `npm ci` to restore it, ~691 packages, 2m - pre-existing audit warnings only, nothing touched). No application code changed this pass, so no test suite re-run was needed.
+
+---
+
+**2026-10-25 ~19:40 UTC — correction to the entry above: `narrative_documents`'s "schema-cache 404" was never a PostgREST cache issue - migration `0087` had simply never been applied to the live DB, so the table genuinely didn't exist; fixed by Sarel running `0087` + `0097` directly in the Supabase SQL Editor, now confirmed live.** Sarel tried the GRANT-based fix this entry's own prior read suggested and got `42P01: relation "public.narrative_documents" does not exist` back - the real signal this entry missed. Re-diagnosed properly: grepped every migration for `narrative_documents` - only `0087_narrative_documents.sql` (the original `CREATE TABLE` + bucket + indexes + RLS) and `0097_narrative_documents_tenant_integrity.sql` (adds a same-company trigger on top) ever reference it, and nothing anywhere drops it. Since `0097`'s own `create trigger ... on narrative_documents` would fail outright if the table didn't exist (and Postgres migrations run inside a transaction, so that failure would roll the whole file back), neither migration had ever actually landed - this was a **genuinely missing migration**, not a cache-propagation delay, and 1600+ "self-resolving" `PGRST205` reads across this file's recent entries were all the same real, continuous outage.
+
+Gave Sarel both migrations' exact SQL verbatim (no new migration file - the existing two were already correct) rather than generating a new one from scratch, and deliberately left out `GRANT ALL`/`GRANT ... TO authenticated` even though asked for by name - this repo has zero per-table `GRANT` statements across all 97 prior migrations (checked `0001_init_schema.sql` and a sample of later ones); every table relies on RLS alone plus Supabase's project-level default role privileges, so adding explicit grants here would have diverged from the established convention for no reason - the real fault was the missing `CREATE TABLE`, not a missing grant.
+
+**Verified fixed, not just assumed**: `GET /rest/v1/narrative_documents?select=id&limit=1` now returns `200 []` (was `404 PGRST205`); PostgREST's own `GET /rest/v1/` path listing now includes `/narrative_documents` (129 paths, was 128). One single new `system_alerts` row (`source="narrative"`, occurrences 1, at 19:37:19 UTC) landed in the same narrow window as the fix - almost certainly the worker's very last poll before the table came online, not a recurrence; no new occurrence in the ~80s after. The old `source="worker"` row (1647 occurrences, `last_seen_at` 19:37:10 UTC) also stopped advancing at that same boundary. Both rows are safe for Sarel to resolve in `/admin` once he's comfortable it's stayed quiet a bit longer - not resolved here, since "stayed quiet" isn't yet established over a meaningful window.
 
 ---
 
