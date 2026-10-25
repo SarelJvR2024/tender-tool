@@ -1,5 +1,51 @@
 # System Status
 
+**2026-10-25 ~16:16 UTC — standing review pass: clean sweep of `engine/ocr/scan_ocr.py` (the
+Tesseract OCR fallback) - no new bug found after real effort, documented rather than forced; QA
+tooling re-confirmed sound; no collisions.** Orientation: `git fetch origin main` showed one new
+commit since this routine's own last pass (`09bd8ec`, a sibling QA routine's docs-only clean sweep
+of `engine/cv/` - specifically checked `extract_cv_fields.py`'s own `validate_proposal()` for the
+identical lost-date-warning bug this routine's prior pass just fixed in `onboarding/`'s copy, found
+it already correct there). Checked local HEAD actually matched `origin/main` before starting (the
+habit this routine adopted after getting burned twice). Every remote branch beyond `origin/main`
+confirmed either merged already or inactive for 16+ hours - no collision; `#118` remains the only
+open PR (draft, stale, unrelated). Stayed entirely clear of the PR #143/#149/#150
+(and #131/#134-#138/#142) self-merge incident, as directed - still in Sarel's own hands.
+
+**Rotated to `engine/ocr/scan_ocr.py`** (untouched since 2026-10-17, the oldest engine area by
+last-review date, and the only one in `engine/` with zero committed test file). Read the whole
+module end to end rather than skimming. Specifically verified, not assumed:
+- The page-rotation fix direction: Tesseract's own OSD "Rotate: n" means "rotate the image n
+  degrees CLOCKWISE to correct it"; PIL's `Image.rotate(angle)` is counter-clockwise-positive, so
+  `im.rotate(-rot, ...)` (this file's own code) is the correct clockwise correction, not a sign bug
+  - confirmed against PIL's own documented rotation convention, not just trusted the inline comment.
+- The TSV word-level filter (`level == "5"`, Tesseract's own word-level row) and the CSV parsing
+  around it.
+- The call-site integration in `engine/general/requirements.py`'s `ocr_scanned_pages()`: traced the
+  `empty`/`used`/`res["read"]` reassignment sequence carefully for an off-by-one or stale-reference
+  bug around the "OCR succeeded but wasn't used because the native text was already enough" path -
+  a page that passes OCR's own quality gate but isn't swapped in (e.g. a short divider page) is
+  correctly left out of both `pages_ocr` and `pages_failed` in the summary, matching the comment's
+  own stated intent ("a blank page in a text PDF isn't news") rather than being a silently-dropped
+  finding - this is deliberate, not a gap.
+- `_alert_failures()`'s broken-vs-expected-refusal distinction (a bad scan alerts nobody, by
+  design; Tesseract missing/erroring/timing out does) - correctly scoped, matches
+  `docs/specs/System-Status.md`'s own standing "alerts for failures, not for expected refusals"
+  convention used elsewhere in this codebase.
+
+No new bug found worth either row - documenting the sweep so the next pass through this area starts
+ahead, same pattern the CV/pack-area clean sweeps already established, rather than claiming a weak
+finding just to have shipped something this pass.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings - `Logo.tsx`'s `<img>` tags, `analytics/page.tsx`'s unused `STAGE_META`). No code touched
+this pass, so no test suite re-run was needed beyond the standing full check.
+
+**Nothing new for Sarel this pass** - the existing backlog (migration `0093`'s live/cache status,
+migrations `0096`/`0097`, the PayFast idempotency design question) is unchanged, not grown.
+
+---
+
 **2026-10-25 ~14:18 UTC — standing review pass: a real onboarding-scan bug fixed (an unparseable
 expiry date vanished with its own warning, not just the field) - reproduced, fixed, re-verified; QA
 tooling sound; no collisions.** Orientation: `git fetch origin main` showed one new commit since this
