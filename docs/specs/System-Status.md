@@ -2958,6 +2958,34 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-25, standing QA/robustness review - ninety-second run): rotated to CV (engine/cv) - thorough review, no new bug found this time
+
+Orientation: synced a sibling pass (`4e93d70`, a real "a date-parse warning was lost when the field
+was dropped" fix in `engine/onboarding/classify_documents.py`) - no `engine/cv/` overlap, but the
+module's own docstring says it shares "the exact same pipeline shape" as CV's own
+`extract_cv_fields.py`, so checked `extract_cv_fields.validate_proposal()` specifically for the
+identical bug. Rotated to CV - the most overdue standing area (last dedicated pass the
+eighty-third run, 2026-10-25, already a clean sweep).
+
+Read `validate_proposal()`, `call_llm()`'s full Anthropic-exception mapping,
+`mark_ocr_values()` and `extract_from_file()` end to end; none held up as a new, reachable bug:
+
+- The sibling's exact bug (a date field's parse-failure warning discarded along with the dropped
+  field) does NOT reproduce here - CV's own person-field and project-field date handling both set
+  `value = iso` (possibly `None`) in place, without ever removing the field from its dict, so the
+  warning and the null value always travel together. Already structured correctly, confirmed by
+  reading rather than assumed from the sibling's own fix existing elsewhere.
+- `call_llm()`'s Anthropic exception mapping (`AuthenticationError`/`PermissionDeniedError`/
+  `NotFoundError` -> `SetupError`; `RateLimitError`/`APIConnectionError`/`APIStatusError >= 500` ->
+  `TransientError`; everything else -> `ExtractionFailed`) is exhaustive and correctly distinguishes
+  "fix the worker's own setup", "retry automatically" and "this one CV failed" - no gap found.
+- `mark_ocr_values()`'s `other_registrations` entries never get a `"warnings"` key at all (unlike
+  `person`/`projects`, which always do) - a real shape inconsistency, but not a crash or a wrong
+  value; not chased further as a cosmetic/schema-shape nit rather than a found bug.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle - same
+discipline as the sixty-seventh, eighty-first, eighty-third and eighty-ninth runs' own clean sweeps.
+
 ## This pass (2026-10-25, standing QA/robustness review - ninety-first run): suggest_pack.py's own CLI tool crashed with a bare, uninformative TypeError on a blank SANRAL closing-date cell
 
 Orientation: synced two sibling passes (`fd30549`, a real cross-tenant reference gap closed on
