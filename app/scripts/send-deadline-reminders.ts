@@ -126,6 +126,18 @@ async function main() {
       const result = await sendTransactionalEmail({ to: email, subject, html, text });
       if (result.status === "sent") sent++;
       else console.log(`  ${result.status} -> ${email} (${contractLabel})`);
+      const { error: logError } = await supabase.rpc("record_notification_sent", {
+        p_idempotency_key: `deadline-reminder-${tender.id}-${companyId}-${threshold}-${email}`,
+        p_notification_type: "deadline_reminder",
+        p_recipient_email: email,
+        p_company_id: companyId,
+        p_tender_id: tender.id,
+        p_subject: subject,
+        p_status: result.status,
+        p_resend_id: result.status === "sent" ? result.resendId : null,
+        p_error: result.status === "failed" ? result.error : null,
+      });
+      if (logError) console.error("record_notification_sent failed for deadline_reminder", logError);
     }
   }
 
