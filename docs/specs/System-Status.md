@@ -1,5 +1,62 @@
 # System Status
 
+**2026-10-25 ~00:16 UTC — standing review pass: PR #149 merged (`c7bf169`), one real hover-only
+gap fixed; notification-engine work (PR #145/#147/#148) confirmed quiet, no collision; QA tooling
+re-confirmed sound.** Orientation: `git fetch origin main` showed 19 new commits since this
+session's own last pass (PR #146 merge) - almost all of it `session_01DZfrLTsnZtiZGmTHPxQqAX`'s
+notification-engine build-out (PR #145 Tier 0/3 foundation, PR #147 Tier 0/3 triggers wired to real
+data, PR #148 zero-recipients bug fix + Python/Gmail alert retirement, plus a docs-only entry on a
+blocked live-verification attempt). Read that whole stretch of `System-Status.md` in full before
+touching anything - no action needed from this pass on any of it; it's mid-flight on a real,
+already-flagged blocker (migration `0093`'s `claim_notification`/`record_notification_sent` missing
+from PostgREST's schema cache on the live DB) that is explicitly Sarel's own step to clear, not a
+code bug. Collision check: `git for-each-ref` showed every non-`main` branch was already an orphaned,
+merged source branch - nothing in flight to avoid.
+
+**One real, caught-mid-pass mistake worth recording so it doesn't repeat**: this pass's own first
+local checkout was still sitting on its last branch (`fix/batch-2b-touchups`, pre-dating PR #146's
+own merge) instead of fresh `main` - `npx vitest run` showed 162/162 instead of the real, current
+185/185, and a grep for notification-engine files turned up nothing at all, which should have been
+the immediate tell. Caught before committing anything against stale code: re-checked out real
+`main` (`git checkout main && git pull --ff-only`), confirmed 185/185 matches this file's own
+already-documented baseline exactly, and redid the actual review/fix against the real current tree.
+Flagging this plainly rather than quietly fixing the process: any session resuming a standing-review
+routine across multiple fires should re-confirm its own branch is `main` (or freshly rebased onto
+it) before trusting a "nothing changed" read, not just before pushing.
+
+**The fix**: `app/app/pipeline/page.tsx`'s kanban board card showed a tender's owner only as a
+2-letter initials circle, full name reachable solely via a `title=` hover tooltip - invisible on
+touch, unreachable without a mouse. Same bug class this routine has already fixed repeatedly
+(PrimaryPackActionLink, Discovery's readiness blockers, SANRAL schedules, Analytics trend counts,
+Market Intelligence frequency counts, People's role-source citations) - worth naming since this is
+now the seventh+ instance of the identical pattern across this codebase, a genuine candidate for a
+shared, reusable "visible disclosure, not hover-only" convention/component rather than each instance
+being independently rediscovered and independently fixed. Confirmed as real, not a style nit, by the
+same page already rendering the owner's name as plain visible text in two *other* views on the exact
+same file (the submitted-tenders list, `"Owner: {name}"`; the table view) - only the kanban card hid
+it. Fixed by adding a small truncated name label next to the initials badge, keeping it compact;
+`title=` kept as a fallback for an over-length name. PR:
+https://github.com/SarelJvR2024/tender-tool/pull/149 (branch
+`fix/pipeline-owner-visible-not-hover-only`), self-merged per the standing
+autonomous-non-schema-UI-work authorization once green.
+
+Verified, against real current `main` after the branch mistake above was caught: `tsc --noEmit`
+clean, `eslint` clean (0 errors, same 3 pre-existing warnings - `Logo.tsx`'s `<img>` tags,
+`analytics/page.tsx`'s unused `STAGE_META`), `npm run build` clean, `npx vitest run` 185/185
+(unchanged - markup-only change, nothing vitest-covered touched), every `*.test.ts` file run
+directly via `node --experimental-strip-types --test` - same pass/fail counts as before this change
+(5 pre-existing 0-test files, a known pre-existing quirk unrelated to this change; every other file
+green). Python spot-check (`test_gov_sources.py`, `test_source_http.py`) also clean.
+
+**A suggestion for whoever next touches this pattern, not acted on here (out of scope for a
+light-touch pass)**: given how many times "hover-only tooltip hides real information" has now been
+found and fixed independently across Discovery, SANRAL schedules, Analytics, Market Intelligence,
+People, and now Pipeline, a small shared component (e.g. a `VisibleTooltip`/`InlineDisclosure`
+wrapper that always renders its content as visible text, with the hover title only as a progressive-
+enhancement extra) would likely prevent the next instance from being independently rediscovered.
+
+---
+
 **2026-10-24 ~23:07 UTC — PR #148 merged (`f6cd4e7`); live verification dispatch of `founder-digest.yml`/`scout-alerts.yml` ran, both exited 0, but every notification attempt inside both failed at `claim_notification` - zero emails actually sent.** Sarel: migrations `0094`/`0095` applied to the live DB, merge PR #148, dispatch the two Resend-only workflows as a real end-to-end test. Both dispatched via `workflow_dispatch`, both jobs completed with `conclusion: success` (the script's own top-level `main()` didn't throw) - but reading the actual job logs shows every single `sendNotification()` call inside both scripts failed before ever reaching Resend:
 
 ```
