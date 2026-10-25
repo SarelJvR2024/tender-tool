@@ -1,5 +1,26 @@
 # System Status
 
+> ## Resume here (live handover, 2026-10-25 ~19:15 UTC)
+>
+> From `session_01DZfrLTsnZtiZGmTHPxQqAX`, dedicated to the Resend notification engine (Tier 0-3), handing off because this session's environment got `RESEND_API_KEY`/`ADMIN_NOTIFICATION_EMAIL`/`RESEND_FROM_*` added mid-session - env var additions only take effect in a session created *after* they're saved, so this one can never pick them up. A fresh session started now should have all of it.
+>
+> **Read first:** this file's own two most recent dated entries above (2026-10-25 ~19:10 UTC and the one above it) - they're the full account of what's below.
+>
+> **What's merged and live:** PR #145 (brand/visual system), #147 (Tier 0 nudge + Tier 3 digest/scout triggers), #148 (fixed a real zero-recipients bug in `send-deadline-reminders.ts`/`send-operational-alerts.ts`, retired the old Python+Gmail alert mechanism), #151 (Scout anti-noise throttle + batching - stops the alert backlog firing one email per 10 minutes). Migrations `0093`-`0095` are confirmed applied and reachable on the live DB.
+>
+> **Open, needs a decision, not a code fix:** PR #152 (`fix/bridge-alert-source-tagging`, draft) - tags bridge-crash alerts with their real bridge name instead of `"worker"`. Small, already verified (`engine/worker/test_poll_loop.py` green). Mark ready + merge when you're satisfied.
+>
+> **Real, concrete next steps for a session with live Resend access:**
+> 1. Trigger a real `sendTransactionalEmail()` directly (not via a GitHub Actions dispatch - this session only ever confirmed delivery secondhand through the Resend dashboard screenshot Sarel shared) to close out genuine first-party verification.
+> 2. Tier 3 (`founder-digest.yml`, `scout-alerts.yml`) is confirmed working end-to-end in production. Tier 0/1/2 (`deadline-reminders.yml`, `operational-alerts.yml`, `onboarding-nudges.yml`) have the recipient-lookup bug fixed (PR #148) and should now work on their own daily schedule, but nobody has confirmed a real send from any of the three yet - they touch real customer addresses, so don't manually dispatch them without Sarel's explicit go-ahead (same reasoning PR #148's own description gives).
+> 3. 4 stale/self-resolved `system_alerts` rows (pack 502, two already-fixed discovery bugs, one narrative schema-cache blip) are sitting open, waiting for Sarel to mark them resolved in `/admin` - not this session's to touch.
+> 4. `narrative_documents`'s PostgREST schema-cache 404 self-resolved mid-triage (2026-10-25) after ~1585 occurrences over ~17 hours - worth one live check that it hasn't recurred.
+> 5. Known, not-yet-actioned nitpick: `lifecycle_unsubscribe_token_for()` (migration `0093`) is granted to `anon` with no auth check by design (RFC 8058 needs it) - flagged as a minor, non-blocking privacy nitpick in PR #145's own description, never revisited since.
+>
+> Delete this block once it's been read and acted on - it's a handover marker, not a permanent record (the dated entries below are the permanent record).
+
+
+
 **2026-10-25 ~19:10 UTC — PR #151 merged (`ca6dcea`, Scout anti-noise throttle + batching); live triage of the 4 open "bridge pass failed"/"watch run failed" alerts, all 4 already resolved or self-resolved; PR #152 opened (bridge alert source tagging).** Sarel, once the new environment's live Supabase/Resend credentials finally reached this session: confirmed the Scout batching fix (189/189 tests, merged), then pulled the real `detail`/`context` for the 4 open alerts directly from the live DB (Supabase REST, service-role key - raw Postgres via `SUPABASE_DB_URL` is blocked by this sandbox's own network egress policy, confirmed by a timed-out `psql` connection attempt).
 
 **All 4 were already handled, nothing new to build beyond one source-tagging fix:**
