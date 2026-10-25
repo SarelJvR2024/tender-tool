@@ -1,5 +1,55 @@
 # System Status
 
+**2026-10-25 ~12:15 UTC — standing review pass: a real billing idempotency gap found and reproduced
+live in `apply_payfast_itn()` - NOT fixed this pass, flagged for Sarel's own call.** Orientation:
+`git fetch origin main` showed no new commits since this routine's own last pass (`fd30549`) -
+local checkout confirmed on the real tip (`git rev-parse HEAD` == `git rev-parse origin/main`)
+before starting, per the standing habit this routine adopted after getting burned by a stale
+checkout twice. Collision check: only open PR is `#118` (draft, stale, unrelated); every other
+branch on the remote is an orphaned, already-merged source branch. Stayed entirely clear of the PR
+#143/#149/#150 (and #131/#134-#138/#142) self-merge incident, as directed - that's in Sarel's own
+hands across two parallel conversations.
+
+**The finding**: `apply_payfast_itn()` (0078, last redefined in `0083`) has no idempotency guard
+against a duplicate/redelivered ITN for the SAME payment. Reproduced live against a fresh replay of
+all 87 migrations on a scratch Postgres: called it once for a test company with
+`p_payment_status='COMPLETE'` and a `p_period_end` of "now + 1 month" (mirroring the real route
+handler, `app/api/billing/payfast/itn/route.ts`, which recomputes `nextPeriodEnd()` fresh from
+`Date.now()` on every single invocation, with no memory of any prior call) - `current_period_end`
+set correctly to one month out. Called it again immediately after, with the exact same
+`m_payment_id`/`pf_payment_id`/`'COMPLETE'` status (simulating a genuine webhook redelivery, which
+PayFast's own docs describe as something a merchant's endpoint must tolerate) but computed as if 10
+days had passed - `current_period_end` silently moved another 10 days further out, with no new
+payment having occurred. The route handler itself always acks PayFast with `200 OK` regardless of
+outcome specifically so PayFast won't retry-on-failure, which rules out the most common cause of
+duplicate delivery, but doesn't rule out PayFast's own infrastructure-level redelivery, which is
+exactly the scenario their own ITN docs warn integrators to handle idempotently.
+
+**Why this needs Sarel's own call, not a straight fix in this pass**: the honest, correct fix isn't
+small. `m_payment_id` (our own merchant-generated id, stored on the subscription row) stays
+constant across a RECURRING subscription's whole lifetime in PayFast's model, while `pf_payment_id`
+(their own id) is meant to be unique PER CHARGE - so the dedup key has to be `pf_payment_id`, not
+`m_payment_id`, or every legitimate monthly renewal charge would get silently swallowed as a "dupe"
+of the first one. That needs a new claim/dedup table (the same shape this codebase already uses
+elsewhere for exactly this problem - `sent_deadline_reminders`, `sent_operational_alerts`,
+`notification_claims` from 0093), not a one-line guard, and I haven't independently confirmed
+PayFast's exact subscription-ITN field semantics against their own docs/SDK the way `lib/payfast.ts`'s
+existing code clearly already did for the signature algorithm - getting this wrong in the wrong
+direction (treating a legitimate renewal as a dupe) would silently stop a paying customer's renewal
+from ever taking effect, which is worse than the bug it would fix. **Not urgent today**: this repo's
+own migration `0083` header confirms no live Supabase project has ever run this schema yet, and
+`lib/payfast.ts`'s own header confirms PayFast is sandbox-only, Sarel's own explicit instruction -
+there is no live money or a real recurring customer this can affect right now. Flagging it here
+rather than rushing a fix that could get the dedup key wrong, especially with two other migrations
+(`0096`, `0097`) already queued waiting on Sarel's own apply step - a third, money-adjacent one isn't
+something this pass should add without him seeing it first.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `npx vitest run` 185/185 (unchanged, no code touched
+this pass - the reproduction above was done entirely against a scratch Postgres, nothing in the
+working tree was modified). No commit beyond this documentation entry.
+
+---
+
 **2026-10-25 ~10:20 UTC — standing review pass: a real cross-tenant reference gap closed on
 `narrative_documents` (migration `0097`) - reproduced live, fixed, re-verified against the full
 tenant-isolation suite; QA tooling re-confirmed sound; no collisions.** Orientation: `git fetch
