@@ -5,8 +5,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import process_narrative_jobs as pnj  # noqa: E402
+import system_alerts  # noqa: E402  (on the path via poll_loop, same as watch_deadlines's own tests)
 
 FAILS = []
+ALERTS = []
+system_alerts.set_sink(lambda payload: ALERTS.append(payload) or "test-alert")
 
 
 def check(name, cond, detail=""):
@@ -140,6 +143,45 @@ def test_build_context_assembles_the_shape_generate_narrative_expects():
     check("user_guidance passed through", context["user_guidance"] == "Keep it concise.")
 
 
+def test_process_one_never_leaks_a_raw_exception_to_the_customer():
+    """QA pass, 2026-10-25: process_one()'s own except clause used to write
+    str(e) straight into error_message for ANY unexpected exception (a
+    python-docx internal error, a KeyError, ...) - narrative-documents.tsx
+    shows this to the customer verbatim, no sanitisation on that side. Same
+    'never a raw Python/library exception' discipline process_cv_jobs.py's
+    own process_job() already follows. Also: this was the only
+    process_*_jobs.py bridge in the repo with no system_alerts call at all
+    on a genuine crash."""
+    stub, original = _patch({
+        "narrative_documents": [{"id": "job-1"}],  # non-empty -> claim_job() succeeds
+    })
+    real_build_context = pnj.build_context
+
+    def boom(*a, **k):
+        raise ValueError("Some raw internal detail that must never reach a customer")
+
+    pnj.build_context = boom
+    ALERTS.clear()
+    try:
+        pnj.process_one("url", "key", {"id": "job-1", "company_id": "c1", "tender_id": "t1", "kind": "methodology",
+                                       "style_length": "standard", "style_detail": "detailed",
+                                       "style_visual": "structured"}, "/tmp")
+    finally:
+        pnj.build_context = real_build_context
+        pnj.supabase_request = original
+
+    patches = [c for c in stub.calls if c[0] == "PATCH" and "status" in (c[2] or {})
+               and c[2]["status"] == "failed"]
+    check("a 'failed' PATCH was sent", len(patches) == 1, stub.calls)
+    if patches:
+        msg = patches[0][2]["error_message"]
+        check("the customer-facing error_message is the generic message, not the raw exception",
+              "raw internal detail" not in msg and msg == "Could not generate this document - try again. "
+              "If it keeps happening, let us know.", msg)
+    check("a system_alerts record was made for this genuine crash (previously none ever were)",
+          len(ALERTS) == 1 and "Some raw internal detail" in ALERTS[0]["p_message"], ALERTS)
+
+
 def main():
     test_load_key_people_computes_years_experience_from_graduation_date()
     test_load_key_people_handles_missing_graduation_date()
@@ -148,6 +190,7 @@ def main():
     test_load_other_companies_text_excludes_empty_generated_text()
     test_build_context_raises_generation_failed_when_company_row_is_missing()
     test_build_context_assembles_the_shape_generate_narrative_expects()
+    test_process_one_never_leaks_a_raw_exception_to_the_customer()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

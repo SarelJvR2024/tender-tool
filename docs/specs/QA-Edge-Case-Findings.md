@@ -4368,3 +4368,48 @@ reproducing the literal rendered string; restored: `ALL PASSED`. `test_form_fiel
 **Regression:** `engine/pack/process_pack_jobs.py`'s `adapt_company()` only - two keys in one
 nested dict, additive (a placeholder string instead of `None`, never changes a non-null value).
 No schema or other call-site changes.
+
+### Finding 75 (CONFIRMED, FIXED, severe - the narrative bridge was the only process_*_jobs.py bridge in the repo that leaked a raw Python exception straight to a customer-facing field, and the only one with no system_alerts visibility on a genuine crash)
+
+**Where:** `engine/narrative/process_narrative_jobs.py`'s `process_one()`.
+
+**What was tested:** rotated to worker/job-queue - the least recently touched standing area.
+`run_bridges.py`'s own freshly-landed "narrative" registration (a sibling pass, earlier the same
+day) made this bridge genuinely live for the first time - worth checking it holds to the same
+discipline every other bridge in this family already does, now that it actually runs. Checked
+`process_cv_jobs.py`'s own explicit precedent first: its `process_job()` comment says plainly that
+`error_message` "is read straight through by the Tender Workspace page and shown to the customer
+verbatim... so it must never be a raw Python/library exception" - citing a real past incident
+(a control-character crash naming python-docx internals). Checked whether `process_narrative_jobs.py`
+followed the same rule.
+
+**Finding (CONFIRMED, severe).** It didn't. `process_one()`'s final `except (GenerationFailed,
+Exception) as e:` branch wrote `str(e)` straight into `narrative_documents.error_message` for
+literally ANY unexpected exception - a python-docx internal error, a `KeyError`, anything -
+and `app/app/tenders/[id]/narrative-documents.tsx` (lines 219-220) renders that field to the
+customer verbatim, no sanitisation on that side either. Confirmed directly: forced a raw
+`ValueError("Some raw internal detail that must never reach a customer")` through `process_one()`
+and the exact string reached the `error_message` PATCH. Also confirmed by grep across every
+`process_*_jobs.py` bridge (`cv`, `onboarding`, `pack`, `general`) that this was the ONLY one that
+doesn't import `system_alerts` from `poll_loop` at all - a genuine crash in this specific bridge
+was completely invisible to Sarel's own ops alerting, unlike every sibling bridge.
+
+**Fix:** split the combined except clause - `GenerationFailed` (whose own messages in
+`generate_narrative.py` are already deliberately written as clean, customer-safe sentences, e.g.
+"The AI service rejected this request: ...") keeps showing its own message verbatim; a bare
+`Exception` now records a `system_alerts.record("narrative", ...)` call (matching every sibling
+bridge) and writes a generic customer message ("Could not generate this document - try again. If
+it keeps happening, let us know.") - the exact wording `process_cv_jobs.py`'s own equivalent branch
+already uses.
+
+**Verified the regression test actually catches the regression:** new
+`test_process_one_never_leaks_a_raw_exception_to_the_customer()` in `test_process_narrative_jobs.py`,
+forcing a raw exception through the real `process_one()` and checking both the PATCH payload and
+the `system_alerts` sink. Reverted the fix: both checks failed exactly as predicted (the raw
+exception text reappeared, no alert was recorded); restored: `0 failures`. Every other narrative
+test suite and `test_poll_loop.py` (the real `run_bridges.py` loop this bridge now runs inside) re-run
+clean.
+
+**Regression:** `engine/narrative/process_narrative_jobs.py` only - one except clause split into
+two, plus one import line. No schema or other call-site changes; `GenerationFailed`'s own
+customer-facing wording is completely unchanged.

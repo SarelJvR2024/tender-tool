@@ -2800,6 +2800,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-25, standing QA/robustness review - ninetieth run): the narrative bridge was the only one leaking a raw Python exception to a customer, and the only one with no system_alerts visibility on a crash
+
+Orientation: synced a sibling pass (`359559c`, a real pack-quota bypass fix - TypeScript/SQL only,
+no `engine/` overlap). Confirmed both real scheduled cron workflows (`daily-discovery`,
+`daily-digest`) ran green for real today (02:45/03:45 UTC window, delayed to ~07:49/08:43 UTC per
+GitHub's own documented scheduling variance) - the `lxml` fix from two runs ago holds in
+production, no further action needed there. Rotated to worker/job-queue - the least recently
+touched standing area - specifically the "narrative" bridge a sibling pass registered in
+`run_bridges.py` earlier today, now genuinely live for the first time.
+
+**Finding 75 (CONFIRMED, FIXED, severe).** `process_cv_jobs.py`'s own `process_job()` has an
+explicit comment: `error_message` "is read straight through by the Tender Workspace page and shown
+to the customer verbatim... so it must never be a raw Python/library exception" - citing a real
+past incident. `process_narrative_jobs.py`'s own equivalent branch didn't follow that rule: its
+combined `except (GenerationFailed, Exception)` wrote `str(e)` straight into
+`narrative_documents.error_message` for ANY unexpected exception, and
+`app/app/tenders/[id]/narrative-documents.tsx` renders that field verbatim with no sanitisation.
+Confirmed directly: forced a raw `ValueError` through the real `process_one()` and the exact
+internal string reached the database PATCH. Also the only `process_*_jobs.py` bridge in the repo
+with no `system_alerts` import at all - a genuine crash here was invisible to Sarel's own ops
+alerting, unlike `cv`/`onboarding`/`pack`.
+
+**Fix:** split the except clause - `GenerationFailed` (already written with clean, customer-safe
+messages) keeps its own wording; a bare `Exception` now calls `system_alerts.record(...)` and
+writes the same generic customer message `process_cv_jobs.py`'s own equivalent branch uses.
+
+**Verified the regression test actually catches the regression:** new
+`test_process_one_never_leaks_a_raw_exception_to_the_customer()` in `test_process_narrative_jobs.py`.
+Reverted the fix: both checks failed exactly as predicted; restored: `0 failures`. Every other
+narrative suite and `test_poll_loop.py` re-run clean.
+
 ## This pass (2026-10-25, standing QA/robustness review - eighty-ninth run): repo-wide sweep for the "prints the literal word None" bug class (Findings 49/73/74) - one near-miss found and ruled out, nothing new reachable
 
 Orientation: synced a sibling pass (`0ce6556`, Finding 74 - the same "None"-interpolated-into-a-

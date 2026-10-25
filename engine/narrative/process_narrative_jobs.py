@@ -39,7 +39,7 @@ ENGINE = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ENGINE, "worker"))
 
-from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS  # noqa: E402
+from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 from build_docx import build_docx  # noqa: E402
 from generate_narrative import SetupError, TransientError, GenerationFailed, generate_with_uniqueness_check  # noqa: E402
 
@@ -275,10 +275,32 @@ def process_one(url, key, job, out_dir):
         supabase_request(url, key, "PATCH", f"narrative_documents?id=eq.{job['id']}",
                          {"status": "requested"})
         print(f"Transient error on job {job['id']}, requeued: {e}", file=sys.stderr)
-    except (GenerationFailed, Exception) as e:  # noqa: BLE001 - a real, final failure for this one job
+    except GenerationFailed as e:
+        # generate_narrative.py's own messages are already written to be
+        # customer-safe, plain sentences ("The AI service rejected this
+        # request: ...") - safe to show verbatim, unlike the generic
+        # Exception branch below.
         supabase_request(
             url, key, "PATCH", f"narrative_documents?id=eq.{job['id']}",
             {"status": "failed", "error_message": str(e), "completed_at": _now_iso()},
+        )
+    except Exception as e:  # noqa: BLE001 - a bug, not a user problem
+        # narrative-documents.tsx shows error_message to the customer
+        # verbatim (no sanitisation on that side) - this used to write the
+        # raw str(e) straight through for ANY unexpected exception here
+        # (a python-docx internal error, a KeyError, ...), the exact "never
+        # a raw Python/library exception" problem process_cv_jobs.py's own
+        # process_job() was already written to avoid. This was also the
+        # only process_*_jobs.py bridge in the repo with no system_alerts
+        # call at all on a genuine crash - silent from Sarel's own ops
+        # visibility too. QA pass, 2026-10-25.
+        system_alerts.record("narrative", f"Narrative generation crashed: {type(e).__name__}: {e}", "error", exc=e,
+                             context={"job_id": job["id"], "company_id": job.get("company_id"), "kind": job.get("kind")})
+        supabase_request(
+            url, key, "PATCH", f"narrative_documents?id=eq.{job['id']}",
+            {"status": "failed",
+             "error_message": "Could not generate this document - try again. If it keeps happening, let us know.",
+             "completed_at": _now_iso()},
         )
 
 
