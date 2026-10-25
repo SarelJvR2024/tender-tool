@@ -1,5 +1,19 @@
 # System Status
 
+**2026-10-25 ~19:10 UTC — PR #151 merged (`ca6dcea`, Scout anti-noise throttle + batching); live triage of the 4 open "bridge pass failed"/"watch run failed" alerts, all 4 already resolved or self-resolved; PR #152 opened (bridge alert source tagging).** Sarel, once the new environment's live Supabase/Resend credentials finally reached this session: confirmed the Scout batching fix (189/189 tests, merged), then pulled the real `detail`/`context` for the 4 open alerts directly from the live DB (Supabase REST, service-role key - raw Postgres via `SUPABASE_DB_URL` is blocked by this sandbox's own network egress policy, confirmed by a timed-out `psql` connection attempt).
+
+**All 4 were already handled, nothing new to build beyond one source-tagging fix:**
+- **Narrative bridge, 1585 occurrences and still climbing at time of query** - `PGRST205: Could not find the table 'public.narrative_documents' in the schema cache`. Confirmed live and broken on a first query; confirmed RECOVERED on a second query ~3 minutes later (Supabase's own managed PostgREST schema-cache listener catching up on its own, same class of issue as the `claim_notification` PGRST202 incident two days ago, but this one self-resolved without a manual reload). Worth a human glance at `/admin` to confirm it hasn't recurred before marking resolved.
+- **Pack bridge, 1 occurrence (2026-10-22)** - a transient `502 Bad Gateway` from Supabase's own REST API. Never recurred. Stale, safe to resolve.
+- **Discovery watch, 1 occurrence (2026-10-24)** - `ModuleNotFoundError: No module named 'lxml'`. Already fixed - `lxml==6.1.3` is pinned in `daily-discovery.yml`'s own install step, with a comment citing this exact error message. Stale, safe to resolve.
+- **Discovery watch, 1 occurrence (2026-10-19)** - a `400 Bad Request` from a generator (not a list/tuple) reaching `company_profiles.py`'s `select()` filter-builder, producing a garbage `in.()` value. Already fixed - `download_discovered_documents.py`'s `existing_urls()` converts to a `sorted()` list before chunking, and the code's own comment confirms this exact bug was found and fixed "live 2026-10-20," the day after this alert fired. Stale, safe to resolve.
+
+**The one real, shipped fix (PR #152, not yet merged)**: both "bridge pass failed"/"timed out" alerts in `engine/worker/run_bridges.py`'s `BridgeRunner.run_once()` showed `source="worker"` with the real bridge name buried in `context.bridge` - inconsistent with every per-job alert the same two bridges raise internally (already correctly `source="pack"`/`"narrative"`). Fixed at the one real call site (not inside `process_pack_jobs.py`/`process_narrative_jobs.py` themselves, which have no top-level try/except around their own `main()` and never raise this particular alert at all - `run_bridges.py`'s subprocess-exit-code wrapper is the only thing that does). `context.bridge` kept alongside. Real, flagged consequence: this changes `system_alerts.fingerprint()`'s input (source+message), so already-open `"worker"`-sourced rows won't auto-merge with a new correctly-sourced occurrence - they need resolving separately, not expected to roll forward.
+
+Verified: `engine/worker/test_poll_loop.py`'s own bridge-loop smoke suite passes clean, confirmed showing `source=hanger` (its own test bridge name) instead of `worker` for the exact alert path this touches.
+
+---
+
 **2026-10-25 ~18:16 UTC — standing review pass: a real BOQ-extraction false-negative fixed -
 a genuine all-lump-sum priced bill (Preliminaries & General) was being rejected entirely as a
 "coincidental header match"; QA tooling re-confirmed sound; no collisions.** Orientation: `git fetch
