@@ -244,10 +244,24 @@ def parse_boq_workbook(path_or_file):
             attempts.append(f"'{sheet}': header matched at row {header_row} but no item rows followed it")
             continue
         numeric_qty = sum(1 for it in items if it["quantity"] is not None)
-        if numeric_qty / len(items) < MIN_NUMERIC_QUANTITY_RATIO:
-            attempts.append(f"'{sheet}': header matched at row {header_row} but only {numeric_qty}/{len(items)} "
-                            "rows had a numeric quantity - likely a coincidental header match, not a real priced "
-                            "schedule")
+        # A genuine Preliminaries & General bill (and some smaller tenders'
+        # ENTIRE priced schedule) is routinely all lump-sum: "Allow a lump sum
+        # for site establishment" with a real rand Amount and no Quantity/Rate
+        # at all - quantity is implicitly 1, left blank in the buyer's own
+        # template. Rejecting every row of a sheet like that as a "coincidental
+        # header match" (confirmed live: a real P&G-shaped sheet came back
+        # with 0 items) throws away a genuine priced schedule. A real line
+        # item still needs a real, non-zero rand value somewhere - this is
+        # deliberately NOT relaxed to "any numeric field", since the sibling
+        # false-positive case this module already guards against (a
+        # returnables checklist whose "Quantity" column is Yes/No/Unclear)
+        # has a literal 0 placed in its own Amount column for every row, and
+        # a uniform zero is itself the tell that it isn't real pricing.
+        numeric_priced = sum(1 for it in items if it["rate_zar"] not in (None, 0) or it["amount_zar"] not in (None, 0))
+        if numeric_qty / len(items) < MIN_NUMERIC_QUANTITY_RATIO and numeric_priced / len(items) < MIN_NUMERIC_QUANTITY_RATIO:
+            attempts.append(f"'{sheet}': header matched at row {header_row} but only {numeric_qty}/{len(items)} rows "
+                            f"had a numeric quantity and only {numeric_priced}/{len(items)} had a real, non-zero "
+                            "rate or amount - likely a coincidental header match, not a real priced schedule")
             continue
         return {"items": items, "sheet": sheet, "header_row": header_row,
                 "note": f"Parsed {len(items)} line item(s) from sheet '{sheet}' (header row {header_row})."}

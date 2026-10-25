@@ -1,5 +1,50 @@
 # System Status
 
+**2026-10-25 ~18:16 UTC — standing review pass: a real BOQ-extraction false-negative fixed -
+a genuine all-lump-sum priced bill (Preliminaries & General) was being rejected entirely as a
+"coincidental header match"; QA tooling re-confirmed sound; no collisions.** Orientation: `git fetch
+origin main` showed no new commits since this routine's own last pass (`0b9a87f`) - local checkout
+confirmed on the real tip before starting. Only open PR is `#118` (draft, stale, unrelated).
+Stayed entirely clear of the PR #143/#149/#150 (and #131/#134-138/#142) self-merge incident, as
+directed.
+
+**The finding, reproduced live before touching anything**: `boq_extraction.py`'s
+`MIN_NUMERIC_QUANTITY_RATIO` sheet-acceptance check required a majority of a sheet's matched rows
+to have a parseable numeric **quantity**, specifically, or the whole sheet (and everything in it)
+was discarded with a note calling it a "coincidental header match." A real, extremely common SA
+tender shape - a Preliminaries & General bill, or some smaller tenders' entire priced schedule,
+made up of lump-sum lines ("Allow a lump sum for site establishment") with a real rand Amount and
+no Quantity/Rate at all (quantity is implicitly 1, left blank in the buyer's own template) - fails
+that check at 0% every time, even though every row carries a genuine, non-zero rand value.
+Reproduced directly: a synthetic P&G sheet (4 lines, real descriptions, real amounts of
+R85,000/R220,000/R45,000/R18,000, no quantity column populated) came back with **0 items** and a
+note actively mischaracterising it as a coincidental match. This silently drops a genuine priced
+schedule from `tender_scope_records.boq_summary` - the exact market-intelligence data this module
+exists to surface.
+
+**Fix, kept deliberately narrow**: the sheet-acceptance check now also passes when a majority of
+matched rows have a real, **non-zero** rate or amount, even with no quantity. Deliberately NOT
+widened to "any numeric field at all" - the sibling false-positive case this module already
+protects against (a returnables checklist whose "Quantity" column reads Yes/No/Unclear) has a
+literal `0` placed in its own Amount column for every row in the existing test fixture, and a
+uniform zero is itself the signal that it isn't real pricing; checking non-zero specifically keeps
+that protection intact. Verified properly, not just read: reverted the fix first, confirmed the new
+test (`test_all_lump_sum_preliminaries_bill_is_not_rejected`) fails with the exact predicted `0
+items` result; restored, confirmed the full `test_boq_extraction.py` suite green (16 checks, 0
+failures) including every pre-existing false-positive-rejection test unchanged; `test_tender_
+enrichment.py` (the one real caller) also still clean.
+
+**Pushed directly to main, no PR, no self-merge**: `engine/discovery/boq_extraction.py` +
+`engine/discovery/test_boq_extraction.py`.
+
+**Flagged for Sarel**: nothing new - existing backlog (migration `0093` live/cache status,
+migrations `0096`/`0097`, the PayFast idempotency design question) unchanged.
+
+**QA tooling**: sound - `tsc --noEmit`/`eslint` clean (no TypeScript touched this pass), all
+touched Python suites clean.
+
+---
+
 **2026-10-25 ~16:16 UTC — standing review pass: clean sweep of `engine/ocr/scan_ocr.py` (the
 Tesseract OCR fallback) - no new bug found after real effort, documented rather than forced; QA
 tooling re-confirmed sound; no collisions.** Orientation: `git fetch origin main` showed one new

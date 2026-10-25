@@ -265,11 +265,34 @@ def test_formula_error_cell_is_null_not_a_fabricated_zero():
     check(item["amount_zar"] is None, f"a #DIV/0! amount must be null, not a fabricated 0.0 - got {item['amount_zar']!r}")
 
 
+def test_all_lump_sum_preliminaries_bill_is_not_rejected():
+    """A genuine Preliminaries & General bill (and some smaller tenders'
+    ENTIRE priced schedule) is routinely all lump-sum - a real rand Amount on
+    every row, no Quantity/Rate at all (quantity is implicitly 1, left blank
+    in the buyer's own template). This must still be accepted as a real
+    priced schedule, not rejected as a coincidental header match the way a
+    genuinely non-numeric table (test_non_numeric_quantity_column_rejected_
+    as_false_positive, where every row also has a literal 0 amount) is."""
+    data = make_workbook_bytes({"P and G": [
+        ["Description", "Unit", "Qty", "Rate", "Amount"],
+        ["Establishment of site - allow a lump sum", "sum", None, None, 85000],
+        ["General overheads for duration of contract - allow a lump sum", "sum", None, None, 220000],
+        ["Removal of site establishment on completion", "sum", None, None, 45000],
+        ["Health and safety file compilation", "sum", None, None, 18000],
+    ]})
+    result = boq.parse_boq_workbook(io.BytesIO(data))
+    check(result["sheet"] == "P and G", f"a real all-lump-sum bill must still be parsed, got {result}")
+    check(len(result["items"]) == 4, f"all 4 real lump-sum lines should be items, got {result['items']}")
+    check(result["items"][0]["amount_zar"] == 85000, f"amount should be read normally, got {result['items'][0]}")
+    check(result["items"][0]["quantity"] is None, "quantity genuinely wasn't given - must stay null, never guessed")
+
+
 def main():
     test_basic_boq_parsed_with_totals_excluded()
     test_header_wording_variants_still_detected()
     test_no_confident_header_leaves_items_empty_with_note()
     test_non_numeric_quantity_column_rejected_as_false_positive()
+    test_all_lump_sum_preliminaries_bill_is_not_rejected()
     test_footer_note_in_the_description_column_is_not_fabricated_as_an_item()
     test_skips_cover_sheet_and_finds_the_real_table_on_a_later_sheet()
     test_unreadable_file_returns_honest_note_never_crashes()
