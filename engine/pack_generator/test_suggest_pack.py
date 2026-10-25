@@ -16,8 +16,10 @@ Tender Workspace would rank first for the identical position.
 Run: python3 engine/pack_generator/test_suggest_pack.py
 """
 import datetime
+import json
 import os
 import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -78,10 +80,44 @@ def test_tied_score_and_years_breaks_by_name():
           ranked1[0]["name"] == "Amy Person" and ranked2[0]["name"] == "Amy Person", (ranked1, ranked2))
 
 
+def test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell():
+    """Finding (2026-10-25): suggest()'s own `_excel_date(wb.cached("SETUP",
+    "C3"))` had no guard at all, unlike classify_tender.read_setup()'s
+    identical calculation - a blank or unreadable SETUP!C3 cell (a real,
+    plausible template shape, not every buyer fills in every cell the same
+    way) raised a bare "int() argument must be a string..." with no
+    indication which cell or workbook was the problem."""
+    print("suggest(): a blank/unreadable SETUP!C3 cell is refused with a clear, named error, not a bare TypeError")
+    real_workbook = sp.Workbook
+
+    class FakeWB:
+        def __init__(self, path):
+            pass
+
+        def cached(self, sheet, ref):
+            return "R.396-010-2025/1F" if ref == "C2" else None
+
+    sp.Workbook = FakeWB
+    d = tempfile.mkdtemp()
+    profile_path = os.path.join(d, "profile.json")
+    json.dump({"key_people": []}, open(profile_path, "w"))
+    try:
+        sp.suggest("fake_template.xlsm", profile_path, d)
+        check("a blank SETUP!C3 should have raised", False)
+    except ValueError as e:
+        check("raises ValueError naming the template and the cell, not a bare TypeError",
+              "SETUP!C3" in str(e) and "fake_template.xlsm" in str(e), str(e))
+    except TypeError as e:
+        check("raises ValueError naming the template and the cell, not a bare TypeError", False, str(e))
+    finally:
+        sp.Workbook = real_workbook
+
+
 def main():
     test_tied_score_breaks_by_years_regardless_of_profile_order()
     test_genuine_score_difference_still_wins_over_years()
     test_tied_score_and_years_breaks_by_name()
+    test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

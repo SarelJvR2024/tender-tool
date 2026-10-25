@@ -2907,6 +2907,34 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-25, standing QA/robustness review - ninety-first run): suggest_pack.py's own CLI tool crashed with a bare, uninformative TypeError on a blank SANRAL closing-date cell
+
+Orientation: synced two sibling passes (`fd30549`, a real cross-tenant reference gap closed on
+`narrative_documents` - migration `0097`; `e4223d1`, a real PayFast ITN idempotency gap documented
+and flagged, not fixed) - both SQL/TypeScript, no `engine/` overlap. Rotated to intake - the most
+overdue standing area (last dedicated pass the eighty-second run, 2026-10-24).
+
+**Finding 76 (CONFIRMED, FIXED, moderate).** `classify_tender.read_setup()` wraps its own
+`_excel_date(wb.cached("SETUP", "C3"))` calculation in a `try/except` specifically because a blank
+cell used to crash - `suggest_pack.py`'s own `suggest()` CLI entry point does the identical
+calculation with no guard at all. Confirmed directly: a blank/unreadable `SETUP!C3` raised a bare
+`TypeError: int() argument must be a string...`, naming neither the template nor the cell. Traced
+every real caller first: the live production pipeline (`process_pack_jobs.py`) only reuses this
+file's `read_required_positions()`/`score_candidate()` and reads `closing_date` from the real DB
+column instead, so this specific path isn't reachable through the web app - but `suggest()` is a
+real, documented, hands-on CLI step Sarel runs directly, and a buyer's template not filling
+`SETUP!C3` the way every other one does is a plausible real shape.
+
+**Fix:** wrapped the calculation in a `try/except (TypeError, ValueError)` that raises a
+`ValueError` naming the template path, the cell, and the actual value - same "refuse loudly, name
+the cell" discipline `classify_tender.read_setup()`/`sanral_fill.set_date()` already use.
+
+**Verified the regression test actually catches the regression:** new
+`test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell()` in
+`test_suggest_pack.py` (this module's first test to exercise `suggest()` itself). Reverted the fix:
+failed exactly as predicted; restored: `0 failures`. `test_classify_tender.py` and
+`test_sanral_b7.py` re-run clean.
+
 ## This pass (2026-10-25, standing QA/robustness review - ninetieth run): the narrative bridge was the only one leaking a raw Python exception to a customer, and the only one with no system_alerts visibility on a crash
 
 Orientation: synced a sibling pass (`359559c`, a real pack-quota bypass fix - TypeScript/SQL only,

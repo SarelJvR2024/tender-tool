@@ -4413,3 +4413,44 @@ clean.
 **Regression:** `engine/narrative/process_narrative_jobs.py` only - one except clause split into
 two, plus one import line. No schema or other call-site changes; `GenerationFailed`'s own
 customer-facing wording is completely unchanged.
+
+### Finding 76 (CONFIRMED, FIXED, moderate - suggest_pack.py's own CLI tool crashed with a bare, uninformative TypeError on a blank or unreadable SANRAL closing-date cell, instead of naming the problem)
+
+**Where:** `engine/pack_generator/suggest_pack.py`'s `suggest()` - the candidate-suggestion CLI
+tool (Step 2 of the SANRAL pack-compilation playbook).
+
+**What was tested:** rotated to intake - the most overdue standing area. `classify_tender.py`'s own
+`read_setup()` reads the identical SANRAL `SETUP!C3` closing-date cell via the identical
+`_excel_date()` helper, but wraps it in a `try/except (TypeError, ValueError)` specifically because
+a blank or unreadable cell used to crash. `suggest_pack.py` defines its OWN separate
+`read_required_positions()` (reused by the real production pack pipeline,
+`process_pack_jobs.py`) in the same file - worth checking whether that file's OWN `suggest()`
+entry point, which does the identical `_excel_date(wb.cached("SETUP", "C3"))` calculation, got the
+same guard. It hadn't.
+
+**Finding (CONFIRMED, moderate).** Confirmed `suggest()`'s own closing-date line had no guard at
+all: a blank or unreadable `SETUP!C3` cell raised a bare
+`TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'`,
+naming neither the template file nor which cell was the problem. Traced every real caller of this
+module first: `process_pack_jobs.py` (the actual production pipeline) only uses
+`read_required_positions()`/`score_candidate()` from this file and reads `closing_date` from the
+real `tenders.closing_date` DB column instead, so this specific bug is not reachable through the
+live web app - but `suggest()` is a real, hands-on CLI step in the documented pack-compilation
+playbook Sarel runs directly, and a buyer's SANRAL template not filling `SETUP!C3` the same way
+every other one does is a completely plausible real-world shape.
+
+**Fix:** wrapped the same calculation in a `try/except (TypeError, ValueError)` that raises a
+`ValueError` naming the template path, the cell, and the actual (unreadable) value - same "refuse
+loudly, name the cell" discipline `classify_tender.read_setup()` and `sanral_fill.set_date()`
+already follow for this exact situation.
+
+**Verified the regression test actually catches the regression:** new
+`test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell()` in
+`test_suggest_pack.py` (this module's first test to exercise `suggest()` itself, not just its
+scoring helpers), with a minimal fake `Workbook`. Reverted the fix: failed exactly as predicted
+(the bare `TypeError` reappeared); restored: `0 failures`. `test_classify_tender.py` and
+`test_sanral_b7.py` re-run clean.
+
+**Regression:** `engine/pack_generator/suggest_pack.py`'s `suggest()` only - one calculation now
+wrapped in a try/except that raises a clearer error of the same type family. No schema or other
+call-site changes; `process_pack_jobs.py`'s own use of this module is untouched.
