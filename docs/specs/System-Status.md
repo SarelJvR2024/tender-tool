@@ -2745,6 +2745,44 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-25, standing QA/robustness review - eighty-ninth run): repo-wide sweep for the "prints the literal word None" bug class (Findings 49/73/74) - one near-miss found and ruled out, nothing new reachable
+
+Orientation: synced a sibling pass (`0ce6556`, Finding 74 - the same "None"-interpolated-into-a-
+`log.confirmed()` bug class as this routine's own Finding 73, found independently in
+`generate_cv.py`'s education table a few hours later). Three real instances of the identical
+pattern in three different files inside one day (49, 73, 74) is a strong signal the pattern itself
+is worth sweeping systematically rather than waiting to stumble on the next one by reading files
+one at a time - a deliberate, one-time deviation from picking a single rotation area this run.
+
+Grepped the whole `engine/` tree for every `log.confirmed(f"...")` call and every `add_run(f"...")`/
+`.text = f"..."` DOCX write with a bracket-accessed (not `.get()`-guarded) dict field - the exact
+shape all three real bugs shared - and checked each one found against the real DB schema and the
+real call path that reaches it:
+
+- `fill_a_forms.py`'s own A9 (SARS TCS PIN), A12 (B-BBEE certificate) and A20 (COID letter) blocks
+  all use the identical "confirmed value built from several nullable fields" shape - but each is
+  correctly gated behind an `if` that already requires every field it interpolates to be truthy
+  first (`if comp.get("sars_tcs_pin"):`, `if bee_level and proof_label and expiry and ...:`,
+  `if coid_number and coid_is_current:`). Already safe.
+- `fill_docx_forms.py`'s C.1.1.1 Form of Offer filler writes `signatory['signatory_capacity']`
+  (a nullable `people` column, migration `0001`, no `not null`) straight into the real generated
+  document with a bare bracket access and no guard at all - looked like a genuine, worse-than-
+  provenance-only instance (the literal "None" would land in the actual signed, submitted form).
+  Ruled out: `process_pack_jobs.py`'s own signatory query (`client.select("people", {"company_id":
+  ..., "signatory_capacity": NOT_NULL}, ...)`) already filters to only people whose
+  `signatory_capacity IS NOT NULL`, and raises a loud `ValueError` ("No person at this company has
+  a signatory capacity set") before `fill_docx_forms.py` is ever called if none qualify - the real
+  production path is already guaranteed-safe by construction, confirmed by reading the query, not
+  assumed.
+- `company_documents.py`'s guideline-field filler and the remaining `fill_docx_forms.py` call sites
+  (key-person rows, representative email) all explicitly check for a missing/empty value and route
+  to `log.missing(...)` BEFORE the `log.confirmed(...)` branch ever runs - already correctly
+  structured.
+
+No Python file changed this pass - the one near-miss found is provably unreachable, not silently
+left unfixed. Logging this as a genuine, valuable sweep (closes out the bug class this routine's
+own prior findings opened, for the next pass's benefit), not a skipped cycle.
+
 ## This pass (2026-10-25, standing QA/robustness review - eighty-eighth run): a real company's professional indemnity insurance could print the literal word "None" twice in a field_provenance entry marked confirmed
 
 Orientation: synced a sibling landing (`4703382`, worker/job-queue area: the narrative bridge
