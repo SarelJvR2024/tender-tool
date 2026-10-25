@@ -11,6 +11,12 @@
 # mechanism, not a replacement for it - flagged there and in this change's
 # own PR description, not silently decided.
 #
+# Anti-noise throttle (2026-10-25): only alerts with activity in the last 30
+# minutes qualify (app/lib/scoutAnomalyAlerts.ts's own SCOUT_ANOMALY_MAX_AGE_MINUTES
+# - a stale backlog item is still covered by the daily founder digest's own
+# count, just not as its own interrupt), and every run sends at most ONE
+# email covering every alert it claims, never one email per alert.
+#
 # Needs NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/RESEND_API_KEY
 # (same repository secrets the other email workflows already use), plus
 # ADMIN_NOTIFICATION_EMAIL and (optional) RESEND_FROM_SCOUT. Until both

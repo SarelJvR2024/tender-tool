@@ -1,7 +1,7 @@
 // Tier 3 - Founder & Quality Scout Alerts (notification engine brief,
 // section 3, Tier 3). Sent to Sarel / the platform admin.
 import { formatDateTime } from "./dates.ts";
-import { button, escapeHtml, infoCard, layout, pill } from "./emailBrand.ts";
+import { button, escapeHtml, infoCard, layout, pill, type Tone } from "./emailBrand.ts";
 import { adminSubject } from "./emailSubjects.ts";
 import type { NotificationEmail } from "./notificationEngine.ts";
 
@@ -47,6 +47,59 @@ export function scoutAnomalyEmail(opts: {
     { appUrl: opts.appUrl }
   );
   const text = `[${opts.severity.toUpperCase()}] ${opts.message}\nSource: ${opts.source} (${opts.occurrences}x since ${formatDateTime(opts.firstSeenAt)})\n${opts.detail ?? ""}\n\n${opts.appUrl}/admin`;
+  return { subject, html, text };
+}
+
+// 3.1b Batched Instant Quality Scout Anomaly Alert (2026-10-25, Sarel's own
+// anti-noise ask: "batch multiple simultaneous anomalies into a single
+// summary email rather than sending 7 separate emails"). scripts/send-
+// scout-alerts.ts now always sends through THIS function, never the single-
+// alert scoutAnomalyEmail() above - kept for scripts/render-email-samples.ts's
+// own sample set and as a smaller building block, but no longer a live
+// sender call site. Renders 1..N alerts the same way (a "batch of one" is
+// just a list with one row) so there is exactly one template, not two
+// near-duplicate ones to keep in sync.
+export type ScoutAlertSummary = {
+  source: string;
+  severity: "critical" | "error" | "warning";
+  message: string;
+  occurrences: number;
+  firstSeenAt: string;
+};
+
+const SEVERITY_TONE: Record<ScoutAlertSummary["severity"], Tone> = { critical: "urgent", error: "warning", warning: "info" };
+
+export function scoutAnomalyBatchEmail(opts: { alerts: ScoutAlertSummary[]; appUrl: string }): NotificationEmail {
+  const n = opts.alerts.length;
+  const criticalCount = opts.alerts.filter((a) => a.severity === "critical").length;
+  const worstTone: Tone = criticalCount > 0 ? "urgent" : "warning";
+  const headline = n === 1 ? opts.alerts[0].message : `${n} new Quality Scout exception${n === 1 ? "" : "s"}${criticalCount > 0 ? ` (${criticalCount} critical)` : ""}`;
+  const subject = adminSubject({ summary: headline.slice(0, 120) });
+
+  const rows = opts.alerts
+    .map(
+      (a) => `
+        <tr>
+          <td style="padding:10px 0;border-top:1px solid #E2E8F0;vertical-align:top;white-space:nowrap;">${pill(a.severity.toUpperCase(), SEVERITY_TONE[a.severity])}</td>
+          <td style="padding:10px 0 10px 12px;border-top:1px solid #E2E8F0;vertical-align:top;">
+            <p style="margin:0 0 2px;font-size:14px;font-weight:600;color:#0B1F3A;">${escapeHtml(a.message)}</p>
+            <p style="margin:0;font-size:12px;color:#5C6374;">Source: ${escapeHtml(a.source)} - first seen ${escapeHtml(formatDateTime(a.firstSeenAt) ?? a.firstSeenAt)}${a.occurrences > 1 ? ` - ${a.occurrences} occurrences` : ""}</p>
+          </td>
+        </tr>`
+    )
+    .join("");
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill(n === 1 ? "SCOUT ALERT" : `SCOUT ALERT - ${n} ISSUES`, worstTone)}</p>
+      <p style="margin:0 0 16px;font-size:16px;font-weight:700;">${n === 1 ? "An exception needs a look" : `${n} exceptions need a look`}</p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 20px;">${rows}</table>
+      ${button(`${opts.appUrl}/admin`, "Open Admin Triage Queue")}
+    `,
+    headline,
+    { appUrl: opts.appUrl }
+  );
+  const text = `${headline}\n\n${opts.alerts.map((a) => `[${a.severity.toUpperCase()}] ${a.message} - ${a.source} (${a.occurrences}x since ${formatDateTime(a.firstSeenAt)})`).join("\n")}\n\n${opts.appUrl}/admin`;
   return { subject, html, text };
 }
 

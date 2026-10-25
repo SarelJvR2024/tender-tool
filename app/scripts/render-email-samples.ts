@@ -16,7 +16,7 @@ import {
   printSignCutoffEmail,
 } from "../lib/emailTemplatesTier1.ts";
 import { complianceDigestEmail, SARS_PIN_RISK_NOTE } from "../lib/emailTemplatesTier2.ts";
-import { founderDailyDigestEmail, scoutAnomalyEmail } from "../lib/emailTemplatesTier3.ts";
+import { founderDailyDigestEmail, scoutAnomalyBatchEmail, scoutAnomalyEmail } from "../lib/emailTemplatesTier3.ts";
 import {
   adminNewSignupEmail,
   adminPaidConversionEmail,
@@ -118,6 +118,17 @@ const samples: Record<string, { subject: string; html: string; text: string }> =
     occurrences: 3,
     firstSeenAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
     context: { company_id: "6d1be2fc-6568-...", job_id: "0c7c90d2-fbc1-...", upload_id: "sample" },
+    appUrl: APP_URL,
+  }),
+  // The live sender's own shape (scripts/send-scout-alerts.ts, 2026-10-25
+  // anti-noise batching) - one email covering every alert claimed in a
+  // single run, not one email per alert.
+  "03-scout-anomaly-batch": scoutAnomalyBatchEmail({
+    alerts: [
+      { source: "pack", severity: "critical", message: "Pack bridge pass failed: tender_pack_jobs stuck in 'generating' past its own timeout", occurrences: 4, firstSeenAt: new Date(Date.now() - 12 * 60 * 1000).toISOString() },
+      { source: "narrative", severity: "error", message: "Narrative bridge pass failed: LibreOffice conversion returned no output file", occurrences: 2, firstSeenAt: new Date(Date.now() - 25 * 60 * 1000).toISOString() },
+      { source: "discovery", severity: "error", message: "New-tender watch run failed: OCDS API returned 503 after 3 retries", occurrences: 1, firstSeenAt: new Date(Date.now() - 5 * 60 * 1000).toISOString() },
+    ],
     appUrl: APP_URL,
   }),
   "03-founder-daily-digest": founderDailyDigestEmail({
