@@ -1,5 +1,30 @@
 # System Status
 
+**2026-10-25 ~20:16 UTC — standing review pass: no new fix this cycle, by choice - 8 commits landed
+since the last pass, nearly all of it the notification-engine session resolving real production
+migration gaps (0087/0097/0094/0095 all confirmed applied live, PR #151/#152 merged), which matters
+more to relay to Sarel right now than a fresh bug hunt.** Orientation: `git fetch origin main`
+pulled 8 new commits since this routine's own last pass (`bd680f9`); local checkout fast-forwarded
+and confirmed on the real tip. Read the full stretch of this file written since - no overlap, no
+collision, nothing of this routine's own prior findings touched. Stayed entirely clear of the PR
+#143/#149/#150 (and #131/#134-#138/#142) self-merge incident, as directed.
+
+**Backlog this routine has been tracking, now materially smaller than last reported to Sarel**:
+migration `0093`'s live status is resolved (confirmed genuinely applied, not a cache issue -
+`claim_notification`/`record_notification_sent`/`lifecycle_unsubscribe_token_for`/
+`unsubscribe_lifecycle_email` all live). Migrations `0094`/`0095` (`company_notification_recipients`)
+and `0087`+`0097` (`narrative_documents`, table and its tenant-integrity trigger together) were both
+found genuinely missing from the live DB by the notification-engine session tonight, and both are
+now confirmed fixed by Sarel running the SQL directly - verified via real REST calls, not assumed.
+**Only two items remain on this routine's own backlog**: migration `0096` (pack-quota trial-expiry
+check, this routine's own earlier fix, still not applied live) and the PayFast ITN idempotency
+design question (still unactioned, correctly - not urgent, PayFast is sandbox-only).
+
+**QA tooling**: sound after the pull - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3
+pre-existing warnings). No application code changed this pass.
+
+---
+
 **2026-10-25 ~20:05 UTC — live Resend send confirmed first-party (real `resendId` back); `narrative_documents` PostgREST schema-cache 404 is NOT self-resolved - it's live and broken right now, 1607 occurrences and still climbing over ~18 hours, correcting the prior entry's "self-resolved" read; PR #152 left untouched, merge decision stays Sarel's.** Fresh session, per the prior session's handover ("Resume here" block, now deleted per its own instruction) - its own env var additions (`RESEND_API_KEY`/`ADMIN_NOTIFICATION_EMAIL`/`RESEND_FROM_*`) only take effect in a session created after they're saved, so only this new one could pick them up. Confirmed present at startup.
 
 **1. First-party Resend verification - done.** Called `sendTransactionalEmail()` directly (one-off script, never committed) with `from: "scout"`, `to: adminNotificationEmail()` (`sarel@tenderready.app`, read from env, not hardcoded). Got back `{"status":"sent","resendId":"01a17479-c089-798a-8202-90327f786b64"}` - a real Resend send ID, not a secondhand dashboard screenshot. Sarel: check your own inbox (`sarel@tenderready.app`) for "Tender Ready - live Resend verification (Claude session)" to confirm receipt end-to-end (Resend accepting the send is not the same as a mailbox receiving it).
