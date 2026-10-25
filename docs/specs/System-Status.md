@@ -3049,6 +3049,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-25, standing QA/robustness review - ninety-third run): rotated to discovery (engine/discovery) - thorough review plus a repo-wide confirmation check, no new bug found this time
+
+Orientation: synced a sibling pass (`bd680f9`, a real BOQ-extraction false-negative fix - an
+all-lump-sum priced bill with no numeric quantity column was wrongly rejected - same file as this
+session's own Finding 71, no conflict, different bug) and a sibling clean sweep of
+`engine/ocr/scan_ocr.py`. `tender-workspace-batch-2b` (PR #141) is still open, still touching
+several discovery reader files - avoided those again. Rotated to a genuinely untouched corner:
+`engine/discovery/watch_tender_updates.py` (574 lines, the real addendum/closing-date/briefing-date
+change detector for every actively-pursued tender) and `tender_updates.py`'s own comparison logic.
+
+Given Finding 72 (the ninety-first run) found a real UTC-normalization bug in
+`watch_deadlines.py`'s own SAST closing-day calculation, specifically checked every OTHER place in
+the repo doing the identical "+2 hours for SAST" calculation, to confirm that fix was the only
+instance, not one of several:
+
+- Grepped the whole repo for `timedelta(hours=2)` - every other instance either only DEFINES the
+  fixed `SAST` timezone object (used correctly via `.astimezone()` at the actual conversion sites)
+  or already uses the correct `.astimezone()`-first pattern (`tender_updates.to_date()`,
+  `process_pack_jobs.py:630`) - confirmed, not assumed. Finding 72's fix was the only place in the
+  repo with the broken pattern.
+- Read `watch_tender_updates.check_tender()`/`apply_closing_date()`/`apply_briefing_date()`/
+  `ensure_briefing_tasks()`/`active_pursuits()`/`notify()` end to end - all closing/briefing-date
+  comparisons already route through `tender_updates.to_date()` (confirmed correct above), and
+  `_sanral_closing()`'s own SANRAL-page parse already produces a `+02:00`-tagged value via the
+  shared `SAST` timezone object, consistent with every other real writer of `tenders.closing_date`
+  this session has already traced.
+
+No Python file changed this pass. Logging this as a genuine clean sweep plus a valuable
+confirmation (the previous fix is isolated, not one of several still-open instances), not a
+skipped cycle.
+
 ## This pass (2026-10-25, standing QA/robustness review - ninety-second run): rotated to CV (engine/cv) - thorough review, no new bug found this time
 
 Orientation: synced a sibling pass (`4e93d70`, a real "a date-parse warning was lost when the field
