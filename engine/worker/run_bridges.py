@@ -145,7 +145,14 @@ class BridgeRunner:
                 stdout, stderr = p.communicate()
                 broken.append(f"{label} timed out after {self.timeout}s")
                 out = stdout + stderr
-                system_alerts.record("worker", f"The {label} bridge pass timed out after {self.timeout}s and was killed",
+                # source=label (e.g. "pack", "narrative"), not the generic
+                # "worker" this used before 2026-10-25 - Sarel's own ask,
+                # after a real backlog triage found every bridge crash
+                # showing up under one shared source, with the actual bridge
+                # buried in context.bridge where it was easy to miss when
+                # filtering /admin by source. context.bridge is kept too,
+                # for anyone who already filters on it.
+                system_alerts.record(label, f"The {label} bridge pass timed out after {self.timeout}s and was killed",
                                      "critical", detail=out[-8000:] or None,
                                      context={"bridge": label, "script": os.path.relpath(path, REPO_ROOT)})
                 continue
@@ -161,7 +168,8 @@ class BridgeRunner:
                 # nobody watches this log, so it goes to system_alerts.
                 tail = "\n".join(lines[-80:])
                 last = next((ln for ln in reversed(lines) if not ln.startswith("[system-alert]")), "")
-                system_alerts.record("worker", f"The {label} bridge pass failed (exit {p.returncode}): {last[:300]}",
+                # source=label, same reasoning as the timeout branch above.
+                system_alerts.record(label, f"The {label} bridge pass failed (exit {p.returncode}): {last[:300]}",
                                      "critical", detail=tail or None,
                                      context={"bridge": label, "script": os.path.relpath(path, REPO_ROOT),
                                               "exit_code": p.returncode})
