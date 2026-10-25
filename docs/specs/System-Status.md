@@ -1,5 +1,60 @@
 # System Status
 
+**2026-10-25 ~08:17 UTC — standing review pass: a real, reproduced pack-quota bypass fixed
+(migration `0096`) - a trial that lapsed weeks ago, never converted to paid, could still claim its
+one free bid pack indefinitely; pushed directly to main per the guardrail; QA tooling re-confirmed
+sound; no collisions.** Orientation: `git fetch origin main` showed one new commit since this
+routine's own last pass (`e5af970`, a docs-only sweep from the Edge-case QA routine closing out the
+"prints None" bug class - Findings 49/73/74 - with one near-miss ruled out as unreachable; no code
+change, no overlap with this pass). Only open PR is `#118` (draft, stale, unrelated) - no collision.
+Stayed entirely clear of the PR #143/#149/#150 (and #131/#134-138/#142) self-merge incident, as
+directed - that's in Sarel's own hands across two parallel conversations.
+
+**The finding**: `company_can_request_pack()` (0083, pack-in-flight-counting fixed once already in
+0084) is the one gate `requestSubmissionPack()`/`requestJob()`'s `generate_pack` path call before
+letting a company request a bid pack - a trial gets exactly one, ever; an active plan gets its
+monthly allowance. Its `'trialing'` branch checked only whether that one pack had already been used
+- never `trial_ends_at` at all. `app/lib/billing.ts`'s own `effectiveSubscriptionStatus()` already
+documents, in its own header comment, that a stored `'trialing'` status never flips to `'past_due'`
+by itself once the trial's own end date passes - "nothing in this app runs a clock-driven job to
+rewrite it" - and treats a lapsed, never-converted trial as effectively past_due everywhere the UI
+shows it (the banner, `isSubscriptionLapsed()`). This SQL gate never made that same adjustment, so
+it silently disagreed with what the product's own UI already tells the company: a trial that ended
+weeks or months ago, with no payment on file, could still request its one free pack at any point in
+the future, with no time limit at all, simply because the stored `status` column never changes on
+its own and nothing had used the allowance yet.
+
+Reproduced live, not assumed: started the local Postgres 16 cluster, replayed all 95 migrations onto
+a fresh scratch database (`engine/security/replay_schema.sh`, clean exit), inserted a company with
+`status='trialing'`, `trial_ends_at` 30 days in the past, zero packs ever requested -
+`company_can_request_pack()` returned `true`. Fix (migration `0096_pack_quota_checks_trial_expiry.sql`):
+the `'trialing'` branch now returns `false` once `trial_ends_at < now()`, mirroring
+`effectiveSubscriptionStatus()`'s own rule exactly - a still-current trial is unaffected. Re-verified
+against the same live database after applying the fix, 4 real cases: the 30-day-lapsed trial now
+correctly `false`; a genuinely active trial with 10 days left still correctly `true` (the fix doesn't
+over-block); an active paid Starter plan with room on its monthly allowance still correctly `true`
+(untouched by this change); a lapsed trial that had *also* already used its one pack still correctly
+`false` (no regression on the original 0083/0084 logic). `lib/billing.spec.ts` (12/12) and the full
+`npx vitest run` (185/185) unaffected - pure SQL change, no TypeScript touched; `tsc`/`eslint` clean
+(same 3 pre-existing warnings).
+
+**Worth flagging, not built this pass**: same as 0084's own fix, this one has no permanent automated
+SQL regression test (`engine/security/test_tenant_isolation.py` doesn't cover usage-gating functions
+at all, only RLS/tenant isolation) - verified live by hand instead, same standard this exact
+function's prior fix (0084) used. A real candidate for the Edge-case QA routine's own rotation: a
+small pytest-against-replayed-Postgres suite for `company_can_request_pack()`/
+`company_packs_this_period()` specifically, covering all 4 cases checked by hand here, so the next
+regression in this area is caught automatically rather than requiring another manual live
+reproduction.
+
+**Pushed directly to `main`** (`app/supabase/migrations/0096_pack_quota_checks_trial_expiry.sql`) -
+no PR, per the guardrail: a single `create or replace function`, already live-verified against a
+real replayed database, not a UI change needing visual review. **Applying this migration to the live
+Supabase project is Sarel's own step**, same standing gap this file has already flagged repeatedly -
+no CI/CD step in this repo applies migrations automatically.
+
+---
+
 **2026-10-25 ~04:11 UTC — standing review pass: one real "prints the word None" bug fixed (CV
 education provenance), same bug class as Findings 49/73, pushed directly to main per the guardrail;
 QA tooling re-confirmed sound; no collisions.** Orientation: caught my own first local checkout
