@@ -3845,6 +3845,49 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-26, standing QA/robustness review - one-hundred-and-first run): rotated to discovery (engine/discovery) - thorough review, no new bug found this time
+
+Orientation: synced several sibling commits (WhatsApp widget fixes/extensions, a real
+cross-component bug fix in the floating widget's own number formatting - `app/`/`components/`
+only) and, mid-pass, PR `#118` merging (`9b461a8` - the discipline-match messaging fix and
+"no readable tender document" diagnosis flagged as draft/stale all session; touches
+`assess_tender.assess_fit()` and `classify_tender.assess_fit_from_text()`, both deliberately
+avoided by this routine every prior cycle). Re-synced and re-ran `engine/intake/test_classify_tender.py`
+after the merge to confirm Finding 78's own fix (a different function in the same file) is
+untouched and still green - it is.
+
+Rotated to discovery - most overdue by this routine's own numbered rotation (last dedicated pass
+the ninety-third run). Read four files not given a dedicated adversarial look this session:
+`key_person_minimums.py` (the C3.1.11 minimum-requirements table parser - `_years()`'s range/
+under/plus-suffix parsing, the alternatives-minimum computation), `discovery_downgrades.py`
+(`flag_update()`'s downgrade/recovery precedence logic, `_pursuit()`'s batched tender/pack
+lookups), `opportunity_requirements.py` (the discovered-but-not-pursued document classifier,
+which reuses - and so already benefits from - Finding 78's own `classify_documents()` fix), and
+`tender_enrichment.py` (`_parse_amount()`/`_band_for()`'s value-band computation, which already
+reuses `award_outcomes.parse_rand()` rather than a second hand-rolled number parser, per its own
+comment documenting exactly that prior bug class). Nothing held up as a new, reachable bug:
+
+- `_years()`'s range parsing ("5-10" -> years_min 5, "10-15" -> 10) matches its own documented
+  contract (the lower bound is the binding minimum) - not a bug, confirmed against the docstring's
+  worked examples.
+- `flag_update()`'s "keep the original best verdict across cascading downgrades" and "clear the
+  flag once recovered to at least where it was" rules are each other's exact complement - an
+  inconsistent state (an open flag whose `was` is somehow not better than the current verdict)
+  would require a PRIOR call to have left things inconsistent, and tracing the two branches shows
+  neither can produce that: a full recovery always clears the flag before any later downgrade call
+  sees it.
+- `tender_enrichment.py`'s value-band amount parsing already delegates to the same `parse_rand()`
+  this session's own prior-day sibling fix made correct (decimal-vs-thousands-separator
+  disambiguation) - re-verified the multiplier suffix table (`million`/`billion`/`bn`/`m`/`k`)
+  against the regex's own alternation order, no shadowing issue.
+- All four areas' own existing test suites (`test_key_person_minimums.py`,
+  `test_discovery_downgrades.py`, `test_opportunity_requirements.py`, `test_tender_enrichment.py`)
+  were run directly, not just read - all already green, no hidden skip masking a real gap.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle - the
+same discipline the sixty-seventh/eighty-first/etc. runs established, so the next pass through
+discovery starts further ahead, not from zero.
+
 ## This pass (2026-10-26, standing QA/robustness review - one-hundredth run): a company's explicit "Form B7 is waived" answer could be silently overridden by a stale legacy Targeted Enterprise, writing a false subcontracting declaration into the real submitted SANRAL workbook
 
 Orientation: synced several sibling commits (a real CIDB-returnable-step contradiction fix in
