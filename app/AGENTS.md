@@ -3745,3 +3745,98 @@ no open PR currently excludes it, `app/app/discovery/page.tsx`, `app/app/analyti
 `app/app/pipeline/page.tsx`'s owner-initials line (all prior passes' own fixes),
 `app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
 standing carve-outs.
+
+## Capacity Unlocked: savings-counter copy, calculation and breakdown rework (2026-10-26)
+
+Replaces spec §9's "Time and cost saved" model with the brief's own simpler one: hours of senior
+staff time reclaimed, linked directly to extra tender submissions a company can take on without
+hiring - a concrete capacity claim instead of an abstract "productivity" figure.
+
+**Model change, not a bug fix.** The old model summed six separately configured per-step hour
+values (compliance check 2h, vault documents 3h, CVs 4h, cover page 1h, template 5h, pack assembly
+2h) and capped the total at the company's own baseline. The brief replaces this with a single flat
+figure per completed tender: baseline manual hours minus a fixed "time spent in Tender Ready"
+figure (`lib/savingsCounter.ts`'s new `DEFAULT_TIME_SPENT_HOURS_PER_TENDER = 5`, matching the
+brief's own default) - `hoursSavedPerCompletedTender(20) = 15`, exactly the brief's own worked
+example. `extraCapacity()` changed from `floor(hoursSaved / (baseline - avgSavedPerTender))`
+(dynamic, divides by whatever a tender still costs) to the brief's own `floor(hoursSaved /
+baseline)` - deliberately the MORE conservative reading (dividing by the full baseline overstates
+capacity less than dividing by the smaller remaining cost), consistent with this feature's own
+"no exaggerated numbers" rule. `savings_counted_steps` (0085) keeps its exact shape - a tender now
+writes ONE row (`step_key = "tender_pack_completed"`) instead of six, reusing the same
+once-per-tender unique constraint for the dedupe; the six-step list this fed is gone, nothing
+renders it any more.
+
+**Only two of the three numbers are company-editable, per the brief's own wording.** "Baseline
+manual hours" and "hourly cost" are explicitly called out as editable (and already were, in
+Company Settings' own "Time and cost saved" section); "time spent in Tender Ready" carries no such
+qualifier - read as a product characteristic (how fast the tool itself is), not a per-company
+setting, so it's a fixed exported constant, not a new `companies` column. This also means no new
+migration column was needed - the only schema change is `0099_savings_baseline_range_limits.sql`,
+adding the brief's own editable ranges (10-40h, R250-R1500/hour) as real Postgres CHECK constraints
+(with a defensive clamp-first update, in case any company's value already sits outside the new
+range), backing the matching app-level range check added to `lib/companyProfileUpdate.ts` and the
+`min`/`max` attributes now on `EditForm.tsx`'s two `NumberInput`s. **Not verified against a real
+Postgres** - same documented gap every migration since 0085 has carried (no `SUPABASE_DB_URL` here).
+
+**"How we calculate this" modal** (`components/tt/savings-calculation-dialog.tsx`, new) - the
+brief's own point 2B was blank in the pasted brief (cut off mid-paste, the same way an earlier
+task's own Step 2 was); built from the fully-specified formula pieces given elsewhere in the brief
+(baseline, time spent, hourly rate, tenders counted, extra capacity) rather than guessing at missing
+copy. Shared by the Home/Analytics card (a period total, `tendersCounted` passed) and the
+submission-pack per-tender panel (one tender's own figure, `tendersCounted` omitted) - one
+component, not two independently drifting breakdowns. Its own "Edit baseline hours & hourly rate"
+link goes to Company Settings rather than an in-dialog edit form - the brief phrases baseline-hours
+editability as "in Company Settings OR directly in the breakdown modal"; the first already exists,
+fully validated, so building a second, parallel edit path for the same two fields risked the two
+drifting apart for no real gain.
+
+**A real pre-existing bug fixed along the way, not introduced by this pass**: every "Confirm your
+baseline"/"update it" link in this feature (`savings-counter-card.tsx`'s default `baselineHref`,
+`submission-pack.tsx`'s two links, `dashboard/page.tsx`'s setup-checklist item) pointed at
+`/company#savings-baseline` - landing on `/company`'s READ-ONLY view (`editing` only becomes true
+with `?edit=1`), not the actual edit form, despite explicitly inviting the user to edit. All four
+fixed to `/company?edit=1#savings-baseline`. The bare in-page `#savings-baseline` anchor in
+`company/page.tsx`'s own sub-nav list is untouched - that one is a same-mode jump link, correctly
+independent of whether the page is currently in edit mode.
+
+**"Pays for your subscription Nx over"** (secondary-metric subtext, brief §2A) - added via
+`lib/companySubscription.ts`'s existing `fetchCompanySubscription()` (already used by `/billing`,
+reused rather than a new query shape) in both `dashboard/page.tsx` and `analytics/page.tsx`, resolving
+the company's own real monthly plan price via `lib/billing.ts`'s `PLAN_MONTHLY_ZAR`. Omitted entirely
+(not shown as "0x" or guessed) when no fixed price resolves (Enterprise's custom pricing) or the
+multiple rounds down to under 1x - never a fabricated number.
+
+**Deliberately kept `lib/savingsCounter.ts`'s own `formatRand()`, not `lib/formatZAR.ts`'s canonical
+formatter**, even though the brief says "use the canonical ZAR formatter" - its own literal example
+("R13 500") is `formatRand()`'s exact space-grouped, no-decimals output, not `formatZAR()`'s
+comma-grouped two-decimal one ("R 13,500.00"). `formatZAR.ts`'s own header comment already
+documents this as a deliberate, previously-decided split for this exact counter - the brief's
+instruction and its own example disagree, and the example matches the already-spec-pinned format,
+so that's the one kept.
+
+**Supporting-context copy softened from the brief's own example**: "senior engineering &
+management time" (the brief's illustrative sentence) narrowed to "senior staff time" (matching the
+brief's own task title, "hours of senior staff time reclaimed") - this app explicitly moved away
+from narrow industry-specific framing in an earlier pass (dashboard/onboarding brief, SANRAL-only
+hero copy removed for the same reason), and this product serves far more trade types than
+engineering/management alone.
+
+**Display surfaces**: `components/tt/savings-counter-card.tsx` (Home + Analytics, same component,
+same data shape, can't drift), `app/app/tenders/[id]/submission-pack.tsx` (final review), both
+updated. `components/tt/savings-calculator.tsx` (pricing-page marketing calculator) adapted to the
+new flat formula so it keeps reusing the real counter's own `extraCapacity()`/`formatRand()`
+rather than inventing a second copy. `/billing` has no savings/ROI reference to update - checked,
+not assumed.
+
+Verified: `npm run verify` (typecheck + lint + build, 0 errors, same 3 pre-existing warnings),
+`npx vitest run` - **201/201** (25 new/rewritten cases in `savingsCounter.spec.ts`, down from the
+old file's 26 - `stepAlreadyCounted`'s own 3 tests are gone with the function, 2 new cases added
+elsewhere, net -1, matching 202→201 exactly), full `node:test` sweep (all green, no `*.test.ts`
+file touched by this pass). No screenshot - all four display surfaces (`/dashboard`, `/analytics`,
+`/tenders/[id]`, `/company?edit=1`) need a live signed-in Supabase session this environment's
+placeholder credentials can't provide, same documented limitation as every other signed-in-only
+surface this whole initiative has hit; mobile-safety (384px) checked by reasoning through the
+actual Tailwind classes instead (flex-wrap added to two rows that pair a text block with a dialog
+trigger button, after noticing the brief's own footnote format - "text · [ link ]" - doesn't suit a
+rigid `justify-between` row at narrow widths).

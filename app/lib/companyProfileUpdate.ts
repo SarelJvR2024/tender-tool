@@ -1,4 +1,5 @@
 import { BEE_PROOF_TYPES } from "./vaultDocuments";
+import { BASELINE_HOURS_MAX, BASELINE_HOURS_MIN, HOURLY_COST_MAX_ZAR, HOURLY_COST_MIN_ZAR } from "./savingsCounter";
 
 /**
  * Fields the company edit form (app/company/page.tsx) and the onboarding
@@ -74,6 +75,18 @@ const BLANK_NOT_ALLOWED = new Set(["savings_baseline_hours_per_tender", "savings
 // Integer columns: a fractional count is refused rather than sent to Postgres.
 const INTEGER_FIELDS = new Set(["other_offices", "ecsa_registered_staff_count", "sacpcmp_registered_staff_count", "total_employees", "bee_level"]);
 
+// Capacity Unlocked brief (2026-10-26): the savings baseline fields are
+// bounded, not just non-negative - a stray typo (2 hours? R45 000/hour?)
+// could otherwise silently produce an absurd savings figure the calculation
+// has no way to flag as implausible on its own. Checked here (app-level,
+// the same first line of defence every other field here gets) and backed
+// by a matching Postgres CHECK constraint (migration 0099) for defence in
+// depth against a direct write that bypasses this form.
+const RANGE_FIELDS: Record<string, readonly [number, number]> = {
+  savings_baseline_hours_per_tender: [BASELINE_HOURS_MIN, BASELINE_HOURS_MAX],
+  savings_baseline_hourly_cost_zar: [HOURLY_COST_MIN_ZAR, HOURLY_COST_MAX_ZAR],
+};
+
 const BEE_PROOF_VALUES = BEE_PROOF_TYPES.map((t) => t.value) as string[];
 
 // Matches companies_how_we_work_length (0030).
@@ -117,6 +130,10 @@ export function buildCompanyUpdate(formData: FormData): { update: CompanyUpdate;
     const n = trimmed === "" ? null : Number(trimmed);
     if (n !== null && (!Number.isFinite(n) || n < 0 || (INTEGER_FIELDS.has(field) && !Number.isInteger(n)))) {
       return { update, error: `"${field.replace(/_/g, " ")}" must be a ${INTEGER_FIELDS.has(field) ? "whole " : ""}number of 0 or more.` };
+    }
+    const range = RANGE_FIELDS[field];
+    if (n !== null && range && (n < range[0] || n > range[1])) {
+      return { update, error: `"${field.replace(/_/g, " ")}" must be between ${range[0]} and ${range[1]}.` };
     }
     update[field] = n;
   }

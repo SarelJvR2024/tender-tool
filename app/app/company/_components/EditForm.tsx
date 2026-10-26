@@ -1,5 +1,6 @@
 import { updateCompanyProfile } from "../actions";
 import { BEE_PROOF_TYPES } from "@/lib/vaultDocuments";
+import { BASELINE_HOURS_MAX, BASELINE_HOURS_MIN, HOURLY_COST_MAX_ZAR, HOURLY_COST_MIN_ZAR } from "@/lib/savingsCounter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -76,12 +77,16 @@ export function EditForm({ company }: { company: CompanyRow }) {
             label="Hours your team usually spends on one tender"
             defaultValue={company.savings_baseline_hours_per_tender}
             step="1"
+            min={BASELINE_HOURS_MIN}
+            max={BASELINE_HOURS_MAX}
           />
           <NumberInput
             name="savings_baseline_hourly_cost_zar"
             label="Cost per hour of that person's time (Rand)"
             defaultValue={company.savings_baseline_hourly_cost_zar}
             step="1"
+            min={HOURLY_COST_MIN_ZAR}
+            max={HOURLY_COST_MAX_ZAR}
           />
         </div>
       </VaultSection>
@@ -213,18 +218,32 @@ function NumberInput({
   label,
   defaultValue,
   step,
+  min,
+  max,
 }: {
   name: string;
   label: string;
   defaultValue: number | null;
   step?: string;
+  min?: number;
+  max?: number;
 }) {
   return (
     <div>
       <Label htmlFor={name} className="mb-1.5 block">
         {label}
+        {min !== undefined && max !== undefined && <span className="ml-1 text-muted-foreground">({min}-{max})</span>}
       </Label>
-      <Input type="number" step={step ?? "1"} id={name} name={name} defaultValue={defaultValue ?? ""} className="min-h-11 text-sm" />
+      <Input
+        type="number"
+        step={step ?? "1"}
+        min={min}
+        max={max}
+        id={name}
+        name={name}
+        defaultValue={defaultValue ?? ""}
+        className="min-h-11 text-sm"
+      />
     </div>
   );
 }
