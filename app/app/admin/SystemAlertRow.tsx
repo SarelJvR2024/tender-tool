@@ -17,9 +17,6 @@ export type SystemAlert = {
   reported_at: string | null;
   resolved_at: string | null;
   resolution_note: string | null;
-  /** Resolved from context.company_id/tender_id by page.tsx (platform_admin_companies()/tenders) - null when the context carries no such id, or it didn't resolve to a real row. Never computed in this client component - it has no admin-gated way to look either up itself. */
-  resolvedCompanyName?: string | null;
-  resolvedTenderRef?: string | null;
 };
 
 // Color-token migration (2026-10-21): was raw inline-CSSProperties with a
@@ -85,20 +82,6 @@ export default function SystemAlertRow({ alert }: { alert: SystemAlert }) {
             {alert.occurrences > 1 && ` - happened ${alert.occurrences} times`}
             {alert.reported_at && ` - e-mailed ${formatDateTime(alert.reported_at) ?? alert.reported_at}`}
           </div>
-          {(alert.resolvedCompanyName || alert.resolvedTenderRef) && (
-            <div className="mb-2.5 flex flex-wrap gap-1.5">
-              {alert.resolvedCompanyName && (
-                <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 text-[11px] font-semibold text-accent">
-                  tenant: {alert.resolvedCompanyName}
-                </span>
-              )}
-              {alert.resolvedTenderRef && (
-                <span className="rounded-full border border-accent/30 bg-accent/10 px-2.5 py-0.5 text-[11px] font-semibold text-accent">
-                  tender: {alert.resolvedTenderRef}
-                </span>
-              )}
-            </div>
-          )}
           {context.length > 0 && (
             <div className="mb-2.5 flex flex-wrap gap-1.5">
               {context.map(([k, v]) => (

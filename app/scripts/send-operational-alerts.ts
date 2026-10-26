@@ -50,31 +50,6 @@ import { operationalRecipients as companyRecipients } from "../lib/notificationR
 
 type SupabaseService = SupabaseClient;
 
-/** Audit-log write for /admin/notifications (the unified Tier 0-3 dispatch log) - record_notification_sent() (migration 0093) is a plain, no-constraint audit insert, deliberately decoupled from this script's own record_operational_alert_sent()/notification_claims dedupe, so this can be added without touching that dedupe flow at all. */
-async function logSend(
-  supabase: SupabaseService,
-  notificationType: string,
-  idempotencyKey: string,
-  to: string,
-  companyId: string,
-  tenderId: string | null,
-  subject: string,
-  result: Awaited<ReturnType<typeof sendTransactionalEmail>>,
-) {
-  const { error } = await supabase.rpc("record_notification_sent", {
-    p_idempotency_key: idempotencyKey,
-    p_notification_type: notificationType,
-    p_recipient_email: to,
-    p_company_id: companyId,
-    p_tender_id: tenderId,
-    p_subject: subject,
-    p_status: result.status,
-    p_resend_id: result.status === "sent" ? result.resendId : null,
-    p_error: result.status === "failed" ? result.error : null,
-  });
-  if (error) console.error(`record_notification_sent failed for ${notificationType}`, error);
-}
-
 async function claim(supabase: SupabaseService, alertType: string, tenderId: string | null, companyId: string, thresholdKey: string): Promise<boolean> {
   const { data: claimed, error } = await supabase.rpc("record_operational_alert_sent", {
     p_alert_type: alertType,
@@ -126,7 +101,6 @@ async function runPrintCutoff(supabase: SupabaseService, appUrl: string): Promis
     for (const to of recipients) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
       if (result.status === "sent") sent++;
-      await logSend(supabase, "print_sign_cutoff", `print-cutoff-${tender.id}-${pack.company_id}-${to}`, to, pack.company_id, tender.id, subject, result);
     }
   }
   return { sent, candidates: candidates.length };
@@ -160,7 +134,6 @@ async function runBriefingReminders(supabase: SupabaseService, appUrl: string): 
     for (const to of recipients) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
       if (result.status === "sent") sent++;
-      await logSend(supabase, "briefing_reminder", `briefing-${tender.id}-${companyId}-${threshold}-${to}`, to, companyId, tender.id, subject, result);
     }
   }
   return { sent, candidates: candidates.length };
@@ -186,7 +159,6 @@ async function runComplianceExpiry(supabase: SupabaseService, appUrl: string): P
     for (const to of recipients) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "compliance" });
       if (result.status === "sent") sent++;
-      await logSend(supabase, "compliance_expiry", `compliance-expiry-${company.id}-${field}-${to}`, to, company.id, null, subject, result);
     }
   }
   return { sent, candidates: candidates.length };
