@@ -143,6 +143,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_discovery_fanout.py
 
+      - name: Discovery document reader fallback - docx/doc reading and scanned note (offline fixtures)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_document_reader_fallback.py
+
       - name: Discovery downgrades - a re-score that makes a verdict worse is flagged (real sample PDFs)
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_discovery_downgrades.py
