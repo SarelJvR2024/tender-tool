@@ -35,6 +35,15 @@ export function SubmissionLogisticsForm({
     <form action={saveSubmissionLogistics} className="rounded-lg border border-border bg-card p-4">
       <input type="hidden" name="tender_id" value={tenderId} />
       <h3 className="mb-3 font-display text-sm font-semibold text-foreground">Submission logistics</h3>
+      {submissionType === "physical_box" && (!deliveryLocation || !courierContact) && (
+        <div className="mb-3 rounded bg-warning/10 px-2.5 py-1.5 text-xs font-semibold text-warning">
+          {!deliveryLocation && !courierContact
+            ? "No delivery address or courier/driver on file yet - add both so the departure plan below means something."
+            : !deliveryLocation
+              ? "No delivery address on file yet."
+              : "No courier/driver confirmed yet."}
+        </div>
+      )}
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-xs font-semibold text-foreground sm:col-span-2">
           Submission type
@@ -71,7 +80,7 @@ export function SubmissionLogisticsForm({
           />
         </label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-foreground">
-          Print &amp; bind hours
+          Print, bind &amp; sign hours
           <input
             type="number"
             step="0.5"
@@ -80,6 +89,10 @@ export function SubmissionLogisticsForm({
             defaultValue={estimatedPrintHours}
             className="rounded-md border border-border bg-background px-2.5 py-2 text-xs font-normal text-foreground"
           />
+          <span className="text-[11px] font-normal text-muted-foreground">
+            An editable planning default (defaults to 4h) - not a verified fact. Adjust it to how long signing,
+            binding and printing actually takes your team.
+          </span>
         </label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-foreground">
           Transit hours
@@ -91,6 +104,10 @@ export function SubmissionLogisticsForm({
             defaultValue={estimatedTransitHours}
             className="rounded-md border border-border bg-background px-2.5 py-2 text-xs font-normal text-foreground"
           />
+          <span className="text-[11px] font-normal text-muted-foreground">
+            An editable planning default (defaults to 2h) - not a verified fact. Adjust it once the delivery
+            route/courier above is confirmed.
+          </span>
         </label>
       </div>
       <button

@@ -202,6 +202,31 @@ def test_world_bank_project_with_null_fields_does_not_print_the_word_none():
     check("the start date is still shown correctly", "2022-01-01" in text, text)
 
 
+def test_world_bank_project_with_null_position_held_does_not_print_the_word_none():
+    print("build_world_bank: a real project row with no captured position title "
+          "(position_held=None) must not render the literal word 'None' into a real CV")
+    # Finding 80 (2026-10-26): the Finding-49 test just above this one deliberately set
+    # position_held="Site Engineer" (a valid value) because it was exercising the OTHER
+    # nullable fields (end/value_rm/contact/contact_phone) - it never covered position_held
+    # itself for THIS function. The 2026-10-23 fix for the sibling bug (build_sanral_keyperson
+    # crashing on position_held=None) only touched that function and its own test - this one,
+    # a plain f-string interpolation with no `or` guard at all, was left behind. Unlike
+    # build_sanral_keyperson's _safe_text(None) crash, an f-string never raises - it silently
+    # renders "Position: None" in a real, client-facing CV instead.
+    person = {"name": "Jane Doe", "role": "Engineer", "qualifications": {},
+              "projects": [{"client_and_number": "Real Project A/2022", "position_held": None,
+                             "start": "2022-01-01", "end": "2023-01-01", "value_rm": 10,
+                             "contact": "A Buyer", "contact_phone": "012 345 6789"}]}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_world_bank(profile, person, "person_1", "full", None, None, log)
+    text = next(p.text for p in doc.paragraphs if "Real Project" in p.text)
+    check("the missing position title reads '?', not the literal word 'None'",
+          "None" not in text and "Position: ?" in text, text)
+    check("the rest of the entry is unaffected (dates/value/referee all still correct)",
+          "2022-01-01" in text and "2023-01-01" in text and "R10m" in text and "A Buyer" in text, text)
+
+
 def test_sanral_keyperson_project_with_null_position_held_does_not_crash():
     print("build_sanral_keyperson: a real project row with no captured position title "
           "(position_held=None) must not crash CV generation for that person")
@@ -269,6 +294,7 @@ def main():
     test_control_characters_are_stripped_not_crashed_on()
     test_years_experience_uses_sast_not_naive_utc_today()
     test_world_bank_project_with_null_fields_does_not_print_the_word_none()
+    test_world_bank_project_with_null_position_held_does_not_print_the_word_none()
     test_sanral_keyperson_project_with_null_position_held_does_not_crash()
     test_world_bank_education_with_null_institution_does_not_log_the_word_none()
     print(f"\n{len(FAILS)} failure(s)")

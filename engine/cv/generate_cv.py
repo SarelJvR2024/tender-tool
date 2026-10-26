@@ -496,9 +496,16 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
             # guards the same fields with `or` for this exact reason - this
             # one didn't.
             value_rm = proj.get("value_rm")
+            # position_held is nullable (0001_init_schema.sql, same as build_sanral_keyperson()'s
+            # own guard on it above) - `proj.get("position_held", "")` only substitutes the
+            # default when the key is ABSENT, not when it's present with value None, and an
+            # f-string interpolates None as the literal string "None" with no crash to catch it -
+            # exactly the bug class the comment above this loop says was already fixed for
+            # start/end/value_rm/contact_name/contact_phone, just missed for this one field.
+            # QA pass, 2026-10-26.
             d.add_paragraph(_safe_text(
                 f"{proj.get('start') or '?'} to {proj.get('end') or '?'}  —  {proj.get('client_and_number', '')}\n"
-                f"Position: {proj.get('position_held', '')}    Value: R{value_rm if value_rm is not None else '?'}m\n"
+                f"Position: {proj.get('position_held') or '?'}    Value: R{value_rm if value_rm is not None else '?'}m\n"
                 f"Referee: {proj.get('contact') or 'MISSING'}  {proj.get('contact_phone') or ''}"
             ))
     else:

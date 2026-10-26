@@ -50,7 +50,13 @@ RPC = "record_system_alert"
 TIMEOUT = 10
 
 _UUID = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
-_HEX = re.compile(r"\b[0-9a-f]{12,}\b", re.I)
+# The 0x... alternative has to come first and match the prefix itself: a bare
+# \b[0-9a-f]{12,}\b never matches a "0x7f8a3c2d1e40"-style address (the kind
+# every Python object repr embeds in a traceback) because "x" and the hex
+# digits after it are both \w characters - there is no word boundary between
+# them for \b to anchor on, so the run falls through to the digit-only branch
+# below instead and blanks inconsistently from one occurrence to the next.
+_HEX = re.compile(r"\b0x[0-9a-f]+\b|\b[0-9a-f]{12,}\b", re.I)
 _NUM = re.compile(r"\d+")
 _sink = None
 

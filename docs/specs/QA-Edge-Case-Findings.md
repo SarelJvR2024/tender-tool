@@ -4560,3 +4560,170 @@ than one Technical Submission workbook is uploaded. `sanral_files`/`sanral_docum
 AMBIGUOUS note were already correct and are unchanged. No schema or other call-site changes;
 `process_pack_jobs.py` (which reads `sanral_files`, not `signal`) was never affected by the bug and
 is untouched by the fix.
+
+### Finding 79 (CONFIRMED, FIXED, severe - the Submission Plan told a person to "Complete by hand" SBD 2, the tax clearance form on virtually every tender, directly contradicting its own detail text saying it was already satisfied from the vault)
+
+**Where:** `engine/general/submission_plan.py`'s `_form_step()`.
+
+**What was tested:** rotated to non-SANRAL pack (`engine/general`). PR #141 (the "Batch 2B" pass)
+merged into `main` since the last pass through this rotation, touching `assess_tender.py`'s
+`labels()` helper, 4 discovery sources' closing-time defaults, and `process_general_jobs.py`'s own
+closing-time placeholder (12:00 -> 11:00) - all already baked into the checked-out tree, no
+overlap to avoid. A sibling standing-review pass (same morning) already gave `fill_flat_pdf.py`'s
+prefix handling a thorough, confirmed-correct look, so picked a different file in the same area:
+`submission_plan.py` (236 lines, the "what do we actually have to go and do for this tender"
+compiler, Sarel's own framing 2026-10-21) - not given a dedicated adversarial look since its own
+regression test file was written. Read `_form_step()`, `_returnable_step()`, `compile_plan()`'s
+gap-de-duplication prefix logic end to end, checking each branch against every real status value
+its own upstream (`requirements.py`) can actually produce - not just the three `_form_step()`
+itself already names.
+
+**Finding (CONFIRMED, severe).** `requirements.py`'s own form-status assignment
+(`extract_requirements()`, ~line 1056) has FOUR real status values a form can carry, not three:
+`"auto"`, `"overlay"`, `"by_hand"` - and `"attach"`, assigned whenever `FORMS[code][1] ==
+"attach"`. Exactly one form code currently has that capability: `"2"` - "Tax clearance / tax
+compliance status" (SBD 2), required on essentially every South African public-sector tender.
+`_form_step()` only ever checked for `"auto"` and `"overlay"` explicitly; `"attach"` fell through
+to the generic `return {"status": "by_hand", "detail": f["reason"]}` at the bottom - despite
+`f["reason"]` for this exact status being the literal string *"Satisfied by the tax compliance
+status (TCS PIN) - attached from the vault."* The result, reproduced directly with a synthetic SBD
+2 bundle: a plan step titled "SBD 2 - Tax clearance / tax compliance status", status "Complete by
+hand", detail "Satisfied by the tax compliance status (TCS PIN) - attached from the vault." - the
+status label and the detail text of the SAME step directly contradict each other, on what is very
+likely the single most common form this engine ever classifies. Confirmed this isn't a stale or
+unused status: `build_general_pack.py` (the real pack builder) has its own explicit handling for
+`f["status"] == "attach"` (`form_results[f["code"]] = {"status": "from the vault"}`, no by-hand
+path at all) - proving the real, intended semantics of "attach" is "already satisfied", exactly
+what `_form_step()` should have mapped to `"ready"`, the same treatment `"auto"` already gets.
+
+**Fix:** `_form_step()` now treats `"attach"` the same as `"auto"` (`status in ("auto",
+"attach")` -> `"ready"`), matching `build_general_pack.py`'s own real-world treatment of the
+identical status value.
+
+**Verified the regression test actually catches the regression:** new synthetic-bundle test in
+`test_submission_plan.py` (an SBD 2 mention - no existing test in this file's SBD_BUNDLE fixture
+mentioned SBD 2 at all, which is exactly why this had gone unnoticed). Reverted the fix (`git apply
+-R`, keeping the new test): failed with the predicted status/detail contradiction; restored: `0
+failure(s)`. Full `test_submission_plan.py` (now covering this case) and the unrelated
+`test_requirements.py` re-run clean.
+
+**Regression:** `engine/general/submission_plan.py`'s `_form_step()` only - `"attach"`-status
+forms (SBD 2 today; any future form code given that same capability) now read "ready" instead of
+"by_hand". No schema or other call-site changes; `build_general_pack.py`'s own, already-correct
+`"attach"` handling is untouched.
+
+### Finding 80 (CONFIRMED, FIXED, severe - a real project with no captured position title printed the literal word "None" into a client-facing World Bank-format CV, the exact bug class this same function was already fixed for on its sibling fields)
+
+**Where:** `engine/cv/generate_cv.py`'s `build_world_bank()`, Employment Record section.
+
+**What was tested:** rotated to CV - the most overdue standing area (last dedicated pass the
+ninety-second run). PR #157 (draft, test-only additions to `engine/pack/process_pack_jobs.py`, from
+the pack-focused standing-review routine) and the `eb60f96` fingerprint fix (both already merged/in
+`origin/main`, both `engine/alerts`/`engine/pack` only) - no overlap with `engine/cv`. Read
+`generate_cv.py` end to end, specifically checking whether every "prints the literal word None"
+fix this function has already received (Finding 49, then the 2026-10-23/2026-10-25 follow-ups)
+was actually applied to every nullable field it touches, or only some of them - the same
+"did the earlier fix actually cover everywhere it needed to" question that found Finding 78 last
+cycle in a different file.
+
+**Finding (CONFIRMED, severe).** It wasn't. `build_world_bank()`'s Employment Record loop has a
+comment (just above it) explicitly listing which nullable project fields were fixed for Finding 49
+("start/end/value_rm/contact_name/contact_phone... all nullable columns... sailed straight through
+as the literal string 'None'") - `position_held` is not on that list, and the line just below still
+read `f"Position: {proj.get('position_held', '')} ..."` with no `or` guard at all.
+`position_held` is independently nullable (confirmed from `0001_init_schema.sql`'s own `projects`
+table, and from this exact file's OWN comment three lines above, on `build_sanral_keyperson()`'s
+sibling table-cell version of this field) - a real project captured with no position title reaches
+this line with the key PRESENT but value `None`, and since this is an f-string (not a direct
+`_safe_text(None)` call like the sibling table-cell version, which crashes instead - the 2026-10-23
+fix for THAT), Python silently renders `str(None)` = `"None"` into the paragraph, with nothing to
+crash and catch it. Reproduced directly: a project row with `position_held: None` produced a
+real CV paragraph reading `"Position: None    Value: R10m\nReferee: A Buyer  012 345 6789"`. Traced
+why both existing tests missed this exact gap: Finding 49's own regression test deliberately set
+`position_held="Site Engineer"` (a valid value, since it was testing the OTHER fields), and the
+2026-10-23 fix's own test only covers `build_sanral_keyperson()`, never `build_world_bank()`'s
+sibling field - the two tests' deliberate field choices structurally guaranteed this one slipped
+through both passes.
+
+**Fix:** `proj.get('position_held') or '?'` (matching the `'?'` placeholder this same f-string
+already uses for `start`/`end` one line above), same pattern already correctly applied to every
+other field in this loop.
+
+**Verified the regression test actually catches the regression:** new
+`test_world_bank_project_with_null_position_held_does_not_print_the_word_none()` in
+`test_generate_cv.py`. Reverted the fix (`git apply -R`, keeping the new test): failed with the
+exact predicted "Position: None" text; restored: `0 failure(s)`. Full `test_generate_cv.py` (now 11
+functions) and the unrelated `test_extract_cv_fields.py` re-run clean.
+
+**Regression:** `engine/cv/generate_cv.py`'s `build_world_bank()` only - the Employment Record
+section's `position_held` cell now reads "?" instead of "None" when the field is null.
+`build_sanral_keyperson()`'s own (already-correct) handling of the identical field is untouched.
+
+### Finding 81 (CONFIRMED, FIXED, severe - a company's explicit "Form B7 is waived" answer could be silently overridden by a stale legacy Targeted Enterprise, writing a false subcontracting declaration into the real submitted SANRAL workbook)
+
+**Where:** `engine/fill_tender.py` and `engine/fill_conventional.py` (identical logic, both fixed) -
+the Form B7 (Targeted Enterprise subcontracting) fill branch.
+
+**What was tested:** rotated to SANRAL pack - tied with discovery for most overdue, picked SANRAL
+pack. Open PRs checked: `#157` (draft, test-only additions to `process_pack_jobs.py`'s `sync_*`
+functions - avoided that file) and `#118` (draft, stale, `assess_tender.py`/`classify_tender.py` -
+not touched either way). A sibling pass (same day) had just fixed a DIFFERENT contradiction in
+`submission_plan.py`'s CIDB returnable step - same "two things in the same output disagree about
+the same fact" shape that's been a recurring theme this session, worth specifically hunting for
+elsewhere. Read `engine/sanral_b7.py` (B7 applicability/validation/fill) end to end first - it is
+extremely well-guarded, with its own self-check assertions - then its real callers
+(`fill_tender.py`/`fill_conventional.py`'s Form B7 branch, `assemble_pack.py`'s own B7
+orchestration) to see whether the INTENDED precedence rule `assemble_pack.py` itself already
+encodes is actually enforced where the cells get written.
+
+**Finding (CONFIRMED, severe).** It wasn't. Both fillers decide which Form B7 source to use with:
+`if (td.get("subcontracting_plan") or {}).get("mode") == "subcontract": <use the new plan> elif
+te: <use the legacy td["targeted_enterprise"] block>` - the legacy fallback fires whenever a
+`targeted_enterprise` block is present, REGARDLESS of whether an explicit `subcontracting_plan` of
+a DIFFERENT mode (most importantly `"waived_by_tender"` - the company's own, more authoritative
+"Book 1 says B7 isn't required" answer) also exists on the same pack.yaml. Confirmed this isn't
+purely theoretical: a real pack.yaml in this repo (`packs/r334-030-2025-1f.yaml`) has a `targeted_
+enterprise:` field literally named in its own comments as a once-real field ("omitted - Form B7
+confirmed NOT required"), proving the legacy single-TE format was real, hand-written data before
+`sanral_b7.py`/the Tender Workspace migration existed - a long-running tender whose pack.yaml
+predates that migration and is STILL in use today would carry exactly this shape, and the
+company's later, explicit "waived" answer (captured via the Tender Workspace Form B7 card) would
+silently lose to the untouched legacy block. `assemble_pack.py`'s own `b7_filled` bookkeeping
+(`bool(legacy_te) and not b7_plan`) ALREADY assumes the correct precedence rule ("the legacy block
+only applies when there's no explicit plan AT ALL") - this is the same shape of bug as Finding 78
+(a reporting layer's own assumption not matching what the real write path actually does), just
+with the real submitted SANRAL workbook as the thing that ends up wrong, not just a status message.
+
+Reproduced directly against a real sample (`templates/samples/R.334-030-2025.1F_ran.xlsm`,
+"Conventional" family): a pack.yaml with BOTH a legacy `targeted_enterprise` block ("Stale Legacy
+TE (Pty) Ltd") AND an explicit `subcontracting_plan` with `mode: "waived_by_tender"` ran through
+`fill_conventional.main()` and produced a workbook whose `TEND 1X!C3906` (the Targeted Enterprise
+name cell) read **"Stale Legacy TE (Pty) Ltd"** - a false subcontracting commitment physically
+written into the real Technical Submission workbook, directly contradicting the company's own
+explicit "this tender waives B7" answer, with nothing in the pack's own manifest/contents page
+aware of the mismatch (per `b7_filled`'s own, separately-correct computation, it believed B7 was
+NOT included).
+
+**Fix:** both fillers' legacy fallback condition changed from `elif te:` to `elif te and not
+td.get("subcontracting_plan"):` - the legacy block now only fires when there is no explicit plan
+of ANY mode, matching the precedence `assemble_pack.py` already assumed. An explicit
+`"subcontract"` plan, an explicit `"waived_by_tender"` plan, and the legacy-only case (an old
+pack.yaml with no Tender Workspace answer at all) were all re-verified to behave correctly.
+
+**Verified the regression test actually catches the regression:** new
+`engine/test_fill_b7_legacy_precedence.py` (no dedicated test file existed for either filler's
+Form B7 branch before this, confirmed by grep) - four cases (explicit waiver overrides legacy;
+legacy-only still fills, for back-compat; explicit subcontract plan still fills normally; neither
+present stays blank), driven directly against the real committed sample workbook. Reverted the fix
+(`git apply -R`, keeping the new test): failed exactly as predicted (the stale legacy name written
+despite the waiver); restored: `0 failure(s)`. `test_sanral_b7.py` and `test_form_field_audit.py`
+(which already exercises `fill_conventional.py` via `confirm_pack.py`) both re-run clean. No
+RRM-family sample workbook is committed to this repo to drive an identical end-to-end test of
+`fill_tender.py` (the RRM sibling filler) - its identical fix was verified by direct code
+inspection and the same manual repro technique used to confirm this finding, not a second
+end-to-end test.
+
+**Regression:** `engine/fill_tender.py` and `engine/fill_conventional.py`'s Form B7 branch only -
+one condition changed in each, same fix, same reasoning. No schema or other call-site changes;
+`sanral_b7.py`'s own functions and `assemble_pack.py`'s `b7_filled`/manifest reporting (already
+correct) are untouched.

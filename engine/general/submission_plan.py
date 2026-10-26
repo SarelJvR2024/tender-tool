@@ -85,7 +85,15 @@ def _returnable_step(r, company):
 
 
 def _form_step(f):
-    if f["status"] == "auto":
+    if f["status"] in ("auto", "attach"):
+        # "attach" (requirements.py's FORMS[code][1], e.g. SBD 2 - tax
+        # clearance/TCS PIN, on virtually every tender) means the vault
+        # satisfies this one automatically - build_general_pack.py treats it
+        # the same way (`form_results[f["code"]] = {"status": "from the
+        # vault"}`, no by-hand path at all). Falling through to the generic
+        # by_hand return below (as this used to) told the user to "Complete
+        # by hand" a form whose own reason text, one line later, says
+        # "Satisfied by... attached from the vault" - QA pass, 2026-10-26.
         return {"status": "ready", "detail": f["reason"]}
     if f["status"] == "overlay":
         return {"status": "review", "detail": f["reason"]}
@@ -120,6 +128,23 @@ def compile_plan(manifest, company=None, tender=None):
         })
 
     for r in manifest["returnables"]:
+        # The generic "CIDB registration / grading" returnable (matched on
+        # the bare keyword \bCIDB\b) and the dedicated cidb_grading step
+        # below (matched on an actual "CIDB grading of X" number) fire
+        # together on the same tender almost every time a specific grading
+        # is named - the grading sentence itself contains the word "CIDB".
+        # This returnable step then marked "ready" the moment ANY grading
+        # was on file at all, even one well below what's required (5GB on
+        # file, 7GB required -> shown "ready" right next to the dedicated
+        # step's own, correctly cautious "review - confirm this meets or
+        # exceeds 7GB" for the exact same fact) - a false, misleading
+        # confidence signal, found and reproduced live, 2026-10-26. The
+        # dedicated step is strictly more informative (it names the actual
+        # grading required and never claims "ready" without a human
+        # confirming the comparison), so it wins; this generic step is only
+        # shown when no specific grading was found to anchor that one.
+        if r["key"] == "cidb" and manifest.get("cidb"):
+            continue
         out = _returnable_step(r, company)
         title = r["label"] + (" (only if bidding as a JV/consortium)" if r.get("conditional") == "jv" else "")
         steps.append({

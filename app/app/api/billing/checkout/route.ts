@@ -4,6 +4,7 @@ import {
   PAYFAST_CYCLES_INDEFINITE,
   PAYFAST_FREQUENCY,
   encodePlanInterval,
+  isBillingSandboxed,
   orderedCheckoutEntries,
   payfastMerchantId,
   payfastMerchantKey,
@@ -34,6 +35,18 @@ export async function GET(request: NextRequest) {
   }
   if (interval !== "monthly" && interval !== "yearly") {
     return NextResponse.redirect(new URL("/billing?error=Unknown+billing+interval.", request.url));
+  }
+
+  // Same guard /billing's own Subscribe buttons already disable on
+  // (isBillingSandboxed(), lib/payfast.ts) - the UI and this route read one
+  // flag, so a disabled button and a refused direct-URL hit are the same
+  // decision. Without this, a sandbox-disabled button was only a UI nicety:
+  // hitting this URL directly still built and auto-submitted a real
+  // PayFast sandbox transaction.
+  if (isBillingSandboxed()) {
+    return NextResponse.redirect(
+      new URL(`/billing?error=${encodeURIComponent("Payments aren't switched on yet - try again once they are.")}`, request.url)
+    );
   }
 
   const supabase = await createClient();

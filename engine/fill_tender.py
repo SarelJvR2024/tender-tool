@@ -114,11 +114,25 @@ def main(tpl, pack_path, out, log=None):
         print("NOTE: no C2.4 figures in this pack yet - every Form C2.4 sheet left exactly as SANRAL shipped it")
     # Form B7: the company's own captured subcontracting plan (sanral_b7.py,
     # Tender Workspace), else the legacy single `targeted_enterprise` block.
+    # An EXPLICIT plan of any mode - including "waived_by_tender" - must win
+    # over the legacy block, not just a "subcontract" one: `te` used to fill
+    # regardless of mode whenever both happened to be present on the same
+    # pack.yaml (an old, pre-Tender-Workspace pack still carrying its
+    # hand-written `targeted_enterprise`, plus a company that later captured
+    # an explicit waiver), silently overwriting the company's own "B7 isn't
+    # required" answer with a stale, unrelated Targeted Enterprise in the
+    # real submitted workbook. Confirmed reachable: `elif te:` fired on a
+    # real sample pack+template with both fields set, writing the legacy
+    # name into TEND 1X!C3906 even though subcontracting_plan.mode was
+    # "waived_by_tender". assemble_pack.py's own b7_filled bookkeeping
+    # already assumed this precedence (`bool(legacy_te) and not b7_plan`) -
+    # this is that same rule, now actually enforced where the cells are
+    # written. QA pass, 2026-10-26.
     te = td.get("targeted_enterprise")
     if (td.get("subcontracting_plan") or {}).get("mode") == "subcontract":
         n = sanral_b7.fill_b7(wb, td["subcontracting_plan"])
         print(f"Form B7: {n} Targeted Enterprise(s) from the company's subcontracting plan")
-    elif te:
+    elif te and not td.get("subcontracting_plan"):
         wb.set_value(T, "C3906", te["name"]); wb.set_value(T, "J3906", te["status"])
         wb.set_value(T, "M3906", te["pct_of_contract"]); wb.set_value(T, "D3908", te["black_ownership"])
         wb.set_value(T, "H3908", te["bee_level"]); wb.set_value(T, "M3908", te["pct_excl_provisional"])

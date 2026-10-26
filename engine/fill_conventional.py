@@ -122,11 +122,15 @@ def main(tpl, pack_path, out, log=None):
     # Form B7 (same cells as the RRM template): the company's own captured
     # subcontracting plan (sanral_b7.py, Tender Workspace), else the legacy
     # single hand-written `targeted_enterprise` block of a CLI pack.yaml.
+    # An EXPLICIT plan of any mode - including "waived_by_tender" - must win
+    # over the legacy block, not just a "subcontract" one: see fill_tender.py's
+    # identical sibling fix for the full explanation (same bug, same cells,
+    # same fix). QA pass, 2026-10-26.
     te = td.get("targeted_enterprise")
     if (td.get("subcontracting_plan") or {}).get("mode") == "subcontract":
         n = sanral_b7.fill_b7(wb, td["subcontracting_plan"])
         print(f"Form B7: {n} Targeted Enterprise(s) from the company's subcontracting plan")
-    elif te:
+    elif te and not td.get("subcontracting_plan"):
         wb.set_value(T, "C3906", te["name"]); wb.set_value(T, "J3906", te["status"])
         wb.set_value(T, "M3906", te["pct_of_contract"]); wb.set_value(T, "D3908", te["black_ownership"])
         wb.set_value(T, "H3908", te["bee_level"]); wb.set_value(T, "M3908", te["pct_excl_provisional"])
