@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { formatClosingDateTime } from "@/lib/dates";
+import { PrintPreviewButton } from "./print-preview-button";
 
 /**
  * Cover-page preview (prompt 10, item 3). Read-only: shows exactly what
@@ -47,12 +48,44 @@ export async function CoverPagePreview({
     company = data;
   }
 
+  const closingText = closingDate ? (formatClosingDateTime(closingDate) ?? "—") : "- no closing date on file";
+  const tendererLine = `TENDERER: ${company?.legal_name ?? "No company name on file"}`;
+  const printLines = [
+    company?.logo_storage_path ? "Company logo" : "No logo on file",
+    "OUTER ENVELOPE",
+    "The South African National Roads Agency SOC Limited",
+    `CONTRACT ${contractNo ?? "- no contract number on file"}`,
+    ...(nraReference ? [nraReference] : []),
+    (description ?? "- no description on file").toUpperCase(),
+    `TENDER CLOSES: ${closingText}`,
+    `Client: ${buyer ?? "No client on file"}`,
+    tendererLine,
+  ];
+
   return (
     <div id="cover-page" className="mb-4 rounded-xl border border-border bg-card px-5 py-[18px]">
-      <div className="mb-0.5 text-[15px] font-bold text-foreground">Cover page preview</div>
+      <div className="mb-0.5 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-[15px] font-bold text-foreground">Cover page preview</div>
+        <PrintPreviewButton lines={printLines} />
+      </div>
       <div className="mb-3 text-xs text-muted-foreground">
         What the Outer Envelope and Envelope covers will print, generated fresh with the pack - read-only; see below for
         why.
+      </div>
+      {/* Anonymous/blind-submission check (System Admin/Tender Workspace
+          brief, 2026-10-25): no part of this app's extraction pipeline
+          (engine/general/requirements.py, the SANRAL manifest reader)
+          currently detects a "do not identify the bidder on the outer
+          envelope" clause - there is no schema column and no engine rule
+          to read this from, so there's nothing real to check yet. Shown as
+          an honest "not checked" note rather than a fabricated Yes/No -
+          same rule this file's own header comment already follows for its
+          two unbuilt editable fields. The real TENDERER line keeps showing
+          unconditionally below until this is actually built. */}
+      <div className="mb-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-[11px] text-warning">
+        Anonymous-submission check: not available yet - nothing in this tender&apos;s extracted requirements currently
+        flags whether the RFP forbids identifying your company on the outer envelope. Read the RFP&apos;s own submission
+        instructions by hand before relying on the tenderer line below.
       </div>
       <div className="rounded-lg border border-dashed border-border px-4 py-5 text-center">
         <div className="mb-2.5 text-[11px] text-muted-foreground">
@@ -64,10 +97,10 @@ export async function CoverPagePreview({
         {nraReference && <div className="text-xs font-bold text-foreground">{nraReference}</div>}
         <div className="text-xs font-bold text-foreground uppercase">{description ?? "- no description on file"}</div>
         <div className="mt-2.5 text-xs font-bold text-foreground">
-          TENDER CLOSES: {closingDate ? (formatClosingDateTime(closingDate) ?? "—") : "- no closing date on file"}
+          TENDER CLOSES: {closingText}
         </div>
         <div className="mt-2.5 text-[11px] text-muted-foreground">Client: {buyer ?? "No client on file"}</div>
-        <div className="mt-1.5 text-[11px] text-muted-foreground">TENDERER: {company?.legal_name ?? "No company name on file"}</div>
+        <div className="mt-1.5 text-[11px] text-muted-foreground">{tendererLine}</div>
       </div>
       <div className="mt-2.5 text-[11px] text-muted-foreground">
         Everything above comes from this tender and your company record - nothing here can be typed over yet.

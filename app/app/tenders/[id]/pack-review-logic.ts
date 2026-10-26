@@ -53,10 +53,22 @@ export function fieldStatus(value: unknown, required = true): { status: ReviewSt
   return { status: required ? "missing" : "needs_input", note: "Not on file - set it on the Company page." };
 }
 
-/** field_provenance.status -> this screen's own ReviewStatus vocabulary. */
+// field_provenance.status -> this screen's own ReviewStatus vocabulary.
+// QA finding, 2026-10-26: "computed" used to map to "confirmed" here - but
+// 0002_field_provenance.sql's own table comment defines them as opposites:
+// "confirmed" is "a human entered/approved it", "computed" is "derived
+// mechanically ... no judgment call" - nobody ever looked at it. Folding
+// both into one ReviewStatus silently fed tender-readiness.ts's
+// confirmedCount/score from mechanically-derived values alone, even though
+// that file's own doc comment says confirmedCount should count only "the
+// underlying ReviewStatus ... literally 'confirmed'". Mapped to
+// "assumed_default" instead - the Fix/Provide/Verify bucket a mechanically-
+// derived, not-yet-human-checked value already belongs in
+// (reviewStatusToBidTask's own doc comment above groups them for exactly
+// this reason), without inventing a 6th ReviewStatus value for one mapping.
 const PROVENANCE_STATUS_MAP: Record<string, ReviewStatus> = {
   confirmed: "confirmed",
-  computed: "confirmed",
+  computed: "assumed_default",
   assumed_default: "assumed_default",
   missing: "missing",
 };

@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   classifyDispatchBucket,
+  departureDeadline,
   deriveDecisionNeeded,
   hoursUntilPrintSignDeadline,
   operationalStatusMessage,
@@ -35,6 +36,22 @@ test("printSignDeadline: null for a digital submission - no physical print/trans
 
 test("printSignDeadline: null with no closing date", () => {
   assert.equal(printSignDeadline({ ...baseLogistics, closingDate: null }), null);
+});
+
+test("departureDeadline: closing minus transit only - the separate 'must leave by' step", () => {
+  const d = departureDeadline(baseLogistics);
+  assert.ok(d);
+  // 2 hours before 2026-11-01T11:00+02:00 = 2026-11-01T09:00+02:00 - later
+  // than printSignDeadline's 05:00, since no print/bind/sign buffer applies.
+  assert.equal(d!.toISOString(), new Date("2026-11-01T09:00:00+02:00").toISOString());
+});
+
+test("departureDeadline: null for a digital submission, same as printSignDeadline", () => {
+  assert.equal(departureDeadline({ ...baseLogistics, submissionType: "etenders_portal" }), null);
+});
+
+test("departureDeadline: null with no closing date", () => {
+  assert.equal(departureDeadline({ ...baseLogistics, closingDate: null }), null);
 });
 
 test("hoursUntilPrintSignDeadline: positive before the cutoff, negative after", () => {
