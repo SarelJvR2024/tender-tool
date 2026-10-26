@@ -6,13 +6,14 @@ import { cn } from "@/lib/utils";
 
 // Public-marketing-only contact channel (brief, 2026-10-26): South African
 // contractors prefer WhatsApp over a contact form. Deliberately scoped to
-// the exact public routes named in the brief - "/" and "/demo" - not every
-// unauthenticated route (not /tools, /login, /signup, /privacy). There is
-// no separate public-vs-authenticated layout segment in this app (AppShell
-// is a client wrapper each authenticated page mounts itself, not a
-// layout.tsx route group), so this reads the pathname itself and renders
-// nothing outside its two routes, rather than needing a new layout split
-// just for this.
+// the public marketing/tool routes named across both briefs - "/", "/demo",
+// and "/tools" (+ every nested calculator under it, e.g.
+// "/tools/b6-estimator") - not every unauthenticated route (not /login,
+// /signup, /privacy). There is no separate public-vs-authenticated layout
+// segment in this app (AppShell is a client wrapper each authenticated
+// page mounts itself, not a layout.tsx route group), so this reads the
+// pathname itself and renders nothing outside those routes, rather than
+// needing a new layout split just for this.
 //
 // "/pricing" in the brief doesn't exist as a route - pricing is a section
 // of "/" (id="pricing", see app/page.tsx), not its own page. Treated as
@@ -31,7 +32,10 @@ const WHATSAPP_NUMBER = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER;
 
 const DEMO_MESSAGE = "Hi Sarel, I'm reviewing the Tender Ready demo and have a question.";
 const PRICING_MESSAGE = "Hi Sarel, I'd like to find out more about Tender Ready subscription pricing.";
-const HOME_MESSAGE = "Hi Sarel, I'd like to find out more about Tender Ready.";
+// Exported: app/page.tsx's own footer WhatsApp link reuses this exact
+// message (same "find out more" intent as this widget's own default) -
+// one source of truth, not a second hand-typed copy that could drift.
+export const HOME_MESSAGE = "Hi Sarel, I'd like to find out more about Tender Ready.";
 
 function messageFor(pathname: string, onPricingSection: boolean): string {
   if (pathname === "/demo") return DEMO_MESSAGE;
@@ -75,7 +79,8 @@ export function WhatsAppContactButton() {
     () => false,
   );
 
-  if (pathname !== "/" && pathname !== "/demo") return null;
+  const onToolsPage = pathname === "/tools" || pathname.startsWith("/tools/");
+  if (pathname !== "/" && pathname !== "/demo" && !onToolsPage) return null;
   if (!WHATSAPP_NUMBER) return null; // No real number configured - a live link to a made-up number would misdirect a real prospect, never shown.
 
   const message = messageFor(pathname, onPricingSection);
