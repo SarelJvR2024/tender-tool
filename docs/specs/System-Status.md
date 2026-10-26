@@ -1,5 +1,46 @@
 # System Status
 
+**2026-10-26 ~04:15 UTC — standing review pass: `engine/compliance/registration_reminders.py`
+reviewed in depth, no new bug found - a real-looking lead chased to ground, already covered by
+existing tests.** Orientation: `git fetch origin main` showed one new commit since this routine's
+own last pass (`5fe4c78`, a sibling QA routine's test fix for Finding 76's own stale assertion, no
+overlap). Fast-forwarded a 1-commit-behind local checkout before starting. Two open PRs: `#156`
+(draft, the notification-engine session's in-flight tender-workspace wire-up - avoided its files
+entirely) and `#118` (draft, stale, unrelated). Stayed clear of the self-merge incident PRs, as
+directed.
+
+Rotated to `engine/compliance/registration_reminders.py` (held_registrations/property_documents
+expiry reminders, 0050) - last touched 2026-10-18, no recent attention. `find_due_registrations()`
+and `find_due_property_documents()` both call `watch_deadlines._expiry_window()` WITHOUT its
+optional `company_id` kwarg (every other caller in `watch_deadlines.py` itself passes it inline),
+then separately call this file's own `_mark_company()` afterward to patch `company_id` into the
+`seen` dict entry in place - looked like a real risk that the DB seen-store (`save_seen_db()`,
+which runs once in `main()`, after all `find_*` functions return) could persist a null
+`company_id` if persistence happened before the patch. Traced the actual write path: `save_seen_db()`
+only runs at the very end of `main()`, after every `find_*` call (including the in-place patch)
+has completed, so the final `seen` dict is already correct by the time anything is written to the
+DB - confirmed, not assumed, by also checking `test_principals_registrations.py`'s own "every seen
+entry carries its company (needed by the database seen store)" case, which already exercises this
+exact path and passes. Verified clean: `test_principals_registrations.py` (12/12) and
+`test_watch_deadlines_urgency.py` both re-run, 0 failures. Not a bug - a real lead followed to a
+genuine answer rather than left unchecked, worth recording since a surface read of the two-step
+pattern looks like exactly the kind of order-of-operations bug this codebase has found elsewhere.
+One minor, non-blocking style note for whoever next touches this file: the indirect
+`_expiry_window()` + `_mark_company()` two-step could be simplified to passing `company_id=`
+directly like `find_due_documents()`/`find_due_person_credentials()` already do, removing the need
+for `_mark_company()` entirely - not changed here, since it works correctly as-is and this was a
+read-only review pass.
+
+QA tooling: sound - `tsc --noEmit`/`eslint` clean (no TypeScript touched), the two Python suites
+above both clean. No commit beyond this documentation entry - no application code was changed.
+
+Backlog waiting on Sarel, re-confirmed not assumed: migration `0096` (pack-quota trial-expiry),
+migration `0098` (admin portal customers/readiness), the `narrative_documents` PostgREST
+schema-cache reload, and the PayFast idempotency design question (not urgent) - unchanged since the
+last pass.
+
+---
+
 **2026-10-26 ~02:14 UTC — standing review pass: traced a comment's claim end to end across both
 pack-generation paths, held up - no fix needed, documented rather than forced.** Orientation:
 local checkout was 1 commit behind `origin/main` (`d61daaa`, a sibling QA routine's docs-only
