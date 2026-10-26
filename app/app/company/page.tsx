@@ -17,6 +17,7 @@ import { ReadOnlyView } from "./_components/ReadOnlyView";
 import { EditForm } from "./_components/EditForm";
 import { RegisterLinks } from "./_components/RegisterLinks";
 import { LettersSection } from "./_components/LettersSection";
+import { VaultProgressSummary } from "./_components/VaultProgressSummary";
 import { Banner } from "./_components/shared";
 import type { CompanyRow, DocUrls } from "./types";
 
@@ -99,12 +100,24 @@ export default async function CompanyPage({
   // own query. Scoring itself lives in lib/readiness.ts (pure, unit-tested)
   // so this page, the dashboard and the onboarding end screen can never
   // quietly disagree - see lib/companyReadinessData.ts.
+  //
+  // people(id, name) is the one new query VaultProgressSummary needs (Sarel's
+  // own live feedback tonight: "people uploaded and missing docs per
+  // person") - cv_uploads itself was already being read for the readiness
+  // score above; this just keeps the per-person_id Set instead of
+  // discarding it once the count is taken, so the summary card below can't
+  // compute a different answer than the score it sits next to.
   let readiness: ReadinessResult | null = null;
+  let peopleRows: { id: string; name: string }[] = [];
+  let peopleWithCvIds = new Set<string>();
   if (row && !editing) {
-    const [{ data: cvRows }, { count: experienceCount }] = await Promise.all([
+    const [{ data: cvRows }, { count: experienceCount }, { data: peopleData }] = await Promise.all([
       supabase.from("cv_uploads").select("person_id"),
       supabase.from("experience_items").select("id", { count: "exact", head: true }),
+      supabase.from("people").select("id, name").order("name", { ascending: true }),
     ]);
+    peopleRows = (peopleData ?? []) as { id: string; name: string }[];
+    peopleWithCvIds = new Set((cvRows ?? []).map((r) => r.person_id as string));
     readiness = computeBidReadiness({
       legalName: row.legal_name,
       csdSupplierNumber: row.csd_supplier_number,
@@ -116,10 +129,20 @@ export default async function CompanyPage({
       cidbExpiry: row.cidb_expiry,
       bankConfirmationValidUntil: row.bank_confirmation_letter_valid_until,
       principalCount: registerCounts.principals,
-      peopleWithCvCount: new Set((cvRows ?? []).map((r) => r.person_id as string)).size,
+      peopleWithCvCount: peopleWithCvIds.size,
       experienceProjectCount: experienceCount ?? 0,
     });
   }
+  const peopleMissingCv = peopleRows.filter((p) => !peopleWithCvIds.has(p.id));
+
+  // Document count for VaultProgressSummary - the same 7 VAULT_DOCUMENTS
+  // columns ComplianceDocumentsSection already renders one row per, counted
+  // here instead of re-deriving its own ComplianceDocEntry[] array just to
+  // count how many have a path.
+  const documentsTotal = Object.keys(VAULT_DOCUMENTS).length;
+  const documentsOnFile = row
+    ? (Object.keys(VAULT_DOCUMENTS) as VaultDocumentKind[]).filter((k) => !!row[VAULT_DOCUMENTS[k].column]).length
+    : 0;
 
   // Sub-nav completion ticks - reuses already-computed signals only
   // (lib/readiness.ts's criteria, lib/documentExpiry.ts's statusFor), never
@@ -136,19 +159,26 @@ export default async function CompanyPage({
       )
     : undefined;
 
+  // Grouped into three clusters so a first-time user's sub-nav reads as "what
+  // every tender needs" vs "team & experience" vs "other company info",
+  // instead of one flat 12-item list (Sarel's own live feedback: the
+  // sections "feel intimidating for an initial user"). Grouping only
+  // reorders/labels existing items - no new section, href or signal.
   const subNavItems: CompanySubNavItem[] = [
-    { href: "#document-expiry", label: "Expiry" },
-    { href: "#compliance-documents", label: "Documents", complete: complianceDocumentsComplete },
-    { href: "#company-identity", label: "Identity", complete: identityComplete },
-    { href: "#size-offices", label: "Size & offices" },
-    { href: "#savings-baseline", label: "Time & cost saved" },
-    { href: "#how-we-work", label: "How we work" },
-    { href: "#bee-cidb", label: "B-BBEE & CIDB", complete: beeCidbComplete },
-    { href: "#bank-details", label: "Bank details" },
-    { href: "#notifications", label: "Notifications" },
-    { href: "#registers", label: "Registers" },
-    { href: "#letters", label: "Letters" },
-    { href: "#offices", label: "Offices" },
+    { href: "#document-expiry", label: "Expiry", group: "Required for every tender" },
+    { href: "#compliance-documents", label: "Documents", complete: complianceDocumentsComplete, group: "Required for every tender" },
+    { href: "#company-identity", label: "Identity", complete: identityComplete, group: "Required for every tender" },
+    { href: "#bee-cidb", label: "B-BBEE & CIDB", complete: beeCidbComplete, group: "Required for every tender" },
+    { href: "#bank-details", label: "Bank details", complete: satisfied("bank_confirmation"), group: "Required for every tender" },
+    { href: "/people", label: "People", complete: satisfied("people_cvs"), group: "Team & experience" },
+    { href: "/experience", label: "Experience", complete: satisfied("experience"), group: "Team & experience" },
+    { href: "#registers", label: "Registers", group: "Team & experience" },
+    { href: "#size-offices", label: "Size & offices", group: "Other company info" },
+    { href: "#savings-baseline", label: "Time & cost saved", group: "Other company info" },
+    { href: "#how-we-work", label: "How we work", group: "Other company info" },
+    { href: "#notifications", label: "Notifications", group: "Other company info" },
+    { href: "#letters", label: "Letters", group: "Other company info" },
+    { href: "#offices", label: "Offices", group: "Other company info" },
   ];
 
   return (
@@ -168,6 +198,16 @@ export default async function CompanyPage({
 
         <div className="flex flex-col gap-4">
           {readiness && <BidReadinessCard result={readiness} size="compact" />}
+
+          {row && !editing && (
+            <VaultProgressSummary
+              documentsOnFile={documentsOnFile}
+              documentsTotal={documentsTotal}
+              peopleTotal={peopleRows.length}
+              peopleWithCv={peopleWithCvIds.size}
+              peopleMissingCv={peopleMissingCv}
+            />
+          )}
 
           {(loadError || !row) && (
             <Banner tone="destructive">

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
-import { NEXT_STAGES, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { IN_PROGRESS_STAGES, NEXT_STAGES, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -136,20 +136,41 @@ export default async function PipelinePage({
 }
 
 async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>, actionError: string | undefined) {
-  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows }, { data: outcomeRows }] = await Promise.all([
+  const [{ data: tenders, error }, { data: opportunities }, { data: peopleRows }, { data: outcomeRows }, { data: preferencesRow, error: preferencesError }] = await Promise.all([
     supabase
       .from("tenders")
       .select(`id, contract_no, title, description, buyer, closing_date, family, status, ocid, tender_packs(pipeline_stage, stage_changed_at, submitted_at, ${ECONOMICS_COLUMNS})`)
       .order("closing_date", { ascending: true }),
     // Discovery's fit verdict, where this tender came from the scored feed.
-    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories, downgraded_from, downgrade_acknowledged_at"),
+    // Scaling fix (see app/lib/discoveryPagination.ts's module comment for
+    // the root-cause writeup): discovered_opportunities accumulates one row
+    // per OCDS release ever scored against this company, forever, but this
+    // lookup only ever needs rows that became one of THIS company's own
+    // tenders (matched below by tender_id/ocid/contract_number against the
+    // `tenders` rows already loaded above) - every such row has `tender_id`
+    // set (pursue_discovered_opportunity() always backfills it the moment a
+    // tender is pursued, confirmed in migrations 0024/0051), so narrowing to
+    // `tender_id is not null` drops only opportunities nothing here reads,
+    // never one this page's matching still needs.
+    supabase.from("discovered_opportunities").select("ocid, contract_number, tender_id, verdict, categories, downgraded_from, downgrade_acknowledged_at").not("tender_id", "is", null),
     // Who can get credit for a submission (item 26, migration 0034): the
     // company's people roster, same list the task assignee picker uses.
     supabase.from("people").select("id, name").order("name"),
     // Outcome facts (item 4) - tender_answers' own outcome:* keys, see
     // recordOutcomeAndMoveStage (pipeline/actions.ts) for why this table.
     supabase.from("tender_answers").select("tender_id, field_key, value").in("field_key", Object.values(OUTCOME_FIELD_KEYS)),
+    // This company's real, saved Opportunity preferences (migration 0088,
+    // company_tender_preferences, set from the /discovery panel) -
+    // hide_sanral_board gates the "found" column's own shared SANRAL feed
+    // below. RLS (is_company_member(company_id)) already scopes this to at
+    // most one row with no explicit company_id filter needed. Degrades to
+    // "no preference saved" (board stays visible, today's behavior) rather
+    // than failing the page - covers both a genuine read error and, until
+    // Sarel applies 0088 live, the table not existing yet.
+    supabase.from("company_tender_preferences").select("hide_sanral_board").maybeSingle(),
   ]);
+  if (preferencesError) console.error("company_tender_preferences select failed", preferencesError);
+  const hideSanralBoard = (preferencesRow as { hide_sanral_board: boolean } | null)?.hide_sanral_board ?? false;
   const people = (peopleRows ?? []) as CreditPerson[];
   const peopleById = new Map(people.map((p) => [p.id, p.name]));
   const taxonomy = await loadDisciplineTaxonomy(supabase);
@@ -188,6 +209,14 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
       // was pursued by another company - not ours to show.
       if (t.family === GENERAL_FAMILY || t.status !== "open") continue;
       if (isPast(t.closing_date)) continue;
+      // Task item 4 (app/AGENTS.md): hide_sanral_board (migration 0088,
+      // company_tender_preferences) - a company that's said it doesn't do
+      // SANRAL/road-construction work doesn't get this shared,
+      // un-tenant-scoped board shown to it by default. Every remaining
+      // branch of this `if (!pack)` guard is for a non-general family (the
+      // GENERAL_FAMILY case already `continue`d above), i.e. exactly the
+      // SANRAL-conventional board this preference is about.
+      if (hideSanralBoard) continue;
     }
     cards.push({
       id: t.id,
@@ -257,7 +286,7 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   // only "value" this app tracks, same field the card itself shows),
   // submitted this month (submitted_at's calendar month = now's), win rate
   // (Awarded / (Awarded + Lost), the only two outcomes that exist).
-  const activeCards = [...byStage.found, ...byStage.bidding];
+  const activeCards = IN_PROGRESS_STAGES.flatMap((s) => byStage[s]);
   const activeBids = activeCards.length;
   const totalValueBeingBid = activeCards.reduce((sum, c) => sum + (toNumber(c.economics?.submitted_price_zar) ?? 0), 0);
   const now = new Date();
@@ -510,11 +539,11 @@ function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPers
             </span>
           )}
           {owner && (
-            <span
-              title={`Owner: ${owner}`}
-              className="inline-flex size-5 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground"
-            >
-              {initials(owner)}
+            <span className="inline-flex min-w-0 items-center gap-1" title={`Owner: ${owner}`}>
+              <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[9px] font-bold text-foreground">
+                {initials(owner)}
+              </span>
+              <span className="max-w-20 truncate text-[10px] text-muted-foreground">{owner}</span>
             </span>
           )}
         </div>

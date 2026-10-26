@@ -48,13 +48,15 @@ export function toNumber(v: number | string | null | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** "R 1 234 567" (en-ZA grouping), cents only when there are any. */
-export function formatRand(v: number | string | null | undefined): string {
-  const n = toNumber(v);
-  if (n === null) return "-";
-  const hasCents = Math.round(n * 100) % 100 !== 0;
-  return `R ${n.toLocaleString("en-ZA", { minimumFractionDigits: hasCents ? 2 : 0, maximumFractionDigits: 2 })}`;
-}
+// The canonical formatter (lib/formatZAR.ts, Sarel's own Batch 6 brief,
+// 2026-10-24) re-exported under this module's original name, so every
+// existing caller here (~30 across market-context.tsx, analytics/page.tsx,
+// discovery/page.tsx, market-intelligence/page.tsx, pipeline/*.tsx) picks up
+// the one real implementation without touching each call site. The one
+// visible change: always 2 fixed decimals now, not conditional on whether
+// the amount has cents - a deliberate part of the new spec, not a bug.
+import { formatZAR } from "./formatZAR";
+export const formatRand = formatZAR;
 
 /**
  * Parses a typed rand amount: "R 1 234 567,89", "1,234,567.89", "1234567".

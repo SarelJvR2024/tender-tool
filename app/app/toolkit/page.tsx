@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Zap } from "lucide-react";
 import { AppShell } from "../_components/AppShell";
 import { PageHeader } from "@/components/tt/page-header";
 
@@ -47,9 +48,32 @@ export default function ToolkitIndexPage() {
     <AppShell>
       <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-6 p-4 sm:p-6">
         <PageHeader
-          title="Tools"
+          title="Toolkit"
           description="The same calculators as Tender Ready's free tools, without leaving your company context."
         />
+
+        {/* Phase 2 nav restructure (2026-10-23): SANRAL schedules moved out of
+            the primary sidebar (it was cluttering a nav meant for every
+            customer, SANRAL-focused or not) - this is its own new home, a
+            featured card rather than just another row in the list below, so
+            it stays as visible as it was in the sidebar. */}
+        <Link
+          href="/sanral-schedules"
+          className="flex items-start gap-3.5 rounded-xl border border-accent/30 bg-accent/5 p-5 no-underline transition-[border-color,box-shadow,transform] duration-150 hover:-translate-y-px hover:border-accent hover:shadow-md"
+        >
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent text-white">
+            <Zap className="size-4.5" />
+          </div>
+          <div>
+            <div className="mb-1.5 flex items-center gap-2 text-base font-bold text-foreground">
+              SANRAL schedules
+              <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent uppercase">Featured</span>
+            </div>
+            <div className="text-[13px] leading-relaxed text-muted-foreground">
+              Track every SANRAL tender&apos;s own publication schedule and upcoming closing dates in one place.
+            </div>
+          </div>
+        </Link>
 
         <div className="flex flex-col gap-3">
           {TOOLS.map((tool) => (

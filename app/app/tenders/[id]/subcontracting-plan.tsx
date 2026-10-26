@@ -2,6 +2,7 @@ import { loadB7State } from "./b7-data";
 import { SubcontractingPlanForm } from "./subcontracting-plan-form";
 import { clearSubcontractingPlan } from "./b7-actions";
 import { B7_CATEGORY_BANDS, B7_POLICY_MIN_PCT } from "@/lib/sanralB7";
+import { formatDate } from "@/lib/dates";
 
 /**
  * "Form B7 - Subcontracting to Targeted Enterprises" on the SANRAL Tender
@@ -92,7 +93,7 @@ export async function SubcontractingPlan({ tenderId, saved }: { tenderId: string
         <form action={clearSubcontractingPlan} className="mt-2">
           <input type="hidden" name="tender_id" value={tenderId} />
           <button type="submit" className="cursor-pointer border-none bg-transparent p-0 text-xs text-muted-foreground underline">
-            Clear this answer{s.updatedAt ? ` (saved ${new Date(s.updatedAt).toLocaleDateString()})` : ""}
+            Clear this answer{s.updatedAt ? ` (saved ${(formatDate(s.updatedAt) ?? "—")})` : ""}
           </button>
         </form>
       )}

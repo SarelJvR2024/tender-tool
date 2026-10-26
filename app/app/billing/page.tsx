@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../_components/AppShell";
 import { fetchCompanySubscription } from "@/lib/companySubscription";
+import { formatZAR } from "@/lib/formatZAR";
 import {
   PAYABLE_PLAN_TIERS,
   PLAN_LABEL,
@@ -17,6 +18,7 @@ import { PageHeader } from "@/components/tt/page-header";
 import { SectionCard } from "@/components/tt/section-card";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { isBillingSandboxed } from "@/lib/payfast";
 
 // Depends on the signed-in user's own subscription row, same reason as
 // every other RLS-scoped page in this app.
@@ -40,6 +42,24 @@ export default async function BillingPage({
   searchParams: Promise<{ checkout?: string; error?: string }>;
 }) {
   const { checkout, error } = await searchParams;
+  // UX audit 2026-10-23, item 6: "PayFast sandbox" was hardcoded into this
+  // page's copy regardless of PAYFAST_MODE (lib/payfast.ts), so production
+  // would keep telling paying customers their card wasn't being charged
+  // even once PAYFAST_MODE=live. First fix gated the copy on the real
+  // checkout/ITN routes' own flag; re-review 2026-10-23 asked for an
+  // explicit NEXT_PUBLIC_PAYFAST_SANDBOX switch instead, so it can be
+  // turned off here without touching PAYFAST_MODE's own effect on where
+  // checkout actually posts. CAUTION, not enforced in code: if this is set
+  // to "false" while PAYFAST_MODE is still "sandbox", the page will claim
+  // live payment while checkout is still hitting PayFast's sandbox - don't
+  // flip this ahead of PAYFAST_MODE actually going live. Unset falls back
+  // to the real mode, same safe default as before.
+  //
+  // isBillingSandboxed() (lib/payfast.ts) is the SAME flag /api/billing/checkout
+  // itself reads before building a PayFast form - this page disabling the
+  // Subscribe buttons and the route refusing to start a transaction are two
+  // views of one source, not two independent checks that could drift apart.
+  const isSandbox = isBillingSandboxed();
   const supabase = await createClient();
   const subscription = await fetchCompanySubscription(supabase);
 
@@ -63,8 +83,12 @@ export default async function BillingPage({
       <div className="mx-auto w-full max-w-[1000px] flex-1 px-8 py-6">
         <PageHeader
           className="mb-5"
-          title="Billing"
-          description="Your plan, trial and payment - PayFast sandbox for now, so no real card is charged."
+          title={isSandbox ? "Billing not yet active" : "Billing"}
+          description={
+            isSandbox
+              ? "Card payments are not switched on yet. Your plan stays active in the meantime."
+              : "Your plan, trial and payment."
+          }
         />
 
         {error && (
@@ -125,7 +149,7 @@ export default async function BillingPage({
         </p>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {PAYABLE_PLAN_TIERS.map((plan) => (
-            <PlanCard key={plan} plan={plan} currentPlan={subscription?.planTier} />
+            <PlanCard key={plan} plan={plan} currentPlan={subscription?.planTier} isSandbox={isSandbox} />
           ))}
           <SectionCard title="Enterprise" description="Priced on request">
             <p className="mb-4 text-sm text-muted-foreground">
@@ -139,19 +163,14 @@ export default async function BillingPage({
         </div>
 
         <p className="mt-6 text-xs text-muted-foreground">
-          Yearly billing is 2 months free (10&times; the monthly price). Prices exclude VAT. Payments run through PayFast&apos;s
-          sandbox for now - see{" "}
-          <Link href="https://sandbox.payfast.co.za" className="underline underline-offset-2" target="_blank" rel="noreferrer">
-            sandbox.payfast.co.za
-          </Link>
-          .
+          Yearly billing is 2 months free (10&times; the monthly price). Prices exclude VAT.
         </p>
       </div>
     </AppShell>
   );
 }
 
-function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: string }) {
+function PlanCard({ plan, currentPlan, isSandbox }: { plan: PayablePlan; currentPlan?: string; isSandbox: boolean }) {
   const monthly = priceForPlanZar(plan, "monthly");
   const yearly = yearlyPriceZar(monthly);
   const isCurrent = plan === currentPlan;
@@ -163,7 +182,7 @@ function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: stri
       title={PLAN_LABEL[plan]}
       description={
         <>
-          <span className="text-2xl font-semibold text-money">R{monthly.toLocaleString("en-ZA")}</span>
+          <span className="text-2xl font-semibold text-money">{formatZAR(monthly)}</span>
           <span className="text-sm text-muted-foreground">/month</span>
         </>
       }
@@ -176,43 +195,86 @@ function PlanCard({ plan, currentPlan }: { plan: PayablePlan; currentPlan?: stri
         {plan === "professional" && <li className="font-medium text-accent">&bull; For companies tendering regularly</li>}
       </ul>
       <div className="flex flex-col gap-2">
-        <CheckoutLink plan={plan} interval="monthly" disabled={isCurrent} label={`Subscribe monthly - R${monthly.toLocaleString("en-ZA")}`} />
+        <CheckoutLink
+          plan={plan}
+          interval="monthly"
+          disabled={isCurrent}
+          isSandbox={isSandbox}
+          priceLabel={formatZAR(monthly)}
+        />
         <CheckoutLink
           plan={plan}
           interval="yearly"
           disabled={isCurrent}
-          label={`Subscribe yearly - R${yearly.toLocaleString("en-ZA")} (2 months free)`}
+          isSandbox={isSandbox}
+          priceLabel={`${formatZAR(yearly)}/yr`}
           variant="outline"
         />
       </div>
       {isCurrent && <p className="mt-2 text-xs font-medium text-accent">Your current plan</p>}
+      {!isCurrent && isSandbox && <p className="mt-2 text-xs text-muted-foreground">Payments aren&apos;t switched on yet</p>}
     </SectionCard>
   );
 }
 
+// h-auto/whitespace-normal here is a deliberate override of the shared
+// Button/Link's own whitespace-nowrap default (components/ui/button.tsx) -
+// "Subscribe yearly - R 49,900.00/yr" (Business, yearly) does not fit a
+// single nowrap line in a 4-up desktop grid card or a narrow phone width,
+// and nowrap without overflow handling let it visually spill past the
+// button's own border rather than truncate. Splitting the interval word
+// from the price onto two short, always-short lines fits at both widths
+// regardless of exact price length, rather than depending on wrap landing
+// at a convenient space.
 function CheckoutLink({
   plan,
   interval,
   disabled,
-  label,
+  isSandbox,
+  priceLabel,
   variant = "accent",
 }: {
   plan: PayablePlan;
   interval: BillingInterval;
   disabled?: boolean;
-  label: string;
+  isSandbox: boolean;
+  priceLabel: string;
   variant?: "accent" | "outline";
 }) {
-  if (disabled) {
+  const intervalLabel = interval === "yearly" ? "Yearly" : "Monthly";
+  const fullLabel = `Subscribe ${intervalLabel.toLowerCase()} - ${priceLabel}`;
+  const content = (
+    <span className="flex flex-col items-center leading-tight">
+      <span>{intervalLabel}</span>
+      <span className="text-xs font-normal opacity-80">{priceLabel}</span>
+    </span>
+  );
+  const sharedClassName = "h-auto min-h-11 whitespace-normal py-2 text-center";
+
+  // Billing not switched on (sandbox) blocks every plan's checkout, not
+  // just the current one - this mirrors the exact guard
+  // /api/billing/checkout itself applies (isBillingSandboxed(), lib/payfast.ts),
+  // so a disabled button here and a redirect-with-reason there are the same
+  // decision, never a UI promise the route doesn't keep.
+  if (disabled || isSandbox) {
     return (
-      <Button variant={variant} className="h-11" disabled>
-        {label}
+      <Button
+        variant={variant}
+        className={sharedClassName}
+        disabled
+        aria-label={isSandbox && !disabled ? `${fullLabel} - payments aren't switched on yet` : fullLabel}
+      >
+        {content}
       </Button>
     );
   }
   return (
-    <Link href={`/api/billing/checkout?plan=${plan}&interval=${interval}`} className={buttonVariants({ variant, className: "h-11" })}>
-      {label}
+    <Link
+      href={`/api/billing/checkout?plan=${plan}&interval=${interval}`}
+      className={buttonVariants({ variant, className: sharedClassName })}
+      aria-label={fullLabel}
+    >
+      {content}
     </Link>
   );
 }

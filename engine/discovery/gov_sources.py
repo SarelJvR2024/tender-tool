@@ -430,10 +430,41 @@ def fetch_all(sources=ALL_SOURCES, with_documents=True, log=print):
         except Exception as e:
             errors["etenders_portal_closed"] = str(e)
     merged = merge(by_source, portal_closed)
+    attach_scope_enrichment(merged, log=log)
     cov = coverage(by_source, merged)
     cov["errors"] = errors
     return {"releases": merged, "notices": notices, "by_source": by_source, "coverage": cov, "errors": errors,
             "portal_closed": portal_closed}
+
+
+def attach_scope_enrichment(releases, log=print):
+    """The per-release hook tender_enrichment.py's own module docstring
+    names ("a future per-release hook in gov_sources.py/etenders_national.py"
+    - Sarel, 2026-10-23: "an engine that assess and extract the scope of each
+    tender even the backlog"). Attaches release['scope_enrichment'] -
+    tender_enrichment.enrich_release()'s own result dict (industry/discipline
+    tags, pricing-model keyword, BOQ-mention detection, value band) - to
+    EVERY merged release, going forward, alongside (never replacing) the
+    existing per-company scoring fan-out in watch_new_tenders.py, which this
+    never touches.
+
+    Heuristic only, same as enrich_release() itself always is at this point
+    in the pipeline (see its own docstring for why: no tenders.id exists yet
+    for most releases, and no document has been downloaded here) - real,
+    document-based extraction (BOQ line items, LLM-assisted scope,
+    confidence='document_confirmed') happens later, once a tender has a real
+    `tenders` row, via tender_enrichment.py's own CLI.
+
+    One release's tagging failure is logged and skipped, never fatal - the
+    same "one bad source/release never stops the whole run" discipline this
+    module uses throughout (see fetch_all()'s own docstring)."""
+    import tender_enrichment
+    for rel in releases:
+        try:
+            rel["scope_enrichment"] = tender_enrichment.enrich_release(rel)
+        except Exception as e:
+            rel["scope_enrichment"] = None
+            log(f"  WARNING: scope/BOQ/value-band tagging failed for {rel.get('ocid') or rel.get('contract_number')}: {e}")
 
 
 def releases_for_watch(sources=ALL_SOURCES, with_documents=True, log=print):

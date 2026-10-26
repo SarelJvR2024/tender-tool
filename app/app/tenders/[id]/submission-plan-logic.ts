@@ -39,6 +39,44 @@ export type PlanStep = {
   quote?: string | null;
 };
 
+/**
+ * What KIND of work a step actually is, separate from its Verify/Provide/Fix
+ * status (whether it needs fixing) - Sarel's own live feedback on this
+ * screen: "indicate if it requires a physical action, a decision, a
+ * document, info, review etc not just [a status badge], it is not
+ * descriptive enough, you can still color code if [it] needs fixing or done
+ * or ready to submit." Two different questions about the same step ("is
+ * this OK?" vs "what do I actually have to go and DO?"), so this is a
+ * second tag next to the existing status badge, never a replacement for it.
+ *
+ * Derived purely from the step's own `category` (already a required field,
+ * nothing new to read) plus, for forms/buyer forms, whether the engine
+ * already filled it in - no new data, no schema change.
+ */
+export type ActionType = "physical" | "decision" | "document" | "info" | "review";
+
+export function actionTypeForStep(step: PlanStep): ActionType {
+  switch (step.category) {
+    case "briefing":
+      return "physical"; // attending in person - no document or decision resolves this
+    case "role":
+    case "cidb_grading":
+      return "decision"; // who to tag, or whether the company's own grading actually qualifies
+    case "returnable":
+      return "document"; // something to have on file or upload
+    case "form":
+    case "buyer_form":
+      // The engine already filled/typed it - a glance confirms it (review);
+      // "by hand" means a person still has to produce the completed form.
+      return step.bidTaskStatus === "verify" ? "review" : "document";
+    case "gap":
+      return "review"; // the engine couldn't tell - a person has to look and judge
+    case "question":
+    default:
+      return "info"; // something only a person knows, typed into a field
+  }
+}
+
 function step(
   category: string,
   id: string,

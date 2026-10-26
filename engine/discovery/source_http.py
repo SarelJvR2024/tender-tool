@@ -178,6 +178,27 @@ def iso_sast(value):
     return dt.isoformat() if dt else None
 
 
+def iso_sast_closing(value):
+    """Like iso_sast(), but for a CLOSING date/time specifically, from a
+    source confirmed to give a date only, never a time (Rand Water, Kouga,
+    Vaal Central Water, Lephalale's own batch PDFs - each checked at its own
+    call site). parse_sast()'s midnight default is correct there as a generic
+    "no time given" marker (it also backs published_date, where midnight is
+    harmless), but a real tender closing deadline is never actually midnight
+    - no SA public-tender submission window runs through the night - so for
+    this field specifically a bare date defaults to 11:00 SAST, the standard
+    closing time, same as the General pack compiler's own placeholder
+    (Batch 2B, Sarel's own live feedback). Only call this where the source is
+    already known date-only; a source that can genuinely report a real
+    midnight closing time should keep using iso_sast()."""
+    dt = parse_sast(value) if not isinstance(value, datetime.datetime) else value
+    if dt is None:
+        return None
+    if dt.hour == 0 and dt.minute == 0 and dt.second == 0:
+        dt = dt.replace(hour=11)
+    return dt.isoformat()
+
+
 def is_past(value, now=None):
     dt = parse_sast(value)
     if dt is None:
@@ -205,6 +226,42 @@ def clean(text):
         return None
     t = re.sub(r"\s+", " ", str(text)).strip()
     return t or None
+
+
+# SA province codes and common buyer/department acronyms that share the
+# <2-letter initials><space><Capitalised word> shape _COMPILER_PREFIX looks
+# for - excluded so a real title that happens to start with one is never
+# touched (e.g. "KZN Roads Maintenance..." is a real title, not an officer's
+# initials).
+_SAFE_TITLE_PREFIXES = {"EC", "FS", "GP", "KZN", "LP", "MP", "NC", "NW", "WC", "DOT", "SARS"}
+# A tender officer's own "<Initials> <Surname> /" typed ahead of the real
+# title (sign-off bleeding into the free-text description box) - e.g.
+# "GA Mathebula / Supply and delivery of..." (Batch 2B Touch-ups, Sarel's own
+# live feedback). Deliberately narrow (exactly 2 capital initials, no
+# periods, a Capitalised word, then "/") since no raw eTenders sample with
+# this artifact was found in this repo's own fixtures to verify a looser
+# pattern against.
+_COMPILER_PREFIX = re.compile(r"^([A-Z]{2})\s+([A-Z][a-z]{2,})\s*/\s*")
+# A re-advertised notice's own trailing marker - "...2026(Re-Advert)",
+# "... (RE-ADVERT)" - never real title content.
+_RE_ADVERT_SUFFIX = re.compile(r"[\s\-]*\(\s*re[\s-]?advert\s*\)\s*$", re.I)
+
+
+def strip_title_artifacts(title):
+    """eTenders-specific notice-header noise that leaks into the buyer's own
+    free-text title/description field, not a separate structured field this
+    reader already drops (see this module's own contact-person minimisation
+    in etenders_portal.py) - call only on a title already read from eTenders
+    (etenders_portal.py, etenders_national.py), not a different buyer's own
+    site, whose title conventions this wasn't checked against."""
+    if not title:
+        return title
+    t = title
+    m = _COMPILER_PREFIX.match(t)
+    if m and m.group(1) not in _SAFE_TITLE_PREFIXES and m.group(2).upper() not in _SAFE_TITLE_PREFIXES:
+        t = t[m.end():]
+    t = _RE_ADVERT_SUFFIX.sub("", t)
+    return clean(t)
 
 
 def release(**kw):

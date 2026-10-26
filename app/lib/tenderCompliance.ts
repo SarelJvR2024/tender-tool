@@ -24,7 +24,7 @@
 // in the detail text but doesn't change the status - same as COID, whose
 // status has always come from the number + expiry on file.
 
-import { closingDayOf, daysUntil } from "./dates";
+import { closingDayOf, daysUntil, formatDate } from "./dates";
 import { SACQSP_POSITION_RE, SAGC_POSITION_RE, catalogSlug, type CatalogBody, type HeldCatalogRegistration, type PersonCredentialFields } from "./personCredentials";
 
 export type ComplianceStatus = "have" | "missing" | "check";
@@ -74,11 +74,15 @@ export type CompanyVault = {
   legal_name: string | null;
   csd_supplier_number: string | null;
   income_tax_number: string | null;
+  coid_registration_number: string | null;
   coid_letter_of_good_standing_number: string | null;
   coid_letter_of_good_standing_expiry: string | null;
   bee_level: number | null;
+  black_ownership_pct: number | null;
+  bee_procurement_recognition_pct: number | null;
   status: string | null; // e.g. "QSE"
   bank_name: string | null;
+  bank_branch_code: string | null;
   director_name: string | null;
   // 0014_vault_compliance_documents.sql
   coid_letter_document_path: string | null;
@@ -87,6 +91,7 @@ export type CompanyVault = {
   sars_tcs_pin_document_path: string | null;
   pi_insurance_insurer: string | null;
   pi_insurance_policy_number: string | null;
+  pi_insurance_cover_zar: number | null;
   pi_insurance_expiry: string | null;
   pi_insurance_document_path: string | null;
   iso_9001_certified: boolean | null;
@@ -102,12 +107,21 @@ export type CompanyVault = {
 };
 
 /** Column list for a supabase select() of CompanyVault. */
+// Extended 2026-10-24 (Batch 3, Quick Blocker Resolver) with the few real
+// CompanyVault fields that weren't needed here before this drawer: the
+// drawer pre-fills every field it offers to edit from this same row, so it
+// can never show a stale or blank value next to a document that's actually
+// on file.
 export const COMPANY_VAULT_COLUMNS =
-  "id, legal_name, csd_supplier_number, income_tax_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, status, bank_name, director_name, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path";
+  "id, legal_name, csd_supplier_number, income_tax_number, coid_registration_number, coid_letter_of_good_standing_number, coid_letter_of_good_standing_expiry, bee_level, black_ownership_pct, bee_procurement_recognition_pct, status, bank_name, bank_branch_code, director_name, coid_letter_document_path, sars_tcs_pin, sars_tcs_pin_expiry, sars_tcs_pin_document_path, pi_insurance_insurer, pi_insurance_policy_number, pi_insurance_cover_zar, pi_insurance_expiry, pi_insurance_document_path, iso_9001_certified, iso_9001_certificate_number, iso_9001_expiry, iso_9001_document_path, bank_confirmation_letter_date, bank_confirmation_letter_valid_until, bank_confirmation_letter_path, bee_proof_type, bee_proof_expiry, bee_proof_document_path";
 
 const RENEW_SOON_DAYS = 60; // same threshold as app/lib/dates.ts expiryStatus()
 
-const fmt = (d: string) => new Date(d).toLocaleDateString();
+// Trust Blue standard date format (Phase 2, 2026-10-23): the bare
+// `new Date(d).toLocaleDateString()` this used to be rendered raw US
+// MM/DD/YYYY under the server's own default locale - formatDate() (lib/dates.ts)
+// always gives the South African "23 Oct 2026" form instead.
+const fmt = (d: string) => formatDate(d) ?? d;
 
 /**
  * Validity of a dated document on this tender's closing date. "missing" when
@@ -243,13 +257,13 @@ export function sanralConventionalDocumentChecks(input: {
       detail = `Letter ${c?.coid_letter_of_good_standing_number} on file but no expiry date - confirm it is valid on the closing date.`;
     } else if (closingLeft !== null && expLeft !== null && expLeft < closingLeft) {
       status = "missing";
-      detail = `Expires ${new Date(exp).toLocaleDateString()}, before this tender closes - renew it first.`;
+      detail = `Expires ${fmt(exp)}, before this tender closes - renew it first.`;
     } else if (expLeft !== null && expLeft < 0) {
       status = "missing";
-      detail = `Expired ${new Date(exp).toLocaleDateString()}.`;
+      detail = `Expired ${fmt(exp)}.`;
     } else {
       status = "have";
-      detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${new Date(exp).toLocaleDateString()} - covers the closing date.` + copyNote(c?.coid_letter_document_path ?? null);
+      detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${fmt(exp)} - covers the closing date.` + copyNote(c?.coid_letter_document_path ?? null);
     }
     const fill = formFillNote(input.provenance, ["a_forms.A20"], input.hasPack);
     const exp_ = !!exp && expiredCopy(status, c?.coid_letter_document_path);
@@ -269,18 +283,21 @@ export function sanralConventionalDocumentChecks(input: {
     });
   }
 
-  // Stage 2 #4 - attendance of compulsory briefing session.
-  items.push({
-    key: "briefing",
-    form: "Briefing",
-    label: "Attendance at the compulsory briefing session",
-    mandatory: true,
-    ...(input.briefingTask
-      ? input.briefingTask.status === "done"
-        ? { status: "have" as const, detail: "Briefing task marked done." }
-        : { status: "check" as const, detail: `Briefing task is ${input.briefingTask.status.replace("_", " ")}${input.briefingTask.due_date ? `, due ${new Date(input.briefingTask.due_date).toLocaleDateString()}` : ""}. Missing it disqualifies the tender.` }
-      : { status: "check" as const, detail: "No briefing task on this tender. Add one under Tasks & milestones with its date - the date isn't extracted from the tender document yet." }),
-  });
+  // Stage 2 #4 - attendance of compulsory briefing session. QA finding,
+  // 2026-10-26: this used to push a ComplianceItem here, rendered by
+  // compliance-report.tsx with the exact same "On file / Confirm by hand /
+  // Don't have" document-evidence vocabulary as a real document check
+  // (CSD, Tax, COID...) - but attending a session isn't evidence on file,
+  // it's an action to complete, and this schema already tracks it correctly
+  // as exactly that: a real tender_tasks row (kind "briefing",
+  // ensureBriefingMilestone() - see page.tsx), shown in Tasks & milestones
+  // with its own real status (not_started/in_progress/done) and due date,
+  // and again in the day-before Submission Plan's own "Attend the
+  // briefing" step (submission-plan-view.tsx). Showing it a third time
+  // here, re-labelled into document vocabulary it doesn't fit, is the
+  // conflation this fix removes - input.briefingTask is still read by the
+  // caller for other summaries, just no longer turned into a document
+  // chip here.
 
   // A9 - tax compliance status (SARS TCS PIN). Real fields since 0014.
   {

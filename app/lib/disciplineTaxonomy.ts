@@ -10,7 +10,13 @@
 // Evidence for the seed: docs/specs/Discipline-Taxonomy-Findings.md.
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DISCIPLINES, disciplineLabel } from "@/lib/experience";
+// Relative, not the "@/" alias (both resolve to the same file - this is the
+// same directory): opportunityDisciplineMatch.test.ts (node:test, task item
+// 5) is this file's first unit-test importer, and plain
+// `node --experimental-strip-types` has no tsconfig "paths" resolution for
+// "@/..." the way `tsx`/Next.js's bundler do - a relative import here is the
+// only form every one of this repo's required test runners can resolve.
+import { DISCIPLINES, disciplineLabel } from "./experience.ts";
 
 export type DisciplineCategory = {
   slug: string;
@@ -71,6 +77,23 @@ export function isTaxonomySlug(t: DisciplineTaxonomy, slug: string): boolean {
 
 export function parentOf(t: DisciplineTaxonomy, slug: string): string | null {
   return t.categories.find((c) => c.slug === slug)?.parent_slug ?? null;
+}
+
+/**
+ * Strips a leaked taxonomy slug from a stored opportunity "reason" string -
+ * "Label (slug)" -> "Label". engine/discovery/assess_tender.py's labels()
+ * used to append the raw slug in parens after its own human label "for
+ * internal debugging", but it leaked into this user-facing discovery copy
+ * (Batch 2B's own fix for that, Sarel's live feedback) - discovered_opportunities.reasons
+ * is only ever rewritten when a tender is re-scored for a company that
+ * hasn't already seen it, so a row scored before that fix keeps the old
+ * text verbatim. Only strips a parenthetical made entirely of lowercase
+ * snake_case characters - a real parenthetical already in a label (e.g.
+ * "(UPS)", "(Re-Advert)") never matches that shape, so this can't eat
+ * genuine content.
+ */
+export function stripLeakedTaxonomySlugs(text: string): string {
+  return text.replace(/ \([a-z][a-z0-9_]*\)/g, "");
 }
 
 /**

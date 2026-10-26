@@ -1,11 +1,17 @@
 import Link from "next/link";
+import { HashAwareLink } from "./hash-aware-link";
+import { Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { loadTenderCompliance } from "./compliance-data";
-import { type ComplianceItem, type ComplianceStatus } from "@/lib/tenderCompliance";
+import { type ComplianceItem, type ComplianceStatus, type CompanyVault } from "@/lib/tenderCompliance";
 import { classifyComplianceItem, type BidTaskStatus } from "./bid-task-status";
+import { QuickBlockerDrawer } from "./quick-blocker-drawer";
+import { VAULT_DRAWER_CONFIG } from "./quick-fix-config";
 import { estimateSanralConventional, type Range } from "@/lib/sanralScoring";
 import { DOCUMENT_TYPES, disciplineLabel, isScoreableEvidence, labelFor, type ExperienceItem } from "@/lib/experience";
 import { acceptedDocTypes, describeRule, type ChosenRule, type EvaluationRules } from "@/lib/experienceEvidence";
 import { matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
+import { formatDate } from "@/lib/dates";
 
 /**
  * Compliance check + score estimate for one tender (Sarel, 2026-10-16: "once
@@ -45,21 +51,43 @@ const TASK_STYLE: Record<BidTaskStatus, { title: string; className: string }> = 
 // large diff for a color-only pass (design-system color migration, batch 4).
 const card: React.CSSProperties = { background: "var(--card)", border: "1px solid var(--border)", borderRadius: 12, padding: "18px 20px", marginBottom: 16 };
 
-export async function ComplianceReport({ tenderId }: { tenderId: string }) {
+/**
+ * One section per returned key, so the Tender Workspace's top-level tabs
+ * (page.tsx, Phase 2 retab) can place each where it belongs (documents/
+ * locality -> Compliance & Guard, people/experience -> Team & CVs,
+ * score -> Overview) instead of one long fragment -
+ * nothing here changed except the return shape; every read, every
+ * computed value, every piece of JSX is identical to before this split.
+ */
+export type ComplianceReportSections = {
+  documents: React.ReactNode;
+  people: React.ReactNode;
+  experience: React.ReactNode;
+  locality: React.ReactNode;
+  score: React.ReactNode | null;
+};
+
+export async function ComplianceReport({ tenderId }: { tenderId: string }): Promise<ComplianceReportSections | null> {
   const data = await loadTenderCompliance(tenderId);
   if (!data) return null;
   if (!data.mapped) {
     const family = data.family;
-    return (
-      <div style={card}>
-        <SectionTitle title="Compliance check" />
-        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-          Required documents are only mapped for SANRAL Conventional Consultant tenders so far
-          {family ? ` - this one is "${family}"` : ""}. Other buyers each set their own returnable list, so
-          nothing is claimed here until this tender&apos;s list has been read.
+    return {
+      documents: (
+        <div style={card}>
+          <SectionTitle title="Compliance check" />
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+            Required documents are only mapped for SANRAL Conventional Consultant tenders so far
+            {family ? ` - this one is "${family}"` : ""}. Other buyers each set their own returnable list, so
+            nothing is claimed here until this tender&apos;s list has been read.
+          </div>
         </div>
-      </div>
-    );
+      ),
+      people: null,
+      experience: null,
+      locality: null,
+      score: null,
+    };
   }
 
   const {
@@ -90,81 +118,116 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
   ];
   const fixCount = tasks.filter((t) => t.task.status === "fix").length;
 
-  return (
-    <>
-      {/* Required documents */}
-      <div id="compliance-check" style={card}>
-        <SectionTitle title="Compliance check - required documents" />
-        <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
-          SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria, checked against your
-          company vault on the closing date. <strong>Fix</strong> items would disqualify the bid at Stage 2 if left as is.{" "}
-          <strong>Provide</strong> items only you can supply. <strong>Verify</strong> items are already filled from your
-          vault - just confirm them.
-        </div>
-        {fixCount > 0 && (
-          <div className="border border-destructive/40 bg-destructive/10 text-destructive" style={{ borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, fontWeight: 600 }}>
-            {fixCount} requirement{fixCount === 1 ? "" : "s"} would disqualify this bid at Stage 2 - fix {fixCount === 1 ? "it" : "them"} before you submit.
-          </div>
-        )}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-          {taskGroups.map((g) => {
-            const rows = tasks.filter((t) => t.task.status === g.status);
-            const st = TASK_STYLE[g.status];
-            return (
-              <div key={g.status} style={{ border: "1px solid var(--border)", borderRadius: 11, padding: "12px 14px", minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{st.title}</div>
-                  <CountBadge count={rows.length} className={st.className} />
-                </div>
-                {rows.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "var(--muted-foreground)", paddingTop: 6 }}>{g.empty}</div>
-                ) : (
-                  rows.map(({ item, task }) => <BidTaskRow key={item.key} item={item} task={task} />)
-                )}
-              </div>
-            );
-          })}
-        </div>
+  const documents = (
+    <div id="compliance-check" style={card}>
+      {/* QA finding, 2026-10-26: trimmed from an always-visible 3-sentence
+          paragraph to one line + the full explanation on demand - same
+          Tooltip pattern narrative-documents.tsx already uses for its own
+          "how this is written" explainer, for consistency. */}
+      <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span>
+          Checked against your company vault on the closing date - <strong>Fix</strong>, <strong>Provide</strong> or{" "}
+          <strong>Verify</strong>.
+        </span>
+        <Tooltip>
+          <TooltipTrigger aria-label="What Fix, Provide and Verify mean" className="inline-flex size-4 flex-none items-center justify-center rounded-full text-muted-foreground">
+            <Info size={14} aria-hidden />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs text-left font-normal">
+            SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria.{" "}
+            <strong>Fix</strong> items would disqualify the bid at Stage 2 if left as is. <strong>Provide</strong>{" "}
+            items only you can supply. <strong>Verify</strong> items are already filled from your vault - just
+            confirm them.
+          </TooltipContent>
+        </Tooltip>
       </div>
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
+        {/* QA finding, 2026-10-26: attendance at the compulsory briefing session is
+            an action to complete, not a document to have on file - it belongs with
+            the other tasks, tracked with its own real status/due date, not re-labelled
+            into this list's document vocabulary. Plain <a>, not <Link>: same-page hash
+            into a different tab - see hash-aware-link.tsx's own doc comment. */}
+        Attendance at the compulsory briefing session is tracked as a task, not a document - see{" "}
+        <a href="#tasks-milestones" style={{ color: "var(--accent)", fontWeight: 600 }}>
+          Tasks &amp; milestones
+        </a>
+        .
+      </div>
+      {fixCount > 0 && (
+        <div className="border border-destructive/40 bg-destructive/10 text-destructive" style={{ borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, fontWeight: 600 }}>
+          {fixCount} requirement{fixCount === 1 ? "" : "s"} would disqualify this bid at Stage 2 - fix {fixCount === 1 ? "it" : "them"} before you submit.
+        </div>
+      )}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+        {taskGroups.map((g) => {
+          const rows = tasks.filter((t) => t.task.status === g.status);
+          const st = TASK_STYLE[g.status];
+          return (
+            <div key={g.status} style={{ border: "1px solid var(--border)", borderRadius: 11, padding: "12px 14px", minWidth: 0 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>{st.title}</div>
+                <CountBadge count={rows.length} className={st.className} />
+              </div>
+              {rows.length === 0 ? (
+                <div style={{ fontSize: 12, color: "var(--muted-foreground)", paddingTop: 6 }}>{g.empty}</div>
+              ) : (
+                rows.map(({ item, task }) => <BidTaskRow key={item.key} item={item} task={task} tenderId={tenderId} company={company} />)
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 
-      {/* Key people & CVs */}
-      <div id="key-people" style={card}>
-        <SectionTitle title="Key people & CVs" />
+  const people = (
+    <div id="key-people" style={card}>
+      <SectionTitle title="Key people & CVs" />
         <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           Whether each position is filled by someone <strong>your company has tagged</strong> as fitting that role (set on
           the person&apos;s People page - Tender Ready doesn&apos;t guess role fit), with the C3.1.11 minimums checked
           against the records on file as a cross-check, the CV on file and the tender-specific CV status.
         </div>
         {/* Whose C3.1.11 table the minimums come from - same banner pattern as the experience-evidence rule. */}
-        <div
-          className={
-            ownMinimums && assumedPositions.length === 0
-              ? "border border-border bg-card text-foreground"
-              : "border border-warning/40 bg-warning/10 text-warning"
-          }
-          style={{ borderRadius: 9, padding: "9px 12px", margin: "0 0 10px", fontSize: 12 }}
-        >
-          {ownMinimums ? (
-            <>
-              <div style={{ fontWeight: 700, marginBottom: 2 }}>Minimum requirements read from this tender&apos;s own C3.1.11 table</div>
-              <div>
-                {ownMinimums.rows.length} position row{ownMinimums.rows.length === 1 ? "" : "s"} read from {evaluationRules?.source_document ?? "the tender document"}.
-                {assumedPositions.length > 0 &&
-                  ` ${assumedPositions.join(", ")} ha${assumedPositions.length === 1 ? "s" : "ve"} no row in it - for ${assumedPositions.length === 1 ? "that position" : "those"} the R.396-010-2025/1F minimum is used and marked "Assumed rule".`}
-              </div>
-            </>
-          ) : (
-            <>
-              <div style={{ fontWeight: 700, marginBottom: 2 }}>Assumed rule - this tender&apos;s own C3.1.11 minimum-requirements table hasn&apos;t been read</div>
-              <div>
-                The minimums below are R.396-010-2025/1F&apos;s table (Book 2/3, C3-14/C3-15), not a fact about this tender - other SANRAL
-                tenders set different registrations and years (N.011-010-2027-1F wants Pr Eng only for the Contract Engineer and 10-15
-                years for the RE). Run engine/seed_tender_evaluation_rules.py with this tender&apos;s Book 2/3 to replace them.
-              </div>
-              {keyPersonMinimums?.reason && <div style={{ marginTop: 3, color: "var(--muted-foreground)" }}>Last read: {keyPersonMinimums.reason}</div>}
-            </>
-          )}
-        </div>
+        {ownMinimums ? (
+          <div
+            className="border border-border bg-card text-foreground"
+            style={{ borderRadius: 9, padding: "9px 12px", margin: "0 0 10px", fontSize: 12 }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 2 }}>Minimum requirements read from this tender&apos;s own C3.1.11 table</div>
+            <div>
+              {ownMinimums.rows.length} position row{ownMinimums.rows.length === 1 ? "" : "s"} read from {evaluationRules?.source_document ?? "the tender document"}.
+              {assumedPositions.length > 0 &&
+                ` ${assumedPositions.join(", ")} ha${assumedPositions.length === 1 ? "s" : "ve"} no row in it - for ${assumedPositions.length === 1 ? "that position" : "those"} the R.396-010-2025/1F minimum is used and marked "Assumed rule".`}
+            </div>
+          </div>
+        ) : (
+          // Batch 2B: the multi-paragraph "Assumed rule" yellow callout read
+          // as a text wall - condensed to a badge, with the same technical
+          // detail (which tender's table this estimate borrows, why, and
+          // when it's replaced) moved into a tooltip rather than dropped.
+          <div style={{ margin: "0 0 10px", display: "flex", alignItems: "center", gap: 5 }}>
+            <span className="border border-warning/40 bg-warning/10 text-warning" style={{ borderRadius: 100, padding: "3px 10px", fontSize: 11, fontWeight: 700 }}>
+              Standard SANRAL Criteria (Estimated)
+            </span>
+            <Tooltip>
+              <TooltipTrigger
+                aria-label="Why this estimate is used"
+                className="inline-flex size-4 flex-none items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
+              >
+                <Info className="size-3.5" aria-hidden />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs text-left font-normal">
+                This tender&apos;s own C3.1.11 minimum-requirements table hasn&apos;t been read yet. The minimums below
+                are R.396-010-2025/1F&apos;s table (Book 2/3, C3-14/C3-15), not a fact about this tender - other SANRAL
+                tenders set different registrations and years (N.011-010-2027-1F wants Pr Eng only for the Contract
+                Engineer and 10-15 years for the RE). These will be replaced with this tender&apos;s own minimums once
+                its Book 2/3 technical specification is read.
+                {keyPersonMinimums?.reason && <div style={{ marginTop: 6 }}>Last read: {keyPersonMinimums.reason}</div>}
+              </TooltipContent>
+            </Tooltip>
+          </div>
+        )}
         {positionRows.length === 0 && (
           <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
             No key positions recorded for this tender yet - they come from the tender pack once it&apos;s created.
@@ -233,24 +296,24 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }) {
           );
         })}
       </div>
-
-      {/* Company experience (Experience Library) */}
-      <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} chosen={chosenRule} disciplines={experienceDisciplines} />
-
-      {/* Locality (office locations vs the tender's own locality rows) */}
-      <LocalitySection rules={evaluationRules} offices={offices} />
-
-      {/* Score estimate */}
-      {estimate && (
-        <ScoreEstimate
-          estimate={estimate}
-          beeLevel={(company?.bee_level as number | null) ?? null}
-          beeProofValid={beeProofValid}
-          qualityFromVault={qualitySystem !== null}
-        />
-      )}
-    </>
   );
+
+  const experienceSection = (
+    <ExperienceSection available={experienceAvailable} error={experience.error} items={expItems} closingDate={closingDate} chosen={chosenRule} disciplines={experienceDisciplines} />
+  );
+
+  const locality = <LocalitySection rules={evaluationRules} offices={offices} />;
+
+  const score = estimate ? (
+    <ScoreEstimate
+      estimate={estimate}
+      beeLevel={(company?.bee_level as number | null) ?? null}
+      beeProofValid={beeProofValid}
+      qualityFromVault={qualitySystem !== null}
+    />
+  ) : null;
+
+  return { documents, people, experience: experienceSection, locality, score };
 }
 
 function ScoreEstimate({
@@ -362,8 +425,8 @@ function ExperienceSection({
       <div style={{ fontStyle: "italic", color: "var(--muted-foreground)", marginTop: 3, wordBreak: "break-word" }}>&ldquo;{rule.quote}&rdquo;</div>
       {source === "assumed" && (
         <div style={{ marginTop: 3 }}>
-          This is SANRAL&apos;s Form B6 pattern, not a fact about this tender. Run engine/seed_tender_evaluation_rules.py on
-          the tender document to replace it.
+          This is SANRAL&apos;s Form B6 pattern, not a fact about this tender. It will be replaced with this tender&apos;s own
+          rule once its evidence requirements are read from the document.
         </div>
       )}
       {chosen.otherRules > 0 && <div style={{ marginTop: 3 }}>The document states {chosen.otherRules} more experience rule(s) - check which one applies.</div>}
@@ -394,7 +457,7 @@ function ExperienceSection({
       <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
         Tagged {disciplines.map((d) => disciplineLabel(d).toLowerCase()).join(" / ")} projects (the disciplines of this tender&apos;s key positions) in your Experience Library
         {rule.window_years ? ` completed within ${rule.window_years} years of` : " up to"}
-        {closingDate ? ` ${new Date(closingDate).toLocaleDateString()}` : " closing"}.
+        {closingDate ? ` ${(formatDate(closingDate) ?? "—")}` : " closing"}.
       </div>
       {ruleBox}
       {items.length === 0 && (
@@ -409,7 +472,7 @@ function ExperienceSection({
             <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>
               {labelFor(DOCUMENT_TYPES, i.document_type)}
               {i.client_name ? ` · ${i.client_name}` : ""}
-              {i.completion_date ? ` · completed ${new Date(i.completion_date).toLocaleDateString()}` : ""}
+              {i.completion_date ? ` · completed ${(formatDate(i.completion_date) ?? "—")}` : ""}
             </div>
           </div>
           {accepted.has(i.document_type) ? (
@@ -496,7 +559,25 @@ function RangeBar({ range, max, threshold }: { range: Range; max: number; thresh
   );
 }
 
-function BidTaskRow({ item, task }: { item: ComplianceItem; task: ReturnType<typeof classifyComplianceItem> }) {
+function BidTaskRow({
+  item,
+  task,
+  tenderId,
+  company,
+}: {
+  item: ComplianceItem;
+  task: ReturnType<typeof classifyComplianceItem>;
+  tenderId: string;
+  company: (CompanyVault & { id: string }) | null;
+}) {
+  const fixColor = task.status === "fix" ? "var(--destructive)" : "var(--warning)";
+  // The Quick Blocker Resolver drawer (Sarel's own Batch 3 brief,
+  // 2026-10-24) only replaces the plain Link for the compliance keys that
+  // actually map to a real company-vault shape (quick-blocker-drawer.tsx's
+  // own VAULT_DRAWER_CONFIG) - everything else keeps its existing Link to
+  // /company, unchanged.
+  const drawerConfig = company ? VAULT_DRAWER_CONFIG[item.key] : undefined;
+
   return (
     <div style={{ padding: "9px 0", borderTop: "1px solid var(--border)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -511,10 +592,24 @@ function BidTaskRow({ item, task }: { item: ComplianceItem; task: ReturnType<typ
       <div style={{ marginTop: 5 }}>
         {task.confirmed ? (
           <Chip label="Confirmed" className="bg-success/10 text-success" />
+        ) : drawerConfig && company ? (
+          <QuickBlockerDrawer
+            tenderId={tenderId}
+            companyId={company.id}
+            config={drawerConfig}
+            currentValues={Object.fromEntries(
+              drawerConfig.fields.map((f) => {
+                const raw = (company as unknown as Record<string, string | number | null>)[f.name];
+                return [f.name, raw === null || raw === undefined ? "" : String(raw)];
+              }),
+            )}
+            triggerElement={<button type="button" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, fontWeight: 600, color: fixColor }} />}
+            triggerLabel={`${task.fixLabel} →`}
+          />
         ) : (
-          <Link href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: task.status === "fix" ? "var(--destructive)" : "var(--warning)" }}>
+          <HashAwareLink href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: fixColor }}>
             {task.fixLabel} →
-          </Link>
+          </HashAwareLink>
         )}
       </div>
     </div>

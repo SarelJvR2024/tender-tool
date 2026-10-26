@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { TENDER_DOCS_BUCKET } from "@/lib/manualTender";
 import { AddPrivateDocumentsForm } from "../new/manual-tender-form";
 import { removePrivateTenderDocument } from "./general-actions";
+import { formatDate } from "@/lib/dates";
 
 /**
  * "Your private documents" on a SHARED tender (one Discovery found -
@@ -62,7 +63,7 @@ export async function PrivateDocuments({
                 ) : (
                   <span className="font-semibold text-foreground">{d.title}</span>
                 )}
-                <span className="text-muted-foreground"> · added {new Date(d.created_at).toLocaleDateString()}</span>
+                <span className="text-muted-foreground"> · added {(formatDate(d.created_at) ?? "—")}</span>
               </div>
               <form action={removePrivateTenderDocument}>
                 <input type="hidden" name="tender_id" value={tenderId} />

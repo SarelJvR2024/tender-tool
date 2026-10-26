@@ -1854,3 +1854,1894 @@ committing, per this repo's own standing worktree-isolation rule.
 **Tested**: `python3 engine/discovery/test_taxonomy.py`, `python3 engine/discovery/test_discovery_fanout.py`,
 `python3 engine/intake/test_classify_tender.py` - all three, 0 failures. No TypeScript/UI surface
 touched by this fix (Opportunities' own card copy/layout is task #94's scope, not this one's).
+
+---
+
+### Tender workspace: quick doc link, phase-grouped plan, action-type tags, tabs (Sarel's own live feedback)
+
+Sarel's third live-feedback round tonight, screenshot of `/tenders/[id]#general-preparation`
+(RFP165/2026, DBSA, general family): "have a quick link to access all tender docs. change
+submission plan to be grouped by how to compile the tender pack and according to the timeline...
+not just one long list. also indicate if it requires a physical action, a decision, a document,
+info, review etc not just [a status badge]... you can still color code if it needs fixing or done
+or ready to submit. the tags in the standard forms section should be standard sizes. add a summary
+of how much is still needed per section... always displayed. see if you can streamline the page
+and move to different tabs, it is a very long list, even reduce some of the blabber on the
+questions." Seven distinct asks, all in `general-workspace.tsx`/`submission-plan-*.ts` (general
+family only - SANRAL's own `compliance-report.tsx` and `disqualification-guard.tsx` sit outside
+this page's biggest-complaint area and were left alone beyond one copy trim). The CV-pre-population/
+confidence-level closing line is the same ground `CV-led "Add person"` work (same night, different
+Claude session/PR) already covers - not re-scoped here to avoid two sessions racing the same code.
+
+**Action-type tags (new axis, not a status change)**: new `ActionType = "physical" | "decision" |
+"document" | "info" | "review"` and a pure `actionTypeForStep()` in `submission-plan-logic.ts`,
+derived from each step's existing `category` (+ `bidTaskStatus` for forms: engine-filled ->
+review, by-hand -> document) - no new data, no schema change. Rendered by new `ActionTypeTag`
+(`action-type-tag.tsx`) - deliberately a square-cornered, icon+outline tag, a different SHAPE from
+`BidTaskBadge`'s rounded pill, so the two read as two different kinds of information at a glance:
+the existing Fix/Provide/Verify status badge (kept, unchanged, still color-coded) stays the "is
+this OK" signal; the new tag is "what do I actually have to go and do." Never merged into one
+badge - Sarel's own words kept the two separate ("not just [status], it is not descriptive enough,
+you can still color code").
+
+**Submission plan regrouped by phase, not status**: `submission-plan-view.tsx` rewritten -
+`PHASE_ORDER` groups the exact same steps into "1. Confirm you qualify" (returnable, cidb_grading)
+-> "2. Assign your team" (role) -> "3. Complete the forms" (form, buyer_form) -> "4. Answer this
+tender's own questions" (question) -> "5. Attend the briefing" (briefing) -> "6. Known limitations"
+(gap) - the order a pack actually gets compiled in, derived purely from each step's existing
+`category` field (8 values already there, nothing new read). Status is still worst-first WITHIN
+each phase and still the row's own color-coded badge - grouping changed, the Fix/Provide/Verify
+model didn't. An always-visible "`N` of `M` ready · `fix` to fix · `provide` to provide · `verify`
+to verify" bar sits above the phases (item 5), plus a "`done` of `total` done" count per phase
+header, even while scrolled past it. An empty phase (e.g. no gaps) is skipped entirely rather than
+padded with an empty-state line - the old flat list's own `emptyText` strings are gone; a phase
+with zero items for this tender just isn't shown.
+
+**Tabs, scoped deliberately**: new `WorkspaceTabs` (`workspace-tabs.tsx`, client component) wraps
+ONLY `GeneralTenderWorkspace`'s 4 secondary sections (Documents/Questions/People/Pack) behind a tab
+bar - "What this tender needs" (has its own live blocker chips) stays always visible above the
+tabs, and the Disqualification guard + Submission plan (`page.tsx`, mounted above this whole
+component) were already structurally outside/above it before tonight - confirmed by reading
+`page.tsx` before starting. No blocker is ever hidden in a tab (spec v3 §16.E: "Do not bury
+blockers in a hidden tab"). Every tab's content is always rendered (same data already being
+fetched unconditionally before tabs existed) - only which one is VISIBLE changes, via the `hidden`
+attribute rather than unmounting, so an existing `JumpLink href="#general-documents"` style anchor
+still finds a real element. Since a `hidden` element can't be scrolled to, `WorkspaceTabs` listens
+for `hashchange` (a `JumpLink` click, or the page loading with a hash already in the URL) and
+switches tabs itself before re-doing the scroll the browser couldn't do while it was hidden; a
+tab's optional `anchors` list (used for `general-pack-review`, rendered inside the Pack tab but
+with its own id) covers a hash that isn't the tab's own id. Each tab carries a `TabBadge` - the
+same per-section "still outstanding" count Sarel asked for (item 5), on the bar itself so it's
+genuinely "always displayed" even while a different tab is open: Documents = `docsMissing`,
+Questions = `needAnswer`, People = `regGaps + roleGaps` (new, a small pure count from already-
+loaded `personRegs`/`roleRowsForTender`, not a new query), Pack = `generalFixCount` (already
+computed, reused).
+
+**Quick doc link + standard-size form tags + copy trim**: "Read from N documents" in "What this
+tender needs" is now a link to `#general-documents`/the Documents tab; that section gained a
+`<details>` disclosure listing every `manifest.documents[]` entry by name (with an unreadable/OCR
+note) - the one genuine gap found while investigating (the manifest's own document list was being
+counted everywhere but never itemized anywhere) - rather than inventing a download feature the
+schema doesn't have (checked: no `listing_url`/original-document storage exists beyond
+`tender_private_documents`, which IS already linked from inside the disclosure when present).
+`FormTag` (SBD/MBD code pills, "standard forms" section) got a `minWidth: 56` + centered text - the
+literal ask ("standard forms section tags should be standard sizes"); previously auto-width, so
+"SBD 1" and "SBD 6.1" visibly differed. Trimmed the Questions intro paragraph, the Submission plan
+intro, and the Disqualification guard's description to their load-bearing sentence each - the
+"blabber" complaint was about fixed wrapper copy, not per-question `help` text (that's extracted
+from the tender's own documents, not authored here).
+
+**Self-review (4 rounds, this page's size/risk)**: round 1 - re-read Sarel's own words item by
+item against the diff; the "info" fallback for a signatory-type question (`q.type === "person"`)
+is a known, accepted simplification - `PlanStep` carries no discriminator for it today, so it reads
+as generic "info" rather than "decision" (who signs); not silently missed, flagged here. Round 2 -
+confirmed `disqualification-guard.tsx`'s own `plan.steps.filter((s) => s.category === "role")`
+still works unchanged (category values untouched, only a new derived `ActionType` added alongside).
+Round 3 - a mock-data screenshot harness (`/design/screenshot-workspace-redesign`, temporary,
+deleted before finishing) rendered `ActionTypeTag` for all 5 types, the phase-grouped plan with 9
+mock steps across 5 phases, and `WorkspaceTabs` with its badges; confirmed visually at 1440px and
+390px, and confirmed a real click switches tabs (Playwright, `page.getByRole('tab').click()`).
+Round 4 - re-read the full restructured `general-workspace.tsx` end to end for the tab-content
+extraction itself (the highest-risk mechanical step): every section's own id, every prop/state
+closure (`tenderId`, `manifest`, `returnables`, `qStates`, etc.) still reads from the same
+surrounding closure as before, nothing duplicated or dropped in the move.
+
+**Tested**: `npm run build` clean, `npm run verify` 0 errors, 144/144 vitest (11 new
+`actionTypeForStep` cases added to the existing `submission-plan-logic.spec.ts`), 76/76 node:test
+both ways. **Not tested**: an actual signed-in render of `/tenders/[id]` - same sandbox credential-
+generation limitation as every batch tonight; the mock-data screenshot harness above is real
+evidence the new components render, lay out, and respond to clicks correctly, not a substitute for
+Sarel clicking through his own real tender.
+
+---
+
+### Fix: stop naming SANRAL in the general (non-SANRAL) tender flow
+
+Sarel's own live feedback: "there is still sanral specific references and saying not sanral
+temple [template], dont do that, onlt when it is a sanral tender, then mention the sanral specs and
+tools and process." Grepped every `SANRAL` occurrence under `app/app/tenders/[id]/` to check each
+one was actually gated to a real SANRAL-route tender (most already were - `compliance-report.tsx`,
+`submission-pack.tsx`, `subcontracting-plan.tsx`, `tender-templates.tsx` are only rendered at all
+when `isSanralFamily`/`showSubmissionPack` is true, per `page.tsx`'s own conditional). Found three
+real leaks, all in files a general (non-SANRAL) tender's own user would actually see:
+
+- `general-workspace.tsx`'s "Tender preparation" intro used to open with "This isn't a SANRAL
+  tender, so..." - naming the one thing this screen explicitly isn't, to a user who may never deal
+  with SANRAL at all. Now opens directly with what the screen actually does: "What this tender
+  needs is read from its own documents...".
+- `intake-card.tsx`'s route chip said "General (non-SANRAL) flow" for every non-SANRAL tender -
+  now just "General flow". The chip for an actual SANRAL tender still correctly says "SANRAL pack
+  flow - {family}".
+- `intake-card.tsx`'s "reading the documents" loading message used to say "working out whether
+  this is a SANRAL template tender or a general one" - said to every tender while intake is still
+  running, before the route is even known. Reworded to describe what's actually happening ("working
+  out what this tender requires and how it fits your company") without leading with SANRAL.
+- `intake-card.tsx`'s generic "missing something?" prompt under the manual-upload form used "an
+  addendum, the SANRAL workbook, a readable copy of a scanned page" as its three examples
+  unconditionally - a general tender's own user saw "the SANRAL workbook" as a suggested example of
+  something THEY might be missing. Now conditional on `intake?.route === "sanral"`.
+
+Pure copy/conditional-rendering change - no calculation, routing decision, or SANRAL-specific
+feature was touched; `compliance-report.tsx`/`submission-pack.tsx`/`subcontracting-plan.tsx`/
+`tender-templates.tsx` (the actual SANRAL-only screens) are unchanged, confirmed still gated
+correctly. `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways (`tsx --test` and
+the real CI invocation, `node --experimental-strip-types` per file).
+
+---
+
+## App-wide counts & calculations audit (2026-10-23)
+
+Sarel, after seeing the real Active-bids 6-vs-1 discrepancy (PR #122, `fix/active-bids-count-mismatch`
+- same root cause shape cited throughout this pass): "run through the app all calculations and counts
+and make sure they are correct." A systematic read of every page that shows a computed stat, count,
+percentage or total - `dashboard/page.tsx`, `pipeline/page.tsx` (read-only per the file-overlap rule
+below), `analytics/page.tsx`, Company vault (`lib/companyReadinessData.ts`/`lib/readiness.ts`),
+`lib/savingsCounter*.ts`, `lib/marketPricing.ts` and everything reachable from them - checked against
+its own label, against every other place in the app computing what should logically be the same
+number, and against zero-row/one-row/null-field/wrong-company edge cases, same bar as the
+Audit-fix-cluster batches above.
+
+**File-overlap rule followed**: two other sessions were concurrently touching
+`app/app/discovery/page.tsx`, `app/app/pipeline/page.tsx` and `app/app/pipeline/pricing/page.tsx`
+(server-side pagination/filtering batch, and PR #122's own active-bids fix) - none of those three
+were edited in this pass, even though `pipeline/page.tsx`'s own `totalValueBeingBid`/
+`submittedThisMonth`/`winRate` were read and checked (see "found but not fixed" below for the one
+real issue that turned up there).
+
+**Fixed - real bug, same precedent as PR #111 ("silently reading a 2.5% sample, not the real
+table")**: `app/dashboard/page.tsx` and `app/analytics/page.tsx` both read the whole shared `tenders`
+table (migration 0001: "Shared across every company - not tenant-scoped", readable by every
+authenticated user for every non-manual row) with a plain `.select()` and **no `.range()`-based
+pagination at all** - `analytics/page.tsx`'s own read didn't even have an `.order()` clause. PostgREST
+caps any response at 1000 rows (db-max-rows) regardless of a client-side `.limit()`, confirmed live
+during the PR #111 QA pass against this exact project - once the shared `tenders` table (grown daily
+by the discovery pipeline, with nothing ever pruning closed/old rows) passes 1000 rows, both pages
+would silently see an arbitrary, truncated slice instead of the real set, undercounting "Active
+bids"/"Packs ready"/"Closing this week"/"Tenders tracked"/"Win rate" etc. for every company on the
+platform at once - not a single-company bug, a whole-platform one, the moment the row count crosses
+the cap. Grepped the whole codebase for every other `.select()` that could plausibly read more than
+1000 rows without `.range()`-based pagination (325 `.select()` calls checked) - every other one is
+either already paginated (`lib/marketPricing.ts`, PR #111) or inherently bounded by a real filter
+(`.eq("id", ...)`, a single company's own RLS-scoped rows, a `tender_packs!inner(...)` join that
+requires a real pack, a `.limit()` on a small capped list) - these two were the only genuine gaps.
+- **Extracted `fetchAllRows()`/`POSTGREST_PAGE_SIZE` out of `lib/marketPricing.ts` into a new shared
+  `lib/supabasePaging.ts`** (re-exported from `marketPricing.ts` so its own existing imports/tests
+  don't need to change) - this exact fix needed reusing in two more files, not redefining.
+- `dashboard/page.tsx`'s `tenders` read now pages through `fetchAllRows()` (keeping its existing
+  `.order("closing_date")`, needed for the "Closing soon" list's own ordering) capped at 20,000 rows
+  - headroom above any plausible current count, not a measurement, same reasoning
+  `loadMarketOutcomes()`'s own 60,000 cap documents.
+- `analytics/page.tsx`'s `tenders` read gets the same fix (no pre-existing `.order()` to preserve -
+  none was ever applied here, matching `lib/marketPricing.ts`'s own un-ordered
+  `loadSegment()`/`loadMarketOutcomes()` precedent for a `fetchAllRows()` caller).
+- **Test**: `lib/supabasePaging.spec.ts` (5 cases, moved from `marketPricing.spec.ts` + one new) -
+  including a direct regression case naming the exact old bug (a naive single `.range()` request
+  returns only 1000 of 1800 real rows) vs. the fix (returns the real 1800). The generic helper is
+  what's unit-tested (same as PR #111's own fix); neither `dashboard/page.tsx` nor
+  `analytics/page.tsx` can be unit-tested against a live-growing table in this environment (no
+  `SUPABASE_DB_URL` here either - same documented limitation as every other DB-dependent page in
+  this file), so correctness here rests on reusing the already-tested helper verbatim, not a new
+  page-level test.
+- **Before/after**: today's real row count is well under 1000, so this is forward-looking, not a
+  live-data fix visible in a screenshot right now - exactly the same situation PR #111 was in before
+  `public_tender_outcomes` crossed the cap for real. The bug is real and reproducible (the new
+  regression test proves it) even though it hasn't yet bitten in production.
+
+**Checked and confirmed correct (re-verified, not just trusted from the prior pass's own fix)**:
+- `lib/savingsCounter.ts`/`lib/savingsCounterData.ts` (this file's own "Spec §9" entry documents a
+  real past R0-savings bug) - `resolveBaseline()` is used consistently in both
+  `fetchSavingsCounterSummary()` and `fetchTenderSavingsBreakdown()`, `hoursSavedForTender()`'s
+  baseline cap and `extraCapacity()`'s divide-by-zero guard are both still correct against their own
+  26 unit tests. One real but very narrow edge case found, **not fixed**: `fetchSavingsCounterSummary()`'s
+  "this month" boundary (`new Date(now.getFullYear(), now.getMonth(), 1)`) uses the server's own local
+  time zone, not `Africa/Johannesburg` (unlike `dashboard/page.tsx`'s own `greetingFor()`, which
+  explicitly uses SAST) - on a server running in UTC, a step counted in the ~2-hour window around
+  midnight SAST at a month boundary could land in the wrong month's total. Narrow enough (a few hours,
+  once a month) that this pass judged it not worth the risk of a deploy-environment-dependent fix
+  without being able to confirm the real server's time zone here - flagged for whoever next touches
+  this file.
+- `lib/companyReadinessData.ts`/`lib/readiness.ts` - confirmed `app/dashboard/page.tsx`,
+  `app/company/page.tsx` and the onboarding end screen all ultimately feed the exact same
+  `computeBidReadiness()` pure function with field-for-field identical inputs;
+  `app/company/page.tsx` computes its own input object (rather than calling
+  `fetchCompanyReadiness()`) only to reuse data it had already fetched for other reasons on the same
+  page (the company row, the principal count) - checked every field one by one against
+  `fetchCompanyReadiness()`'s own mapping and found zero drift, so this is a legitimate fetch-path
+  optimization, not the "recomputing its own version" drift risk this audit was looking for.
+- `lib/documentExpiry.ts`/`lib/notifications.ts` - the vault's "N documents need attention" count and
+  the topbar bell read the same `COMPANY_EXPIRY_FIELDS`/tables, the bell's tighter 60-day vs. the
+  vault's 30-day window is a documented, deliberate difference (already in this file's own prior
+  entry), not a disagreement bug.
+- `app/pipeline/page.tsx`'s own `totalValueBeingBid`/`submittedThisMonth`/`winRate` (read-only, not
+  edited per the file-overlap rule) - all three check out: `winRate` uses the identical
+  `won/(won+lost)` formula (with the identical `decided === 0 -> null` guard) as
+  `analytics/page.tsx`'s own win rate, `submittedThisMonth` counts by `submitted_at`'s calendar
+  month regardless of current stage (correct - a tender submitted this month that was later decided
+  should still count), and `totalValueBeingBid` sums `submitted_price_zar` only across
+  found+bidding (not-yet-decided) cards, matching the field the pipeline card itself already shows.
+  The one real disagreement in this area - `pipeline/page.tsx`'s own "Active bids" (found+bidding
+  only) vs. `dashboard/page.tsx`'s (found+bidding+submitted, via `ACTIVE_PURSUIT_STAGES`) - is
+  exactly PR #122's own fix, already in flight; not re-fixed here to avoid colliding with it.
+- `lib/dealEconomics.ts`'s `median()` (odd/even length, empty array), `commissionRand()`'s
+  round-to-cents arithmetic, `lib/dates.ts`'s `daysUntil()` (NaN/malformed-date guard) - all read
+  correct against their call sites and existing tests; left alone.
+- `app/tenders/[id]/tender-readiness.ts`'s `computeTenderReadiness()` returning `score: 100` for
+  `totalCount === 0` is deliberate and already covered by its own 5-case test (an unmapped family or
+  zero-section pack reads as "nothing to assess yet", not "0% ready") - not a bug.
+- Confirmed no query anywhere in `app/`/`lib/` uses a service-role/admin Supabase client that bypasses
+  RLS (grepped for `service_role`/`SUPABASE_SERVICE_ROLE`/`supabaseAdmin` - the only hit is
+  `scripts/send-deadline-reminders.ts`, a standalone cron script, not a page) - **no tenant-isolation
+  leak found** in this pass. `discovered_opportunities`, `savings_counted_steps`, `tender_packs` all
+  confirmed to carry a real `company_id` + tenant-scoped RLS policy by reading their migrations
+  directly, not assumed from naming.
+
+**Found but NOT fixed here (file-overlap conflict with concurrent work - write-up only, per this
+batch's own instruction)**:
+- `app/app/pipeline/page.tsx`'s "Active bids" stat (found+bidding only) disagreeing with
+  `app/app/dashboard/page.tsx`'s "Active bids" (found+bidding+submitted, via
+  `ACTIVE_PURSUIT_STAGES`) - this is the exact bug PR #122 (`fix/active-bids-count-mismatch`) is
+  already open to fix; deliberately not touched a second time here to avoid a merge collision. See
+  that PR's own description for the fix (a shared `IN_PROGRESS_STAGES` constant in `lib/pipeline.ts`).
+- No other real counts/calculations bug was found specifically inside `discovery/page.tsx`,
+  `pipeline/page.tsx` or `pipeline/pricing/page.tsx` beyond the one above - both files were read in
+  full for this audit's own verification purposes (see "Checked and confirmed correct" above), not
+  skipped, just not edited.
+
+Verified: `rm -rf .next && npm run verify` - 0 errors (3 pre-existing warnings, unrelated to this
+pass - 2 `no-img-element` on `Logo.tsx`, 1 `no-unused-vars` on `analytics/page.tsx`'s own
+`STAGE_META` import, confirmed present on `origin/main` before this pass touched the file).
+`npx vitest run` - 145/145 (144 baseline + 1 new regression test; `supabasePaging.spec.ts`'s 5 cases
+replace the 4 `fetchAllRows` cases moved out of `marketPricing.spec.ts`). Full `node:test` sweep both
+ways: `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 76/76; the same
+set run individually via `node --experimental-strip-types --test <file>` - 76/76, zero failures.
+
+---
+
+### Opportunities/Bids/Pricing history: discovered_opportunities scaling fix (Sarel: "filtering tenders is going to be critical with the load, we need to be smart about how we manage that")
+
+**Root cause.** `discovered_opportunities` is a per-company table that accumulates one row for
+every OCDS release ever scored against that company, forever - there is no retention/archival
+(see the proposal at the end of this entry). Three call sites fetched the ENTIRE table, unbounded,
+on every page load: `app/discovery/page.tsx` (no `.range()`/`.limit()` at all, with every
+verdict/changed/reassessed filter done in JS over the full in-memory array), `app/pipeline/page.tsx`,
+and `app/pipeline/pricing/page.tsx` (the latter two only ever using rows to look up
+`categories`/`verdict` for tenders this company has actually pursued). **This is the same class of
+bug PR #111 fixed** ("Fix Market Intelligence silently reading a 2.5% sample, not the real table",
+`lib/marketPricing.ts`'s own `fetchAllRows()`/`POSTGREST_PAGE_SIZE` comment): PostgREST silently
+caps any single `.select()` response at 1000 rows (`db-max-rows`, confirmed live during that PR's
+own investigation) regardless of a client-side `.limit()` past it - so an unpaginated discovery
+fetch wasn't just slow, it would eventually start silently truncating and showing wrong
+counts/filters once a company's scored history passed 1000 rows. Treated as a real, found
+defect-in-waiting, not a hypothetical - exactly per the task brief.
+
+**Fixed, pure application-code, no schema/migration change** (the table was already indexed for
+exactly this access pattern - `discovered_opportunities_company_verdict_idx (company_id, verdict)`
+and `discovered_opportunities_company_first_seen_idx (company_id, first_seen desc)`, migration
+0004):
+
+1. **Pipeline + Pipeline Pricing**: both queries narrowed with `.not("tender_id", "is", null)`.
+   Verified safe by reading `pursue_discovered_opportunity()`'s full history across migrations
+   0018/0024/0051 - the 0024/0051 redefinitions (`create or replace function`, which wins) always
+   `update discovered_opportunities set tender_id = t_id where id = opp.id` the moment a tender is
+   pursued, and the opportunity upsert key is `(company_id, ocid)` (one row per company per ocid,
+   `seed_supabase_opportunities.py`), so every row either of these two pages' ocid/contract_number/
+   tender_id lookup can ever match already has `tender_id` set. Narrowing drops only opportunities
+   neither page reads anyway (never pursued into a `tenders` row), never one the lookup still needs.
+   Zero UI/behaviour change.
+2. **Discovery page pagination**: a growing `.range(0, show)` window (default 30, `PAGE_SIZE` in
+   the new `lib/discoveryPagination.ts`), fetching `show + 1` rows each time to know for certain
+   whether a further row exists (no extra count query) and capped at `MAX_SHOW = 300` (10 "Load
+   more" clicks). **Chosen over true keyset pagination** (which the task preferred and the index
+   supports directly) because expressing a keyset tuple comparison
+   (`WHERE (first_seen, id) < (cursor)`) in supabase-js means a hand-rolled `.or()`/`.and()`
+   PostgREST filter string, and this sandbox has no live Supabase project to verify that string
+   against (same standing gap as every other page in `docs/specs/System-Status.md`) - a silently-
+   wrong hand-rolled filter is a worse failure mode than the bug being fixed. The growing-limit
+   approach uses only ordinary `.order()`/`.range()` calls, never skips or duplicates rows under
+   concurrent inserts the way classic increasing-OFFSET pagination can (there is no offset - a new
+   row inserted between "Load more" clicks just appears at the top of a bigger, still fully
+   consistent window, like a refreshed inbox), at the cost of re-transferring already-seen rows on
+   every click instead of only the incremental delta - bounded and cheap given `MAX_SHOW`. True
+   keyset is a reasonable follow-up once there's a way to verify a compound PostgREST filter
+   against a real project. Full reasoning + the "open downgrade bump-to-top is now only within the
+   loaded window, not the whole table" tradeoff (addressed below) are in `discoveryPagination.ts`'s
+   own module comment and in the page's inline comments.
+3. **Verdict filter tabs pushed into the query.** Strong fit/Needs review/Not a fit are now
+   `.eq()`/`.in()` on the indexed `verdict` column server-side (`verdictQuerySpec()`, pure and unit
+   tested). Per-tab counts are their own `{count:"exact", head:true}` queries (5 total, run in
+   parallel, no row data transferred) instead of scanning the fetched array - and are real,
+   company-wide exact counts (`count:"exact"` is accurate even past PostgREST's 1000-row *data*
+   cap - only the row data is capped, confirmed by the same Content-Range behaviour PR #111 found).
+4. **Re-assessed turned out to be a real, full-history filter, not just a scoped one** - the task
+   flagged this as worth checking (`downgraded_from`/`downgrade_acknowledged_at` are real columns
+   on the row), and it checks out: `.not("downgraded_from", "is", null)` is both the main-query
+   predicate and its own exact count, so the Re-assessed tab now genuinely searches this company's
+   entire downgrade history (paginated the same growing-window way), not just whatever's loaded on
+   "All". **Changed is the one tab that stays an honest, scoped limitation** - it needs a
+   cross-reference against `tender_listing_changes`, which isn't a column on `discovered_opportunities`,
+   so it can't become a WHERE clause without a schema change (a dedicated view/function - see the
+   proposal below). It only searches whatever window is currently loaded (shown with its own
+   explanatory note on the page, and its count badge is only ever computed while that tab is open -
+   "–" otherwise rather than a fake number elsewhere).
+5. **The open-downgrade warning banner at the top of the page** got its own small, separately-scoped
+   query (`.not("downgraded_from","is",null).is("downgrade_acknowledged_at", null)`, row data capped
+   at 200 with an honest "200+" shown past that, but the *count* itself is always the true,
+   un-truncated total) so it stays accurate across the company's full history regardless of which
+   page/tab is currently in view - it no longer silently undercounts once history grows past
+   whatever's loaded. Its "Show re-assessed tenders" link is how every open downgrade stays
+   reachable even though the in-window bump-to-top (unchanged visual behaviour) can no longer
+   guarantee an old one appears on the very first screen of "All".
+6. **The `tender_listing_changes` ocid lookup** now naturally only chunks over the current window's
+   ocids (it operates on `rows`, which is now bounded) - fell out for free from the pagination
+   change, no separate work needed, confirmed by reading the data flow rather than assumed.
+7. **Interaction with `lib/marketPricing.ts`'s `MAX_PRICING_LOOKUPS = 40` cap** (PR #120,
+   Opportunities card enrichment): **not touched in this batch**, and worth noting precisely because
+   that PR is still open/draft, not merged (see the coordination note below, despite this task's
+   own brief describing it as "just-merged" - checked directly via the GitHub API, not assumed).
+   Once this pagination lands, that cap stops being load-bearing on its own (a page can no longer
+   show more than `MAX_SHOW` cards at once, so `MAX_PRICING_LOOKUPS` will rarely if ever actually
+   bind) - not a loose end, just worth whoever reconciles the two branches knowing why.
+
+**A real cross-session coordination finding, not assumed.** This task's own brief described PR #120
+as "just-merged" - it is not: `gh api repos/.../pulls/120` shows `draft: true, merged: false` as of
+this pass, and its diff substantially rewrites the same `renderDiscovery()` function this batch
+touches (countdown chips, compliance/pricing/"done similar tenders before" insight cards), including
+logic that scans the company's **full, unpaginated** `rows` array on purpose (`buildDoneHistory()`
+needs every tender this company has ever pursued, not just the current page, to answer "done N
+similar tenders before"). **This is a real, substantive merge/semantics conflict for whoever lands
+second, not just a textual diff conflict** - PR #120's "done similar tenders before" feature will
+need to either accept running over a bounded window too (losing some historical matches) or get its
+own separate, targeted query once this pagination merges. Flagging this explicitly here rather than
+leaving it only in chat/PR description, per this file's own standing discipline. PR #118
+(discovery-scoring-diagnosis) is also still open/draft but touches only `engine/discovery/`
+Python files, not `page.tsx` - no overlap there.
+
+**Verified**: `npm run verify` (0 errors, confirmed the two pre-existing warnings - `Logo.tsx`'s
+`<img>` and `analytics/page.tsx`'s unused `STAGE_META` import - predate this branch, both traced to
+commits before this work), `npx vitest run` 144/144 (unchanged - no vitest-covered logic touched),
+`npx tsx --test` over every `*.test.ts` file 88/88 (76 existing + 12 new in
+`discoveryPagination.test.ts`, covering `parseShowParam`/`nextShow`/`hasMore`/`canLoadMore` and the
+verdict-to-query-filter mapping), and `node --experimental-strip-types --test` per file individually
+- same 88/88, both sweeps agree. A temporary dev-only mock-data route
+(`app/design/screenshot-discovery`, deleted before commit - confirmed via `git status` showing only
+the real feature files) rendered the real pagination/filter logic from `lib/discoveryPagination.ts`
+(imported directly, not reimplemented) against an in-memory mock dataset at 1440x900 and 390x844 via
+Playwright (a temporary `playwright-core` dev install, removed again after - `npm uninstall
+playwright-core`, confirmed no `package.json`/`package-lock.json` diff remains): clicked "Load
+more" (window grew from 30 to 55 rows, button correctly disappeared once no more existed), clicked
+through Strong fit/Needs review/Not a fit/Changed/Re-assessed tabs (each filtered server-side
+correctly; Re-assessed showed all 5 ever-downgraded mock rows including 2 un-acknowledged ones
+bumped to the top with the warning border, confirming it is NOT scoped to a window; Changed showed
+its scoped-limitation note and only the 5 mock rows with a matching "listing change" inside the
+loaded window). Not verified: against a live Supabase project or real authenticated session (same
+standing gap as every other page in this file) - the mock route therefore also skipped `AppShell`
+(sidebar/topbar), which needs a real session and wasn't the part under test.
+
+**Explicitly out of scope - proposed for Sarel's own review, not built:**
+- **A real DB-side full-text/buyer/title search box** - would want a trigram index or similar, a
+  schema change.
+- **A dedicated SQL function/materialized view so "Changed" (and, if ever needed again, a cheap
+  "Changed" count) can search this company's FULL history, not just the loaded pages** - also
+  schema work. Re-assessed no longer needs this (see above - it turned out to reduce to a real
+  column predicate), so this follow-up is narrower than the original task brief anticipated: only
+  "Changed" (the `tender_listing_changes` cross-reference) would benefit.
+- **A retention/archival policy for old `discovered_opportunities` rows** (e.g. auto-dropping
+  `not_a_fit`/`closed` rows after N days) - could independently fix a lot of the scaling problem at
+  the source, but is a product/data-retention decision for Sarel, not something to decide here. The
+  pagination/filtering fix in this entry works regardless of whether such a policy ever exists, but
+  would need less of it (smaller `MAX_SHOW`, fewer "Load more" clicks to reach deep history) if one
+  did.
+
+---
+
+### Reconciling PR #120 (Opportunities card enrichment) onto the now-paginated Discovery page
+
+PR #120 (`feature/opportunities-card-enrichment`) built five real additions to each Opportunities
+card from Sarel's own live feedback (2026-10-22): a closes-in countdown, a company-readiness
+indicator, a "done N similar tenders before" history match, a market-pricing-range lookup, and
+conditional scope/pricing-model display. It was opened against the OLD, pre-pagination `main` and
+was never merged - PR #123 (the `discovered_opportunities` scaling fix directly above this entry)
+landed first and rewrote the same `renderDiscovery()` function PR #120 touches, which PR #123's own
+entry above flagged explicitly as "a real, substantive merge/semantics conflict for whoever lands
+second, not just a textual diff conflict." This entry is that reconciliation, done by hand (not a
+blind `git merge`/`git cherry-pick`) onto `main`'s current, already-paginated
+`app/app/discovery/page.tsx`.
+
+**The one real conflict, exactly as PR #123 diagnosed it.** PR #120's `buildDoneHistory()`
+(`lib/opportunityInsights.ts`) needs every past opportunity this company has pursued to at least a
+submitted bid, to answer "done N similar tenders before" honestly. Before PR #123, the page's own
+`rows` variable WAS this company's entire scored-opportunity history, so passing `rows` into
+`buildDoneHistory()` worked. After PR #123, `rows` is only the current bounded page/filter window
+(`PAGE_SIZE=30` by default, up to `MAX_SHOW=300`) - feeding that windowed `rows` into
+`buildDoneHistory()` would silently undercount history matches for any company with more pursued
+history than what's currently loaded on screen. Exactly the same class of bug this whole session's
+other PRs (#111, #122, #123, #124) have been hunting and fixing - this must not ship as a
+regression, and it doesn't.
+
+**The fix**: `buildDoneHistory()`'s own pure-function signature in `lib/opportunityInsights.ts` is
+UNCHANGED from PR #120 - only what `discovery/page.tsx` passes into it changed. The page now runs a
+second, dedicated, un-paginated query in the SAME `Promise.all(...)` as the existing queries (not
+serially after it):
+```
+supabase.from("discovered_opportunities").select("tender_id, buyer, categories").not("tender_id", "is", null)
+```
+identical in shape and reasoning to `app/app/pipeline/page.tsx`'s own query after its PR #123 fix -
+this is safe because `pursue_discovered_opportunity()` always backfills `tender_id` the moment a
+tender is pursued (verified across migrations 0018/0024/0051, same verification PR #123's own entry
+above already did for the pipeline page). A company's own pursued pipeline is naturally small - one
+row per OCDS release that became a real tender - unlike the full scored-opportunity table the page
+itself must paginate, so this query needs no pagination of its own. `buildDoneHistory()` is now fed
+these rows (`pursuedHistoryRows`), not the windowed `rows`, so it always sees this company's FULL
+pursued history regardless of which page/filter window is currently showing.
+
+**Proven with a real test, not just asserted**: `lib/opportunityInsights.test.ts` has a new case
+("a pursued match outside a 30-row paginated window is still counted") that builds a 400-row mock
+dataset with exactly one pursued/won match sitting at index 349 - well outside any default
+PAGE_SIZE=30 slice - and shows that feeding `buildDoneHistory()` a plain windowed slice silently
+drops the match to zero (the regression this whole fix exists to prevent), while feeding it the
+dedicated-query-shaped full set finds it correctly. This is the regression PR #123's own entry
+warned about, reproduced and then shown fixed, not just described.
+
+**The other four PR #120 features - verified unaffected by pagination, confirmed by reading the
+code, not assumed**:
+- **Closes-in countdown** (`closingCountdown()`, new export on `lib/dates.ts`) - operates per-card
+  only, no history dependency. Unaffected, unchanged from PR #120.
+- **Company-readiness/compliance indicator** (`fetchCompanyReadiness()`) - called once per page
+  render inside the same `Promise.all(...)` as everything else, company-wide, not per-row or
+  history-dependent. Unaffected, unchanged from PR #120.
+- **Market pricing range** (`pricingCategoriesFor()`/`pricingSegmentKey()`, `lib/marketPricing.ts`,
+  capped at `MAX_PRICING_LOOKUPS = 40`) - operates on whatever cards are in the CURRENT rendered
+  `visibleRows` window, which is fine: pagination (PR #123) already means fewer cards per page than
+  before PR #123 was ever drafted, so this cap will rarely if ever actually bind now. Noted plainly
+  here, not treated as something to "fix" - exactly the interaction PR #123's own entry above
+  predicted, and the cap is kept anyway as a correct belt-and-braces guard (see this constant's own
+  comment in `discovery/page.tsx`).
+- **Scope/pricing-model conditional display** (`tender_scope_records`, migration 0060) - per
+  already-pursued row within the current `visibleRows` window, not history-wide. Unaffected,
+  unchanged from PR #120 (still honestly rare today - `engine/discovery/tender_enrichment.py` is
+  still never invoked by the production discovery pipeline, same standing follow-up PR #120 itself
+  flagged, not re-litigated here).
+
+**Self-review, 3 full rounds**: round 1 - re-read `lib/discoveryPagination.ts`'s own module comment
+and the current (post-#123) `discovery/page.tsx` in full before writing anything, to work from the
+file's real current shape rather than PR #120's stale diff assumptions. Round 2 - traced every one
+of PR #120's five features through the new tabbed/paginated/windowed structure one at a time,
+confirming each renders correctly and that only the history-match feature had a real
+pagination-window dependency (matching PR #123's own diagnosis - no other hidden dependency found).
+Round 3 - confirmed directly in the diff that the new pursued-history query is a sibling array
+entry inside the existing `Promise.all(...)` (parallel), never a second `await` after it, and that
+`buildDoneHistory()`'s call site now reads from `pursuedHistoryRows`, never from `rows` or
+`visibleRows`.
+
+**Verified**: `rm -rf .next && npm run verify` - 0 errors (the same 3 pre-existing warnings as PR
+#123's own pass - `Logo.tsx`'s two `<img>` warnings and `analytics/page.tsx`'s unused `STAGE_META`
+import, confirmed present on `main` before this branch touched anything). `npx vitest run` -
+147/147 (unchanged from main's baseline - no vitest-covered logic touched by this reconciliation).
+Full `node:test` sweep both ways: `npx tsx --test $(find . -name "*.test.ts" -not -path
+"*/node_modules/*")` - 104/104 (88 baseline + 7 in `dates.test.ts` + 9 in
+`opportunityInsights.test.ts`, the latter including the new regression-proof case above); the same
+set run individually via `node --experimental-strip-types --test <file>` - 104/104, both sweeps
+agree (the same pre-existing 5 zero-test `app/tenders/[id]/*.test.ts` files PR #120's own entry
+already noted as an unrelated quirk of single-file invocation, not something this reconciliation
+introduced or touched).
+
+PR #120 itself is closed (superseded, not merged) once this reconciliation branch is open, with a
+comment pointing to the new PR - avoids leaving a stale, now-conflicting original open alongside its
+own replacement.
+
+---
+
+### Company vault: always-visible progress summary + grouped sub-nav (Sarel's own live feedback)
+
+Sarel's next piece of live feedback tonight: "Company vault need a similar improvement to see
+progress, number of docs uploaded and missing, people uploaded and missing docs per person. also
+see if there is a better way to do the layout and how to get to the different sections it feel
+intimidating for an initial users... it need to be completely clear how the process and flow
+works." Two real gaps, both addressed without a second completeness mechanism: Company vault had
+no document count anywhere, no per-person CV status anywhere, and People wasn't linked from this
+page at all (not in `RegisterLinks`' card grid, not in the sub-nav).
+
+**Progress summary**: new `VaultProgressSummary.tsx` - two always-visible cards (not inside a
+section you have to open), right under `BidReadinessCard` at the top of the page. "Compliance
+documents: N of 7 on file" with a link to the missing count when incomplete, and "People / CVs: N
+of M have a CV" with up to 4 missing names linked straight to `/people/[id]` plus a "see all" link
+to `/people`; a zero-people company instead gets "No one on file yet" + "Add your first person" -
+the actual first-attempt state, not a 0/0 that reads as done. Both numbers reuse data `page.tsx`
+already computes or trivially extends: `documentsOnFile`/`documentsTotal` loop the same 7
+`VAULT_DOCUMENTS` keys `ComplianceDocumentsSection` already renders one row per (counted, not
+re-derived as a second array); the per-person CV set is the one new `people(id, name)` query added
+alongside the `cv_uploads` read the bid-readiness score already made, kept instead of discarded
+once its count was taken. Deliberately not a second progress bar/percentage - `BidReadinessCard`
+above it still owns "the one score" for this company; this is the concrete, countable version of
+the same underlying facts (its own file's doc comment: "these surfaces can't quietly disagree").
+
+**Grouped sub-nav**: `CompanySubNavItem` gained an optional `group` field; `CompanySubNav.tsx`
+renders a small uppercase header above each cluster of items that share one (desktop column only -
+the horizontal pill row below `lg` stays flat, since a scroller has no good place to inline a
+header). `page.tsx`'s `subNavItems` now reads as three clusters instead of one flat 12-item list:
+"Required for every tender" (Expiry, Documents, Identity, B-BBEE & CIDB, Bank details), "Team &
+experience" (new **People** and **Experience** entries - neither existed in the sub-nav before,
+despite both having real `lib/readiness.ts` criteria with hrefs already pointing at `/people` and
+`/experience` - plus Registers), "Other company info" (Size & offices, Time & cost saved, How we
+work, Notifications, Letters, Offices). Two new completion ticks reuse existing criteria exactly
+like `identityComplete`/`beeCidbComplete` already did (`satisfied("people_cvs")`,
+`satisfied("experience")`, `satisfied("bank_confirmation")` for the pre-existing Bank details
+entry, which never had one before) - no guessed tick invented for the nav. Grouping only relabels
+and reorders the existing items; no section, href, or signal is new besides the two sub-nav
+entries themselves (both already real pages).
+
+**Self-review**: round 1 - a dev-only mock route (`/design/screenshot-company-vault`, deleted
+before finishing, never committed) rendered the real `VaultProgressSummary` + `CompanySubNav`
+components with `computeBidReadiness`-derived mock data, screenshotted at 1440px and 390px in both
+a populated state and an all-zero first-time-user state (`?empty=1`). Confirmed: group headers
+render correctly above each cluster on desktop, the pill row degrades to a flat horizontal
+scroller with no stray headers on mobile, the progress cards stack to one column below `sm:`, and
+the empty state reads as "add your first document / your first person" rather than a misleading
+0/0. Round 2 - re-checked against Sarel's own two asks: progress (done - two always-visible counts,
+missing docs and missing people both link straight to where to fix them) and layout (done - the
+sub-nav is now three named clusters instead of one list, and People/Experience are reachable from
+it for the first time). Round 3 - confirmed `lib/readiness.ts` and the compliance-docs/field-width
+work from the last two batches are untouched: `git diff` shows only `page.tsx`,
+`CompanySubNav.tsx`, and the new `VaultProgressSummary.tsx`; `lib/readiness.spec.ts` (6/6) and the
+full vitest/node:test suites re-run clean.
+
+**Tested**: `npm run verify` 0 errors, 133/133 vitest, 76/76 node:test both ways (`tsx --test` and
+`node --experimental-strip-types` per file). **Not tested**: an actual signed-in render - same
+sandbox credential-generation limitation as every batch tonight; the mock-route screenshots above
+are the closest available substitute, not a replacement for Sarel clicking it himself.
+---
+
+### Feature: real scope/BOQ/quantity extraction engine (BOQ line items, LLM-assisted scope, backlog pagination check)
+
+Sarel's own request, verbatim: "In the market analysis shown the number of tenders in the system
+and stats on them. We need an engine that assess and extract the scope of each tender even the
+backlog so that we can. Do analysis on scope and boq and quantities even on historic tenders to
+provide insights and trends. Build the extract engines so long we will still finalize what we
+analyze and what we visualise." Read literally: the extraction engine only - the analysis/
+visualisation layer (`app/app/market-intelligence/`) is explicitly deferred and NOT touched here.
+
+This builds on `engine/discovery/tender_enrichment.py` (migration 0060, 2026-10-18), whose own
+module docstring and the `tender_scope_records.boq_summary` column comment both explicitly
+anticipated this exact follow-on ("a future real-extraction pass"). No schema change was needed or
+made - confirmed by reading migration 0060's own column comments before writing a line of code, and
+again at the end of this pass; `scope_source`'s existing check constraint
+(`'description_text' | 'document_scope_snippet'`) already had room for the new LLM path (see below -
+it reuses `'document_scope_snippet'`, deliberately, rather than adding a third value that would need
+a migration).
+
+**What's REAL now (read `tender_enrichment.py`'s own module docstring for the full, precise
+breakdown - this is the summary):**
+
+- **BOQ line items** (`boq_summary.items`) - real, deterministic spreadsheet parsing, new module
+  `engine/discovery/boq_extraction.py`. Reuses `engine/sanral_fill.Workbook` (this repo's own
+  hand-rolled .xlsx/.xlsm zip+XML reader - confirmed, again, that no third-party spreadsheet library
+  exists anywhere in this repo before writing this) rather than adding `openpyxl` - `Workbook` turned
+  out to already have everything needed except a way to read a whole sheet's shape without already
+  knowing which cell holds what, so it gained two new, narrowly-scoped, read-only methods:
+  `sheet_names()` and `sheet_grid(sheet, max_rows=5000)` (every existing `Workbook` caller -
+  `fingerprint.py`, `fill_financial.py`, `sanral_fill.py`'s own SANRAL-specific code - is unchanged
+  and still reads known, fixed cell references exactly as before; confirmed by re-running
+  `test_form_field_audit.py`, `test_sanral_b7.py` and `test_tenant_isolation.py` after the change -
+  all still pass).
+  - **Item shape** (no fixed schema on the jsonb column itself, so documented here and in
+    `boq_extraction.py`'s own docstring): `{"description": str, "unit": str|None,
+    "quantity": number|None, "rate_zar": number|None, "amount_zar": number|None}`.
+  - **Header detection, not a fixed layout**: a row is trusted as a real header only when it matches
+    both "description" and "quantity" column-name variants (`HEADER_PATTERNS` - extend this list from
+    a real template that doesn't match, never from a guess), each to a *different* column letter.
+    Every sheet in the workbook is tried in turn (the priced schedule is rarely sheet 1 - a BOQ
+    workbook usually opens on a cover/instructions sheet first).
+  - **Three separate "never fabricate" guards**, each with its own test in
+    `test_boq_extraction.py`: (1) a sheet with no confident header match at all leaves `items: []`
+    with an honest `note`; (2) a header match whose "quantity" column is mostly non-numeric text
+    (a coincidental match, e.g. a returnable-schedule Yes/No table) is rejected
+    (`MIN_NUMERIC_QUANTITY_RATIO`); (3) a row with real text in the description column but **no
+    number anywhere** (quantity/rate/amount all null - a footer note, an instruction, a signature
+    line that happens to land in the same column as the real descriptions) is never counted as an
+    item - every genuine BOQ row has at least one number attached to it. Caught in this pass's own
+    round-2 self-review (a footer-note row was briefly being counted as a zero-info "item" before
+    this guard was added) and has its own test
+    (`test_footer_note_in_the_description_column_is_not_fabricated_as_an_item`).
+  - **Known limitation, honestly flagged, not silently worked around**: a BOQ shipped inside a
+    `.zip` (seen live in this pass's own sample run - DBSA's RFP165/2026 "SHEQ Annexures.zip") is not
+    unpacked by this CLI's own document fetcher (`_read_document_text()` reads one file at a time by
+    URL/extension; it does not reuse `engine/general/requirements.collect_documents()`'s own zip-
+    unpacking, which was built for a local directory of already-downloaded files, not one URL at a
+    time). Logged plainly ("'zip' is not a text document format this reader handles"), never guessed
+    at - a real gap worth closing in a follow-up pass if zipped BOQ bundles turn out to be common on
+    non-SANRAL buyers.
+
+- **LLM-assisted scope summary** - new module `engine/discovery/scope_llm.py`, built per
+  `docs/specs/AI-Call-Quality-Standard.md` **read in full before writing the prompt**, both required
+  parts:
+  1. **A prompt specific to this exact job** (`SYSTEM_PROMPT`, `test_scope_llm.py`'s own
+     `test_prompt_is_scenario_specific_not_a_copy_of_the_cv_prompt` proves it isn't a copy of
+     `extract_cv_fields.py`'s prompt): what the output is for (a cross-tender market-intelligence
+     record for real trend-spotting, not a sworn compliance document, but still a real cost if
+     wrong); SA-government-tender-specific rules (scope scattered across SCOPE OF WORK/Part
+     T1.2/annexures, "the Contractor/Service Provider shall", SBD/MBD/BOQ form references are form
+     numbers, not scope); the explicit null-when-unclear + verbatim-quote-evidence rule; and a
+     concrete checklist of what "good" looks like for this output (specific to THIS tender's actual
+     work vs. a generic restatement of the buyer; every quantity/unit genuinely in the source text,
+     not inferred; every claim traceable to a real quote; free of filler like "as required" with
+     nothing substantive attached).
+  2. **The mandatory 3-pass generate -> review -> revise loop**
+     (`extract_scope_with_review()`), each review pass re-reading the source text plus the
+     **previous pass's own corrected output** (never the original draft again) - proven by
+     `test_review_loop_chains_forward_and_stops_on_clean_pass`, which inspects the actual request
+     body sent on the 2nd review call. Stops as soon as a pass reports "No issues found on this
+     pass"; if pass 3 still finds a real issue, the result is still returned (the best version found)
+     but `needs_human_review` is set and the reason is folded into `source_note` with a
+     `"NEEDS HUMAN REVIEW: ..."` prefix - never silently shipped as if it passed its own check
+     (`test_review_loop_caps_at_3_passes_and_flags_needs_human_review`).
+  - Called **only as a fallback**: `extract_scope_summary()`'s existing fast/free "SCOPE OF WORK"
+    heading regex is tried first and kept whenever it succeeds (the task was explicit: don't replace
+    working logic with a slower/costlier one for no reason) - the LLM pass only runs when that regex
+    finds nothing, real document text exists, and it's at least `MIN_TEXT_CHARS_FOR_LLM_PASS` (400)
+    characters long. `scope_source` stays `'document_scope_snippet'` for BOTH paths deliberately (no
+    migration needed to add a third check-constraint value): both genuinely came from reading the
+    tender's own document; which one ran is distinguishable, if needed, by whether `source_note`
+    starts with "LLM-extracted".
+  - Same proven LLM-calling convention as `engine/cv/extract_cv_fields.py`, reused deliberately, not
+    reinvented: `client.beta.messages.create()` with a `json_schema` structured output, the
+    `server-side-fallback-2026-07-01` beta + `"default"` fallbacks pair, the same
+    `SetupError`/`TransientError` exception taxonomy, the same `<MODULE>_EXTRACTION_MODEL`
+    (`SCOPE_EXTRACTION_MODEL`) env-var-override pattern (default `claude-opus-5-5`).
+
+- **`tender_enrichment.enrich()` now actually receives real document text/BOQ items** when its
+  caller supplies them (`boq_items`, `llm_scope_result` - both optional, both None by default) - it
+  still does **no I/O itself** (stays a pure function, see its own docstring); only the CLI (`run()`)
+  does real I/O. A tender whose documents yield either real `boq_items` or real `document_text` is
+  marked `confidence='document_confirmed'`; everything else stays `'heuristic'`, exactly as the
+  column always promised.
+
+- **The CLI (`run()`) now actually fetches and reads each tender's own documents** before calling
+  `enrich()` - previously it called `enrich()` with no `document_text`/`documents` at all, so every
+  row ever written was permanently heuristic regardless of `enrich()`'s own capability. Documents
+  come from `discovered_opportunities.document_urls` (join on `tender_id`) - the direct buyer-site
+  links captured at discovery time for an eTenders/general tender; `discovered_opportunities` is
+  also the only place a tender's `buyer` name is recorded (`tenders` itself has no `buyer` column),
+  read from there for the LLM prompt's own context, not guessed from the title (a real bug caught and
+  fixed in this pass's own round-1 self-review - the first draft wrongly passed `contract_no` as the
+  "buyer"). PDFs are read via `assess_tender.fetch_pdf_text()` (read-only reuse, never modified);
+  .docx/.doc/.txt via `engine/general/requirements.read_document()` (confirmed by a prior session's
+  own PR #118 investigation to NOT be wired into the live discovery feed - reused here rather than a
+  third document-reading path, without touching the live feed itself). **SANRAL tenders'
+  `tender_documents` rows are deliberately NOT read for this** - they are blank template workbooks
+  uploaded by hand (migration 0001), not the tender's real scope/BOQ content; a SANRAL tender's scope
+  still comes from its own title/description (the heuristic path, unchanged).
+
+- **Per-release heuristic hook, going forward**: `gov_sources.fetch_all()` now calls
+  `tender_enrichment.enrich_release()` on every merged release (`attach_scope_enrichment()`),
+  attaching `release['scope_enrichment']` - the same cheap, free, zero-cost tagging `enrich()`
+  always did, just now running on every release as it's discovered, not only once it becomes a
+  `tenders` row. Deliberately heuristic-only at this point (no `tenders.id` exists yet for most
+  releases - most eTenders releases only get one once pursued, migration 0018 - and no document has
+  been downloaded this early) - never fatal (one release's tagging failure is logged and skipped,
+  same "one bad release never stops the whole run" discipline `gov_sources.py` already uses
+  throughout). The existing per-company scoring fan-out in `watch_new_tenders.py` is completely
+  untouched.
+
+**Backlog pagination (step 5) - checked, found already fixed, not re-fixed**: the task's own brief
+named this as a real, previously-found bug class (`app/lib/marketPricing.ts`, PR #111 - a
+client-side `.limit()` silently truncated at PostgREST's hard 1000-row cap). Read
+`company_profiles.RestClient.select()`'s own implementation before assuming anything: it already
+loops on `offset`/`limit` (`PAGE = 1000`) until a page comes back short - this was evidently already
+fixed (or built correctly from the start) in the Python client, separately from the TypeScript one
+PR #111 fixed. No code change was needed. Added `engine/discovery/test_company_profiles.py` anyway -
+the Python-equivalent of `marketPricing.spec.ts`'s own `serverThatCapsAt()` test - proving it for
+real (a server stand-in capped at 1000 rows regardless of the requested limit; `select()` correctly
+pages through 2500 real rows in 3 requests) rather than leaving this as a read-and-trust claim.
+
+**Real backlog-size numbers** - a new `counts` subcommand
+(`python3 engine/discovery/tender_enrichment.py counts`) reports the true, paginated total tender
+count and how many already have a `tender_scope_records` row, split by confidence, vs. none at all.
+Run for real in this sandbox's own configured Supabase project (a dev/test project - `companies`
+rows are named things like "E2E Test Construction", "Debug Co", "Fresh Walkthrough Civils", not real
+customers; this is NOT the same as checking Sarel's real production backlog size, which needs this
+same command run against production credentials): **9 total tenders, 0 already enriched** before this
+pass. This is a small, dev-scale number precisely because it's a test project, not evidence about the
+real production backlog - the full-backfill proposal below is sized in general terms for exactly that
+reason.
+
+**Sample run - a REAL run, not just a mocked one**: this sandbox turned out to have real
+(non-placeholder) `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` configured (confirmed live,
+read-only, before writing anything) - no `ANTHROPIC_API_KEY` though (confirmed absent, same as every
+other LLM-adjacent pass tonight). Ran `python3 engine/discovery/tender_enrichment.py run --limit 20
+--all` for real against all 9 real tenders in that project (within this task's own 20-50 sample
+bound) - real network fetches of real government documents, real BOQ-candidate detection, real
+writes to `tenders`/`tender_scope_records`. Result: **9/9 enriched, 2 document_confirmed (both real
+PDFs fetched and read over the network from dbsa-procurement), 7 heuristic** (manual/demo tenders and
+one Cape Town RFQ with no attached document URLs). One of the two document-confirmed rows (DBSA
+RFQ073/2026) got a real regex-matched "SCOPE OF WORK" snippet genuinely pulled from the live-fetched
+PDF text ("2.1 Supply and Provision of Equipment - Supply and provide suitable three (03) X-ray
+baggage/item screening machines..."); the other (DBSA RFP165/2026) also matched the regex path but
+picked up a less useful snippet (a repeated page header/boilerplate from elsewhere in a 108-page PDF)
+- a **pre-existing limitation of the regex-only heading match, not something this pass introduced**,
+and exactly the kind of case the new LLM fallback exists to improve on - except the regex path
+"succeeded" (found *a* heading) so the LLM fallback correctly didn't run for it, per this task's own
+explicit instruction not to replace a working fast/free path. Neither of the 9 real tenders triggered
+the LLM fallback for real (every one either matched the regex path or had no document text at all),
+so **the LLM scope call itself is still unverified against a live Anthropic API** - proven correct
+only via the mocked `test_scope_llm.py` (3-pass loop, chaining, early-stop, cap+flag) and a local,
+stub-client demonstration script (not committed) that exercised the real `extract_scope_with_review()`
+logic end to end. Real BOQ parsing WAS exercised end to end with a real (synthetic, hand-built)
+.xlsx in `test_boq_extraction.py` and the same local demonstration.
+
+**Full-backfill proposal - NOT YET RUN, a sized decision for Sarel, same "propose, don't spend"
+discipline this repo already applies to schema risk, applied here to real API cost**:
+- Real tender count in whatever project this runs against: check with
+  `python3 engine/discovery/tender_enrichment.py counts` first - this sandbox's own project has only
+  9 (see above); Sarel's real production count needs checking separately, against production
+  credentials, before deciding anything.
+- Rough per-tender cost/time, from this pass's own sample run and `scope_llm.py`'s own call shape: a
+  tender whose regex heading match fails needs up to 4 LLM calls (1 generate + up to 3 review passes,
+  `effort: "medium"`, ~4000 max_tokens each) against `claude-opus-5-5` (or whatever
+  `SCOPE_EXTRACTION_MODEL` is set to) - each call sends the tender's own document text (capped at
+  `MAX_TEXT_CHARS_SENT` = 60,000 characters) plus the system prompt. **Check current published
+  Anthropic pricing for the configured model before relying on a dollar figure here** - this pass
+  did not have a live key to measure real token usage/cost against, so any number quoted here would
+  be a guess dressed up as a measurement, which is exactly what this standard exists to prevent.
+  Order-of-magnitude planning assumption instead: budget for up to 4 LLM calls per tender that
+  doesn't have a clean "SCOPE OF WORK" heading (most adverts in this pass's own earlier samples
+  across `test_tender_enrichment.py`'s fixtures do state one or have no document text at all, so this
+  is likely well under 100% of the real backlog, but that ratio should be measured on a larger real
+  sample before committing to a number) - a few seconds of wall-clock time per call, so a few tens of
+  seconds per tender needing the fallback, times the real tender count.
+- Exact CLI invocation for the full run, once a count and a cost estimate are in hand:
+  `ANTHROPIC_API_KEY=... python3 engine/discovery/tender_enrichment.py run --all` (drop `--all` to
+  only enrich tenders with no `tags_updated_at` yet, i.e. skip ones already done in an earlier
+  partial run).
+
+**Self-review (3 rounds, per this task's own standing rule)**: round 1 - re-read the CLI's own
+document-fetch wiring line by line and caught a real bug before it ever ran: the first draft passed
+`t.get("contract_no")` as the LLM prompt's "buyer" context, but `tenders` has no `buyer` column at
+all (migration 0001) - fixed by reading the real buyer from `discovered_opportunities` alongside the
+document URLs (`_tender_context()`, replacing the narrower `_documents_for_tender()`), with its own
+new test (`test_tender_context_dedupes_documents_and_reads_the_buyer`) checking the buyer is read
+from the right table, not guessed. Round 2 - re-read `boq_extraction.py`'s own item-row filter
+adversarially and found it would count a footer/signature line with no numbers as a zero-info "item"
+whenever it happened to land in the description column; added the "at least one number" guard and
+its own test before moving on, exactly the "does the BOQ parser ever fabricate a line item from a
+sheet it genuinely can't read" question this task's own brief asked self-review to specifically
+check. Round 3 - re-ran the FULL existing Python test sweep (46 files, all pre-existing, 0 changed by
+this pass) plus the new test files, then did the real, live sample run above as the final check
+rather than trusting the unit tests alone; re-confirmed the chaining/early-stop/cap-and-flag review-
+loop behaviour and the real-paginated-count behaviour both have their own passing tests, not just
+read-and-trust claims, per this task's own explicit self-review checklist.
+
+**Tested**: 50/50 Python test files (46 pre-existing + 4 new: `test_boq_extraction.py`,
+`test_scope_llm.py`, `test_company_profiles.py`, `test_tender_enrichment_cli.py`), 0 failures,
+including `test_form_field_audit.py`/`test_sanral_b7.py`/`test_tenant_isolation.py` re-run to confirm
+the new `Workbook.sheet_grid()`/`sheet_names()` methods didn't disturb any existing `sanral_fill.py`
+caller. Plus the real, live sample run above (not a substitute for the mocked LLM tests, a
+complement to them - this is explicitly the one new LLM call site this pass could NOT verify live, no
+`ANTHROPIC_API_KEY` in this sandbox).
+
+**Not touched, per this task's own explicit scope**: `app/app/market-intelligence/` or any other
+analysis/visualisation page (what gets analysed/shown is still Sarel's own call); any database
+migration (none was needed - confirmed by reading migration 0060's own column comments, twice);
+`app/lib/marketPricing.ts`, `app/app/discovery/page.tsx`, `app/app/pipeline/page.tsx`,
+`app/app/pipeline/pricing/page.tsx` (other sessions' own in-flight files tonight); the full historic
+backlog itself (sized and proposed above, deliberately not run).
+
+---
+
+### Opportunity preferences (SANRAL visibility + discipline interest) - UI preview + schema proposal, DRAFT, not mergeable as-is
+
+Sarel's own live feedback, this session (2026-10-23), after onboarding a new test company: (1) "the
+Opportunities list was empty right after onboarding ... to a new user it looks like it is empty",
+(2) "in the opportunities page we need to add options to set the opportunity preferences for a
+company", (3) "i see also there is by default a sanral bid pulled in, this shouldnt be tehere if the
+company is not interested in sanral projects." Items 2 and 3 are treated as ONE feature request (a
+company-level "what we care about" concept doesn't exist anywhere in the schema today), per this
+task's own framing - not two separate asks.
+
+**Why the Opportunities feed was empty (confirmed, not re-derived) - a real, already-partially-fixed
+timing gap, not a bug.** `.github/workflows/daily-discovery.yml`'s own header comment (written by an
+earlier session, 2026-10-22) confirms nothing in this repo had ever scheduled
+`engine/discovery/watch_new_tenders.py` - the only script that writes `discovered_opportunities`
+(migration 0004), which `/discovery` reads - until that session added a daily `cron: "45 2 * * *"`
+(02:45 UTC) schedule, since run successfully at least once. A company created between runs can still
+see an empty feed for up to ~24h. **Not re-triggered on demand here**: `watch_new_tenders.py` has no
+"score just this one company" mode - an on-demand `workflow_dispatch` right after onboarding would
+re-score the ENTIRE platform's tender backlog against EVERY company every time anyone signs up, a
+real, possibly large repeated cost/runtime decision that is this repo's engine-logic standing rule
+to defer, not build blind. **What a `--company-id` flag would need** (proposed, not built): a CLI
+flag on `watch_new_tenders.py` narrowing `all_company_profiles()` (engine/discovery/company_profiles.py)
+to one company, called from a new onboarding-completion hook (a Supabase Edge Function or a
+`workflow_dispatch` trigger from the Next.js side once a company finishes onboarding) instead of the
+nightly cron sweeping everyone. Cost tradeoff: one scored-against-full-backlog run per signup, vs.
+the current one run per day for everyone - cheaper per event but with a higher QPS ceiling risk if
+signups cluster. Sarel's own call, not decided here.
+
+**What's built instead (zero schema, zero engine change)**: the Discovery page's own "Nothing scored
+yet" empty-state copy (the `activeFilter === "all"` case only - the other cases were untouched) now
+says the scan "runs once a day, overnight" and that first results land "after tonight's run, not
+immediately" if a company just signed up or changed its profile - accurate to the real cadence,
+without promising anything instant or on-demand that doesn't exist. `app/app/discovery/page.tsx`,
+the one string in the existing `EmptyState description` ternary - not a new component, not a
+restructure of the filter-tab bar or pagination logic around it (both PR #123/#124/#125's own work,
+left untouched).
+
+**Why a SANRAL tender showed up for an unrelated new company (confirmed, not a bug) - two separate,
+real mechanisms, both re-verified by reading the actual code this session, not trusted from memory**:
+
+1. `engine/discovery/assess_tender.py`'s `assess_fit()` has its own `elif not known_disciplines:`
+   branch with its own code comment: "An empty disciplines list is 'we don't know yet', not 'we
+   checked and this is out of scope'" - a deliberate anti-regression fix (an earlier version
+   wrongly scored a real SANRAL roads tender as `not_a_fit` for a company with no tagged Experience
+   Library items yet). So a brand-new company gets `needs_review`, not `not_a_fit`, for ambiguous
+   tenders - confirmed correct/intentional, **not changed here**.
+2. Separately - and this is the one that actually explains Sarel's own screenshot - `app/app/pipeline/page.tsx`'s
+   "found" column (`renderPipeline()`'s own `if (!pack) { if (t.family === GENERAL_FAMILY || t.status
+   !== "open") continue; ... }`) reads the SHARED, un-tenant-scoped `tenders` table directly (migration
+   0001's own comment: "Shared across every company - not tenant-scoped") and shows every open,
+   non-general-family (i.e. SANRAL-conventional) tender with no pack yet to EVERY company by default,
+   regardless of fit score - a completely different code path from the scored `/discovery` feed.
+   Confirmed directly in the current (post-#122/#123/#125) `pipeline/page.tsx`, not assumed from an
+   older copy.
+
+**The real gap, confirmed**: there is no company-level concept anywhere in the schema of "we don't do
+SANRAL/road-construction work, don't show us that board by default" or "we only care about these
+disciplines." This step 5's own onboarding-wizard writeup already flagged exactly this ("Preferred
+buyers ... not tracked anywhere", "Disciplines you work in ... no company-level disciplines table
+exists") - this entry is that gap's first concrete UI pass, not a new discovery.
+
+**A directly relevant precedent, read and reused but NOT touched**: PR #121
+(`feature/opportunities-tags-interest-proposal`, still open/draft) already built the same
+preview-UI-plus-proposed-schema pattern for a DIFFERENT, adjacent need (per-opportunity company tags
++ interest/decline marker on `discovered_opportunities`, via `lib/opportunityTagsPreview.ts`'s
+`useSyncExternalStore`-over-`localStorage` technique). This entry's own preview store
+(`lib/opportunityPreferencesPreview.ts`, key `tt_opportunity_preferences_preview_v1`) is a
+deliberately SEPARATE module and a separate `localStorage` key - a per-COMPANY concept (which
+buyer boards/disciplines the company cares about at all), not a per-opportunity one - so the two
+previews cannot collide if Sarel later approves both schemas. PR #121's own files
+(`lib/opportunityTagsPreview.ts`, `app/app/discovery/OpportunityQuickActions.tsx`) are untouched -
+confirmed by diff: this branch adds no changes to either path.
+
+**What's built, as a real working UI interaction (not a static mock)**:
+- `app/lib/opportunityPreferencesPreview.ts` - the browser-only mock store (`localStorage`, read via
+  `useSyncExternalStore`, same technique as PR #121's own file, its own separate module). Shape:
+  `{ hideSanral: boolean, disciplines: string[] }`. Two pure, unit-tested helpers:
+  `sanitizePreferences()` (never trusts raw JSON blindly - degrades to the empty default on any
+  malformed shape) and `toggleDiscipline()` (on/off list toggle for the checkbox handler).
+- `app/app/discovery/OpportunityPreferencesPanel.tsx` - a collapsed-by-default `<details>` panel
+  (so a company that never opens it sees no visible change at all), mounted additively in
+  `discovery/page.tsx` just above the existing verdict filter-tab bar (the tab bar itself, and
+  everything below/around it, is byte-for-byte untouched - confirmed by diff). Contains: a "Don't
+  show me SANRAL / road-construction tenders" checkbox (`hideSanral`), and a discipline
+  picker reusing `lib/disciplineTaxonomy.ts`'s existing `taxonomyGroups()` (migration 0040's own
+  vocabulary - the SAME list Experience Library tagging and pricing already use, no new taxonomy
+  invented). Every interactive element carries a visible "Preview - not yet saved" badge plus
+  explanatory body copy: "every choice below lives only in this browser ... reloading on another
+  device or clearing your browser data loses it. Nothing here changes what you or your team are
+  shown today" - this is load-bearing honesty, not decoration: **nothing in this PR actually hides
+  the SANRAL board anywhere** (the Bids/`pipeline/page.tsx` "found" column is completely untouched
+  by this branch - a deliberate scope cut, since wiring the preview's `localStorage` state into a
+  SERVER-rendered board would mean either a client-side re-filter of server-rendered cards - a
+  half-real, confusing middle ground - or pretending a browser-local preview is company data, which
+  is exactly the dishonesty this whole pattern exists to avoid). The panel only lets Sarel react to
+  the interaction; it changes nothing about what anyone actually sees yet.
+- `app/lib/disciplineTaggingNudge.ts` + an additive banner in `discovery/page.tsx` (task item 3,
+  zero schema change): `hasNoTaggedDisciplines()` mirrors, read-side, EXACTLY what
+  `engine/discovery/company_profiles.py`'s `profile_from_company_rows()` computes for
+  `known_disciplines` (`sorted({d for i in items if i.get("tagged_at") for d in (i.get("disciplines")
+  or [])})`) - verified by reading that function directly this session, not assumed. The page now
+  runs one additional, RLS-scoped `supabase.from("experience_items").select("tagged_at,
+  disciplines")` query (same table, same two columns, same no-explicit-`company_id`-filter pattern
+  `app/app/experience/page.tsx` already uses, confirmed by reading that file directly before
+  committing to this being buildable without new schema) alongside the page's existing
+  `Promise.all(...)`. When the result says this company has never tagged a single Experience
+  Library item with a discipline, a plain-language banner explains WHY some tenders show "Needs
+  review" instead of a tighter verdict, and links to `/experience` to fix it - turning the
+  previously-opaque `assess_fit()` behaviour (confirmed correct, not touched) into something a
+  first-time user can actually act on.
+
+**Proposed schema (SQL below) - NOT applied, NOT a migration file in this branch** (kept out of
+`app/supabase/migrations/` on purpose, same discipline as PR #121), **for Sarel's own review**:
+
+```sql
+-- Proposed: company-level opportunity/visibility preferences (Sarel, this
+-- session, 2026-10-23: "set the opportunity preferences for a company" +
+-- the SANRAL visibility case). A new table, not new columns on `companies`
+-- (that table is already 60+ columns of compliance/registration facts per
+-- migration 0001 - this is a distinct, optional, UI-preference concern,
+-- same reasoning migration 0038's own discovery_seen_releases and 0041's
+-- reminder-seen-stores tables used for "a preference/state row that isn't
+-- a core company fact"). One row per company, upserted - never multiple
+-- rows, so a plain primary key on company_id, not a surrogate id + unique
+-- constraint.
+
+create table company_tender_preferences (
+  company_id uuid primary key references companies(id) on delete cascade,
+
+  -- Sarel's own concrete case: true = don't show this company SANRAL/
+  -- road-construction work by default. Column name intentionally generic
+  -- (not "hide_sanral") since the real mechanism this would gate is "the
+  -- shared, un-tenant-scoped SANRAL-conventional board on /pipeline" (see
+  -- this entry's own writeup on why that board shows every open SANRAL
+  -- tender to every company today) - a future second shared board (a
+  -- different buyer family) would reuse this same column's intent, not need
+  -- a new one, if the product ever adds one.
+  hide_sanral_board boolean not null default false,
+
+  -- discipline_categories (0040) slugs this company says it cares about -
+  -- reuses the SAME taxonomy Experience Library tagging/pricing already use
+  -- (no second vocabulary). Nullable/empty = no stated preference yet
+  -- (different from "we checked and care about nothing" - same "we don't
+  -- know yet" honesty principle assess_tender.py's own known_disciplines
+  -- branch already applies, carried into this table's own default).
+  interested_disciplines text[] not null default '{}',
+
+  updated_at timestamptz not null default now(),
+  updated_by uuid references auth.users(id)
+);
+
+create index company_tender_preferences_disciplines_idx
+  on company_tender_preferences using gin (interested_disciplines);
+
+comment on table company_tender_preferences is
+  'One row per company: opt-out of a shared buyer board (hide_sanral_board) and/or the disciplines this company says it cares about (interested_disciplines, discipline_categories 0040 slugs) - distinct from discovered_opportunities.categories (0004, per-tender fit-scoring output) and from PR #121''s proposed discovered_opportunities.company_tags (per-opportunity, free-text search tags) - this is a company-wide, structured statement of intent, read by the UI to filter/hide, never by the scoring engine itself.';
+
+alter table company_tender_preferences enable row level security;
+
+create policy company_tender_preferences_select on company_tender_preferences
+  for select to authenticated using (is_company_member(company_id));
+-- Same reasoning as 0038/0041's own seen-store tables: any company member
+-- may read and write their own company's preferences (not owner/admin-only -
+-- this is a shared team setting, not a sensitive compliance fact).
+create policy company_tender_preferences_upsert on company_tender_preferences
+  for insert to authenticated with check (is_company_member(company_id));
+create policy company_tender_preferences_update on company_tender_preferences
+  for update to authenticated using (is_company_member(company_id)) with check (is_company_member(company_id));
+```
+
+**What a real implementation would also need** (documented, NOT built - same "not in this PR"
+discipline as PR #120's own schema-gated half):
+- `setOpportunityPreferences(hideSanralBoard, interestedDisciplines)` - a server action in a new
+  `app/app/discovery/preferencesActions.ts`, upserting the row above (`is_company_member` already
+  covers the RLS check; the action itself would still re-check company membership server-side,
+  same pattern every other mutating action in this app follows).
+- `pipeline/page.tsx`'s own "found" column (`renderPipeline()`) would need its own, SEPARATE follow-
+  up change to actually read `hide_sanral_board` and skip those cards - **not built or touched by
+  this PR at all**, kept out deliberately (this task's own scope keeps `pipeline/page.tsx`
+  untouched, and wiring real visibility logic ahead of the schema landing would be exactly the kind
+  of "ships a preview that implies it's already real" this whole pattern exists to avoid).
+- `discovery/page.tsx` would read `interested_disciplines` to pre-filter or highlight matching
+  verdicts, and `OpportunityPreferencesPanel.tsx` would read/write through the server action instead
+  of `localStorage` once the schema exists - the panel's own props/shape were kept close to what
+  that real version would need (a flat `{hideSanral, disciplines}` object) specifically so this swap
+  is mechanical, not a rewrite.
+
+**Self-review, 3 full rounds** (per this task's own instruction):
+1. Re-read the finished `OpportunityPreferencesPanel.tsx` and its mounted position in `page.tsx` as
+   a first-time user would see it: collapsed by default, the badge and body copy are the first
+   things visible once opened, and no other part of the page (verdict chips, pursue buttons, the
+   Bids board) changes behavior based on anything stored here - confirmed by grep: no other file in
+   this branch reads `opportunityPreferencesPreview.ts`'s exports except the panel itself.
+2. Re-checked the empty-state copy against the real cron (`45 2 * * *` = 02:45 UTC, confirmed by
+   re-reading `.github/workflows/daily-discovery.yml` directly this session, not from memory) -
+   the new copy says "once a day, overnight" and "after tonight's run", never a specific clock time
+   that could drift from the actual schedule, and never implies an on-demand/instant path that
+   doesn't exist.
+3. Re-verified the discipline-tagging nudge's data source is genuinely readable from the app layer,
+   not assumed: read `engine/discovery/company_profiles.py`'s `profile_from_company_rows()` line by
+   line, matched its exact `known_disciplines` computation against `disciplineTaggingNudge.ts`'s
+   `hasNoTaggedDisciplines()`, and read `app/app/experience/page.tsx`'s own `experience_items` query
+   to confirm the same table/columns/RLS-reliance pattern this page's new query now also uses - no
+   new scoring-result field was needed, so this shipped as the real thing, not a proposal.
+
+**Verified**: `rm -rf .next && npm run verify` - 0 errors (the same 3 pre-existing warnings every
+recent pass on this area has reported - `Logo.tsx`'s two `<img>` warnings and `analytics/page.tsx`'s
+unused `STAGE_META` import, confirmed present on `main` before this branch touched anything).
+`npx vitest run` - 147/147 (unchanged - no vitest-covered logic touched). Full `node:test` sweep both
+ways: `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 118/118 (104
+baseline + 9 new in `opportunityPreferencesPreview.test.ts` + 5 new in
+`disciplineTaggingNudge.test.ts`); the same set via `node --experimental-strip-types --test <file>` -
+118/118, both sweeps agree.
+
+**This PR is intentionally left in draft, not merged.** Like PR #121, the real half of this feature
+(actually saving a preference, and actually hiding anything anywhere) is gated on Sarel's own review
+of the `company_tender_preferences` schema above - a database decision is his to make, never
+something to force through by shipping a preview that quietly implies it already works. The two
+engine-level items flagged above (a `--company-id` on-demand scan flag, and wiring
+`hide_sanral_board` into `pipeline/page.tsx` once the schema exists) are also explicitly deferred to
+him, not built.
+
+---
+
+### Opportunity preferences (SANRAL visibility + disciplines) - built for real, migration 0088 NOT yet applied live
+
+Sarel's explicit sign-off, this session (2026-10-23): he reviewed the `company_tender_preferences`
+schema proposed above and approved building the real feature against it - not just reacting to
+another preview. This entry replaces the preview end-to-end; `lib/opportunityPreferencesPreview.ts`
+and its test (the localStorage-only mock the entry above describes) are deleted, not kept alongside
+the real version - one source of truth, not two that could drift.
+
+**Migration**: `app/supabase/migrations/0088_company_tender_preferences.sql` - the exact SQL
+proposed above, unchanged (Sarel's own review covered that exact text), **renumbered 0087 -> 0088**
+while rebasing onto latest `main`: the same collision pattern this file's own earlier entries
+describe (`0084`->`0085`->`0086`->`0087`, each time a different, already-merged migration took the
+next number first) had already happened again - PR #74's own `0087_narrative_documents.sql` merged
+while this branch was open, so this migration moved to the next free number, same discipline, no
+other change. **NOT applied to the live
+database from this session** - this environment can reach the real Supabase project over
+PostgREST but genuinely cannot run raw DDL (confirmed, see this file's own 2026-10-23 ~19:00 UTC
+addendum and `docs/specs/System-Status.md`'s matching entry). **Sarel needs to paste this migration's
+SQL into Supabase's own SQL Editor (Project > SQL Editor) before merging** - every server action
+below will error with "relation does not exist" against a database that doesn't have this table
+yet (both pages degrade gracefully when that happens - see below - but nothing actually saves or
+filters until the table is real).
+
+**Server action**: `app/app/discovery/preferencesActions.ts`'s `setOpportunityPreferences(hideSanralBoard,
+interestedDisciplines)` - same `requireCompanyId()` tenant-check shape as every other mutating
+action in this app (`app/app/tenders/[id]/actions.ts`'s own copy, read directly before writing
+this one); companyId is derived server-side from the signed-in user's own `company_members` row,
+never taken from the client, so RLS (`is_company_member`, migration 0088) and this extra check
+agree by construction. Upserts both columns in one row (`onConflict: "company_id"`), re-validates
+every discipline slug against `SLUG_RE` (0040's own slug shape) rather than trusting the client
+array, and revalidates both `/discovery` and `/pipeline` since `hide_sanral_board` affects both.
+
+**Panel wiring**: `OpportunityPreferencesPanel.tsx` no longer reads/writes `localStorage` at all -
+prefilled from a real row `discovery/page.tsx` reads server-side
+(`company_tender_preferences.select("hide_sanral_board, interested_disciplines").maybeSingle()`,
+same no-explicit-company_id-filter pattern the page's own `experience_items` query already uses),
+and every toggle calls `setOpportunityPreferences()` directly inside `useTransition` - same
+direct-invoke-no-form shape as `task-status-button.tsx`'s `advanceTaskStatus` - with an optimistic
+local update that reverts and shows an error banner on a failed save. The "Preview - not yet saved"
+badge is gone; the body copy now says this is saved to the company's account.
+
+**`pipeline/page.tsx` wiring (task item 4 - explicitly deferred, not built, by the entry above)**:
+`renderPipeline()` now also reads `company_tender_preferences.hide_sanral_board` (same
+no-explicit-filter RLS read) and, inside the existing `if (!pack) { ... }` guard for the "found"
+column, `continue`s past a card when `hideSanralBoard` is true - every remaining branch of that
+guard is already narrowed to a non-general-family (i.e. SANRAL-conventional) tender by the
+`t.family === GENERAL_FAMILY` check just above it, so this is exactly the shared board the
+preference is about, nothing else. A pack that already exists (anything actually pursued) is
+completely unaffected - this only ever hides the un-tenant-scoped "found" suggestions, never a
+tender this company is already working.
+
+**`discovery/page.tsx` wiring (task item 5)** - deliberately additive, never a filter:
+`lib/opportunityDisciplineMatch.ts`'s `matchesInterestedDisciplines()` (new, unit-tested pure
+function - expands BOTH the company's stated disciplines and the tender's own categories via
+`disciplineTaxonomy.ts`'s existing `expandDisciplines()`, the same call the page's own
+market-pricing lookup already makes on an opportunity's categories, so a company that selected a
+whole group matches a tender tagged with one of its children and vice versa) is used only to sort
+matching tenders first within whatever verdict tab and pagination window is already active - same
+window, same count, same cards, nothing hidden or removed. A company with no stated preference
+(`interested_disciplines` empty, the default) sees exactly today's order, since the function
+returns `true` for everything in that case. A non-matching card (only shown when the company HAS
+stated a preference) gets a small muted "Outside your disciplines" badge next to its verdict chip,
+with a title explaining it was sorted lower, not hidden - the same honesty discipline every other
+badge on this page already follows.
+
+**A real, necessary one-line fix found along the way, not a scope change**: `disciplineTaxonomy.ts`
+itself imported `lib/experience.ts` via the `"@/lib/experience"` alias. That's fine for
+Next.js/`tsx` (both resolve `tsconfig.json`'s `paths`), but `opportunityDisciplineMatch.test.ts` is
+this file's first unit-test importer, and this task's own required sweep
+(`node --experimental-strip-types --test <file>`, no bundler, no tsconfig paths resolution) failed
+with `ERR_MODULE_NOT_FOUND` on the alias. Fixed by switching that one import to the equivalent
+relative path (`./experience.ts`, same directory, same file, same runtime behavior, confirmed by
+re-running the full app `verify`/`vitest`/both `node:test` sweeps below) - the only form every
+required test runner in this repo can resolve, same reasoning `tender-readiness.ts` already uses
+an explicit `.ts` relative import for.
+
+**Self-review, 3 full rounds** (per this task's own instruction):
+1. Re-read `discovery/page.tsx`'s diff adversarially: confirmed the new discipline-interest sort key
+   sits strictly between the existing open-downgrade sort and the original index tiebreak (never
+   overriding the downgrade bump), confirmed `visibleRows`/`changedVisible` for the "Changed" tab
+   still derive from the same (now-additionally-sorted) `rows`, and confirmed the "Outside your
+   disciplines" badge and the sort use the exact same `matchesInterestedDisciplines()` call so they
+   can never disagree with each other.
+2. Re-read `pipeline/page.tsx`'s diff adversarially: confirmed `hideSanralBoard` only short-circuits
+   inside the `if (!pack)` branch (a card with an existing pack - bidding/submitted/won/lost, or
+   already "found" via a manual load - is untouched), and confirmed it reads the same
+   `company_tender_preferences` table/column the panel writes, not a stale duplicate.
+3. Grepped the whole repo for every remaining reference to
+   `lib/opportunityPreferencesPreview`/`setHideSanralPreview`/`setDisciplinesPreview`/the old
+   "Preview - not yet saved" copy after deleting that module - none left outside this entry's own
+   explanatory prose (confirmed: a dangling import would also have failed `npm run typecheck`/`build`
+   below, which it didn't).
+
+**Verified**: `rm -rf app/.next && npm run verify` (`typecheck` + `lint` + `build`) - 0 errors, the
+same 3 pre-existing warnings every recent pass on this area has reported (`Logo.tsx`'s two `<img>`
+warnings, `analytics/page.tsx`'s unused `STAGE_META` import). `npx vitest run` - 147/147 (unchanged -
+no vitest-covered logic touched). Full `node:test` sweep both ways: combined
+`npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 116/116 (118 from the
+preview entry above, minus 9 deleted with `opportunityPreferencesPreview.test.ts`, plus 7 new in
+`opportunityDisciplineMatch.test.ts`); the same set run individually via
+`node --experimental-strip-types --test <file>` - also 116/116, including the new file (the fix
+above was specifically to make this per-file invocation pass, not just the combined one), both
+sweeps agree. No `engine/` file touched - Python sweep not re-run.
+
+**This PR stays in draft.** The schema is approved and the code is real (not a preview), but the
+migration genuinely is not live yet - merging now would ship server actions and page reads against
+a table that, until Sarel runs the SQL above in Supabase's own SQL Editor, does not exist, which
+both pages handle gracefully (empty preferences, board stays visible) but is still not the state
+this PR is meant to land in.
+
+---
+
+## Opportunity tags + interest/decline: real schema + wiring (migration 0089, 2026-10-23)
+
+Sarel's own live feedback on `/discovery` (2026-10-22: "allow the company to add tags for how to
+search and prioritise opportunities. add quick tags to indicate interest or declines.") first
+shipped as a browser-only localStorage preview (PR #121, explicitly "DO NOT MERGE" - no schema
+existed yet). **Sarel has now reviewed and approved the schema** - this pass replaces the preview
+with the real thing: `company_tags text[]` + `interest_marker`/`interest_marked_at`/
+`interest_marked_by` on `discovered_opportunities`, real `setOpportunityTag()`/
+`setOpportunityInterest()` server actions, and `OpportunityQuickActions.tsx` now reads/writes the
+real row instead of `lib/opportunityTagsPreview.ts` (deleted).
+
+**The migration is NOT yet applied to the live database** - same standing limitation as every
+session tonight (see `docs/specs/System-Status.md`'s ~19:00 UTC addendum: this sandbox can reach
+Supabase over PostgREST but cannot run raw DDL). `0089_opportunity_tags_interest.sql` is committed
+and reviewed, but until Sarel pastes it into Supabase's own SQL Editor, every real call to
+`set_opportunity_tag()`/`set_opportunity_interest()` will fail with "function does not exist" -
+this PR stays in draft for exactly that reason.
+
+**A real gap found in the original PR's own RLS claim, fixed, not just trusted**: PR #121's
+description said no RLS change was needed because `discovered_opportunities` already has
+`is_company_member`-scoped RLS. True for reads, but reading every migration that touches this
+table's RLS (0004, 0048's own precedent, 0055, 0072) confirms `discovered_opportunities` has **no
+client UPDATE policy at all** - 0004's own header comment says it plainly ("service-role written"),
+and 0055's `acknowledge_discovery_downgrade()` exists for exactly this reason. A column-only
+migration with no write path would mean `setOpportunityTag`/`setOpportunityInterest` either need a
+new blanket UPDATE policy (a bigger surface than this needs) or fail outright. Instead, two new
+SECURITY DEFINER functions (`set_opportunity_tag`, `set_opportunity_interest`) were added to the
+same migration file, below Sarel's exact approved column SQL (left untouched, verbatim) - same
+shape as `acknowledge_discovery_downgrade`: check the row exists and `is_company_member(company_id)`
+inside the function, then write. No new RLS policy; the approved "no RLS change needed" conclusion
+holds, just not for the reason the original PR gave.
+
+**"Declined" filter tab (task item 4)**: added to the SAME exclusive, single-select tab list as the
+existing verdict filters (`lib/discoveryPagination.ts`'s `VerdictFilter`/`verdictQuerySpec`/
+`COUNTABLE_FILTERS`, `page.tsx`'s own `FILTERS`), not a second, independent toggle composed with
+them. Reasoning: this list was never strictly "verdict values" - `reassessed` is already
+`downgraded_from`, a different column, and `changed` isn't a column at all - it's "what the one row
+of filter tabs can show at a time", and Sarel asked for "a Declined filter chip/tab alongside the
+existing ones", not a second axis to intersect with the first. Selecting Declined shows every
+declined row regardless of verdict, the same way Re-assessed already ignores verdict. A composable
+second toggle would need its own query param, a two-dimensional WHERE clause and two
+simultaneously-highlighted controls - real complexity not asked for here. `interest_marker` has its
+own partial index (migration 0089), so - like `reassessed` - this is a genuine full-history filter
+with a real exact count, not a page-scoped JS filter like `changed`.
+
+**Tag suggestions, deliberately page-scoped**: `OpportunityQuickActions`'s "reuse a tag you already
+typed" datalist is built from `company_tags` across whatever window of `discovered_opportunities`
+is currently loaded (`page.tsx`'s own `allCompanyTags`), not a dedicated company-wide-vocabulary
+query - the same documented scoped-limitation `lib/discoveryPagination.ts` already applies to the
+`changed` tab. A tag only ever used on a row outside the current window won't suggest until that
+row is loaded too; worth a dedicated query later if Sarel wants it, not built blind here.
+
+**Self-review (3 rounds)**: round 1 - re-read the RLS claim adversarially against every migration
+touching `discovered_opportunities`'s policies (listed above) rather than trusting PR #121's own
+description; found and fixed the missing write path (above). Round 2 - re-verified pagination/count
+behaviour from PR #123/#125 is unaffected: `COUNTABLE_FILTERS`/`verdictQuerySpec`/`withVerdictSpec`
+are extended (one more case each), not rewritten - every existing filter's query shape is untouched,
+confirmed by re-running `discoveryPagination.test.ts`'s pre-existing cases alongside the two new
+ones. Round 3 - re-read `OpportunityQuickActions.tsx` end to end for the mock-to-real swap
+specifically: no `useSyncExternalStore`/localStorage read left anywhere, `tags`/`interest` always
+come from the prop the server component passed down (the real row), and every write path
+(add/remove tag, toggle interest) goes through `startTransition()` + the real server action, same
+shape as `task-status-button.tsx`/`task-assignee-select.tsx` - no stale "Preview" copy left in the
+UI.
+
+**Tested**: `npm run verify` (`rm -rf .next` first) - 0 errors. `npx vitest run` - 147/147 (no
+vitest files touched; this feature's new pure-logic test lives in `discoveryPagination.test.ts`,
+Node's test runner, same as the rest of that module). Full `node:test` sweep both ways - combined
+`npx tsx --test` across every `*.test.ts` file (105/105) and per-file `node --experimental-strip-types
+--test` (same count once the pre-existing `[id]`-bracketed-path glob quirk is worked around the way
+this repo's own CI does - `node --experimental-strip-types <path>` with no `--test` flag for those 5
+files specifically; not a regression, see System-Status.md's own prior notes on this). All green,
+including the 2 new `declined`-filter cases in `discoveryPagination.test.ts`.
+
+**Not done, by design**: the migration is not applied live (see above - Sarel's manual step, spelled
+out in the PR description). No new RLS policy (verified unnecessary, see above). No dedicated
+company-wide tag-vocabulary query (page-scoped suggestions, see above, a reasonable follow-up).
+
+---
+
+## Standing UI/UX review pass, 2026-10-23: tender workspace primary action's disabled reason made visible, not hover-only
+
+Routine scheduled solution-architect-style UI/UX check-in. Reviewed real screens not touched by
+tonight's largest batches (`people/page.tsx`, `experience/page.tsx`, `billing/page.tsx`,
+`company/page.tsx` and its sub-nav/`VaultSection` anchor targets, `sanral-schedules/page.tsx`) -
+all already in good shape, no real gap found worth shipping (the company vault sub-nav's anchor
+links all resolve through `shared.tsx`'s own `VaultSection` wrapper, which already applies
+`scroll-mt-20` against the sticky top bar - confirmed by reading every section component the
+sub-nav links to, not assumed clean).
+
+**The one real gap, found in the Phase 2 batch that merged into `main` an hour before this pass
+(`8e5567f`), one file, not a duplicate of anything above**: the brand-new sticky header banner's
+`PrimaryPackActionLink` (`app/app/tenders/[id]/page.tsx`) renders its disabled state as a `<span
+title={disabledReason}>` - a hover-only tooltip, invisible on a touch device and never reached by
+keyboard. The actual real-action control this banner's own comment says it links to
+(`submission-pack.tsx`'s "Fill SANRAL schedules" button, a few hundred lines down the same page)
+already solved this exact problem for itself, with its own comment stating why in plain words:
+"title= (hover) doesn't reach touch devices - the same reason as visible text so a phone user isn't
+left guessing why it's grey" - a real, visible `<div className="text-warning">{disabledReason}</div>`
+under the button, confirmed by reading `submission-pack.tsx` lines ~293-307 directly. The new
+banner's primary action - the one piece of UI this whole Phase 2 pass added specifically to give
+users one clear next step - silently dropped that established pattern and shipped the tooltip-only
+half of it. On a phone (this app's own field-use case - checking a tender on site), the "Generate
+submission pack" button just sits there greyed out with zero explanation.
+
+**Fixed**: `PrimaryPackActionLink`'s disabled branch now renders the exact same
+tooltip-plus-visible-text pattern as `submission-pack.tsx`'s own disabled button - `aria-disabled="true"`
+and `title={disabledReason}` kept on the span (desktop hover convenience, no regression), plus a new
+sibling `<div style={{ color: "var(--warning)" }}>{disabledReason}</div>` underneath, always visible.
+No new copy invented - `disabledReason` is the exact same string this page was already computing
+server-side (same `!tenderPack` / `openPositionsCount` / `tenderReadiness.thingsLeft` checks,
+untouched). The enabled (ready) branch of the component is completely untouched.
+
+**Self-review, 3 rounds**: 1) re-read the diff - only the disabled branch's JSX changed, the ready
+branch and every caller/prop untouched, confirmed by `git diff --stat` showing one file, isolated
+hunk. 2) confirmed the fix matches an already-established, in-repo convention rather than inventing
+a new one - `submission-pack.tsx`'s own sibling button is the reference implementation, same file,
+same page, same "Generate submission pack" feature area. 3) confirmed the wrapping `<div>` added
+around the disabled span doesn't change layout elsewhere - it's the sole child of its own
+`marginTop`/`paddingTop`/`borderTop` block-level wrapper in `page.tsx`, not inside a flex row with
+siblings that would need to account for a new element.
+
+**Verified**: `rm -rf .next && npm run verify` (`typecheck` + `lint` + `build`) - 0 errors, same 3
+pre-existing warnings every recent pass on this area has reported (`Logo.tsx`'s two `<img>` warnings,
+`analytics/page.tsx`'s unused `STAGE_META` import). `npx vitest run` - 147/147 (unchanged - no
+vitest-covered logic touched, and no test covers this presentational component either way). Full
+`node:test` sweep both ways: combined `npx tsx --test $(find . -name "*.test.ts" -not -path
+"*/node_modules/*")` - 123/123 (the same pre-existing `[id]`-bracketed-path glob quirk silently
+drops 5 files from this combined invocation, not a regression - same quirk this file's own prior
+entries already document); the same 5 files run individually via `node --experimental-strip-types
+<path>` (no `--test` flag, same documented workaround) - 61/61; 184/184 real tests total, all green,
+none newly added or removed by this change.
+
+**Not done, by design**: did not touch the "Part 4 scope cut" question (a full 5-tab retab of this
+page) the Phase 2 entry above explicitly left open for Sarel - that's a sweeping redesign, not a
+single scoped improvement, and stays his own call. Did not touch anything under
+`app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
+standing carve-outs, untouched.
+
+## Tender Workspace Comprehensive Overhaul, Batch 1: badge mashup, duplicate pack-review lists, marketing paragraphs (2026-10-23)
+
+Sarel's "Comprehensive Overhaul" spec for `/tenders/[id]` and the Pack Compiler is a large,
+multi-batch piece of work; a prior read-only investigation (no code changed) confirmed three real,
+safe, no-schema-change bugs and scoped this pass to exactly those three - no drawers, no VAT work,
+no pack-compiler restructuring, all of which are later batches.
+
+**Bug 1 - "Fix Strong match" badge mashup (`general-pack-review.tsx`)**: the per-item row rendered
+`<Pill status={item.status}/>` (Verify/Provide/Fix, `TASK_STYLE`) immediately next to
+`<MatchStrengthBadge confidence={...}/>` ("Strong match"/"Check this"/"Low confidence",
+`matchStrengthStatus()`) in the same `flex gap-1` badge column - two unrelated facts (an action
+needed vs. an extraction-quality score) reading as one phrase. Read the real rendered tree first
+(not just the quoted line range): `Pill` lives in its own leading badge column, matching
+`pack-review.tsx`'s (SANRAL's) own pattern for the exact same row shape. Fix: `Pill` stays alone in
+that leading column; `MatchStrengthBadge` moved out of it entirely, now rendered inline next to the
+item's own label/value line (same row as `{item.label} · {item.value}`) - the same place this
+screen already put the " · value" annotation, so match strength reads as a property of the
+extracted item, not a second status flag competing with the action pill. No color/tier change to
+either component.
+
+**Bug 2 - duplicate lists (`general-pack-review-data.ts` / `general-pack-review.tsx`) - decided:
+CONSOLIDATE, not clarify-both.** Read both consumers end to end before touching anything, per the
+task's own instruction, since a legitimate "scannable summary vs. detailed breakdown" design was a
+real possibility:
+
+- Consumer 1: `snapshot.sections[].items`, rendered as the per-category `<details>` list (Company
+  details/questions & signature, Supporting documents, Roles & CVs, Company experience evidence,
+  Office location) - each item has a `Pill`, a match-strength badge, label/value/note, and the
+  section's own "Confirm or change" link that jumps to where it's edited. This is the actionable,
+  complete view.
+- Consumer 2: `snapshot.checklist`, fed to `<PackChecklist rows={snapshot.checklist} title="What's
+  identified to go into this pack">` rendered directly below it. `PackChecklist` (`pack-checklist.tsx`)
+  is genuinely a shared, legitimate component elsewhere - it's the REAL post-generation checklist
+  (`submission-pack.tsx`, `general-workspace.tsx`), built from the actual generated job's own
+  manifest (real page numbers, real `checklistOf()`). Here, though, it was fed a hand-built
+  `ChecklistRow[]` from `pushChecklist()`, called inline in the SAME loop as `items.push()` for
+  returnables, roles & CVs, experience, and locality - same `title`, same `status` (same underlying
+  `ReviewStatus` just mapped to `ChecklistStatus` vocabulary via the very same classifier call),
+  same `note`. `pages` was hardcoded `null` on every single row, so unlike the real post-generation
+  checklist this echo carried zero information the per-section list didn't already have. Company
+  fields and plain tender questions (only the signature question) were never pushed to it at all -
+  not a deliberate scope cut (nothing documented why), just an inconsistency from being built ad hoc
+  inside each category's own loop.
+
+Evidence this is a real bug, not an intentional two-views design: (1) for every category that did
+feed the checklist, the two lists showed the user the exact same fact twice on one page, with no
+new information in the second copy; (2) the second list had no edit link and no match-strength
+badge - strictly less useful than the first, never more; (3) it was also incomplete (missing 2 of 6
+categories) with no stated reason, which a deliberate second "summary" view would not be; (4)
+nothing outside this one render call consumed `snapshot.checklist` or `gapsCount` (checked by
+grepping every caller of `loadGeneralPackReviewSnapshot` - `page.tsx`, `general-workspace.tsx`,
+`pipeline/page.tsx`, `lib/tenderNextStep.ts` - none read `.checklist`; `computeTenderReadiness()`
+(`tender-readiness.ts`) reads only `.sections`, so readiness scoring was never touched by either
+list). Decision: removed the `<PackChecklist>` render from `general-pack-review.tsx` and the
+`checklist`/`pushChecklist`/`ChecklistRow` plumbing from `general-pack-review-data.ts` (the field,
+the 5 `pushChecklist()` call sites, the now-unused `checklistStatus` destructures at each - careful
+to drop only the destructured binding, not the shared classifier functions themselves, since
+`returnableReviewStatus()` is also reused as-is by `submission-plan-data.ts`, which already only
+destructures `{ reviewStatus }` from it). `pack-checklist.tsx`'s `PackChecklist`/`ChecklistRow` are
+completely untouched - still exactly what `submission-pack.tsx`/`general-workspace.tsx`/the `/demo`
+page use for the real thing. SANRAL's own `pack-review.tsx`/`pack-review-data.ts` has the same
+`checklist`-alongside-`items` shape and was deliberately left alone - out of this batch's named
+scope (`general-pack-review-data.ts`/`general-pack-review.tsx` only), not reviewed here.
+
+**Bug 3 - marketing paragraph cleanup, 3 spots.** `general-pack-review.tsx`'s verbose intro
+paragraph replaced with the existing bold header + a small `Info`-icon tooltip trigger (one line of
+compact microcopy stays visible below the header; the full original sentence, verbatim, moved into
+the tooltip - nothing deleted, just deferred to hover/focus). Reused `components/ui/tooltip.tsx`
+(base-ui `Tooltip`/`TooltipTrigger`/`TooltipContent`, already wrapped around the whole app by
+`TooltipProvider` in `app/layout.tsx` via `components/ui/sidebar.tsx` - confirmed by reading both
+files - so no new client-boundary wiring needed) and the `Info` icon from `lucide-react`, already
+used the same way in this same directory (`action-type-tag.tsx`). A real `Tooltip` (hover AND focus
+accessible) was chosen over a bare `title=` attribute specifically because this codebase's own
+standing review already flagged `title=`-only tooltips as a real problem ("doesn't reach touch
+devices" - see the "primary-action disabled reason" entry above) - not worth reintroducing the same
+gap in new copy.
+
+Searched `submission-pack.tsx` and `narrative-documents.tsx` for the two paragraphs Sarel's spec
+quoted:
+- "AI-drafted from your company's own profile, people, past projects and how you describe your own
+  approach..." - found **verbatim** in `narrative-documents.tsx` (the cover letter/methodology
+  card's own intro). Same treatment applied: compact one-line microcopy kept visible, full original
+  paragraph moved into an `Info`-icon tooltip. This file styles with inline `style={{}}` objects,
+  not Tailwind classes (pre-dates the design-token migration batches) - the new header row and
+  tooltip trigger match that file's own existing inline-style convention (same hex colors,
+  `#16233B`/`#5B6472`) rather than mixing in Tailwind classes that nothing else in the file uses;
+  `TooltipContent` itself still uses its own component's existing Tailwind-based styling internally,
+  which is self-contained and doesn't require the host file to adopt Tailwind.
+- "One ordered PDF: contents page, the forms filled from your data and answers..." - **not found
+  verbatim** in either named file. It's actually `general-workspace.tsx`'s own intro paragraph (the
+  general/non-SANRAL tender's one-PDF pack card) - out of this batch's named scope (only
+  `submission-pack.tsx` and `narrative-documents.tsx` were to be searched), left untouched. The
+  closest equivalent explanatory paragraph that IS in `submission-pack.tsx` is that card's own intro
+  ("Two PDFs, one per sealed envelope..." - SANRAL's two-envelope structure, naturally worded
+  differently from the general-tender one-PDF copy since the two tender families have a genuinely
+  different pack shape). Same treatment applied there: full paragraph verbatim into the tooltip,
+  compact one-line microcopy ("Two sealed-envelope PDFs - Technical and Financial - each with its
+  own contents page and checklist.") left visible by default.
+
+No copy was fabricated in any of the three spots - every compact line is a condensation of facts
+already stated in that same paragraph (never a new claim), and the full original text is preserved
+verbatim, unedited, inside each tooltip.
+
+**Self-review, 3 rounds.** Round 1: re-read every diff hunk adversarially against the stated bug -
+confirmed `general-pack-review-data.ts`'s diff touches only `pushChecklist` plumbing and the now-
+unused `checklistStatus` destructures (not the shared classifier functions' return shapes, not any
+`items.push()` value), confirmed `general-pack-review.tsx`'s diff is exactly the header/tooltip
+swap, the Pill/MatchStrengthBadge column split, and the `<PackChecklist>` removal, confirmed
+`submission-pack.tsx`/`narrative-documents.tsx` diffs touch only their own intro block. Round 2:
+checked the `Tooltip`/`TooltipTrigger`/`TooltipContent` choice doesn't introduce a layout or
+server/client-boundary regression - `TooltipRoot` "doesn't render its own HTML element" (confirmed
+by reading its source), so wrapping existing flex rows with `<Tooltip>` adds no extra DOM node to
+account for; these are React Server Components rendering a client component as a leaf, the same
+pattern `sidebar.tsx` already establishes for the whole app via its own `TooltipProvider`. Round 3:
+confirmed no regression to readiness scoring or the disqualification guard - `computeTenderReadiness()`
+reads only `ReviewSection[].items` (never `.checklist`/`.gapsCount`), and nothing in this diff
+changes any `items.push()` call's value, only which downstream calls read the already-computed
+`reviewStatus`/`note`/etc. Confirmed via `git status --short` that exactly the 4 intended files
+changed - nothing under `app/supabase/migrations/`, no billing/entitlement file, no
+`engine/sanral_fill.py` or its callers.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s unused
+`STAGE_META`), all 57 routes build. `npx vitest run` - 147/147, unchanged (confirmed identical on a
+fresh `origin/main` checkout run in parallel, same 147/147). Full `node:test` sweep both ways:
+combined `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` - 123/123 (same
+pre-existing `[id]`-bracketed-path glob quirk drops the same 5 files from this combined invocation);
+those 5 files individually via `node --experimental-strip-types <path>` (no `--test` flag) - 61/61;
+184/184 total, identical counts on a fresh `origin/main` baseline run the same way. No test file
+touches `general-pack-review-data.ts`/`general-pack-review.tsx` directly - the only test coverage in
+this area (`general-pack-review-logic.test.ts`, 20/20) exercises the pure classifiers in
+`general-pack-review-logic.ts`, which this pass never touched.
+
+**Not done, by design**: SANRAL's own `pack-review.tsx`/`pack-review-data.ts` (same
+checklist-duplicates-items shape) - out of this batch's named files, not this pass's call to make.
+`general-workspace.tsx`'s own verbose intro paragraph (the actual source of the "One ordered PDF..."
+quote) - out of the two files this bug named to search. Drawers, VAT, briefing banners, and any
+pack-compiler restructuring - explicitly later batches, not attempted here. Did not touch anything
+under `app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its
+callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24: Discovery's own per-card readiness blockers made visible, not hover-only
+
+Routine scheduled solution-architect-style UI/UX check-in. The Tender Workspace / Pack Compiler
+area (`app/app/tenders/[id]/` - `general-pack-review.tsx`, `submission-pack.tsx`,
+`narrative-documents.tsx`, `page.tsx`, `workspace-tabs.tsx`, `general-workspace.tsx` and everything
+else in that directory) was a hard exclusion for this pass: it has an open, actively-worked PR
+(`#133`, `workspace-polish`) plus two unresolved design questions explicitly waiting on Sarel
+(vault slide-over drawers, ZAR/VAT formatting), documented at the top of `System-Status.md` as the
+site of a real same-night cross-session collision (`PR #133` vs. this repo's own `PR #134`,
+resolved before this pass started). Picked this pass's improvement from elsewhere entirely, per
+that instruction - `company/`, `people/`, `experience/`, `billing/`, `analytics/`,
+`sanral-schedules/`, `onboarding/`, `pipeline/`, `discovery/` - and checked `git log`/open PRs
+first for anything another session had touched in the last hour (nothing in those directories had;
+the one other open PR, `#118`/`fix/discovery-scoring-diagnosis`, only touches `engine/discovery/`
+and `engine/intake/` Python files, confirmed by reading its file list - no overlap).
+
+**The gap, found by grepping every `title={` in these directories for one that carries real,
+non-decorative information** (the same "hover-only is a real bug on a touch-first app" pattern this
+repo's own 2026-10-23 standing-review entry above already fixed once, on
+`PrimaryPackActionLink`'s disabled reason): `app/discovery/page.tsx`'s per-tender "Company profile
+N% ready" link put its entire blocker list - which of the company's own tracked compliance criteria
+(CSD, Tax PIN, B-BBEE, CIDB, bank letter, principals, people with CVs, experience projects) are
+still outstanding - only in a `title` attribute on the `<Link>` itself. Two compounding problems,
+not one: (1) `title` tooltips never fire on a touch device at all - the real audience for this
+screen (a director checking tenders on their phone, exactly this app's own stated field-use case),
+and (2) even on desktop, this was a hover tooltip on something that is also a clickable `<Link>` -
+a mouse click fires navigation to `/company` before any hover-delay tooltip has a chance to appear,
+so the information was functionally unreachable there too, not just on mobile. This sits on every
+single opportunity card in Discovery - the screen this app's own "Find" stage is built around,
+checked constantly, read far more often than the Company vault page the link points to - so the one
+piece of information that would tell a user why their readiness score isn't 100% (and whether it's
+worth fixing before pursuing this specific tender) was never actually visible anywhere.
+
+**Fixed**: the `title` attribute is gone from the `<Link>`. Its visible text is unchanged ("Company
+profile N% ready"), but when `readiness.blockers.length > 0` a new sibling line renders underneath,
+always visible, no hover required - `{n} open: {label, label…}`, the top 2 blockers by the same
+weight-sorted order `readiness.blockers` already returns (`lib/readiness.ts`'s own documented
+"sorted by weight (highest first)" contract, unchanged), with a trailing `…` when there are more
+than 2. Styled `text-warning` - this app's own established amber "Provide/gap" token, already used
+the same way for blocker-style content elsewhere (`DeadlineChip`, `bid-task-badge.tsx`,
+`bid-readiness-card.tsx`, and the Dashboard's own visible readiness-blockers list in its empty
+state, `app/dashboard/page.tsx` ~line 389 - the direct in-repo precedent this fix follows, not a
+new pattern invented for Discovery). No new copy invented - every blocker's `label` is the exact
+same string `lib/readiness.ts`'s `computeBidReadiness()` already produces; nothing about the
+scoring, weighting, or criteria set changed. Kept `title` on the new div too (the full blocker list,
+comma-joined) purely as a free desktop-hover convenience on top of the now-always-visible text - not
+load-bearing the way the old `title`-only version was.
+
+**Self-review, 3 rounds.** Round 1: re-read the diff hunk directly - confirmed it touches only this
+one `<Link>` + the new conditional div immediately below it, nothing else in the card (`git status
+--short` after the edit showed exactly one file, `app/discovery/page.tsx`). Round 2: checked the
+`mb-2.5` spacing that used to live on the `<Link>` itself - moved it onto whichever of the two new
+branches renders (the blockers-present div, or the existing empty-spacer div for the
+zero-blockers case), so the card's vertical rhythm below this line is unchanged either way, not
+doubled or dropped. Round 3: confirmed `readiness.blockers` (`lib/readiness.ts`'s `Criterion[]`,
+each with a `label`/`href`/`weight`) is read the exact same way the Dashboard's own precedent reads
+it - no new type, no new sort, no change to `computeBidReadiness()` or anything upstream of it;
+`readiness.percent`, the link's own primary visible text, is completely untouched.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings every recent pass on this repo has reported (`Logo.tsx`'s two `<img>`
+warnings, `analytics/page.tsx`'s unused `STAGE_META` import), all 57 routes build. `npx vitest run`
+- 147/147, unchanged (no vitest-covered logic touched - this is a presentational-only change, and
+`lib/readiness.spec.ts`'s own 6 tests, unaffected, confirm `computeBidReadiness()` itself wasn't
+touched). Full `node:test` sweep: `npx tsx --test $(find . -name "*.test.ts" -not -path
+"*/node_modules/*")` - **143/143**, all 20 test files included (the `[id]`-bracketed-path glob quirk
+earlier entries documented as dropping 5 files from this combined invocation did not reproduce in
+this pass's shell - re-confirmed identical, 143/143, on a fresh `origin/main` checkout run with the
+exact same command before concluding anything, so this is the real current baseline, not a
+regression or an improvement over the figure earlier entries recorded under a different shell).
+
+**Not done, by design**: the other `title=`-only spots this same grep turned up on `discovery/page.tsx`
+(the "similar tenders"/market-pricing-range badges, the eTenders-category cross-reference note, the
+filter-chip count explainer) carry real but secondary, non-blocking context, not a "why can't I
+submit" fact the way the readiness blockers are - left as-is rather than reworking every hover
+tooltip on the page in one pass; a real follow-up, not silently dropped. Did not touch anything
+under `app/app/tenders/[id]/` (this pass's hard exclusion), `app/supabase/migrations/`,
+billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (third pass tonight): Analytics win/loss trend chart made readable without hovering
+
+Routine scheduled solution-architect-style UI/UX check-in. Same hard exclusion as the last two
+passes (`app/app/tenders/[id]/` - PR #133 still open, unreviewed, its two design questions still
+waiting on Sarel) plus `app/app/discovery/page.tsx` (fixed last pass, PR #135) and the three Batch 1
+files. `git fetch origin main` + `gh api .../pulls?state=open` first: only two open PRs, `#133`
+(`workspace-polish`, the hard exclusion) and `#118` (`fix/discovery-scoring-diagnosis`, `engine/
+discovery/` and `engine/intake/` Python only - no UI overlap). `git log --oneline -30 --name-only`
+showed nothing touching `company/`, `people/`, `experience/`, `billing/`, `analytics/`,
+`sanral-schedules/`, `onboarding/`, `pipeline/`, `tools/`, `admin/` in recent history - no
+collision risk picking from any of those.
+
+**The gap, same bug class as the last two passes' own fixes (`PrimaryPackActionLink`'s disabled
+reason, Discovery's per-card readiness blockers) - found by grepping every `title={` across those
+ten directories for one carrying real, non-decorative data**: `app/analytics/page.tsx`'s "Win/loss
+trend (last 6 months)" chart rendered each month as a plain stacked bar (won/lost segments, no
+numbers anywhere in the DOM) with the actual counts - `${monthLabel} : ${won} won, ${lost} lost` -
+living *only* in a `title=` attribute on the bar's own container div. Worse than the two prior
+hover-only findings in one respect: there was no visible fallback at all, not even an approximate
+one - a bar's height is relative to that 6-month window's own max (`trendMax`), not an absolute
+scale, so a short bar could mean "1 lost" or "2 won, 1 lost" and nothing on screen said which. On a
+touch device (this app's own stated field-use case - a director checking in from their phone) the
+exact figures behind every bar in this core "Track" widget were completely unreachable, not just
+inconvenient to get to.
+
+**Fixed**: added a small always-visible `{won}W {lost}L` line under each bar, color-coded to match
+the existing bar/legend colors (`text-success` when `won > 0`, `text-destructive` when `lost > 0`,
+`text-muted-foreground` otherwise - including for a quiet month showing `0W 0L`, which is itself
+real information: "no decisions that month", not a gap to hide). `tabular-nums` so the two-column
+figures don't jitter against each other month to month. The `title=` attribute stays on the bar
+div itself, same as Discovery's fix kept its own `title` - a free desktop-hover convenience now,
+not load-bearing. No change to `lib/analyticsLogic.ts` (`buildWinLossTrend`/`monthLabel`) or any
+other computed value - `p.won`/`p.lost`/`trendMax` are read exactly as before, this is markup-only.
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly one file changed,
+`app/app/analytics/page.tsx`; re-read the diff hunk - it touches only the one `<div>` between the
+bar container and the month-label `<span>`, nothing else in the card. Round 2: checked the
+narrow-column case (6 months across, `flex-1` columns) - the two counts have a natural wrap point
+(a literal space between the `W`/`L` spans, not a non-breaking one), so a very narrow viewport
+wraps to two short lines rather than overflowing or clipping; `min-w-0` on the parent column already
+handled shrinking before this change, unaffected. Round 3: confirmed this is markup-only - `trend`,
+`trendMax`, `monthLabel()` and the `decided === 0` empty-state branch above are all read exactly as
+before; `lib/analyticsLogic.spec.ts`'s 6 tests (the only coverage on the logic this chart reads)
+weren't touched and still pass unchanged.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import - present before this change too, confirmed by the same warning showing in last
+pass's own verify output), all 57 routes build. `npx vitest run` - **147/147**, unchanged. Full
+`node:test` sweep, `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` -
+**143/143**, matching last pass's freshly-reconfirmed baseline exactly (re-checked fresh in this
+pass's own shell before concluding anything, per this file's own standing instruction not to assume
+either the 123+61 split or the 143 figure without re-running it).
+
+**Not done, by design**: the chart's underlying scale is still relative-to-window (`trendMax`), not
+an absolute Y-axis - the new counts fix the "can't tell what a bar means" problem directly without
+needing one; adding gridlines/an absolute scale would be a real but separable chart upgrade, not
+attempted here. The other non-chart `title=`-only spots elsewhere on this page (none carrying
+load-bearing data, same audit) and on `pipeline/page.tsx` (the card-footer owner-avatar initials,
+the secondary "Back" button's target-stage name) were left as-is - lower-value than a chart with
+zero visible fallback, a real follow-up rather than silently dropped. Did not touch anything under
+`app/app/tenders/[id]/` (hard exclusion), `app/app/discovery/page.tsx` (last pass's own fix),
+`app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
+standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (fourth pass tonight): Market Intelligence frequency chart made readable without hovering
+
+Routine scheduled solution-architect-style UI/UX check-in. Same hard exclusion as the last three
+passes (`app/app/tenders/[id]/` - PR #133 still open, unreviewed, its two design questions still
+waiting on Sarel) plus `app/app/discovery/page.tsx` (PR #135) and `app/app/analytics/page.tsx`
+(PR #136). `git fetch origin main` + `gh api .../pulls?state=open` first: only two open PRs,
+`#133` (`workspace-polish`, the hard exclusion) and `#118` (`fix/discovery-scoring-diagnosis`,
+Python-only, no UI overlap). `origin/main` carried one new doc-only commit since the last pass
+(`017cb9f`, an `engine/notify`/`engine/worker` clean sweep, no findings, no UI touched) - no
+collision risk.
+
+**The gap, same bug class as the last three passes' own fixes (`PrimaryPackActionLink`'s disabled
+reason, Discovery's per-card readiness blockers, Analytics' win/loss trend) - found by grepping
+every `title={` across `company/`, `people/`, `experience/`, `billing/`, `sanral-schedules/`,
+`onboarding/`, `pipeline/`, `dashboard/`, `tools/`, `admin/`, `market-intelligence/` for one
+carrying real, non-decorative data**: `app/app/market-intelligence/page.tsx`'s "Tender frequency
+(last 12 months)" bar chart had the exact same shape as Analytics' pre-fix trend chart - each
+month a plain bar, height relative to that 12-month window's own max (`frequencyMax`), with the
+real count (`${monthLabel} : ${count} tender(s)`) living only in a `title=` attribute. Same
+touch-device unreachability, same "a short bar could mean anything" ambiguity, on a page whose own
+module comment frames it as a real bidding-decision input, not decoration.
+
+**Fixed**: added a small always-visible count (`{p.count}`) under each bar, `text-accent` when
+`count > 0` (matching the bar's own `bg-accent` fill) and `text-muted-foreground` for a quiet
+month (`0`, itself real information - no tenders that month, not a gap to hide), `tabular-nums` so
+single- and double-digit counts don't jitter the column width month to month. The `title=`
+attribute stays on the bar's own container div, same convention as the three prior fixes - a free
+desktop-hover convenience now, not load-bearing. No change to `lib/marketPricing.ts`
+(`tenderFrequencyTrend`) or any other computed value - `p.count`, `frequencyMax`, `monthLabel()`
+are all read exactly as before; this is markup-only.
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly one file changed,
+`app/app/market-intelligence/page.tsx`; re-read the diff hunk - it touches only the one new
+`<span>` between the bar container and the month-label `<span>`, nothing else in the section.
+Round 2: this chart's per-column content is a single short number (unlike Analytics' two-part
+`{won}W {lost}L`), so there's no wrap-point concern at narrow widths; the existing `min-w-0
+flex-1` column sizing is unaffected by the addition. Round 3: confirmed markup-only -
+`tenderFrequencyTrend`'s return type (`MonthCount = { month: string; count: number }`),
+`frequencyMax`, and `monthLabel()` are all read exactly as before; `lib/marketPricing.spec.ts`'s 9
+tests (the only coverage on the logic this chart reads) weren't touched and still pass unchanged.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same
+3 pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 57 routes build. `npx vitest run` - **147/147**, unchanged. Full
+`node:test` sweep, `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` -
+**143/143**, matching the last three passes' freshly-reconfirmed baseline exactly.
+
+**Not done, by design**: the chart's underlying scale is still relative-to-window
+(`frequencyMax`), not an absolute Y-axis - same reasoning as the Analytics fix, the new counts
+solve the "can't tell what a bar means" problem directly without one. `BreakdownTable`'s own
+`title={b.label}` (line 218, truncation-overflow convenience on an already-visible, just-clipped
+label) is a different and lower-stakes pattern - left alone, not the same bug class. Did not touch
+anything under `app/app/tenders/[id]/` (hard exclusion), `app/app/discovery/page.tsx` or
+`app/app/analytics/page.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
+billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (fifth pass tonight): notification titles no longer silently cut off with zero fallback
+
+Routine scheduled solution-architect-style UI/UX check-in. Same hard exclusion as the last four
+passes (`app/app/tenders/[id]/` - PR #133 still open, unreviewed, its two design questions still
+waiting on Sarel) plus `app/app/discovery/page.tsx` (PR #135), `app/app/analytics/page.tsx`
+(PR #136) and `app/app/market-intelligence/page.tsx` (PR #137). `git fetch origin main` + `gh api
+.../pulls?state=open` first: only two open PRs, `#133` (`workspace-polish`, the hard exclusion)
+and `#118` (`fix/discovery-scoring-diagnosis`, Python-only, `engine/discovery/` and
+`engine/intake/`, no UI overlap). `git log --oneline -30` showed nothing new touching
+`company/`, `people/`, `experience/`, `billing/`, `sanral-schedules/`, `onboarding/`, `pipeline/`,
+`dashboard/`, `tools/`, `admin/`, or the notifications bell since PR #137 merged - no collision
+risk.
+
+**Checked first whether the last four passes' own hover-only-`title=` bug class had a clear new
+instance anywhere in the remaining directories (per this pass's own instruction not to force that
+exact pattern a fifth time) - grepped every `title={` across all of `company/`, `people/`,
+`experience/`, `billing/`, `sanral-schedules/`, `onboarding/`, `pipeline/`, `dashboard/`, `tools/`,
+`admin/`, `notifications/`.** Nothing comparable turned up: `pipeline/page.tsx`'s own
+owner-initials and "Back"-target-stage `title=`s are real but already documented (last pass's own
+"Not done, by design" note) as lower-stakes than a chart with zero visible fallback, and nothing
+else carried load-bearing data behind a hover-only attribute. So this pass picked a genuinely
+different kind of improvement instead, per instruction - not the same pattern a fifth time.
+
+**The gap**: `app/app/notifications/` doesn't exist as a route - the actual notifications feature
+is the topbar bell, `app/app/_components/NotificationsBell.tsx` (rendered globally via
+`TopBar.tsx` on every authenticated page), fed by `lib/notifications.ts`'s `getNotifications()`.
+Its per-item title line was `className="truncate text-sm font-medium text-foreground"` with **no
+`title=` attribute at all** - strictly worse than the hover-only bug class the last four passes
+fixed, because there was no fallback of any kind, not even a desktop hover. And the titles here
+are routinely long enough to need one: `lib/notifications.ts` builds a person-expiry title as
+`` `${label} - ${p.name}` `` (e.g. "ECSA registration - [a two-part surname]") and a
+tender-deadline title as `t.contract_no ?? t.description`, falling back to the tender's full
+description text when no contract number exists yet - both regularly overflow a single line in
+the popover's `w-80` (320px) column. Worse, the line below it (`n.detail`, e.g. "Expires in 5
+days") had no `truncate` and always rendered in full, so the *less* important half of each row
+was guaranteed visible while the identifying half - which document, whose registration, which
+tender - was the one silently cut off.
+
+**Fixed**: replaced `truncate` with `line-clamp-2 break-words` on the title line, and added
+`title={n.title}` as a free desktop-hover convenience for the rare case a title still overflows
+two lines - same "visible by default, hover is just extra" convention the last four passes'
+fixes already established, just applied to a truncation gap instead of a chart. No change to
+`lib/notifications.ts` - `n.title`, `n.detail`, `n.severity`, `n.href` are all read exactly as
+before; this is markup-only on one `<div>`.
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly one file changed,
+`app/app/_components/NotificationsBell.tsx`; re-read the diff hunk - it touches only the one
+title `<div>`'s className plus adding `title=`, nothing else in the row (the severity dot, the
+detail line, the `Link` wrapper are all untouched). Round 2: checked the popover's own layout -
+the row already uses `items-start` (not `items-center`), so a title that now wraps to 2 lines
+doesn't misalign the severity dot or push the detail line oddly; `max-h-80 overflow-y-auto` on the
+list container means a taller row just takes more scroll space, not a layout break. Round 3:
+confirmed this is the one and only notifications UI in the app (`grep -rl NotificationsBell`
+across `app/` returns only the component itself and `TopBar.tsx`) - no other copy of this row
+markup exists to drift out of sync, and no test file references `NotificationsBell` or asserts on
+its className, so nothing needed updating there.
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same
+3 pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 57 routes build. `npx vitest run` - **147/147**, unchanged (no
+vitest-covered logic touched). Full `node:test` sweep, `npx tsx --test $(find . -name "*.test.ts"
+-not -path "*/node_modules/*")` - **143/143**, matching the last four passes' freshly-reconfirmed
+baseline exactly.
+
+**Not done, by design**: `pipeline/page.tsx`'s owner-initials and "Back"-button `title=`s (flagged
+by the third pass as a real but lower-value follow-up) are still untouched - re-confirmed this
+pass as lower-stakes than a notification row that could hide *which* tender or registration is
+expiring, not revisited here. Did not touch anything under `app/app/tenders/[id]/` (hard
+exclusion), `app/app/discovery/page.tsx`, `app/app/analytics/page.tsx`, or
+`app/app/market-intelligence/page.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
+billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (sixth pass tonight): role-source citations on `/people/[id]` made reachable without a mouse
+
+Routine scheduled solution-architect-style UI/UX check-in. `git fetch origin main` + `gh api
+.../pulls?state=open` first: two open PRs, `#141` (`tender-workspace-batch-2b`, last pushed ~20
+min ago - the new hard exclusion for this pass, superseding the now-resolved PR #133 vault-drawer/
+ZAR-formatting questions it was based on) and `#118` (`fix/discovery-scoring-diagnosis`,
+Python-only, no UI overlap). Also read `docs/AUDIT_MULTI_TENANT_SECURITY.md` (added `f734a31`,
+Finding 1 already closed `a07a6d5`) - a read-only RLS/auth audit, confirmed no UI overlap with this
+pass's own remit.
+
+**Same hover-only bug class the last five passes fixed (chart counts, notification titles), found
+in a different shape**: grepped every `title={` across `company/`, `people/`, `experience/`,
+`billing/`, `sanral-schedules/`, `onboarding/`, `pipeline/`, `dashboard/`, `tools/`, `admin/` (the
+directories this pass is scoped to, `tenders/[id]/` excluded). `people/[id]/page.tsx`'s "Tender
+roles this CV qualifies for" checklist - the per-role checkbox `<label>` carried `title={r.source}`
+(`tender_roles.source`, migration 0016: real per-role evidence text, e.g. which SANRAL Book 1
+table/matrix sheet or which other buyer's tender a role code comes from, not decoration), and the
+section's own intro copy says outright **"Hover a role to see which tender it came from"** - an
+explicit instruction to use an interaction that doesn't exist on any touch device and is invisible
+to a screen reader. Worse than the chart cases: there are 47 roles across 6 families
+(`ROLE_FAMILY_LABEL`), so this is 47 citations, not one.
+
+**Fixed**: replaced the bare `title=` with a small `(?)` `Tooltip`-backed icon
+(`app/app/people/_components/role-source-info.tsx`, new file) reusing the exact accessible,
+already-proven pattern this app uses for its section-level "how this works" tooltips
+(`pack-review.tsx`, `submission-pack.tsx`, `narrative-documents.tsx`, all built on `components/ui/
+tooltip.tsx`'s base-ui `Tooltip`, which has real touch-pointer handling, not just `:hover` CSS).
+Each role row is now `<input id="role-{code}"> <label htmlFor="role-{code}">…</label>
+<RoleSourceInfo source={r.source} roleTitle={r.title} />` instead of one `<label>` wrapping the
+checkbox - the checkbox's own `id`/`htmlFor` pairing keeps "click the text to toggle" working
+exactly as before, and moving the tooltip icon *outside* the label (not nested inside it) means
+tapping it to read the source never also toggles the checkbox, with no `stopPropagation` hack
+needed. `saveRoleEligibility`'s own form read (`name="role_code"`, `app/app/people/actions.ts`) is
+untouched - same checkbox, same value, same name. Intro copy updated from "Hover a role..." to
+"Tap the (?) on a role..." (matches this app's own existing "tap to advance" copy convention,
+`tenders/[id]/task-status-button.tsx`).
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly the 2 expected files
+(`people/[id]/page.tsx` edited, `role-source-info.tsx` new); re-read the diff hunk - only the one
+role-row block and the one import line changed, nothing else in the 1000+ line page. Round 2:
+confirmed `r.code` is unique per role across the whole catalog (each role belongs to exactly one
+family, `familyRoles = roleCatalog.filter(r => r.family === family)`), so the new `id="role-{code}"`
+values can't collide with each other or with any other `id` on the page; confirmed this checklist
+renders exactly once per page load (one person per `/people/[id]` route), so no duplicate-id risk
+across re-renders either. Round 3: confirmed `RoleSourceInfo` is a genuinely new, separately-"use
+client" file (required - `people/[id]/page.tsx` is a Server Component, and Base UI's `Tooltip` is a
+Client Component; a Server Component can render it directly but can't hand it an inline event
+handler, which is exactly why the label/icon click-conflict was solved by DOM structure - keeping
+the icon outside the `<label>` - rather than a `stopPropagation` prop that couldn't have been
+passed across that boundary anyway).
+
+**Verified**: this worktree needed its own fresh `npm install` (standard for a new worktree, not a
+regression). `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 57 routes build. `npx vitest run` - **147/147**, unchanged (no
+vitest-covered logic touched). Full `node:test` sweep, `npx tsx --test $(find . -name "*.test.ts"
+-not -path "*/node_modules/*")` - **156/156** (re-confirmed fresh in this pass's own shell per this
+file's own standing instruction not to assume a stale baseline figure; grown from the fifth pass's
+143 as PR #139/#141 landed real new test files in between).
+
+**Not done, by design**: `pipeline/page.tsx`'s owner-initials and "Back"-button `title=`s (flagged
+lower-stakes by the third/fifth passes, re-confirmed still lower-stakes than 47 real evidence
+citations with an explicit "hover to see" instruction) are still untouched. Did not touch anything
+under `app/app/tenders/[id]/` (hard exclusion - PR #141 in flight), `app/app/discovery/page.tsx`,
+`app/app/analytics/page.tsx`, `app/app/market-intelligence/page.tsx`, or
+`app/app/_components/NotificationsBell.tsx` (prior passes' own fixes), `app/supabase/migrations/`,
+billing/entitlement logic, or `engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-24 (seventh pass tonight): `/sanral-schedules` was silently dropping the tender title whenever a contract number existed
+
+Routine scheduled solution-architect-style UI/UX check-in. `git fetch origin main` + `gh api
+.../pulls?state=open` first: fast-forwarded `main` to `9ede13a` (picked up Finding 71,
+`sanral_fill.py`'s own fix for Excel formula-error codes in BOQ cells - no UI overlap). Two open
+PRs: `#141` (`tender-workspace-batch-2b`, pushed within the hour - still the hard exclusion for
+`app/app/tenders/[id]/`) and `#118` (`fix/discovery-scoring-diagnosis`, Python-only, no UI overlap,
+confirmed stale since 2026-10-23).
+
+**Not the same hover-only bug class this routine has fixed the last several passes - a worse one:
+real information silently dropped, with no workaround at all, not even hovering.** `/sanral-
+schedules` (the premium-feature front door for the SANRAL Technical/Financial-workbook
+automation) listed each SANRAL tender with `{t.contract_no || t.title || "Tender"}` - when a
+tender had *both* a contract number and a title (the normal case; both fields are populated
+throughout the real scraping/engine pipeline, `engine/**` has 42 files reading `contract_no`
+alongside `title`), the actual tender title was never rendered anywhere on the page, not even as
+a hover `title=`. A company with more than one SANRAL tender in flight saw only bare contract
+numbers like `SANRAL/ADK/0071/2017` in the list and had to open each one to find out which tender
+it actually was. The pipeline board (`pipeline/page.tsx`) already shows contract number and title
+as two distinct lines for the exact same reason they're two distinct pieces of identifying
+information - this page just hadn't followed that same convention.
+
+**Fixed**: contract number (when present) now renders as its own small mono line above the title,
+title renders on its own line below it (falling back to a bare "Tender" label only when *neither*
+field exists - the genuine last-resort case, not the common one). No data layer or query change -
+`TenderRow`'s shape, the Supabase query, and the rest of the page (`DeadlineChip`, job status
+badge, the "Fill SANRAL schedules" link) are all untouched.
+
+**Self-review, 3 rounds.** Round 1: `git status --short` showed exactly one file changed,
+`app/app/sanral-schedules/page.tsx`; re-read the diff hunk - only the one `<div className="min-
+w-0">` block changed, nothing else on the page (the buyer line, the deadline chip, the job-status
+badge, the CTA link are all untouched). Round 2: confirmed no test file references this page or
+asserts on its markup (`grep -rl sanral-schedules **/*.test.ts*` - none), so no test needed
+updating; confirmed the three real shapes render correctly - contract number + title (both shown,
+two lines), title only (no contract-number line, no empty gap above it), neither (falls back to
+"Tender", same as before). Round 3: confirmed this is the only place in the app that built this
+particular `||` fallback across contract number and title (`grep -rn contract_no.*||.*title` across
+`app/app` - only this one site; `pipeline/pricing/page.tsx`'s own `r.contractNo || r.title` is a
+single compact summary line for an unrelated banner listing several tenders by name, not a
+per-tender identity row, and out of this pass's scope regardless since `pipeline/` isn't where the
+bug actually lives there).
+
+**Verified**: `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same
+3 pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 57 routes build. `npx vitest run` - **147/147**, unchanged (no
+vitest-covered logic touched, markup-only change). Full `node:test` sweep, `npx tsx --test
+$(find . -name "*.test.ts" -not -path "*/node_modules/*")` - **156/156**, re-confirmed fresh in
+this pass's own shell (matches the sixth pass's own freshly-reconfirmed baseline exactly, no new
+test files landed in between).
+
+**Not done, by design**: `pipeline/page.tsx`'s owner-initials-circle hover-only `title=` (flagged
+lower-stakes by the third/fifth/sixth passes) is still untouched - re-confirmed this pass as a real
+but smaller gap (the owner is still visible via the readiness/stage context around it; the SANRAL
+page's bug hid the tender's own identity outright, a bigger single fix). Did not touch anything
+under `app/app/tenders/[id]/` (hard exclusion - PR #141 in flight), `app/app/discovery/page.tsx`,
+`app/app/analytics/page.tsx`, `app/app/market-intelligence/page.tsx`,
+`app/app/_components/NotificationsBell.tsx`, or `app/app/people/[id]/page.tsx`'s role-source
+tooltips (prior passes' own fixes), `app/supabase/migrations/`, billing/entitlement logic, or
+`engine/sanral_fill.py` and its callers - standing carve-outs.
+
+## Standing UI/UX review pass, 2026-10-25 (eighth pass): Tender Command Center's raw emoji glyphs replaced with the app's own icon convention
+
+Routine scheduled solution-architect-style UI/UX check-in. `git fetch origin main` + `gh`/MCP
+open-PR check first: fast-forwarded `main` to `0e52aa8` (picked up PR #149, pipeline owner-name
+visibility - already fixed, confirmed in place, not re-touched). Only one open PR repo-wide -
+`#118` (`fix/discovery-scoring-diagnosis`, Python-only, draft, stale since 2026-10-23, no UI
+overlap). No PR currently touches `app/app/tenders/[id]/` - the usual hard exclusion didn't apply
+this pass, but the highest-value real issue found was elsewhere anyway. Scanned every remote branch
+again for undisclosed in-flight work: the handful sitting 1-2 commits ahead of `main`
+(`uiux/primary-action-visible-disabled-reason`, `ux-fix/opportunity-table-filter-labels`,
+`ux-fix/task-assignee-aria-label`, `uiux/brand-accessibility-fixes`, etc.) are all stale, abandoned
+branches whose actual fixes already landed on `main` separately (confirmed by re-reading each
+branch's diff against the current file content directly, not just trusting the branch name) - dead
+branches, not in-flight work, nothing to collide with.
+
+**The bug**: the brand-new Tender Command Center (`components/tt/command-center.tsx`, Sarel's own
+brief from 2026-10-24, now the dashboard's primary "what's urgent" view - the first thing every
+signed-in user sees) rendered its Urgent Actions lane with three raw emoji glyphs mixed directly
+into alert text - `⚠️ {c.blockingSummary}`, `⏱️ Tender box deadline: ...`, `🖨️ Print & bind cutoff:
+...` - with no `aria-hidden`, unlike every other icon anywhere else in this app (all `lucide-react`
+SVGs with `aria-hidden`, confirmed by grepping every other decorative-icon usage in the file itself
+- `AlertTriangle`/`Gavel`/`PackageCheck`/`Radar` all follow this pattern two lines away from the
+three emoji that didn't). Checked the rest of the codebase for the same emoji-as-glyph pattern
+before concluding this was scoped right: `submission-mode-badge.tsx` and `submission-pack.tsx` both
+already wrap their own decorative emoji in `<span aria-hidden>` - so even the two other places this
+app uses raw emoji follow the accessibility convention properly; this file's three were the one
+regression, not an established exception. Three real problems from using raw unicode glyphs here
+specifically: (1) no `aria-hidden` means a screen reader announces the glyph's own name ("warning
+sign", "stopwatch", "printer") ahead of the actual text, on the dashboard's single most
+attention-demanding lane; (2) emoji render with their own OS/browser-supplied colors and don't
+respect this app's `text-warning`/`text-foreground` tokens, so the glyph's color drifts out of the
+design system's control (and would look wrong the moment dark mode, which the tokens already
+support, ever gets a toggle); (3) emoji font fallback differs by platform (Windows/Mac/Linux/mobile
+all render these differently sized and styled), breaking the "confident & premium" visual
+consistency every other migrated screen in this app already holds to.
+
+**Fixed**: replaced the three raw emoji with the exact `lucide-react` equivalents already used
+elsewhere in this same codebase for the same concepts (`Clock` - already imported by
+`deadline-chip.tsx` for deadline urgency; `Printer` - new import, matches the "print & bind"
+concept directly) plus the file's own already-imported `AlertTriangle`, each `size-3.5 shrink-0
+aria-hidden`, matching `RadarSection`'s existing `Radar` icon treatment two functions below in the
+same file. No copy change, no logic change, no data-shape change - purely swapping the icon
+mechanism these three lines use, in the one file that broke the established convention.
+
+**Self-review, 3 rounds.** Round 1: `git diff` showed exactly one file changed,
+`components/tt/command-center.tsx` - one import line and the three emoji sites, nothing else in the
+233-line file touched (the other four exported components - `CriticalDispatchBanner`,
+`NeedsDecisionLane`, `DispatchLane`, `RadarSection` - are untouched). Round 2: confirmed via a
+full-codebase Unicode-range grep (`\U0001F300-\U0001FAFF`, `☀-➿`) that no other file in
+`app/`/`lib`/`components` has the same unwrapped-emoji-in-alert-text pattern - the two existing
+emoji usages elsewhere (`submission-mode-badge.tsx`, `submission-pack.tsx`) are already correctly
+`aria-hidden`-wrapped and out of this pass's scope; `pipeline/page.tsx`'s own single `"⚠ "` prefix
+and `review-button.tsx`'s `"✓"` are single-glyph, lower-stakes, and left untouched to avoid any file
+overlap with the just-merged PR #149 in `pipeline/page.tsx`. Round 3: confirmed the new
+`inline-flex items-center gap-1` wrapper spans don't break the surrounding `flex flex-wrap gap-x-4
+gap-y-1` layout - icon and its own text stay paired as one flex item when the row wraps at narrow
+widths, rather than the icon and text separating onto different lines; confirmed `Printer`/`Clock`
+both exist in the installed `lucide-react` version before using them (checked directly, not
+assumed).
+
+**Verified**: this worktree needed its own fresh `npm install` (standard for a new worktree, not a
+regression). `rm -rf app/.next && npm run verify` (typecheck + lint + build) - 0 errors, the same 3
+pre-existing warnings (`Logo.tsx`'s two `<img>` warnings, `analytics/page.tsx`'s own unused
+`STAGE_META` import), all 58 routes build (grown from the seventh pass's 57 - new routes landed
+with the recent notification-feature work, not a regression). `npx vitest run` -
+**185/185** (grown from the seventh pass's 147 as the notification-feature PRs #145/#147/#148 landed
+real new test files in between - markup-only change here, nothing vitest-covered touched). Full
+`node:test` sweep, `npx tsx --test $(find . -name "*.test.ts" -not -path "*/node_modules/*")` -
+**156/156**, re-confirmed fresh in this pass's own shell per this file's own standing instruction
+not to assume a stale baseline figure - unchanged from the seventh pass's own freshly-reconfirmed
+figure (no new `.test.ts` files landed between that pass and this one).
+
+**Not done, by design**: `pipeline/page.tsx`'s own `"⚠ "` prefix and `review-button.tsx`'s `"✓"`
+(found by the same sweep, both single-glyph and lower-stakes than three unwrapped emoji on the
+dashboard's primary urgent-action lane) are still untouched - flagged here so a future pass doesn't
+need to re-run the same sweep from scratch. Did not touch `app/app/tenders/[id]/` beyond confirming
+no open PR currently excludes it, `app/app/discovery/page.tsx`, `app/app/analytics/page.tsx`,
+`app/app/market-intelligence/page.tsx`, `app/app/_components/NotificationsBell.tsx`,
+`app/app/people/[id]/page.tsx`'s role-source tooltips, `app/app/sanral-schedules/page.tsx`, or
+`app/app/pipeline/page.tsx`'s owner-initials line (all prior passes' own fixes),
+`app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
+standing carve-outs.

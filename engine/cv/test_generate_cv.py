@@ -202,6 +202,89 @@ def test_world_bank_project_with_null_fields_does_not_print_the_word_none():
     check("the start date is still shown correctly", "2022-01-01" in text, text)
 
 
+def test_world_bank_project_with_null_position_held_does_not_print_the_word_none():
+    print("build_world_bank: a real project row with no captured position title "
+          "(position_held=None) must not render the literal word 'None' into a real CV")
+    # Finding 80 (2026-10-26): the Finding-49 test just above this one deliberately set
+    # position_held="Site Engineer" (a valid value) because it was exercising the OTHER
+    # nullable fields (end/value_rm/contact/contact_phone) - it never covered position_held
+    # itself for THIS function. The 2026-10-23 fix for the sibling bug (build_sanral_keyperson
+    # crashing on position_held=None) only touched that function and its own test - this one,
+    # a plain f-string interpolation with no `or` guard at all, was left behind. Unlike
+    # build_sanral_keyperson's _safe_text(None) crash, an f-string never raises - it silently
+    # renders "Position: None" in a real, client-facing CV instead.
+    person = {"name": "Jane Doe", "role": "Engineer", "qualifications": {},
+              "projects": [{"client_and_number": "Real Project A/2022", "position_held": None,
+                             "start": "2022-01-01", "end": "2023-01-01", "value_rm": 10,
+                             "contact": "A Buyer", "contact_phone": "012 345 6789"}]}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_world_bank(profile, person, "person_1", "full", None, None, log)
+    text = next(p.text for p in doc.paragraphs if "Real Project" in p.text)
+    check("the missing position title reads '?', not the literal word 'None'",
+          "None" not in text and "Position: ?" in text, text)
+    check("the rest of the entry is unaffected (dates/value/referee all still correct)",
+          "2022-01-01" in text and "2023-01-01" in text and "R10m" in text and "A Buyer" in text, text)
+
+
+def test_sanral_keyperson_project_with_null_position_held_does_not_crash():
+    print("build_sanral_keyperson: a real project row with no captured position title "
+          "(position_held=None) must not crash CV generation for that person")
+    # Finding (2026-10-23): dict.get(key, default) only substitutes `default`
+    # when the key is ABSENT, not when it's present with value None -
+    # position_held is a nullable column (0001_init_schema.sql's projects
+    # table), and _safe_text(None) itself crashes (re.sub needs a string,
+    # not None) - every OTHER nullable project field in this same function
+    # already guards with `or ""` (the "or" pattern that fixed the sibling
+    # build_world_bank() bug, Finding 49), position_held was the one left
+    # behind. Worse than Finding 49's "prints the word None": this one
+    # failed the whole CV generation job, not just rendered wrong text.
+    person = {"name": "Jane Doe", "role": "Engineer", "qualifications": {},
+              "projects": [{"client_and_number": "Real Project A/2022", "position_held": None,
+                             "start": "2022-01-01", "end": "2023-01-01", "value_rm": 10,
+                             "contact": "A Buyer", "contact_phone": "012 345 6789"}]}
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_sanral_keyperson(profile, person, "person_1", "full", None, None, log)
+    row = next(r for t in doc.tables for r in t.rows if any("Real Project" in c.text for c in r.cells))
+    cells = [c.text for c in row.cells]
+    check("the project renders at all (no crash) and the position cell is blank, not the word 'None'",
+          cells[2] == "", cells)
+    check("the rest of the row is unaffected (client/value/start/end/contact all still correct)",
+          cells[0] == "Real Project A/2022" and cells[1] == "10" and cells[3] == "2022-01-01"
+          and cells[4] == "2023-01-01" and cells[5] == "A Buyer", cells)
+
+
+def test_world_bank_education_with_null_institution_does_not_log_the_word_none():
+    print("build_world_bank: a qualification with a description but no institution/graduation "
+          "date yet must not log 'confirmed' with the literal word 'None' in its provenance entry")
+    # Finding (2026-10-25, standing review pass): highest_description/
+    # highest_institution/highest_graduated are three independently nullable
+    # columns (0001_init_schema.sql's people table) - a real person can have
+    # a qualification description on file with the institution or graduation
+    # date not yet captured. The document cells already guard with `or ""`
+    # (rendering blank, not "None"), but the field_provenance log entry
+    # interpolated institution/date raw, so it recorded "confirmed" with the
+    # literal word "None" in it - same bug class as Finding 49/73, just in
+    # the provenance record rather than the visible document.
+    person = {
+        "name": "Jane Doe", "role": "Engineer", "projects": [],
+        "qualifications": {
+            "highest_description": "BSc Civil Engineering", "highest_institution": None, "highest_graduated": None,
+        },
+    }
+    profile = {"company": {"legal_name": "Test Co"}}
+    log = ProvenanceLog(source="test")
+    doc = gc.build_world_bank(profile, person, "person_1", "full", None, None, log)
+    text = next(p.text for p in doc.paragraphs if "BSc Civil Engineering" in p.text) if any(
+        "BSc Civil Engineering" in p.text for p in doc.paragraphs) else ""
+    entry = next(e for e in log.entries if e["field_key"] == "cv.wb.education.BSc Civil Engineering")
+    check("the provenance entry is 'confirmed', not downgraded", entry["status"] == "confirmed", entry)
+    check("the provenance entry's value does not contain the literal word 'None'",
+          "None" not in entry["value"], entry["value"])
+    check("the visible document cell for institution is blank, not the word 'None'", "None" not in text, text)
+
+
 def main():
     test_unmatched_candidate_reason_is_not_nonsensical()
     test_matched_candidate_logs_score_not_rationale_on_page()
@@ -211,6 +294,9 @@ def main():
     test_control_characters_are_stripped_not_crashed_on()
     test_years_experience_uses_sast_not_naive_utc_today()
     test_world_bank_project_with_null_fields_does_not_print_the_word_none()
+    test_world_bank_project_with_null_position_held_does_not_print_the_word_none()
+    test_sanral_keyperson_project_with_null_position_held_does_not_crash()
+    test_world_bank_education_with_null_institution_does_not_log_the_word_none()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

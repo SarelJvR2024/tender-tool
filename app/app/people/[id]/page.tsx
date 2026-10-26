@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { AlertTriangle, UserX } from "lucide-react";
-import { expiryStatus } from "@/lib/dates";
+import { expiryStatus, formatDate } from "@/lib/dates";
 import { createClient } from "@/lib/supabase/server";
-import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
+import { savePerson, deletePerson, saveProject, deleteProject, uploadCv, retryCvExtraction, saveRoleEligibility, addPersonCatalogRegistration, addSignatoryScope, deleteSignatoryScope } from "../actions";
 import { loadDisciplineTaxonomy, taxonomyGroups, taxonomyLabel } from "@/lib/disciplineTaxonomy";
 import { AppShell } from "../../_components/AppShell";
 import { ConfirmSubmitButton } from "../../_components/ConfirmSubmitButton";
 import { CvExtractionReview } from "./cv-review";
 import { CvLedAddPerson } from "../_components/cv-led-add-person";
+import { RoleSourceInfo } from "../_components/role-source-info";
 import type { CvExtractionResult } from "@/lib/cvExtraction";
 import { EmptyState } from "@/components/tt/empty-state";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -713,7 +714,8 @@ export default async function PersonDetailPage({
               Your company decides which tender roles {person!.name}&apos;s CV fits - Tender Ready uses this tag on each
               tender&apos;s compliance check instead of guessing from years of experience or registration. The roles are the
               ones real tenders ask for: SANRAL&apos;s Book 1 key-person codes (a Design Specialist is tendered per
-              specialism) and the key personnel other buyers name. Hover a role to see which tender it came from.
+              specialism) and the key personnel other buyers name. Tap the (?) on a role to see which tender it came
+              from.
             </div>
             {rolesSaved === "1" && (
               <div className="mb-3 rounded-lg border border-success/20 bg-success/10 px-3.5 py-2 text-sm text-success">
@@ -744,13 +746,21 @@ export default async function PersonDetailPage({
                       </summary>
                       <div className="mt-2 grid grid-cols-1 gap-x-3 gap-y-1.5 sm:grid-cols-2">
                         {familyRoles.map((r) => (
-                          <label key={r.code} title={r.source} className="flex min-h-8 items-start gap-2 text-sm text-foreground">
-                            <input type="checkbox" name="role_code" value={r.code} defaultChecked={taggedRoles.has(r.code)} className="mt-0.5 size-4 shrink-0" />
-                            <span>
+                          <div key={r.code} className="flex min-h-8 items-start gap-1.5">
+                            <input
+                              type="checkbox"
+                              id={`role-${r.code}`}
+                              name="role_code"
+                              value={r.code}
+                              defaultChecked={taggedRoles.has(r.code)}
+                              className="mt-0.5 size-4 shrink-0"
+                            />
+                            <label htmlFor={`role-${r.code}`} className="min-w-0 flex-1 text-sm text-foreground">
                               {r.title}
                               {r.registration_body && <span className="text-[11px] text-muted-foreground"> · {r.registration_body}</span>}
-                            </span>
-                          </label>
+                            </label>
+                            <RoleSourceInfo source={r.source} roleTitle={r.title} />
+                          </div>
                         ))}
                       </div>
                     </details>
@@ -810,14 +820,32 @@ export default async function PersonDetailPage({
                       <div>
                         <div className="text-sm font-semibold text-foreground">{u.original_filename}</div>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">
-                          {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {new Date(u.created_at).toLocaleDateString()}
+                          {u.mode === "as_is" ? "Use as-is" : "AI-extract"} · {(formatDate(u.created_at) ?? "—")}
                         </div>
-                        {u.status === "extraction_failed" && u.extraction_error && (
-                          <div className="mt-1 max-w-[480px] text-xs text-destructive">{u.extraction_error}</div>
+                        {u.status === "extraction_failed" && (
+                          // UX audit re-review 2026-10-23, item 3: this used to render
+                          // u.extraction_error verbatim - a raw provider error and
+                          // request id for anything that failed at the AI call itself
+                          // (engine/cv/extract_cv_fields.py now keeps that detail out of
+                          // the stored message, but this stays a fixed, generic line
+                          // regardless, rather than trusting whatever's in the column).
+                          <div className="mt-1 max-w-[480px] text-xs text-destructive">
+                            We couldn&apos;t read this file automatically. The original file is safe - retry, or
+                            upload the original Word/PDF export.
+                          </div>
                         )}
                       </div>
                       <div className="flex items-center gap-2.5">
                         <Pill tone={st.tone}>{st.label}</Pill>
+                        {u.status === "extraction_failed" && (
+                          <form action={retryCvExtraction}>
+                            <input type="hidden" name="cv_upload_id" value={u.id} />
+                            <input type="hidden" name="person_id" value={person!.id} />
+                            <button type="submit" className="text-xs font-semibold text-accent">
+                              Retry
+                            </button>
+                          </form>
+                        )}
                         {url && (
                           <a href={url} className="text-xs font-semibold text-accent">
                             Download
@@ -865,8 +893,7 @@ export default async function PersonDetailPage({
               Project / reference history
             </h2>
             <div className="mb-3 text-xs text-muted-foreground">
-              Used by the pack-matching engine to score this person against a tender&apos;s key positions
-              (see engine/pack_generator/suggest_pack.py).
+              Used to match this person against a tender&apos;s key positions and suggest the best fit for each role.
             </div>
 
             {projects.length === 0 && (

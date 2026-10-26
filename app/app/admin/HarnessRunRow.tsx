@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatDateTime } from "@/lib/dates";
 import { markHarnessRunReviewed, clearHarnessRunReview } from "./actions";
 
 export type HarnessDocument = { label: string; url: string | null; isPdf: boolean };
@@ -72,7 +73,7 @@ export default function HarnessRunRow(props: Props) {
         </span>
         <span className={chipClass(reviewTone)}>{reviewLabel}</span>
         <span className="text-[11px] text-muted-foreground">
-          {new Date(runAt).toLocaleString()}
+          {formatDateTime(runAt) ?? runAt}
           <span className="ml-1.5 text-accent">{open ? "hide ▲" : "open ▼"}</span>
         </span>
       </button>
@@ -145,7 +146,7 @@ export default function HarnessRunRow(props: Props) {
               <form action={clearHarnessRunReview} className="flex items-start gap-3">
                 <input type="hidden" name="run_id" value={runId} />
                 <div className="flex-1 text-xs text-success">
-                  Reviewed {new Date(reviewedAt).toLocaleString()}
+                  Reviewed {formatDateTime(reviewedAt) ?? reviewedAt}
                   {reviewNote && <div className="mt-1 whitespace-pre-wrap text-muted-foreground">{reviewNote}</div>}
                 </div>
                 <button type="submit" className="min-h-11 rounded-md border border-border bg-card px-3 text-xs text-foreground">

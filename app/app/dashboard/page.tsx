@@ -1,24 +1,26 @@
 import Link from "next/link";
-import { Clock, FolderOpen, Search } from "lucide-react";
+import { FolderOpen, Search } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { daysUntil } from "@/lib/dates";
 import { AppShell } from "../_components/AppShell";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { getNotifications } from "@/lib/notifications";
-import { nextStepFor } from "@/lib/tenderNextStep";
-import { ACTIVE_PURSUIT_STAGES } from "@/lib/discoveryReassessment";
+import { IN_PROGRESS_STAGES } from "@/lib/pipeline";
+import { computeDashboardStats, stageOf } from "@/lib/dashboardStats";
 import { loadDocumentExpiryOverview } from "@/lib/documentExpiry";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
+import { fetchAllRows } from "@/lib/supabasePaging";
+import { loadDispatchCards, type ActiveBidInput } from "@/lib/dispatchDashboard";
 import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
 import { PageHeader } from "@/components/tt/page-header";
 import { StatCard } from "@/components/tt/stat-card";
-import { StatusBadge, type TenderStatus } from "@/components/tt/status-badge";
 import { DeadlineChip } from "@/components/tt/deadline-chip";
 import { EmptyState } from "@/components/tt/empty-state";
 import { ErrorState } from "@/components/tt/error-state";
 import { BidReadinessCard } from "@/components/tt/bid-readiness-card";
 import { NextBestActionCard, type NextBestAction } from "@/components/tt/next-best-action-card";
 import { SetupChecklistCard, type SetupChecklistItem } from "@/components/tt/setup-checklist-card";
+import { CriticalDispatchBanner, NeedsDecisionLane, UrgentActionsLane, DispatchLane, RadarSection } from "@/components/tt/command-center";
 import { buttonVariants } from "@/components/ui/button";
 
 // This page depends on the signed-in user's session (via RLS) on every
@@ -27,17 +29,38 @@ import { buttonVariants } from "@/components/ui/button";
 // per-request data.
 export const instant = false;
 
-const CLOSING_SOON_WINDOW_DAYS = 14;
 const ACTION_WINDOW_DAYS = 7;
+// "tenders" (migration 0001: "Shared across every company - not
+// tenant-scoped") is unbounded and grows every day the discovery pipeline
+// runs - a plain .select() with no .range() silently truncates at
+// PostgREST's own 1000-row response cap once the shared table passes that
+// size (same bug class as PR #111's marketPricing.ts fix - "silently
+// reading a 2.5% sample, not the real table"). Paginated with the same
+// fetchAllRows() helper; 20,000 is headroom above any plausible current row
+// count, not a measurement - revisit upward if the table ever grows past it.
+const TENDERS_FETCH_CAP = 20_000;
 
-type PackJoin = { status: string; pipeline_stage: string };
+type PackJoin = {
+  id: string;
+  status: string;
+  pipeline_stage: string;
+  submission_type: string;
+  delivery_location: string | null;
+  estimated_print_hours: number;
+  estimated_transit_hours: number;
+  dispatch_status: string;
+  courier_contact: string | null;
+};
 
 type TenderRow = {
   id: string;
   contract_no: string | null;
   nra_reference: string | null;
   description: string | null;
+  buyer: string | null;
   closing_date: string | null;
+  briefing_date: string | null;
+  briefing_time: string | null;
   source: string | null;
   family: string | null;
   tender_packs: PackJoin[];
@@ -59,36 +82,25 @@ const VERDICT_TONE: Record<string, string> = {
   needs_review: "border-warning/20 bg-warning/10 text-warning",
 };
 
-/**
- * Pack-completeness for this list, not a pipeline stage - keeps the
- * original wording in every case (StatusBadge's own default label for
- * each variant differs: "ready" defaults to "Ready", "in-progress" to
- * "In progress") so the migration doesn't quietly change user-facing copy.
- *
- * Deliberately NOT reclassified into Verify/Provide/Fix (product-promise
- * audit, see app/AGENTS.md "Home cockpit: StatusBadge vocabulary is
- * intentional, not a gap") - this is a whole-tender PACK-COMPLETION status
- * (no pack / still being worked / complete), not a single task's type. A
- * tender can genuinely have both open Fix items and open Provide items on
- * its own pack at once (computeTenderReadiness's own per-tender fix/provide
- * arrays prove this); collapsing that down to one V/P/F badge per row would
- * either lose information or arbitrarily pick one. The badge's TEXT already
- * carries the real next action (nextStepFor()'s short Fix/Provide-shaped
- * phrase) once a pack exists - only the three-state colour/variant here is
- * a different, valid vocabulary, same pattern as the Bids board's own
- * stage machine.
- */
-function statusFor(tender: TenderRow): { variant: TenderStatus; label: string } {
-  const pack = tender.tender_packs?.[0];
-  if (!pack) return { variant: "needs-docs", label: "Needs documents" };
-  if (pack.status === "confirmed" || pack.status === "filled") {
-    return { variant: "ready", label: "Complete" };
+// Phase 2 targeted polish (2026-10-23): the greeting prefers csd_trading_name
+// already (below) - this only fires when a company has none on file and
+// falls back to its registered legal_name, which almost always carries a SA
+// entity-type suffix ("Reviewer Civils (Pty) Ltd") that reads badly in
+// "Good evening, ...". Strips one recognised suffix word (optionally
+// parenthesised) at a time from the end until none remain - display only,
+// never stored, never used for matching (lib/onboardingScan.ts's own
+// normalizeCompanyName() is the separate, comparison-oriented version of
+// this same idea, used to judge whether two names refer to the same
+// company, not to shorten one for display).
+const COMPANY_NAME_SUFFIX = /[,]?\s*\(?(pty\.?|proprietary|ltd\.?|limited|cc|close\s+corporation|inc\.?|incorporated|co\.?|company)\)?\.?$/i;
+function shortCompanyName(name: string): string {
+  let s = name.trim();
+  for (let i = 0; i < 6; i++) {
+    const next = s.replace(COMPANY_NAME_SUFFIX, "").trim();
+    if (next === s || next.length === 0) break;
+    s = next;
   }
-  return { variant: "in-progress", label: "Needs your input" };
-}
-
-function stageOf(tender: TenderRow): string {
-  return tender.tender_packs?.[0]?.pipeline_stage ?? "found";
+  return s || name.trim();
 }
 
 function greetingFor(date: Date): string {
@@ -100,8 +112,13 @@ function greetingFor(date: Date): string {
   return "Good evening";
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ docsProcessing?: string }>;
+}) {
   const supabase = await createClient();
+  const { docsProcessing } = await searchParams;
 
   // Every read below is a real Supabase round-trip that can genuinely fail
   // (network blip, RLS/session hiccup) - a thrown error here used to crash
@@ -112,7 +129,7 @@ export default async function DashboardPage() {
   // is nothing honest left to show, so the whole page falls back to a
   // friendly retry instead of Next's generic error boundary.
   try {
-    return await renderDashboard(supabase);
+    return await renderDashboard(supabase, docsProcessing === "1");
   } catch (e) {
     console.error("dashboard failed to load", e);
     return (
@@ -131,15 +148,22 @@ export default async function DashboardPage() {
   }
 }
 
-async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>>) {
+async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>>, docsProcessing: boolean) {
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ data: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary] = await Promise.all([
-    supabase
-      .from("tenders")
-      .select("id, contract_no, nra_reference, description, closing_date, source, family, tender_packs(status, pipeline_stage)")
-      .order("closing_date", { ascending: true }),
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary] = await Promise.all([
+    fetchAllRows<TenderRow>(
+      (from, to) =>
+        supabase
+          .from("tenders")
+          .select(
+            "id, contract_no, nra_reference, description, buyer, closing_date, briefing_date, briefing_time, source, family, tender_packs(id, status, pipeline_stage, submission_type, delivery_location, estimated_print_hours, estimated_transit_hours, dispatch_status, courier_contact)",
+          )
+          .order("closing_date", { ascending: true })
+          .range(from, to),
+      TENDERS_FETCH_CAP,
+    ),
     fetchCompanyReadiness(supabase),
     getNotifications(supabase),
     supabase
@@ -155,52 +179,58 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
 
   if (error) console.error("tenders select failed for dashboard", error);
 
-  const rows = (tenders ?? []) as unknown as TenderRow[];
+  const rows = tenders as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
 
-  const activeBidsCount = rows.filter((t) => ACTIVE_PURSUIT_STAGES.includes(stageOf(t))).length;
-  const packsReadyCount = rows.filter((t) => statusFor(t).variant === "ready").length;
-  const closingThisWeekCount = rows.filter((t) => {
-    const left = daysUntil(t.closing_date);
-    return left !== null && left >= 0 && left <= ACTION_WINDOW_DAYS;
-  }).length;
+  // See lib/dashboardStats.ts's own header for why this can't just filter
+  // `rows` directly in place: `rows` is every tender in the shared,
+  // not-tenant-scoped `tenders` table, not this company's own list.
+  const { myRows, activeBidsCount, packsReadyCount, closingThisWeekCount } = computeDashboardStats(rows, ACTION_WINDOW_DAYS);
   const documentsExpiringCount = notifications.filter((n) => n.kind === "document").length;
 
-  // "Closing soon" timeline - the next 14 days of bids. Bounded and small by
-  // construction, which matters: computing each row's specific next step
-  // below runs the same real, multi-query compliance/pack-review load the
-  // tender workspace itself pays, per tender - fine for a handful of rows,
-  // not something to do for the full tender list.
-  const closingSoon = rows.filter((t) => {
-    const left = daysUntil(t.closing_date);
-    return left !== null && left >= 0 && left <= CLOSING_SOON_WINDOW_DAYS;
-  });
-  const closingSoonSteps = await Promise.all(
-    closingSoon.map((t) => nextStepFor(t.id, t.family, (t.tender_packs?.length ?? 0) > 0)),
-  );
+  // Tender Command Center (Sarel's own brief, 2026-10-24): every active bid
+  // (pipeline_stage still 'found'/'bidding' - IN_PROGRESS_STAGES, same
+  // definition the "Active bids" stat card above already uses), classified
+  // by lib/dispatchDashboard.ts into the brief's own 4 triage buckets. This
+  // replaces the old flat "Closing soon" list and the "deadline" half of
+  // Next Best Action - both were a weaker version of the same "what's
+  // urgent" question this now answers directly, with a real physical-
+  // submission cutoff instead of just the tender's own closing date.
+  const activeBids: ActiveBidInput[] = myRows
+    // myRows is already "has a real tender_packs row" - t.tender_packs[0]
+    // below is never undefined for these.
+    .filter((t) => (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t)))
+    .map((t) => {
+      const pack = t.tender_packs[0];
+      return {
+        tenderId: t.id,
+        tenderPackId: pack.id,
+        contractNo: t.contract_no,
+        description: t.description,
+        buyer: t.buyer,
+        closingDate: t.closing_date,
+        family: t.family,
+        briefingDate: t.briefing_date,
+        briefingTime: t.briefing_time,
+        submissionType: pack.submission_type as ActiveBidInput["submissionType"],
+        deliveryLocation: pack.delivery_location,
+        estimatedPrintHours: pack.estimated_print_hours,
+        estimatedTransitHours: pack.estimated_transit_hours,
+        dispatchStatus: pack.dispatch_status as ActiveBidInput["dispatchStatus"],
+        courierContact: pack.courier_contact,
+        pipelineStage: stageOf(t) as ActiveBidInput["pipelineStage"],
+      };
+    });
+  const dispatchCards = await loadDispatchCards(activeBids, supabase);
+  const criticalCards = dispatchCards.filter((c) => c.bucket === "critical");
 
-  // Next best action: the single most urgent thing, in priority order - a
-  // near deadline with an incomplete pack, else an expiring document, else
-  // a new matching opportunity. closingSoon is already sorted soonest-first
-  // (the tenders query orders by closing_date), so the first match here is
-  // also the most urgent one.
+  // Next best action: now only the fallback for when nothing is dispatch-
+  // critical - an expiring document, else a new matching opportunity. The
+  // "deadline" case is gone - CriticalDispatchBanner/UrgentActionsLane/
+  // NeedsDecisionLane below answer that question more thoroughly (a real
+  // print-cutoff, not just the tender's own closing date).
   let nextBestAction: NextBestAction = { kind: "none" };
-  const urgentIndex = closingSoon.findIndex((t) => {
-    const left = daysUntil(t.closing_date)!;
-    return left <= ACTION_WINDOW_DAYS && statusFor(t).variant !== "ready";
-  });
-  if (urgentIndex !== -1) {
-    const t = closingSoon[urgentIndex];
-    const step = closingSoonSteps[urgentIndex];
-    const left = daysUntil(t.closing_date)!;
-    nextBestAction = {
-      kind: "deadline",
-      title: t.contract_no ?? t.description ?? "Tender",
-      detail: `${left === 0 ? "Closes today" : `Closes in ${left} day${left === 1 ? "" : "s"}`} - ${step?.label ?? "Review compliance"}`,
-      daysLeft: left,
-      href: step?.href ?? `/tenders/${t.id}`,
-    };
-  } else {
+  if (criticalCards.length === 0) {
     const doc = notifications.find((n) => n.kind === "document");
     if (doc) {
       nextBestAction = { kind: "document", title: doc.title, detail: doc.detail, daysLeft: doc.daysLeft, href: doc.href };
@@ -215,7 +245,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
     }
   }
 
-  const companyName = companyRow?.csd_trading_name ?? companyRow?.legal_name ?? null;
+  const companyName = companyRow?.csd_trading_name ?? (companyRow?.legal_name ? shortCompanyName(companyRow.legal_name) : null);
 
   // Empty-state setup checklist: a brand-new company (nothing tracked yet,
   // AND a readiness score low enough that it clearly hasn't finished the
@@ -229,7 +259,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // expiring-soon window doesn't apply here); the CV check reuses
   // ReadinessResult's own peopleWithCvCount count, just against a lower bar
   // (>=1) than the 10-point criterion's own >=2.
-  const isNewCompany = rows.length === 0 && readiness.percent < 50;
+  const isNewCompany = myRows.length === 0 && readiness.percent < 50;
   let setupChecklistItems: SetupChecklistItem[] = [];
   if (isNewCompany) {
     const documentExpiryRows = await loadDocumentExpiryOverview(supabase);
@@ -280,6 +310,12 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
           </div>
         )}
 
+        {docsProcessing && (
+          <div className="mb-5 rounded-lg border border-info/20 bg-info/10 px-4 py-3 text-sm text-info">
+            Your documents are being processed in the background. We&apos;ll alert you when they&apos;re ready to review.
+          </div>
+        )}
+
         <div className="mb-5 grid gap-3 lg:grid-cols-2">
           <BidReadinessCard result={readiness} />
           <NextBestActionCard action={nextBestAction} />
@@ -287,7 +323,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
 
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard label="Active bids" value={activeBidsCount} />
-          <StatCard label="Packs ready" value={packsReadyCount} tone="success" />
+          <StatCard label="Packs ready" value={packsReadyCount} tone={packsReadyCount > 0 ? "success" : "default"} />
           <StatCard label="Closing this week" value={closingThisWeekCount} tone={closingThisWeekCount > 0 ? "warning" : "default"} />
           <StatCard label="Documents expiring" value={documentsExpiringCount} tone={documentsExpiringCount > 0 ? "destructive" : "default"} />
         </div>
@@ -314,7 +350,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
               </Link>
             </div>
           </div>
-        ) : rows.length === 0 && !error ? (
+        ) : myRows.length === 0 && !error ? (
           <div className="mb-5 overflow-hidden rounded-lg border border-border bg-card">
             <EmptyState
               icon={FolderOpen}
@@ -347,39 +383,28 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
             />
           </div>
         ) : (
-          <div className="mb-5">
-            <h2 className="mb-2 font-display text-lg font-medium text-foreground">Closing soon</h2>
-            <div className="overflow-hidden rounded-lg border border-border bg-card">
-              {closingSoon.length === 0 && (
-                <EmptyState icon={Clock} title="Nothing closing soon" description={`Nothing closing in the next ${CLOSING_SOON_WINDOW_DAYS} days.`} />
-              )}
-              {closingSoon.map((t, i) => {
-                const left = daysUntil(t.closing_date)!;
-                const st = statusFor(t);
-                const step = closingSoonSteps[i];
-                const badgeText = st.variant === "ready" ? st.label : (step?.label ?? st.label);
-                return (
-                  <Link
-                    key={t.id}
-                    href={step?.href ?? `/tenders/${t.id}`}
-                    className={`flex flex-wrap items-start justify-between gap-3 px-5 py-3 text-inherit no-underline hover:bg-muted/50 ${i > 0 ? "border-t border-border" : ""}`}
-                  >
-                    <div className="min-w-0 flex-1 basis-64">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="font-mono text-xs font-semibold text-foreground">{t.contract_no ?? "(no reference)"}</span>
-                      </div>
-                      {t.nra_reference && <div className="mt-px text-xs text-muted-foreground">{t.nra_reference}</div>}
-                      <div className="mt-0.5 text-xs text-muted-foreground">{t.description}</div>
-                    </div>
-                    <div className="flex shrink-0 flex-col items-end gap-1.5">
-                      <StatusBadge status={st.variant}>{badgeText}</StatusBadge>
-                      <div className="text-xs text-foreground">{t.closing_date ? new Date(t.closing_date).toLocaleDateString() : "-"}</div>
-                      <DeadlineChip daysLeft={left} />
-                    </div>
-                  </Link>
-                );
-              })}
+          <div className="mb-5 flex flex-col gap-5">
+            {/* Tender Command Center (Sarel's own brief, 2026-10-24) - Zone 1 */}
+            <CriticalDispatchBanner cards={criticalCards} />
+
+            {/* Zone 2: the 3 operational lanes */}
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div>
+                <h2 className="mb-2 font-display text-base font-medium text-foreground">Needs decision</h2>
+                <NeedsDecisionLane cards={dispatchCards} />
+              </div>
+              <div>
+                <h2 className="mb-2 font-display text-base font-medium text-foreground">Urgent actions &amp; blocked items</h2>
+                <UrgentActionsLane cards={dispatchCards} />
+              </div>
+              <div>
+                <h2 className="mb-2 font-display text-base font-medium text-foreground">Dispatch &amp; delivery</h2>
+                <DispatchLane cards={dispatchCards} />
+              </div>
             </div>
+
+            {/* Zone 3: Radar / can wait */}
+            <RadarSection cards={dispatchCards} />
           </div>
         )}
 

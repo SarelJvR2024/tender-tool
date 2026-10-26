@@ -250,7 +250,29 @@ def test_merge():
         sanral_site("NRA 2026/0021", "2026-11-02T12:00:00+02:00", slug="nra-2026-0021"),
         sanral_site("NRA 2026/0021 (B)", "2026-11-02T12:00:00+02:00", slug="nra-2026-0021-b"),
     ]
-    m = gov_sources.merge({"etenders_portal": portal, "sanral": site}, closed)
+    # gov_sources.merge() always recomputes is_closed from sh.is_past() against
+    # the REAL current time (sh.release() strips any given is_closed and
+    # computes its own - confirmed by reading the code, not assumed), and the
+    # "open on SANRAL, Closed on portal" check below hardcodes 2026-11-06 as
+    # still-open. Same bug class as the randwater fixture that already
+    # flipped (System-Status.md, Finding 62, 2026-10-23) - this one is a
+    # ticking time bomb for 2026-11-06, not yet flipped. Freezing the clock
+    # (same FixedDateTime pattern as test_kouga.py's own fix, same pass)
+    # makes it correct forever, not just until that date. QA pass, 2026-10-23.
+    import datetime as _real_datetime
+
+    class _FixedBeforeClosing(_real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = _real_datetime.datetime(2026, 10, 25, 9, 0, tzinfo=_real_datetime.timezone.utc)
+            return base.astimezone(tz) if tz else base
+
+    _real_dt = sh.datetime.datetime
+    sh.datetime.datetime = _FixedBeforeClosing
+    try:
+        m = gov_sources.merge({"etenders_portal": portal, "sanral": site}, closed)
+    finally:
+        sh.datetime.datetime = _real_dt
     by = {x["ocid"]: x for x in m}
     c = by["ocds-9t57fa-171756"]
     check("matched on the NRA bid number via SCM reference", [s["source"] for s in c["listing_sources"]] == ["etenders_portal", "sanral"])
@@ -270,6 +292,35 @@ def test_merge():
           len([x for x in m2 if x["ocid"] == "ocds-9t57fa-900002"][0]["listing_sources"]) == 1)
     check("SANRAL ids: contract + bid number", gov_sources.sanral_ids("BID NUMBER: NRA 2026/0754 (B) CONTRACT SANRAL N.011-010-2017/1F")
           == {"NRA:2026/754B", "SC:N01101020171F"})
+
+
+def test_scope_enrichment_hook():
+    """attach_scope_enrichment() - the per-release hook tender_enrichment.py's
+    own module docstring named. Heuristic-only tagging attached to every
+    release, never fatal when one release's tagging blows up."""
+    print("gov_sources.attach_scope_enrichment")
+    releases = [
+        {"ocid": "ocds-test-1", "title": "Appointment of a service provider for guarding services",
+         "description": "24-hour armed guarding and access control at regional offices for 36 months.",
+         "documents": [{"title": "Bill_of_Quantities.xlsx", "url": "https://example.test/boq.xlsx"}]},
+        {"ocid": "ocds-test-2", "title": "Supply of stationery", "description": "Office stationery supply."},
+    ]
+    gov_sources.attach_scope_enrichment(releases, log=lambda m: None)
+    r1 = releases[0]["scope_enrichment"]
+    check("per-release tagging attached", r1 is not None and "security_facilities" in r1["industry_tags"])
+    check("heuristic only at this stage", r1["confidence"] == "heuristic")
+    check("BOQ-named document detected by title", r1["boq_summary"]["referenced"] is True)
+    check("existing release fields untouched", releases[0]["title"] == "Appointment of a service provider for guarding services")
+
+    # One release that will make enrich_release() blow up must not take out
+    # the others - same "never fatal" discipline as every other source read
+    # in this file. A non-iterable `documents` (not the [{"title","url"},...]
+    # shape every real reader produces) makes detect_boq_reference()'s own
+    # `for d in documents` raise TypeError.
+    bad = [{"ocid": "ocds-bad", "title": "x", "description": "y", "documents": 123}]
+    logged = []
+    gov_sources.attach_scope_enrichment(bad, log=logged.append)
+    check("a tagging failure is caught and logged, not raised", bad[0]["scope_enrichment"] is None and len(logged) == 1)
 
 
 def test_changes():
@@ -365,6 +416,7 @@ if __name__ == "__main__":
     test_new_sources()
     test_new_sources_are_in_buyer_family()
     test_merge()
+    test_scope_enrichment_hook()
     test_changes()
     test_digest()
     print(f"\n{'ALL PASSED' if not FAILS else str(len(FAILS)) + ' FAILED: ' + ', '.join(FAILS)}")

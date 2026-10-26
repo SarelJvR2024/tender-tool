@@ -1,0 +1,56 @@
+# Sends the Tier 3 Daily Founder Morning Digest
+# (app/scripts/send-founder-digest.ts) once a day, 07:00 SAST - Sarel's own
+# ask (notification engine brief, section 3, Tier 3). One email to
+# ADMIN_NOTIFICATION_EMAIL, never a per-company fan-out. Same architecture as
+# deadline-reminders.yml/operational-alerts.yml/onboarding-nudges.yml.
+#
+# Needs NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/RESEND_API_KEY
+# (same repository secrets the other email workflows already use), plus
+# ADMIN_NOTIFICATION_EMAIL and (optional) RESEND_FROM_SCOUT - Tier 3's own
+# sender profile. Until both RESEND_API_KEY and ADMIN_NOTIFICATION_EMAIL are
+# set, this workflow still runs safely and still goes green: the script
+# detects whichever is missing and exits 0 having sent or claimed nothing.
+
+name: founder-digest
+
+on:
+  schedule:
+    # 05:00 UTC = 07:00 SAST (no DST in South Africa, so this offset is
+    # always correct - same reasoning lib/emailBrand.ts's own
+    # formatSastDateTime() comment gives).
+    - cron: "0 5 * * *"
+  workflow_dispatch: {} # manual test run, e.g. right after adding RESEND_API_KEY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: founder-digest
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies (needs @supabase/supabase-js and resend)
+        run: npm ci
+
+      - name: Send today's founder digest
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_SCOUT: ${{ secrets.RESEND_FROM_SCOUT }}
+          ADMIN_NOTIFICATION_EMAIL: ${{ secrets.ADMIN_NOTIFICATION_EMAIL }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: node --experimental-strip-types scripts/send-founder-digest.ts

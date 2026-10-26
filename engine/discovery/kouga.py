@@ -72,7 +72,9 @@ def normalize(url, title, ref, start, closing):
     return sh.release(
         ocid=f"kouga:{ref}",
         contract_number=ref, title=title, description=title, buyer=BUYER,
-        closing_date=sh.iso_sast(closing),
+        # Kouga's own card gives a date only, never a time - see
+        # iso_sast_closing()'s own docstring.
+        closing_date=sh.iso_sast_closing(closing),
         published_date=sh.iso_sast(start),
         documents=[],  # the listing card has no document link - only the detail page would, not fetched here
         source=SOURCE, source_id=ref, source_url=url,

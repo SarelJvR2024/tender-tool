@@ -255,11 +255,52 @@ def test_intake_readers():
               "Tenders must be placed inside the tender box at:\n\nThe Reception Area\n20 Shoreward Drive\nBay West\n"
               "Gqeberha\n6025\n                    T-6\n")
     a = c.find_delivery_address(notice)
-    check(a and a["lines"] == ["The Reception Area", "20 Shoreward Drive", "Bay West", "Gqeberha", "6025"],
-          "tender-box address read from R.396's own Tender Notice wording")
-    check(c.find_closing_time(notice) == "12:00" and c.find_closing_time("The closing date and time is 11h00 on 3 June") == "11:00",
-          "closing time read from the notice (12:00 and 11h00 forms)")
+    check(a and a["lines"] == ["The Reception Area", "20 Shoreward Drive", "Bay West", "Gqeberha", "6025"]
+          and a["ambiguous"] is False,
+          "tender-box address read from R.396's own Tender Notice wording, not flagged ambiguous (only one found)")
+    t = c.find_closing_time(notice)
+    check(t == {"value": "12:00", "ambiguous": False}
+          and c.find_closing_time("The closing date and time is 11h00 on 3 June") == {"value": "11:00", "ambiguous": False},
+          "closing time read from the notice (12:00 and 11h00 forms), not flagged ambiguous (only one found)")
     check(c.find_delivery_address("No address here.") is None, "no address -> None, never a default")
+
+    # Finding 61, QA pass 2026-10-23: a real, common shape - an addendum
+    # extending the deadline and/or moving the tender box venue, on top of
+    # Book 1's own original notice. collect_documents() feeds documents in
+    # alphabetical filename order, not chronological order, so whichever one
+    # happens to sort first in all_text is NOT a reliable "the original" or
+    # "the correcting addendum" signal either way - confirmed directly below
+    # by swapping which section comes first and watching the answer flip.
+    addendum = ("ADDENDUM No 1\n\nThe closing time and date for receipt of tenders is 10:00 on 29 October 2026\n\n"
+                "Tenders must be placed inside the tender box situated at:\n\nSANRAL Southern Region Office\n"
+                "Corner Plein and Govan Mbeki\nHumewood\nGqeberha\n6001\n")
+    book1_first = c.find_closing_time(notice + "\n" + addendum)
+    addendum_first = c.find_closing_time(addendum + "\n" + notice)
+    check(book1_first == {"value": "12:00", "ambiguous": True} and addendum_first == {"value": "10:00", "ambiguous": True},
+          f"two different closing times across the documents: which one wins depends purely on filename sort order "
+          f"({book1_first} vs {addendum_first}), so both are correctly flagged ambiguous=True rather than trusted silently")
+    addr_book1_first = c.find_delivery_address(notice + "\n" + addendum)
+    addr_addendum_first = c.find_delivery_address(addendum + "\n" + notice)
+    check(addr_book1_first["lines"][0] == "The Reception Area" and addr_book1_first["ambiguous"] is True
+          and addr_addendum_first["lines"][0] == "SANRAL Southern Region Office" and addr_addendum_first["ambiguous"] is True,
+          "two different delivery addresses: which one wins again depends purely on sort order, both flagged ambiguous")
+
+    # Finding 70, QA pass 2026-10-24: find_nra_reference() picks the
+    # MOST-REPEATED number, not the first match - worse than a plain sort-
+    # order tiebreak here, since Book 1's own running page footer repeats the
+    # same (possibly stale/typo'd) reference many times over, while a single
+    # addendum correcting it is mentioned only once and would always lose a
+    # repetition count regardless of document order.
+    book1_footer = "\n".join(["Page footer: NRA: 2026/0071"] * 8)
+    addendum_fix = "ADDENDUM No 1: please note the correct reference is NRA: 2026/0017, not as printed in Book 1."
+    single = c.find_nra_reference("Book 1 cover: NRA: 2026/0071")
+    check(single == {"value": "NRA 2026/0071", "ambiguous": False},
+          "a single NRA reference mention is read correctly, not flagged ambiguous")
+    check(c.find_nra_reference("no reference here at all") is None, "no NRA reference -> None, never a default")
+    outvoted = c.find_nra_reference(book1_footer + "\n" + addendum_fix)
+    check(outvoted == {"value": "NRA 2026/0071", "ambiguous": True},
+          f"a correcting addendum mentioned once is outvoted by a stale reference repeated many times in Book 1's "
+          f"own footer ({outvoted}), so this is correctly flagged ambiguous=True rather than trusted silently")
 
 
 def test_financial_rows():

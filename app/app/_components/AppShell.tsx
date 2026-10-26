@@ -62,10 +62,9 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <SidebarProvider defaultOpen={sidebarOpen}>
-      <AppSidebar isPlatformAdmin={isPlatformAdmin} isEmployee={isEmployee} />
+      <AppSidebar isPlatformAdmin={isPlatformAdmin} isEmployee={isEmployee} userEmail={user?.email ?? null} companyName={companyName} />
       <SidebarInset>
         <TopBar
-          userEmail={user?.email ?? null}
           companyName={companyName}
           isPlatformAdmin={isPlatformAdmin}
           isEmployee={isEmployee}

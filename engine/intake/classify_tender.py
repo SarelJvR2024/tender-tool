@@ -136,15 +136,29 @@ NRA_RE = re.compile(r"\bNRA\s*:?\s*(?:No\.?\s*)?(\d{4}\s*/\s*\d{3,5})\b")
 
 def find_nra_reference(all_text):
     """SANRAL's NRA number, as printed on Book 1's cover ("NRA: 2026/0071",
-    R.396-010-2025/1F). Returned in the seed's own format ("NRA 2026/0071")
-    - the envelope covers and authority letter refuse to invent it."""
+    R.396-010-2025/1F). {"value": "NRA 2026/0071", "ambiguous": bool}, or
+    None if none was found. `value` is in the seed's own format
+    ("NRA 2026/0071") - the envelope covers and authority letter refuse to
+    invent it.
+
+    `ambiguous` is True when more than one DISTINCT NRA number was found
+    across the documents read - an addendum correcting a typo'd reference is
+    a real, common shape, mentioned once, while the original (wrong) number
+    is often repeated many times over on Book 1's own running page
+    footer/header. The most-repeated value stays the default (unchanged
+    behaviour for the normal single-reference case), but repetition count is
+    not a reliability signal - a stale number printed on every page can
+    outvote a single correcting mention - so this surfaces the conflict
+    instead of silently trusting whichever counted highest, same "silent
+    wrong data is the main risk" discipline as find_closing_time()/
+    find_delivery_address() above. QA pass, 2026-10-24."""
     counts = {}
     for m in NRA_RE.finditer(all_text or ""):
         v = re.sub(r"\s+", "", m.group(1))
         counts[v] = counts.get(v, 0) + 1
     if not counts:
         return None
-    return "NRA " + max(counts, key=counts.get)
+    return {"value": "NRA " + max(counts, key=counts.get), "ambiguous": len(counts) > 1}
 
 
 # The tender's own delivery address and closing time, as its Tender Notice
@@ -163,15 +177,9 @@ CLOSING_TIME_RE = re.compile(
     re.IGNORECASE)
 
 
-def find_delivery_address(all_text):
-    """{"lines": [...], "quote": "..."} - the address lines under the Tender
-    Notice's "tender box at:" heading, or None. Stops at a blank-run end, a
-    page footer (e.g. "T-6") or a sentence; never more than 7 lines."""
-    m = DELIVERY_RE.search(all_text or "")
-    if not m:
-        return None
+def _address_lines_after(all_text, end):
     lines = []
-    for raw in all_text[m.end():].split("\n")[:14]:
+    for raw in all_text[end:].split("\n")[:14]:
         line = re.sub(r"\s+", " ", raw).strip()
         if not line:
             if lines:
@@ -183,15 +191,61 @@ def find_delivery_address(all_text):
         lines.append(line)
         if re.fullmatch(r"\d{4}", line) or len(lines) >= 7:
             break
-    if not lines:
+    return lines
+
+
+def find_delivery_address(all_text):
+    """{"lines": [...], "quote": "...", "ambiguous": bool} - the address
+    lines under the Tender Notice's own "tender box at:" heading, or None if
+    none was found. Stops at a blank-run end, a page footer (e.g. "T-6") or
+    a sentence; never more than 7 lines.
+
+    `ambiguous` is True when more than one DIFFERENT address was found across
+    the documents read - a real, common shape: an addendum moving the
+    delivery venue, on top of Book 1's own original notice. The value
+    returned is still the FIRST address found (unchanged default, same as
+    before this fix), because collect_documents() feeds documents in
+    alphabetical filename order, not chronological/addendum order - there is
+    no reliable "the later one in the text is the correcting one" signal to
+    act on here, confirmed directly: swapping which of two conflicting
+    addresses appears first in `all_text` changes which one this function
+    returns, purely because of where each happened to sort by filename. Since
+    guessing isn't safe either way, this surfaces the conflict instead of
+    silently trusting an arbitrary pick - the same "silent wrong data is the
+    main risk" discipline this module already applies to a duplicate
+    workbook candidate (classify_documents()'s own AMBIGUOUS note). QA pass,
+    2026-10-23."""
+    first = None
+    quotes = set()
+    for m in DELIVERY_RE.finditer(all_text or ""):
+        lines = _address_lines_after(all_text, m.end())
+        if not lines:
+            continue
+        quotes.add(" / ".join(lines))
+        if first is None:
+            first = lines
+    if first is None:
         return None
-    return {"lines": lines, "quote": " / ".join(lines)}
+    return {"lines": first, "quote": " / ".join(first), "ambiguous": len(quotes) > 1}
 
 
 def find_closing_time(all_text):
-    """'HH:MM' from the Tender Notice's own "closing time ... is 12:00" sentence, or None."""
-    m = CLOSING_TIME_RE.search(all_text or "")
-    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else None
+    """{"value": "HH:MM", "ambiguous": bool}, or None - from the Tender
+    Notice's own "closing time ... is 12:00" sentence.
+
+    `ambiguous` is True when more than one DIFFERENT closing time was found
+    across the documents read - an addendum extending the deadline is common
+    and real (almost every SANRAL tender gets at least one), and - same
+    reasoning as find_delivery_address() above - the order documents appear
+    in `all_text` is filename-alphabetical, not chronological, so a plain
+    first-match search has no real basis for picking the extended time over
+    the original one, or vice versa. `value` stays the FIRST match found
+    (unchanged default); the caller is told to check rather than trust it
+    silently when there's more than one. QA pass, 2026-10-23."""
+    times = [f"{int(h):02d}:{m}" for h, m in CLOSING_TIME_RE.findall(all_text or "")]
+    if not times:
+        return None
+    return {"value": times[0], "ambiguous": len(set(times)) > 1}
 
 
 def check_fingerprint(technical_path, family, store=None):
@@ -254,7 +308,7 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
     sanral_hint = bool(SANRAL_HINT_RE.search(buyer or "")) or bool(SANRAL_HINT_RE.search(all_text[:200000] or ""))
     tech = candidates.get("technical_xlsm") or []
     families = sorted({c[2] for c in tech})
-    files, registered = {}, []
+    files, registered, winners = {}, [], {}
     for doc_type, cands in candidates.items():
         # More than one document matched the same doc_type: prefer the most
         # recently modified file as a best-effort signal (a draft kept
@@ -274,6 +328,8 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
             except OSError:
                 pass  # mtime unavailable - keep collect_documents()'s own order
         files[doc_type] = cands[0][1]
+        winners[doc_type] = cands[0]  # the SAME file files[doc_type]/registered name below - tech[0] (pre-tie-break
+                                      # order) must never be used for reporting once there's more than one candidate.
         registered.append({"doc_type": doc_type, "label": SANRAL_DOC_LABEL[doc_type], "document": cands[0][0]})
         if len(cands) > 1:
             notes.append(f"AMBIGUOUS - more than one {SANRAL_DOC_LABEL[doc_type]} was uploaded "
@@ -283,11 +339,19 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
                          "on this tender's SANRAL pack.")
 
     if tech:
-        family = tech[0][2]
+        # winners["technical_xlsm"] (the SAME tie-broken pick files["technical_xlsm"] and the
+        # AMBIGUOUS note above use), never tech[0] - tech is candidates["technical_xlsm"] in its
+        # ORIGINAL, pre-tie-break (collect_documents()'s alphabetical) order. Using tech[0] here
+        # named the wrong file as "routed to the SANRAL flow" whenever two Technical Submission
+        # workbooks were uploaded and the most-recently-modified one didn't also sort first
+        # alphabetically - directly contradicting this very function's own AMBIGUOUS note naming
+        # the OTHER file as the one actually picked. QA pass, 2026-10-26.
+        winner = winners["technical_xlsm"]
+        family = winner[2]
         if len(families) > 1:
-            notes.append(f"Workbooks of two SANRAL families were uploaded ({', '.join(families)}) - used {family} from {tech[0][0]}.")
+            notes.append(f"Workbooks of two SANRAL families were uploaded ({', '.join(families)}) - used {family} from {winner[0]}.")
         route = "sanral"
-        signal = (f"{tech[0][0]} is a SANRAL '{family}' Technical Submission workbook (engine/fingerprint.py "
+        signal = (f"{winner[0]} is a SANRAL '{family}' Technical Submission workbook (engine/fingerprint.py "
                   "detect_family on its sheet set) - routed to the SANRAL submission-pack flow.")
         missing = [SANRAL_DOC_LABEL[t] for t in ("c111_form_of_offer", "c123_contract_data", "a_forms") if t not in files]
         if missing:

@@ -6,6 +6,7 @@ import {
   type ExtractedPersonField,
 } from "@/lib/cvExtraction";
 import { Button } from "@/components/ui/button";
+import { formatDate } from "@/lib/dates";
 
 /**
  * Confirm-or-correct card for one AI-extracted CV (cv_extraction_results,
@@ -96,7 +97,7 @@ export function CvExtractionReview({
           <h2 className="mb-0.5 font-display text-base font-medium text-foreground">Check the fields read from the CV</h2>
           <div className="text-xs text-muted-foreground">
             From <strong>{filename}</strong>
-            {result.source_pages ? ` · ${result.source_pages} page(s)` : ""} · read {new Date(result.created_at).toLocaleDateString()}.
+            {result.source_pages ? ` · ${result.source_pages} page(s)` : ""} · read {(formatDate(result.created_at) ?? "—")}.
             Nothing has been saved yet. Correct anything wrong, untick anything you don&apos;t want, then save.
           </div>
         </div>

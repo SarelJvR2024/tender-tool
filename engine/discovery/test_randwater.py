@@ -111,8 +111,14 @@ check("closing_date parsed to real SAST ISO (the new date format)",
 check("buyer is Rand Water", rel["buyer"] == "Rand Water")
 check("source/source_id/source_url set for listing_sources", rel["source"] == "randwater" and rel["source_id"] == "RFQ10419311")
 check("documents deliberately empty - the detail popup isn't read, not silently faked", rel["documents"] == [])
-check("is_closed computed correctly from the real closing date (future -> not yet closed)",
-      rel["is_closed"] is False)
+# This fixture's own real closing date (23 Oct 2026 16:00 SAST) was in the
+# future when captured (2026-10-20) but is a fixed point in time, not a
+# relative offset - it has since passed, so is_closed's real-clock-dependent
+# answer for it flipped from False to True and will stay True from here on.
+# Finding 62, 2026-10-23: the assertion itself had rotted, not the code -
+# caught by this repo's own standing Python sweep on the very day it tipped.
+check("is_closed computed correctly from the real closing date (now in the past -> closed)",
+      rel["is_closed"] is True)
 
 # --- the pageCount safety check: never silently drop a 2nd page's bids ------
 

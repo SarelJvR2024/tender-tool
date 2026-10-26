@@ -1096,6 +1096,21 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
                 break
 
     cidb_m = CIDB_RE.search(all_text)
+    # Finding, 2026-10-24: CIDB_RE.search() only ever returns the FIRST
+    # mention in the whole document set, so an addendum correcting the
+    # grading requirement (confirmed real and reachable - exactly the same
+    # shape as Finding 61's SANRAL closing-time/delivery-address ambiguity,
+    # just for CIDB grading) is silently outvoted by the ORIGINAL, now-stale
+    # value: a 2-document reproduction (original notice "6CE", addendum
+    # "the CIDB grading requirement for this contract is corrected to
+    # 8CE") picked up "6CE", never "8CE". Submitting against the wrong
+    # minimum grading is exactly the kind of compliance-critical silent
+    # error this project exists to prevent. `cidb_ambiguous` flags it
+    # instead of guessing which one is right - no reliable "the later
+    # mention wins" signal exists here either (plain text concatenation
+    # order, not a dated revision history).
+    cidb_gradings = {m.group(1).replace(" ", "").upper() for m in CIDB_RE.finditer(all_text)}
+    cidb_ambiguous = len(cidb_gradings) > 1
     brief_m = BRIEFING_RE.search(all_text)
     non_compulsory = bool(re.search(r"non[- ]compulsory\s+(?:clarification\s+)?brief", all_text, re.IGNORECASE))
     outlook = estimate_score_outlook(all_text, "full_document" if all_text.strip() else "no_extractable_text",
@@ -1140,7 +1155,8 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         # - score_confidence() still applies the anchored_regex base, just
         # with ocr_confidence left unknown rather than guessed.
         "cidb": {"grading": cidb_m.group(1).replace(" ", "").upper(), "quote": _quote(all_text, cidb_m.start(), cidb_m.end()),
-                 "confidence": cidb_confidence[0], "confidence_reason": cidb_confidence[1]} if cidb_m else None,
+                 "confidence": cidb_confidence[0], "confidence_reason": cidb_confidence[1],
+                 "ambiguous": cidb_ambiguous} if cidb_m else None,
         "briefing": {"compulsory": conditions["briefing"], "quote": _quote(all_text, brief_m.start(), brief_m.end()),
                      "confidence": briefing_confidence[0], "confidence_reason": briefing_confidence[1]} if brief_m else None,
         "scoring": {

@@ -41,12 +41,17 @@ for the normal case of one worker serving both queues.
 
 Failures reach Sarel, not just this log (system alerts, migration 0042,
 engine/alerts/system_alerts.py): a bridge pass that exits non-zero or times
-out, and a crash of this runner itself, are recorded as `critical` alerts
-under source "worker" (the bridge's output tail as the detail). Each bridge
-records its own job-level failures (a crashed job, a refused job as a
-warning, a job stuck in 'generating') under its own source. One open alert
-per distinct failure - a pass failing every 30 s counts occurrences on one
-row. engine/alerts/check_system_alerts.py reports them for the e-mail.
+out is recorded as a `critical` alert under THAT BRIDGE'S OWN source (its
+registered name, or the script's basename for a `--script` path - not the
+generic "worker" this used before 2026-10-25, after a real backlog triage
+found every bridge crash buried under one shared source; `context.bridge`
+carries the same value for anyone still filtering on it). A crash of this
+runner itself (main()/run_once() raising outside any one bridge's own pass)
+is recorded under source "worker" - see the `__main__` guard below. Each
+bridge records its own job-level failures (a crashed job, a refused job as a
+warning, a job stuck in 'generating') under its own source too. One open
+alert per distinct failure - a pass failing every 30 s counts occurrences on
+one row. engine/alerts/check_system_alerts.py reports them for the e-mail.
 
 Usage:
     python3 run_bridges.py                        # one pass over every bridge, then exit
@@ -61,6 +66,7 @@ no --once flag, give it one: that's the contract.
 """
 import argparse
 import os
+import signal
 import subprocess
 import sys
 
@@ -79,6 +85,15 @@ BRIDGES = {
     # bulk onboarding document scan (0063): onboarding_uploads -> onboarding_document_results;
     # needs ANTHROPIC_API_KEY once a document is queued, same as cv_extract
     "onboarding": "engine/onboarding/process_onboarding_jobs.py",
+    # cover letter / methodology statement drafting: narrative_documents ->
+    # generated_documents. Built on the identical poll/claim contract as every
+    # bridge above (its own process_narrative_jobs.py, its own test suite) but
+    # was never added here, so a customer's "Generate narrative" request sat
+    # as a 'requested' row with nothing ever polling it - found during a
+    # standing review pass (2026-10-25), not a deliberate exclusion anyone
+    # could point to (no cost/rate-limit note anywhere in this engine's own
+    # docs explaining why it would be held back from the other five).
+    "narrative": "engine/narrative/process_narrative_jobs.py",
 }
 
 # A pass that finds nothing prints exactly this kind of line. In loop mode that
@@ -112,18 +127,41 @@ class BridgeRunner:
             if label in self._missing_reported:
                 self.log(f"{label}: {os.path.relpath(path, REPO_ROOT)} is now present, running it")
                 self._missing_reported.discard(label)
+            # start_new_session=True + Popen (not subprocess.run's own
+            # timeout=) so a timeout kill can take the WHOLE process group
+            # down, not just the bridge script's own PID. A bridge that
+            # shells out to soffice/LibreOffice (the docx -> pdf step every
+            # pack bridge needs) or anything else leaves that grandchild
+            # running forever otherwise: subprocess.run's own timeout
+            # handling only ever kills the immediate child it started, and
+            # confirmed directly - adding start_new_session=True to
+            # subprocess.run alone changes nothing, since nothing then
+            # targets the group it creates. QA pass, 2026-10-23.
+            p = subprocess.Popen([sys.executable, path, "--once"] + self.extra_args,
+                                 cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                 text=True, start_new_session=True)
             try:
-                p = subprocess.run([sys.executable, path, "--once"] + self.extra_args,
-                                   cwd=REPO_ROOT, capture_output=True, text=True, timeout=self.timeout)
-            except subprocess.TimeoutExpired as e:
+                stdout, stderr = p.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass  # already gone between the timeout firing and here
+                stdout, stderr = p.communicate()
                 broken.append(f"{label} timed out after {self.timeout}s")
-                out = (e.stdout or b"") + (e.stderr or b"")
-                out = out.decode(errors="replace") if isinstance(out, bytes) else out
-                system_alerts.record("worker", f"The {label} bridge pass timed out after {self.timeout}s and was killed",
+                out = stdout + stderr
+                # source=label (e.g. "pack", "narrative"), not the generic
+                # "worker" this used before 2026-10-25 - Sarel's own ask,
+                # after a real backlog triage found every bridge crash
+                # showing up under one shared source, with the actual bridge
+                # buried in context.bridge where it was easy to miss when
+                # filtering /admin by source. context.bridge is kept too,
+                # for anyone who already filters on it.
+                system_alerts.record(label, f"The {label} bridge pass timed out after {self.timeout}s and was killed",
                                      "critical", detail=out[-8000:] or None,
                                      context={"bridge": label, "script": os.path.relpath(path, REPO_ROOT)})
                 continue
-            lines = [ln for ln in (p.stdout + p.stderr).splitlines() if ln.strip()]
+            lines = [ln for ln in (stdout + stderr).splitlines() if ln.strip()]
             meaningful = [ln for ln in lines if not ln.startswith(QUIET_PREFIXES)]
             if meaningful:
                 did_something += 1
@@ -135,7 +173,8 @@ class BridgeRunner:
                 # nobody watches this log, so it goes to system_alerts.
                 tail = "\n".join(lines[-80:])
                 last = next((ln for ln in reversed(lines) if not ln.startswith("[system-alert]")), "")
-                system_alerts.record("worker", f"The {label} bridge pass failed (exit {p.returncode}): {last[:300]}",
+                # source=label, same reasoning as the timeout branch above.
+                system_alerts.record(label, f"The {label} bridge pass failed (exit {p.returncode}): {last[:300]}",
                                      "critical", detail=tail or None,
                                      context={"bridge": label, "script": os.path.relpath(path, REPO_ROOT),
                                               "exit_code": p.returncode})

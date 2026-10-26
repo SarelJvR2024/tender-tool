@@ -186,9 +186,94 @@ class Workbook:
         if t == "inlineStr": return "".join(c.find("m:is", N).itertext())
         if v is None: return None
         if t == "s": return self._shared[int(v.text)]
-        if t in ("str", "e"): return v.text
+        # t == "e": a FORMULA ERROR (#DIV/0!, #REF!, #VALUE!, ...), not a real
+        # string value - v.text is the error code itself. #DIV/0! is the one
+        # code that contains a literal digit, so returning it as a string let
+        # a downstream rand-amount parser silently read it as 0.0 (QA pass,
+        # 2026-10-24) - an unknown/broken value, not a confirmed zero.
+        if t == "e": return None
+        if t == "str": return v.text
         if t == "b": return v.text == "1"
         f = float(v.text); return int(f) if f.is_integer() else f
+
+    def sheet_names(self):
+        """Every sheet name in this workbook, in the order the workbook.xml
+        lists them. Added for engine/discovery/boq_extraction.py, which
+        doesn't know ahead of time which sheet (if any) holds the priced
+        schedule - unlike every other Workbook caller in this repo
+        (fingerprint.py/fill_financial.py/this file's own SANRAL code), which
+        all read a known, fixed sheet name."""
+        return list(self.sheet_path.keys())
+
+    def _decode_cell_value(self, c):
+        """Same decode rules as cached() (shared string / inline string / bool /
+        numeric) but from an already-found <c> element, so sheet_grid() can
+        read a whole sheet in one pass instead of one cell lookup per ref."""
+        if c is None:
+            return None
+        t = c.get("t")
+        v = c.find("m:v", N)
+        if t == "inlineStr":
+            is_el = c.find("m:is", N)
+            return "".join(is_el.itertext()) if is_el is not None else None
+        if v is None:
+            return None
+        if t == "s":
+            try:
+                return self._shared[int(v.text)]
+            except (ValueError, IndexError):
+                return None
+        # t == "e": a FORMULA ERROR (#DIV/0!, #REF!, #VALUE!, ...), not a real
+        # string value - see cached()'s own identical fix for why this
+        # matters (#DIV/0! silently parsed as the number 0.0 downstream).
+        if t == "e":
+            return None
+        if t == "str":
+            return v.text
+        if t == "b":
+            return v.text == "1"
+        try:
+            f = float(v.text)
+        except (TypeError, ValueError):
+            return v.text
+        return int(f) if f.is_integer() else f
+
+    def sheet_grid(self, sheet, max_rows=5000):
+        """Reads an ENTIRE sheet in one pass as [(row_number, {col_letter:
+        value})], skipping fully-empty rows. A generic reader for a
+        spreadsheet whose own structure (header row position, column order,
+        how many columns) is NOT known ahead of time - unlike every other
+        Workbook caller in this repo, which reads a known, fixed cell
+        reference (SANRAL's own SETUP sheet layout). Added for
+        engine/discovery/boq_extraction.py: a buyer's own BOQ/pricing-schedule
+        template varies far more than that, so its reader has to find its own
+        header row instead of assuming one. Read-only - never creates cells,
+        never marks the workbook dirty, so it is safe to call on a workbook
+        this process has no intention of writing back out."""
+        root = self._xml(self.sheet_path[sheet])
+        data = root.find("m:sheetData", N)
+        if data is None:
+            return []
+        out = []
+        for r in data.findall("m:row", N):
+            try:
+                rn = int(r.get("r"))
+            except (TypeError, ValueError):
+                continue
+            if rn > max_rows:
+                break
+            cells = {}
+            for c in r.findall("m:c", N):
+                ref = c.get("r")
+                if not ref:
+                    continue
+                col, _ = split(ref)
+                value = self._decode_cell_value(c)
+                if value not in (None, ""):
+                    cells[col] = value
+            if cells:
+                out.append((rn, cells))
+        return out
 
     def options(self, rng, host_sheet):
         if "!" in rng:

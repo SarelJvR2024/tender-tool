@@ -173,7 +173,10 @@ DEFAULT_DOC_LEAD_DAYS = 60  # matches app/lib/dates.ts's renewSoonWithinDays def
 DEFAULT_TASK_LEAD_DAYS = 14
 
 
-def supabase_request(url, service_key, path):
+PAGE = 1000  # PostgREST's own hard cap on rows per response
+
+
+def _fetch_page(url, service_key, path):
     req = urllib.request.Request(
         f"{url}/rest/v1/{path}",
         method="GET",
@@ -187,6 +190,32 @@ def supabase_request(url, service_key, path):
             return json.load(r)
     except urllib.error.HTTPError as e:
         raise RuntimeError(f"GET {path} failed: {e.code} {e.read().decode()}")
+
+
+def supabase_request(url, service_key, path):
+    """GET every page: PostgREST caps one response at 1000 rows regardless
+    of what `limit` is asked for, the exact bug class
+    engine/discovery/company_profiles.py's own RestClient.select() already
+    guards against (and app/lib/marketPricing.ts's own fix, PR #111) - this
+    function didn't, so every caller (find_due_documents/
+    find_due_person_credentials/find_due_tasks here, and
+    registration_reminders.py's find_due_registrations/
+    find_due_property_documents) would silently stop reminding anyone past
+    the company/person/registration/task whose row happened to be the
+    1000th, with no error, as soon as any one of those tables grew past
+    1000 real rows. QA pass, 2026-10-23. A stable `order=id.asc` is
+    appended when the caller's own path has none, so repeated paged GETs
+    can't skip or duplicate rows - every table read through this function
+    selects `id` as its first column already."""
+    sep = "&" if "?" in path else "?"
+    base = path if "order=" in path else f"{path}{sep}order=id.asc"
+    out, offset = [], 0
+    while True:
+        page = _fetch_page(url, service_key, f"{base}&limit={PAGE}&offset={offset}")
+        out += page
+        if len(page) < PAGE:
+            return out
+        offset += PAGE
 
 
 def load_seen_db(client, consumer=CONSUMER):
@@ -403,7 +432,22 @@ def find_documents_lapsing_before_closing(url, key, seen, today, lead_days=DEFAU
                                  "is not a valid date - its lapsing-before-closing check was skipped.",
                                  "warning", context={"tender_id": tender["id"], "closing_date": tender["closing_date"]})
             continue
-        closing_day = (closing_ts + datetime.timedelta(hours=2)).date() if closing_ts.tzinfo else closing_ts.date()
+        # closingDayOf() in app/lib/dates.ts normalizes to an absolute UTC
+        # instant FIRST, then adds 2h - correct for any input offset. This
+        # used to add the 2h directly to the aware value instead, which only
+        # shifts its wall-clock fields while keeping its ORIGINAL tzinfo -
+        # not the same operation. tenders.closing_date is written with a
+        # literal "+02:00" offset by several real callers (gov_sources.py's
+        # iso_sast(), process_general_jobs.py's own SANRAL intake) as well as
+        # genuine UTC/"Z" values straight from an OCDS feed
+        # (watch_tender_updates.apply_closing_date()) - both really occur.
+        # For a "+02:00" value, the old code added a SECOND, wrong 2h shift
+        # on top of an already-SAST wall-clock time: a tender closing between
+        # 22:00 and 23:59 SAST rolled its calculated closing day forward by
+        # one real day. Confirmed directly: "2026-10-22T23:00:00+02:00" (real
+        # SAST day 22nd) came back as the 23rd. QA pass, 2026-10-24.
+        closing_day = ((closing_ts.astimezone(datetime.timezone.utc) + datetime.timedelta(hours=2)).date()
+                       if closing_ts.tzinfo else closing_ts.date())
         to_closing = (closing_day - today).days
         if to_closing < 0:
             continue

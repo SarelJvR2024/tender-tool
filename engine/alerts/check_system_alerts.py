@@ -5,16 +5,32 @@ Sarel, 2026-10-17: "A fail must be emailed to me and flagged for me to review
 so that we can fix it. Any issues and breaks must be sent and flagged to me
 to keep reviewing and improving the app."
 
+RETIRED as a live alert channel, 2026-10-24 (Sarel: "retire the old
+Python+Gmail alert mechanism ... consolidate all system and Scout exception
+alerts into the new Resend path"). The scheduled Claude-session-with-Gmail
+trigger that used to run this script with --out and e-mail what it listed
+(trig_01U6pzsyxHEiqZzEKmE7SZ9f, "System alerts check-in") has been disabled,
+not deleted - re-enabling it would resume double-reporting, now that
+scripts/send-scout-alerts.ts (app/, Tier 3, every 10 minutes) and
+scripts/send-founder-digest.ts (07:00 SAST) cover the same system_alerts
+table via Resend, with their own idempotency (notification_claims, migration
+0093) deliberately independent of this script's own reported_at/
+reported_occurrences bookkeeping below - see lib/scoutAnomalyAlerts.ts's own
+header comment for the full reasoning. This script itself is left in place,
+unchanged and still correct for a manual --dry-run look (same reasoning any
+other read-only diagnostic script in this repo stays available) - it is the
+automated Gmail delivery that is retired, not this file's own logic.
+
 Same family and same deliberate boundary as
 engine/discovery/watch_new_tenders.py and engine/compliance/watch_deadlines.py:
 find what is new, diff against a seen store IN THE DATABASE, print one line
 per item, and - with --out - write the full list as JSON for a caller to turn
 into a real notification. Nothing here sends an e-mail. There is no
 SMTP/e-mail code anywhere in this repo (confirmed: no smtplib, no mail API
-client, no cron file); the e-mail to Sarel is sent by an EXTERNAL scheduled
-Claude session check-in that has real Gmail access: it runs this script with
---out, reads the JSON and e-mails what it lists. Building a mail sender here
-would be a second, parallel notification mechanism.
+client, no cron file); until 2026-10-24 the e-mail to Sarel was sent by an
+EXTERNAL scheduled Claude session check-in that has real Gmail access: it ran
+this script with --out, read the JSON and e-mailed what it listed - now
+retired in favour of the Resend path above.
 
 What it reads: system_alerts (migration 0042), written by every engine and
 bridge through engine/alerts/system_alerts.py. Not tenant-scoped (Sarel's

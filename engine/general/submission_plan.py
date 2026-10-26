@@ -85,7 +85,15 @@ def _returnable_step(r, company):
 
 
 def _form_step(f):
-    if f["status"] == "auto":
+    if f["status"] in ("auto", "attach"):
+        # "attach" (requirements.py's FORMS[code][1], e.g. SBD 2 - tax
+        # clearance/TCS PIN, on virtually every tender) means the vault
+        # satisfies this one automatically - build_general_pack.py treats it
+        # the same way (`form_results[f["code"]] = {"status": "from the
+        # vault"}`, no by-hand path at all). Falling through to the generic
+        # by_hand return below (as this used to) told the user to "Complete
+        # by hand" a form whose own reason text, one line later, says
+        # "Satisfied by... attached from the vault" - QA pass, 2026-10-26.
         return {"status": "ready", "detail": f["reason"]}
     if f["status"] == "overlay":
         return {"status": "review", "detail": f["reason"]}
@@ -120,6 +128,23 @@ def compile_plan(manifest, company=None, tender=None):
         })
 
     for r in manifest["returnables"]:
+        # The generic "CIDB registration / grading" returnable (matched on
+        # the bare keyword \bCIDB\b) and the dedicated cidb_grading step
+        # below (matched on an actual "CIDB grading of X" number) fire
+        # together on the same tender almost every time a specific grading
+        # is named - the grading sentence itself contains the word "CIDB".
+        # This returnable step then marked "ready" the moment ANY grading
+        # was on file at all, even one well below what's required (5GB on
+        # file, 7GB required -> shown "ready" right next to the dedicated
+        # step's own, correctly cautious "review - confirm this meets or
+        # exceeds 7GB" for the exact same fact) - a false, misleading
+        # confidence signal, found and reproduced live, 2026-10-26. The
+        # dedicated step is strictly more informative (it names the actual
+        # grading required and never claims "ready" without a human
+        # confirming the comparison), so it wins; this generic step is only
+        # shown when no specific grading was found to anchor that one.
+        if r["key"] == "cidb" and manifest.get("cidb"):
+            continue
         out = _returnable_step(r, company)
         title = r["label"] + (" (only if bidding as a JV/consortium)" if r.get("conditional") == "jv" else "")
         steps.append({
@@ -145,18 +170,29 @@ def compile_plan(manifest, company=None, tender=None):
     if manifest.get("cidb"):
         grading = manifest["cidb"]["grading"]
         have = (company or {}).get("cidb_grading")
-        ok = bool(have) and have.upper().replace(" ", "") >= grading.upper().replace(" ", "")
         # "Confirm" rather than a hard pass/fail: CIDB grading comparison
         # (numeral + class letter, e.g. "6CE" vs "4CE") isn't a simple string
         # compare and this module doesn't own that logic - requirements.py's
         # own CIDB_RE just reads the number named in the text, nothing more.
+        detail = (f"Company has no CIDB grading on file - confirm it meets {grading} before bidding."
+                   if not have else
+                   f"Company's own grading on file is {have} - confirm this actually meets or exceeds {grading} "
+                   "(Tender Tool doesn't compare grading levels for you).")
+        if manifest["cidb"].get("ambiguous"):
+            # Finding, 2026-10-24: more than one different CIDB grading was
+            # found across the documents read (e.g. an addendum correcting
+            # the original notice) - requirements.py has no reliable signal
+            # for which one is the actual, current requirement, so this is
+            # surfaced rather than silently trusted (same "silent wrong data
+            # is the main risk" discipline as Finding 61's own ambiguity
+            # flags).
+            detail += (f" More than one different CIDB grading was found across the documents read - {grading} is "
+                       "shown, but check the tender notice and any addenda for the actual, current requirement "
+                       "before relying on this.")
         steps.append({
             "category": "cidb_grading", "id": "cidb_grading", "title": f"CIDB grading {grading} required",
             "status": "needs_input" if not have else "review",
-            "detail": (f"Company has no CIDB grading on file - confirm it meets {grading} before bidding."
-                       if not have else
-                       f"Company's own grading on file is {have} - confirm this actually meets or exceeds {grading} "
-                       "(Tender Tool doesn't compare grading levels for you)."),
+            "detail": detail,
             "quote": manifest["cidb"].get("quote"),
         })
 

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Check, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { LogoLockup } from "./_components/Logo";
+import { HOME_MESSAGE } from "@/components/public/whatsapp-contact-button";
 import { buttonVariants } from "@/components/ui/button";
 import { SavingsCalculator } from "@/components/tt/savings-calculator";
 import { cn } from "@/lib/utils";
@@ -120,6 +121,19 @@ const PRICING_TIERS = [
   },
 ];
 
+// "+27 XX XXX XXXX" grouping for a real SA mobile number (country code 27 +
+// 9 digits) - any other shape (a landline, a different country code set by
+// mistake) falls back to a plain "+<number>" rather than guessing a wrong
+// grouping.
+function formatWhatsAppDisplay(number: string): string {
+  const digits = number.replace(/\D/g, "");
+  if (digits.length === 11 && digits.startsWith("27")) {
+    const rest = digits.slice(2);
+    return `+27 ${rest.slice(0, 2)} ${rest.slice(2, 5)} ${rest.slice(5)}`;
+  }
+  return `+${digits}`;
+}
+
 function CheckItem({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-2 text-[12.5px] leading-relaxed text-muted-foreground">
@@ -138,6 +152,14 @@ export default async function Home() {
   if (user) {
     redirect("/dashboard");
   }
+
+  // Same "no real number configured, no fake-looking contact detail shown"
+  // rule as WhatsAppContactButton - never shown with a placeholder/example
+  // number pretending to be real.
+  const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER;
+  const whatsappHref = whatsappNumber
+    ? `https://wa.me/${whatsappNumber.replace(/\D/g, "")}?text=${encodeURIComponent(HOME_MESSAGE)}`
+    : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -327,7 +349,7 @@ export default async function Home() {
       </section>
 
       {/* Pricing */}
-      <section className={SECTION}>
+      <section id="pricing" className={SECTION}>
         <h2 className={H2}>Pricing</h2>
         <p className={LEDE}>
           Excl. VAT. Every plan gets every AI engine - plans differ only in how many people and how many bid packs a month.
@@ -399,6 +421,20 @@ export default async function Home() {
       {/* Footer */}
       <footer className="px-5 py-6 text-center">
         <p className="mb-2 text-xs text-muted-foreground">Tender Ready - built for South African companies that submit tenders.</p>
+        {whatsappNumber && whatsappHref && (
+          <p className="mb-2 text-xs text-muted-foreground">
+            WhatsApp:{" "}
+            <a
+              href={whatsappHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline-offset-2 transition-[filter] duration-150 hover:underline hover:brightness-110"
+            >
+              {formatWhatsAppDisplay(whatsappNumber)}
+            </a>{" "}
+            (Business hours)
+          </p>
+        )}
         <Link href="/privacy" className="text-xs text-muted-foreground underline">
           Privacy notice
         </Link>

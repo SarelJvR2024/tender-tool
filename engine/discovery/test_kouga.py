@@ -234,11 +234,39 @@ check("real last-page number read from the page's own '>|' pagination link, not 
 
 # --- normalize() -> the shared release shape --------------------------------
 
-rel = kouga.normalize(*cards[9])
+# is_closed is computed inside release() against the REAL current time
+# (source_http.is_past(), no `now` override threaded through from here) -
+# this fixture's own closing date (29 Oct 2026) is a real, hardcoded
+# calendar date that WILL eventually be in the past, same bug class as the
+# randwater fixture that just flipped (System-Status.md, Finding 62,
+# 2026-10-23: "any fixture with a hardcoded near-term real date will
+# eventually flip the same way... a separate, broader task" - this is that
+# task, done for this fixture). Freezing the clock (same FixedDateTime
+# monkeypatch pattern as engine/test_form_field_audit.py's
+# test_today_iso_is_sast_not_naive_utc(), restored immediately after) makes
+# "is_closed is False" correct forever, regardless of when this test
+# actually runs - not just correct until 2026-10-29. QA pass, 2026-10-23.
+import datetime as _real_datetime
+
+
+class _FixedBeforeClosing(_real_datetime.datetime):
+    @classmethod
+    def now(cls, tz=None):
+        base = _real_datetime.datetime(2026, 10, 25, 9, 0, tzinfo=_real_datetime.timezone.utc)
+        return base.astimezone(tz) if tz else base
+
+
+_real_dt = sh.datetime.datetime
+sh.datetime.datetime = _FixedBeforeClosing
+try:
+    rel = kouga.normalize(*cards[9])
+finally:
+    sh.datetime.datetime = _real_dt
 check("ocid is source-namespaced, stable", rel["ocid"] == "kouga:225/2026", rel["ocid"])
 check("contract_number is the real reference", rel["contract_number"] == "225/2026")
-check("closing_date parsed to real SAST ISO (DMY-with-month-abbreviation format)",
-      rel["closing_date"] == "2026-10-29T00:00:00+02:00", rel["closing_date"])
+check("closing_date parsed to real SAST ISO (DMY-with-month-abbreviation format), defaulted to 11:00 "
+      "- Kouga's own card gives no time (Batch 2B: never a literal midnight)",
+      rel["closing_date"] == "2026-10-29T11:00:00+02:00", rel["closing_date"])
 check("published_date parsed from 'Start Date'", rel["published_date"] == "2026-09-29T00:00:00+02:00", rel["published_date"])
 check("buyer is Kouga Local Municipality", rel["buyer"] == "Kouga Local Municipality")
 check("source/source_id set for listing_sources", rel["source"] == "kouga" and rel["source_id"] == "225/2026")

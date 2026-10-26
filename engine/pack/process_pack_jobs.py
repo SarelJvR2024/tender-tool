@@ -204,9 +204,20 @@ def _num(v):
 def adapt_company(row):
     pi = None
     if row.get("pi_insurance_cover_zar") is not None and row.get("pi_insurance_policy_number"):
-        pi = {"insurer": row.get("pi_insurance_insurer"), "policy_number": row["pi_insurance_policy_number"],
+        # Each of these 4 columns is independently nullable (migration 0014,
+        # no check constraint tying them together) - a company can genuinely
+        # have the cover amount and policy number on file with the insurer
+        # name or expiry date still blank. period_from already got its own
+        # "not on file" placeholder for this exact reason; insurer/period_to
+        # didn't, so a real company in that shape had the literal word "None"
+        # printed into a field_provenance entry marked log.confirmed() below -
+        # the same "prints the word None" bug class as Finding 49, just in a
+        # new field. QA pass, 2026-10-25.
+        pi = {"insurer": row.get("pi_insurance_insurer") or "(insurer not on file)",
+              "policy_number": row["pi_insurance_policy_number"],
               "limit_of_indemnity_zar": _num(row["pi_insurance_cover_zar"]),
-              "period_from": "(start date not on file)", "period_to": row.get("pi_insurance_expiry")}
+              "period_from": "(start date not on file)",
+              "period_to": row.get("pi_insurance_expiry") or "(expiry not on file)"}
     return {
         "legal_name": row["legal_name"],
         "csd_trading_name": row.get("csd_trading_name"),
@@ -755,32 +766,6 @@ def sync_tender_requirements(client, work_root):
             written[key] = [p["code"] for p, alt in rows if not alt]
             print(f"[requirements] tender {d['tender_id']} ({'company ' + d['company_id'] if d.get('company_id') else 'shared copy'}): "
                   f"{len(primary)} position(s) from SETUP ({', '.join(written[key])}), {len(rows) - len(primary)} ALT")
-        except Exception as e:
-            print(f"[requirements] tender {d['tender_id']}: could not read the uploaded Technical workbook's "
-                  f"SETUP sheet ({type(e).__name__}: {e})")
-            system_alerts.record("pack", f"Could not read an uploaded Technical workbook's SETUP sheet "
-                                         f"({type(e).__name__}: {e})", "error", exc=e,
-                                 context={"tender_id": d["tender_id"], "storage_path": d.get("storage_path")})
-        finally:
-            shutil.rmtree(os.path.dirname(local), ignore_errors=True)
-    return written
-    have = {r["tender_id"] for r in client.select("tender_requirements", {"tender_id": [d["tender_id"] for d in docs]})}
-    for d in docs:
-        if d["tender_id"] in have:
-            continue
-        local = os.path.join(work_root, "requirements", d["tender_id"], "technical.xlsm")
-        try:
-            client.download("tender-documents", d["storage_path"], local)
-            primary, alternates = read_required_positions(Workbook(local))
-            rows = [(p, False) for p in primary] + [(a, True) for alts in alternates.values() for a in alts[:1]]
-            for p, alt in rows:
-                client.insert("tender_requirements", {
-                    "tender_id": d["tender_id"], "position_code": p["code"],
-                    "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
-                    "managerial": _managerial(p.get("managerial")), "is_alternate": alt})
-            written[d["tender_id"]] = [p["code"] for p, alt in rows if not alt]
-            print(f"[requirements] tender {d['tender_id']}: {len(primary)} position(s) from SETUP "
-                  f"({', '.join(written[d['tender_id']])}), {len(rows) - len(primary)} ALT")
         except Exception as e:
             print(f"[requirements] tender {d['tender_id']}: could not read the uploaded Technical workbook's "
                   f"SETUP sheet ({type(e).__name__}: {e})")

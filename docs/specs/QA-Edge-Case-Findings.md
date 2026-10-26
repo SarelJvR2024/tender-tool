@@ -3713,3 +3713,1017 @@ already-malformed-string check stayed green. Restored: `0` failures. Also re-ran
 site (`find_due_documents`, `find_due_person_credentials`, `registration_reminders`,
 `find_due_tasks`, both `daily_digest.py --mode local` helpers) gets the fix for free, with no
 call-site changes needed.
+
+### Finding 60 (CONFIRMED, FIXED, severe - a hung bridge pass's own timeout only killed its own PID, leaking whatever it had spawned (soffice included) forever on the live worker container)
+
+**Where:** `engine/worker/run_bridges.py`'s `BridgeRunner.run_once()` - the one place every async
+bridge (CV generation, SANRAL/general pack generation, CV field extraction, onboarding document
+scan) gets run as a subprocess, with a `--timeout` (default 30 minutes) meant to stop a hung pass
+from stalling the whole worker forever.
+
+**What was tested:** rotated to `engine/worker` this cycle (the one area in the standing rotation
+that had never had a dedicated run by name). The module's own docstring already names the exact
+risk this finding confirms: "a crash or a leaked LibreOffice process in one bridge can't take down
+the other" - worth checking whether the existing timeout mechanism actually PREVENTS that leak, or
+only describes the goal. Every real pack bridge shells out to `soffice` for its own `.docx` ->
+`.pdf` step (confirmed: this exact class of process - a long-running child spawned BY the bridge
+script, not the bridge script itself - is also what hung the `bridge-worker-ci` CI job's own
+"Install LibreOffice" step earlier this same day, Finding 59's CI note). Constructed the
+adversarial case directly: a fixture script that spawns its own grandchild (`subprocess.Popen(["sleep",
+"300"])`, standing in for a hung `soffice`) and then hangs itself well past the runner's
+`--timeout`. Reproduced in isolation first, outside any test harness, to confirm the mechanism
+before touching the real code:
+```
+p = subprocess.run([sys.executable, 'fake_bridge.py'], capture_output=True, timeout=2)
+# -> subprocess.TimeoutExpired; the grandchild ("sleep 300") is CONFIRMED STILL ALIVE a second later
+```
+Also confirmed that merely adding `start_new_session=True` to that same `subprocess.run()` call
+changes nothing on its own - the grandchild is still leaked - because nothing then targets the
+process GROUP that flag creates; `subprocess.run()`'s own built-in timeout handling only ever
+kills the one PID it started.
+
+**Why severe:** this is the real worker container's own crash-recovery mechanism failing silently
+at the exact moment it exists to matter - a hung pack generation (a slow/corrupt tender's documents
+jamming LibreOffice, exactly the shape Finding 59's own CI note hit the same day) doesn't just fail
+that one job: the orphaned `soffice` process keeps holding CPU/memory on the worker indefinitely,
+cycle after cycle, for as long as the container runs, with nothing in the existing design
+noticing or reclaiming it. `run_bridges.py`'s own docstring already names leaked LibreOffice
+processes as the risk its `--timeout` and run-each-bridge-as-its-own-subprocess design are
+supposed to prevent - they didn't, for exactly the shape most likely to occur in production.
+
+**Fix:** `BridgeRunner.run_once()` now starts each bridge with `subprocess.Popen(...,
+start_new_session=True)` (putting the bridge and everything IT spawns in one new process group)
+instead of `subprocess.run(..., timeout=...)`, and on `TimeoutExpired` calls
+`os.killpg(os.getpgid(p.pid), signal.SIGKILL)` - killing the whole group, not just the bridge's own
+PID - before draining its pipes. Confirmed directly (not assumed) that this actually closes the
+gap: the same fixture's grandchild, alive and unreachable under the old code, is dead within
+~2 seconds under the fix.
+
+**Verified the regression test actually catches the regression:** new
+`test_timeout_kills_the_whole_process_group()` in `engine/worker/test_poll_loop.py` - runs
+`BridgeRunner` directly (unit-level) against the grandchild-spawning fixture, confirms the pass is
+reported as timed out (`RuntimeError`, same as before) AND that the grandchild's own PID is
+actually dead within 5 seconds, not just unreachable-but-still-running. Reverted
+`run_once()` to the exact previous `subprocess.run(..., timeout=...)` version (saved patch + `git
+apply -R`, restored with `git apply`): the new test failed exactly as predicted (the grandchild
+PID was still alive 5 seconds later, confirmed via `os.kill(pid, 0)` not raising
+`ProcessLookupError`); restored: all 6 tests in the file passed, including the 3 that already
+exercised `run_bridges.py` end to end (CV bridge fulfilling a job, SIGTERM mid-sleep, `--script`
+additivity) - this fix changes nothing about the non-timeout path, only what happens to a hung
+pass's own descendants.
+
+**Regression:** only `engine/worker/run_bridges.py` changed (`BridgeRunner.run_once()`); every
+registered bridge (`cv`, `cv_extract`, `pack`, `general`, `onboarding`) and any `--script` addition
+gets the fix for free, with no bridge-script changes needed. Also cleaned up two of my own leaked
+sandbox processes from reproducing this live (`sleep 300` fixtures from before the fix landed) -
+noted here only because the standing discipline (Finding 56) is to disclose any mid-task mistake,
+even a harmless one in a throwaway sandbox.
+
+### Finding 61 (CONFIRMED, FIXED, severe - a SANRAL tender's addendum moving the delivery venue or extending the deadline could be silently ignored in favour of the original, stale notice, with a coin-flip deciding which one wins)
+
+**Where:** `engine/intake/classify_tender.py`'s `find_delivery_address()` and `find_closing_time()`
+- read once per SANRAL tender to fill the envelope covers' tender-box address and, when the user
+didn't type one, the closing date/time, straight from the tender's own documents (Form-Field-Audit,
+2026-10-18: both used to be fixed defaults - SANRAL's head office address, a hardcoded 12:00 -
+before being changed to read the real ones off the Tender Notice).
+
+**What was tested:** rotated to `engine/intake` this cycle (last touched run 36, 2026-10-20 -
+the most overdue area in the standing rotation). Both functions use `re.search()`, which returns
+only the FIRST match in the tender's concatenated document text (`all_text`, built by
+`requirements.extract_requirements()` as `"\n".join(d["text"] for d in usable_docs)`, in
+`collect_documents()`'s own filename-alphabetical order - confirmed by reading that function, not
+assumed). A real, common SANRAL shape this misses entirely: an addendum extending the closing date
+or moving the tender-box venue, landing as its own document ALONGSIDE Book 1's original notice -
+almost every real SANRAL tender gets at least one such addendum. Constructed the adversarial case
+directly: synthetic Book 1 text (closing 12:00, tender box at "The Reception Area...") plus a
+synthetic Addendum text (closing 10:00, tender box moved to "SANRAL Southern Region Office..."),
+concatenated in both possible orders:
+```
+find_closing_time(book1 + addendum)   -> "12:00"  (Book 1's own, now-superseded time)
+find_closing_time(addendum + book1)   -> "10:00"  (the addendum's corrected time)
+```
+Confirmed directly which answer a tender gets is decided purely by which document's filename
+happens to sort first alphabetically - which has no relationship whatsoever to which notice is
+chronologically later or legally controlling. The same held for `find_delivery_address()`.
+
+**Why severe:** a SANRAL submission physically delivered to the WRONG venue, or stamped/expected at
+the WRONG closing time, because the envelope covers or closing-date field were silently built from
+whichever document sorted first alphabetically - this is exactly the kind of "silently wrong data"
+this whole standing review exists to catch, on the one artifact (the physical envelope) that can't
+be corrected after the fact if a company trusts it and submits.
+
+**Fix:** neither function can actually know which of two conflicting values is correct - there is
+no chronological signal available at this layer (filenames aren't addendum numbers, and
+`all_text` has already lost per-document boundaries by the time these run). Rather than invent a
+guess with no better grounding than the existing one (e.g. "last one wins" is just as arbitrary as
+"first one wins" given alphabetical-only ordering), both functions now also report whether more
+than one DISTINCT value was found (`ambiguous: True`), while still returning the same first-match
+value as before (unchanged default, so nothing regresses for the overwhelmingly common one-notice
+case). `process_general_jobs.py`'s two call sites now add an explicit note to `intake_rec["notes"]`
+when `ambiguous` is set, naming which value was used and telling a person to check the Tender
+Notice and any addenda before relying on it - the same "silent wrong data is the main risk"
+discipline this module already applies to a duplicate SANRAL workbook candidate (its own
+`classify_documents()` AMBIGUOUS note).
+
+**Verified the regression test actually catches the regression:** extended
+`engine/test_form_field_audit.py::test_intake_readers()` with the addendum-vs-Book-1 case in both
+orders, asserting `ambiguous=True` is set and the returned value matches whichever document was
+fed first (proving the ordering sensitivity directly, not just asserting a fixed expected value).
+Reverted `classify_tender.py`/`process_general_jobs.py` to their exact previous versions while
+KEEPING the new test (saved patch + `git apply -R` on the fix files only, restored with
+`git apply`): the new test failed immediately with `KeyError: 'ambiguous'` (the old return shape
+has no such key) - confirming the test actually exercises the new behaviour, not a no-op. Restored:
+`0` failures. Full existing `test_classify_tender.py`, `test_general_bridge.py` and
+`test_process_general_jobs.py` suites re-run clean - the fix is additive to both functions' return
+shape (an extra key / a wrapped `{"value", "ambiguous"}` dict instead of a bare string), and the
+two real call sites were updated to match; no other call site exists anywhere in the repo (checked
+by grep).
+
+**Regression:** `engine/intake/classify_tender.py` (2 functions), `engine/general/process_general_jobs.py`
+(2 call sites updated for the new `find_closing_time()` return shape, plus a new ambiguity note at
+each site), and the test file. No schema or API shape change - `intake_rec["delivery_address"]`
+gains one extra key (`ambiguous`), additive only.
+
+### Finding 63 (CONFIRMED, FIXED, moderate - a real project with no captured position title crashed CV generation entirely for that person, not just printed the word "None")
+
+**Where:** `engine/cv/generate_cv.py`'s `build_sanral_keyperson()` - the normal (non-World-Bank)
+CV builder, used for every real key-person CV this project generates.
+
+**What was tested:** rotated to CV this cycle. Finding 49 (run 60, 2026-10-21) fixed the sibling
+builder `build_world_bank()` for the exact same bug class - `dict.get(key, default)` only
+substitutes `default` when the key is ABSENT, never when it's present with value `None` - and its
+own write-up said `build_sanral_keyperson()` "already guards the identical fields correctly with
+`proj.get(...) or ''`". Checked that claim directly against the actual code rather than trusting
+it: true for `start`/`end`/`contact`/`contact_phone`/`value_rm`, but **not** for `position_held`
+(line 290) - still a bare `proj.get("position_held", "")` with no `or ""`. `position_held` is a
+nullable column (`0001_init_schema.sql`'s `projects` table; `client_and_number`, the one other
+unguarded field on the same line, is `not null` in the schema and so was correctly left alone).
+Reproduced directly: a project row with `position_held=None` (a real, plausible shape - a key
+person's project entered without filling in every field) crashes `_safe_text(None)` with
+`TypeError: expected string or bytes-like object, got 'NoneType'` (`_safe_text`'s own docstring
+says plainly it is "never called on None (every call site already has its own '' fallback for
+that)" - this was the one call site that didn't).
+
+**Why worse than Finding 49, not just the same bug again:** Finding 49's bug rendered the literal
+word "None" into a real CV - wrong content, but the document still generated. This one crashes
+`build_sanral_keyperson()` outright, failing that key person's CV generation job entirely (contained
+to one job by `process_cv_jobs.py`'s own per-job try/except, confirmed in Finding 49's own write-up
+- not a bridge-wide outage, but a real, visible job failure for a company relying on that person's
+CV for a real submission).
+
+**Fix:** added the same `or ""` guard already used for every other nullable field on these rows -
+`proj.get("position_held", "") or ""`.
+
+**Verified the regression test actually catches the regression:** new
+`test_sanral_keyperson_project_with_null_position_held_does_not_crash()` in
+`engine/cv/test_generate_cv.py` - a project with `position_held=None` and every other field
+present and valid, asserting the row renders (no crash), the position cell is blank (not the word
+"None"), and every other cell in the same row is unaffected. Reverted the fix (saved patch + `git
+apply -R`, restored with `git apply`): the new test failed with the exact predicted `TypeError` at
+the exact predicted line; restored: `0` failures. Full `test_generate_cv.py` (now 9 functions) and
+`test_extract_cv_fields.py` re-run clean.
+
+**Regression:** one line changed in `engine/cv/generate_cv.py`. No schema or call-site changes
+needed elsewhere.
+
+### Finding 64 (CONFIRMED, FIXED, moderate - two more real test fixtures were ticking time bombs for the exact same "hardcoded real date vs. real clock" rot a sibling pass just hit, found by auditing the whole suite rather than fixing the one known case)
+
+**Where:** `engine/discovery/test_kouga.py` (`rel["is_closed"] is False`, a real fixture closing
+29 Oct 2026) and `engine/discovery/test_gov_sources.py::test_merge()` (`not a["is_closed"]`, a real
+fixture closing 6 Nov 2026).
+
+**What was tested:** a sibling solution-architect review pass this same day (System-Status.md,
+"Finding 62") found and fixed `test_randwater.py`'s own version of this bug - a frozen fixture with
+a real closing date, asserted against `source_http.is_past()`'s real wall clock, which flipped from
+correct to wrong the moment real time crossed that date - and explicitly flagged: "any fixture with
+a hardcoded near-term real date will eventually flip the same way... auditing every such fixture
+across the discovery test suite is a separate, broader task" - without doing that broader audit
+themselves. Took that up directly: dispatched a read-only investigation across every `test_*.py`
+in `engine/` for the same shape (a frozen calendar date compared against the REAL current time, not
+a relative-to-a-captured-`TODAY` offset, which is the safe pattern already used correctly
+elsewhere - `test_watch_deadlines_urgency.py`, `test_principals_registrations.py`, etc.). Found two
+more real, not-yet-flipped instances: `test_kouga.py` (closing 2026-10-29, 6 days out) and
+`test_gov_sources.py` (closing 2026-11-06, 14 days out) - both compute `is_closed` via
+`source_http.release()`'s own `is_past(base["closing_date"])`, against `datetime.datetime.now(SAST)`,
+with no `now` override threaded through from either test. Confirmed each would actually flip, not
+just theoretically: froze the real clock to a point AFTER each fixture's own closing date (same
+mechanism, `sh.datetime.datetime` monkeypatched to a fixed subclass) and reproduced `is_closed`
+flipping from `False` to `True` exactly as the dates predict - the identical failure mode the
+sibling pass just fixed, just not yet due.
+
+**Why this is worth fixing now, not waiting for it to actually break:** these are ticking time
+bombs, not live bugs - today (2026-10-23) both assertions still pass. Waiting for them to flip
+means a future session re-derives the same root cause from scratch (exactly what the sibling pass
+spent real effort doing for `test_randwater.py`) instead of the fix already being in place.
+
+**Fix:** froze the clock for just the one call that computes `is_closed` in each test (`sh.datetime.datetime`
+monkeypatched to a fixed point BEFORE the fixture's real closing date, restored in a `finally`) -
+the same `FixedDateTime` pattern already established in `engine/test_form_field_audit.py`'s
+`test_today_iso_is_sast_not_naive_utc()`. This makes both assertions correct FOREVER, independent of
+when the test actually runs, rather than correct only until the next hardcoded date arrives -
+closing the actual pattern, not just today's two instances of it.
+
+**Verified directly (not a revert-and-confirm-red in the usual sense, since neither bug has
+actually manifested yet under real time):** reproduced each flip by freezing the clock to a point
+*after* the real closing date and confirming `is_closed` really does flip to `True` with the
+original, unfixed code path - the same proof a revert would have given, adapted to a bug that
+hasn't happened yet rather than one that has. Both full test files re-run clean after the fix
+(`test_kouga.py`: all checks pass; `test_gov_sources.py`: all `test_merge()` and `tender_changes`/
+`daily_digest` checks pass).
+
+**What was ruled out as safe, so a future pass doesn't re-check it:** `test_randwater.py` (already
+fixed by the sibling pass - a past date, correct forever), `test_lephalale.py` and
+`test_vaal_central_water.py` (already-past closing dates asserted `True` - correct forever, once
+past a date never becomes future again), `test_discovery_downgrades.py`/`test_discovery_fanout.py`
+(`closing_date: "2099-01-01..."` is ~73 years out - not a realistic near-term risk),
+`test_taxonomy.py` (`is_closed` is a hardcoded literal input, no date comparison at all),
+`test_pdf_merge.py` and `test_form_field_audit.py`'s own existing `FixedDateTime` tests (already
+decoupled from the real clock), every `engine/compliance/test_*.py` file (the safe
+captured-`TODAY`-plus-relative-offset pattern, never the real clock), `test_reminder_seen_db.py`
+(real `datetime.date.today()`, but only as a consistent relative base - correct whenever run),
+`test_general_bridge.py` (only an already-past expiry is asserted "EXPIRED"; future dates in the
+same file are inert fixture data), `test_award_prices.py` (pure string-parsing, no "now"
+comparison at all).
+
+**Regression:** only the two test files changed (one freeze each, around the single call that
+needed it). No production code touched - the same `datetime.datetime.now` monkeypatch pattern
+`fill_a_forms`/`fill_sbd_docx`'s own tests already use for a different module, applied here to
+`source_http` instead.
+
+### Finding 66 (CONFIRMED, FIXED, severe - the brand-new cover-letter/methodology generator's Word-document builder had no control-character guard at all, unlike its sibling CV generator, and crashed on a tender's own corrupted contract number)
+
+**Where:** `engine/narrative/build_docx.py`'s `build_docx()` - the "export to Word for
+hand-editing" renderer for the brand-new cover-letter/methodology-statement generator (PR #74,
+merged earlier this session).
+
+**What was tested:** this feature just landed and had never had a dedicated adversarial QA pass.
+Read `generate_cv.py` (the sibling document builder, same repo, same shape) first for context and
+noticed its own `_safe_text()` exists specifically because python-docx (via lxml) raises
+`ValueError: All strings must be XML compatible...` on a control character or NULL byte -
+`build_docx.py` writes strings into the same kind of document (`document.add_heading()`,
+`document.add_paragraph()`) with **no equivalent guard anywhere**. Reproduced directly:
+```
+build_docx(sections, out, title="Cover Letter", subtitle="N.011-010\x00-2027/1F")
+```
+`ValueError: All strings must be XML compatible...` - confirmed crashing.
+
+**Why severe, and worse than the usual "LLM might echo something odd" risk:** `subtitle` is a
+direct, unsanitized passthrough of the tender's own `contract_no` (`process_narrative_jobs.py`'s
+`build_context()` -> `generate_narrative.py`'s `_main()`/`process_one()` -> `build_docx()`) - a
+field read straight off a real buyer's page or the eTenders portal, not generated by any LLM at
+all. This codebase has already found real-world corruption in fields read exactly this way
+(government-source scraping/OCR gaps documented elsewhere in this repo); a single stray control
+byte in ANY tender's reference number would deterministically crash generation for every company
+requesting that document, not a rare or hypothetical trigger. The model-generated headings,
+paragraphs and bullets carry the same risk one level down: the system prompt explicitly tells the
+model to draw on a company's own free-text "how we work"/`user_guidance` fields "in its own
+words," so an LLM echo of a company-typed control character is a second, real path to the same
+crash.
+
+**Fix:** added the identical `_safe_text()` guard `generate_cv.py` already uses (same regex,
+`[\x00-\x08\x0B\x0C\x0E-\x1F]`, stripped before writing) to every string `build_docx()` writes -
+title, subtitle, every section heading, every paragraph, every bullet.
+
+**Verified the regression test actually catches the regression:** new
+`test_control_characters_are_stripped_not_crashed_on()` in `test_build_docx.py` - control
+characters in the title, subtitle (the real, directly-reachable `contract_no` vector), a heading,
+a paragraph and a bullet, all in one document. Reverted `build_docx.py` to its exact previous
+version (saved patch + `git apply -R`, restored with `git apply`): the new test failed with the
+exact predicted `ValueError`; restored: `0` failures. Full `test_build_docx.py` (now 7 functions),
+`test_build_prompt.py`, `test_generate_narrative.py`, `test_uniqueness.py` and
+`test_process_narrative_jobs.py` all re-run clean.
+
+**Also reviewed this pass, no bug found, flagged for whoever extends this feature next:**
+`uniqueness.py`'s anti-collusion check (the actual reason this feature exists - two companies'
+drafts for the same tender must never read as near-duplicates) compares a new draft only against
+OTHER companies' already-`ready` documents for the same tender+kind (`load_other_companies_text()`
+in `process_narrative_jobs.py`). `narrative` is not yet wired into `run_bridges.py`'s `BRIDGES`
+registry (confirmed by grep - it only runs standalone today, per its own module docstring), so
+within the one worker process that exists today this is safe (jobs for the same tender are
+processed strictly sequentially, one at a time, inside a single `for job in jobs:` loop - an
+earlier company's document is always written to the database and visible as `ready` before a
+later one in the same batch is even read). The real exposure is narrower but genuine: if this
+bridge is ever run as more than one concurrent process against the same Supabase project (two
+worker containers, or `run_bridges.py` adding it later without routing same-tender jobs to one
+worker), two companies' narrative requests for the same tender, processed in parallel by different
+processes, could each fetch `other_texts` before the other's draft is `ready` - and the one check
+this whole feature exists for would silently never run for that pair. Not fixed here (it needs a
+real multi-process reproduction against a live database to verify, not a plausible-sounding
+story, and isn't reachable under how this bridge actually runs today) - flagged here and in
+System-Status.md so whoever wires `narrative` into `run_bridges.py` or scales it to more than one
+worker reads this first.
+
+**Regression:** one function changed in `engine/narrative/build_docx.py` (the renderer itself);
+every caller (`generate_narrative.py`'s CLI, `process_narrative_jobs.py`'s real bridge) gets the
+fix for free, with no call-site changes needed.
+
+### Finding 67 (CONFIRMED, FIXED, severe - every compliance/registration reminder would silently stop past the 1000th company, person, registration or task, the exact bug class already fixed elsewhere in this repo but not here)
+
+**Where:** `engine/compliance/watch_deadlines.py`'s own `supabase_request()` - shared by
+`find_due_documents()`, `find_due_person_credentials()`, `find_due_tasks()` in that file, and (via
+`_wd().supabase_request`) `registration_reminders.py`'s `find_due_registrations()` and
+`find_due_property_documents()`. Every compliance/deadline/registration reminder this platform
+sends goes through this one function.
+
+**What was tested:** rotated to `engine/compliance` this cycle (most overdue literal rotation
+slot). This exact bug class - a client read that never pages past PostgREST's hard 1000-row-per-
+response cap, silently truncating rather than erroring - has already been found and fixed twice
+elsewhere in this very repo within the last day (`app/lib/marketPricing.ts`, PR #111: "silently
+reading a 2.5% sample, not the real table"; `engine/discovery/company_profiles.py`'s
+`RestClient.select()`, with its own dedicated `test_company_profiles.py` proving it pages
+correctly) - worth checking whether `watch_deadlines.py`'s OWN, separate `supabase_request()`
+function got the same treatment. It hadn't: confirmed by reading it (no `offset`/`limit` loop at
+all, a single GET per call) and reproducing directly - a fake PostgREST server that caps every
+response at 1000 rows regardless of what's asked for, called through the real (unmodified)
+function, returned exactly 1000 rows for a table with 2500 real ones, with no error, no warning,
+nothing to indicate anything was missing.
+
+**Why severe:** this silently drops EVERY company/person/registration/task past row 1000 from
+EVERY compliance reminder the platform sends - document expiry, person-credential expiry
+(ECSA/SACPCMP/SACNASP/SAGC), the shared registrations catalog (PSIRA, SETA, waste permits...),
+property documents, and tender task due-dates - the exact kind of silent, unannounced coverage
+gap this review's own standing discipline exists to catch. Not yet triggered at today's company
+count, but a pure function of row count that will start silently dropping reminders, with zero
+symptom until someone notices a reminder that should have fired never did, the moment any ONE of
+those tables crosses 1000 real rows - and `held_registrations`/`property_documents` in particular
+can accumulate several rows per company, so this is reachable well before the platform itself has
+1000 customers.
+
+**Fix:** `supabase_request()` now pages (offset/limit, `PAGE=1000`) exactly the way
+`RestClient.select()` already does, accumulating every page until one comes back short. Also
+appends a stable `order=id.asc` when the caller's own path has no `order=` clause (every table
+read through this function already selects `id` as its first column), so repeated paged GETs
+can't skip or duplicate rows across pages - the same safety `RestClient.select()`'s own docstring
+calls out ("pass order for a stable order across pages"). The actual network call moved into a
+small, separately-swappable `_fetch_page()` so the real pagination LOOP (not a replacement fake)
+could be exercised by a test, while every existing test's own `wd.supabase_request = fake_request`
+monkeypatch (which replaces the whole function) is completely unaffected.
+
+**Verified the regression test actually catches the regression:** new
+`supabase_request_pages_past_the_1000_row_server_cap()` in `test_watch_deadlines_urgency.py` - a
+`CappedServer` stand-in (the identical pattern `test_company_profiles.py`'s own `CappedServer`
+already uses for `RestClient.select()`) hooked onto the new `_fetch_page()` seam, proving the real
+function pages through 2500 rows in exactly 3 requests, that a missing `order=` gets a safe
+default, and that a caller's own `order=` is left alone. Reverted `watch_deadlines.py` to its
+exact previous version (saved patch + `git apply -R`, restored with `git apply`): confirmed the
+NEW test breaks (the `_fetch_page` seam it needs doesn't exist on the old code) and, separately
+and more directly, reproduced the OLD code's actual silent-truncation behavior one more time by
+hand against the same capped-at-1000 fake server - exactly 1000 rows back for a 2500-row table, no
+error. Restored: `0` failures. Full compliance suite (`test_watch_deadlines_urgency.py`,
+`test_watch_person_credentials.py`, `test_principals_registrations.py`,
+`test_watch_conditional_registrations.py`, `test_reminder_seen_db.py`) and `engine/notify`'s own
+`test_digest_live.py` (which reads company/document/task data through this same function) all
+re-run clean.
+
+**Regression:** one function changed (`supabase_request()`), plus a new, purely additive
+`_fetch_page()` helper; every one of its 7 callers across `watch_deadlines.py` and
+`registration_reminders.py` gets the fix for free, with no call-site changes needed.
+
+### Finding 68 (CONFIRMED, FIXED, severe - a general (non-SANRAL) tender's addendum correcting the required CIDB grading could be silently outvoted by the original notice, the exact SANRAL bug class fixed two findings ago, just for a different field)
+
+**Where:** `engine/general/requirements.py`'s CIDB-grading extraction (`CIDB_RE.search(all_text)`)
+and its one real consumer, `submission_plan.py`'s `compile_plan()` (the "CIDB grading X required"
+step of a tender's submission plan).
+
+**What was tested:** rotated to `engine/general` (non-SANRAL pack) this cycle - most overdue
+literal rotation slot. Finding 61 (this same session, run 74) found and fixed the exact "a plain
+`re.search()` only ever returns the FIRST mention across a tender's whole document set, so an
+addendum correcting an earlier value is silently outvoted by the original, stale one" pattern for
+SANRAL closing time/delivery address - worth checking whether the same shape exists anywhere in
+the general (non-SANRAL) pack's own extraction, since it reads tender documents the identical way
+(`all_text`, every document concatenated). It does, for CIDB grading: `cidb_m = CIDB_RE.search(all_text)`
+takes only the first match. Reproduced directly with two real-shaped documents - an original
+notice ("CIDB contractor grading of at least 6CE") and a correcting addendum ("CIDB grading of at
+least 8CE is now required for this contract") - `extract_requirements()` picked up `"6CE"`, the
+superseded original, never `"8CE"`, the actual current requirement.
+
+**Why severe:** the CIDB grading step is the one place a company's own submission-plan checklist
+tells them what minimum grading the tender actually asks for - a company relying on the stale,
+lower value from before an addendum could bid believing they qualify (or don't) against the wrong
+number, a compliance-critical error on exactly the kind of silent, unannounced data this review
+exists to catch.
+
+**Fix:** same remediation shape as Finding 61 (no better signal exists here either - plain text
+concatenation order is not a chronological/addendum-order signal): `requirements.py` now also
+collects every DISTINCT grading found (`CIDB_RE.finditer()`) and sets `manifest["cidb"]["ambiguous"]`
+when more than one exists, while keeping the same first-match value as the default (unchanged for
+the overwhelmingly common single-mention case). `submission_plan.py`'s CIDB step appends an
+explicit note when `ambiguous` is set, telling the user to check the tender notice and any addenda
+before relying on the shown value - same "silent wrong data is the main risk" discipline as
+Finding 61's own ambiguity notes. Also removed a genuinely dead, unused `ok = ...` CIDB-grading
+string comparison in `compile_plan()` while in the same function - `>=` on `"10CE"` vs `"9CE"`
+compares lexicographically (wrong for real two-digit grades), computed but never once read by any
+branch; left in place it was a trap for whoever next touched this function and assumed it did
+something.
+
+**Verified the regression test actually catches the regression:** new checks in
+`test_submission_plan.py` - a single-mention document (not flagged), and the real two-document
+addendum-correction case (flagged `ambiguous=True` in the manifest, the step's own title still
+shows the first/stale value as before, but its detail now says to check for a conflict). Reverted
+`requirements.py`/`submission_plan.py` to their exact previous versions (saved patch + `git apply
+-R`, restored with `git apply`): the new test failed with the exact predicted `KeyError: 'ambiguous'`;
+restored: `ALL PASSED`. Full `test_requirements.py`, `test_general_bridge.py` and
+`test_process_general_jobs.py` suites re-run clean.
+
+**Regression:** `engine/general/requirements.py` (CIDB extraction, additive - one new key on an
+existing dict) and `engine/general/submission_plan.py` (one step's detail text, plus the dead-code
+removal). No schema or other call-site changes - `assess_tender.py`/`app/`'s own
+`submission-plan-logic.ts` read `manifest["cidb"]["grading"]` unchanged.
+
+### Finding 69 (CONFIRMED, FIXED, severe - a human-typed capture.yaml typo could silently corrupt a real SANRAL Financial Submission workbook's own fee-computation formula, with no error raised anywhere)
+
+**Where:** `engine/fill_financial_hours.py`'s `fill()` - the one module in the SANRAL pack area
+that captures genuinely human-typed planning data (hours per discipline/category/key-person) into
+the real Financial Submission workbook, rather than deriving it.
+
+**What was tested:** this module had no dedicated regression test at all before this pass (checked:
+no `test_fill_financial_hours.py` existed anywhere in the repo). Read it end to end: `fill()`'s own
+"refuse while null" rule (the module's own stated discipline - never silently turn "not supplied
+yet" into a completed zero) only ever checks `hours is None` before calling
+`Workbook.set_value(sheet, f"E{row}", hours)`. Confirmed directly against the real fixture
+(`templates/samples/financial/R.334-030-2025.1F_Financial_Submission_ran.xlsm`, the same file this
+module's own docstring says it was built from) that `"Hours Roadworks"!E8` (Category A, PL) is the
+real unlocked input cell with no formula, and `"Hours Roadworks"!G8` computes
+`ROUND(F8*E8, 2)` - a plain arithmetic formula reading E8 directly, rolling up into FORM C2.4 FIN
+and ultimately SUMMARY TENDERED FEE.
+
+**Finding (CONFIRMED, severe).** Ran `fill()` with a `capture.yaml` value of `"40h"` (a completely
+realistic human typo - capture.yaml is hand-edited per `suggest()`'s own instructions) for one
+position's hours: it returned successfully, with no error, and wrote the literal string into E8 as
+an Excel inline-string cell (`t="inlineStr"`) - confirmed by reading the written cell back. The
+same silent pass-through happens for a stray YAML boolean (e.g. a human typing `yes`/`true` where a
+number was meant - PyYAML's `safe_load` coerces this) and for a negative number. Every one of these
+corrupts the real `G8 = ROUND(F8*E8, 2)` formula input on a document that gets submitted to SANRAL,
+with nothing in the pipeline - not `fill()`, not `Workbook.set_value()`, not the provenance log -
+ever noticing. The provenance log would even record the garbage value as `log.confirmed(...)`,
+i.e. "known and verified," which is the opposite of true. Same "silently wrong data is the main
+risk" class this review exists to catch, on a real evaluation-scored form (Workplan
+Appropriateness, 30 of 100 points) and the tendered fee itself.
+
+**Fix:** added one validation check in `fill()`, right after the existing null check: reject (raise
+`ValueError`, naming the field and the actual bad value) any hours value that isn't a real,
+non-negative `int`/`float` - explicitly excluding `bool` (a plain `isinstance(x, int)` check alone
+accepts booleans in Python), matching the same `isinstance(lvl, int) or isinstance(lvl, bool)`
+guard convention already used in `sanral_b7.py`. Same "refuse and name the problem, don't guess"
+discipline as this module's own existing null-refusal rule and as Finding 56/61/68's own precedent
+elsewhere in this review.
+
+**Verified the regression test actually catches the regression:** wrote the module's first-ever
+test file, `engine/test_fill_financial_hours.py`, against the real financial-workbook fixture (not
+a synthetic stand-in) - confirms E8/G8's real layout directly, then the string/bool/negative
+rejection cases, then that valid ints, `0` (explicitly tendered, distinct from null), and floats
+are still accepted and written correctly, and that `None` still reads as "missing" rather than a
+validation error. Reverted the fix (keeping the new test): the 3 bad-input cases failed exactly as
+predicted (`fill() returned with no error for ...`); restored: `ALL PASSED`.
+
+**Regression:** `engine/test_sanral_b7.py` and `engine/test_form_field_audit.py` (both touch
+`sanral_fill.Workbook`/the SANRAL pack area) re-run clean - no other test exercises
+`fill_financial_hours.py` directly, confirmed by grep before this pass.
+
+### Finding 70 (CONFIRMED, FIXED, severe - a SANRAL addendum correcting a typo'd NRA reference could be silently outvoted by the stale number simply because it's repeated more often, worse than a plain filename-order tiebreak)
+
+**Where:** `engine/intake/classify_tender.py`'s `find_nra_reference()`, called from
+`engine/general/process_general_jobs.py`'s SANRAL-route intake branch whenever a tender's
+`nra_reference` column isn't already set.
+
+**What was tested:** Finding 61 (run 74) and Finding 68 (run 79) both already fixed the same
+"plain `re.search()`/first-match silently picks a filename-order winner" bug class for SANRAL
+closing time/delivery address and non-SANRAL CIDB grading respectively - worth checking whether
+any other field in the same intake module still had the unflagged version. `find_nra_reference()`
+does NOT use first-match at all - it counts every distinct NRA number found across `all_text` and
+returns whichever is MOST FREQUENT (`max(counts, key=counts.get)`), with no `ambiguous` signal of
+any kind (it returns a bare string or `None`, unlike its two siblings above).
+
+**Finding (CONFIRMED, severe).** This is not just the same bug class - it's a worse version of it.
+SANRAL's Book 1 cover prints its NRA reference once, but real tenders often repeat it in a running
+page footer/header across many pages. An addendum correcting a typo in that reference is realistically
+mentioned only ONCE. Confirmed directly: a synthetic Book 1 footer with "NRA: 2026/0071" repeated 8
+times plus a single addendum line "the correct reference is NRA: 2026/0017" - `find_nra_reference()`
+returned "NRA 2026/0071", the STALE, already-known-wrong number, purely because it was repeated more
+times, with zero indication two different references were ever found. Unlike the sort-order tiebreak
+Finding 61/68 fixed (at least a coin-flip), this heuristic actively prefers whichever number happens
+to be printed more often, which has no correlation with which one is actually correct - a correcting
+addendum is structurally guaranteed to lose a repetition count against the document it's correcting.
+This reference feeds the real printed envelope covers and authority letter SANRAL requires
+(`find_nra_reference()`'s own docstring: "the envelope covers and authority letter refuse to invent
+it") and is stored directly on the `tenders.nra_reference` column.
+
+**Fix:** `find_nra_reference()` now returns `{"value": "NRA ...", "ambiguous": bool}` (or `None`),
+`ambiguous` set when more than one distinct NRA number was found - same shape, same "surface the
+conflict, don't guess a smarter default" discipline as Finding 61/68. The most-frequent value stays
+the default (unchanged behaviour for the normal single-reference case). Updated the one real call
+site (`process_general_jobs.py`): `patch["nra_reference"]` is set from `nra["value"]` (the DB column
+is plain `text`, confirmed against migration `0001`), and `intake_rec["notes"]` gets an extra sentence
+telling a person to check the tender notice and any addenda when `ambiguous` is set.
+
+**Verified the regression test actually catches the regression:** extended
+`test_form_field_audit.py::test_intake_readers()` with the single-mention case (not ambiguous),
+the no-match case (`None`), and the real outvoting case (ambiguous, stale value still returned).
+Reverted the fix (keeping the new tests): both new checks failed exactly as predicted (the bare
+string no longer matched the expected dict shape); restored: `0 failures`. Full
+`test_classify_tender.py` and `test_process_general_jobs.py` suites re-run clean.
+
+**Regression:** `engine/intake/classify_tender.py` (additive return shape - the only caller was
+updated in the same commit) and `engine/general/process_general_jobs.py` (one call site). No
+schema change - `tenders.nra_reference` stays a plain string column, unchanged on disk.
+
+### Finding 71 (CONFIRMED, FIXED, severe - a broken formula in a buyer's own BOQ workbook could be silently read as a confirmed zero rate or amount, not an unknown/broken value)
+
+**Where:** `engine/sanral_fill.py`'s `Workbook.cached()` and `Workbook._decode_cell_value()` -
+the shared, general-purpose Excel-cell decoder used by every caller of `Workbook` across this
+repo, including the brand-new `engine/discovery/boq_extraction.py` (real BOQ line-item parsing,
+landed this week - the same feature whose missing `lxml` dependency broke both daily cron
+workflows earlier today).
+
+**What was tested:** rotated to discovery - the most overdue standing area - but several of its
+reader files (`kouga.py`/`lephalale.py`/`randwater.py`/`vaal_central_water.py`/`source_http.py`/
+`assess_tender.py`) have live, uncollided in-flight work on an open PR (#141, branch
+`tender-workspace-batch-2b`), so picked a different, untouched corner instead: `boq_extraction.py`,
+brand new and under heavy scrutiny today for an unrelated reason (the `lxml` production break).
+Read both cell decoders end to end. Both treat Excel's `t="str"` (a literal string formula result)
+and `t="e"` (a FORMULA ERROR - `#DIV/0!`, `#REF!`, `#VALUE!`, ...) identically, just returning
+`v.text` either way - but an error cell's "value" is an error CODE, not real data.
+
+**Finding (CONFIRMED, severe).** Of the standard Excel error codes, `#DIV/0!` is the only one that
+contains a literal digit (the others - `#REF!`, `#NAME?`, `#N/A`, `#NULL!`, `#NUM!`, `#VALUE!` -
+have none). `award_outcomes.parse_rand()` (reused by `boq_extraction.py` for every quantity/rate/
+amount cell) strips everything but digits/commas/periods before parsing - so `#REF!` etc. correctly
+strip to nothing and return `None`, but `#DIV/0!` strips to `"0"` and parses to the float `0.0`.
+Confirmed directly end to end (not just unit-testing `parse_rand()` in isolation): built a real,
+minimal `.xlsx` with a BOQ row whose Rate/Amount cells are genuine `t="e"` formula-error cells
+(`#DIV/0!` - a completely realistic real-world case: a rate-per-unit formula dividing by a blank
+denominator), ran it through the real `boq_extraction.parse_boq_workbook()` - the item came back
+with `rate_zar: 0.0, amount_zar: 0.0`, indistinguishable from a genuinely, confirmedly free line
+item. A real tender's BOQ with one broken formula cell would have that line item's cost silently
+recorded as zero rather than unknown, understating whatever downstream total reads it - the exact
+"silent wrong data is the main risk" class this review exists to catch, and arguably worse than a
+crash: nothing anywhere would ever notice.
+
+**Fix:** split the `t in ("str", "e")` branch in both decoders - `"str"` is unchanged (still
+returns the literal string); `"e"` now returns `None`. No other code in this repo relies on an
+error-cell's string value surviving (confirmed by grep before changing shared code two other
+modules also depend on).
+
+**Verified the regression test actually catches the regression:** new
+`test_formula_error_cell_is_null_not_a_fabricated_zero()` in `test_boq_extraction.py`, plus a small
+`ExcelError` marker added to the file's own in-memory `.xlsx` builder so a test can represent a
+real `t="e"` cell (previously only plain strings/numbers were representable). Reverted the fix:
+failed exactly as predicted (`rate_zar`/`amount_zar` both came back `0.0` again); restored: `0
+failures`. Every other test that exercises `Workbook.cached()`/`sheet_grid()` in this repo
+(`test_sanral_b7.py`, `test_classify_tender.py`, `test_fill_financial_hours.py`,
+`test_form_field_audit.py`, `test_tender_enrichment.py`, `test_tender_enrichment_cli.py`) re-run
+clean - no other caller ever encounters or expects an error-typed cell.
+
+**Regression:** `engine/sanral_fill.py` only (two decoders, additive - `None` instead of the raw
+error-code string, affecting only cells Excel itself marks as errored, which is `#DIV/0!`-only
+reachable incorrect behaviour before this fix, confirmed by grep across the repo for any caller
+expecting an error-code string back).
+
+### Finding 72 (CONFIRMED, FIXED, severe - a "+02:00"-tagged tender closing time near midnight SAST could report its own closing day as one real day later than it actually is, in a customer-facing compliance reminder)
+
+**Where:** `engine/compliance/watch_deadlines.py`'s `find_documents_lapsing_before_closing()` -
+the function that warns a company when a document will lapse before a pursued tender's own
+closing date, even though it's still outside the normal renewal window.
+
+**What was tested:** rotated to compliance/reminders - the most overdue standing area - and
+re-read this function's own "calendar day in SAST, like app/lib/dates.ts closingDayOf()" comment
+against the actual TypeScript it claims to mirror. `closingDayOf()` (`app/lib/dates.ts`) uses JS's
+`Date`, which always normalizes to an absolute instant first - so its unconditional "+2h, then take
+the date" is correct for ANY input offset. The Python port instead does `aware_dt + timedelta(hours=2)`
+directly on the parsed, still timezone-AWARE value - which only shifts the wall-clock fields while
+KEEPING the original tzinfo attached; it does NOT normalize to UTC first. That is a different
+operation, and it is only equivalent to the TypeScript version when the input is already tagged
+UTC ("+00:00"/"Z").
+
+**Finding (CONFIRMED, severe).** Confirmed `tenders.closing_date` genuinely carries BOTH
+conventions in real data, not just UTC: `gov_sources.py`'s `iso_sast()` and
+`process_general_jobs.py`'s own SANRAL-intake write (`f"...T{notice_time}:00+02:00"`) both tag the
+value with a literal "+02:00" SAST offset; `watch_tender_updates.apply_closing_date()` writes
+whatever a raw OCDS feed's `tenderPeriod.endDate` gives, which is genuine UTC. For a "+02:00"-
+tagged value with a time between 22:00 and 23:59 SAST, the old code's second, un-normalized +2h
+shift rolled the calculated closing day forward by one real day. Confirmed directly:
+`"2026-10-22T23:00:00+02:00"` (real SAST day the 22nd) came back as the 23rd. The existing test
+fixture for this exact function (`test_watch_deadlines_urgency.py`) only ever used "+00:00"-tagged
+closing dates - which happen to work correctly under the old code purely because no UTC-to-SAST
+normalization was actually needed for them - so this never showed up in any test despite being
+reachable from two different real write paths. The wrong date is shown directly in the reminder
+item's own `closing_date` field, which daily_digest.py/the compliance report surface to a real
+person.
+
+**Fix:** `closing_day` now converts the aware timestamp to UTC first
+(`closing_ts.astimezone(datetime.timezone.utc)`) before adding the 2-hour SAST shift and taking
+`.date()` - the same normalize-then-shift order `closingDayOf()` already does, for both offset
+conventions this column actually carries.
+
+**Verified the regression test actually catches the regression:** new
+`closing_day_handles_a_sast_tagged_offset_correctly()` in `test_watch_deadlines_urgency.py`, a
+self-contained fixture (a "+02:00"-tagged tender closing at 23:00 SAST). Reverted the fix: the
+reported `closing_date` came back one real day late, exactly as predicted; restored: `0
+failures`. `test_principals_registrations.py`, `test_watch_person_credentials.py`,
+`test_watch_conditional_registrations.py`, `test_reminder_seen_db.py` and
+`test_digest_live.py` (daily_digest.py's own live-mode consumer of this exact function) all
+re-run clean.
+
+**Regression:** `engine/compliance/watch_deadlines.py` only - one function, additive (a correct
+UTC-normalize step before the existing +2h shift). No schema or call-site changes;
+`find_due_documents()`/`find_due_tasks()`/`registration_reminders.py` don't use this calculation at
+all.
+
+### Finding 73 (CONFIRMED, FIXED, moderate - a real company's professional indemnity insurance could print the literal word "None" twice in a field_provenance entry marked as confirmed, the same bug class as Finding 49 in a field nobody had checked yet)
+
+**Where:** `engine/pack/process_pack_jobs.py`'s `adapt_company()` - the Supabase-row-to-profile-dict
+adapter `fill_a_forms.py` (A17, professional indemnity cover) and `fill_docx_forms.py` read.
+
+**What was tested:** rotated to SANRAL pack - the most overdue standing area. `fill_a_forms.py`'s
+A17 section builds its professional-indemnity line from 5 dict keys
+(`insurer`/`policy_number`/`limit_of_indemnity_zar`/`period_from`/`period_to`) and logs it
+`log.confirmed(...)` - a field_provenance entry the Tender Workspace shows as trustworthy, not
+flagged for review. `adapt_company()` already gives `period_from` its own `"(start date not on
+file)"` placeholder, with a comment explaining why - worth checking whether the other two nullable
+fields in the same dict (`insurer`, `period_to`) got the same treatment. They hadn't. No dedicated
+test exists anywhere in the repo for `adapt_company()` at all (confirmed by grep).
+
+**Finding (CONFIRMED, moderate).** `pi_insurance_insurer`, `pi_insurance_policy_number`,
+`pi_insurance_cover_zar` and `pi_insurance_expiry` (migration `0014`) are four independently
+nullable columns with no check constraint tying them together - a real company can have the cover
+amount and policy number on file while the insurer name or expiry date are still blank (entered in
+stages, or never finished). `adapt_company()` only guards against `pi` being built at all when
+cover/policy-number are missing; once built, `insurer`/`period_to` pass through as a bare `None`.
+Confirmed directly: a row with cover=R5,000,000 and a real policy number but no insurer/expiry on
+file produced `{"insurer": None, ..., "period_to": None}`, and `fill_a_forms.py`'s real f-string
+rendered `"R5,000,000 (policy POL123456, None, valid (start date not on file) to None)"` - the
+literal word "None", twice, in a provenance entry marked `confirmed`. Same bug class as Finding 49
+(`build_world_bank()`'s employment record), just a field nobody had checked for it yet.
+
+**Fix:** `insurer`/`period_to` now default to `"(insurer not on file)"`/`"(expiry not on file)"`
+when blank, mirroring the existing `period_from` placeholder convention in the exact same dict.
+
+**Verified the regression test actually catches the regression:** new
+`engine/pack/test_adapt_company.py` (this adapter's first-ever test) covering the partial-data
+case, the fully-populated case (unaffected), and the no-cover-at-all case (`pi` stays `None`, not a
+fabricated half-built dict). Reverted the fix: all 3 "no None" checks failed exactly as predicted,
+reproducing the literal rendered string; restored: `ALL PASSED`. `test_form_field_audit.py` and
+`process_cv_jobs.py --self-test` (both exercise the same CV/forms pipeline) re-run clean.
+
+**Regression:** `engine/pack/process_pack_jobs.py`'s `adapt_company()` only - two keys in one
+nested dict, additive (a placeholder string instead of `None`, never changes a non-null value).
+No schema or other call-site changes.
+
+### Finding 75 (CONFIRMED, FIXED, severe - the narrative bridge was the only process_*_jobs.py bridge in the repo that leaked a raw Python exception straight to a customer-facing field, and the only one with no system_alerts visibility on a genuine crash)
+
+**Where:** `engine/narrative/process_narrative_jobs.py`'s `process_one()`.
+
+**What was tested:** rotated to worker/job-queue - the least recently touched standing area.
+`run_bridges.py`'s own freshly-landed "narrative" registration (a sibling pass, earlier the same
+day) made this bridge genuinely live for the first time - worth checking it holds to the same
+discipline every other bridge in this family already does, now that it actually runs. Checked
+`process_cv_jobs.py`'s own explicit precedent first: its `process_job()` comment says plainly that
+`error_message` "is read straight through by the Tender Workspace page and shown to the customer
+verbatim... so it must never be a raw Python/library exception" - citing a real past incident
+(a control-character crash naming python-docx internals). Checked whether `process_narrative_jobs.py`
+followed the same rule.
+
+**Finding (CONFIRMED, severe).** It didn't. `process_one()`'s final `except (GenerationFailed,
+Exception) as e:` branch wrote `str(e)` straight into `narrative_documents.error_message` for
+literally ANY unexpected exception - a python-docx internal error, a `KeyError`, anything -
+and `app/app/tenders/[id]/narrative-documents.tsx` (lines 219-220) renders that field to the
+customer verbatim, no sanitisation on that side either. Confirmed directly: forced a raw
+`ValueError("Some raw internal detail that must never reach a customer")` through `process_one()`
+and the exact string reached the `error_message` PATCH. Also confirmed by grep across every
+`process_*_jobs.py` bridge (`cv`, `onboarding`, `pack`, `general`) that this was the ONLY one that
+doesn't import `system_alerts` from `poll_loop` at all - a genuine crash in this specific bridge
+was completely invisible to Sarel's own ops alerting, unlike every sibling bridge.
+
+**Fix:** split the combined except clause - `GenerationFailed` (whose own messages in
+`generate_narrative.py` are already deliberately written as clean, customer-safe sentences, e.g.
+"The AI service rejected this request: ...") keeps showing its own message verbatim; a bare
+`Exception` now records a `system_alerts.record("narrative", ...)` call (matching every sibling
+bridge) and writes a generic customer message ("Could not generate this document - try again. If
+it keeps happening, let us know.") - the exact wording `process_cv_jobs.py`'s own equivalent branch
+already uses.
+
+**Verified the regression test actually catches the regression:** new
+`test_process_one_never_leaks_a_raw_exception_to_the_customer()` in `test_process_narrative_jobs.py`,
+forcing a raw exception through the real `process_one()` and checking both the PATCH payload and
+the `system_alerts` sink. Reverted the fix: both checks failed exactly as predicted (the raw
+exception text reappeared, no alert was recorded); restored: `0 failures`. Every other narrative
+test suite and `test_poll_loop.py` (the real `run_bridges.py` loop this bridge now runs inside) re-run
+clean.
+
+**Regression:** `engine/narrative/process_narrative_jobs.py` only - one except clause split into
+two, plus one import line. No schema or other call-site changes; `GenerationFailed`'s own
+customer-facing wording is completely unchanged.
+
+### Finding 76 (CONFIRMED, FIXED, moderate - suggest_pack.py's own CLI tool crashed with a bare, uninformative TypeError on a blank or unreadable SANRAL closing-date cell, instead of naming the problem)
+
+**Where:** `engine/pack_generator/suggest_pack.py`'s `suggest()` - the candidate-suggestion CLI
+tool (Step 2 of the SANRAL pack-compilation playbook).
+
+**What was tested:** rotated to intake - the most overdue standing area. `classify_tender.py`'s own
+`read_setup()` reads the identical SANRAL `SETUP!C3` closing-date cell via the identical
+`_excel_date()` helper, but wraps it in a `try/except (TypeError, ValueError)` specifically because
+a blank or unreadable cell used to crash. `suggest_pack.py` defines its OWN separate
+`read_required_positions()` (reused by the real production pack pipeline,
+`process_pack_jobs.py`) in the same file - worth checking whether that file's OWN `suggest()`
+entry point, which does the identical `_excel_date(wb.cached("SETUP", "C3"))` calculation, got the
+same guard. It hadn't.
+
+**Finding (CONFIRMED, moderate).** Confirmed `suggest()`'s own closing-date line had no guard at
+all: a blank or unreadable `SETUP!C3` cell raised a bare
+`TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'`,
+naming neither the template file nor which cell was the problem. Traced every real caller of this
+module first: `process_pack_jobs.py` (the actual production pipeline) only uses
+`read_required_positions()`/`score_candidate()` from this file and reads `closing_date` from the
+real `tenders.closing_date` DB column instead, so this specific bug is not reachable through the
+live web app - but `suggest()` is a real, hands-on CLI step in the documented pack-compilation
+playbook Sarel runs directly, and a buyer's SANRAL template not filling `SETUP!C3` the same way
+every other one does is a completely plausible real-world shape.
+
+**Fix:** wrapped the same calculation in a `try/except (TypeError, ValueError)` that raises a
+`ValueError` naming the template path, the cell, and the actual (unreadable) value - same "refuse
+loudly, name the cell" discipline `classify_tender.read_setup()` and `sanral_fill.set_date()`
+already follow for this exact situation.
+
+**Verified the regression test actually catches the regression:** new
+`test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell()` in
+`test_suggest_pack.py` (this module's first test to exercise `suggest()` itself, not just its
+scoring helpers), with a minimal fake `Workbook`. Reverted the fix: failed exactly as predicted
+(the bare `TypeError` reappeared); restored: `0 failures`. `test_classify_tender.py` and
+`test_sanral_b7.py` re-run clean.
+
+**Regression:** `engine/pack_generator/suggest_pack.py`'s `suggest()` only - one calculation now
+wrapped in a try/except that raises a clearer error of the same type family. No schema or other
+call-site changes; `process_pack_jobs.py`'s own use of this module is untouched.
+
+### Finding 77 (CONFIRMED, FIXED, moderate - a real regression test for run_bridges.py's own critical-crash alert was silently checking for a source that stopped being written a day earlier, leaving that path with no working coverage)
+
+**Where:** `engine/alerts/test_system_alerts.py` (the regression test), and `engine/worker/run_bridges.py`'s
+own module docstring (stale documentation of the same behaviour).
+
+**What was tested:** rotated to worker/job-queue - the most overdue standing area (last full
+dedicated pass the seventy-third run; a secondary check at the eighty-first run). Read
+`poll_loop.py`, `run_bridges.py`, `system_alerts.py` and `check_system_alerts.py` end to end
+looking for a reachable adversarial gap. Nothing new held up as a *product* bug (the hung-bridge
+process-group kill from Finding 60, the per-roster-entry isolation, the fingerprint() id/number
+blanking all still check out), but running this area's own existing test suites directly (not just
+reading the code) turned up a real, currently-FAILING regression: `python3
+engine/alerts/test_system_alerts.py` reported 2 failures outright, with no code changes of my own.
+
+**Finding (CONFIRMED, moderate).** `run_bridges.py` was changed on 2026-10-25 (per its own inline
+comment, "Sarel's own ask, after a real backlog triage found every bridge crash showing up under
+one shared source") so that a bridge pass exiting non-zero or timing out is recorded under THAT
+BRIDGE'S OWN source (its registered name, or the script's basename for `--script`) instead of the
+generic source `"worker"` it used before. The test (`test_system_alerts.py`, part 1, item 3) and
+`run_bridges.py`'s own module docstring were never updated to match - both still describe/assert
+the pre-2026-10-25 behaviour. Concretely: `run([RUNNER, "--once", "--script", broken], fake)` then
+`[x for x in alerts(fake) if x["source"] == "worker"]` found nothing (the real row was filed under
+`source="broken_bridge.py"`), so the check silently evaluated false, and the downstream
+`check_system_alerts.py` assertion (`{x["source"] for x in rep["new"]} == {"cv", "general",
+"worker"}`) failed the same way. This is a real, currently-broken test, not a hypothetical: the
+"a bridge pass crashed -> a critical alert reaches Sarel" path has had no working regression
+coverage since the day before this run, and anyone reading either docstring would be told the
+wrong thing to filter `/admin` by.
+
+**Fix:** updated `run_bridges.py`'s module docstring to describe the real, current split - a
+bridge pass's own crash/timeout files under that bridge's own source (not "worker"; `context.bridge`
+still carries the same value), while a crash of the runner itself (the `__main__` guard at the
+bottom, unrelated to any one bridge) is still recorded under source `"worker"`, exactly as the code
+already does. Updated `test_system_alerts.py`'s own docstring (item 3) and its assertions to match
+the real, intended behaviour: check for `source == "broken_bridge.py"` (not `"worker"`), add an
+explicit `context.bridge == "broken_bridge.py"` check and a `not any(x["source"] == "worker" ...)`
+check so a future regression back to the old shared source would be caught either way, and fixed
+the checker-run-1 expected source set to `{"cv", "general", "broken_bridge.py"}`.
+
+**Verified red, then green:** ran `python3 engine/alerts/test_system_alerts.py` BEFORE touching
+anything - `2 failure(s)`, both exactly as predicted above (the "critical worker alert" check and
+the checker-run-1 source-set check). Applied the test/docstring fix above (no production code
+changed - the product's own behaviour was already correct since 2026-10-25); re-ran: `0
+failure(s)`. Also re-ran `python3 engine/worker/test_poll_loop.py` (the sibling bridge-loop smoke
+test, unaffected by this file) to confirm no other regression: all passed, including the
+process-group-kill-on-timeout case from Finding 60.
+
+**Regression:** `engine/alerts/test_system_alerts.py` and `engine/worker/run_bridges.py`'s own
+docstring only - no production code or schema touched. `engine/worker/test_poll_loop.py` re-run
+clean.
+
+### Finding 78 (CONFIRMED, FIXED, severe - a SANRAL intake's own top-line "routed to the SANRAL flow" message could name a different Technical Submission workbook than the one actually used to build the pack, directly contradicting the AMBIGUOUS note right next to it)
+
+**Where:** `engine/intake/classify_tender.py`'s `classify_documents()`.
+
+**What was tested:** rotated to intake - by far the most overdue standing area (last full
+dedicated pass the seventy-fourth run, Finding 61, 23 runs ago). Open PR #118 (draft, stale, since
+2026-10-23) touches this same file's `assess_fit_from_text()` and `assess_tender.assess_fit()` -
+avoided those two functions entirely; everything else in `classify_tender.py` was fair game.
+Finding 61 (this same rotation, run 74) already established that a SANRAL addendum can disagree
+with the original notice on a field value, and Finding 74 (run 82, NRA reference) that whichever
+value is repeated more often, or sorts first, can silently win over the correct one - worth
+checking whether `classify_documents()`'s own duplicate-candidate tie-break (added for exactly
+this reason, per its own 2026-10-20 QA-audit comment) is actually applied EVERYWHERE it reports a
+chosen file, not just where it stores one.
+
+**Finding (CONFIRMED, severe).** It wasn't. `classify_documents()` builds `tech =
+candidates.get("technical_xlsm") or []` BEFORE the tie-break loop runs, in `collect_documents()`'s
+original (alphabetical-by-filename) order. The tie-break loop that follows picks the
+most-recently-modified file when more than one Technical Submission workbook was uploaded, and
+correctly uses that pick for `files["technical_xlsm"]` (the file the pack actually gets built
+from) and the "AMBIGUOUS" note - but `sorted()` returns a NEW list, so `candidates`/`tech`'s own
+original list was never updated. The `family`/`signal` text built afterwards still read `tech[0]`
+- the STALE, pre-tie-break first candidate. Reproduced directly: two technical workbooks,
+"Draft_Technical_Submission.xlsm" (older, sorts first alphabetically) and
+"ZZfinal_Technical_Submission.xlsm" (newer). `sanral_files["technical_xlsm"]` and the AMBIGUOUS
+note both correctly named `ZZfinal...xlsm` as the file actually used - but the top-line `signal`
+field said *"Draft_Technical_Submission.xlsm is a SANRAL 'Conventional Consultant Tender'
+Technical Submission workbook ... routed to the SANRAL submission-pack flow"* - directly
+contradicting the AMBIGUOUS note two lines below it in the exact same intake decision. A person
+skimming only the signal line (the first, most prominent thing this function reports) would
+believe the wrong workbook drove the routing decision, exactly the "silently wrong data" risk this
+session's own `fingerprint.py`/tie-break fix was built to prevent in the first place, now
+re-introduced one field over.
+
+**Fix:** added a `winners` dict inside the existing tie-break loop (`winners[doc_type] =
+cands[0]`, the identical tuple `files[doc_type]`/`registered` already use), and read
+`family`/`signal`/the "two SANRAL families" note from `winners["technical_xlsm"]` instead of the
+stale `tech[0]`. `families` (the *set* of families seen, used only to detect "two different
+families uploaded at all") is unaffected - that check never depended on tie-break order.
+
+**Verified the regression test actually catches the regression:** new
+`test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used()` in
+`test_classify_tender.py`, reusing the real `TECH_WORKBOOK` sample fixture copied to two paths
+with the same "sorts first alphabetically but older" / "sorts last but newer" shape as the repro
+above. Reverted the fix (`git apply -R`, keeping the new test): failed with exactly the predicted
+wrong filename in `signal`; restored: `0 failure(s)`. Full `test_classify_tender.py` (now 6
+functions) re-run clean both before and after.
+
+**Regression:** `engine/intake/classify_tender.py`'s `classify_documents()` only - the
+`family`/`signal`/"two SANRAL families" text now matches the file actually used whenever more
+than one Technical Submission workbook is uploaded. `sanral_files`/`sanral_documents`/the
+AMBIGUOUS note were already correct and are unchanged. No schema or other call-site changes;
+`process_pack_jobs.py` (which reads `sanral_files`, not `signal`) was never affected by the bug and
+is untouched by the fix.
+
+### Finding 79 (CONFIRMED, FIXED, severe - the Submission Plan told a person to "Complete by hand" SBD 2, the tax clearance form on virtually every tender, directly contradicting its own detail text saying it was already satisfied from the vault)
+
+**Where:** `engine/general/submission_plan.py`'s `_form_step()`.
+
+**What was tested:** rotated to non-SANRAL pack (`engine/general`). PR #141 (the "Batch 2B" pass)
+merged into `main` since the last pass through this rotation, touching `assess_tender.py`'s
+`labels()` helper, 4 discovery sources' closing-time defaults, and `process_general_jobs.py`'s own
+closing-time placeholder (12:00 -> 11:00) - all already baked into the checked-out tree, no
+overlap to avoid. A sibling standing-review pass (same morning) already gave `fill_flat_pdf.py`'s
+prefix handling a thorough, confirmed-correct look, so picked a different file in the same area:
+`submission_plan.py` (236 lines, the "what do we actually have to go and do for this tender"
+compiler, Sarel's own framing 2026-10-21) - not given a dedicated adversarial look since its own
+regression test file was written. Read `_form_step()`, `_returnable_step()`, `compile_plan()`'s
+gap-de-duplication prefix logic end to end, checking each branch against every real status value
+its own upstream (`requirements.py`) can actually produce - not just the three `_form_step()`
+itself already names.
+
+**Finding (CONFIRMED, severe).** `requirements.py`'s own form-status assignment
+(`extract_requirements()`, ~line 1056) has FOUR real status values a form can carry, not three:
+`"auto"`, `"overlay"`, `"by_hand"` - and `"attach"`, assigned whenever `FORMS[code][1] ==
+"attach"`. Exactly one form code currently has that capability: `"2"` - "Tax clearance / tax
+compliance status" (SBD 2), required on essentially every South African public-sector tender.
+`_form_step()` only ever checked for `"auto"` and `"overlay"` explicitly; `"attach"` fell through
+to the generic `return {"status": "by_hand", "detail": f["reason"]}` at the bottom - despite
+`f["reason"]` for this exact status being the literal string *"Satisfied by the tax compliance
+status (TCS PIN) - attached from the vault."* The result, reproduced directly with a synthetic SBD
+2 bundle: a plan step titled "SBD 2 - Tax clearance / tax compliance status", status "Complete by
+hand", detail "Satisfied by the tax compliance status (TCS PIN) - attached from the vault." - the
+status label and the detail text of the SAME step directly contradict each other, on what is very
+likely the single most common form this engine ever classifies. Confirmed this isn't a stale or
+unused status: `build_general_pack.py` (the real pack builder) has its own explicit handling for
+`f["status"] == "attach"` (`form_results[f["code"]] = {"status": "from the vault"}`, no by-hand
+path at all) - proving the real, intended semantics of "attach" is "already satisfied", exactly
+what `_form_step()` should have mapped to `"ready"`, the same treatment `"auto"` already gets.
+
+**Fix:** `_form_step()` now treats `"attach"` the same as `"auto"` (`status in ("auto",
+"attach")` -> `"ready"`), matching `build_general_pack.py`'s own real-world treatment of the
+identical status value.
+
+**Verified the regression test actually catches the regression:** new synthetic-bundle test in
+`test_submission_plan.py` (an SBD 2 mention - no existing test in this file's SBD_BUNDLE fixture
+mentioned SBD 2 at all, which is exactly why this had gone unnoticed). Reverted the fix (`git apply
+-R`, keeping the new test): failed with the predicted status/detail contradiction; restored: `0
+failure(s)`. Full `test_submission_plan.py` (now covering this case) and the unrelated
+`test_requirements.py` re-run clean.
+
+**Regression:** `engine/general/submission_plan.py`'s `_form_step()` only - `"attach"`-status
+forms (SBD 2 today; any future form code given that same capability) now read "ready" instead of
+"by_hand". No schema or other call-site changes; `build_general_pack.py`'s own, already-correct
+`"attach"` handling is untouched.
+
+### Finding 80 (CONFIRMED, FIXED, severe - a real project with no captured position title printed the literal word "None" into a client-facing World Bank-format CV, the exact bug class this same function was already fixed for on its sibling fields)
+
+**Where:** `engine/cv/generate_cv.py`'s `build_world_bank()`, Employment Record section.
+
+**What was tested:** rotated to CV - the most overdue standing area (last dedicated pass the
+ninety-second run). PR #157 (draft, test-only additions to `engine/pack/process_pack_jobs.py`, from
+the pack-focused standing-review routine) and the `eb60f96` fingerprint fix (both already merged/in
+`origin/main`, both `engine/alerts`/`engine/pack` only) - no overlap with `engine/cv`. Read
+`generate_cv.py` end to end, specifically checking whether every "prints the literal word None"
+fix this function has already received (Finding 49, then the 2026-10-23/2026-10-25 follow-ups)
+was actually applied to every nullable field it touches, or only some of them - the same
+"did the earlier fix actually cover everywhere it needed to" question that found Finding 78 last
+cycle in a different file.
+
+**Finding (CONFIRMED, severe).** It wasn't. `build_world_bank()`'s Employment Record loop has a
+comment (just above it) explicitly listing which nullable project fields were fixed for Finding 49
+("start/end/value_rm/contact_name/contact_phone... all nullable columns... sailed straight through
+as the literal string 'None'") - `position_held` is not on that list, and the line just below still
+read `f"Position: {proj.get('position_held', '')} ..."` with no `or` guard at all.
+`position_held` is independently nullable (confirmed from `0001_init_schema.sql`'s own `projects`
+table, and from this exact file's OWN comment three lines above, on `build_sanral_keyperson()`'s
+sibling table-cell version of this field) - a real project captured with no position title reaches
+this line with the key PRESENT but value `None`, and since this is an f-string (not a direct
+`_safe_text(None)` call like the sibling table-cell version, which crashes instead - the 2026-10-23
+fix for THAT), Python silently renders `str(None)` = `"None"` into the paragraph, with nothing to
+crash and catch it. Reproduced directly: a project row with `position_held: None` produced a
+real CV paragraph reading `"Position: None    Value: R10m\nReferee: A Buyer  012 345 6789"`. Traced
+why both existing tests missed this exact gap: Finding 49's own regression test deliberately set
+`position_held="Site Engineer"` (a valid value, since it was testing the OTHER fields), and the
+2026-10-23 fix's own test only covers `build_sanral_keyperson()`, never `build_world_bank()`'s
+sibling field - the two tests' deliberate field choices structurally guaranteed this one slipped
+through both passes.
+
+**Fix:** `proj.get('position_held') or '?'` (matching the `'?'` placeholder this same f-string
+already uses for `start`/`end` one line above), same pattern already correctly applied to every
+other field in this loop.
+
+**Verified the regression test actually catches the regression:** new
+`test_world_bank_project_with_null_position_held_does_not_print_the_word_none()` in
+`test_generate_cv.py`. Reverted the fix (`git apply -R`, keeping the new test): failed with the
+exact predicted "Position: None" text; restored: `0 failure(s)`. Full `test_generate_cv.py` (now 11
+functions) and the unrelated `test_extract_cv_fields.py` re-run clean.
+
+**Regression:** `engine/cv/generate_cv.py`'s `build_world_bank()` only - the Employment Record
+section's `position_held` cell now reads "?" instead of "None" when the field is null.
+`build_sanral_keyperson()`'s own (already-correct) handling of the identical field is untouched.
+
+### Finding 81 (CONFIRMED, FIXED, severe - a company's explicit "Form B7 is waived" answer could be silently overridden by a stale legacy Targeted Enterprise, writing a false subcontracting declaration into the real submitted SANRAL workbook)
+
+**Where:** `engine/fill_tender.py` and `engine/fill_conventional.py` (identical logic, both fixed) -
+the Form B7 (Targeted Enterprise subcontracting) fill branch.
+
+**What was tested:** rotated to SANRAL pack - tied with discovery for most overdue, picked SANRAL
+pack. Open PRs checked: `#157` (draft, test-only additions to `process_pack_jobs.py`'s `sync_*`
+functions - avoided that file) and `#118` (draft, stale, `assess_tender.py`/`classify_tender.py` -
+not touched either way). A sibling pass (same day) had just fixed a DIFFERENT contradiction in
+`submission_plan.py`'s CIDB returnable step - same "two things in the same output disagree about
+the same fact" shape that's been a recurring theme this session, worth specifically hunting for
+elsewhere. Read `engine/sanral_b7.py` (B7 applicability/validation/fill) end to end first - it is
+extremely well-guarded, with its own self-check assertions - then its real callers
+(`fill_tender.py`/`fill_conventional.py`'s Form B7 branch, `assemble_pack.py`'s own B7
+orchestration) to see whether the INTENDED precedence rule `assemble_pack.py` itself already
+encodes is actually enforced where the cells get written.
+
+**Finding (CONFIRMED, severe).** It wasn't. Both fillers decide which Form B7 source to use with:
+`if (td.get("subcontracting_plan") or {}).get("mode") == "subcontract": <use the new plan> elif
+te: <use the legacy td["targeted_enterprise"] block>` - the legacy fallback fires whenever a
+`targeted_enterprise` block is present, REGARDLESS of whether an explicit `subcontracting_plan` of
+a DIFFERENT mode (most importantly `"waived_by_tender"` - the company's own, more authoritative
+"Book 1 says B7 isn't required" answer) also exists on the same pack.yaml. Confirmed this isn't
+purely theoretical: a real pack.yaml in this repo (`packs/r334-030-2025-1f.yaml`) has a `targeted_
+enterprise:` field literally named in its own comments as a once-real field ("omitted - Form B7
+confirmed NOT required"), proving the legacy single-TE format was real, hand-written data before
+`sanral_b7.py`/the Tender Workspace migration existed - a long-running tender whose pack.yaml
+predates that migration and is STILL in use today would carry exactly this shape, and the
+company's later, explicit "waived" answer (captured via the Tender Workspace Form B7 card) would
+silently lose to the untouched legacy block. `assemble_pack.py`'s own `b7_filled` bookkeeping
+(`bool(legacy_te) and not b7_plan`) ALREADY assumes the correct precedence rule ("the legacy block
+only applies when there's no explicit plan AT ALL") - this is the same shape of bug as Finding 78
+(a reporting layer's own assumption not matching what the real write path actually does), just
+with the real submitted SANRAL workbook as the thing that ends up wrong, not just a status message.
+
+Reproduced directly against a real sample (`templates/samples/R.334-030-2025.1F_ran.xlsm`,
+"Conventional" family): a pack.yaml with BOTH a legacy `targeted_enterprise` block ("Stale Legacy
+TE (Pty) Ltd") AND an explicit `subcontracting_plan` with `mode: "waived_by_tender"` ran through
+`fill_conventional.main()` and produced a workbook whose `TEND 1X!C3906` (the Targeted Enterprise
+name cell) read **"Stale Legacy TE (Pty) Ltd"** - a false subcontracting commitment physically
+written into the real Technical Submission workbook, directly contradicting the company's own
+explicit "this tender waives B7" answer, with nothing in the pack's own manifest/contents page
+aware of the mismatch (per `b7_filled`'s own, separately-correct computation, it believed B7 was
+NOT included).
+
+**Fix:** both fillers' legacy fallback condition changed from `elif te:` to `elif te and not
+td.get("subcontracting_plan"):` - the legacy block now only fires when there is no explicit plan
+of ANY mode, matching the precedence `assemble_pack.py` already assumed. An explicit
+`"subcontract"` plan, an explicit `"waived_by_tender"` plan, and the legacy-only case (an old
+pack.yaml with no Tender Workspace answer at all) were all re-verified to behave correctly.
+
+**Verified the regression test actually catches the regression:** new
+`engine/test_fill_b7_legacy_precedence.py` (no dedicated test file existed for either filler's
+Form B7 branch before this, confirmed by grep) - four cases (explicit waiver overrides legacy;
+legacy-only still fills, for back-compat; explicit subcontract plan still fills normally; neither
+present stays blank), driven directly against the real committed sample workbook. Reverted the fix
+(`git apply -R`, keeping the new test): failed exactly as predicted (the stale legacy name written
+despite the waiver); restored: `0 failure(s)`. `test_sanral_b7.py` and `test_form_field_audit.py`
+(which already exercises `fill_conventional.py` via `confirm_pack.py`) both re-run clean. No
+RRM-family sample workbook is committed to this repo to drive an identical end-to-end test of
+`fill_tender.py` (the RRM sibling filler) - its identical fix was verified by direct code
+inspection and the same manual repro technique used to confirm this finding, not a second
+end-to-end test.
+
+**Regression:** `engine/fill_tender.py` and `engine/fill_conventional.py`'s Form B7 branch only -
+one condition changed in each, same fix, same reasoning. No schema or other call-site changes;
+`sanral_b7.py`'s own functions and `assemble_pack.py`'s `b7_filled`/manifest reporting (already
+correct) are untouched.

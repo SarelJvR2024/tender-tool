@@ -9,6 +9,7 @@ import { PIPELINE_STAGES, STAGE_META, type PipelineStage } from "@/lib/pipeline"
 import { ECONOMICS_COLUMNS, formatRand, median, toNumber, type PackEconomics } from "@/lib/dealEconomics";
 import { buildWinLossTrend, monthLabel } from "@/lib/analyticsLogic";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
 import { loadOutcomesForTenders, ownPosition, firmsMet, benchmark, bestOutcome, MIN_SAMPLE, type OutcomeStats } from "@/lib/marketPricing";
 
@@ -29,6 +30,16 @@ import { loadOutcomesForTenders, ownPosition, firmsMet, benchmark, bestOutcome, 
  */
 export const instant = false;
 
+// "tenders" (migration 0001: "Shared across every company - not
+// tenant-scoped") is unbounded and grows every day the discovery pipeline
+// runs - this page's own read had no .range() AND no .order() at all, so
+// once the shared table passes PostgREST's 1000-row response cap it would
+// silently return an arbitrary, unstable 1000-row slice (same bug class as
+// PR #111's marketPricing.ts fix - "silently reading a 2.5% sample, not the
+// real table"). Paginated with the same fetchAllRows() helper; 20,000 is
+// headroom above any plausible current row count, not a measurement.
+const TENDERS_FETCH_CAP = 20_000;
+
 type TenderRow = {
   id: string;
   closing_date: string | null;
@@ -39,10 +50,15 @@ type TenderRow = {
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
-  const [{ data: tenderRows, error }, { data: company }, { data: briefingTasks }, savingsSummary] = await Promise.all([
-    supabase
-      .from("tenders")
-      .select(`id, closing_date, title, buyer, tender_packs(pipeline_stage, stage_changed_at, submitted_at, ${ECONOMICS_COLUMNS})`),
+  const [{ rows: tenderRows, error }, { data: company }, { data: briefingTasks }, savingsSummary] = await Promise.all([
+    fetchAllRows<TenderRow>(
+      (from, to) =>
+        supabase
+          .from("tenders")
+          .select(`id, closing_date, title, buyer, tender_packs(pipeline_stage, stage_changed_at, submitted_at, ${ECONOMICS_COLUMNS})`)
+          .range(from, to),
+      TENDERS_FETCH_CAP,
+    ),
     supabase.from("companies").select("legal_name, csd_trading_name").maybeSingle(),
     supabase.from("tender_tasks").select("status").eq("kind", "briefing"),
     fetchSavingsCounterSummary(supabase),
@@ -182,6 +198,16 @@ export default async function AnalyticsPage() {
                         {p.lost > 0 && <div className="w-full rounded-t-sm bg-destructive/60" style={{ height: `${(p.lost / trendMax) * 100}%` }} />}
                         {p.won > 0 && <div className="w-full rounded-t-sm bg-success" style={{ height: `${(p.won / trendMax) * 100}%` }} />}
                       </div>
+                      {/* The won/lost counts used to live only in the title= above - invisible on
+                          touch and unreachable by hover on the bar itself once the cursor is busy
+                          elsewhere. Same "real information, hover-only" bug this app's own standing
+                          review already fixed twice (PrimaryPackActionLink, Discovery readiness
+                          blockers) - title kept as a free desktop-hover convenience, not load-bearing
+                          here either. */}
+                      <span className="text-[9px] font-semibold tabular-nums">
+                        <span className={p.won > 0 ? "text-success" : "text-muted-foreground"}>{p.won}W</span>{" "}
+                        <span className={p.lost > 0 ? "text-destructive" : "text-muted-foreground"}>{p.lost}L</span>
+                      </span>
                       <span className="text-[10px] text-muted-foreground">{monthLabel(p.month)}</span>
                     </div>
                   ))}

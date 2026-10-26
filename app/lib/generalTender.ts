@@ -13,6 +13,7 @@
 // Evidence for every rule: docs/specs/General-Tender-Engine-Findings.md and
 // docs/specs/General-Tender-Preparation-Findings.md.
 
+import { formatDate } from "./dates";
 import { BEE_PROOF_LABEL, validityAtClosing, type CompanyVault, type ComplianceStatus } from "./tenderCompliance";
 import type { EvidenceRule } from "./experienceEvidence";
 import type { LocalityRow } from "./locality";
@@ -162,9 +163,15 @@ export type ReturnableCheck = {
   vaultLink: boolean; // fix it on the Company page instead
   upload: TenderAnswer | null;
   expiring?: boolean;
+  /** Passed straight through from the manifest - lets a renderer route a "missing" row to quick-fix-config.ts's own VAULT_DRAWER_CONFIG (the Quick Blocker Resolver drawer), the same lookup compliance-report.tsx's BidTaskRow already does for SANRAL. */
+  vault: "csd" | "tax" | "bbbee" | "coid" | "cidb" | "bank" | "insurance" | null;
+  /** requirements.py's own regex/heuristic extraction confidence (0-100) for THIS returnable being required at all - never "AI confidence" (general-pack-review.tsx's MatchStrengthBadge comment explains why). About how confidently the requirement text was found, not whether the company's own document satisfies it - so only meaningful alongside "check", never "missing" (see general-workspace.tsx's own use of matchStrengthStatus()). */
+  confidence?: number;
+  confidenceReason?: string;
 };
 
-const fmt = (d: string) => new Date(d).toLocaleDateString();
+// Trust Blue standard date format (Phase 2, 2026-10-23) - see tenderCompliance.ts's own fmt().
+const fmt = (d: string) => formatDate(d) ?? d;
 
 /**
  * One supporting document against the vault / this tender's uploads.
@@ -180,7 +187,7 @@ export function checkReturnable(
   biddingAsJv: boolean | null,
 ): ReturnableCheck {
   const upload = answers.find((a) => a.field_key === UPLOAD_PREFIX + r.key && a.storage_path) ?? null;
-  const base = { key: r.key, label: r.label, quote: r.quote, from_ocr: r.from_ocr, strength: r.strength, upload };
+  const base = { key: r.key, label: r.label, quote: r.quote, from_ocr: r.from_ocr, strength: r.strength, upload, vault: r.vault, confidence: r.confidence, confidenceReason: r.confidence_reason };
   const uploaded = upload ? ` Uploaded for this tender: ${upload.original_filename}.` : "";
 
   if (r.conditional === "jv" && biddingAsJv === false) {

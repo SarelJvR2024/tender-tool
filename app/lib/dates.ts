@@ -1,3 +1,54 @@
+// Trust Blue standard date format (Phase 2, 2026-10-23): always "23 Oct 2026",
+// never a raw US MM/DD/YYYY from an unqualified toLocaleDateString() - the
+// exact options discovery/page.tsx's own SAST_DATE already used locally;
+// shared here so every other caller gets the same, correct rendering
+// instead of depending on the server's own default locale (which produced
+// MM/DD/YYYY wherever a bare toLocaleDateString()/toLocaleString() call
+// slipped through).
+const SAST_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  timeZone: "Africa/Johannesburg",
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+};
+const SAST_DATETIME_OPTIONS: Intl.DateTimeFormatOptions = { ...SAST_DATE_OPTIONS, hour: "2-digit", minute: "2-digit" };
+
+/** "23 Oct 2026" - South African date-only format. Returns null for an unreadable date, never a guess. */
+export function formatDate(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-ZA", SAST_DATE_OPTIONS);
+}
+
+/** "23 Oct 2026, 14:30" - South African date+time format. Returns null for an unreadable date, never a guess. */
+export function formatDateTime(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleString("en-ZA", SAST_DATETIME_OPTIONS);
+}
+
+/**
+ * Closing date/time with a real time - "23 Oct 2026 (Time TBC in RFP)" when
+ * the stored value's SAST time is exactly midnight. parse_sast()
+ * (engine/discovery/source_http.py) defaults a date-only ingest value - no
+ * time given at all by the source - to SAST midnight as a generic "unknown"
+ * marker; harmless for a published/briefing date, but shown as a tender's
+ * own closing TIME it reads as a real (and highly improbable) deadline
+ * rather than what it actually is: unspecified (Batch 2B Touch-ups, Sarel's
+ * live feedback). Returns null for an unreadable date, same as
+ * formatDate()/formatDateTime().
+ */
+export function formatClosingDateTime(dateStr: string | null | undefined): string | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return null;
+  const sastTime = d.toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit", hour12: false });
+  if (sastTime === "00:00") return `${formatDate(dateStr)} (Time TBC in RFP)`;
+  return formatDateTime(dateStr);
+}
+
 // Shared "N days until a date" math, used anywhere a closing date or expiry
 // date needs a day count: tenders closing (dashboard), documents expiring
 // (company vault). Normalizes "today" to midnight first so the count is
@@ -50,4 +101,32 @@ export function expiryStatus(dateStr: string | null, renewSoonWithinDays = 60): 
   if (left < 0) return { label: "Expired", tone: "destructive" };
   if (left <= renewSoonWithinDays) return { label: "Renew soon", tone: "warning" };
   return { label: "Current", tone: "success" };
+}
+
+/**
+ * "Closes in X days / Y hours" - the exact wording Sarel asked for on the
+ * Opportunities cards (2026-10-22 live feedback). The one shared deadline-
+ * countdown calculation for any tender closing time - time-aware on purpose
+ * (unlike the date-only daysUntil()): a tender closes at a stated hour, and
+ * Math.ceil(ms / day) turned "closed 2 hours ago" into -0, which rendered as
+ * "0 days left" instead of "closed" (2026-10-17 scenario pass). Used by
+ * discovery/page.tsx's Opportunities cards and the Tender Workspace header
+ * (app/app/tenders/[id]/page.tsx) - the latter used to keep its own,
+ * independently-drifted copy of this exact function (missing the remaining-
+ * hours breakdown below, QA finding 2026-10-26) rather than importing this
+ * one; don't reintroduce a second copy.
+ */
+export function closingCountdown(closingDate: string | null): { text: string; urgent: boolean } | null {
+  if (!closingDate) return null;
+  const ms = new Date(closingDate).getTime() - Date.now();
+  if (Number.isNaN(ms)) return null;
+  if (ms <= 0) return { text: "closed", urgent: true };
+  const hours = Math.floor(ms / (1000 * 60 * 60));
+  if (hours < 24) return { text: hours < 1 ? "closes within the hour" : `closes in ${hours} hour${hours === 1 ? "" : "s"}`, urgent: true };
+  const days = Math.floor(hours / 24);
+  const remHours = hours - days * 24;
+  return {
+    text: remHours > 0 ? `closes in ${days} day${days === 1 ? "" : "s"} ${remHours} hour${remHours === 1 ? "" : "s"}` : `closes in ${days} day${days === 1 ? "" : "s"}`,
+    urgent: days <= 7,
+  };
 }

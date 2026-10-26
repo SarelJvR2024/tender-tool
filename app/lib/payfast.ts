@@ -42,6 +42,19 @@ export function payfastHost(): string {
   return payfastMode() === "live" ? "www.payfast.co.za" : "sandbox.payfast.co.za";
 }
 
+// Single source of truth for "is this still sandbox, from a customer's point
+// of view" - read by both /billing's own copy (lib/payfast.ts -> page.tsx)
+// AND the checkout route itself (/api/billing/checkout), so the two can
+// never drift (one claiming "billing is active" while the other still
+// quietly starts a PayFast sandbox transaction). NEXT_PUBLIC_PAYFAST_SANDBOX
+// is the explicit override introduced by the 2026-10-23 UX audit (item 6);
+// unset falls back to the real payfastMode().
+export function isBillingSandboxed(): boolean {
+  return process.env.NEXT_PUBLIC_PAYFAST_SANDBOX === undefined
+    ? payfastMode() === "sandbox"
+    : process.env.NEXT_PUBLIC_PAYFAST_SANDBOX === "true";
+}
+
 export function payfastProcessUrl(): string {
   return `https://${payfastHost()}/eng/process`;
 }

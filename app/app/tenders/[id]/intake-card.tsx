@@ -1,4 +1,5 @@
 import { DowngradeFlag } from "../../discovery/downgrade-flag";
+import { stripLeakedTaxonomySlugs } from "@/lib/disciplineTaxonomy";
 import { ACTIVE_PURSUIT_STAGES, DOWNGRADE_COLUMNS, isDowngraded, isOpenDowngrade, verdictLabel, type Downgrade } from "@/lib/discoveryReassessment";
 import { createClient } from "@/lib/supabase/server";
 import { JOB_STATUS_STYLE, type EngineJob } from "@/lib/generalTender";
@@ -93,8 +94,8 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
 
       {active && (
         <div className="mb-2.5 rounded-lg bg-warning/10 px-3.5 py-2.5 text-[13px] text-warning">
-          Reading the documents: working out whether this is a SANRAL template tender or a general one, what it requires, and how
-          it fits your company. This page refreshes by itself. If it stays queued, the Tender Ready worker isn&apos;t running yet.
+          Reading the documents: working out what this tender requires and how it fits your company. This page refreshes
+          by itself. If it stays queued, the Tender Ready worker isn&apos;t running yet.
         </div>
       )}
 
@@ -109,7 +110,7 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
         <>
           <div className="mb-1.5 flex flex-wrap items-center gap-2">
             <span className={chip(intake.route === "sanral" ? "bg-foreground text-white" : "bg-muted text-foreground")}>
-              {intake.route === "sanral" ? `SANRAL pack flow - ${intake.family}` : "General (non-SANRAL) flow"}
+              {intake.route === "sanral" ? `SANRAL pack flow - ${intake.family}` : "General flow"}
             </span>
             {intake.fingerprint && (
               <span className={chip(FP_STYLE[intake.fingerprint.status].className)}>{FP_STYLE[intake.fingerprint.status].label}</span>
@@ -169,7 +170,7 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
             )}
           </div>
           <ul className="m-0 pl-4 text-xs text-muted-foreground">
-            {(opp.reasons ?? []).map((r, i) => <li key={i}>{r}</li>)}
+            {(opp.reasons ?? []).map((r, i) => <li key={i}>{stripLeakedTaxonomySlugs(r)}</li>)}
             {(opp.score_outlook?.summary ?? []).map((r, i) => <li key={`s${i}`} className="text-muted-foreground">{r}</li>)}
           </ul>
         </div>
@@ -178,7 +179,8 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
       {isManual && ownerId && !active && (
         <div className="mt-3 border-t border-border pt-3">
           <div className="mb-1.5 text-xs text-muted-foreground">
-            Missing something (an addendum, the SANRAL workbook, a readable copy of a scanned page)? Add it and the tender is read again.
+            Missing something (an addendum{intake?.route === "sanral" ? ", the SANRAL workbook" : ""}, a readable copy of a scanned page)? Add
+            it and the tender is read again.
           </div>
           <AddTenderDocumentsForm companyId={ownerId} tenderId={tenderId} />
         </div>

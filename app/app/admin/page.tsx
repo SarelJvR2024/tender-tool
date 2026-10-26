@@ -27,6 +27,52 @@ type CvDocumentStats = {
   open_tender_cvs_docs_missing: number;
 };
 
+type CompanyNameRow = { id: string; legal_name: string; csd_trading_name: string | null };
+
+// Quick Health Status (System Admin Command Center brief, 2026-10-25):
+// green/amber/red per engine area, derived entirely from signals this app
+// already has - system_alerts (open critical/error/warning, source-scoped)
+// and notification_logs' own recent send outcomes - deliberately NOT a new
+// heartbeat/last_run_at table. Sarel's own call on the brief's "INFO
+// severity for routine completions" ask: skip it, keep system_alerts a
+// high-signal exception queue, and answer "is everything healthy" here
+// instead, from data that already exists.
+const HEALTH_SOURCE_GROUPS: Record<string, string[]> = {
+  "Scraper / Discovery feed": ["discovery", "scraper"],
+  "OCR & extraction workers": ["pack", "narrative", "cv", "cv_extract", "general", "onboarding", "worker"],
+};
+type HealthStatus = { label: string; tone: "success" | "warning" | "destructive"; detail: string };
+
+function healthFromAlerts(label: string, sources: string[], openAlerts: SystemAlert[]): HealthStatus {
+  const relevant = openAlerts.filter((a) => sources.includes(a.source));
+  const critical = relevant.filter((a) => a.severity === "critical");
+  if (critical.length > 0) return { label, tone: "destructive", detail: `${critical.length} open critical alert${critical.length === 1 ? "" : "s"}` };
+  if (relevant.length > 0) return { label, tone: "warning", detail: `${relevant.length} open alert${relevant.length === 1 ? "" : "s"}` };
+  return { label, tone: "success", detail: "no open alerts" };
+}
+
+// Resend has no alert source of its own (a failed send never raises a
+// system_alerts row) - its own dispatch log (notification_logs,
+// /admin/notifications) is the real signal. Looks at the most recent 20
+// sends: >=50% failed is red, any failure is amber, otherwise green; no
+// sends yet at all is shown as its own neutral state rather than a false
+// "healthy".
+function healthFromNotificationLogs(recentStatuses: string[]): HealthStatus {
+  const label = "Resend email dispatch";
+  if (recentStatuses.length === 0) return { label, tone: "warning", detail: "no sends recorded yet" };
+  const failed = recentStatuses.filter((s) => s !== "sent").length;
+  const ratio = failed / recentStatuses.length;
+  if (ratio >= 0.5) return { label, tone: "destructive", detail: `${failed}/${recentStatuses.length} of the last sends failed` };
+  if (failed > 0) return { label, tone: "warning", detail: `${failed}/${recentStatuses.length} of the last sends failed` };
+  return { label, tone: "success", detail: `last ${recentStatuses.length} sends delivered` };
+}
+
+const HEALTH_CHIP_CLASS: Record<HealthStatus["tone"], string> = {
+  success: "bg-success/10 text-success border-success/20",
+  warning: "bg-warning/10 text-warning border-warning/20",
+  destructive: "bg-destructive/10 text-destructive border-destructive/20",
+};
+
 type RunRow = {
   id: string;
   run_at: string;
@@ -70,17 +116,50 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   // / did we get the tender documents" check, computed server-side rather
   // than left as a one-off query - see that migration's header for exactly
   // what each number counts.
-  const [{ data: openAlerts, error: alertsError }, { data: resolvedAlerts }, { data: cvStatsRows, error: cvStatsError }] = await Promise.all([
+  const [{ data: openAlerts, error: alertsError }, { data: resolvedAlerts }, { data: cvStatsRows, error: cvStatsError }, { data: recentLogs }, { data: companyNameRows }] = await Promise.all([
     supabase.from("system_alerts").select(ALERT_COLUMNS).is("resolved_at", null)
       .order("last_seen_at", { ascending: false }),
     supabase.from("system_alerts").select(ALERT_COLUMNS).not("resolved_at", "is", null)
       .order("resolved_at", { ascending: false }).limit(RESOLVED_SHOWN),
     supabase.rpc("platform_admin_cv_document_stats"),
+    // Quick Health Status's Resend signal - see healthFromNotificationLogs().
+    supabase.from("notification_logs").select("status").order("sent_at", { ascending: false }).limit(20),
+    // Resolves company_id in an alert's own context to a real name below -
+    // reuses platform_admin_companies() (0064/0098) rather than a second,
+    // narrower "company name by id" RPC for the same admin-gated lookup.
+    supabase.rpc("platform_admin_companies"),
   ]);
   const cvStats = cvStatsRows?.[0] as CvDocumentStats | undefined;
   const open = (openAlerts ?? []) as SystemAlert[];
   const resolved = (resolvedAlerts ?? []) as SystemAlert[];
-  const newCount = open.filter((a) => !a.reported_at).length;
+  const companyNameById = new Map(
+    ((companyNameRows ?? []) as CompanyNameRow[]).map((c) => [c.id, c.csd_trading_name || c.legal_name] as const),
+  );
+
+  // Tender reference resolution: tenders are readable by any authenticated
+  // user (0001's own "tenders readable by authenticated users" policy, not
+  // company-scoped - tender data is shared/discovery-sourced), so this is a
+  // plain batched select, not another admin RPC.
+  const tenderIds = Array.from(
+    new Set([...open, ...resolved].map((a) => (a.context?.tender_id as string | undefined) ?? null).filter((v): v is string => !!v)),
+  );
+  const { data: tenderRefRows } = tenderIds.length > 0
+    ? await supabase.from("tenders").select("id, contract_no, description").in("id", tenderIds)
+    : { data: [] as { id: string; contract_no: string | null; description: string | null }[] };
+  const tenderRefById = new Map((tenderRefRows ?? []).map((t) => [t.id, t.contract_no || t.description || t.id] as const));
+
+  const resolveAlert = (a: SystemAlert): SystemAlert => ({
+    ...a,
+    resolvedCompanyName: a.context?.company_id ? companyNameById.get(a.context.company_id as string) ?? null : null,
+    resolvedTenderRef: a.context?.tender_id ? tenderRefById.get(a.context.tender_id as string) ?? null : null,
+  });
+  const openResolved = open.map(resolveAlert);
+  const resolvedResolved = resolved.map(resolveAlert);
+
+  const health: HealthStatus[] = [
+    ...Object.entries(HEALTH_SOURCE_GROUPS).map(([label, sources]) => healthFromAlerts(label, sources, open)),
+    healthFromNotificationLogs((recentLogs ?? []).map((r) => r.status as string)),
+  ];
 
   if (error) console.error("admin_harness_runs select failed", error);
   if (alertsError) console.error("system_alerts select failed", alertsError);
@@ -102,6 +181,23 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     <AppShell>
       <div className="mx-auto w-full max-w-[1000px] p-4 sm:p-6 md:px-8 md:py-6">
         <AdminNav active="alerts" />
+
+        <section id="quick-health-status" className="mb-9">
+          <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">Quick health status</h1>
+          <p className="mb-4 text-[13px] text-muted-foreground">
+            Green/amber/red per engine area, derived from open system alerts and Resend&apos;s own recent sends - not a
+            separate heartbeat, just this page&apos;s own data read as a status.
+          </p>
+          <div className="flex flex-wrap gap-2.5">
+            {health.map((h) => (
+              <span key={h.label} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[12px] font-semibold ${HEALTH_CHIP_CLASS[h.tone]}`}>
+                {h.label}
+                <span className="font-normal opacity-80">- {h.detail}</span>
+              </span>
+            ))}
+          </div>
+        </section>
+
         <section id="cv-document-stats" className="mb-9">
           <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">CVs &amp; tender documents</h1>
           <p className="mb-4 text-[13px] text-muted-foreground">
@@ -131,9 +227,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
           <p className="mb-4 text-[13px] text-muted-foreground">
             Every failure the engines and the bridge worker hit (a job that crashed, a scoring error, OCR that
             couldn&apos;t run, a worker pass that broke) - one row per problem, counted each time it happens again.
-            New alerts are e-mailed by the scheduled check-in (engine/alerts/check_system_alerts.py); mark one resolved
-            once it is fixed.{" "}
-            {open.length === 0 ? "Nothing open." : `${open.length} open${newCount > 0 ? `, ${newCount} not yet e-mailed` : ""}.`}
+            Error/critical alerts are e-mailed within minutes by scripts/send-scout-alerts.ts; every open alert is also
+            summarised in the 07:00 SAST founder digest - mark one resolved once it is fixed.{" "}
+            {open.length === 0 ? "Nothing open." : `${open.length} open.`}
           </p>
           {alertsError && (
             <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-2.5 text-[13px] text-destructive">
@@ -144,7 +240,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
             {open.length === 0 && !alertsError && (
               <div className="p-4.5 text-[13px] text-success">No open system alerts.</div>
             )}
-            {open.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
+            {openResolved.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
           </div>
           {resolved.length > 0 && (
             <details className="mt-3">
@@ -152,7 +248,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
                 Recently resolved ({resolved.length})
               </summary>
               <div className="mt-2 overflow-hidden rounded-xl border border-border bg-card">
-                {resolved.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
+                {resolvedResolved.map((a) => <SystemAlertRow key={a.id} alert={a} />)}
               </div>
             </details>
           )}

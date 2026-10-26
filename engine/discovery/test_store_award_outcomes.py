@@ -109,12 +109,33 @@ def test_every_row_in_one_batch_carries_the_same_keys():
           [r for r in rows if r["outcome_key"] == sao.outcome_key(new_tender)][0]["first_seen_at"] is not None)
 
 
+def test_zero_amount_dropped_with_an_explanatory_note():
+    print("a literal '0.00' on a SANRAL register (parse_rand()'s own docstring confirms this is real, "
+          "seen live 2026-10-17) must be dropped with the same kind of note every other dropped amount gets")
+    rec = {
+        "source": "sanral_awarded", "reference": "N.001-002-2026/1", "title": "Test tender",
+        "opening_register": [
+            {"tenderer": "Withdrawn Co (Pty) Ltd",
+             "amounts": [{"column": "Amount", "amount_zar": 0.0, "amount_raw": "0.00"}]},
+        ],
+    }
+    part = sao.part_from_sanral(rec)
+    check("the zero amount is still dropped from amount_zar (0 fails plausible()'s 0 < amount check)",
+          part["bidders"][0]["amounts"][0]["amount_zar"] is None, part["bidders"][0]["amounts"][0])
+    check("but the raw text is kept, not discarded, so the register's own wording is still visible",
+          part["bidders"][0]["amounts"][0]["amount_raw"] == "0.00")
+    check("and - unlike every OTHER dropped amount in this file - a note explains why it's missing, "
+          "not a silent null with no reason given",
+          any("Withdrawn Co" in n for n in part["notes"]), part["notes"])
+
+
 def main():
     test_unrelated_company_sharing_a_first_word_is_not_assumed_the_winner()
     test_exact_name_match_still_sets_the_winner()
     test_amount_match_still_sets_the_winner()
     test_find_winner_still_returns_the_unconfirmed_candidate_for_diagnostics()
     test_every_row_in_one_batch_carries_the_same_keys()
+    test_zero_amount_dropped_with_an_explanatory_note()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

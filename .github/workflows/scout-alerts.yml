@@ -1,0 +1,66 @@
+# Sends Tier 3 "instant" Quality Scout exception alerts
+# (app/scripts/send-scout-alerts.ts) on a tight schedule - Sarel's own ask,
+# "instant Quality Scout exception alerts" (notification engine brief,
+# section 3, Tier 3). There is no event bus anywhere in this codebase (every
+# notification type here is a scheduled candidate scan, not a webhook/queue
+# trigger) - every 10 minutes is the closest a GitHub Actions cron can get to
+# "instant" without standing up a new always-on process this app has never
+# needed before. See app/lib/scoutAnomalyAlerts.ts's own header comment for
+# why this is a deliberately SEPARATE channel from the existing
+# engine/alerts/check_system_alerts.py + external-Claude-session-with-Gmail
+# mechanism, not a replacement for it - flagged there and in this change's
+# own PR description, not silently decided.
+#
+# Anti-noise throttle (2026-10-25): only alerts with activity in the last 30
+# minutes qualify (app/lib/scoutAnomalyAlerts.ts's own SCOUT_ANOMALY_MAX_AGE_MINUTES
+# - a stale backlog item is still covered by the daily founder digest's own
+# count, just not as its own interrupt), and every run sends at most ONE
+# email covering every alert it claims, never one email per alert.
+#
+# Needs NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/RESEND_API_KEY
+# (same repository secrets the other email workflows already use), plus
+# ADMIN_NOTIFICATION_EMAIL and (optional) RESEND_FROM_SCOUT. Until both
+# RESEND_API_KEY and ADMIN_NOTIFICATION_EMAIL are set, this workflow still
+# runs safely and still goes green every 10 minutes: the script detects
+# whichever is missing and exits 0 having sent or claimed nothing.
+
+name: scout-alerts
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {} # manual test run, e.g. right after adding RESEND_API_KEY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scout-alerts
+  cancel-in-progress: true # a 10-minute cadence job should never queue behind a slow/stuck previous run
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies (needs @supabase/supabase-js and resend)
+        run: npm ci
+
+      - name: Send any new Quality Scout exception alerts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_SCOUT: ${{ secrets.RESEND_FROM_SCOUT }}
+          ADMIN_NOTIFICATION_EMAIL: ${{ secrets.ADMIN_NOTIFICATION_EMAIL }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: node --experimental-strip-types scripts/send-scout-alerts.ts

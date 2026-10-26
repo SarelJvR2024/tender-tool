@@ -94,12 +94,29 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          # No pip install step: daily_digest.py's own import chain
-          # (discovery/compliance/alerts modules) and send_digest_emails.py
-          # are both pure standard library - confirmed by grepping every
-          # module they import for python-docx/PyYAML/pypdf/Pillow/
-          # anthropic/pdfplumber (engine/worker/requirements.txt's own
-          # list) before writing this workflow. Nothing to install.
+
+      # QA pass, 2026-10-24: this used to need nothing installed (confirmed
+      # at the time by grepping daily_digest.py's whole import chain for
+      # python-docx/PyYAML/pypdf/Pillow/anthropic/pdfplumber - none were
+      # there). The real BOQ/scope extraction engine (gov_sources.py's own
+      # attach_scope_enrichment(), landed since) added a new, unconditional
+      # import chain - tender_enrichment.py -> boq_extraction.py ->
+      # sanral_fill.py -> `from lxml import etree` - that this workflow was
+      # never updated for. Confirmed live: the scheduled run that first hit
+      # this (2026-10-24 08:24 UTC) failed with
+      # "ModuleNotFoundError: No module named 'lxml'" partway through
+      # fetch_releases(), after a 14-minute feed read, right before it would
+      # have written digest_report.json - every digest for every opted-in
+      # person that day was lost, not just delayed. lxml alone, not the
+      # python-docx that normally pulls it in transitively (engine/worker/
+      # requirements.txt's own comment) - this workflow's own scripts never
+      # touch python-docx, so installing the whole package just for its one
+      # transitive dependency would be installing code this job never runs.
+      # Pinned to the version this repo's worker container already verifies
+      # against (same "pin to what was actually verified" convention as
+      # engine/worker/requirements.txt).
+      - name: Install lxml (sanral_fill.py's own XML dependency, pulled in by the BOQ/scope-enrichment chain)
+        run: pip install lxml==6.1.3
 
       - name: Build today's digests (read-only against Supabase)
         env:

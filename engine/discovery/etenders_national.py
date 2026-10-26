@@ -65,6 +65,7 @@ category is kept; the site rows' contact names and e-mails are dropped.
 Usage:
     python3 etenders_national.py --days 14 [--buyer "SANRAL"] [--out report.json] [--no-site-categories]
 """
+import os
 import sys
 import json
 import time
@@ -73,6 +74,9 @@ import datetime
 import urllib.parse
 import urllib.request
 import urllib.error
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import source_http as sh  # noqa: E402
 
 API_BASE = "https://ocds-api.etenders.gov.za/api/OCDSReleases"
 # The public eTenders site's own table data (the JSON behind
@@ -242,7 +246,7 @@ def normalize(release):
         "ocid": release.get("ocid"),
         "contract_number": bid_number or tender.get("id"),
         "portal_id": tender.get("id"),
-        "title": tender.get("description") or bid_number,
+        "title": sh.strip_title_artifacts(tender.get("description")) or bid_number,
         "description": tender.get("description"),
         "buyer": buyer.get("name"),
         "procurement_category": tender.get("mainProcurementCategory"),

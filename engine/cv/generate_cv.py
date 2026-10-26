@@ -285,9 +285,15 @@ def build_sanral_keyperson(profile, person, person_id, detail, tender_ctx, logo_
         hdr[i].paragraphs[0].runs[0].bold = True
     for proj in shown:
         row = t.add_row().cells
-        row[0].text = _safe_text(proj.get("client_and_number", ""))
+        row[0].text = _safe_text(proj.get("client_and_number", ""))  # not-null column (0001_init_schema.sql)
         row[1].text = _safe_text(str(proj.get("value_rm", "")) if proj.get("value_rm") is not None else "")
-        row[2].text = _safe_text(proj.get("position_held", ""))
+        # position_held is nullable (0001_init_schema.sql) - dict.get(key, default) only
+        # substitutes default when the key is ABSENT, not when it's present with value None,
+        # and _safe_text(None) crashes (re.sub needs a string): a real project row with no
+        # captured position title failed CV generation for that person entirely, not just
+        # printed the word "None" like the sibling bug this file's own build_world_bank() had
+        # (Finding 49). QA pass, 2026-10-23.
+        row[2].text = _safe_text(proj.get("position_held", "") or "")
         row[3].text = _safe_text(proj.get("start", "") or "")
         row[4].text = _safe_text(proj.get("end", "") or "")
         row[5].text = _safe_text(proj.get("contact", "") or "")
@@ -452,7 +458,14 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
             row[0].text = _safe_text(desc or "")
             row[1].text = _safe_text(inst or "")
             row[2].text = _safe_text(date or "")
-            log.confirmed(f"cv.wb.education.{desc}", f"{inst}, {date}")
+            # inst/date are independently nullable (0001_init_schema.sql) -
+            # the document cells above already guard with `or ""`, but this
+            # provenance entry interpolated them raw, so a qualification
+            # captured with a description but no institution/graduation date
+            # yet logged as "confirmed" with the literal word "None" in it -
+            # same bug class as Finding 49/73 (QA pass, 2026-10-25).
+            log.confirmed(f"cv.wb.education.{desc}",
+                          f"{inst or '(institution not on file)'}, {date or '(graduation date not on file)'}")
     else:
         d.add_paragraph("MISSING")
         log.missing("cv.wb.education", reason="No qualifications on file for this person.")
@@ -483,9 +496,16 @@ def build_world_bank(profile, person, person_id, detail, tender_ctx, logo_path, 
             # guards the same fields with `or` for this exact reason - this
             # one didn't.
             value_rm = proj.get("value_rm")
+            # position_held is nullable (0001_init_schema.sql, same as build_sanral_keyperson()'s
+            # own guard on it above) - `proj.get("position_held", "")` only substitutes the
+            # default when the key is ABSENT, not when it's present with value None, and an
+            # f-string interpolates None as the literal string "None" with no crash to catch it -
+            # exactly the bug class the comment above this loop says was already fixed for
+            # start/end/value_rm/contact_name/contact_phone, just missed for this one field.
+            # QA pass, 2026-10-26.
             d.add_paragraph(_safe_text(
                 f"{proj.get('start') or '?'} to {proj.get('end') or '?'}  —  {proj.get('client_and_number', '')}\n"
-                f"Position: {proj.get('position_held', '')}    Value: R{value_rm if value_rm is not None else '?'}m\n"
+                f"Position: {proj.get('position_held') or '?'}    Value: R{value_rm if value_rm is not None else '?'}m\n"
                 f"Referee: {proj.get('contact') or 'MISSING'}  {proj.get('contact_phone') or ''}"
             ))
     else:

@@ -189,11 +189,60 @@ GOOD_ANSWER = {  # TEST DOUBLE: what a correct model answer for make_docx()'s CV
 }
 
 
+def _person_as_wire_entries(person_dict):
+    """GOOD_ANSWER["person"] is a dict (used throughout this file to test
+    validate_proposal()'s own logic) - the real wire schema (output_schema())
+    is an array of {field, value, evidence} entries (see extract_cv_fields.py's
+    own 2026-10-23 comment on PERSON_FIELD_ENTRY_SCHEMA). Converts one to the
+    other for the one test that checks a fixture against the real schema."""
+    return [{"field": k, "value": v["value"], "evidence": v["evidence"]} for k, v in person_dict.items()]
+
+
+def _count_union_params(schema):
+    """What the API's own error actually counts (2026-10-23 re-review,
+    QA-cv.pdf): 'N parameters with type arrays or anyOf' - only
+    union/nullable-typed properties, not every property. A first pass at
+    this check (`_count_schema_params`, counting every property regardless
+    of union-ness) overstated the real number and understated how much
+    `person`'s own fix already helped - it reported this schema at ~22
+    "total params" and left the real, API-relevant number (12, see below)
+    unverified. Counting only union-typed properties, recursively through
+    `properties`, array `items` and `anyOf` branches, is what actually
+    matches the provider's limit."""
+    if not isinstance(schema, dict):
+        return 0
+    n = 0
+    for v in (schema.get("properties") or {}).values():
+        if isinstance(v, dict) and ("anyOf" in v or isinstance(v.get("type"), list)):
+            n += 1
+        n += _count_union_params(v)
+    items = schema.get("items")
+    if isinstance(items, dict):
+        n += _count_union_params(items)
+    for branch in schema.get("anyOf") or []:
+        n += _count_union_params(branch)
+    return n
+
+
 def test_validation(docx_path, tmp):
     print("3. checks applied to a model answer (hand-written test doubles)")
     import jsonschema
-    jsonschema.validate(GOOD_ANSWER, x.output_schema())
-    check(True, "test-double answer is valid against the structured-output schema sent to the API")
+    jsonschema.validate(dict(GOOD_ANSWER, person=_person_as_wire_entries(GOOD_ANSWER["person"])), x.output_schema())
+    check(True, "array-shaped test-double answer is valid against the real structured-output schema sent to the API")
+    n = _count_union_params(x.output_schema())
+    # `person`'s own union count dropped from 32 (one value+evidence pair
+    # per field, the same fixed-object-per-field bug confirmed live in
+    # classify_documents.py's `fields`) to 2, by moving to an array of
+    # {field, value, evidence} entries. `projects`/`other_registrations`
+    # were deliberately left as typed per-field records rather than
+    # flattened the same way (a shared per-project evidence quote,
+    # `validate_proposal()`'s own verification logic built around that
+    # shape) - but counted correctly (union-typed properties only, matching
+    # the API's own "N parameters with type arrays or anyOf" wording, not
+    # every property regardless of union-ness), their 8 + 2 union params are
+    # well within the limit on their own. 12 total, confirmed under the
+    # real 16-param limit the API enforces - not just "smaller than before".
+    check(n < 16, f"schema has {n} union-typed parameters (API limit 16), down from 42 before `person` was fixed")
     text = x.read_cv_text(docx_path, tmp)["text"]
     _, ids = x.find_and_redact_sa_ids(text)
     prop, warnings = x.validate_proposal(json.loads(json.dumps(GOOD_ANSWER)), text, ids)
@@ -283,6 +332,40 @@ def test_llm_call():
         if saved:
             os.environ["ANTHROPIC_API_KEY"] = saved
 
+    # Re-review 2026-10-23: a live upload exposed the raw provider error and
+    # request_id straight to the customer (ExtractionFailed used to embed
+    # e.message verbatim). A BadRequestError - the exact shape of the real
+    # "too many union parameters" rejection - must now come out as a clean,
+    # fixed customer message, with the technical detail only on `.detail`.
+    import anthropic
+    # Finding 65, 2026-10-23: this is httpx2, not httpx - anthropic's own
+    # _base_client.py imports httpx2 throughout ("`httpx` objects don't work
+    # with `httpx2`, and would otherwise fail deep inside a request") and
+    # anthropic==1.15.0's real dependency is httpx2<3,>=2.0.0, confirmed from
+    # a real CI run's own pip install log, not assumed. A bare `import httpx`
+    # here was wrong in two ways at once: ModuleNotFoundError since nothing
+    # in this dependency tree installs plain httpx, and even if it were
+    # installed, passing an httpx.Response into anthropic.BadRequestError
+    # would silently misbehave per that same docstring.
+    import httpx2 as httpx
+    raw = ("Schemas contains too many parameters with union types (42 parameters with type arrays or anyOf). "
+           "This causes exponential compilation cost. Reduce the number of nullable or union-typed parameters "
+           "(limit: 16 parameters with unions).")
+    resp = httpx.Response(400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages"),
+                          json={"type": "error", "error": {"type": "invalid_request_error", "message": raw},
+                                "request_id": "req_test123"})
+
+    def boom(**kw):
+        raise anthropic.BadRequestError(raw, response=resp, body=resp.json())
+    bad_client = types.SimpleNamespace(beta=types.SimpleNamespace(messages=types.SimpleNamespace(create=boom)))
+    try:
+        x.call_llm("cv text", client=bad_client)
+        check(False, "BadRequestError should raise ExtractionFailed")
+    except x.ExtractionFailed as e:
+        check("Error code" not in str(e) and "request_id" not in str(e) and "42 parameters" not in str(e),
+              "customer-facing message has no raw provider error or request id")
+        check(e.detail and "42 parameters" in e.detail, "raw provider detail kept on .detail for system_alerts, not lost")
+
 
 class MemoryDb:
     """In-memory stand-in for supabase_request + storage_download (only the URL
@@ -362,6 +445,24 @@ def test_queue(docx_path, tmp):
     x.poll_once("u", "k", quiet_when_empty=True, client_factory=lambda: stub)
     u4 = [r for r in db.tables["cv_uploads"] if r["id"] == "u4"][0]
     check(u4["status"] == "extraction_failed" and "stopped mid-job" in u4["extraction_error"], "stale 'extracting' reclaimed as failed")
+
+    # A write that REPORTS an outcome (fail_upload) must never itself crash
+    # the pass if IT fails (a transient Supabase blip right as a different
+    # error is being reported) - found missing, UX audit 2026-10-23: a prior
+    # contributor to a row staying 'extracting' past the stale-reclaim window.
+    db.tables["cv_uploads"].append(dict(base, id="u5", storage_path="c1/people/p1/uploads/missing.docx", created_at="5"))
+    real_request = db.request
+
+    def flaky_request(url, key, method, path, body=None):
+        if method == "PATCH" and path == "cv_uploads?id=eq.u5":  # fail_upload()'s own write, not claim_upload()'s
+            raise RuntimeError("simulated transient Supabase failure while marking u5 failed")
+        return real_request(url, key, method, path, body)
+    x.supabase_request = flaky_request
+    try:
+        handled5 = x.poll_once("u", "k", quiet_when_empty=True, client_factory=lambda: stub)
+        check(handled5 >= 1, "poll_once() itself doesn't crash when fail_upload()'s own write fails")
+    finally:
+        x.supabase_request = real_request
 
 
 def test_ocr(docx_path, tmp):

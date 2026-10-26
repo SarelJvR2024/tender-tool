@@ -1,4 +1,4 @@
-import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, Zap, FileUser, CreditCard, BarChart3, TrendingUp, type LucideIcon } from "lucide-react";
+import { Home, Compass, Gavel, Vault, Users, GraduationCap, Wrench, ShieldCheck, FileUser, CreditCard, BarChart3, TrendingUp, type LucideIcon } from "lucide-react";
 
 export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: string };
 
@@ -18,18 +18,47 @@ export type NavItem = { href: string; label: string; icon: LucideIcon; badge?: s
 // (see the "4-tier scheme" entry below). Removed rather than replaced with
 // another invented segment name - "SANRAL schedules" already says what the
 // feature is without one.
+// Phase 2 completion pass (2026-10-23, Sarel's own review against the real
+// production deploy): grouped into 4 labelled sections (Core workspace /
+// Intelligence / Assets & library / Settings) - this exact grouping
+// superseded an earlier same-day 3-group-plus-bottom-section pass once
+// Sarel reviewed the real thing and asked for Company vault to sit with the
+// other everyday-workspace items, Toolkit to sit with the reference
+// material it actually is, and Billing to be its own labelled group rather
+// than a bottom-section special case. Each item is defined once below and
+// shared between the flat NAV_ITEMS (CommandPalette's own search list - a
+// command palette has no use for section headers) and the grouped
+// NAV_GROUPS (AppSidebar) - one definition per destination, so the two
+// lists can't silently drift apart on label/icon/href.
+const DASHBOARD: NavItem = { href: "/dashboard", label: "Dashboard", icon: Home };
+const OPPORTUNITIES: NavItem = { href: "/discovery", label: "Opportunities", icon: Compass };
+const BID_PIPELINE: NavItem = { href: "/pipeline", label: "Bid pipeline", icon: Gavel };
+const COMPANY_VAULT: NavItem = { href: "/company", label: "Company vault", icon: Vault };
+const PEOPLE_CVS: NavItem = { href: "/people", label: "People & CVs", icon: Users };
+const EXPERIENCE: NavItem = { href: "/experience", label: "Experience", icon: GraduationCap };
+const MARKET_INTELLIGENCE: NavItem = { href: "/market-intelligence", label: "Market intelligence", icon: TrendingUp };
+const TOOLKIT: NavItem = { href: "/toolkit", label: "Toolkit", icon: Wrench };
+const ANALYTICS: NavItem = { href: "/analytics", label: "Analytics", icon: BarChart3 };
+const BILLING: NavItem = { href: "/billing", label: "Billing", icon: CreditCard };
+
 export const NAV_ITEMS: NavItem[] = [
-  { href: "/dashboard", label: "Home", icon: Home },
-  { href: "/discovery", label: "Opportunities", icon: Compass },
-  { href: "/pipeline", label: "Bids", icon: Gavel },
-  { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/market-intelligence", label: "Market intelligence", icon: TrendingUp },
-  { href: "/sanral-schedules", label: "SANRAL schedules", icon: Zap },
-  { href: "/company", label: "Company vault", icon: Vault },
-  { href: "/billing", label: "Billing", icon: CreditCard },
-  { href: "/people", label: "People & CVs", icon: Users },
-  { href: "/experience", label: "Experience", icon: GraduationCap },
-  { href: "/toolkit", label: "Tools", icon: Wrench },
+  DASHBOARD,
+  OPPORTUNITIES,
+  BID_PIPELINE,
+  COMPANY_VAULT,
+  MARKET_INTELLIGENCE,
+  TOOLKIT,
+  ANALYTICS,
+  BILLING,
+  PEOPLE_CVS,
+  EXPERIENCE,
+];
+
+export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  { label: "Core workspace", items: [DASHBOARD, OPPORTUNITIES, BID_PIPELINE, COMPANY_VAULT] },
+  { label: "Intelligence", items: [MARKET_INTELLIGENCE, ANALYTICS] },
+  { label: "Assets & library", items: [PEOPLE_CVS, EXPERIENCE, TOOLKIT] },
+  { label: "Settings", items: [BILLING] },
 ];
 
 export const ADMIN_NAV_ITEM: NavItem = { href: "/admin", label: "Admin", icon: ShieldCheck };

@@ -184,7 +184,17 @@ def suggest(template_path, profile_path, out_dir):
     people = {f"person_{i}": p for i, p in enumerate(profile["key_people"])}
 
     contract_no = wb.cached("SETUP", "C2")
-    closing_date = _excel_date(wb.cached("SETUP", "C3"))
+    raw_closing = wb.cached("SETUP", "C3")
+    # _excel_date(None) raised a bare "int() argument must be a string..."
+    # for any workbook whose SETUP!C3 is blank or an unreadable formula
+    # error cell - named here instead, same "refuse loudly, name the cell"
+    # discipline classify_tender.read_setup()'s own identical calculation
+    # already follows. QA pass, 2026-10-25.
+    try:
+        closing_date = _excel_date(raw_closing)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"{template_path}: SETUP!C3 (closing date) is '{raw_closing!r}', not a readable "
+                         f"Excel date ({type(e).__name__}) - check this template's own SETUP sheet.") from None
     positions, alternates = read_required_positions(wb)
 
     suggestions = {}

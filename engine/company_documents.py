@@ -152,7 +152,10 @@ def default_llm_client():
         import anthropic
     except ImportError:
         return None
-    return anthropic.Anthropic()
+    # Explicit, bounded timeout - see extract_cv_fields.default_llm_client's
+    # own comment (UX audit, 2026-10-23) for why: the SDK's 600s default left
+    # a single hung connection able to wedge a job far longer than it should.
+    return anthropic.Anthropic(timeout=180)
 
 
 def render_guideline(guideline, facts, document_type, log, llm=None):

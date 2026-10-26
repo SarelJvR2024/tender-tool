@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "../../_components/AppShell";
 import { AdminNav } from "../AdminNav";
 import { setPlatformSetting } from "../actions";
+import { formatDateTime } from "@/lib/dates";
 
 // Reads per-request session/DB data (platform_admin_settings RPC, 0064) -
 // same escape hatch as ../page.tsx.
@@ -56,7 +57,7 @@ export default async function AdminSettingsPage({ searchParams }: { searchParams
               <div className="min-w-0 flex-[1_1_320px]">
                 <div className="text-[13.5px] font-semibold text-foreground">{SETTING_LABEL[s.key] ?? s.key}</div>
                 <div className="mt-0.5 text-xs text-muted-foreground">{s.description}</div>
-                <div className="mt-1 text-[11px] text-muted-foreground">Last changed {new Date(s.updated_at).toLocaleString()}</div>
+                <div className="mt-1 text-[11px] text-muted-foreground">Last changed {(formatDateTime(s.updated_at) ?? "—")}</div>
               </div>
               <form action={setPlatformSetting}>
                 <input type="hidden" name="key" value={s.key} />

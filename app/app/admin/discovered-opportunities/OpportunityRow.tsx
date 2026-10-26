@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { overrideOpportunityConfidence } from "./actions";
 import type { CompileReadiness, CompileConfidence } from "@/lib/compileReadiness";
+import { formatDate, formatDateTime } from "@/lib/dates";
 
 export type OpportunityRowData = {
   id: string;
@@ -82,7 +83,7 @@ export default function OpportunityRow({ row }: { row: OpportunityRowData }) {
           tone={BAND_TONE[row.effective.band]}
         />
         <span className="text-[11px] text-muted-foreground/70">
-          {row.closing_date ? `closes ${new Date(row.closing_date).toLocaleDateString()}` : "no closing date"}
+          {row.closing_date ? `closes ${(formatDate(row.closing_date) ?? "—")}` : "no closing date"}
           <span className="ml-1.5 text-accent">{open ? "hide ▲" : "open ▼"}</span>
         </span>
       </button>
@@ -95,7 +96,7 @@ export default function OpportunityRow({ row }: { row: OpportunityRowData }) {
             <Field label="Source">{row.source || "-"}</Field>
             <Field label="Tender type">{row.tender_type || "-"}</Field>
             <Field label="Province">{row.province || "-"}</Field>
-            <Field label="First seen">{new Date(row.first_seen).toLocaleString()}</Field>
+            <Field label="First seen">{(formatDateTime(row.first_seen) ?? "—")}</Field>
           </div>
 
           <div className="mb-3 rounded-lg border border-border bg-muted/40 px-3.5 py-2.5">

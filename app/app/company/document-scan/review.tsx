@@ -23,6 +23,7 @@ import {
   type OnboardingFields,
 } from "@/lib/onboardingScan";
 import { Button } from "@/components/ui/button";
+import { formatDate } from "@/lib/dates";
 
 // Confirm-or-correct card for one AI-classified onboarding document
 // (onboarding_document_results, 0063). Deliberately the same shape as
@@ -184,7 +185,7 @@ export function DocumentReviewCard({
           <h3 className="mb-0.5 text-[15px] font-bold text-foreground">{filename}</h3>
           <div className="text-xs text-muted-foreground">
             Detected as <strong>{KIND_LABELS[kind]}</strong>
-            {result.document_kind_reason ? ` - ${result.document_kind_reason}` : ""}. Read {new Date(result.created_at).toLocaleDateString()}
+            {result.document_kind_reason ? ` - ${result.document_kind_reason}` : ""}. Read {(formatDate(result.created_at) ?? "—")}
             {result.model ? ` by ${result.model}` : ""}.
           </div>
         </div>

@@ -118,6 +118,37 @@ def test_duplicate_candidates_prefer_the_more_recently_modified_file(tmp_path="/
     os.remove(new_path)
 
 
+def test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used(tmp_path="/tmp"):
+    print("classify_documents: two Technical Submission .xlsm candidates - the top-line 'signal' "
+          "text must name the SAME file the tie-break actually picked (files/the AMBIGUOUS note), "
+          "not whichever sorted first before the tie-break ran")
+    # QA pass, 2026-10-26: family/signal were read from `tech[0]` - candidates["technical_xlsm"]
+    # in its ORIGINAL, pre-tie-break (alphabetical) order - while files["technical_xlsm"] and the
+    # AMBIGUOUS note already correctly used the tie-broken (most-recently-modified) pick. Whenever
+    # the two orders disagreed, the signal told a person the WRONG file was "routed to the SANRAL
+    # submission-pack flow", directly contradicting the AMBIGUOUS note two lines below it in the
+    # very same decision. "Draft" < "ZZfinal" alphabetically but is modified FIRST (older mtime),
+    # so this reproduces the divergence deterministically.
+    import shutil
+    import time
+    old_path = os.path.join(tmp_path, "Draft_Technical_Submission.xlsm")
+    new_path = os.path.join(tmp_path, "ZZfinal_Technical_Submission.xlsm")
+    shutil.copy(TECH_WORKBOOK, old_path)
+    time.sleep(1.1)
+    shutil.copy(TECH_WORKBOOK, new_path)
+    entries = [_doc_entry("Draft_Technical_Submission.xlsm", old_path, fmt="xlsm"),
+               _doc_entry("ZZfinal_Technical_Submission.xlsm", new_path, fmt="xlsm")]
+    decision = ct.classify_documents(entries, buyer="SANRAL", all_text="SANRAL tender")
+    winner = os.path.basename(decision["sanral_files"].get("technical_xlsm") or "")
+    check("the more recently modified file (ZZfinal) is the one actually used",
+          winner == "ZZfinal_Technical_Submission.xlsm", decision)
+    check("the signal text names that SAME file, not the alphabetically-first one",
+          winner in decision["signal"] and "Draft_Technical_Submission.xlsm" not in decision["signal"],
+          decision["signal"])
+    os.remove(old_path)
+    os.remove(new_path)
+
+
 def test_docx_already_marked_unreadable_is_skipped_without_a_note():
     print("classify_documents: a doc_entry already flagged unreadable upstream")
     entry = _doc_entry("whatever.docx", "/tmp/does-not-matter.docx")
@@ -165,6 +196,7 @@ def main():
     test_valid_docx_is_classified_with_no_spurious_note()
     test_period_after_the_form_letter_is_also_recognized()
     test_duplicate_candidates_prefer_the_more_recently_modified_file()
+    test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used()
     test_docx_already_marked_unreadable_is_skipped_without_a_note()
     test_assess_fit_from_text_categorized_tender_no_disciplines_not_duplicated()
     test_assess_fit_from_text_uncategorized_tender_no_disciplines_still_appends()

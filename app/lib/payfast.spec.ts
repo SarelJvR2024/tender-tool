@@ -4,6 +4,7 @@ import {
   buildSignatureBaseString,
   decodePlanInterval,
   encodePlanInterval,
+  isBillingSandboxed,
   signCheckoutFields,
   verifyItnSignature,
 } from "./payfast";
@@ -136,6 +137,44 @@ describe("verifyItnSignature against PayFast's own official recorded fixture", (
       orderedPairs.map(([k, v]) => `${k}=${encodeURIComponent(v).replace(/%20/g, "+")}`).join("&") +
       "&signature=4078bca2c8987e0e0c4e7230f2f46323";
     expect(verifyItnSignature(rawBody, "4078bca2c8987e0e0c4e7230f2f46323")).toBe(true);
+  });
+});
+
+describe("isBillingSandboxed", () => {
+  // Regression coverage for the billing-review fix (2026-10-26): /billing's
+  // Subscribe buttons and /api/billing/checkout itself both call this one
+  // function so they can never disagree - a disabled button while the
+  // route still happily starts a sandbox transaction underneath it (the
+  // bug this fix closed) would show up here as route/page reading
+  // different results for the same env, which these cases rule out.
+  it("defaults to sandboxed when PAYFAST_MODE is unset (no live credentials configured)", () => {
+    vi.stubEnv("PAYFAST_MODE", undefined);
+    vi.stubEnv("NEXT_PUBLIC_PAYFAST_SANDBOX", undefined);
+    expect(isBillingSandboxed()).toBe(true);
+  });
+
+  it("is not sandboxed once PAYFAST_MODE=live, with no override set", () => {
+    vi.stubEnv("PAYFAST_MODE", "live");
+    vi.stubEnv("NEXT_PUBLIC_PAYFAST_SANDBOX", undefined);
+    expect(isBillingSandboxed()).toBe(false);
+  });
+
+  it("stays sandboxed when PAYFAST_MODE is explicitly 'sandbox'", () => {
+    vi.stubEnv("PAYFAST_MODE", "sandbox");
+    vi.stubEnv("NEXT_PUBLIC_PAYFAST_SANDBOX", undefined);
+    expect(isBillingSandboxed()).toBe(true);
+  });
+
+  it("NEXT_PUBLIC_PAYFAST_SANDBOX='true' forces sandboxed even if PAYFAST_MODE=live", () => {
+    vi.stubEnv("PAYFAST_MODE", "live");
+    vi.stubEnv("NEXT_PUBLIC_PAYFAST_SANDBOX", "true");
+    expect(isBillingSandboxed()).toBe(true);
+  });
+
+  it("NEXT_PUBLIC_PAYFAST_SANDBOX='false' forces not-sandboxed even if PAYFAST_MODE=live (matches, doesn't fight, the real mode)", () => {
+    vi.stubEnv("PAYFAST_MODE", "live");
+    vi.stubEnv("NEXT_PUBLIC_PAYFAST_SANDBOX", "false");
+    expect(isBillingSandboxed()).toBe(false);
   });
 });
 
