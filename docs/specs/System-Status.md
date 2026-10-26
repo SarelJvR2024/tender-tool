@@ -3701,6 +3701,46 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-26, standing QA/robustness review - one-hundredth run): a company's explicit "Form B7 is waived" answer could be silently overridden by a stale legacy Targeted Enterprise, writing a false subcontracting declaration into the real submitted SANRAL workbook
+
+Orientation: synced several sibling commits (a real CIDB-returnable-step contradiction fix in
+`submission_plan.py` - same file as this session's own Finding 79, different function, no
+collision; a WhatsApp widget feature; a merged tender-workspace wiring PR - all `app/`/
+`engine/general` only, no overlap with SANRAL pack). Open PRs `#157` (draft, `process_pack_jobs.py`
+test-only additions - avoided that file) and `#118` (draft, stale) checked and avoided. Rotated to
+SANRAL pack - tied for most overdue with discovery, picked pack since a sibling's same-day fix in
+a different file had just resurfaced the exact "two things in the same output disagree about the
+same fact" shape this session keeps finding, worth specifically hunting for in an untouched corner
+of this area.
+
+**Finding 81 (CONFIRMED, FIXED, severe).** `engine/fill_tender.py` and `engine/fill_conventional.py`
+(identical logic) decide Form B7's source with `if subcontracting_plan.mode == "subcontract": <new
+plan> elif targeted_enterprise: <legacy block>` - the legacy fallback fires on ANY presence of the
+old single-TE block, regardless of whether an explicit plan of a DIFFERENT mode (most importantly
+`"waived_by_tender"`, the company's own authoritative "Book 1 says B7 isn't required" answer) also
+exists on the same pack.yaml. `assemble_pack.py`'s own `b7_filled` bookkeeping already assumes the
+correct precedence (legacy only applies when there's no explicit plan at all) - the fillers' actual
+cell-writing code didn't enforce it. Confirmed real, not theoretical: a committed pack.yaml
+(`packs/r334-030-2025-1f.yaml`) has this legacy field named in its own comments as something that
+was once genuinely set, for a tender predating the Tender Workspace migration. Reproduced directly
+against a real sample workbook: a pack.yaml carrying both the legacy block and an explicit
+`waived_by_tender` plan produced a Technical Submission workbook with `TEND 1X!C3906` reading the
+STALE legacy company's name - a false subcontracting declaration physically written into the real
+submitted document, contradicting the company's own waiver, with nothing in the pack's own
+manifest aware of the mismatch.
+
+**Fix:** both fillers' legacy condition changed from `elif te:` to `elif te and not
+td.get("subcontracting_plan"):` - matching the precedence `assemble_pack.py` already assumed.
+
+**Verified red, then green:** new `engine/test_fill_b7_legacy_precedence.py` (no dedicated test
+existed for either filler's B7 branch), four cases against the real sample workbook. Reverted the
+fix (keeping the test): failed exactly as predicted; restored: `0 failure(s)`. `test_sanral_b7.py`
+and `test_form_field_audit.py` re-run clean. No RRM-family sample is committed to drive an
+end-to-end test of `fill_tender.py`'s identical fix - verified by code inspection and the same
+manual repro technique instead.
+
+Full details: Finding 81 in `QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-26, standing QA/robustness review - ninety-ninth run): a real project with no captured position title printed the literal word "None" into a client-facing World Bank-format CV - the exact bug class this same function was already fixed for on its sibling fields
 
 Orientation: synced several sibling commits (`eb60f96` fingerprint-dedup fix, two real billing

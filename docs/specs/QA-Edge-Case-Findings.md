@@ -4658,3 +4658,72 @@ functions) and the unrelated `test_extract_cv_fields.py` re-run clean.
 **Regression:** `engine/cv/generate_cv.py`'s `build_world_bank()` only - the Employment Record
 section's `position_held` cell now reads "?" instead of "None" when the field is null.
 `build_sanral_keyperson()`'s own (already-correct) handling of the identical field is untouched.
+
+### Finding 81 (CONFIRMED, FIXED, severe - a company's explicit "Form B7 is waived" answer could be silently overridden by a stale legacy Targeted Enterprise, writing a false subcontracting declaration into the real submitted SANRAL workbook)
+
+**Where:** `engine/fill_tender.py` and `engine/fill_conventional.py` (identical logic, both fixed) -
+the Form B7 (Targeted Enterprise subcontracting) fill branch.
+
+**What was tested:** rotated to SANRAL pack - tied with discovery for most overdue, picked SANRAL
+pack. Open PRs checked: `#157` (draft, test-only additions to `process_pack_jobs.py`'s `sync_*`
+functions - avoided that file) and `#118` (draft, stale, `assess_tender.py`/`classify_tender.py` -
+not touched either way). A sibling pass (same day) had just fixed a DIFFERENT contradiction in
+`submission_plan.py`'s CIDB returnable step - same "two things in the same output disagree about
+the same fact" shape that's been a recurring theme this session, worth specifically hunting for
+elsewhere. Read `engine/sanral_b7.py` (B7 applicability/validation/fill) end to end first - it is
+extremely well-guarded, with its own self-check assertions - then its real callers
+(`fill_tender.py`/`fill_conventional.py`'s Form B7 branch, `assemble_pack.py`'s own B7
+orchestration) to see whether the INTENDED precedence rule `assemble_pack.py` itself already
+encodes is actually enforced where the cells get written.
+
+**Finding (CONFIRMED, severe).** It wasn't. Both fillers decide which Form B7 source to use with:
+`if (td.get("subcontracting_plan") or {}).get("mode") == "subcontract": <use the new plan> elif
+te: <use the legacy td["targeted_enterprise"] block>` - the legacy fallback fires whenever a
+`targeted_enterprise` block is present, REGARDLESS of whether an explicit `subcontracting_plan` of
+a DIFFERENT mode (most importantly `"waived_by_tender"` - the company's own, more authoritative
+"Book 1 says B7 isn't required" answer) also exists on the same pack.yaml. Confirmed this isn't
+purely theoretical: a real pack.yaml in this repo (`packs/r334-030-2025-1f.yaml`) has a `targeted_
+enterprise:` field literally named in its own comments as a once-real field ("omitted - Form B7
+confirmed NOT required"), proving the legacy single-TE format was real, hand-written data before
+`sanral_b7.py`/the Tender Workspace migration existed - a long-running tender whose pack.yaml
+predates that migration and is STILL in use today would carry exactly this shape, and the
+company's later, explicit "waived" answer (captured via the Tender Workspace Form B7 card) would
+silently lose to the untouched legacy block. `assemble_pack.py`'s own `b7_filled` bookkeeping
+(`bool(legacy_te) and not b7_plan`) ALREADY assumes the correct precedence rule ("the legacy block
+only applies when there's no explicit plan AT ALL") - this is the same shape of bug as Finding 78
+(a reporting layer's own assumption not matching what the real write path actually does), just
+with the real submitted SANRAL workbook as the thing that ends up wrong, not just a status message.
+
+Reproduced directly against a real sample (`templates/samples/R.334-030-2025.1F_ran.xlsm`,
+"Conventional" family): a pack.yaml with BOTH a legacy `targeted_enterprise` block ("Stale Legacy
+TE (Pty) Ltd") AND an explicit `subcontracting_plan` with `mode: "waived_by_tender"` ran through
+`fill_conventional.main()` and produced a workbook whose `TEND 1X!C3906` (the Targeted Enterprise
+name cell) read **"Stale Legacy TE (Pty) Ltd"** - a false subcontracting commitment physically
+written into the real Technical Submission workbook, directly contradicting the company's own
+explicit "this tender waives B7" answer, with nothing in the pack's own manifest/contents page
+aware of the mismatch (per `b7_filled`'s own, separately-correct computation, it believed B7 was
+NOT included).
+
+**Fix:** both fillers' legacy fallback condition changed from `elif te:` to `elif te and not
+td.get("subcontracting_plan"):` - the legacy block now only fires when there is no explicit plan
+of ANY mode, matching the precedence `assemble_pack.py` already assumed. An explicit
+`"subcontract"` plan, an explicit `"waived_by_tender"` plan, and the legacy-only case (an old
+pack.yaml with no Tender Workspace answer at all) were all re-verified to behave correctly.
+
+**Verified the regression test actually catches the regression:** new
+`engine/test_fill_b7_legacy_precedence.py` (no dedicated test file existed for either filler's
+Form B7 branch before this, confirmed by grep) - four cases (explicit waiver overrides legacy;
+legacy-only still fills, for back-compat; explicit subcontract plan still fills normally; neither
+present stays blank), driven directly against the real committed sample workbook. Reverted the fix
+(`git apply -R`, keeping the new test): failed exactly as predicted (the stale legacy name written
+despite the waiver); restored: `0 failure(s)`. `test_sanral_b7.py` and `test_form_field_audit.py`
+(which already exercises `fill_conventional.py` via `confirm_pack.py`) both re-run clean. No
+RRM-family sample workbook is committed to this repo to drive an identical end-to-end test of
+`fill_tender.py` (the RRM sibling filler) - its identical fix was verified by direct code
+inspection and the same manual repro technique used to confirm this finding, not a second
+end-to-end test.
+
+**Regression:** `engine/fill_tender.py` and `engine/fill_conventional.py`'s Form B7 branch only -
+one condition changed in each, same fix, same reasoning. No schema or other call-site changes;
+`sanral_b7.py`'s own functions and `assemble_pack.py`'s `b7_filled`/manifest reporting (already
+correct) are untouched.
