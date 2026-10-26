@@ -80,8 +80,12 @@ export default async function BillingPage({
       <div className="mx-auto w-full max-w-[1000px] flex-1 px-8 py-6">
         <PageHeader
           className="mb-5"
-          title="Billing"
-          description={isSandbox ? "Your plan, trial and payment - PayFast sandbox for now, so no real card is charged." : "Your plan, trial and payment."}
+          title={isSandbox ? "Billing not yet active" : "Billing"}
+          description={
+            isSandbox
+              ? "Card payments are not switched on yet. Your plan is active, and we will email you before any charge is made."
+              : "Your plan, trial and payment."
+          }
         />
 
         {error && (
@@ -157,16 +161,6 @@ export default async function BillingPage({
 
         <p className="mt-6 text-xs text-muted-foreground">
           Yearly billing is 2 months free (10&times; the monthly price). Prices exclude VAT.
-          {isSandbox && (
-            <>
-              {" "}
-              Payments run through PayFast&apos;s sandbox for now - see{" "}
-              <Link href="https://sandbox.payfast.co.za" className="underline underline-offset-2" target="_blank" rel="noreferrer">
-                sandbox.payfast.co.za
-              </Link>
-              .
-            </>
-          )}
         </p>
       </div>
     </AppShell>
