@@ -1,5 +1,42 @@
 # System Status
 
+**2026-10-26 ~18:16 UTC — standing review pass: a real cross-component bug fixed (the WhatsApp
+floating widget built a broken link whenever the configured number had any formatting), QA sound,
+no collisions.** Orientation: `git fetch origin main` showed 4 new commits since this routine's own
+last pass (`92f04f3`) - PR #162 (WhatsApp footer link made clickable + widget extended to `/tools`
+and its calculators), merged with zero reviews (`get_reviews` returned `[]` - a further self-merge
+instance, not investigated or reverted, same as every other one this file already documents). Three
+open PRs checked and avoided: `#159` (dashboard/onboarding fixes, draft, real and well-verified per
+its own PR body), `#157` (pack bridge test-only additions, draft), `#118` (discovery scoring, draft,
+stale) - none collided with this pass's own work.
+
+**The bug**: the floating `WhatsAppContactButton` (`components/public/whatsapp-contact-button.tsx`,
+landed via the self-merged PRs #160-162) and the home page's own footer WhatsApp link (`app/page.tsx`)
+both read the same `NEXT_PUBLIC_WHATSAPP_NUMBER` env var, but only the footer link's code stripped
+it to digits-only (`number.replace(/\D/g, "")`) before building the `wa.me/` URL - the floating
+widget used the raw env-var string directly. A phone number typed into an env var with its natural
+formatting ("+27 82 123 4567" - spaces and a leading "+", exactly how a person would type it) would
+produce a malformed `https://wa.me/+27 82 123 4567?...` link from the widget while the footer's own
+link to the *same number* worked correctly - confirmed directly (not assumed) by constructing both
+URLs side by side with a realistic formatted value. Found by comparing the two call sites of the
+same env var directly against each other, since neither one in isolation reads as wrong.
+
+**Fix**: `whatsapp-contact-button.tsx` now strips to digits the same way `app/page.tsx` already
+does - one source of sanitization logic duplicated correctly instead of one correct and one
+missing, rather than extracting a shared helper for a two-line regex. Verified: `tsc --noEmit`/
+`eslint` clean on the changed file, full `npx vitest run` 202/202 unchanged (no existing coverage of
+this component to begin with - a real gap worth a future pass, not built here to stay scoped), and
+the before/after URL construction demonstrated directly with a realistic formatted number.
+
+**Pushed directly to `main`, no PR, no self-merge**: `app/components/public/whatsapp-contact-button.tsx`.
+
+**Backlog waiting on Sarel, re-confirmed not assumed**: migration `0096` (pack-quota trial-expiry,
+still outstanding), the `narrative_documents` PostgREST schema-cache reload (not re-checked this
+pass, don't assume it's cleared), and the PayFast idempotency design question (not urgent, still
+open).
+
+---
+
 **2026-10-26 ~16:17 UTC — standing review pass: no fix, a real test-coverage gap flagged instead
 of forced into a weak finding.** Orientation: `git fetch origin main` showed 3 new commits since
 this routine's own last pass (`e27e380`) - Finding 81 (a legacy TE field could override an explicit

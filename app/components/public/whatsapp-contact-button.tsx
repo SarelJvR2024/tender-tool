@@ -84,7 +84,15 @@ export function WhatsAppContactButton() {
   if (!WHATSAPP_NUMBER) return null; // No real number configured - a live link to a made-up number would misdirect a real prospect, never shown.
 
   const message = messageFor(pathname, onPricingSection);
-  const href = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(message)}`;
+  // Stripped to digits only, same as app/page.tsx's own footer WhatsApp
+  // link - wa.me needs a plain international-format digit string, and
+  // NEXT_PUBLIC_WHATSAPP_NUMBER is typed into an env var by hand, where a
+  // "+27 82 123 4567"-style value (spaces, a leading "+") is exactly how a
+  // real phone number gets entered. Left unsanitized here, this button
+  // silently built a broken link while the footer's own link to the same
+  // number worked - found by comparing the two call sites directly, not
+  // assumed from either one alone.
+  const href = `https://wa.me/${WHATSAPP_NUMBER.replace(/\D/g, "")}?text=${encodeURIComponent(message)}`;
 
   return (
     <a
