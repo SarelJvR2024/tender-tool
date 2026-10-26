@@ -357,9 +357,16 @@ def assess_fit(categories, signals, depth, profile):
         # classify_tender.assess_fit_from_text() already worked around this
         # at its own call site; this is the same fix at the root, so every
         # caller (including the live OCDS discovery feed, which had no
-        # workaround) gets it.
-        reasons.append(f"Discipline ({labels(categories)}) matched, but the company has no disciplines "
-                        "recorded yet to compare against - needs a human look, not an automatic rejection.")
+        # workaround) gets it. The WORDING fix was only ever applied at that
+        # one call site though (a plain "has no disciplines recorded yet"
+        # told the live Discovery feed's own users nothing about where to
+        # fix it) - this is that same actionable wording, moved to the root
+        # so every caller gets it, matching this comment's own original
+        # intent. Sarel's own live feedback, 2026-10-23: "I see a lot [of
+        # this message]... this is not helpful."
+        reasons.append(f"Discipline ({labels(categories)}) matched, but your company has no disciplines on file "
+                        "yet (they come from your Experience Library tags) - needs a human look, not an "
+                        "automatic rejection.")
         verdict = "needs_review"
     else:
         reasons.append(f"Discipline ({labels(categories)}) doesn't match the company's known disciplines "

@@ -418,18 +418,17 @@ def assess_fit_from_text(title, description, all_text, profile, documents=None):
     verdict, reasons = assess_tender.assess_fit(categories, signals, depth, profile)
     if categories != assess_tender.categorize(title, description):
         reasons.append("Discipline read from the opening pages of the tender documents (the title alone didn't say).")
-    if not profile.get("disciplines"):
-        # assess_fit() itself now treats an empty disciplines list as
-        # "unknown" rather than "checked, out of scope" (same root fix, so
-        # the live OCDS discovery feed gets it too, not just this intake
-        # path) - swap its generic reason for this call site's more useful
-        # one, which actually tells the user where disciplines come from.
-        nicer = ("Your company has no disciplines on file yet (they come from your Experience Library tags), so "
-                "fit can't be judged - needs a human look.")
-        if any("has no disciplines recorded yet" in r for r in reasons):
-            reasons = [nicer if "has no disciplines recorded yet" in r else r for r in reasons]
-        else:
-            reasons.append(nicer)
+    if not profile.get("disciplines") and not any("no disciplines on file yet" in r for r in reasons):
+        # assess_fit() itself now carries this same actionable wording at the
+        # root (moved there 2026-10-23, Sarel's own live feedback - it used
+        # to say only "has no disciplines recorded yet", true everywhere but
+        # unhelpful everywhere that wasn't this call site), so the usual case
+        # needs nothing here. This still covers the case assess_fit() itself
+        # doesn't: a DIFFERENT reason fired first (e.g. "uncategorized"), but
+        # the company's own disciplines are also empty - worth telling the
+        # user that too, since it's still true and still actionable.
+        reasons.append("Your company has no disciplines on file yet (they come from your Experience Library tags), "
+                       "so fit can't be judged - needs a human look.")
         if verdict in ("not_a_fit", "strong_fit", "possible"):
             verdict = "needs_review"
     outlook = estimate_score_outlook(all_text or "", depth, profile, signals.get("cidb_grading"))
