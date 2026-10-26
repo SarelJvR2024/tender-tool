@@ -3375,6 +3375,44 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-26, standing QA/robustness review - ninety-seventh run): a SANRAL intake's own "routed to the SANRAL flow" message could name a different Technical Submission workbook than the one actually used to build the pack
+
+Orientation: synced two sibling commits (`53ef198`/`4495893`, standing-review passes tracing
+`registration_reminders.py`'s company_id patching and `fill_flat_pdf.py`'s prefix handling - both
+confirmed correct, no fix, `engine/compliance`/`engine/general` files only, no overlap). In sync
+with `origin/main` before and after this pass. Rotated to intake - by far the most overdue
+standing area (last full dedicated pass the seventy-fourth run, Finding 61, 23 runs ago). Open PR
+`#118` (draft, stale since 2026-10-23) touches `classify_tender.py`'s `assess_fit_from_text()` and
+`assess_tender.assess_fit()` - avoided both functions entirely; everything else in the file was
+fair game.
+
+**Finding 78 (CONFIRMED, FIXED, severe).** `classify_documents()`'s own duplicate-candidate
+tie-break (most-recently-modified file wins when two files match the same doc_type, added
+2026-10-20 for exactly this "don't let a stale draft win on a filename coin-flip" reason) was
+applied inconsistently for the Technical Submission workbook specifically: `files["technical_xlsm"]`
+and the "AMBIGUOUS" note both read the tie-broken pick correctly, but the human-facing
+`family`/`signal` text - the first, most prominent thing this function reports - still read
+`tech[0]`, a STALE reference captured in `collect_documents()`'s original (alphabetical) order
+BEFORE the tie-break ran (`sorted()` returns a new list; the original was never updated).
+Reproduced directly: two technical workbooks, an older one that sorts first alphabetically and a
+newer one that doesn't - `sanral_files` and the AMBIGUOUS note correctly named the newer file as
+the one actually used, while `signal` said the OLDER file was "routed to the SANRAL submission-pack
+flow", directly contradicting the note sitting right next to it in the same decision. Same
+"silently wrong data" risk class as Findings 61/74/82 in this same rotation, just one field over
+from where the earlier fix landed.
+
+**Fix:** tracked the tie-broken winner per doc_type in the existing loop (`winners[doc_type] =
+cands[0]`, the identical tuple already used for `files`/`registered`) and read `family`/`signal`
+from `winners["technical_xlsm"]` instead of the stale `tech[0]`.
+
+**Verified red, then green:** new
+`test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used()` in
+`test_classify_tender.py`. Reverted the fix (keeping the new test): failed with exactly the
+predicted wrong filename in `signal`; restored: `0 failure(s)`. Full `test_classify_tender.py` (6
+functions) clean both before and after.
+
+Full details: Finding 78 in `QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-26, standing QA/robustness review - ninety-sixth run): a regression test for run_bridges.py's own critical-crash alert was silently checking a source that stopped being written a day earlier
 
 Orientation: synced a sibling commit (`d91ab38`, a standing-review pass tracing

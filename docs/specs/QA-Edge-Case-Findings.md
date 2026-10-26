@@ -4505,3 +4505,58 @@ process-group-kill-on-timeout case from Finding 60.
 **Regression:** `engine/alerts/test_system_alerts.py` and `engine/worker/run_bridges.py`'s own
 docstring only - no production code or schema touched. `engine/worker/test_poll_loop.py` re-run
 clean.
+
+### Finding 78 (CONFIRMED, FIXED, severe - a SANRAL intake's own top-line "routed to the SANRAL flow" message could name a different Technical Submission workbook than the one actually used to build the pack, directly contradicting the AMBIGUOUS note right next to it)
+
+**Where:** `engine/intake/classify_tender.py`'s `classify_documents()`.
+
+**What was tested:** rotated to intake - by far the most overdue standing area (last full
+dedicated pass the seventy-fourth run, Finding 61, 23 runs ago). Open PR #118 (draft, stale, since
+2026-10-23) touches this same file's `assess_fit_from_text()` and `assess_tender.assess_fit()` -
+avoided those two functions entirely; everything else in `classify_tender.py` was fair game.
+Finding 61 (this same rotation, run 74) already established that a SANRAL addendum can disagree
+with the original notice on a field value, and Finding 74 (run 82, NRA reference) that whichever
+value is repeated more often, or sorts first, can silently win over the correct one - worth
+checking whether `classify_documents()`'s own duplicate-candidate tie-break (added for exactly
+this reason, per its own 2026-10-20 QA-audit comment) is actually applied EVERYWHERE it reports a
+chosen file, not just where it stores one.
+
+**Finding (CONFIRMED, severe).** It wasn't. `classify_documents()` builds `tech =
+candidates.get("technical_xlsm") or []` BEFORE the tie-break loop runs, in `collect_documents()`'s
+original (alphabetical-by-filename) order. The tie-break loop that follows picks the
+most-recently-modified file when more than one Technical Submission workbook was uploaded, and
+correctly uses that pick for `files["technical_xlsm"]` (the file the pack actually gets built
+from) and the "AMBIGUOUS" note - but `sorted()` returns a NEW list, so `candidates`/`tech`'s own
+original list was never updated. The `family`/`signal` text built afterwards still read `tech[0]`
+- the STALE, pre-tie-break first candidate. Reproduced directly: two technical workbooks,
+"Draft_Technical_Submission.xlsm" (older, sorts first alphabetically) and
+"ZZfinal_Technical_Submission.xlsm" (newer). `sanral_files["technical_xlsm"]` and the AMBIGUOUS
+note both correctly named `ZZfinal...xlsm` as the file actually used - but the top-line `signal`
+field said *"Draft_Technical_Submission.xlsm is a SANRAL 'Conventional Consultant Tender'
+Technical Submission workbook ... routed to the SANRAL submission-pack flow"* - directly
+contradicting the AMBIGUOUS note two lines below it in the exact same intake decision. A person
+skimming only the signal line (the first, most prominent thing this function reports) would
+believe the wrong workbook drove the routing decision, exactly the "silently wrong data" risk this
+session's own `fingerprint.py`/tie-break fix was built to prevent in the first place, now
+re-introduced one field over.
+
+**Fix:** added a `winners` dict inside the existing tie-break loop (`winners[doc_type] =
+cands[0]`, the identical tuple `files[doc_type]`/`registered` already use), and read
+`family`/`signal`/the "two SANRAL families" note from `winners["technical_xlsm"]` instead of the
+stale `tech[0]`. `families` (the *set* of families seen, used only to detect "two different
+families uploaded at all") is unaffected - that check never depended on tie-break order.
+
+**Verified the regression test actually catches the regression:** new
+`test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used()` in
+`test_classify_tender.py`, reusing the real `TECH_WORKBOOK` sample fixture copied to two paths
+with the same "sorts first alphabetically but older" / "sorts last but newer" shape as the repro
+above. Reverted the fix (`git apply -R`, keeping the new test): failed with exactly the predicted
+wrong filename in `signal`; restored: `0 failure(s)`. Full `test_classify_tender.py` (now 6
+functions) re-run clean both before and after.
+
+**Regression:** `engine/intake/classify_tender.py`'s `classify_documents()` only - the
+`family`/`signal`/"two SANRAL families" text now matches the file actually used whenever more
+than one Technical Submission workbook is uploaded. `sanral_files`/`sanral_documents`/the
+AMBIGUOUS note were already correct and are unchanged. No schema or other call-site changes;
+`process_pack_jobs.py` (which reads `sanral_files`, not `signal`) was never affected by the bug and
+is untouched by the fix.
