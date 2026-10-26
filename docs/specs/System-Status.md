@@ -86,6 +86,27 @@ PR activity subscription confirmed active. Not yet done: a live click-through ag
 tenders on the refreshed Vercel preview (build-level verification only so far) - the PR's own test-plan
 checkbox for this is left unchecked, not claimed.
 
+**2026-10-26 ~10:45 UTC — correction: migration `0098` (admin portal customers/readiness) is NOT
+still waiting on Sarel - it shipped with PR #155 (merged 2026-10-25 ~23:04 SAST/21:04 UTC, before
+PR #156 was even opened) and is confirmed LIVE in production.** Verified by direct RPC call
+against the real Supabase project (`platform_admin_company_readiness_data()` - a function that
+only exists after 0098 - returns `[]` for a dummy company id rather than a `PGRST202: function
+not found` error), not assumed from the merged PR alone.
+
+**How this went stale, and a real investigation mistake worth recording**: this entry's own prior
+backlog line ("migration `0098`... waiting on Sarel") was carried forward unchanged across at
+least 5 standing-review passes without anyone re-checking it after PR #155 merged - a real gap in
+this routine's own backlog hygiene. Separately, while reviewing PR #156 this session initially
+misread its scope: comparing `git diff origin/main...origin/claude/vibrant-feynman-kodhbh` (three-
+dot, i.e. against the two branches' merge-base) made the admin-command-center commit on that
+branch look like undisclosed, unreviewed, pending-on-Sarel work bundled into an unrelated PR - it
+is in fact byte-identical to PR #155's own already-merged commit (`git diff <commit>..<commit>` on
+the two confirmed zero output), present on the branch only because that branch forked before PR
+#155 merged. A two-dot diff (`main..branch`) or diffing against main's actual current tip would
+have shown this immediately. No new PR was opened for it, since there is nothing left to review.
+
+---
+
 **2026-10-26 ~10:20 UTC — standing review pass: a real dedupe bug fixed in `system_alerts.fingerprint()`
 - two occurrences of the identical underlying failure, differing only by a Python object's
 non-deterministic memory address, were silently filed as two separate open alerts instead of one.**
