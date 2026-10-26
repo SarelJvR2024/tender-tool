@@ -5,7 +5,7 @@ import { StatusBadge } from "@/components/tt/status-badge";
 
 const PROOF_POINTS = [
   { icon: ShieldCheck, text: "Checks every contents entry against its real page number before the pack is built" },
-  { icon: FileCheck2, text: "Builds your full SANRAL submission pack - forms, financials and CVs" },
+  { icon: FileCheck2, text: "Compiles complete South African tender packs - SBD/MBD forms, financials, compliance, and CVs" },
   { icon: AlarmClock, text: "Flags every expired, missing or mismatched document before you submit" },
 ];
 
@@ -36,11 +36,11 @@ function ProductPreview() {
       </div>
       <div className="space-y-2 rounded-lg border border-white/10 bg-white/[0.03] p-2.5">
         <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[10px] text-white/70">SANRAL/NRA/2026/014</span>
+          <span className="font-mono text-[10px] text-white/70">TFR/2026/014</span>
           <StatusBadge status="ready">Complete</StatusBadge>
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[10px] text-white/70">SANRAL/NRA/2026/022</span>
+          <span className="font-mono text-[10px] text-white/70">DBSA/2026/022</span>
           <StatusBadge status="needs-docs">Needs documents</StatusBadge>
         </div>
       </div>
