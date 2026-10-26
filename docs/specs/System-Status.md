@@ -1,5 +1,62 @@
 # System Status
 
+**2026-10-26 ~10:05 UTC — standing review pass: closed the real zero-coverage gap on
+`process_pack_jobs.py`'s three `sync_*` functions, and corrected a stale claim in this file's own
+backlog along the way.** Orientation: `git fetch origin main` showed local HEAD already matched
+`origin/main` exactly (`3ca226f`) before starting. Two open PRs checked and avoided: `#156` (draft,
+in-flight, the notification-engine session's tender-workspace wire-up - untouched by this pass) and
+`#118` (draft, stale, unrelated). Stayed clear of the self-merge incident PRs, per the standing
+guardrail. (Note: this pass's own changes went to `claude/modest-newton-qwgux0` + a draft PR, not a
+direct push to `main` as several recent entries above describe - this session's own harness
+instructions require a feature branch + PR, which take precedence over the direct-push pattern the
+other sessions used.)
+
+**The gap, and what was actually true about it**: four passes in a row (going back through
+`fe8352c`'s predecessor) had flagged `sync_tender_requirements()`, `sync_b7_setup()` and
+`sync_position_suggestions()` as having "no coverage at all" - true for the first two (confirmed
+again by grep: nothing imports either name before this pass), **but already false for the third**
+by the time it was last written: `engine/pack/test_pdf_merge.py`'s
+`test_sync_position_suggestions_skips_a_tender_closed_real_yesterday()` already covers its
+naive-"today" skip path (Finding 37/38's bug class). What that one test never exercised - the
+function's actual write path (rank, insert/update `tender_pack_assignments`, and the "written only
+when the ranking changed" no-op) - was the real remaining gap, not "zero coverage." Recording this
+here since repeating an unverified claim across four standing-review entries is exactly the kind of
+drift this file exists to catch.
+
+**Built**: `engine/pack/test_sync_functions.py` (new, 9 cases, no live Supabase/Postgres needed) -
+a `FakeClient` (in-memory `.select`/`.insert`/`.update`, `.download()` copying from a local-file map
+instead of hitting Storage) driving `sync_tender_requirements()` and `sync_b7_setup()` against the
+real `templates/samples/R.396-010-2025.1F_ran.xlsm` sample workbook (same file bridge_selftest.py
+seeds with), exactly as the live bridge reads it - no mocking of `sanral_fill.Workbook` itself.
+Covers: primary + ALT rows written correctly from the real SETUP sheet; idempotency (a second poll
+writes nothing once positions/`sanral_b7_setup` are on file); the 0045 "per copy" contract (a
+company's own upload and the buyer's shared copy get independent rows, no company_id leakage);
+`sync_b7_setup()` preferring the shared copy over a company upload regardless of upload order
+(proven by pointing the company's copy at a file that doesn't exist - the test would fail if the
+wrong one were chosen); an unreadable workbook being skipped and reported via `system_alerts`
+(`set_sink`) rather than crashing the poll; and, for `sync_position_suggestions()`, the real
+write path (one `tender_pack_assignments` row per open position, correctly shaped) plus the
+no-op-on-unchanged-ranking path that `test_pdf_merge.py` didn't cover.
+
+**Verified**: all 9 new cases pass; `test_adapt_company.py` (6/6) and `test_pdf_merge.py` (3/3), the
+two existing test files in this directory, both still pass unchanged; `python3 -m py_compile` clean
+on `process_pack_jobs.py` and the new test file. No bug found in the three functions themselves -
+every assertion passed on the first real run, which is itself informative: `sync_tender_requirements`/
+`sync_b7_setup`'s per-copy and idempotency logic, traced in depth by two of the entries below, now
+has a regression harness instead of resting on inspection alone.
+
+**QA tooling**: sound - `tsc --noEmit`/`eslint` clean (no TypeScript touched). No Python linter is
+configured in this repo (confirmed: no `.flake8`/`ruff.toml`/lint section in `pyproject.toml`); the
+existing `engine/pack/test_*.py` convention (plain script, `check()`, `sys.exit(1)` on failure, no
+pytest) is what this file follows too.
+
+**Backlog confirmed, not assumed - unchanged this pass**: migration `0096` (pack-quota trial-
+expiry), migration `0098` (admin portal customers/readiness), the `narrative_documents` PostgREST
+schema-cache reload, and the PayFast idempotency design question (not urgent) are all still waiting
+on Sarel.
+
+---
+
 **2026-10-26 ~08:18 UTC — standing review pass: removed ~25 lines of genuinely unreachable dead
 code in `engine/pack/process_pack_jobs.py`'s `sync_tender_requirements()` - a leftover duplicate
 from the 0045 "per copy" refactor, never executed, now gone.** Orientation: `git fetch origin main`
