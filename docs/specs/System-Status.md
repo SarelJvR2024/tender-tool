@@ -3885,6 +3885,41 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-26, standing QA/robustness review - one-hundred-and-second run): a legacy .doc whose LibreOffice conversion produced a broken file raised an uncaught exception straight out of the document reader shared by discovery, intake and general-pack extraction
+
+Orientation: synced a sibling commit (`3ade4a0`, a standing-review pass giving real review to two
+self-merged PRs - #159's dashboard-stats tenant leak fix, confirmed sound; #163's new discovery
+`.docx`/`.doc` fallback reader, confirmed sound by running its own test suite). No open PRs.
+Picked up on that same `.docx`/`.doc` fallback reader deliberately: freshly-landed glue code
+wiring an existing function into a new caller is exactly the shape this routine's own history
+(the sixty-second run's PayFast pass) keeps finding real bugs in, and the sibling's review -
+while real and direct - checked the PR's own claims, not adversarial edge cases against the
+shared function it now exposes to a new caller.
+
+**Finding 82 (CONFIRMED, FIXED, moderate).** `requirements.py`'s `read_document()` - shared by the
+new discovery fallback, manual intake, and general-pack extraction - guards its `fmt == "docx"`
+branch's `docx_text()` call with a `try/except` ("corrupt / not really a docx") but not its
+`fmt == "doc"` branch's identical call on LibreOffice's own conversion output.
+`convert_with_soffice()` only checks the output path EXISTS, never that LibreOffice wrote a valid
+docx or that the subprocess exited cleanly - an unusual legacy `.doc` feature that leaves a
+truncated/broken file at the expected path (simulated via a monkeypatched `convert_with_soffice()`
+returning a path to a genuinely broken file; not reproduced from a real sample) raised
+`PackageNotFoundError` straight out of `read_document()`, uncaught - and, for the new discovery
+caller specifically, out of `fetch_document_text()` too, with no guard there either. Confirmed the
+real blast radius: `watch_new_tenders.py`'s `fan_out()` already catches per-release exceptions
+inside its thread pool, so this degrades to a generic `"ERROR"` verdict + a `system_alerts` entry
+for that one tender rather than crashing the whole daily run - real, but moderate, not severe.
+
+**Fix:** wrapped `docx_text(conv)` in the same `try/except` pattern the sibling `docx` branch
+already uses, naming the conversion (not python-docx generically) as the problem.
+
+**Verified red, then green:** new case added to the sibling's own `test_document_reader_fallback.py`
+(monkeypatched `convert_with_soffice()`, a real `.doc` sample). Reverted the fix (keeping the
+test): the script crashed with the exact predicted `PackageNotFoundError` traceback; restored: `0
+failure(s)`, all 20 checks. `test_requirements.py` re-run clean.
+
+Full details: Finding 82 in `QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-26, standing QA/robustness review - one-hundred-and-first run): rotated to discovery (engine/discovery) - thorough review, no new bug found this time
 
 Orientation: synced several sibling commits (WhatsApp widget fixes/extensions, a real

@@ -4727,3 +4727,57 @@ end-to-end test.
 one condition changed in each, same fix, same reasoning. No schema or other call-site changes;
 `sanral_b7.py`'s own functions and `assemble_pack.py`'s `b7_filled`/manifest reporting (already
 correct) are untouched.
+
+### Finding 82 (CONFIRMED, FIXED, moderate - a legacy .doc whose LibreOffice conversion produced a broken file raised an uncaught exception straight out of the document reader shared by discovery, intake and general-pack extraction)
+
+**Where:** `engine/general/requirements.py`'s `read_document()`, the `fmt == "doc"` branch.
+
+**What was tested:** a sibling standing-review pass (same day) had just merged PR #163 - a new
+`.docx`/`.doc` fallback reader for the live OCDS discovery feed (`assess_tender.fetch_document_text()`,
+routing non-PDF documents through `requirements.read_document()` instead of always failing on
+`pdftotext`) - and given it a real, direct review (ran the new test suite, confirmed its claims).
+Freshly-landed glue code wiring an EXISTING shared function into a NEW caller is exactly the shape
+this routine's own history keeps finding real bugs in (the sixty-second run's PayFast pass, this
+same reasoning). Read `read_document()` itself end to end, specifically checking whether the error
+handling around each of its format branches (`pdf`/`docx`/`doc`) is actually symmetric, since this
+exact asymmetry class (a guard applied to one branch, not its sibling) is what Findings 80 and 81
+both turned out to be.
+
+**Finding (CONFIRMED, moderate).** It wasn't symmetric. The `fmt == "docx"` branch wraps its
+`docx_text(doc["path"])` call in `try/except Exception as e: doc["unreadable"] = f"python-docx
+could not open it: {e}"` (handling "corrupt / not really a docx", per its own comment). The
+`fmt == "doc"` branch's own call to the SAME `docx_text()` function - on `conv`, LibreOffice's
+own `.doc` -> `.docx` conversion output - has no such guard, and `convert_with_soffice()` only
+checks that the output path EXISTS (`os.path.exists(out)`), never that LibreOffice actually wrote
+a readable docx; it also never checks the subprocess's own return code. An unusual legacy `.doc`
+feature that makes `soffice` exit non-zero while still leaving a truncated or empty file at the
+expected output path (not reproduced from a real `.doc` sample - no committed sample triggers it -
+but simulated with a monkeypatched `convert_with_soffice()` returning a path to a genuinely broken
+file, the same "exists but isn't valid" shape) raises `docx.opc.exceptions.PackageNotFoundError`
+straight out of `read_document()`, uncaught. This function is shared by three real callers: the
+brand-new discovery fallback (`fetch_document_text()`, no guard around its own call to
+`read_document()` either), the pre-existing manual-intake pipeline, and general-pack extraction -
+all three inherit the same gap, not just the new one. Confirmed the actual blast radius for
+discovery specifically: `watch_new_tenders.py`'s `fan_out()` already wraps each release's
+`read_release()` call in a per-release `try/except` inside its thread pool, so this degrades to a
+generic `"ERROR"` verdict plus a `system_alerts` entry for that one tender rather than crashing the
+whole daily discovery run - real, but moderate, not severe.
+
+**Fix:** wrapped `text = docx_text(conv)` in the `fmt == "doc"` branch with the same
+`try/except Exception as e: doc["unreadable"] = f"..."` pattern the sibling `docx` branch already
+uses, naming the conversion (not python-docx generically) as the problem since the file itself
+came from `soffice`, not the original upload.
+
+**Verified the regression test actually catches the regression:** new case in the sibling's own
+`test_document_reader_fallback.py` (monkeypatching `requirements.convert_with_soffice()` to return
+a path to a deliberately broken "converted" file, then calling the real
+`assess_tender.fetch_document_text()` against a real `.doc` sample). Reverted the fix (`git apply
+-R`, keeping the new test): the test script itself crashed with the exact predicted
+`PackageNotFoundError` traceback, uncaught; restored: `0 failure(s)`, all 18 pre-existing checks
+plus the 2 new ones. `engine/general/test_requirements.py` (the shared function's own existing
+suite) re-run clean.
+
+**Regression:** `engine/general/requirements.py`'s `read_document()` only - one `try/except`
+added around the `fmt == "doc"` branch's conversion-output read. No schema or other call-site
+changes; every caller (discovery's new fallback, manual intake, general-pack extraction) now
+degrades honestly on this path instead of raising.

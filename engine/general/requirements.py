@@ -183,7 +183,18 @@ def read_document(doc, work_dir):
         conv = convert_with_soffice(doc["path"], "docx", work_dir)
         if conv:
             doc["converted_docx"] = conv
-            text = docx_text(conv)
+            # convert_with_soffice() only checks that the output path EXISTS, not that
+            # LibreOffice actually wrote a valid docx - an unusual legacy .doc feature can
+            # make soffice exit non-zero while still leaving a truncated/empty file at the
+            # expected path. The sibling "docx" branch just above already guards the
+            # identical docx_text() call for this exact reason ("corrupt / not really a
+            # docx") - this branch didn't, so a broken conversion raised straight out of
+            # read_document() uncaught (confirmed: PackageNotFoundError from python-docx).
+            # QA pass, 2026-10-26.
+            try:
+                text = docx_text(conv)
+            except Exception as e:
+                doc["unreadable"] = f"LibreOffice's own .docx conversion could not be read: {e}"
         else:
             doc["unreadable"] = "LibreOffice could not convert this legacy .doc"
     elif fmt == "txt":

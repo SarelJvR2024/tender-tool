@@ -81,6 +81,39 @@ def part1_fetch_document_text():
         check(err == "Document is a scanned image — full text requires OCR during tender intake",
               f"the scanned-image case gets its own honest, OCR-free status note, not a generic failure (err={err!r})")
 
+    # Finding (2026-10-26): requirements.read_document()'s "doc" branch calls
+    # docx_text() on LibreOffice's own conversion output with NO guard - the
+    # sibling "docx" branch guards the identical call ("corrupt / not really
+    # a docx"), this one didn't. convert_with_soffice() only checks that the
+    # output path EXISTS, not that LibreOffice actually wrote a valid docx,
+    # so an unusual legacy .doc feature can leave a broken file at the
+    # expected path and docx_text() then raises straight out of
+    # read_document() - uncaught here in fetch_document_text() too, before
+    # the fix. Simulated (no real .doc sample is known to trigger this in
+    # LibreOffice itself) by monkeypatching convert_with_soffice() to return
+    # a path to a genuinely broken "conversion".
+    general_dir = os.path.join(ROOT, "engine", "general")
+    if general_dir not in sys.path:
+        sys.path.insert(0, general_dir)
+    import requirements as _requirements  # noqa: E402
+
+    with tempfile.TemporaryDirectory() as td:
+        broken_docx = os.path.join(td, "broken.docx")
+        with open(broken_docx, "wb") as f:
+            f.write(b"not a real docx file, just garbage bytes")
+        real_convert = _requirements.convert_with_soffice
+        _requirements.convert_with_soffice = lambda path, target_ext, out_dir: broken_docx
+        try:
+            # If fetch_document_text() still raised here, this line itself would crash the
+            # whole test script - the real regression check is reaching the line below at all.
+            text, err = assess_tender.fetch_document_text(sample_url("raf_pr10118921", "SCM-Bid Documents SBD 4.doc"))
+            check(text == "" and err is not None, f"a .doc whose LibreOffice conversion produced a broken file "
+                  f"degrades honestly (no uncaught exception) instead of crashing the caller (text={text!r}, err={err!r})")
+            check("could not be read" in (err or ""),
+                  f"the error names the conversion as the problem, not a generic/misleading one (err={err!r})")
+        finally:
+            _requirements.convert_with_soffice = real_convert
+
     # A PDF, or an unrecognised/missing extension, must still go through
     # fetch_pdf_text exactly as before - this function changes nothing there.
     real_calls = []
