@@ -283,18 +283,21 @@ export function sanralConventionalDocumentChecks(input: {
     });
   }
 
-  // Stage 2 #4 - attendance of compulsory briefing session.
-  items.push({
-    key: "briefing",
-    form: "Briefing",
-    label: "Attendance at the compulsory briefing session",
-    mandatory: true,
-    ...(input.briefingTask
-      ? input.briefingTask.status === "done"
-        ? { status: "have" as const, detail: "Briefing task marked done." }
-        : { status: "check" as const, detail: `Briefing task is ${input.briefingTask.status.replace("_", " ")}${input.briefingTask.due_date ? `, due ${fmt(input.briefingTask.due_date)}` : ""}. Missing it disqualifies the tender.` }
-      : { status: "check" as const, detail: "No briefing task on this tender. Add one under Tasks & milestones with its date - the date isn't extracted from the tender document yet." }),
-  });
+  // Stage 2 #4 - attendance of compulsory briefing session. QA finding,
+  // 2026-10-26: this used to push a ComplianceItem here, rendered by
+  // compliance-report.tsx with the exact same "On file / Confirm by hand /
+  // Don't have" document-evidence vocabulary as a real document check
+  // (CSD, Tax, COID...) - but attending a session isn't evidence on file,
+  // it's an action to complete, and this schema already tracks it correctly
+  // as exactly that: a real tender_tasks row (kind "briefing",
+  // ensureBriefingMilestone() - see page.tsx), shown in Tasks & milestones
+  // with its own real status (not_started/in_progress/done) and due date,
+  // and again in the day-before Submission Plan's own "Attend the
+  // briefing" step (submission-plan-view.tsx). Showing it a third time
+  // here, re-labelled into document vocabulary it doesn't fit, is the
+  // conflation this fix removes - input.briefingTask is still read by the
+  // caller for other summaries, just no longer turned into a document
+  // chip here.
 
   // A9 - tax compliance status (SARS TCS PIN). Real fields since 0014.
   {

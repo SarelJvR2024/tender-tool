@@ -204,7 +204,32 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       </div>
       </>
     );
-    return { overview, documents: null, questions: null, people: null, pack: null, badges: { docsMissing: 0, needAnswer: 0, peopleGaps: 0, generalFixCount: 0 } };
+    // QA finding, 2026-10-26: this used to be a bare `people: null`, which the
+    // Team & CVs tab (page.tsx) renders as `{generalSections?.people}` with
+    // nothing else guaranteed to fill that tab for a general-family tender
+    // (no ComplianceReport, and no key-positions card until positions exist)
+    // - so the tab could render completely empty with zero explanation. Key
+    // positions, registrations and experience requirements are read off this
+    // tender's own documents (see the comment above), so there is a genuine,
+    // honest reason nothing can show yet - say it, and point at the one
+    // action (Overview tab) that unblocks it, rather than leaving a blank tab.
+    const peopleBlocked = (
+      <div id="general-people" style={card}>
+        <SectionTitle title="Key people & requirements" />
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+          {extractJob && extractJob.status === "failed"
+            ? "Couldn't read this tender's documents, so key positions, registrations and experience requirements aren't known yet."
+            : extractJob
+              ? "Still reading this tender's documents - key positions, registrations and experience requirements will appear here once that finishes."
+              : "Key positions, registrations and experience requirements are read from this tender's own documents, which haven't been read yet."}{" "}
+          <a href="#general-preparation" style={{ color: "var(--accent)", fontWeight: 600 }}>
+            See Overview to read the documents
+          </a>
+          .
+        </div>
+      </div>
+    );
+    return { overview, documents: null, questions: null, people: peopleBlocked, pack: null, badges: { docsMissing: 0, needAnswer: 0, peopleGaps: 0, generalFixCount: 0 } };
   }
 
   // ----- supporting documents -----
@@ -323,9 +348,16 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           </ul>
           {privateCard && (
             <div style={{ marginTop: 6 }}>
-              <Link href="#private-documents" style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>
+              {/* Plain <a>, not next/link's <Link>: this jumps to #private-documents,
+                  which WorkspaceTabs registers under a DIFFERENT tab (Overview) than
+                  this component's own (Compliance). WorkspaceTabs switches tabs by
+                  listening for the native `hashchange` event - which a same-page
+                  history.pushState navigation (what <Link> does for a hash-only href)
+                  never fires, so a <Link> here would silently fail to switch tabs
+                  while an ordinary anchor click still does (QA finding, 2026-10-26). */}
+              <a href="#private-documents" style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>
                 See your private documents above
-              </Link>
+              </a>
             </div>
           )}
         </details>
@@ -335,7 +367,38 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         <Link href="/company" style={{ color: "var(--accent)", fontWeight: 600 }}>company vault</Link> on the closing date; anything the vault has no
         place for can be uploaded for this tender only.
       </div>
-      {returnables.length === 0 && <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>No supporting documents named in the readable text.</div>}
+      {returnables.length === 0 && (() => {
+        // QA finding, 2026-10-26: this used to be a flat "No supporting
+        // documents named in the readable text" with no explanation and no
+        // way forward - indistinguishable from "this tender genuinely asks
+        // for nothing" even when the real cause is that none of the
+        // documents could actually be read (manifest.documents[].unreadable
+        // - a real, already-captured per-document fact, just never
+        // surfaced here). Give the real reason, and the same retry action
+        // the pre-manifest state above offers, instead of a dead end.
+        const unreadableDocs = manifest.documents.filter((d) => d.unreadable);
+        const allUnreadable = manifest.documents.length > 0 && unreadableDocs.length === manifest.documents.length;
+        return (
+          <div>
+            <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: allUnreadable ? 8 : 0 }}>
+              {allUnreadable
+                ? `None of this tender's ${manifest.documents.length} document${manifest.documents.length === 1 ? "" : "s"} could actually be read (${unreadableDocs[0].unreadable}${unreadableDocs.length > 1 ? `, and ${unreadableDocs.length - 1} more` : ""}) - that's why nothing is listed, not because this tender asks for nothing.`
+                : "No supporting documents named in the readable text."}
+            </div>
+            {allUnreadable && (
+              <form action={requestRequirementsExtraction}>
+                <input type="hidden" name="tender_id" value={tenderId} />
+                <button type="submit" style={secondaryBtn}>Try reading the documents again</button>
+                {isShared && (
+                  <a href="#private-documents" style={{ marginLeft: 10, fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>
+                    Or upload a clearer copy
+                  </a>
+                )}
+              </form>
+            )}
+          </div>
+        );
+      })()}
       {returnables.map((r) => {
         // Requirements & Compliance tab brief: RequirementRow (quote
         // provenance, already built for the demo page) wired in here for
@@ -675,10 +738,12 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         {savedNote && <SavedBanner text={savedNote} />}
         <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           Read from{" "}
-          <Link href="#general-documents" style={{ color: "var(--accent)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}>
+          {/* Plain <a>, not <Link> - same cross-tab hashchange reason as the
+              #private-documents link above (this points into the Compliance tab). */}
+          <a href="#general-documents" style={{ color: "var(--accent)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}>
             <FileText style={{ width: 12, height: 12 }} />
             {manifest.documents.length} {readingIsPrivate ? "" : "published "}document{manifest.documents.length === 1 ? "" : "s"}
-          </Link>
+          </a>
           {readingIsPrivate ? ` (including your ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"})` : ""}
           {tender.buyer ? ` by ${tender.buyer}` : ""} on {(formatDate(manifest.extracted_at) ?? "—")}.{" "}
           {manifest.form_suite === "MBD"

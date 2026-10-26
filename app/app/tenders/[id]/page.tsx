@@ -40,14 +40,14 @@ import { roleCodeForPosition, type RoleTag } from "@/lib/tenderRoles";
 import { suggestForPosition, type CandidateScore } from "@/lib/positionSuggestions";
 import { loadPackReviewSnapshot } from "./pack-review-data";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
-import { formatDate, formatDateTime, formatClosingDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime, formatClosingDateTime, closingCountdown, daysUntil } from "@/lib/dates";
 import { DateField } from "@/components/ui/date-field";
 import { formatZAR } from "@/lib/formatZAR";
 import { computeTenderReadiness } from "./tender-readiness";
 import { DisqualificationGuard } from "./disqualification-guard";
 import { SubmissionPlanView } from "./submission-plan-view";
 import { CollapsibleSection } from "./collapsible-section";
-import { type SubmissionType, type DispatchStatus, printSignDeadline, operationalStatusMessage } from "@/lib/dispatchTriage";
+import { type SubmissionType, type DispatchStatus, printSignDeadline, departureDeadline, operationalStatusMessage } from "@/lib/dispatchTriage";
 import { SubmissionModeBadge } from "./submission-mode-badge";
 import { SubmissionLogisticsForm } from "./submission-logistics-form";
 import { DispatchStatusButton } from "@/components/tt/dispatch-status-button";
@@ -176,15 +176,8 @@ const PRICING_MODEL_LABEL: Record<string, string> = {
   time_based: "Time-based",
 };
 
-// field_key is a dotted path like "a_forms.A8.litigation" or
-// "financial_hours.Roadworks.A.PL" (see 0002_field_provenance.sql) - there's
-// no display-name table, so this is a best-effort humanization: drop the
-// owning-script prefix segment, underscore-split the rest, title-case it.
-function humanizeFieldKey(fieldKey: string): string {
-  const parts = fieldKey.split(".");
-  const rest = parts.length > 1 ? parts.slice(1) : parts;
-  return rest
-    .join(" ")
+function titleCaseWords(s: string): string {
+  return s
     .replace(/_/g, " ")
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .split(" ")
@@ -193,19 +186,35 @@ function humanizeFieldKey(fieldKey: string): string {
     .join(" ");
 }
 
-// Time-aware on purpose (unlike the date-only daysUntil): a tender closes at
-// a stated hour. The old Math.ceil(ms / day) turned "closed 2 hours ago" into
-// -0, which rendered as "0 days left" instead of "closed" (2026-10-17
-// scenario pass), and "closes at 12:00 today" as "1 days left".
-function closingCountdown(closingDate: string | null): { text: string; urgent: boolean } | null {
-  if (!closingDate) return null;
-  const ms = new Date(closingDate).getTime() - Date.now();
-  if (Number.isNaN(ms)) return null;
-  if (ms <= 0) return { text: "closed", urgent: true };
-  const hours = Math.floor(ms / (1000 * 60 * 60));
-  if (hours < 24) return { text: hours < 1 ? "closes within the hour" : `closes in ${hours} hour${hours === 1 ? "" : "s"}`, urgent: true };
-  const days = Math.floor(hours / 24);
-  return { text: `${days} day${days === 1 ? "" : "s"} left`, urgent: days <= 7 };
+// Known field_key -> real document/section name overrides, for the exact
+// keys this engine's real callers write today (0002_field_provenance.sql's
+// own fill_a_forms.py/process_general_jobs.py/seed_demo_company.py). QA
+// finding, 2026-10-26: the generic humanization below is only a best-effort
+// cosmetic pass (drop the owning-script prefix, title-case the rest) - it
+// still let real internal identifiers through, e.g. "signatory_person_id"
+// humanized to "Signatory Person Id" (a raw DB column suffix, not a
+// real-world name) and "company.bee_level" to "Bee Level" (loses the
+// B-BBEE term entirely). Anything not listed here still falls back to the
+// generic pass - there's still no full display-name table.
+const FIELD_KEY_LABELS: Record<string, string> = {
+  signatory_person_id: "Signatory",
+  "company.bee_level": "B-BBEE level",
+  "contract_data.client_name": "Client name (Contract Data form)",
+  "financial_hours.summary": "Financial & hours workbook",
+};
+
+function humanizeFieldKey(fieldKey: string): string {
+  if (FIELD_KEY_LABELS[fieldKey]) return FIELD_KEY_LABELS[fieldKey];
+  const parts = fieldKey.split(".");
+  // "a_forms.A8.litigation" -> "Form A8 - Litigation", matching this app's
+  // own "Form A12"/"Form B6" convention for a real SANRAL document code
+  // (compliance-report.tsx) rather than silently dropping the word "Form".
+  if (parts[0] === "a_forms" && parts.length > 1) {
+    const rest = parts.slice(2);
+    return rest.length > 0 ? `Form ${parts[1]} - ${titleCaseWords(rest.join(" "))}` : `Form ${parts[1]}`;
+  }
+  const rest = parts.length > 1 ? parts.slice(1) : parts;
+  return titleCaseWords(rest.join(" "));
 }
 
 export default async function TenderWorkspacePage({
@@ -371,7 +380,7 @@ export default async function TenderWorkspacePage({
   // Drives the at-a-glance summary chips on the facts card, so "are we ready
   // to submit" is answerable without scrolling past Tasks & Key positions.
   const overdueTaskCount = tasks.filter((t) => {
-    const taskLeft = taskDaysLeft(t.due_date);
+    const taskLeft = daysUntil(t.due_date);
     return taskLeft !== null && taskLeft < 0 && t.status !== "done";
   }).length;
   // Drives which jump-nav links are shown: ComplianceReport only renders its
@@ -453,6 +462,7 @@ export default async function TenderWorkspacePage({
         }
       : null;
   const printDeadline = dispatchLogistics ? printSignDeadline(dispatchLogistics) : null;
+  const dispatchDepartureDeadline = dispatchLogistics ? departureDeadline(dispatchLogistics) : null;
   const operationalMessage = dispatchLogistics ? operationalStatusMessage(dispatchLogistics, blockingSummary) : null;
 
   // Section-level error recovery: each of these is a self-contained async
@@ -669,6 +679,9 @@ export default async function TenderWorkspacePage({
                   estimatedPrintHours={dispatchLogistics.estimatedPrintHours}
                   estimatedTransitHours={dispatchLogistics.estimatedTransitHours}
                   printDeadline={printDeadline}
+                  departureDeadline={dispatchDepartureDeadline}
+                  deliveryLocation={tenderPack?.delivery_location ?? null}
+                  courierContact={tenderPack?.courier_contact ?? null}
                   operationalMessage={operationalMessage}
                 />
               )}
@@ -1252,14 +1265,6 @@ const KIND_TAG: Record<string, string> = {
   opening: "Opening",
 };
 
-function taskDaysLeft(dueDate: string | null): number | null {
-  if (!dueDate) return null;
-  const target = new Date(dueDate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return Math.ceil((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-}
-
 /**
  * Task/deadline timeline - standard milestones (kind set, auto-seeded where
  * the date is known) plus free-text manual tasks, same table, same list,
@@ -1299,7 +1304,7 @@ function TaskTimeline({
       {!error && tasks.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", marginBottom: 14 }}>
           {tasks.map((t) => {
-            const left = taskDaysLeft(t.due_date);
+            const left = daysUntil(t.due_date);
             const overdue = left !== null && left < 0 && t.status !== "done";
             return (
               <div

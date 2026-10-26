@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HashAwareLink } from "./hash-aware-link";
 import { Info } from "lucide-react";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { confirmGeneralPackReview } from "./general-pack-review-actions";
@@ -179,9 +179,9 @@ export async function GeneralPackReview({ tenderId }: { tenderId: string }) {
                   </span>
                 )}
               </span>
-              <Link href={s.changeHref} className="text-[11px] font-semibold text-accent">
+              <HashAwareLink href={s.changeHref} className="text-[11px] font-semibold text-accent">
                 {s.changeLabel} &rarr;
-              </Link>
+              </HashAwareLink>
             </summary>
             <div className="px-3 pb-2.5">
               {s.error ? (

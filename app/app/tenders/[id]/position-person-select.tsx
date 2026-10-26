@@ -138,6 +138,13 @@ export function PositionPersonSelect({
           A suggestion appears once the pack builder has scored your people against this position.
         </div>
       )}
+      {suggestions.scored && suggestions.noSuitableCandidate && (
+        <div className="rounded-lg border border-border bg-muted/30 px-2.5 py-2 text-[11px] text-muted-foreground">
+          <strong className="text-foreground">No suitable candidate identified</strong> - nobody on file has any ECSA
+          registration, years&apos; experience, or keyword match for this position. Choose someone manually below if
+          you know who it should be.
+        </div>
+      )}
       <select
         aria-label={`Confirmed key person for ${positionCode}`}
         value={confirmedPersonId ?? ""}

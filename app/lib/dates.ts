@@ -105,11 +105,16 @@ export function expiryStatus(dateStr: string | null, renewSoonWithinDays = 60): 
 
 /**
  * "Closes in X days / Y hours" - the exact wording Sarel asked for on the
- * Opportunities cards (2026-10-22 live feedback). Shares the tender-workspace
- * page's own closingCountdown() logic (app/app/tenders/[id]/page.tsx) rather
- * than importing from that file, since a sibling session was concurrently
- * editing it when this was written - a shared export here lets both pages
- * use the same rule without either one depending on the other's file.
+ * Opportunities cards (2026-10-22 live feedback). The one shared deadline-
+ * countdown calculation for any tender closing time - time-aware on purpose
+ * (unlike the date-only daysUntil()): a tender closes at a stated hour, and
+ * Math.ceil(ms / day) turned "closed 2 hours ago" into -0, which rendered as
+ * "0 days left" instead of "closed" (2026-10-17 scenario pass). Used by
+ * discovery/page.tsx's Opportunities cards and the Tender Workspace header
+ * (app/app/tenders/[id]/page.tsx) - the latter used to keep its own,
+ * independently-drifted copy of this exact function (missing the remaining-
+ * hours breakdown below, QA finding 2026-10-26) rather than importing this
+ * one; don't reintroduce a second copy.
  */
 export function closingCountdown(closingDate: string | null): { text: string; urgent: boolean } | null {
   if (!closingDate) return null;

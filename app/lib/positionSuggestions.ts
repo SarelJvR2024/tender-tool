@@ -54,7 +54,27 @@ export type PositionSuggestions = {
   // The suggestion's match score equals the first alternative's: the order
   // between them comes from the tie-break (years' experience), not the match.
   tied: boolean;
+  /**
+   * True once scoring ran and at least one candidate was ranked, but NONE of
+   * them had any real evidence (no ECSA level, no years' experience on
+   * file, no matched keyword) - `suggestion` is null for an honest reason
+   * here, distinct from `scored: false` (nothing scored yet) or simply
+   * nobody eligible to rank at all. QA finding, 2026-10-26: this module used
+   * to hand back the top-ranked person regardless, labelled SUGGESTED, even
+   * with literally nothing behind it (score_candidate()'s own open-ended,
+   * no-floor integer score can be 0 or negative) - a real person's name
+   * dressed up as a real match. Candidates with no evidence are still left
+   * in the ordinary dropdown (suggestForPosition() excludes them only from
+   * `suggestion`/`alternatives`) - manual selection stays possible, just
+   * never presented as if the system found something.
+   */
+  noSuitableCandidate: boolean;
 };
+
+/** Same "any real signal at all" check whySuggested() uses to decide whether it has anything to say. */
+function hasEvidence(c: CandidateScore): boolean {
+  return !!c.ecsa_level || (c.years_experience !== null && c.years_experience !== undefined) || !!(c.matched && c.matched.length > 0);
+}
 
 /** "Professional Engineer" -> "Pr Eng" etc.; anything else is shown as stored. */
 function shortEcsa(level: string): string {
@@ -106,13 +126,23 @@ export function suggestForPosition(input: {
   tags: RoleTag[];
   peopleIds: Set<string>;
 }): PositionSuggestions {
-  if (!input.candidateScores) return { scored: false, basis: "tagged", suggestion: null, alternatives: [], tied: false };
+  if (!input.candidateScores) return { scored: false, basis: "tagged", suggestion: null, alternatives: [], tied: false, noSuitableCandidate: false };
   const roleCode = roleCodeForPosition(input.positionCode, input.description);
   const tagged = new Set(roleCode ? input.tags.filter((t) => t.role_code === roleCode).map((t) => t.person_id) : []);
   const onFile = input.candidateScores.filter((c) => input.peopleIds.has(c.person_id));
   const eligible = onFile.filter((c) => tagged.has(c.person_id));
   const basis = eligible.length > 0 ? "tagged" : "everyone";
-  const ranked = (basis === "tagged" ? eligible : onFile).map(toSuggestion);
+  const rankedAll = basis === "tagged" ? eligible : onFile;
+  // QA finding, 2026-10-26: candidates with no real evidence (no ECSA level,
+  // no years' experience, no matched keyword - score_candidate()'s own
+  // open-ended, no-floor score can land at 0 or below) are excluded from
+  // suggestion/alternatives entirely, not just de-prioritized - the old
+  // ranked[0] always became "SUGGESTED" even with nothing behind it. They
+  // stay selectable through the ordinary dropdown (position-person-select.tsx
+  // only removes people already in `top` from it) - manual selection stays
+  // possible, just never presented as a match the system found.
+  const ranked = rankedAll.filter(hasEvidence).map(toSuggestion);
   const tied = ranked.length > 1 && ranked[0].score === ranked[1].score;
-  return { scored: true, basis, suggestion: ranked[0] ?? null, alternatives: ranked.slice(1, 3), tied };
+  const noSuitableCandidate = rankedAll.length > 0 && ranked.length === 0;
+  return { scored: true, basis, suggestion: ranked[0] ?? null, alternatives: ranked.slice(1, 3), tied, noSuitableCandidate };
 }

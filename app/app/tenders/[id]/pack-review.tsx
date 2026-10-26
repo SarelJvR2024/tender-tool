@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HashAwareLink } from "./hash-aware-link";
 import { loadPackReviewSnapshot, type ReviewStatus } from "./pack-review-data";
 import { confirmPackReview } from "./pack-review-actions";
 import { PackChecklist } from "./pack-checklist";
@@ -118,9 +118,9 @@ export async function PackReview({ tenderId }: { tenderId: string }) {
                   </span>
                 )}
               </span>
-              <Link href={s.changeHref} className="text-[11px] font-semibold text-accent">
+              <HashAwareLink href={s.changeHref} className="text-[11px] font-semibold text-accent">
                 {s.changeLabel} &rarr;
-              </Link>
+              </HashAwareLink>
             </summary>
             <div className="px-3 pb-2.5">
               {s.error ? (
