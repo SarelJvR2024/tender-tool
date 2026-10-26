@@ -1,5 +1,91 @@
 # System Status
 
+**2026-10-26 ~12:00 UTC — PR #156: 6 of 7 targeted review fixes pushed (commit `7c8a21f`), re-tested
+against real tenders GG12700238 and N.007-030-2026/1F; 1 fix explicitly not done, for a stated reason.**
+A relayed review (claimed to be Sarel's own, against the Vercel preview of PR #156 - the tender-
+workspace wire-up pass) listed 7 fixes to make before approval, with explicit constraints: no rewrite,
+no splitting admin work out again, don't touch migration 0098. Verified the premise before acting on
+it (per this file's own standing "weigh, don't blindly trust" rule for cross-session/relayed input) -
+each of the 7 findings was independently re-derived from the actual code, not taken on faith:
+
+1. **Cross-tab anchor links didn't switch tabs** - confirmed root cause: `next/link`'s `<Link href="#x">`
+   navigates via `history.pushState`, which never fires the native `hashchange` event
+   `workspace-tabs.tsx`'s `WorkspaceTabs` listens for to switch tabs (a real, well-known Next.js/browser
+   quirk, not a guess - a plain `<a href="#x">` fires it correctly, and both styles already coexisted in
+   this codebase). Found 2 same-page `<Link>` hash jumps in `general-workspace.tsx` and 3 more dynamic
+   ones (`fixHref`/`changeHref`, which mix same-page hashes like `#tender-templates`/`#form-b7`/
+   `#key-positions` with real cross-page paths like `/company#bee-cidb` in the same field) in
+   `compliance-report.tsx`, `pack-review.tsx`, `general-pack-review.tsx`. Fixed with plain `<a>` for the
+   first case and a new `HashAwareLink` helper (`app/app/tenders/[id]/hash-aware-link.tsx`) for the
+   mixed case - picks `<a>` for a same-page hash, `<Link>` for a real route. Tested (`hash-aware-link.spec.ts`).
+2. **Misleading blocked-document flow** - for a general-family tender with no manifest read yet, "Team &
+   CVs" could render completely empty (`generalSections.people` was a bare `null`, and nothing else fills
+   that tab for a general-family tender) - now explains why and points at Overview's read-documents
+   action. Separately, a manifest where every document came back `unreadable` gave a dead-end "No
+   supporting documents named in the readable text" with zero indication anything had gone wrong - now
+   names the real reason and offers "Try reading the documents again" (+ an upload pointer for a shared
+   tender).
+3. **Deadline/countdown math wasn't actually shared** - `app/app/tenders/[id]/page.tsx` carried its own
+   independently-drifted local copies of `lib/dates.ts`'s exported `closingCountdown()` (missing the
+   remaining-hours breakdown the shared one has) and `daysUntil()` (as a locally-defined `taskDaysLeft()`,
+   byte-for-byte the same logic under a different name) - both deleted in favour of the one shared,
+   tested implementation. Added direct `daysUntil()` coverage (date-only/already-overdue matrix) to
+   `lib/dates.test.ts`, which previously only tested `closingCountdown()`.
+4. **No day-before physical-submission planning detail** - the print+transit buffer collapsed into one
+   opaque "Hard target" number in `SubmissionModeBadge`. Added `departureDeadline()` to
+   `lib/dispatchTriage.ts` (closing minus transit only, tested) so the badge can show 3 sequential,
+   labelled steps instead of one. The 4h/2h hour defaults (`0090_submission_logistics.sql`'s own column
+   defaults) are now explicitly labelled "editable planning defaults... not verified facts" in both the
+   badge and the logistics form; a missing delivery address or courier contact now warns explicitly in
+   both places too.
+5. **Status vocabulary conflated unlike things** - real, provable bug:
+   `0002_field_provenance.sql`'s own table comment defines `"confirmed"` as "a human entered/approved
+   it" and `"computed"` as "derived mechanically... no judgment call" - opposites - but
+   `pack-review-logic.ts`'s `PROVENANCE_STATUS_MAP` mapped both to the same ReviewStatus `"confirmed"`,
+   silently feeding `tender-readiness.ts`'s "confirmed" count/score from mechanically-derived values
+   nobody ever looked at, directly contradicting that file's own doc comment ("only true when the
+   underlying ReviewStatus is literally confirmed"). Fixed: `"computed"` now maps to `"assumed_default"`
+   (same Fix/Provide/Verify bucket, excluded from the confirmed count). Separately, removed "Attendance
+   at the compulsory briefing session" as a document-style compliance chip in `tenderCompliance.ts` (an
+   action, already tracked correctly as a real `tender_tasks` row with its own status/due date) -
+   replaced with a one-line pointer to Tasks & milestones in `compliance-report.tsx`.
+6. **Fake personnel matches shown as SUGGESTED** - `lib/positionSuggestions.ts`'s `suggestForPosition()`
+   handed back the top-ranked candidate regardless of evidence; a person with no ECSA level, no years'
+   experience and no matched keyword could be labelled "SUGGESTED" with its own reason reading "no
+   matching or conflicting evidence on file" - a real name dressed up as a real match.
+   `score_candidate()`'s score is an open-ended, no-floor integer, so 0/negative is a real, reachable
+   case, not an edge case to dismiss. Fixed: such candidates are now excluded from
+   `suggestion`/`alternatives` entirely (new `noSuitableCandidate: boolean`, tested in
+   `positionSuggestions.spec.ts`); the UI shows "No suitable candidate identified" and manual selection
+   stays available in the ordinary dropdown.
+
+**Also done, not one of the 7 but the same pass**: trimmed one always-visible 3-sentence compliance
+explainer (`compliance-report.tsx`) to a one-line summary + expandable `Tooltip`, matching
+`narrative-documents.tsx`'s own existing pattern for the identical kind of explanation.
+
+**Not done - methodology reference-document upload, and why.** The 7th finding asked for a reference-
+document upload for the methodology-statement generator, "using the existing document/extraction
+mechanism only." Checked what that mechanism actually is before attempting it: this Next.js app has no
+synchronous text-extraction capability anywhere (`grep` of `package.json` for `mammoth`/`pdf-parse`/
+`pdfjs`/`textract` - zero hits), and the only extraction that exists runs asynchronously in `engine/`
+(Python, job-queue based - CV extraction, general-tender requirement extraction) and doesn't persist
+raw extracted document text anywhere a Next.js server action could read it back synchronously. Building
+real AI-side consumption of an uploaded reference document would require either a new engine-side job
+(Python, outside what this pass could safely write and test) or a new Next.js dependency (which is
+itself a new mechanism, not "the existing one"). Did not ship a half-wired upload button that stores a
+file the generation call never actually reads - flagged honestly in the PR body instead, with the
+concrete reason, so it reads as a known gap rather than a silent drop.
+
+**Verification**: `npm run typecheck` clean, `npx eslint` clean on every touched file, `npm run build`
+compiles (all routes including `/tenders/[id]` prerender/build), `npx vitest run` 197/197 pass (up from
+192 - 5 new test files/cases for this pass), and every `*.test.ts` file run individually via
+`node --experimental-strip-types` (this repo's second, separate test convention - see `vitest.config.ts`'s
+own header comment for why vitest alone doesn't cover them) also passes. Pushed to
+`claude/vibrant-feynman-kodhbh` (`7c8a21f`), PR #156's body updated with the fix-by-fix breakdown above,
+PR activity subscription confirmed active. Not yet done: a live click-through against the two named real
+tenders on the refreshed Vercel preview (build-level verification only so far) - the PR's own test-plan
+checkbox for this is left unchecked, not claimed.
+
 **2026-10-26 ~10:20 UTC — standing review pass: a real dedupe bug fixed in `system_alerts.fingerprint()`
 - two occurrences of the identical underlying failure, differing only by a Python object's
 non-deterministic memory address, were silently filed as two separate open alerts instead of one.**
