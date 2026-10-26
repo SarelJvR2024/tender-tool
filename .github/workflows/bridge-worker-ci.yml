@@ -163,6 +163,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/test_sanral_b7.py
 
+      - name: Pack bridge sync functions - tender_requirements/B7-setup/position-suggestion writes (fake Supabase, real sample workbook)
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack/test_sync_functions.py
+
       - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
         if: ${{ !cancelled() }}
         run: python3 engine/security/test_tenant_isolation.py
