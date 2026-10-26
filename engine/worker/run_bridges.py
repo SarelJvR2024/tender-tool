@@ -41,12 +41,17 @@ for the normal case of one worker serving both queues.
 
 Failures reach Sarel, not just this log (system alerts, migration 0042,
 engine/alerts/system_alerts.py): a bridge pass that exits non-zero or times
-out, and a crash of this runner itself, are recorded as `critical` alerts
-under source "worker" (the bridge's output tail as the detail). Each bridge
-records its own job-level failures (a crashed job, a refused job as a
-warning, a job stuck in 'generating') under its own source. One open alert
-per distinct failure - a pass failing every 30 s counts occurrences on one
-row. engine/alerts/check_system_alerts.py reports them for the e-mail.
+out is recorded as a `critical` alert under THAT BRIDGE'S OWN source (its
+registered name, or the script's basename for a `--script` path - not the
+generic "worker" this used before 2026-10-25, after a real backlog triage
+found every bridge crash buried under one shared source; `context.bridge`
+carries the same value for anyone still filtering on it). A crash of this
+runner itself (main()/run_once() raising outside any one bridge's own pass)
+is recorded under source "worker" - see the `__main__` guard below. Each
+bridge records its own job-level failures (a crashed job, a refused job as a
+warning, a job stuck in 'generating') under its own source too. One open
+alert per distinct failure - a pass failing every 30 s counts occurrences on
+one row. engine/alerts/check_system_alerts.py reports them for the e-mail.
 
 Usage:
     python3 run_bridges.py                        # one pass over every bridge, then exit

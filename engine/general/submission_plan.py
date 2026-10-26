@@ -85,7 +85,15 @@ def _returnable_step(r, company):
 
 
 def _form_step(f):
-    if f["status"] == "auto":
+    if f["status"] in ("auto", "attach"):
+        # "attach" (requirements.py's FORMS[code][1], e.g. SBD 2 - tax
+        # clearance/TCS PIN, on virtually every tender) means the vault
+        # satisfies this one automatically - build_general_pack.py treats it
+        # the same way (`form_results[f["code"]] = {"status": "from the
+        # vault"}`, no by-hand path at all). Falling through to the generic
+        # by_hand return below (as this used to) told the user to "Complete
+        # by hand" a form whose own reason text, one line later, says
+        # "Satisfied by... attached from the vault" - QA pass, 2026-10-26.
         return {"status": "ready", "detail": f["reason"]}
     if f["status"] == "overlay":
         return {"status": "review", "detail": f["reason"]}

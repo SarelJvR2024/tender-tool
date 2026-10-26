@@ -118,8 +118,20 @@ def part_from_sanral(rec):
         amounts = []
         for a in e.get("amounts") or []:
             amt = a.get("amount_zar")
-            if amt is not None and plausible(amt) is None and amt != 0:
-                notes.append(f"{e['tenderer']}: tendered amount {a.get('amount_raw')!r} could not be read as one figure - left out.")
+            if amt is not None and plausible(amt) is None:
+                # amt == 0 is a real, confirmed value (parse_rand()'s own
+                # docstring lists "0.00" among real text seen on a live
+                # SANRAL register, 2026-10-17) - not a parse failure, so it
+                # needs its own wording rather than reusing "could not be
+                # read as one figure" (which is true for an implausibly
+                # large amount, not a zero one). Both still get a note:
+                # every other amount this function drops already explains
+                # why, and a zero one silently going null with no reason
+                # was the one case that didn't.
+                if amt == 0:
+                    notes.append(f"{e['tenderer']}: tendered amount shown as zero on the register - left out.")
+                else:
+                    notes.append(f"{e['tenderer']}: tendered amount {a.get('amount_raw')!r} could not be read as one figure - left out.")
                 amt = None
             amounts.append({"column": a.get("column"), "amount_zar": plausible(amt), "amount_raw": a.get("amount_raw")})
         columns = max(columns, len(amounts))

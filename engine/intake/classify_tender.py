@@ -308,7 +308,7 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
     sanral_hint = bool(SANRAL_HINT_RE.search(buyer or "")) or bool(SANRAL_HINT_RE.search(all_text[:200000] or ""))
     tech = candidates.get("technical_xlsm") or []
     families = sorted({c[2] for c in tech})
-    files, registered = {}, []
+    files, registered, winners = {}, [], {}
     for doc_type, cands in candidates.items():
         # More than one document matched the same doc_type: prefer the most
         # recently modified file as a best-effort signal (a draft kept
@@ -328,6 +328,8 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
             except OSError:
                 pass  # mtime unavailable - keep collect_documents()'s own order
         files[doc_type] = cands[0][1]
+        winners[doc_type] = cands[0]  # the SAME file files[doc_type]/registered name below - tech[0] (pre-tie-break
+                                      # order) must never be used for reporting once there's more than one candidate.
         registered.append({"doc_type": doc_type, "label": SANRAL_DOC_LABEL[doc_type], "document": cands[0][0]})
         if len(cands) > 1:
             notes.append(f"AMBIGUOUS - more than one {SANRAL_DOC_LABEL[doc_type]} was uploaded "
@@ -337,11 +339,19 @@ def classify_documents(doc_entries, buyer=None, all_text=""):
                          "on this tender's SANRAL pack.")
 
     if tech:
-        family = tech[0][2]
+        # winners["technical_xlsm"] (the SAME tie-broken pick files["technical_xlsm"] and the
+        # AMBIGUOUS note above use), never tech[0] - tech is candidates["technical_xlsm"] in its
+        # ORIGINAL, pre-tie-break (collect_documents()'s alphabetical) order. Using tech[0] here
+        # named the wrong file as "routed to the SANRAL flow" whenever two Technical Submission
+        # workbooks were uploaded and the most-recently-modified one didn't also sort first
+        # alphabetically - directly contradicting this very function's own AMBIGUOUS note naming
+        # the OTHER file as the one actually picked. QA pass, 2026-10-26.
+        winner = winners["technical_xlsm"]
+        family = winner[2]
         if len(families) > 1:
-            notes.append(f"Workbooks of two SANRAL families were uploaded ({', '.join(families)}) - used {family} from {tech[0][0]}.")
+            notes.append(f"Workbooks of two SANRAL families were uploaded ({', '.join(families)}) - used {family} from {winner[0]}.")
         route = "sanral"
-        signal = (f"{tech[0][0]} is a SANRAL '{family}' Technical Submission workbook (engine/fingerprint.py "
+        signal = (f"{winner[0]} is a SANRAL '{family}' Technical Submission workbook (engine/fingerprint.py "
                   "detect_family on its sheet set) - routed to the SANRAL submission-pack flow.")
         missing = [SANRAL_DOC_LABEL[t] for t in ("c111_form_of_offer", "c123_contract_data", "a_forms") if t not in files]
         if missing:
