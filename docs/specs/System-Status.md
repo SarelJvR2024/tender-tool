@@ -1,5 +1,60 @@
 # System Status
 
+**2026-10-26 ~02:14 UTC — standing review pass: traced a comment's claim end to end across both
+pack-generation paths, held up - no fix needed, documented rather than forced.** Orientation:
+local checkout was 1 commit behind `origin/main` (`d61daaa`, a sibling QA routine's docs-only
+clean sweep of `daily_digest.py`'s signal aggregation, no overlap) - fast-forwarded before
+starting. Two open PRs: `#156` (draft, the notification-engine session's in-flight
+`/tenders/[id]` wiring pass - touches `general-workspace.tsx`/`cover-page-preview.tsx`/
+`narrative-documents.tsx`, avoided entirely this pass) and `#118` (draft, stale, unrelated). Every
+other remote branch is an orphaned, already-merged source branch. Stayed clear of the self-merge
+incident PRs entirely, per the standing guardrail.
+
+**What was checked**: rotated to `engine/pack_generator/confirm_pack.py` (the one gate between an
+AI-suggested key-person pack and the real SANRAL fill engines - "nothing reaches the fill engine
+without a named human saying yes," per its own docstring), not reviewed since the 2026-10-20
+enterprise-readiness audit. Its own comment at the `employment_status` field claims "when that
+isn't recorded the old answer is kept but the filler notes it as an assumption on the pack" - the
+same shape of claim ("a comment says X happens elsewhere") that has turned out false more than
+once in this codebase's own history, so traced it rather than trusted it. Confirmed real: both
+`fill_conventional.py` and `fill_tender.py` do add that exact assumption note (`notes.append(...)`,
+"Form B1 declares them a full-time employee... not recorded on their People page... confirm before
+signing") whenever `employment_status` is falsy, reading `person["employment"]`/
+`person["employment_status"]` set by `confirm_pack.py`'s own `EMPLOYMENT_LABEL` lookup.
+
+**A real worry, checked and ruled out**: `EMPLOYMENT_LABEL` only exists in `confirm_pack.py` -
+`fill_conventional.py`/`fill_tender.py` never compute it themselves, they only ever read
+`person["employment"]`. The web app's own async pack-generation path
+(`engine/pack/process_pack_jobs.py`, the real customer-facing "Generate submission pack" button,
+fulfilled by the always-on worker) builds each person via its own `adapt_person()`, which sets
+`employment_status` but never sets `employment` directly - looked like a live `KeyError` waiting to
+happen on every real SANRAL pack. Traced further: `process_pack_jobs.py` doesn't skip
+`confirm_pack.py` for this path, it explicitly calls `confirm_pack.confirm(sugg_path, sel_path,
+profile_path, pack_path)` itself ("pack.yaml via confirm_pack.py's own confirm(), so its gates
+still apply" - the code's own comment, confirmed true), writing a `profile.json` from the same
+`adapt_person()` output first. So `employment` is computed exactly once, in exactly one place,
+reused by both the CLI path and the real web app path - not two parallel implementations that
+could drift, and not a live bug. No fix needed; recording the trace since the next person touching
+either file would otherwise have to re-derive this from scratch.
+
+**One real, non-urgent gap worth naming**: neither `confirm_pack.py` nor `process_pack_jobs.py` has
+its own committed test file (only `suggest_pack.py`, the step before, has `test_suggest_pack.py`) -
+the gate with the strongest "refuse loudly, never guess" language in this whole engine has zero
+regression coverage of its own refusal paths (missing `confirmed_by`, a future-dated
+`initial_graduated`, an unconfirmed position). Not built this pass (real test-authoring effort, not
+a light-touch fix) - a good candidate for the Edge-case QA routine's own rotation.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings), no application code touched this pass (trace/verification only).
+
+**Backlog, confirmed not assumed**: migrations `0096` (pack-quota trial-expiry) and `0098` (admin
+portal customers/readiness) both still outstanding; `narrative_documents` PostgREST schema-cache
+status not re-checked this pass, don't assume it's cleared; PayFast idempotency design question
+still open, still not urgent. `0093`/`0094`/`0095` remain genuinely resolved (verified end-to-end
+the night of 2026-10-25).
+
+---
+
 **2026-10-26 ~00:15 UTC — standing review pass: a real audit-trail gap closed in
 `store_award_outcomes.py` - a zero-amount bid was silently dropped with no note, unlike every
 other dropped amount in this file.** Orientation: `git fetch origin main` showed local HEAD already
