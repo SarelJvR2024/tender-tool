@@ -1,5 +1,37 @@
 # System Status
 
+**2026-10-26 ~22:16 UTC — standing review pass: clean sweep of the deadline-watch engine and the
+CV-generation bridge, no new bug found; two draft PRs confirmed left correctly unmerged.**
+Orientation: `git fetch origin main` showed one new commit since this routine's own last pass
+(`3ade4a0`) - `1b466b8`, Finding 82 (a broken `.doc`→`.docx` conversion raised uncaught from
+`read_document()`), unrelated area, no overlap. Two open PRs, both correctly left as unmerged
+drafts (not another self-merge instance) - #164 (savings-counter rework) and #165 (4 pre-demo
+production defect fixes: a WhatsApp RSC client-boundary crash, a savings-calculator period
+mismatch, two fake `tendertool.co.za` mailboxes switched to the real, already-live
+`support@tenderready.app`, and glued demo-candidate text) - both read in full to confirm neither
+touches anything this pass would, not assumed from the title.
+
+**Reviewed in depth, no fix needed**: `engine/compliance/watch_deadlines.py` (document/person-
+credential/task deadline reminders, the sibling this routine hadn't read end to end since
+`registration_reminders.py`'s own company_id-patching was traced two passes ago) and
+`engine/cv/process_cv_jobs.py` (the CV-generation bridge between `generated_cvs` and
+`generate_cv.py`). Both are already heavily self-documented with real, dated findings from prior
+QA passes (malformed-date guards, the PostgREST 1000-row pagination fix, the closing-day UTC
+conversion fix, the path-traversal guard on a person's own name) - read every one of those claims
+against the actual code rather than trusting the comments, and they all held up. Specifically
+checked whether `process_cv_jobs.py --self-test` (its own adapter-correctness check, not a
+`test_*.py` file a pattern-based CI sweep would catch automatically) was actually wired into
+`bridge-worker-ci.yml` rather than assuming it from the filename - confirmed it is (line 88).
+
+**QA tooling**: sound - `py_compile` clean on both files read, `tsc --noEmit`/`eslint` unaffected
+(no TypeScript touched). No application code changed this pass.
+
+**Backlog unchanged, not re-verified live this pass**: migration `0096` (pack-quota trial-expiry),
+the `narrative_documents` PostgREST schema-cache reload, and the PayFast idempotency design
+question (not urgent) - all still waiting on Sarel.
+
+---
+
 **2026-10-26 ~20:16 UTC — standing review pass: gave real review to two previously-unreviewed
 self-merged PRs instead of hunting a fresh bug elsewhere; both check out sound.** Orientation:
 `git fetch origin main` showed 12 new commits since this routine's own last pass (`9fb3e33`) - local
