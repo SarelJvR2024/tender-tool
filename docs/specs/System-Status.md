@@ -1,5 +1,55 @@
 # System Status
 
+**2026-10-26 ~12:17 UTC — standing review pass: fixed a false "compulsory briefing" claim in an
+unused-by-the-live-sender but still-rendered email template; backlog re-confirmed against two real
+billing fixes that landed this pass (not self-reported, read directly).** Orientation: `git fetch
+origin main` showed 5 new commits since this routine's own last pass (`eb60f96`) - two real billing
+fixes (`e4047af`/`ce52b88`, blocking a silent sandbox PayFast checkout + dropping an unproven
+"we will email you" promise + a button label-clipping fix, all from a different session,
+`session_01Vd1T9z64NZpeXgC6pWcWny`) and a correction entry (`6af4cac`) resolving migration `0098`'s
+backlog status as genuinely live, confirmed via a direct RPC call against production rather than
+assumed from the merged PR alone - read both diffs directly rather than trusting the commit
+messages alone, per this routine's own standing caution after a real misreporting incident two
+nights ago. Local checkout was 5 commits behind `origin/main`; fast-forwarded before starting, per
+the stale-checkout habit this routine adopted after getting burned twice. One open PR, `#157`
+(draft, test-only additions to `engine/pack/process_pack_jobs.py`) - avoided that file entirely to
+not collide with it. Stayed clear of the self-merge incident PRs, as directed.
+
+**The finding**: `lib/emailTemplatesTier1.ts`'s `briefingReminderDetailedEmail()` - not the live
+sender's own briefing template (`send-operational-alerts.ts` calls `briefingReminderEmail()` from
+`lib/emailTemplates.ts` instead; this one exists only for `scripts/render-email-samples.ts`'s
+preview set, per a documented 2026-10-23 PR-collision rename, this file's own earlier entry on that)
+- hardcoded "Compulsory Briefing" in its subject/action text and, worse, stated as unconditional
+fact in a bold red line: "Failure to attend disqualifies your bid automatically." This directly
+contradicts the exact honesty principle `lib/briefingReminders.ts`'s own header comment documents in
+detail: `tenders.briefing_date`/`briefing_time` never records whether a briefing is actually
+compulsory once a tender is pursued, so claiming it is would be a fabricated fact - which is
+precisely why the LIVE template (`briefingReminderEmail`) correctly hedges ("Check the tender notice
+for whether attendance is compulsory"). This dead-to-the-live-sender template still gets rendered
+and likely reviewed by Sarel via the preview script, so a false, alarming claim sitting in it is a
+real problem even though no customer currently receives it. **Fix**: reworded the subject action,
+attendance label, bold warning line, `.ics` description, and plain-text fallback to the same honest
+hedge the live template already uses - "Check the tender notice for whether attendance is
+compulsory - some buyers disqualify a bid automatically for a missed compulsory briefing" - true
+regardless of which specific tender this fires for. Verified: `tsc --noEmit` clean, `eslint` clean
+(0 errors), `npx vitest run` 194/194 (no spec file exists for this exact module; confirmed no other
+test references the old wording via a repo-wide grep before and after). No live sender behavior
+changed - this function isn't wired into any scheduled job.
+
+**Backlog, re-confirmed against this pass's own direct reads, not carried forward unchanged**:
+migration `0096` (pack-quota trial-expiry) still outstanding - not touched by this pass's PRs.
+Migration `0098` - confirmed live (see the correction entry directly below this one; not repeating
+it here). `narrative_documents` PostgREST schema-cache status - not re-checked this pass, don't
+assume it's cleared since the last confirmed check. PayFast idempotency design question - still
+open, still not urgent (unrelated to the two sandbox-checkout fixes that landed this pass, which
+fixed UI/route-level gating, not the webhook redelivery dedupe question itself).
+
+**QA tooling**: sound - `tsc`/`eslint`/`npx vitest run` all clean, matching `main`'s real current
+baseline (194 tests, up from 189 two passes ago - new coverage landed from sibling sessions' own
+work, not a regression).
+
+---
+
 **2026-10-26 ~10:45 UTC — correction: migration `0098` (admin portal customers/readiness) is NOT
 still waiting on Sarel - it shipped with PR #155 (merged 2026-10-25 ~23:04 SAST/21:04 UTC, before
 PR #156 was even opened) and is confirmed LIVE in production.** Verified by direct RPC call
