@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Check, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { LogoLockup } from "./_components/Logo";
-import { HOME_MESSAGE } from "@/components/public/whatsapp-contact-button";
+import { HOME_MESSAGE } from "@/lib/whatsappMessages";
 import { buttonVariants } from "@/components/ui/button";
 import { SavingsCalculator } from "@/components/tt/savings-calculator";
 import { cn } from "@/lib/utils";
@@ -317,12 +317,18 @@ export default async function Home() {
             there is no such mechanism anywhere in this app (no founding-firm
             field, no separate application flow, nothing but the plain /signup
             form a "Start free" click already reaches). Checked for a real
-            contact mechanism to point this at instead - the only one that
-            exists anywhere in the app is privacy@tendertool.co.za on the
-            Privacy notice, and that's scoped to privacy/POPIA requests, not a
-            general sales inbox, so redirecting a "talk to us about founding
-            rates" click there would be just as dishonest in the other
-            direction. Softened the wording instead: "Get in touch", still
+            contact mechanism to point this at instead - at the time, the
+            only one that existed anywhere in the app was a mailto on the
+            Privacy notice, scoped to privacy/POPIA requests, not a general
+            sales inbox, so redirecting a "talk to us about founding rates"
+            click there would have been just as dishonest in the other
+            direction. (Pre-demo audit, 2026-10-26: support@tenderready.app
+            is now the one general-purpose address in real use elsewhere in
+            the app - billing.tsx's Enterprise CTA, every transactional
+            email's footer - but this CTA's own choice of /signup over a
+            mailto stands either way: "Get in touch" on a founding-rate ask
+            still shouldn't dead-end in an inbox with no founding-firm
+            process behind it.) Softened the wording instead: "Get in touch", still
             linking to the same /signup a visitor would reach anyway - true to
             what actually happens on click, no new flow invented.
           */}
@@ -385,7 +391,7 @@ export default async function Home() {
                   ))}
                 </div>
                 <Link
-                  href={isCustom ? "mailto:hello@tendertool.co.za?subject=Enterprise%20plan" : "/signup"}
+                  href={isCustom ? "mailto:support@tenderready.app?subject=Enterprise%20plan" : "/signup"}
                   className={buttonVariants({
                     variant: tier.highlight ? "accent" : "default",
                     size: "lg",

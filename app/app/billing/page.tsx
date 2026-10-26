@@ -156,7 +156,7 @@ export default async function BillingPage({
               For organisations with their own tender function, multiple entities or specific reporting needs. We scope users,
               volume, integrations and training with you and quote accordingly.
             </p>
-            <a href="mailto:hello@tendertool.co.za?subject=Enterprise%20plan" className={buttonVariants({ variant: "outline", className: "h-11 w-full" })}>
+            <a href="mailto:support@tenderready.app?subject=Enterprise%20plan" className={buttonVariants({ variant: "outline", className: "h-11 w-full" })}>
               Contact us
             </a>
           </SectionCard>

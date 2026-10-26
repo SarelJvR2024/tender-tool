@@ -125,8 +125,8 @@ export default function PrivacyPage() {
           <h2 className="mb-2.5 text-[17px] font-semibold text-foreground">Contact</h2>
           <p className="text-sm leading-relaxed text-muted-foreground">
             Questions about this notice, or a request relating to your personal information, can be sent to{" "}
-            <a href="mailto:privacy@tendertool.co.za" className="font-semibold text-foreground">
-              privacy@tendertool.co.za
+            <a href="mailto:support@tenderready.app" className="font-semibold text-foreground">
+              support@tenderready.app
             </a>
             .
           </p>

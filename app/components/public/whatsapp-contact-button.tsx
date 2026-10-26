@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { DEMO_MESSAGE, HOME_MESSAGE, PRICING_MESSAGE } from "@/lib/whatsappMessages";
 
 // Public-marketing-only contact channel (brief, 2026-10-26): South African
 // contractors prefer WhatsApp over a contact form. Deliberately scoped to
@@ -29,13 +30,6 @@ import { cn } from "@/lib/utils";
 // conflicted, and the authenticated-area exclusion is the one that
 // protects a real user from UI noise while they're signed in, so it wins.
 const WHATSAPP_NUMBER = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER;
-
-const DEMO_MESSAGE = "Hi Sarel, I'm reviewing the Tender Ready demo and have a question.";
-const PRICING_MESSAGE = "Hi Sarel, I'd like to find out more about Tender Ready subscription pricing.";
-// Exported: app/page.tsx's own footer WhatsApp link reuses this exact
-// message (same "find out more" intent as this widget's own default) -
-// one source of truth, not a second hand-typed copy that could drift.
-export const HOME_MESSAGE = "Hi Sarel, I'd like to find out more about Tender Ready.";
 
 function messageFor(pathname: string, onPricingSection: boolean): string {
   if (pathname === "/demo") return DEMO_MESSAGE;

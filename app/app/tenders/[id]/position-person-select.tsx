@@ -117,7 +117,10 @@ export function PositionPersonSelect({
                 <div className="min-w-0">
                   <span className="font-semibold">Alternative: {s.name}</span>
                   {s.matchPercent !== null && (
-                    <span className="ml-1.5 rounded-full bg-muted px-1.5 py-px text-[10px] font-semibold text-muted-foreground">{s.matchPercent}% match</span>
+                    <>
+                      {" "}
+                      <span className="ml-1.5 rounded-full bg-muted px-1.5 py-px text-[10px] font-semibold text-muted-foreground">{s.matchPercent}% match</span>
+                    </>
                   )}
                   <span className={s.specialismWarning ? "text-destructive" : "text-muted-foreground"}> - {s.why}</span>
                 </div>
