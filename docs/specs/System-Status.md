@@ -3228,6 +3228,51 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-26, standing QA/robustness review - ninety-fifth run): rotated to notify (engine/notify/daily_digest.py) - thorough review, no new bug found this time
+
+Orientation: synced a sibling commit (`0d1e1d5`, "Award outcomes: explain a zero-amount bid drop,
+not just a silent null" - `engine/discovery/award_outcomes.py`'s `part_from_sanral()`, a different
+file/bug from anything this session has touched). Grepped `engine/notify/*.py` for the same
+"falsy value explicitly excluded from an explanatory note" pattern the sibling had just found
+(`== 0`, `!= 0`, `is 0`, `amt == 0`) - nothing matched beyond already-reviewed retry logic in
+`send_digest_emails.py`. Rotated to `daily_digest.py` (notify's own signal-aggregation and
+digest-assembly logic) as the most overdue standing area - last dedicated pass was the clean sweep
+noted in this file's own history several runs back.
+
+Read `company_signals()`, `new_tender_signals()`, `submission_due_signals()`,
+`listing_change_signals()`, `score_per_company()`, `find_readiness_changes()`,
+`build_digest_for_person()` (all ~5 sections) and `main()`'s orchestration end to end. One real
+lead chased and ruled out, nothing else held up as a new, reachable bug:
+
+- `build_digest_for_person()`'s viewer-role rollups (`min((r.get("closing_date") for r in items
+  if r.get("closing_date")), default=None)`, `new_tenders` and `submission_due` sections) compare
+  ISO closing-date strings lexicographically rather than as parsed datetimes - which is exactly
+  the shape of this session's own Finding 72 (SAST-offset vs UTC-"Z" closing dates don't sort
+  correctly as plain strings). Chased this all the way to `fetch_releases()`'s own source: in
+  `--sources all` (the default `main()` uses), every one of `gov_sources.ALL_SOURCES`
+  (`etenders_portal`, `sanral`, `eskom_bulletin`, `transnet_etenders`, `capetown_procurement`,
+  `dbsa_procurement`, `vaal_central_water`, `lephalale`, `kouga`; `sars_procurement`/
+  `cidb_tenders` never set `closing_date` at all) builds its `closing_date` through
+  `source_http.iso_sast()`/`iso_sast_closing()` - both always produce a fixed `+02:00`-offset
+  Python `isoformat()` string. `--sources ocds` (the only path that would produce a genuine
+  UTC-"Z" string, via `etenders_national.py`'s raw OCDS `endDate`) returns early and never mixes
+  with the `gov_sources` releases in the same call. So within one real `fetch_releases()` call the
+  tagging is always homogeneous and the lexicographic `min()` happens to sort correctly - the
+  dual-convention risk is real (confirmed, same as Finding 72) but lives in the `tenders` DB table
+  populated by the intake jobs, not in this read-only live-feed path. Not a presently reachable bug
+  here; not chased into a speculative fix.
+- `find_readiness_changes()`'s first-time-seen skip (`if prev_status is None and cur_status in
+  ("confirmed", "computed"): continue`) looked asymmetric at first read - a row seen for the first
+  time ever is suppressed only when it's already good, not when it's bad - but that's the intended
+  design (flag a field's bad status the first time this script ever sees it; don't flag an
+  already-fine one just because the seen-store is new), not silently-wrong data.
+- Several bare-key lookups in `main()` (`p["company_id"]`, `u["company_id"]`,
+  `i["opportunity_id"]`) traced back to their producers (`load_roster_live`/`load_roster_local`
+  both always set `company_id`; `tender_update_notifications`/`discovered_opportunities` rows
+  always carry their own id columns) - not reachable with a missing key.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle.
+
 ## This pass (2026-10-25, standing QA/robustness review - ninety-fourth run): rotated to compliance/reminders (engine/compliance) - thorough review, no new bug found this time
 
 Orientation: synced a large stretch of real production work from a separate, live-Supabase-access
