@@ -1,11 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   aggregateSavings,
+  DEFAULT_TIME_SPENT_HOURS_PER_TENDER,
   extraCapacity,
-  hoursSavedForTender,
+  hoursSavedPerCompletedTender,
   resolveBaseline,
-  SAVINGS_STEP_HOURS,
-  type SavingsStepKey,
   type SavingsTotals,
 } from "./savingsCounter";
 import type { SavingsCounterSummary } from "@/components/tt/savings-counter-card";
@@ -17,44 +16,32 @@ import type { SavingsCounterSummary } from "@/components/tt/savings-counter-card
  * fetcher here, a unit-tested pure calculator there). RLS already scopes
  * savings_counted_steps to the signed-in user's own company (0085), so no
  * explicit company_id filter is needed on the select.
+ *
+ * Each tender now contributes AT MOST ONE row (the unique constraint on
+ * (company_id, tender_id, step_key) with a single fixed step_key - see
+ * recordSavingsStep() below), so there's no longer anything to group/sum
+ * per tender before aggregating: each row's own `hours` IS that tender's
+ * already-computed hours-saved snapshot.
  */
 export async function fetchSavingsCounterSummary(supabase: SupabaseClient): Promise<SavingsCounterSummary | null> {
   const [{ data: company }, { data: rows }] = await Promise.all([
     supabase.from("companies").select("savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
-    supabase.from("savings_counted_steps").select("tender_id, hours, counted_at").order("counted_at", { ascending: true }),
+    supabase.from("savings_counted_steps").select("hours, counted_at").order("counted_at", { ascending: true }),
   ]);
   if (!company) return null;
 
-  // Spec v3 §18: resolveBaseline() is the one place that decides "confirmed
-  // or placeholder default" - previously this read the raw columns
-  // directly, so an unconfirmed baseline (null) was cast straight to
-  // `number`, and hoursSavedForTender's own Math.max(0, null)=>0 guard
-  // silently zeroed every tender's hours saved rather than using the
-  // documented 20h/R450 default - a real bug, not just a labeling gap: a
-  // company that had completed real work but never visited the baseline
-  // field saw "0h / R0 saved" instead of any estimate at all.
   const baseline = resolveBaseline(
     company.savings_baseline_hours_per_tender as number | null,
     company.savings_baseline_hourly_cost_zar as number | null,
   );
-  const baselineHours = baseline.hoursPerTender;
-  const hourlyCost = baseline.hourlyCostZar;
-  const allRows = (rows ?? []) as { tender_id: string; hours: number; counted_at: string }[];
+  const allRows = (rows ?? []) as { hours: number; counted_at: string }[];
 
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const thisMonthRows = allRows.filter((r) => new Date(r.counted_at) >= monthStart);
 
-  const summaryFor = (periodRows: typeof allRows): SavingsTotals => {
-    const byTender = new Map<string, number[]>();
-    for (const r of periodRows) {
-      const list = byTender.get(r.tender_id) ?? [];
-      list.push(r.hours);
-      byTender.set(r.tender_id, list);
-    }
-    const perTenderHours = Array.from(byTender.values()).map((hoursList) => hoursSavedForTender(hoursList, baselineHours));
-    return aggregateSavings(perTenderHours, hourlyCost);
-  };
+  const summaryFor = (periodRows: typeof allRows): SavingsTotals =>
+    aggregateSavings(periodRows.map((r) => r.hours), baseline.hourlyCostZar);
 
   const thisMonth = summaryFor(thisMonthRows);
   const allTime = summaryFor(allRows);
@@ -62,7 +49,9 @@ export async function fetchSavingsCounterSummary(supabase: SupabaseClient): Prom
   return {
     thisMonth,
     allTime,
-    extraCapacityThisMonth: extraCapacity(thisMonth.hoursSaved, thisMonth.tendersCounted, baselineHours),
+    extraCapacityThisMonth: extraCapacity(thisMonth.hoursSaved, baseline.hoursPerTender),
+    baselineHoursPerTender: baseline.hoursPerTender,
+    hourlyCostZar: baseline.hourlyCostZar,
     usingDefaultBaseline: baseline.isDefault,
   };
 }
@@ -88,63 +77,85 @@ export function monthlySummaryEmailNotYetBuilt(): never {
   throw new Error("Monthly savings summary email is not implemented yet - see this function's own comment in lib/savingsCounterData.ts for what it needs.");
 }
 
-export type CountedStepBreakdown = { stepKey: SavingsStepKey; reason: string; hours: number }[];
-
-/** "How we worked this out" panel for one tender's final review (§9.3) - the steps actually counted for THIS tender, in the fixed step order, each with the reason text it was counted for. */
+/** "How we calculate this" breakdown for one tender's final review (§9.3) - the real inputs behind the figure, not a per-step list (the old six-step breakdown no longer exists - see lib/savingsCounter.ts's own header comment on the 2026-10-26 model change). */
 export async function fetchTenderSavingsBreakdown(
   supabase: SupabaseClient,
   tenderId: string,
-): Promise<{ hoursSaved: number; randSaved: number; steps: CountedStepBreakdown; usingDefaultBaseline: boolean }> {
-  const [{ data: company }, { data: rows }] = await Promise.all([
+): Promise<{
+  completed: boolean;
+  hoursSaved: number;
+  randSaved: number;
+  baselineHoursPerTender: number;
+  timeSpentHoursPerTender: number;
+  hourlyCostZar: number;
+  usingDefaultBaseline: boolean;
+}> {
+  const [{ data: company }, { data: row }] = await Promise.all([
     supabase.from("companies").select("savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
-    supabase.from("savings_counted_steps").select("step_key, hours").eq("tender_id", tenderId),
+    supabase.from("savings_counted_steps").select("hours").eq("tender_id", tenderId).maybeSingle(),
   ]);
 
-  // Spec v3 §18: same resolveBaseline() the Home/Analytics summary above
-  // uses, so a company with no confirmed baseline sees the same "default,
-  // not yet confirmed" signal here as everywhere else - previously this
-  // function had its own separate `?? 20`/`?? 450` with no way for the UI
-  // to tell it apart from a real confirmed 20/450.
   const baseline = resolveBaseline(
     company?.savings_baseline_hours_per_tender as number | null | undefined,
     company?.savings_baseline_hourly_cost_zar as number | null | undefined,
   );
-  const countedRows = (rows ?? []) as { step_key: string; hours: number }[];
 
-  const steps: CountedStepBreakdown = countedRows
-    .filter((r): r is { step_key: SavingsStepKey; hours: number } => r.step_key in SAVINGS_STEP_HOURS)
-    .map((r) => ({ stepKey: r.step_key, reason: SAVINGS_STEP_HOURS[r.step_key].reason, hours: r.hours }));
-
-  const hoursSaved = hoursSavedForTender(countedRows.map((r) => r.hours), baseline.hoursPerTender);
+  // The counted row's own snapshot, not re-derived from the company's
+  // CURRENT baseline - a later baseline change must never rewrite a past
+  // tender's own figure (same historical-accuracy rule the old per-step
+  // model followed). Reconstruct the baseline THIS tender's own figure
+  // actually used (hoursSaved + the fixed time-spent constant) rather than
+  // showing the company's current baseline next to it - the two could
+  // differ if the baseline changed since, which would make the modal's own
+  // "X - Y = Z" arithmetic look wrong even though neither number is.
+  const hoursSaved = (row?.hours as number | undefined) ?? 0;
+  const timeSpentHoursPerTender = DEFAULT_TIME_SPENT_HOURS_PER_TENDER;
+  const baselineHoursPerTender = row != null ? hoursSaved + timeSpentHoursPerTender : baseline.hoursPerTender;
   return {
+    completed: row != null,
     hoursSaved,
     randSaved: Math.round(hoursSaved * baseline.hourlyCostZar),
-    steps,
+    baselineHoursPerTender,
+    timeSpentHoursPerTender,
+    hourlyCostZar: baseline.hourlyCostZar,
     usingDefaultBaseline: baseline.isDefault,
   };
 }
 
+const SAVINGS_STEP_KEY = "tender_pack_completed";
+
 /**
- * Claims "step X was just completed for tender Y" - the once-per-tender
- * dedupe IS the unique constraint on savings_counted_steps (company_id,
- * tender_id, step_key); a unique_violation (Postgres code 23505) means it
- * was already counted, which is the expected, non-error outcome of a
- * re-run, not a failure to surface. Callers should call this from wherever
- * a step actually completes (pack generation, CV tailoring, etc.) and
- * ignore the return value - it's for tests/logging, not for gating anything.
+ * Claims "this tender's submission pack reached ready" for the savings
+ * counter - the once-per-tender dedupe IS the unique constraint on
+ * savings_counted_steps (company_id, tender_id, step_key); a unique_violation
+ * (Postgres code 23505) means it was already counted, which is the expected,
+ * non-error outcome of a re-render, not a failure to surface.
+ *
+ * `hours` is computed here, once, from the company's baseline AT THE MOMENT
+ * the tender's pack first became ready, and stored as a snapshot - if the
+ * owner later changes the baseline, this tender's own already-counted
+ * figure stays historically accurate rather than silently reinterpreting
+ * itself (same principle the old per-step hours snapshot followed).
  */
 export async function recordSavingsStep(
   supabase: SupabaseClient,
-  params: { companyId: string; tenderId: string; stepKey: SavingsStepKey },
+  params: { companyId: string; tenderId: string },
 ): Promise<boolean> {
-  const { hours } = SAVINGS_STEP_HOURS[params.stepKey];
+  const { data: company } = await supabase
+    .from("companies")
+    .select("savings_baseline_hours_per_tender")
+    .eq("id", params.companyId)
+    .maybeSingle();
+  const baselineHoursPerTender = resolveBaseline(company?.savings_baseline_hours_per_tender as number | null | undefined, undefined).hoursPerTender;
+  const hours = hoursSavedPerCompletedTender(baselineHoursPerTender);
+
   const { error } = await supabase.from("savings_counted_steps").insert({
     company_id: params.companyId,
     tender_id: params.tenderId,
-    step_key: params.stepKey,
+    step_key: SAVINGS_STEP_KEY,
     hours,
   });
   if (!error) return true;
-  if (error.code === "23505") return false; // already counted - expected on a re-run
+  if (error.code === "23505") return false; // already counted - expected on a re-render
   throw error;
 }

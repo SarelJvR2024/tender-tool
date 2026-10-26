@@ -9,6 +9,8 @@ import { IN_PROGRESS_STAGES } from "@/lib/pipeline";
 import { computeDashboardStats, stageOf } from "@/lib/dashboardStats";
 import { loadDocumentExpiryOverview } from "@/lib/documentExpiry";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
+import { fetchCompanySubscription } from "@/lib/companySubscription";
+import { PLAN_MONTHLY_ZAR } from "@/lib/billing";
 import { fetchAllRows } from "@/lib/supabasePaging";
 import { loadDispatchCards, type ActiveBidInput } from "@/lib/dispatchDashboard";
 import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
@@ -152,7 +154,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary] = await Promise.all([
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, rawSavingsSummary, subscription] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -175,9 +177,18 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
       .limit(5),
     supabase.from("companies").select("legal_name, csd_trading_name, savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
     fetchSavingsCounterSummary(supabase),
+    fetchCompanySubscription(supabase),
   ]);
 
   if (error) console.error("tenders select failed for dashboard", error);
+
+  // "Pays for your subscription Nx over" (Capacity Unlocked brief): the
+  // company's own real plan price, never guessed - PLAN_MONTHLY_ZAR is
+  // null for a tier with no fixed price (Enterprise), in which case the
+  // card simply omits this one subtext rather than showing a fabricated
+  // multiple.
+  const monthlyPlanPriceZar = subscription ? PLAN_MONTHLY_ZAR[subscription.planTier] : null;
+  const savingsSummary = rawSavingsSummary ? { ...rawSavingsSummary, monthlyPlanPriceZar } : null;
 
   const rows = tenders as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
@@ -282,7 +293,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
         // company's own real number, same spirit as the other items here
         // ("on file" rather than merely "has a value").
         done: companyRow?.savings_baseline_hours_per_tender !== 20 || companyRow?.savings_baseline_hourly_cost_zar !== 450,
-        href: "/company#savings-baseline",
+        href: "/company?edit=1#savings-baseline",
       },
     ];
   }

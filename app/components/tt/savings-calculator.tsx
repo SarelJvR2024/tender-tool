@@ -2,33 +2,32 @@
 
 import { useState } from "react";
 import { PLAN_MONTHLY_ZAR } from "@/lib/billing";
-import { SAVINGS_STEP_HOURS, extraCapacity, formatRand, hoursSavedForTender } from "@/lib/savingsCounter";
+import { DEFAULT_TIME_SPENT_HOURS_PER_TENDER, extraCapacity, formatRand, hoursSavedPerCompletedTender } from "@/lib/savingsCounter";
 
-const TYPICAL_HOURS_SAVED_PER_TENDER = Object.values(SAVINGS_STEP_HOURS).reduce((sum, s) => sum + s.hours, 0);
 const PROFESSIONAL_MONTHLY_ZAR = PLAN_MONTHLY_ZAR.professional as number;
 
 /**
- * Pricing-page savings calculator (spec §9.5). A marketing estimate, not the
- * real per-tender counter (lib/savingsCounterData.ts) - there's no real
- * tender to read actual counted steps from here, so this assumes a
- * "typical" tender saves the sum of every configured step's placeholder
- * hours (the same SAVINGS_STEP_HOURS the real counter uses - not a
- * separately invented number), capped at whatever baseline the visitor
- * types in, then reuses the exact same extraCapacity()/formatRand()
- * formulas the real Home counter card uses, for the same reason billing.ts
- * reuses PLAN_MONTHLY_ZAR instead of a 4th hardcoded price: one formula,
- * checked once, not quietly reinvented per surface.
+ * Pricing-page savings calculator (spec §9.5, reworked 2026-10-26 for the
+ * Capacity Unlocked brief's flat per-tender model). A marketing estimate,
+ * not the real per-tender counter (lib/savingsCounterData.ts) - there's no
+ * real tender to read an actual completed count from here, so this assumes
+ * every tender in the visitor's own "tenders a month" figure saves the same
+ * flat baseline-minus-time-spent figure the real counter uses, then reuses
+ * the exact same extraCapacity()/formatRand() formulas the real Home
+ * counter card uses, for the same reason billing.ts reuses PLAN_MONTHLY_ZAR
+ * instead of a 4th hardcoded price: one formula, checked once, not quietly
+ * reinvented per surface.
  */
 export function SavingsCalculator() {
   const [tendersPerMonth, setTendersPerMonth] = useState(2);
   const [hoursPerTender, setHoursPerTender] = useState(20);
   const [hourlyCost, setHourlyCost] = useState(450);
 
-  const typicalHoursSaved = hoursSavedForTender([TYPICAL_HOURS_SAVED_PER_TENDER], Math.max(0, hoursPerTender));
-  const hoursSavedPerMonth = Math.max(0, tendersPerMonth) * typicalHoursSaved;
+  const hoursSavedPerTender = hoursSavedPerCompletedTender(Math.max(0, hoursPerTender), DEFAULT_TIME_SPENT_HOURS_PER_TENDER);
+  const hoursSavedPerMonth = Math.max(0, tendersPerMonth) * hoursSavedPerTender;
   const yearlyHours = hoursSavedPerMonth * 12;
   const yearlyRand = Math.round(yearlyHours * Math.max(0, hourlyCost));
-  const extraTendersPerMonth = extraCapacity(hoursSavedPerMonth, Math.max(0, tendersPerMonth), hoursPerTender);
+  const extraTendersPerMonth = extraCapacity(hoursSavedPerMonth, Math.max(0, hoursPerTender));
   const professionalAnnualZar = PROFESSIONAL_MONTHLY_ZAR * 12;
 
   return (

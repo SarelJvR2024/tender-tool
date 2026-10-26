@@ -9,6 +9,8 @@ import { PIPELINE_STAGES, STAGE_META, type PipelineStage } from "@/lib/pipeline"
 import { ECONOMICS_COLUMNS, formatRand, median, toNumber, type PackEconomics } from "@/lib/dealEconomics";
 import { buildWinLossTrend, monthLabel } from "@/lib/analyticsLogic";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
+import { fetchCompanySubscription } from "@/lib/companySubscription";
+import { PLAN_MONTHLY_ZAR } from "@/lib/billing";
 import { fetchAllRows } from "@/lib/supabasePaging";
 import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
 import { loadOutcomesForTenders, ownPosition, firmsMet, benchmark, bestOutcome, MIN_SAMPLE, type OutcomeStats } from "@/lib/marketPricing";
@@ -50,7 +52,7 @@ type TenderRow = {
 
 export default async function AnalyticsPage() {
   const supabase = await createClient();
-  const [{ rows: tenderRows, error }, { data: company }, { data: briefingTasks }, savingsSummary] = await Promise.all([
+  const [{ rows: tenderRows, error }, { data: company }, { data: briefingTasks }, rawSavingsSummary, subscription] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -62,7 +64,15 @@ export default async function AnalyticsPage() {
     supabase.from("companies").select("legal_name, csd_trading_name").maybeSingle(),
     supabase.from("tender_tasks").select("status").eq("kind", "briefing"),
     fetchSavingsCounterSummary(supabase),
+    fetchCompanySubscription(supabase),
   ]);
+
+  // "Pays for your subscription Nx over" (Capacity Unlocked brief): the
+  // company's own real plan price, never guessed - PLAN_MONTHLY_ZAR is
+  // null for a tier with no fixed price (Enterprise), in which case the
+  // card simply omits this one subtext.
+  const monthlyPlanPriceZar = subscription ? PLAN_MONTHLY_ZAR[subscription.planTier] : null;
+  const savingsSummary = rawSavingsSummary ? { ...rawSavingsSummary, monthlyPlanPriceZar } : null;
 
   if (error) {
     return (

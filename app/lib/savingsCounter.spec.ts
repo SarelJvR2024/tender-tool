@@ -3,69 +3,49 @@ import {
   aggregateSavings,
   extraCapacity,
   formatRand,
-  hoursSavedForTender,
+  hoursSavedPerCompletedTender,
   resolveBaseline,
-  stepAlreadyCounted,
 } from "./savingsCounter";
 
-describe("hoursSavedForTender - baseline cap (§9.2: hours saved per tender ≤ company baseline)", () => {
-  it("sums raw step hours when under the baseline", () => {
-    expect(hoursSavedForTender([2, 3, 4], 20)).toBe(9);
+describe("hoursSavedPerCompletedTender - flat per-tender figure (Capacity Unlocked brief: baseline minus time spent in Tender Ready)", () => {
+  it("defaults to the spec's own 20h baseline minus 5h time-spent = 15h", () => {
+    expect(hoursSavedPerCompletedTender(20)).toBe(15);
   });
 
-  it("caps the total at the company's own baseline, never above it", () => {
-    expect(hoursSavedForTender([2, 3, 4, 1, 5, 2, 10], 20)).toBe(20);
+  it("uses the company's own baseline and an explicit time-spent figure", () => {
+    expect(hoursSavedPerCompletedTender(30, 5)).toBe(25);
   });
 
-  it("treats a negative baseline as zero rather than letting the cap go negative", () => {
-    expect(hoursSavedForTender([5, 5], -10)).toBe(0);
-  });
-
-  it("returns 0 for a tender with no counted steps yet", () => {
-    expect(hoursSavedForTender([], 20)).toBe(0);
+  it("never goes negative when the baseline is at or below the time spent", () => {
+    expect(hoursSavedPerCompletedTender(5, 5)).toBe(0);
+    expect(hoursSavedPerCompletedTender(2, 5)).toBe(0);
   });
 });
 
-describe("stepAlreadyCounted - once-per-tender counting (§9.2: re-runs don't add)", () => {
-  it("is false for a step not yet in the counted list", () => {
-    expect(stepAlreadyCounted(["compliance_check"], "cvs_tailored")).toBe(false);
+describe("extraCapacity - 'room for N more tenders without hiring' (Capacity Unlocked brief: floor(hours saved / baseline))", () => {
+  it("returns 0 when no hours have been saved yet", () => {
+    expect(extraCapacity(0, 20)).toBe(0);
   });
 
-  it("is true once a step is in the counted list - a re-run must not add it again", () => {
-    expect(stepAlreadyCounted(["compliance_check", "cvs_tailored"], "cvs_tailored")).toBe(true);
+  it("returns 0, not Infinity/NaN, for an invalid baseline", () => {
+    expect(extraCapacity(100, 0)).toBe(0);
+    expect(extraCapacity(100, -5)).toBe(0);
   });
 
-  it("is false for an empty counted list", () => {
-    expect(stepAlreadyCounted([], "pack_assembled")).toBe(false);
-  });
-});
-
-describe("extraCapacity - divide-by-zero guard (§9.2 explicitly requires this)", () => {
-  it("returns 0, not Infinity/NaN, when no tenders have been counted yet", () => {
-    expect(extraCapacity(0, 0, 20)).toBe(0);
+  it("returns 0 for a negative hours-saved figure (defensive - should never occur upstream)", () => {
+    expect(extraCapacity(-10, 20)).toBe(0);
   });
 
-  it("returns 0 when the average hours saved per tender already meets the baseline (zero remaining denominator)", () => {
-    // 1 tender counted, 20 hours saved, baseline 20 -> remaining = 20 - 20 = 0
-    expect(extraCapacity(20, 1, 20)).toBe(0);
+  it("floors a non-integer result rather than rounding it up - 45 hours saved at a 20h baseline is +2, not +3", () => {
+    expect(extraCapacity(45, 20)).toBe(2);
   });
 
-  it("returns 0 when the average hours saved per tender exceeds the baseline (negative denominator)", () => {
-    // 1 tender counted, 25 hours saved (already capped elsewhere, but pass a
-    // pathological value here to prove the guard holds regardless) vs baseline 20
-    expect(extraCapacity(25, 1, 20)).toBe(0);
+  it("computes the brief's own worked example: 2 completed tenders x 15h saved = 30h -> floor(30/20) = 1", () => {
+    expect(extraCapacity(30, 20)).toBe(1);
   });
 
-  it("computes a real floor()'d capacity when the denominator is positive", () => {
-    // 10 tenders counted, 100 hours saved total (avg 10/tender), baseline 20
-    // -> remaining = 20 - 10 = 10 per tender -> floor(100 / 10) = 10
-    expect(extraCapacity(100, 10, 20)).toBe(10);
-  });
-
-  it("floors a non-integer result rather than rounding it up", () => {
-    // 3 tenders, 27 hours saved (avg 9), baseline 20 -> remaining = 11
-    // -> 27 / 11 = 2.4545... -> floor = 2
-    expect(extraCapacity(27, 3, 20)).toBe(2);
+  it("is 0 straight after a single completed tender's own 15h saved, since that alone is under one full baseline's worth", () => {
+    expect(extraCapacity(15, 20)).toBe(0);
   });
 });
 
@@ -76,6 +56,10 @@ describe("formatRand - Rand rounding and SA thousands formatting (§9.3/§6: spa
 
   it("formats thousands with a space, matching the spec's own example", () => {
     expect(formatRand(27900)).toBe("R27 900");
+  });
+
+  it("formats the brief's own worked example (15h x R450)", () => {
+    expect(formatRand(15 * 450)).toBe("R6 750");
   });
 
   it("formats millions with a space at every thousands group", () => {
@@ -127,10 +111,10 @@ describe("resolveBaseline - distinguishing the company's own confirmed baseline 
 });
 
 describe("aggregateSavings - totals across a period", () => {
-  it("sums already-capped per-tender hours and converts to Rand", () => {
-    const totals = aggregateSavings([20, 15, 9], 450);
-    expect(totals.hoursSaved).toBe(44);
-    expect(totals.randSaved).toBe(44 * 450);
+  it("sums already-computed per-tender hours-saved snapshots and converts to Rand", () => {
+    const totals = aggregateSavings([15, 15, 9], 450);
+    expect(totals.hoursSaved).toBe(39);
+    expect(totals.randSaved).toBe(39 * 450);
     expect(totals.tendersCounted).toBe(3);
   });
 
@@ -143,5 +127,15 @@ describe("aggregateSavings - totals across a period", () => {
     const totals = aggregateSavings([1], 450.6);
     expect(totals.randSaved).toBe(451); // 450.6 rounded
     expect(Number.isInteger(totals.randSaved)).toBe(true);
+  });
+});
+
+describe("the brief's own worked example end to end: 2 completed tenders at the default baseline", () => {
+  it("15h saved per tender x 2 tenders = 30h, x R450 = R13 500, +1 extra tender's worth of capacity", () => {
+    const perTenderHours = [hoursSavedPerCompletedTender(20), hoursSavedPerCompletedTender(20)];
+    const totals = aggregateSavings(perTenderHours, 450);
+    expect(totals.hoursSaved).toBe(30);
+    expect(formatRand(totals.randSaved)).toBe("R13 500");
+    expect(extraCapacity(totals.hoursSaved, 20)).toBe(1);
   });
 });

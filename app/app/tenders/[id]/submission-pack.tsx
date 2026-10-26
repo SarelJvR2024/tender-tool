@@ -13,7 +13,8 @@ import { computeTenderReadiness } from "./tender-readiness";
 import { SanralProgress } from "./sanral-progress";
 import { DownloadAllButton } from "./download-all-button";
 import { fetchTenderSavingsBreakdown, recordSavingsStep } from "@/lib/savingsCounterData";
-import { formatRand, SAVINGS_STEP_ORDER } from "@/lib/savingsCounter";
+import { formatRand } from "@/lib/savingsCounter";
+import { SavingsCalculationDialog } from "@/components/tt/savings-calculation-dialog";
 import { formatDateTime } from "@/lib/dates";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -186,21 +187,21 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
     });
   }
 
-  // Time/cost saved counter (spec §9): record every step once the first
-  // ready pack proves they all genuinely happened for this tender - the
-  // compliance check, vault documents, CVs, cover page, SANRAL schedule and
-  // the pack itself are all bundled into one generated PDF by the time a
-  // job reaches "ready", so this is the single safe, server-rendered moment
-  // to count all six at once. recordSavingsStep() is itself idempotent
-  // (savings_counted_steps' own unique constraint - 0085), so re-rendering
-  // this page on every visit never double-counts; a company without
-  // savings_baseline columns yet (should not happen post-migration, but
-  // this read happens on every render) fails silently rather than breaking
-  // the page - the breakdown panel below just shows nothing counted yet.
+  // Capacity-unlocked counter (brief, 2026-10-26, supersedes the old
+  // per-step spec §9 model): record the flat hours-saved figure once the
+  // first ready pack proves this tender's compliance check, vault
+  // documents, CVs, cover page, SANRAL schedule and the pack itself all
+  // genuinely happened - this is the single safe, server-rendered moment
+  // to count it. recordSavingsStep() is itself idempotent (savings_counted_steps'
+  // own unique constraint - 0085), so re-rendering this page on every visit
+  // never double-counts; a company without savings_baseline columns yet
+  // (should not happen post-migration, but this read happens on every
+  // render) fails silently rather than breaking the page - the breakdown
+  // panel below just shows nothing counted yet.
   const companyId = packRow?.company_id as string | undefined;
   if (companyId && jobs.some((j) => j.status === "ready")) {
     try {
-      await Promise.all(SAVINGS_STEP_ORDER.map((stepKey) => recordSavingsStep(supabase, { companyId, tenderId, stepKey })));
+      await recordSavingsStep(supabase, { companyId, tenderId });
     } catch (e) {
       console.error("recordSavingsStep failed (non-fatal - savings counter only)", e);
     }
@@ -365,26 +366,25 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                     Generated in {formatDuration(new Date(j.completed_at).getTime() - new Date(j.started_at).getTime())}.
                   </div>
                 )}
-                {j.status === "ready" && savingsBreakdown && savingsBreakdown.steps.length > 0 && (
+                {j.status === "ready" && savingsBreakdown && savingsBreakdown.completed && (
                   <div className="mt-2 rounded-lg border border-success/20 bg-success/10 p-3">
-                    <div className="font-semibold text-success">
-                      About {savingsBreakdown.hoursSaved} hour{savingsBreakdown.hoursSaved === 1 ? "" : "s"} saved (<span className="text-money">{formatRand(savingsBreakdown.randSaved)}</span>)
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="font-semibold text-success">
+                        About {savingsBreakdown.hoursSaved} hour{savingsBreakdown.hoursSaved === 1 ? "" : "s"} saved (<span className="text-money">{formatRand(savingsBreakdown.randSaved)}</span>)
+                      </div>
+                      <SavingsCalculationDialog
+                        baselineHoursPerTender={savingsBreakdown.baselineHoursPerTender}
+                        timeSpentHoursPerTender={savingsBreakdown.timeSpentHoursPerTender}
+                        hourlyCostZar={savingsBreakdown.hourlyCostZar}
+                        usingDefaultBaseline={savingsBreakdown.usingDefaultBaseline}
+                        trigger={<button type="button" className="text-xs font-medium text-success underline-offset-2 hover:underline">How we worked this out</button>}
+                      />
                     </div>
-                    <details className="mt-1">
-                      <summary className="cursor-pointer text-xs font-medium text-success">How we worked this out</summary>
-                      <ul className="mt-1.5 list-disc pl-4 text-xs text-muted-foreground">
-                        {savingsBreakdown.steps.map((s) => (
-                          <li key={s.stepKey}>
-                            {s.reason} - {s.hours}h
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
                     <div className="mt-1.5 text-[11px] text-muted-foreground">
                       {savingsBreakdown.usingDefaultBaseline ? (
                         <>
                           Using a default estimate (20h/R450 per tender) - we don&apos;t have your own numbers yet.{" "}
-                          <Link href="/company#savings-baseline" className="underline">
+                          <Link href="/company?edit=1#savings-baseline" className="underline">
                             Confirm your baseline
                           </Link>{" "}
                           for a figure based on your company.
@@ -392,7 +392,7 @@ export async function SubmissionPack({ tenderId, tenderPackId }: { tenderId: str
                       ) : (
                         <>
                           Estimated from your own confirmed baseline -{" "}
-                          <Link href="/company#savings-baseline" className="underline">
+                          <Link href="/company?edit=1#savings-baseline" className="underline">
                             update it
                           </Link>{" "}
                           any time.
