@@ -1,5 +1,55 @@
 # System Status
 
+**2026-10-26 ~16:17 UTC — standing review pass: no fix, a real test-coverage gap flagged instead
+of forced into a weak finding.** Orientation: `git fetch origin main` showed 3 new commits since
+this routine's own last pass (`e27e380`) - Finding 81 (a legacy TE field could override an explicit
+Form B7 waiver, already fixed by the Edge-case QA routine), and PR #160 (WhatsApp contact widget on
+the public site), merged with zero reviews (`get_reviews` returned `[]` - a further self-merge
+instance, not investigated or reverted, same as every other one this file already documents). Four
+open PRs checked and avoided: `#161` (WhatsApp widget refinements, draft, builds on #160), `#159`
+(dashboard/onboarding fixes, draft), `#157` (pack bridge test-only additions, draft), `#118`
+(discovery scoring, draft, stale) - none collided with this pass's own work.
+
+**The finding**: `app/lib/sanralScoring.ts` (341 lines) - the engine behind "does this bid clear
+SANRAL's functionality threshold", shown live on `/tools/b6-estimator` and the tender workspace's
+own compliance report (`compliance-data.ts`, `compliance-report.tsx`) - has **zero test coverage,
+direct or indirect**. Confirmed by searching every actual caller (`compliance-data.ts`,
+`compliance-report.tsx`, `B6EstimatorClient.tsx`, `tenderCompliance.ts`) and finding no test file
+for any of them either. This is real money/bid-decision logic - a wrong `outlook` ("clears" /
+"cannot_clear" / "depends") reaching a customer is a materially different risk than a cosmetic UI
+bug, and nothing here would catch a regression.
+
+Read the whole file looking for a concrete bug to fix rather than just reporting the coverage gap,
+and found one genuine correctness question, but couldn't establish it's actually reachable: when
+more than 6 key positions have an unknown SANRAL "managerial" flag (`estimateSanralConventional`'s
+own `unknownIdx`), the code deliberately stops brute-forcing all `2^n` combinations and checks only
+"all managerial" vs "all non-managerial" as the two bounds (`scenarios = ... <= 6 ? 1 << n : 2`).
+Because making a position managerial changes both the numerator (adds `manPos`, which can be 0) and
+the denominator (`managementMax` 15→30) together, the true min/max of the ratio isn't guaranteed to
+sit at either all-same extreme - a mixed combination could in principle score more extreme than
+both. **Not fixed**: `MAN_POSITION_COLUMNS` (PL/CE/RE/RM + toll equivalents, the only codes that can
+even be managerial) means this needs more than 6 of specifically those position types on one
+tender's Form B1 to ever engage the >6 branch at all - real SANRAL tenders this repo has templates
+for run one PL plus a handful of DS-class (never-managerial) specialists, so this is very unlikely
+to be reachable in practice. Noted here rather than built around a case I can't demonstrate actually
+happens, and rather than silently left for the next pass to rediscover.
+
+**Not acted on this pass**: writing the missing test suite itself - this needs real SANRAL matrix
+fixtures (multiple positions, multiple projects, both managerial-known and -unknown cases) built
+carefully against the actual Book 1 source the file's own header cites, not assembled quickly as a
+light-touch pass's afterthought. A solid candidate for either a dedicated follow-up or the Edge-case
+QA routine's own rotation.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings). No code touched this pass.
+
+**Backlog, re-confirmed from this file's own prior entries, not assumed**: migration `0096`
+(pack-quota trial-expiry) and the `narrative_documents` PostgREST schema-cache reload are both still
+outstanding - not independently re-verified live this pass. The PayFast idempotency design question
+remains open and not urgent.
+
+---
+
 **2026-10-26 ~14:33 UTC — standing review pass: fixed a false "Ready" claim in
 `engine/general/submission_plan.py`'s `compile_plan()` for a CIDB grading requirement - scoped to
 the Python module, verified NOT reachable from the deployed app, which already handles this
