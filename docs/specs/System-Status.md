@@ -1,5 +1,61 @@
 # System Status
 
+**2026-10-26 ~10:20 UTC — standing review pass: a real dedupe bug fixed in `system_alerts.fingerprint()`
+- two occurrences of the identical underlying failure, differing only by a Python object's
+non-deterministic memory address, were silently filed as two separate open alerts instead of one.**
+Orientation: `git fetch origin main` showed one new commit since the last pass (`5ea9dc6`, a sibling
+QA routine's Finding 79 in `engine/general/submission_plan.py` - unrelated area, no overlap; note in
+passing, not acted on: that pass's own `System-Status.md` entry landed mid-file rather than at the
+top, breaking this file's own reverse-chronological convention - flagging for whoever runs that
+routine next, not fixing someone else's file-editing habit myself). Three open PRs checked and
+avoided entirely: `#157` (draft, test-only additions to `engine/pack/process_pack_jobs.py` - the
+exact file this routine's own prior pass just edited, so deliberately steered clear of that file this
+pass to avoid treading on it), `#156` (draft, notification-engine session's tender-workspace wire-up),
+`#118` (draft, stale). Stayed clear of the self-merge incident PRs, per the standing guardrail.
+
+**The finding**: `system_alerts.py`'s own `fingerprint()` function exists specifically so "ids, hex
+strings and numbers [are] blanked out" before hashing, meaning two occurrences of the same
+underlying failure collapse into one open alert with an incrementing occurrence count rather than
+flooding `/admin` with duplicate rows. Read `_UUID`/`_HEX`/`_NUM`'s own regexes closely rather than
+trusting the docstring's claim: `_HEX = re.compile(r"\b[0-9a-f]{12,}\b", re.I)` requires a word
+boundary (`\b`) immediately before the first hex digit - but a Python object repr's own "0x..." memory
+address (routinely the tail of a bridge's stdout/stderr when an exception's `str()` includes an object
+repr, e.g. `<Workbook object at 0x7f8a3c2d1e40>`) has no such boundary: "x" and the hex digit that
+follows it are both `\w` characters, so `\b` never matches between them. The hex run falls through
+`_HEX` entirely and lands on `_NUM` instead, which only blanks the pure-digit substrings inside it
+(`0`, `7`, `8`, `3`, `2`, `1`, `40` individually) and leaves every hex letter in place - a result that
+differs from one process run to the next, since the memory address itself does. Reproduced directly
+(not theorised): `fingerprint("pack", "...at 0x7f8a3c2d1e40...")` and the same message with
+`0x55b19a001230` substituted in produced two different sha256 hashes, confirming two occurrences of
+the exact same failure would file as two separate `system_alerts` rows rather than one row with
+`occurrences: 2` - the opposite of this function's own stated purpose, and exactly the kind of alert-
+noise problem Sarel's own recent asks (PR #151's anti-noise batching, PR #152's per-bridge source
+tagging) were built to reduce.
+
+**Fix**: added `\b0x[0-9a-f]+\b` as a first alternative in `_HEX`, ahead of the existing bare-hex
+pattern - it matches the "0x" prefix as part of the hex run itself, so the match no longer needs a
+word boundary between "x" and the digits after it. Verified: added a regression case to
+`engine/alerts/test_system_alerts.py`'s own `fingerprint()` check block - confirmed it failed with the
+exact predicted result before the fix (two different hashes for the same underlying message), then
+confirmed it passes after. Full `python3 engine/alerts/test_system_alerts.py` (Part 1, the in-memory
+Supabase stand-in - real bridges fed malformed jobs, the checker's new/still-occurring/resolved
+lifecycle) re-run clean, 0 failures, every pre-existing case included - this fix touches only the
+regex, nothing about dedup behaviour on UUIDs or plain numbers changed. `py_compile` clean on both
+touched files.
+
+**Pushed directly to main, no PR**: `engine/alerts/system_alerts.py`,
+`engine/alerts/test_system_alerts.py` - commit (see `git log`).
+
+**Backlog confirmed, not assumed, unchanged this pass**: migration `0096` (pack-quota trial-expiry),
+migration `0098` (admin portal customers/readiness), the `narrative_documents` PostgREST schema-cache
+reload, and the PayFast idempotency design question (not urgent) are all still waiting on Sarel - not
+re-verified live this pass, carried forward from the last confirmed check.
+
+**QA tooling**: sound - `tsc --noEmit` clean (sanity-checked the unrelated TypeScript side too, not
+just the Python touched this pass), `eslint` not re-run (no TypeScript file changed).
+
+---
+
 **2026-10-26 ~08:18 UTC — standing review pass: removed ~25 lines of genuinely unreachable dead
 code in `engine/pack/process_pack_jobs.py`'s `sync_tender_requirements()` - a leftover duplicate
 from the 0045 "per copy" refactor, never executed, now gone.** Orientation: `git fetch origin main`
