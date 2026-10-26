@@ -18,11 +18,20 @@ import { cn } from "@/lib/utils";
 // of "/" (id="pricing", see app/page.tsx), not its own page. Treated as
 // "on / with the #pricing hash" below rather than silently dropped or
 // invented as a new route.
+//
+// Refinement pass (2026-10-26) also named "/billing" as a pricing-message
+// route - that one's deliberately NOT added: /billing is the real,
+// existing route in this app, and it's the authenticated subscription
+// page behind AppShell, not a public marketing page. Showing a public
+// contact widget there would break this same component's own "never
+// inside the authenticated workspace" rule - the two instructions
+// conflicted, and the authenticated-area exclusion is the one that
+// protects a real user from UI noise while they're signed in, so it wins.
 const WHATSAPP_NUMBER = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER;
 
-const DEMO_MESSAGE = "Hi Sarel, I'm reviewing the Tender Ready demo. How does it handle our specific [Civil/Building] tenders?";
-const PRICING_MESSAGE = "Hi Sarel, I have a question about the Tender Ready plans for our company [Company Name].";
-const HOME_MESSAGE = "Hi Sarel, I'd like to find out more about using Tender Ready for [Company Name].";
+const DEMO_MESSAGE = "Hi Sarel, I'm reviewing the Tender Ready demo and have a question.";
+const PRICING_MESSAGE = "Hi Sarel, I'd like to find out more about Tender Ready subscription pricing.";
+const HOME_MESSAGE = "Hi Sarel, I'd like to find out more about Tender Ready.";
 
 function messageFor(pathname: string, onPricingSection: boolean): string {
   if (pathname === "/demo") return DEMO_MESSAGE;
@@ -79,8 +88,8 @@ export function WhatsAppContactButton() {
       rel="noopener noreferrer"
       aria-label="Chat with Tender Ready on WhatsApp"
       className={cn(
-        "fixed bottom-6 right-6 z-40 flex items-center gap-2.5 rounded-full border border-white/20 bg-[#25D366] text-white shadow-lg transition-transform duration-150 ease-out hover:scale-105 focus-visible:scale-105 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[#25D366]/40",
-        "size-[52px] justify-center p-0 md:h-auto md:w-auto md:justify-start md:rounded-full md:px-4 md:py-2.5",
+        "fixed bottom-6 right-6 z-40 flex items-center gap-2.5 rounded-full border border-white/20 bg-[#25D366] text-white shadow-lg transition-all duration-200 hover:scale-105 hover:bg-[#20BA5A] hover:shadow-xl focus-visible:scale-105 focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-[#25D366]/40",
+        "size-12 justify-center p-0 md:h-auto md:w-auto md:justify-start md:rounded-full md:px-4 md:py-2.5",
       )}
     >
       <WhatsAppGlyph className="size-6 shrink-0" />
