@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Fraunces, Inter_Tight } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { WhatsAppContactButton } from "@/components/public/whatsapp-contact-button";
 import "./globals.css";
 
 // Design system direction (2026-10-20, "confident & premium"): Fraunces for
@@ -42,6 +43,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <TooltipProvider delay={300}>
           {children}
           <Toaster />
+          <WhatsAppContactButton />
         </TooltipProvider>
       </body>
     </html>
