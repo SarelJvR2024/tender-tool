@@ -3745,3 +3745,81 @@ no open PR currently excludes it, `app/app/discovery/page.tsx`, `app/app/analyti
 `app/app/pipeline/page.tsx`'s owner-initials line (all prior passes' own fixes),
 `app/supabase/migrations/`, billing/entitlement logic, or `engine/sanral_fill.py` and its callers -
 standing carve-outs.
+
+## Pre-demo audit: 4 production defects fixed, then `/privacy`'s own fake mailbox closes the loop (2026-10-26)
+
+Sarel's own brief named 4 defects to fix ahead of the first customer demo; this entry documents
+that fix plus one more the broader "walk through and fix it" mandate that followed turned up in
+the same area.
+
+**The 4 named defects, all fixed on `pre-demo-defect-fixes`:**
+
+1. **Footer WhatsApp link crash.** `components/public/whatsapp-contact-button.tsx` defined its own
+   `DEMO_MESSAGE`/`PRICING_MESSAGE`/`HOME_MESSAGE` string constants in a `"use client"` module, and
+   `app/page.tsx` (a Server Component) imported `HOME_MESSAGE` from that same file. Next.js's
+   bundler replaces a client module's non-component named exports with a client-reference proxy on
+   the server side - reading one at render time throws "Attempted to call HOME_MESSAGE() from the
+   server...", which is exactly the literal crash text that was ending up inside the footer's own
+   `href`. Fixed by moving the three constants into a new plain file with no `"use client"` -
+   `lib/whatsappMessages.ts` - that both the client button and the server page import from, so
+   neither crosses a client boundary to read a constant.
+2. **Calculator's third stat mismatched its own two neighbours.** `components/tt/savings-calculator.tsx`'s
+   third `<Stat>` was labelled "Extra tenders a month" sitting beside two annual ("a year") stats,
+   worked out from `hoursSavedPerMonth`. Relabelling it "a year" without recomputing it would have
+   made the *number* wrong, not just the label - `extraCapacity`'s 3-arg formula scales ~12x between
+   a monthly and a yearly call (checked by hand: this file's own inputs give 11/month but 136/year
+   under the old formula, not the same figure under a different label), and 136 "extra tenders a
+   year" is also the kind of exaggerated claim this feature's own rule forbids. Computed on a
+   genuine annual basis instead with the simpler, more conservative `floor(yearly hours saved /
+   baseline hours per tender)` - the same formula the real Home/Analytics savings counter is moving
+   to (PR #164, still under review) - inlined here rather than importing from that unreviewed
+   branch. Added a conditional footer sentence ("~N additional tenders every month...") using the
+   monthly-equivalent of that same conservative annual figure, never the old aggressive one.
+3. **Enterprise CTA's mailto pointed at a confirmed-fake mailbox.** `app/page.tsx` and
+   `app/billing/page.tsx`'s Enterprise cards both used `mailto:hello@tendertool.co.za` - this file's
+   own 2026-10-23 entry already documented `hello@tendertool.co.za` as a non-existent mailbox nobody
+   reads. The brief's own suggested replacement (`hello@tenderready.app`) would have been an equally
+   unverified guess - a different kind of fake certainty, not an improvement. Used
+   `support@tenderready.app` instead: already in real, live use as the one general contact address
+   in `lib/emailBrand.ts`'s transactional-email footer, so this is reusing a proven-real address
+   rather than inventing a second untested one.
+4. **`/demo`'s alternative-candidate row rendered with no space in the raw DOM text.**
+   `app/tenders/[id]/position-person-select.tsx`'s alternatives list rendered `{s.name}` immediately
+   followed by a `<span>` for the match-percent badge with no text node between them - visually fine
+   (badge styling supplies visual separation) but the raw DOM/accessibility-tree text read as
+   "...van der Merwe33% match..." glued together, confirmed in a live production text dump before
+   the fix. Fixed with an explicit `{" "}` text node between the name and the badge span - matches
+   the equivalent, already-correct pattern immediately above it in the same file (the suggested
+   candidate's own matchPercent badge already had this space; the alternatives list below it didn't).
+
+**The extra fix, found by the broader pre-demo walkthrough, not the named brief:** `/privacy`'s own
+contact line still read `privacy@tendertool.co.za` - the other of the two fake mailboxes this file's
+2026-10-23 entry named (`hello@...` was defect #3 above; `privacy@...` was explicitly left out of
+that brief's scope at the time). Same reasoning as defect #3: fixed to `support@tenderready.app`
+rather than inventing an unverified `privacy@tenderready.app`. Also corrected a stale inline comment
+in `app/page.tsx` (the "Founding Firms... Get in touch" CTA's own reasoning) that cited
+`privacy@tendertool.co.za` as "the only contact mechanism anywhere in the app" - no longer true now
+that `support@tenderready.app` exists as a second, general-purpose one - without reopening that
+CTA's own already-settled decision to link `/signup` rather than a mailto.
+
+**Verified**: `npm run verify` (typecheck + lint + build) - 0 errors, the same 3 pre-existing
+warnings; `npx vitest run`; a full `node:test` sweep via `node --experimental-strip-types` on every
+`*.test.ts` file - all green, figures given in the PR itself rather than restated here since they
+change pass to pass. Also verified against the real, live `https://tenderready.app` (read-only -
+no form submissions): confirmed all 4 named defects were still live in production at audit time
+(this branch wasn't merged yet), then re-ran the same read-only checks for the remaining free
+calculator tools with actual, hand-checked input values (not just their default/empty state) -
+CIDB grade calculator (R15,000,000 contract value -> "Grade 7CE", matches the published R13,000,001-
+R40,000,000 band), B-BBEE preference points calculator (tendered price R1,050,000 vs Pmin
+R1,000,000, Level 4 -> Ps 76/80 by the reg 4/5 formula `80*(1 - (Pt-Pmin)/Pmin)`, B-BBEE points
+12/20 from the Level 4 row, total 88/100 - matches by hand), and the working-day deadline calculator
+(2026-11-02 + 21 working days -> 2026-12-01, a sane result, not NaN/undefined). The SANRAL B6
+estimator correctly withholds an estimate until a closing date is picked, rather than showing a
+premature/wrong number - confirmed as the honest-range behaviour this tool's own copy describes,
+not a bug.
+
+**Not done, by design**: did not touch the SANRAL B6 estimator's own scoring logic (out of scope -
+no defect found there, and `engine/discovery/` logic changes need Sarel's own review per this file's
+standing rule); did not merge PR #164 (savings-counter rework) or re-open its still-open review;
+did not attempt to verify any signed-in-app flow (dashboard, tender workspace, people) in this pass
+- this environment has no live Supabase session to sign in with, so that remains unaudited.
