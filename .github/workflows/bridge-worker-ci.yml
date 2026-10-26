@@ -116,6 +116,10 @@ jobs:
           python3 engine/discovery/taxonomy.py check
           python3 engine/discovery/test_taxonomy.py
 
+      - name: Intake classification - manual tender-by-URL document routing, discipline-match messaging (offline fixtures)
+        if: ${{ !cancelled() }}
+        run: python3 engine/intake/test_classify_tender.py
+
       - name: Award outcomes - parsing of eTenders/SANRAL award records (offline fixtures)
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_award_outcomes.py
