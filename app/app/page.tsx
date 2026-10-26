@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Check, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { LogoLockup } from "./_components/Logo";
+import { HOME_MESSAGE } from "@/components/public/whatsapp-contact-button";
 import { buttonVariants } from "@/components/ui/button";
 import { SavingsCalculator } from "@/components/tt/savings-calculator";
 import { cn } from "@/lib/utils";
@@ -156,7 +157,9 @@ export default async function Home() {
   // rule as WhatsAppContactButton - never shown with a placeholder/example
   // number pretending to be real.
   const whatsappNumber = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER;
-  const whatsappFooterLine = whatsappNumber ? `WhatsApp: ${formatWhatsAppDisplay(whatsappNumber)} (Business hours)` : null;
+  const whatsappHref = whatsappNumber
+    ? `https://wa.me/${whatsappNumber.replace(/\D/g, "")}?text=${encodeURIComponent(HOME_MESSAGE)}`
+    : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -418,7 +421,20 @@ export default async function Home() {
       {/* Footer */}
       <footer className="px-5 py-6 text-center">
         <p className="mb-2 text-xs text-muted-foreground">Tender Ready - built for South African companies that submit tenders.</p>
-        {whatsappFooterLine && <p className="mb-2 text-xs text-muted-foreground">{whatsappFooterLine}</p>}
+        {whatsappNumber && whatsappHref && (
+          <p className="mb-2 text-xs text-muted-foreground">
+            WhatsApp:{" "}
+            <a
+              href={whatsappHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline-offset-2 transition-[filter] duration-150 hover:underline hover:brightness-110"
+            >
+              {formatWhatsAppDisplay(whatsappNumber)}
+            </a>{" "}
+            (Business hours)
+          </p>
+        )}
         <Link href="/privacy" className="text-xs text-muted-foreground underline">
           Privacy notice
         </Link>
