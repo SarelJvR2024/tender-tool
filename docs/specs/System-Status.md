@@ -3283,6 +3283,46 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-26, standing QA/robustness review - ninety-sixth run): a regression test for run_bridges.py's own critical-crash alert was silently checking a source that stopped being written a day earlier
+
+Orientation: synced a sibling commit (`d91ab38`, a standing-review pass tracing
+`confirm_pack.py`'s employment-note claim across both pack paths - no fix, `engine/pack_generator`/
+`engine/pack` files only, no overlap). In sync with `origin/main` throughout this pass (checked
+before and after the fix below - no collision). Rotated to worker/job-queue per the fixed rotation
+list - the next slot after notify, and the most overdue area by actual last-touch (full dedicated
+pass the seventy-third run, a secondary check at the eighty-first).
+
+**What was checked:** read `poll_loop.py`, `run_bridges.py`, `system_alerts.py` and
+`check_system_alerts.py` end to end for a reachable adversarial gap (malformed timeouts, the
+hung-bridge process-group kill from Finding 60, `fingerprint()`'s id/number blanking, roster/claim
+isolation). Nothing new held up as a *product* bug - but running this area's own test suites
+directly (not just reading the code) surfaced a real, already-broken regression with zero changes
+of my own: `python3 engine/alerts/test_system_alerts.py` failed twice outright.
+
+**Finding 77 (CONFIRMED, FIXED, moderate).** `run_bridges.py` was changed on 2026-10-25 (per its
+own inline comment) so a bridge pass that exits non-zero or times out files its critical alert
+under THAT BRIDGE'S OWN source, not the generic `"worker"` it used before. `test_system_alerts.py`
+and `run_bridges.py`'s own module docstring were never updated to match - the test's `source ==
+"worker"` lookup silently found nothing (the real row was under `source="broken_bridge.py"`), so
+the "a bridge crash reaches Sarel as a critical alert" path has had no working coverage since the
+day before this run, and the docstring told the next reader to filter `/admin` by the wrong source.
+
+**Fix:** updated `run_bridges.py`'s docstring to describe the real split (a bridge's own
+crash/timeout files under its own source; only a crash of the runner itself, in the `__main__`
+guard, stays under `"worker"`). Updated `test_system_alerts.py`'s docstring and assertions to match
+- `source == "broken_bridge.py"`, an explicit `context.bridge` check, and an explicit "not under
+worker" check so a regression back to the old behaviour would be caught either way - and fixed the
+checker-run-1 expected source set.
+
+**Verified red, then green:** `python3 engine/alerts/test_system_alerts.py` before any edit - `2
+failure(s)`, both exactly as predicted; after the doc/test fix (no production code touched) - `0
+failure(s)`. Re-ran the sibling `engine/worker/test_poll_loop.py` too (unaffected by this file): all
+passed, including the process-group-kill-on-timeout case.
+
+No production code changed this pass - the product's own alerting behaviour was already correct
+since 2026-10-25; only its test and docstring had drifted. Full details: Finding 77 in
+`QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-26, standing QA/robustness review - ninety-fifth run): rotated to notify (engine/notify/daily_digest.py) - thorough review, no new bug found this time
 
 Orientation: synced a sibling commit (`0d1e1d5`, "Award outcomes: explain a zero-amount bid drop,

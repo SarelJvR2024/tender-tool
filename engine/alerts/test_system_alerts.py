@@ -14,8 +14,13 @@ per-fingerprint rule):
      (source, severity, the job id in context, a traceback). A second
      malformed CV job raises occurrences on the same open alert instead of a
      second row.
-  3. run_bridges.py over a bridge whose pass exits non-zero: a critical
-     "worker" alert with the bridge's output as detail.
+  3. run_bridges.py over a bridge whose pass exits non-zero: a critical alert
+     under that bridge's OWN source (its registered name, or the script's
+     basename for --script - not "worker", which is reserved for a crash of
+     the runner itself; QA pass, 2026-10-26, after run_bridges.py's own
+     2026-10-25 change to per-bridge sources left this test still asserting
+     the old "worker" source, so this path had no real coverage since) with
+     the bridge's output as detail.
   4. check_system_alerts.py as a CLI: run 1 reports every alert as new and
      writes --out; run 2 reports nothing (already reported); a new occurrence
      of a reported alert is reported once as still_occurring; a RESOLVED
@@ -120,10 +125,16 @@ def part1():
         with open(broken, "w") as f:
             f.write("import sys\nprint('connecting to Supabase...')\nraise SystemExit('ERROR: Supabase unreachable')\n")
         code, out = run([RUNNER, "--once", "--script", broken], fake)
-        w = [x for x in alerts(fake) if x["source"] == "worker"]
+        # source is the bridge's OWN name (the script's basename here), not "worker" -
+        # run_bridges.py's 2026-10-25 change, so a crash is never buried under one
+        # shared source; "worker" stays reserved for a crash of the runner itself.
+        w = [x for x in alerts(fake) if x["source"] == "broken_bridge.py"]
         check(code == 1 and len(w) == 1 and w[0]["severity"] == "critical" and "broken_bridge.py" in w[0]["message"]
-              and "Supabase unreachable" in (w[0]["detail"] or ""),
-              f"run_bridges.py: a bridge pass that exits non-zero -> a critical worker alert - {w[0]['message'] if w else None!r}")
+              and "Supabase unreachable" in (w[0]["detail"] or "")
+              and w[0]["context"].get("bridge") == "broken_bridge.py"
+              and not any(x["source"] == "worker" for x in alerts(fake)),
+              f"run_bridges.py: a bridge pass that exits non-zero -> a critical alert under its own source "
+              f"(not \"worker\") - {w[0]['message'] if w else None!r}")
 
         # The checker: new -> reported once; nothing new on run 2.
         out1 = os.path.join(tempfile.mkdtemp(), "alerts.json")
@@ -133,7 +144,7 @@ def part1():
         rep = json.load(open(out1))
         print("    checker run 1:", [(x["source"], x["severity"], x["occurrences"]) for x in rep["new"]])
         check(code == 0 and len(rep["new"]) == 3 and rep["still_occurring"] == [] and rep["open_unresolved_total"] == 3
-              and {x["source"] for x in rep["new"]} == {"cv", "general", "worker"},
+              and {x["source"] for x in rep["new"]} == {"cv", "general", "broken_bridge.py"},
               "checker run 1: the 3 alerts reported as new, written to --out")
         code, txt = run([CHECKER, "--out", out1], fake)
         rep = json.load(open(out1))

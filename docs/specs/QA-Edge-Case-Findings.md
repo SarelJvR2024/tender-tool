@@ -4454,3 +4454,54 @@ scoring helpers), with a minimal fake `Workbook`. Reverted the fix: failed exact
 **Regression:** `engine/pack_generator/suggest_pack.py`'s `suggest()` only - one calculation now
 wrapped in a try/except that raises a clearer error of the same type family. No schema or other
 call-site changes; `process_pack_jobs.py`'s own use of this module is untouched.
+
+### Finding 77 (CONFIRMED, FIXED, moderate - a real regression test for run_bridges.py's own critical-crash alert was silently checking for a source that stopped being written a day earlier, leaving that path with no working coverage)
+
+**Where:** `engine/alerts/test_system_alerts.py` (the regression test), and `engine/worker/run_bridges.py`'s
+own module docstring (stale documentation of the same behaviour).
+
+**What was tested:** rotated to worker/job-queue - the most overdue standing area (last full
+dedicated pass the seventy-third run; a secondary check at the eighty-first run). Read
+`poll_loop.py`, `run_bridges.py`, `system_alerts.py` and `check_system_alerts.py` end to end
+looking for a reachable adversarial gap. Nothing new held up as a *product* bug (the hung-bridge
+process-group kill from Finding 60, the per-roster-entry isolation, the fingerprint() id/number
+blanking all still check out), but running this area's own existing test suites directly (not just
+reading the code) turned up a real, currently-FAILING regression: `python3
+engine/alerts/test_system_alerts.py` reported 2 failures outright, with no code changes of my own.
+
+**Finding (CONFIRMED, moderate).** `run_bridges.py` was changed on 2026-10-25 (per its own inline
+comment, "Sarel's own ask, after a real backlog triage found every bridge crash showing up under
+one shared source") so that a bridge pass exiting non-zero or timing out is recorded under THAT
+BRIDGE'S OWN source (its registered name, or the script's basename for `--script`) instead of the
+generic source `"worker"` it used before. The test (`test_system_alerts.py`, part 1, item 3) and
+`run_bridges.py`'s own module docstring were never updated to match - both still describe/assert
+the pre-2026-10-25 behaviour. Concretely: `run([RUNNER, "--once", "--script", broken], fake)` then
+`[x for x in alerts(fake) if x["source"] == "worker"]` found nothing (the real row was filed under
+`source="broken_bridge.py"`), so the check silently evaluated false, and the downstream
+`check_system_alerts.py` assertion (`{x["source"] for x in rep["new"]} == {"cv", "general",
+"worker"}`) failed the same way. This is a real, currently-broken test, not a hypothetical: the
+"a bridge pass crashed -> a critical alert reaches Sarel" path has had no working regression
+coverage since the day before this run, and anyone reading either docstring would be told the
+wrong thing to filter `/admin` by.
+
+**Fix:** updated `run_bridges.py`'s module docstring to describe the real, current split - a
+bridge pass's own crash/timeout files under that bridge's own source (not "worker"; `context.bridge`
+still carries the same value), while a crash of the runner itself (the `__main__` guard at the
+bottom, unrelated to any one bridge) is still recorded under source `"worker"`, exactly as the code
+already does. Updated `test_system_alerts.py`'s own docstring (item 3) and its assertions to match
+the real, intended behaviour: check for `source == "broken_bridge.py"` (not `"worker"`), add an
+explicit `context.bridge == "broken_bridge.py"` check and a `not any(x["source"] == "worker" ...)`
+check so a future regression back to the old shared source would be caught either way, and fixed
+the checker-run-1 expected source set to `{"cv", "general", "broken_bridge.py"}`.
+
+**Verified red, then green:** ran `python3 engine/alerts/test_system_alerts.py` BEFORE touching
+anything - `2 failure(s)`, both exactly as predicted above (the "critical worker alert" check and
+the checker-run-1 source-set check). Applied the test/docstring fix above (no production code
+changed - the product's own behaviour was already correct since 2026-10-25); re-ran: `0
+failure(s)`. Also re-ran `python3 engine/worker/test_poll_loop.py` (the sibling bridge-loop smoke
+test, unaffected by this file) to confirm no other regression: all passed, including the
+process-group-kill-on-timeout case from Finding 60.
+
+**Regression:** `engine/alerts/test_system_alerts.py` and `engine/worker/run_bridges.py`'s own
+docstring only - no production code or schema touched. `engine/worker/test_poll_loop.py` re-run
+clean.
