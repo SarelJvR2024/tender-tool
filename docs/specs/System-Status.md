@@ -1,5 +1,53 @@
 # System Status
 
+**2026-10-26 ~08:18 UTC — standing review pass: removed ~25 lines of genuinely unreachable dead
+code in `engine/pack/process_pack_jobs.py`'s `sync_tender_requirements()` - a leftover duplicate
+from the 0045 "per copy" refactor, never executed, now gone.** Orientation: `git fetch origin main`
+showed one new commit since the last pass (`fe8352c`, a sibling QA routine's Finding 78 in
+`engine/intake/classify_tender.py` - unrelated area, no overlap). Fast-forwarded local checkout to
+match exactly before starting. Two open PRs checked and avoided: `#156` (draft, in-flight,
+notification-engine session's tender-workspace wire-up - touches `general-workspace.tsx`/
+`cover-page-preview.tsx`/`narrative-documents.tsx`, none of which this pass went near) and `#118`
+(draft, stale). Stayed clear of the self-merge incident PRs entirely, per the standing guardrail.
+
+**The finding**: confirmed via `ast.parse()` (not just reading) that `sync_tender_requirements()`
+had a `return written` statement at its original line 777, followed immediately by ~25 more lines
+at the same indentation (778-803) - an entire second copy of the function's own loop body, byte-for-
+byte older code, syntactically valid but categorically unreachable (Python never raises on dead code
+after a bare `return`; it just silently never runs). Confirmed this wasn't a refactor artefact that
+still mattered: the live copy above it (the one that actually runs) already writes `company_id` into
+every `tender_requirements` insert - the fix migration 0045 made for the "per copy" tenant-isolation
+bug; the dead copy below the `return` was the OLD, pre-0045 version, missing `company_id` entirely
+on its insert. Pure clutter with a real risk if ever revived blind (e.g. someone later deletes the
+wrong `return` while refactoring and silently reintroduces the exact bug 0045 fixed) - removed
+rather than left as a trap for a future edit.
+
+**Verified**: `python3 -m py_compile` clean; the module imports cleanly standalone with the same
+`sys.path` setup `process_pack_jobs.py` uses for its own CLI entry point; `engine/pack/
+test_adapt_company.py` (6/6) and `engine/pack/test_pdf_merge.py` (3/3, the two existing test files
+in this directory) both still pass unchanged. No live-credential test exists for `sync_tender_
+requirements()` itself (`bridge_selftest.py` imports the module but doesn't call this function
+directly) - flagged below as a real coverage gap, same shape as prior passes' findings on
+`fill_flat_pdf.py`/`fill_sbd_docx.py`/`confirm_pack.py`.
+
+**Pushed directly to main, no PR**: `engine/pack/process_pack_jobs.py`, commit (see `git log`).
+
+**Flagged for the Edge-case QA routine, not built this pass**: `engine/pack/process_pack_jobs.py`
+(the real SANRAL-pack bridge - `gather()`, `process_job()`, `sync_tender_requirements()`,
+`sync_b7_setup()`, `sync_position_suggestions()`) has zero dedicated test file of its own, same gap
+already named for `confirm_pack.py`. `bridge_selftest.py` exercises `process_job()` indirectly
+against a locally replayed schema but the four `sync_*` functions above it have no coverage at all.
+
+**QA tooling**: sound - `tsc --noEmit`/`eslint` clean (no TypeScript touched), both existing
+`engine/pack/` test files clean before and after.
+
+**Backlog confirmed, not assumed - unchanged this pass**: migration `0096` (pack-quota trial-
+expiry), migration `0098` (admin portal customers/readiness), the `narrative_documents` PostgREST
+schema-cache reload, and the PayFast idempotency design question (not urgent) are all still waiting
+on Sarel.
+
+---
+
 **2026-10-26 ~06:20 UTC — standing review pass: `fill_flat_pdf.py`'s CSD/bid-price prefix handling
 and phone-number cell-splitting traced in depth, both confirmed correct - no new bug found; a real
 test-coverage gap flagged instead.** Orientation: `git fetch origin main` showed local HEAD already

@@ -775,32 +775,6 @@ def sync_tender_requirements(client, work_root):
         finally:
             shutil.rmtree(os.path.dirname(local), ignore_errors=True)
     return written
-    have = {r["tender_id"] for r in client.select("tender_requirements", {"tender_id": [d["tender_id"] for d in docs]})}
-    for d in docs:
-        if d["tender_id"] in have:
-            continue
-        local = os.path.join(work_root, "requirements", d["tender_id"], "technical.xlsm")
-        try:
-            client.download("tender-documents", d["storage_path"], local)
-            primary, alternates = read_required_positions(Workbook(local))
-            rows = [(p, False) for p in primary] + [(a, True) for alts in alternates.values() for a in alts[:1]]
-            for p, alt in rows:
-                client.insert("tender_requirements", {
-                    "tender_id": d["tender_id"], "position_code": p["code"],
-                    "position_description": (str(p["description"]).strip() or None) if p.get("description") else None,
-                    "managerial": _managerial(p.get("managerial")), "is_alternate": alt})
-            written[d["tender_id"]] = [p["code"] for p, alt in rows if not alt]
-            print(f"[requirements] tender {d['tender_id']}: {len(primary)} position(s) from SETUP "
-                  f"({', '.join(written[d['tender_id']])}), {len(rows) - len(primary)} ALT")
-        except Exception as e:
-            print(f"[requirements] tender {d['tender_id']}: could not read the uploaded Technical workbook's "
-                  f"SETUP sheet ({type(e).__name__}: {e})")
-            system_alerts.record("pack", f"Could not read an uploaded Technical workbook's SETUP sheet "
-                                         f"({type(e).__name__}: {e})", "error", exc=e,
-                                 context={"tender_id": d["tender_id"], "storage_path": d.get("storage_path")})
-        finally:
-            shutil.rmtree(os.path.dirname(local), ignore_errors=True)
-    return written
 
 
 def sync_b7_setup(client, work_root):
