@@ -1,5 +1,45 @@
 # System Status
 
+**2026-10-26 ~20:16 UTC — standing review pass: gave real review to two previously-unreviewed
+self-merged PRs instead of hunting a fresh bug elsewhere; both check out sound.** Orientation:
+`git fetch origin main` showed 12 new commits since this routine's own last pass (`9fb3e33`) - local
+checkout was fast-forwarded before anything else. No open PRs at all right now (`list_pull_requests`
+state=open returned empty) - nothing to collide with.
+
+Two substantial PRs landed since the last pass, both merged with zero reviews (`get_reviews`
+returned `[]` for each - two more self-merge instances, not investigated or reverted, same as every
+other one this file already documents):
+
+- **PR #159** (dashboard/onboarding fixes) - the PR body claims a real cross-company dashboard-stats
+  leak (Home's "Active bids"/"Closing this week" cards counting every company's tenders, not just
+  the logged-in company's own pursued ones, because `tenders` is deliberately a shared, non-tenant-
+  scoped table and the old code never filtered to rows with a real `tender_packs` entry). Read
+  `lib/dashboardStats.ts` directly rather than trusting the PR prose: the fix is real and correctly
+  scoped - `myTenderRows()` filters to rows with a real pack, and `app/dashboard/page.tsx` actually
+  uses `myRows` (not raw `rows`) for both the stat counts and the fresh-company empty-state check.
+  Ran `lib/dashboardStats.test.ts` directly - 8/8 pass, including the exact "10 unpursued rows a
+  naive count would sweep in" shape the PR describes as the real bug. Sound.
+- **PR #163** (discovery .docx/.doc fallback reader) - `fetch_document_text()` routes a `.docx`/
+  `.doc` tender attachment through `engine/general/requirements.read_document()` instead of always
+  trying `pdftotext` (which can't read non-PDF files at all) in the live daily discovery feed. Ran
+  the new `test_document_reader_fallback.py` directly rather than trusting the commit message - all
+  18 checks pass against real `.docx`/`.doc`/scanned-image sample files, with genuine evidence (real
+  extracted character counts, real content substring checks), not just "no exception raised". Sound.
+
+**Not acted on**: PR #118 (discovery scoring, previously logged here as stale/draft) is no longer
+open - it was resolved and merged (`9b461a8`) in the same stretch; nothing left to track on it.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing warnings
+- `Logo.tsx`'s `<img>` tags, `analytics/page.tsx`'s unused `STAGE_META`). No code touched this pass
+(review-only; both PRs' own fixes already shipped before this pass started).
+
+**Backlog, re-confirmed from this file's own prior entries, not assumed**: migration `0096`
+(pack-quota trial-expiry) and the `narrative_documents` PostgREST schema-cache reload are both still
+outstanding - not independently re-verified live this pass. The PayFast idempotency design question
+remains open and not urgent.
+
+---
+
 **2026-10-26 ~18:16 UTC — standing review pass: a real cross-component bug fixed (the WhatsApp
 floating widget built a broken link whenever the configured number had any formatting), QA sound,
 no collisions.** Orientation: `git fetch origin main` showed 4 new commits since this routine's own
