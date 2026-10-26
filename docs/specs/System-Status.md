@@ -1,5 +1,56 @@
 # System Status
 
+**2026-10-26 ~06:20 UTC — standing review pass: `fill_flat_pdf.py`'s CSD/bid-price prefix handling
+and phone-number cell-splitting traced in depth, both confirmed correct - no new bug found; a real
+test-coverage gap flagged instead.** Orientation: `git fetch origin main` showed local HEAD already
+matched `origin/main` exactly (`53ef198`) before starting - no stale-checkout risk this pass. Two
+open PRs checked and avoided: `#156` (draft, in-flight, the notification-engine session's tender-
+workspace wire-up pass - touches `general-workspace.tsx`/`cover-page-preview.tsx`/
+`narrative-documents.tsx`, none of which this pass went near) and `#118` (draft, stale, touches
+`engine/discovery/assess_tender.py`/`engine/intake/classify_tender.py` - also avoided). Stayed
+entirely clear of the self-merge incident PRs, as directed.
+
+**What was chased, and why it looked like a real bug at first:** `engine/general/fill_flat_pdf.py`
+(the flat/non-fillable municipal MBD-form filler - 1002 lines, confirmed via grep to have zero
+dedicated test file, unlike every other filler in this engine) writes a value into a form cell two
+different ways depending on whether the buyer's own template already pre-prints the field's
+"prefix" (`"MAAA"` for a CSD supplier number, `"R"` for the bid price): if the target cell is
+genuinely blank, it writes the raw `value` straight in with no prefix logic at all; only when the
+cell already shows the prefix printed does it strip a matching prefix off `value` first (so the
+written text doesn't duplicate it, e.g. "MAAAMAAA0999999"). The blank-cell path writing a bare,
+unprefixed `value` looked like a real bug on first read - MBD 1's CSD cell with no pre-printed
+"MAAA" would then show just the bare number, missing the required "MAAA" prefix altogether.
+
+**Confirmed NOT a bug, by checking how these values are actually stored**, not by assumption: grepped
+every write site for `csd_supplier_number` (seed data, migration `0001`, test fixtures,
+`fill_sbd_docx.py`, `fill_a_forms.py`) - every single one stores/passes it **with** "MAAA" already
+baked into the string (`"MAAA0999999"`, `"MAAA0123456"`, never a bare digit string). Same for
+`total_bid_price` (`tender_answers`, per migration `0077`'s own comment, and this engine's own test
+fixtures: `"R 1 000 000.00"`, `"R 98 765.43"` - the user types the "R" themselves when answering).
+So the blank-cell path writing `value` as-is is correct (the prefix is already part of the string),
+and the pre-printed-prefix path's `value.upper().startswith(pre.upper())` strip is the one genuinely
+needed to avoid a doubled prefix when the template already shows it. Also traced the phone-number
+cell-splitting regex (`^\s*\(?(0\d{2})\)?[\s-]*(.+)$`, assumes a domestic `0XX` area code) - a stored
+number not matching that shape (e.g. an international format) correctly falls back to writing the
+whole value into one cell rather than crashing or writing a malformed split.
+
+**Real gap flagged, not built this pass**: `fill_flat_pdf.py` and `fill_sbd_docx.py` (547 lines, the
+SBD/MBD `.docx`-native equivalent) both have **zero dedicated test files** - confirmed via grep,
+neither is imported by any `test_*.py` in this engine. Both are only exercised indirectly through
+`test_general_bridge.py`'s end-to-end fixture runs, which cover the happy path but not the
+prefix/phone-splitting edge cases traced above. A real candidate for the Edge-case QA routine's
+rotation, alongside the already-flagged `confirm_pack.py`/`process_pack_jobs.py` coverage gap from
+two passes ago.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings), unchanged from baseline. No application code touched this pass (investigation only).
+
+**Backlog, confirmed not assumed - unchanged**: migration `0096` (pack-quota trial-expiry), migration
+`0098` (admin portal customers/readiness), the `narrative_documents` PostgREST schema-cache reload,
+and the PayFast idempotency design question (not urgent) are all still waiting on Sarel.
+
+---
+
 **2026-10-26 ~04:15 UTC — standing review pass: `engine/compliance/registration_reminders.py`
 reviewed in depth, no new bug found - a real-looking lead chased to ground, already covered by
 existing tests.** Orientation: `git fetch origin main` showed one new commit since this routine's
