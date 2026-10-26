@@ -3550,6 +3550,41 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-26, standing QA/robustness review - ninety-ninth run): a real project with no captured position title printed the literal word "None" into a client-facing World Bank-format CV - the exact bug class this same function was already fixed for on its sibling fields
+
+Orientation: synced several sibling commits (`eb60f96` fingerprint-dedup fix, two real billing
+fixes, a migration-status correction, a false-claim fix in an unused-live email template - all
+`engine/alerts`/`engine/pack`/`app/` or doc-only, no overlap). PR #157 (draft, test-only additions
+to `engine/pack/process_pack_jobs.py`) - no overlap with `engine/cv` either. Rotated to CV - the
+most overdue standing area (last dedicated pass the ninety-second run). Also received a cross-
+session heads-up (not a finding, reported separately to Sarel): the shared "Default" Supabase
+environment's service-role key was rotated by Sarel for an unrelated app, breaking live access for
+sessions still pointed at it - this routine's own QA cycles so far all run against local fixtures,
+not live Supabase, so unaffected in practice, but worth knowing if a future pass needs live access.
+
+**Finding 80 (CONFIRMED, FIXED, severe).** `build_world_bank()`'s Employment Record loop has its
+own comment explicitly listing which nullable project fields were fixed for Finding 49
+("start/end/value_rm/contact_name/contact_phone") - `position_held` is not on that list, and the
+line right below it still read `f"Position: {proj.get('position_held', '')} ..."` with no `or`
+guard. `position_held` is independently nullable (confirmed from the schema and from this same
+file's own comment on `build_sanral_keyperson()`'s sibling handling of the identical field three
+lines above) - a real project with no position title reaches this f-string with the key present
+but `None`, and since an f-string never raises (unlike the sibling table-cell version, which
+crashes and was fixed in 2026-10-23), it silently renders "Position: None" into a real CV.
+Reproduced directly. Traced why both earlier fixes missed this: Finding 49's own test deliberately
+used a valid `position_held` value (it was testing the OTHER fields), and the 2026-10-23 fix's test
+only covers `build_sanral_keyperson()` - the two tests' own field choices structurally guaranteed
+this gap.
+
+**Fix:** `proj.get('position_held') or '?'`, matching the `'?'` placeholder already used one line
+above for `start`/`end`.
+
+**Verified red, then green:** new test in `test_generate_cv.py`. Reverted the fix (keeping the
+test): failed with the exact predicted "Position: None" text; restored: `0 failure(s)`. Full
+`test_generate_cv.py` (11 functions) and `test_extract_cv_fields.py` re-run clean.
+
+Full details: Finding 80 in `QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-26, standing QA/robustness review - ninety-eighth run): the Submission Plan told a person to "Complete by hand" SBD 2 - tax clearance, required on virtually every tender - directly contradicting its own detail text saying it was already satisfied from the vault
 
 Orientation: synced a sibling commit (`3ca226f`, dead-code removal in `process_pack_jobs.py`'s

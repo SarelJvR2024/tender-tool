@@ -4611,3 +4611,50 @@ failure(s)`. Full `test_submission_plan.py` (now covering this case) and the unr
 forms (SBD 2 today; any future form code given that same capability) now read "ready" instead of
 "by_hand". No schema or other call-site changes; `build_general_pack.py`'s own, already-correct
 `"attach"` handling is untouched.
+
+### Finding 80 (CONFIRMED, FIXED, severe - a real project with no captured position title printed the literal word "None" into a client-facing World Bank-format CV, the exact bug class this same function was already fixed for on its sibling fields)
+
+**Where:** `engine/cv/generate_cv.py`'s `build_world_bank()`, Employment Record section.
+
+**What was tested:** rotated to CV - the most overdue standing area (last dedicated pass the
+ninety-second run). PR #157 (draft, test-only additions to `engine/pack/process_pack_jobs.py`, from
+the pack-focused standing-review routine) and the `eb60f96` fingerprint fix (both already merged/in
+`origin/main`, both `engine/alerts`/`engine/pack` only) - no overlap with `engine/cv`. Read
+`generate_cv.py` end to end, specifically checking whether every "prints the literal word None"
+fix this function has already received (Finding 49, then the 2026-10-23/2026-10-25 follow-ups)
+was actually applied to every nullable field it touches, or only some of them - the same
+"did the earlier fix actually cover everywhere it needed to" question that found Finding 78 last
+cycle in a different file.
+
+**Finding (CONFIRMED, severe).** It wasn't. `build_world_bank()`'s Employment Record loop has a
+comment (just above it) explicitly listing which nullable project fields were fixed for Finding 49
+("start/end/value_rm/contact_name/contact_phone... all nullable columns... sailed straight through
+as the literal string 'None'") - `position_held` is not on that list, and the line just below still
+read `f"Position: {proj.get('position_held', '')} ..."` with no `or` guard at all.
+`position_held` is independently nullable (confirmed from `0001_init_schema.sql`'s own `projects`
+table, and from this exact file's OWN comment three lines above, on `build_sanral_keyperson()`'s
+sibling table-cell version of this field) - a real project captured with no position title reaches
+this line with the key PRESENT but value `None`, and since this is an f-string (not a direct
+`_safe_text(None)` call like the sibling table-cell version, which crashes instead - the 2026-10-23
+fix for THAT), Python silently renders `str(None)` = `"None"` into the paragraph, with nothing to
+crash and catch it. Reproduced directly: a project row with `position_held: None` produced a
+real CV paragraph reading `"Position: None    Value: R10m\nReferee: A Buyer  012 345 6789"`. Traced
+why both existing tests missed this exact gap: Finding 49's own regression test deliberately set
+`position_held="Site Engineer"` (a valid value, since it was testing the OTHER fields), and the
+2026-10-23 fix's own test only covers `build_sanral_keyperson()`, never `build_world_bank()`'s
+sibling field - the two tests' deliberate field choices structurally guaranteed this one slipped
+through both passes.
+
+**Fix:** `proj.get('position_held') or '?'` (matching the `'?'` placeholder this same f-string
+already uses for `start`/`end` one line above), same pattern already correctly applied to every
+other field in this loop.
+
+**Verified the regression test actually catches the regression:** new
+`test_world_bank_project_with_null_position_held_does_not_print_the_word_none()` in
+`test_generate_cv.py`. Reverted the fix (`git apply -R`, keeping the new test): failed with the
+exact predicted "Position: None" text; restored: `0 failure(s)`. Full `test_generate_cv.py` (now 11
+functions) and the unrelated `test_extract_cv_fields.py` re-run clean.
+
+**Regression:** `engine/cv/generate_cv.py`'s `build_world_bank()` only - the Employment Record
+section's `position_held` cell now reads "?" instead of "None" when the field is null.
+`build_sanral_keyperson()`'s own (already-correct) handling of the identical field is untouched.
