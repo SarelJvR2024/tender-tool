@@ -4560,3 +4560,54 @@ than one Technical Submission workbook is uploaded. `sanral_files`/`sanral_docum
 AMBIGUOUS note were already correct and are unchanged. No schema or other call-site changes;
 `process_pack_jobs.py` (which reads `sanral_files`, not `signal`) was never affected by the bug and
 is untouched by the fix.
+
+### Finding 79 (CONFIRMED, FIXED, severe - the Submission Plan told a person to "Complete by hand" SBD 2, the tax clearance form on virtually every tender, directly contradicting its own detail text saying it was already satisfied from the vault)
+
+**Where:** `engine/general/submission_plan.py`'s `_form_step()`.
+
+**What was tested:** rotated to non-SANRAL pack (`engine/general`). PR #141 (the "Batch 2B" pass)
+merged into `main` since the last pass through this rotation, touching `assess_tender.py`'s
+`labels()` helper, 4 discovery sources' closing-time defaults, and `process_general_jobs.py`'s own
+closing-time placeholder (12:00 -> 11:00) - all already baked into the checked-out tree, no
+overlap to avoid. A sibling standing-review pass (same morning) already gave `fill_flat_pdf.py`'s
+prefix handling a thorough, confirmed-correct look, so picked a different file in the same area:
+`submission_plan.py` (236 lines, the "what do we actually have to go and do for this tender"
+compiler, Sarel's own framing 2026-10-21) - not given a dedicated adversarial look since its own
+regression test file was written. Read `_form_step()`, `_returnable_step()`, `compile_plan()`'s
+gap-de-duplication prefix logic end to end, checking each branch against every real status value
+its own upstream (`requirements.py`) can actually produce - not just the three `_form_step()`
+itself already names.
+
+**Finding (CONFIRMED, severe).** `requirements.py`'s own form-status assignment
+(`extract_requirements()`, ~line 1056) has FOUR real status values a form can carry, not three:
+`"auto"`, `"overlay"`, `"by_hand"` - and `"attach"`, assigned whenever `FORMS[code][1] ==
+"attach"`. Exactly one form code currently has that capability: `"2"` - "Tax clearance / tax
+compliance status" (SBD 2), required on essentially every South African public-sector tender.
+`_form_step()` only ever checked for `"auto"` and `"overlay"` explicitly; `"attach"` fell through
+to the generic `return {"status": "by_hand", "detail": f["reason"]}` at the bottom - despite
+`f["reason"]` for this exact status being the literal string *"Satisfied by the tax compliance
+status (TCS PIN) - attached from the vault."* The result, reproduced directly with a synthetic SBD
+2 bundle: a plan step titled "SBD 2 - Tax clearance / tax compliance status", status "Complete by
+hand", detail "Satisfied by the tax compliance status (TCS PIN) - attached from the vault." - the
+status label and the detail text of the SAME step directly contradict each other, on what is very
+likely the single most common form this engine ever classifies. Confirmed this isn't a stale or
+unused status: `build_general_pack.py` (the real pack builder) has its own explicit handling for
+`f["status"] == "attach"` (`form_results[f["code"]] = {"status": "from the vault"}`, no by-hand
+path at all) - proving the real, intended semantics of "attach" is "already satisfied", exactly
+what `_form_step()` should have mapped to `"ready"`, the same treatment `"auto"` already gets.
+
+**Fix:** `_form_step()` now treats `"attach"` the same as `"auto"` (`status in ("auto",
+"attach")` -> `"ready"`), matching `build_general_pack.py`'s own real-world treatment of the
+identical status value.
+
+**Verified the regression test actually catches the regression:** new synthetic-bundle test in
+`test_submission_plan.py` (an SBD 2 mention - no existing test in this file's SBD_BUNDLE fixture
+mentioned SBD 2 at all, which is exactly why this had gone unnoticed). Reverted the fix (`git apply
+-R`, keeping the new test): failed with the predicted status/detail contradiction; restored: `0
+failure(s)`. Full `test_submission_plan.py` (now covering this case) and the unrelated
+`test_requirements.py` re-run clean.
+
+**Regression:** `engine/general/submission_plan.py`'s `_form_step()` only - `"attach"`-status
+forms (SBD 2 today; any future form code given that same capability) now read "ready" instead of
+"by_hand". No schema or other call-site changes; `build_general_pack.py`'s own, already-correct
+`"attach"` handling is untouched.

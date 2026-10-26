@@ -117,6 +117,25 @@ check("the FIRST mention (6CE, the now-superseded original) is still the one sho
       and "More than one different CIDB grading was found" in _step(plan_two_cidb_mentions, "cidb_grading")["detail"],
       _step(plan_two_cidb_mentions, "cidb_grading"))
 
+# --- "attach" form status (SBD 2 - tax clearance/TCS PIN, on virtually every -
+#     tender): the vault satisfies it automatically - must read "ready", not --
+#     the by_hand fallback (QA pass, 2026-10-26) -----------------------------
+
+SBD2_BUNDLE = """
+SBD 2: TAX CLEARANCE / TAX COMPLIANCE STATUS
+All bidders must have a valid tax compliance status.
+"""
+
+_, plan_sbd2 = _plan_for_files([SBD2_BUNDLE])
+check("SBD 2 (tax clearance, requirements.py's own 'attach' capability) reads ready - the vault "
+      "satisfies it automatically, same as build_general_pack.py's own `{\"status\": \"from the "
+      "vault\"}` treatment - not 'by_hand', which used to directly contradict this very step's own "
+      "detail text (\"Satisfied by...attached from the vault\")",
+      _step(plan_sbd2, "form:2") is not None and _step(plan_sbd2, "form:2")["status"] == "ready",
+      _step(plan_sbd2, "form:2"))
+check("...and its detail still names the TCS PIN/vault, unchanged",
+      "attached from the vault" in (_step(plan_sbd2, "form:2") or {}).get("detail", ""))
+
 # --- de-duplication: a gap restating a by-hand/overlay form's own reason is -
 #     dropped, since that form already has its own step with the same text --
 

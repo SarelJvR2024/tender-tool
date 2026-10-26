@@ -3423,6 +3423,38 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-26, standing QA/robustness review - ninety-eighth run): the Submission Plan told a person to "Complete by hand" SBD 2 - tax clearance, required on virtually every tender - directly contradicting its own detail text saying it was already satisfied from the vault
+
+Orientation: synced a sibling commit (`3ca226f`, dead-code removal in `process_pack_jobs.py`'s
+`sync_tender_requirements()` - `engine/pack` only, no overlap). PR #141 ("Batch 2B") merged into
+`main` since the last pass through this rotation - already baked into the checked-out tree, no
+collision to avoid. A same-morning sibling standing-review pass already gave
+`engine/general/fill_flat_pdf.py` a thorough, confirmed-correct look, so rotated to a different
+file in the same (non-SANRAL pack) area: `submission_plan.py`.
+
+**Finding 79 (CONFIRMED, FIXED, severe).** `requirements.py`'s own form-status assignment has FOUR
+real values a form can carry (`"auto"`, `"overlay"`, `"by_hand"`, `"attach"`), not the three
+`submission_plan.py`'s `_form_step()` explicitly checked for. `"attach"` - assigned to exactly one
+form code today, SBD 2 ("Tax clearance / tax compliance status", required on essentially every
+South African public-sector tender) - fell through to the generic `by_hand` return, despite that
+status's own reason text being the literal string *"Satisfied by the tax compliance status (TCS
+PIN) - attached from the vault."* Reproduced directly: a plan step titled "SBD 2 - Tax clearance /
+tax compliance status" came back status "Complete by hand", detail "Satisfied by... attached from
+the vault" - the status and detail of the SAME step flatly contradicting each other, on very
+likely the single most common form this engine ever sees. Confirmed via `build_general_pack.py`
+(the real pack builder, which has its own explicit `"attach"` -> "from the vault" / no-by-hand-path
+handling) that "already satisfied" is the real, intended meaning - exactly what `"auto"` already
+gets mapped to.
+
+**Fix:** `_form_step()` now maps `"attach"` to `"ready"`, same as `"auto"`.
+
+**Verified red, then green:** new SBD-2 bundle test in `test_submission_plan.py` (no existing test
+fixture in that file mentioned SBD 2 at all - exactly why this had gone unnoticed). Reverted the
+fix (keeping the test): failed with the predicted status/detail contradiction; restored: `0
+failure(s)`. `test_requirements.py` re-run clean too.
+
+Full details: Finding 79 in `QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-26, standing QA/robustness review - ninety-seventh run): a SANRAL intake's own "routed to the SANRAL flow" message could name a different Technical Submission workbook than the one actually used to build the pack
 
 Orientation: synced two sibling commits (`53ef198`/`4495893`, standing-review passes tracing
