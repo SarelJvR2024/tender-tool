@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { PLAN_MONTHLY_ZAR } from "@/lib/billing";
-import { SAVINGS_STEP_HOURS, extraCapacity, formatRand, hoursSavedForTender } from "@/lib/savingsCounter";
+import { SAVINGS_STEP_HOURS, formatRand, hoursSavedForTender } from "@/lib/savingsCounter";
 
 const TYPICAL_HOURS_SAVED_PER_TENDER = Object.values(SAVINGS_STEP_HOURS).reduce((sum, s) => sum + s.hours, 0);
 const PROFESSIONAL_MONTHLY_ZAR = PLAN_MONTHLY_ZAR.professional as number;
@@ -14,10 +14,12 @@ const PROFESSIONAL_MONTHLY_ZAR = PLAN_MONTHLY_ZAR.professional as number;
  * "typical" tender saves the sum of every configured step's placeholder
  * hours (the same SAVINGS_STEP_HOURS the real counter uses - not a
  * separately invented number), capped at whatever baseline the visitor
- * types in, then reuses the exact same extraCapacity()/formatRand()
- * formulas the real Home counter card uses, for the same reason billing.ts
- * reuses PLAN_MONTHLY_ZAR instead of a 4th hardcoded price: one formula,
- * checked once, not quietly reinvented per surface.
+ * types in, then reuses formatRand() the real Home counter card uses, for
+ * the same reason billing.ts reuses PLAN_MONTHLY_ZAR instead of a 4th
+ * hardcoded price: one formula, checked once, not quietly reinvented per
+ * surface. All three result stats are kept on the same annual basis -
+ * see the extraTendersPerYear comment below for why this isn't just a
+ * label swap.
  */
 export function SavingsCalculator() {
   const [tendersPerMonth, setTendersPerMonth] = useState(2);
@@ -28,7 +30,25 @@ export function SavingsCalculator() {
   const hoursSavedPerMonth = Math.max(0, tendersPerMonth) * typicalHoursSaved;
   const yearlyHours = hoursSavedPerMonth * 12;
   const yearlyRand = Math.round(yearlyHours * Math.max(0, hourlyCost));
-  const extraTendersPerMonth = extraCapacity(hoursSavedPerMonth, Math.max(0, tendersPerMonth), hoursPerTender);
+  // Pre-demo production audit (2026-10-26): this stat sits beside two
+  // ANNUAL figures ("Hours/Rand saved a year") but was computed from
+  // hoursSavedPerMonth and labelled "a month" - internally consistent on
+  // its own, but reads as a mismatch next to the other two. Re-labelling
+  // it "a year" without recomputing it would make the NUMBER wrong rather
+  // than just the label (extraCapacity's own 3-arg formula scales ~12x
+  // between a monthly and a yearly call, since it divides by a per-tender
+  // remaining-hours figure that doesn't scale with the period - confirmed
+  // by hand: the exact inputs this file ships with produce 11/month but
+  // 136/year, not the same number under a different label). 136 "extra
+  // tenders a year" is also an exaggerated claim this feature's own rule
+  // explicitly forbids. Computed on a genuine annual basis instead, with
+  // the simpler, more conservative floor(yearly hours saved / baseline
+  // hours per tender) - the same formula the real Home/Analytics counter
+  // card is moving to (PR #164, not yet merged) for the same "no
+  // exaggerated numbers" reason, inlined here rather than importing from
+  // that still-unreviewed branch.
+  const extraTendersPerYear = Math.floor(yearlyHours / Math.max(1, hoursPerTender));
+  const extraTendersPerMonthApprox = Math.round(extraTendersPerYear / 12);
   const professionalAnnualZar = PROFESSIONAL_MONTHLY_ZAR * 12;
 
   return (
@@ -43,12 +63,18 @@ export function SavingsCalculator() {
         <Stat label="Hours saved a year" value={`${Math.round(yearlyHours)}h`} />
         <Stat label="Rand saved a year" value={formatRand(yearlyRand)} money />
         <Stat
-          label="Extra tenders a month"
-          value={extraTendersPerMonth > 0 ? `+${extraTendersPerMonth}` : "-"}
+          label="Extra tenders a year"
+          value={extraTendersPerYear > 0 ? `+${extraTendersPerYear}` : "-"}
         />
       </div>
       <div className="mt-4 text-xs leading-relaxed text-muted-foreground">
-        That&apos;s {formatRand(yearlyRand)} a year against the Professional plan&apos;s {formatRand(professionalAnnualZar)} a year (R{PROFESSIONAL_MONTHLY_ZAR.toLocaleString()}/month). Estimated,
+        That&apos;s{" "}
+        {extraTendersPerMonthApprox > 0 && (
+          <>
+            ~{extraTendersPerMonthApprox} additional tender{extraTendersPerMonthApprox === 1 ? "" : "s"} every month without hiring extra staff, and{" "}
+          </>
+        )}
+        {formatRand(yearlyRand)} a year against the Professional plan&apos;s {formatRand(professionalAnnualZar)} a year (R{PROFESSIONAL_MONTHLY_ZAR.toLocaleString()}/month). Estimated,
         based on the numbers you typed in above - not a guarantee for every tender.
       </div>
     </div>

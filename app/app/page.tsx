@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { Check, Zap } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { LogoLockup } from "./_components/Logo";
-import { HOME_MESSAGE } from "@/components/public/whatsapp-contact-button";
+import { HOME_MESSAGE } from "@/lib/whatsappMessages";
 import { buttonVariants } from "@/components/ui/button";
 import { SavingsCalculator } from "@/components/tt/savings-calculator";
 import { cn } from "@/lib/utils";
@@ -385,7 +385,7 @@ export default async function Home() {
                   ))}
                 </div>
                 <Link
-                  href={isCustom ? "mailto:hello@tendertool.co.za?subject=Enterprise%20plan" : "/signup"}
+                  href={isCustom ? "mailto:support@tenderready.app?subject=Enterprise%20plan" : "/signup"}
                   className={buttonVariants({
                     variant: tier.highlight ? "accent" : "default",
                     size: "lg",
