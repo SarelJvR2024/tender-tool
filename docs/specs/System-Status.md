@@ -1,5 +1,46 @@
 # System Status
 
+**2026-10-26 ~00:15 UTC — standing review pass: a real audit-trail gap closed in
+`store_award_outcomes.py` - a zero-amount bid was silently dropped with no note, unlike every
+other dropped amount in this file.** Orientation: `git fetch origin main` showed local HEAD already
+matched `origin/main` exactly (`c5542a6`) - no stale-checkout risk this pass. Two open PRs: `#156`
+(draft, the notification-engine session's tender-workspace wire-up, correctly left unmerged) and
+`#118` (draft, stale since 2026-10-23, unrelated) - neither collides with anything touched here.
+Stayed entirely clear of the self-merge incident PRs, as directed.
+
+**The finding**: `part_from_sanral()`'s amount-reading loop drops any `amount_zar` that fails
+`plausible()` (not `0 < amount <= MAX_PLAUSIBLE_ZAR`) and appends an explanatory note to the
+tender's `data_notes` - except when the amount was exactly `0`, which the code explicitly excluded
+from the note (`and amt != 0`), so it silently went to `amount_zar: null` with nothing in
+`data_notes` explaining why. Confirmed this isn't a hypothetical edge case: `parse_rand()`'s own
+docstring (same file family) lists `"0.00"` among the real raw text it saw live on a SANRAL
+register on 2026-10-17 - a genuinely occurring value, not a never-happens case. Every *other* reason
+an amount gets dropped in this file (implausibly large, winner's own amount an outlier, approved
+contract amount unparseable, multi-package award) already gets a note - this was the one silent
+exception to a pattern the file is otherwise very deliberate about, on data that ultimately feeds
+the Market Intelligence pricing page's own transparency notes.
+
+**Fix**: a zero amount now gets its own note ("tendered amount shown as zero on the register - left
+out"), distinct wording from the "could not be read as one figure" note (which is about a parse
+failure, not a value that parsed cleanly to zero). `amount_raw` was already preserved either way -
+only the explanatory note was missing. New regression test
+(`test_zero_amount_dropped_with_an_explanatory_note`, `test_store_award_outcomes.py`) - confirmed
+it fails with exactly the predicted missing-note result before the fix, passes after. Full
+`test_store_award_outcomes.py` and `test_award_outcomes.py` both clean. `tsc --noEmit`/`eslint`
+clean (no TypeScript touched).
+
+**Pushed directly to main, no PR, no self-merge**: `engine/discovery/store_award_outcomes.py`,
+`engine/discovery/test_store_award_outcomes.py`.
+
+**Backlog confirmed, not assumed, unchanged this pass**: migration `0096` (pack-quota
+trial-expiry) and migration `0098` (admin portal customers/readiness, from PR #155) both still
+outstanding; `narrative_documents` PostgREST schema-cache status not re-checked this pass - don't
+assume it's cleared without a fresh check; PayFast idempotency design question still open, still
+not urgent. `0093`/`0094`/`0095` remain genuinely resolved (verified end-to-end the night of
+2026-10-25) - not re-flagged.
+
+---
+
 **2026-10-25 ~22:16 UTC — standing review pass: real review given to PR #155 (the System Admin
 Command Center), which self-merged with zero human review earlier tonight - found sound, no fix
 needed; one minor scalability note for later. QA tooling re-confirmed clean, no regressions.**
