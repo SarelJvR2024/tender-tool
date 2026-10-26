@@ -28,12 +28,24 @@ export function UploadForm({
   redirectTo = "/company/document-scan?saved=uploaded",
   title,
   hint,
+  onRegistered,
 }: {
   companyId: string;
-  /** Where to send the user once every file in a drop has registered for AI review. Spec v3 Batch 4: reused as-is from Experience, which stays on its own page instead of bouncing to /company/document-scan. */
+  /** Where to send the user once every file in a drop has registered for AI review. Spec v3 Batch 4: reused as-is from Experience, which stays on its own page instead of bouncing to /company/document-scan. Ignored when onRegistered is given - see that prop. */
   redirectTo?: string;
   title?: string;
   hint?: string;
+  /**
+   * When given, called with the number of files just registered instead of
+   * the default auto-navigate-to-redirectTo behavior - the caller owns what
+   * happens next (onboarding's AddDocumentsScreen shows a "Processing N
+   * document(s)..." card + an explicit "Go to your Workspace" button rather
+   * than bouncing straight into the review screen, so a brand-new user
+   * isn't forced into reviewing AI output before they've even seen the
+   * product). Every other caller (the standalone /company/document-scan
+   * page, Experience) omits this and keeps the original auto-redirect.
+   */
+  onRegistered?: (count: number) => void;
 }) {
   const [states, setStates] = useState<FileUploadState[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +69,10 @@ export function UploadForm({
         return;
       }
       setStates((prev) => prev.filter((s) => !succeeded.some((ok) => ok.file === s.file)));
+      if (onRegistered) {
+        onRegistered(succeeded.length);
+        return;
+      }
       router.push(redirectTo);
       router.refresh();
     });
