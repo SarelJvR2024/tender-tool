@@ -128,6 +128,23 @@ def compile_plan(manifest, company=None, tender=None):
         })
 
     for r in manifest["returnables"]:
+        # The generic "CIDB registration / grading" returnable (matched on
+        # the bare keyword \bCIDB\b) and the dedicated cidb_grading step
+        # below (matched on an actual "CIDB grading of X" number) fire
+        # together on the same tender almost every time a specific grading
+        # is named - the grading sentence itself contains the word "CIDB".
+        # This returnable step then marked "ready" the moment ANY grading
+        # was on file at all, even one well below what's required (5GB on
+        # file, 7GB required -> shown "ready" right next to the dedicated
+        # step's own, correctly cautious "review - confirm this meets or
+        # exceeds 7GB" for the exact same fact) - a false, misleading
+        # confidence signal, found and reproduced live, 2026-10-26. The
+        # dedicated step is strictly more informative (it names the actual
+        # grading required and never claims "ready" without a human
+        # confirming the comparison), so it wins; this generic step is only
+        # shown when no specific grading was found to anchor that one.
+        if r["key"] == "cidb" and manifest.get("cidb"):
+            continue
         out = _returnable_step(r, company)
         title = r["label"] + (" (only if bidding as a JV/consortium)" if r.get("conditional") == "jv" else "")
         steps.append({

@@ -117,6 +117,23 @@ check("the FIRST mention (6CE, the now-superseded original) is still the one sho
       and "More than one different CIDB grading was found" in _step(plan_two_cidb_mentions, "cidb_grading")["detail"],
       _step(plan_two_cidb_mentions, "cidb_grading"))
 
+# --- a specific CIDB grading must not ALSO produce a separate, generic ------
+#     "returnable:cidb" step that can claim "ready" off ANY grading on file, -
+#     contradicting the dedicated step's own, correctly cautious "review" ---
+#     for the exact same requirement - found and reproduced live, 2026-10-26 -
+
+check("SBD_BUNDLE names a specific CIDB grading, so the generic 'returnable:cidb' "
+      "step is suppressed - only the dedicated, more informative cidb_grading step shows",
+      _step(plan_low_cidb, "returnable:cidb") is None and _step(plan_low_cidb, "cidb_grading") is not None,
+      [s["id"] for s in plan_low_cidb["steps"] if "cidb" in s["id"]])
+
+CIDB_BARE_MENTION = "Bidders must hold a valid CIDB registration.\n"
+_, plan_cidb_bare = _plan_for_files([CIDB_BARE_MENTION], {"cidb_grading": "5GB"})
+check("a bare 'CIDB' mention with no specific grading number still shows the generic "
+      "returnable step (the only signal available in that case) and no dedicated step",
+      _step(plan_cidb_bare, "returnable:cidb") is not None and _step(plan_cidb_bare, "cidb_grading") is None,
+      [s["id"] for s in plan_cidb_bare["steps"] if "cidb" in s["id"]])
+
 # --- "attach" form status (SBD 2 - tax clearance/TCS PIN, on virtually every -
 #     tender): the vault satisfies it automatically - must read "ready", not --
 #     the by_hand fallback (QA pass, 2026-10-26) -----------------------------

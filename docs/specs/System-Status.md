@@ -1,5 +1,68 @@
 # System Status
 
+**2026-10-26 ~14:33 UTC — standing review pass: fixed a false "Ready" claim in
+`engine/general/submission_plan.py`'s `compile_plan()` for a CIDB grading requirement - scoped to
+the Python module, verified NOT reachable from the deployed app, which already handles this
+correctly.** Orientation: `git fetch origin main` showed 16 new commits since this routine's own
+last pass (`af59b6d`) - the big one being PR #156 (Tender Workspace: RequirementRow wiring,
+contradictory-badge fixes, confidence %, cover-page print, buyer pill), merged with zero reviews
+(`get_reviews` returned `[]` - a further self-merge instance, not investigated or reverted per the
+standing guardrail, same as every other one this file already documents). Also landed: Finding 80
+(`build_world_bank()` printing the literal word "None"), and a System Admin Command Center feature
+that was reverted once and reapplied as its own split PR. Three open PRs checked and avoided: `#159`
+(dashboard/onboarding fixes, draft), `#157` (pack bridge test-only additions, draft), `#118`
+(discovery scoring, draft, stale) - none collided with this pass's own work.
+
+**The finding**: `compile_plan()`'s returnables loop produces a generic "CIDB registration /
+grading" step for the `cidb` returnable (keyword match on the bare word "CIDB" anywhere in the
+text) *in addition to* the dedicated `cidb_grading` step (triggered when a specific grading number,
+e.g. "7GB", is actually found) - and in practice these fire together almost every time a specific
+grading is named, since the grading sentence itself contains the word "CIDB". The generic step's
+own status logic only ever asked "does the company have ANY grading on file at all", marking it
+**"ready" the moment any grading exists - even one well below what's required**. Reproduced live
+with the test suite's own existing SBD_BUNDLE fixture (company has 5GB on file, tender requires
+7GB+): the dedicated step correctly showed `review - "confirm this actually meets or exceeds 7GB"`,
+while the generic step simultaneously showed **`ready - "Company CIDB grading on file: 5GB."`** -
+genuinely contradictory, false-confidence information about the exact same fact, sorted near the
+bottom of the plan (where "ready" items sit) where a skimming user would read it as resolved.
+
+**Important correction made before claiming user-facing impact, not assumed**: `compile_plan()` is
+NOT reachable from the deployed Next.js app - confirmed by reading `submission-plan-logic.ts`'s own
+header comment and the architecture decision it cites (2026-10-21, already recorded in this file):
+every "read the manifest, classify it" screen computes fresh in TypeScript against the
+already-stored manifest, never by calling this Python module live. The live TS port
+(`submission-plan-data.ts` + `generalTender.ts`'s `checkReturnable()`) keeps the CIDB returnable
+(**"is a document on file for this tender"**) and the CIDB grading-comparison step (**"does the
+grading actually meet the requirement"**) as two *deliberately* separate concerns -
+`checkReturnable()`'s own "cidb" case only ever says "CIDB grading X on file" / "attach the
+certificate", never "meets the requirement" or "ready" in the misleading sense this Python bug
+produced. Confirmed directly by reading both files, not inferred. So this is a real conflation bug
+in the Python reference implementation (the one other code is explicitly documented as being
+*ported from*, and the one a local CLI dry run exercises), not a live, user-facing one - worth
+having fixed for that reason, but not reported as more impactful than it actually is.
+
+**The fix**: the generic "cidb" returnable step is now skipped when `manifest.get("cidb")` is
+truthy (a specific grading was found) - the dedicated step is strictly more informative in that
+case (names the actual grading, never claims "ready" without a human confirming the comparison) and
+wins; the generic step still shows on its own when only a bare "CIDB" mention exists with no
+specific number to anchor a dedicated step. Two new regression cases added to
+`test_submission_plan.py` (one per branch); reverted the fix first to confirm the new case fails
+with the exact predicted result (16 steps, both present) before restoring it (15 steps, only the
+dedicated one) - full suite re-run clean (`python3 engine/general/test_submission_plan.py`), plus
+`test_requirements.py`, `test_process_general_jobs.py`, `test_general_bridge.py` (all unaffected,
+confirmed clean) and `tsc`/`eslint` (no TypeScript touched).
+
+**Pushed directly to `main`, no PR, no self-merge**: `engine/general/submission_plan.py`,
+`engine/general/test_submission_plan.py`.
+
+**Backlog re-confirmed, not re-verified live this pass** (unchanged from last pass): migration
+`0096` (pack-quota trial-expiry) still outstanding, the `narrative_documents` PostgREST
+schema-cache reload status not re-checked, PayFast idempotency design question still open and not
+urgent. Migrations `0093`/`0094`/`0095`/`0098` already confirmed genuinely resolved in earlier
+passes.
+
+---
+
 **2026-10-26 ~12:17 UTC — standing review pass: fixed a false "compulsory briefing" claim in an
 unused-by-the-live-sender but still-rendered email template; backlog re-confirmed against two real
 billing fixes that landed this pass (not self-reported, read directly).** Orientation: `git fetch
