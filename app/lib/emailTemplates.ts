@@ -16,7 +16,7 @@
 // below so an existing `import { X } from "./emailTemplates.ts"` still finds
 // every template in one place if that's ever more convenient than
 // importing a specific tier file directly.
-import { button, escapeHtml, formatSastDateTime, infoCard, layout, pill, tenderHeader, type Tone } from "./emailBrand.ts";
+import { button, checklist, escapeHtml, formatSastDateTime, infoCard, layout, pill, tenderHeader, type Tone } from "./emailBrand.ts";
 
 export function welcomeEmail(opts: { companyName: string; appUrl: string }): { subject: string; html: string; text: string } {
   const subject = "Welcome to Tender Ready";
@@ -191,5 +191,48 @@ export function complianceExpiryEmail(opts: {
     { appUrl: opts.appUrl, recipientContext: { kind: "account", companyName: opts.companyName } }
   );
   const text = `${opts.companyName}: ${opts.fieldLabel} expires in ${opts.daysLeft} days.\n\n${opts.appUrl}/company`;
+  return { subject, html, text };
+}
+
+/**
+ * "Pack Incomplete / Returnables Checklist" digest (Phase 6, 2026-10-27,
+ * Sarel's own explicit spec - see lib/returnablesDigestCandidates.ts for
+ * what "missing" means for each tender family and why it's never invented).
+ * Subject line is Sarel's own literal format, not operationalSubject()'s
+ * usual `[Ref] - LEVEL: Specific` shape - every email type here already has
+ * its own subject convention (deadlineReminderEmail doesn't use
+ * operationalSubject() either), so a one-off format for one new type is
+ * consistent with, not a break from, how this file already works.
+ */
+export function returnablesDigestEmail(opts: {
+  contractLabel: string;
+  tenderTitle?: string | null;
+  buyerShortName?: string | null;
+  closingDateText: string; // already human-formatted (lib/dates.ts formatDate) by the caller
+  businessDaysLeft: number;
+  missingLabels: string[];
+  appUrl: string;
+  tenderId: string;
+  workspaceAnchor: "compliance-check" | "general-documents";
+}): { subject: string; html: string; text: string } {
+  const count = opts.missingLabels.length;
+  const subject = `[ACTION REQUIRED] ${opts.contractLabel}: ${count} Returnable${count === 1 ? "" : "s"} Missing — Closes ${opts.closingDateText}`;
+  const closingCountdown = `Closing in ${opts.businessDaysLeft} business day${opts.businessDaysLeft === 1 ? "" : "s"}`;
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill("ACTION REQUIRED", "warning")}</p>
+      ${tenderHeader({ reference: opts.contractLabel, title: opts.tenderTitle, buyerShortName: opts.buyerShortName })}
+      ${infoCard([{ label: "Closing", value: escapeHtml(`${closingCountdown} (${opts.closingDateText})`), emphasis: "warning" }])}
+      <p style="margin:0 0 12px;font-weight:700;">${count} mandatory returnable${count === 1 ? "" : "s"} still outstanding:</p>
+      ${checklist(opts.missingLabels.map((label) => ({ label, done: false })))}
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}#${opts.workspaceAnchor}`, "Open tender checklist")}
+    `,
+    `${opts.contractLabel}: ${count} returnable${count === 1 ? "" : "s"} missing, closes ${opts.closingDateText}.`,
+    { appUrl: opts.appUrl }
+  );
+  const text =
+    `${opts.contractLabel}: ${count} mandatory returnable(s) still outstanding - ${closingCountdown.toLowerCase()} (${opts.closingDateText}).\n\n` +
+    opts.missingLabels.map((l) => `- ${l}`).join("\n") +
+    `\n\n${opts.appUrl}/tenders/${opts.tenderId}#${opts.workspaceAnchor}`;
   return { subject, html, text };
 }

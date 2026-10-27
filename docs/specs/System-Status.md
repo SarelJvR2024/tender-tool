@@ -1,5 +1,83 @@
 # System Status
 
+**2026-10-27 ~21:55 UTC — Phase 6: "Pack Incomplete / Returnables Checklist" digest (A6), closing out
+the notification brief.** Not part of the Admin Command Center's own 7 tabs (those finished at Phase
+5) - a separate, explicitly-scoped item from Sarel's own instructions, with its own detailed spec
+(cadence, subject line format, idempotency, verification) given directly rather than inferred.
+
+Reused the REAL, already-existing "mandatory returnable" concept for each tender family rather than
+inventing a second one:
+- **SANRAL Conventional** (`lib/tenderCompliance.ts`): `ComplianceItem.mandatory` - the actual Stage 2
+  "Mandatory Administration Criteria" (CSD registration, COID Letter of Good Standing, Form of Offer).
+  Deliberately computes ONLY these 3 items' real inputs (company vault, `field_provenance`, pack
+  existence) - confirmed by reading `sanralConventionalDocumentChecks()` that experience/financial-
+  capture/briefing/role data feeds only NON-mandatory items this digest never reports, so none of that
+  heavier machinery (positions, experience matching, score estimate) needed re-implementing service-
+  role-safe for a batch script.
+- **General (non-SANRAL)** (`lib/generalTender.ts`): `ManifestReturnable.strength === "required"`,
+  requirements.py's own reading of the tender's documents - via the existing `checkReturnable()`.
+  Reads the company's own private-document pack manifest over the shared one when both exist, same
+  resolution rule `general-workspace.tsx` itself uses.
+- A family mapping to neither (confirmed against `app/tenders/[id]/page.tsx`'s own `isSanralFamily`/
+  `isGeneralFamily` checks - e.g. "RRM Consultant Tender", or no family at all) has no mandatory-item
+  concept anywhere in this codebase yet - reported `mapped:false` and skipped, the same "not mapped
+  yet" honesty `compliance-data.ts`'s own `loadTenderCompliance()` already uses, never guessed at.
+
+**Real finding, not a bug to silently work around**: SANRAL's own Form of Offer (C1.1.1) item is
+*always* `status: "check"` by construction - confirmed by reading `sanralConventionalDocumentChecks()`,
+`formFillNote()` can only ever return `null` or `"check"`, and the outer code does
+`fill.status ?? "check"` - so it can never read `"have"`, whatever the data. This means every SANRAL
+tender a company tracks will show "C1.1.1 Form of Offer, completed and signed" in this digest at least
+once, every time it enters the window - a real, always-true fact (it genuinely always needs a human
+signature, the same "Verify: Sign the Form of Offer" the live compliance report already shows forever
+until signed), not a defect this digest introduces. Worth knowing before expecting a SANRAL company's
+digest to ever come back empty-missing.
+
+**Pre-existing real bug fixed in passing**: `lib/generalTender.ts` imported `"./dates"` and
+`"./tenderCompliance"` with no file extension - fine for Next.js's bundler, but Node's own
+`--experimental-strip-types` (every standalone `scripts/*.ts` sender uses this, no bundler) can't
+resolve an extensionless relative specifier at all. Confirmed by actually running
+`node --experimental-strip-types -e "import('./lib/generalTender.ts')"` before, which failed
+(`Cannot find module '.../lib/dates'`), and after the fix, which succeeded. This module had never
+been imported by a direct-node script before this digest - only by Next.js-bundled pages - so the bug
+was real but latent. Fixed with `.ts` extensions, matching every other lib file already written this
+way (`lib/tenderCompliance.ts`'s own imports, `lib/deadlineReminders.ts`'s own header comment on
+exactly this constraint).
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint`/`vitest run` 284/284/`npm run build` clean):
+- `lib/returnablesDigestCandidates.ts`: pure `returnablesWindowCandidates()` (3-5 BUSINESS day window,
+  `lib/publicHolidays.ts`'s own `businessDaysBetween()` injected the same way
+  `deadlineReminderCandidates()` injects `daysUntil` - one entry per company tracking a shared tender,
+  same QA-fix shape as that function's own 2026-10-22 finding) + async, service-role-safe
+  `returnablesMissingMandatoryItems()` (explicit `company_id`/`tender_id` filters throughout, never
+  RLS - same pattern `lib/complianceDigestCandidates.ts`'s own header documents).
+- `lib/emailTemplates.ts`: `returnablesDigestEmail()` - Sarel's own literal subject format
+  (`[ACTION REQUIRED] {ref}: {n} Returnables Missing — Closes {date}`), not `operationalSubject()`'s
+  usual shape (every email type here already has its own convention; a one-off format for one new
+  type is consistent with, not a break from, how this file already works), built on the shared
+  `emailBrand.ts` layout/pill/checklist/button components like every other template.
+- `scripts/send-returnables-digest.ts` + `.github/workflows/returnables-digest.yml` (daily, 06:40
+  SAST): the generalised `claim_notification()`/`record_notification_sent()` engine (migration 0093),
+  NOT a new one-off claim table - that migration's own header explicitly warns against exactly that
+  for a type like this one. Idempotency key has no date component - fires at most ONCE EVER per
+  (tender, company), meeting "does not spam for the same tender state" by construction rather than a
+  time-window re-send rule that could still double up.
+- `lib/workflowRegistry.ts` (+ its own spec, now 10 not 9): registered for Template Gallery/Schedule &
+  Cron Health visibility, zero other admin-UI changes needed - the Dispatch Log already reads
+  `notification_logs` generically by `notification_type`, with no hardcoded label list to extend.
+- 8 new/updated unit tests (pure window logic + the async per-family mandatory-item logic, with a
+  minimal Supabase stub matching `complianceDigestCandidates.spec.ts`'s own pattern) - all genuinely
+  exercising the real `sanralConventionalDocumentChecks()`/`checkReturnable()` functions, not a
+  reimplementation of their rules.
+
+**Status note, same as every other sender here**: this is a new GitHub Actions cron workflow -
+nothing to apply to the live database (no new migration; `claim_notification`/`record_notification_sent`
+and `workflow_heartbeats` already exist), but the workflow itself needs the same 3 repository secrets
+every other digest already uses, and will not fire until this branch merges to the branch GitHub
+Actions runs cron schedules from (`main`).
+
+---
+
 **2026-10-27 ~21:45 UTC — Migrations 0099-0102 confirmed live; Admin Command Center Phase 5: Tender
 Catalog (`/admin/tenders`), the last tab from the original 7-tab brief.**
 

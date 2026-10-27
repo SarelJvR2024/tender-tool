@@ -13,8 +13,8 @@
 // Evidence for every rule: docs/specs/General-Tender-Engine-Findings.md and
 // docs/specs/General-Tender-Preparation-Findings.md.
 
-import { formatDate } from "./dates";
-import { BEE_PROOF_LABEL, validityAtClosing, type CompanyVault, type ComplianceStatus } from "./tenderCompliance";
+import { formatDate } from "./dates.ts";
+import { BEE_PROOF_LABEL, validityAtClosing, type CompanyVault, type ComplianceStatus } from "./tenderCompliance.ts";
 import type { EvidenceRule } from "./experienceEvidence";
 import type { LocalityRow } from "./locality";
 import type { RequiredBody } from "./personCredentials";

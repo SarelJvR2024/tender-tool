@@ -6,11 +6,11 @@
 // workflows/*.yml, that's a real bug to fix here, not a sign the DB needs
 // its own copy of the cron string too.
 //
-// 9 workflows, not 6 - the Notification Command Center brief assumed 6;
-// the repo actually has 9 cron-scheduled senders today (confirmed by
-// reading .github/workflows/ directly, 2026-10-27). Shown as-is rather
-// than arbitrarily dropped to match a number from before this list was
-// audited.
+// 10 workflows, not 6 - the Notification Command Center brief assumed 6;
+// the repo actually has 10 cron-scheduled senders today (confirmed by
+// reading .github/workflows/ directly, 2026-10-27, most recently
+// returnables-digest.yml, Phase 6). Shown as-is rather than arbitrarily
+// dropped to match a number from before this list was audited.
 export type WorkflowCadenceKind = "cron" | "event_driven";
 
 export type WorkflowRegistryEntry = {
@@ -107,6 +107,16 @@ export const WORKFLOW_REGISTRY: WorkflowRegistryEntry[] = [
     cadenceSast: "Every 10 minutes",
     targetAudience: "Sarel only (ADMIN_NOTIFICATION_EMAIL) - batched extraction/worker anomalies",
     scriptPaths: ["scripts/send-scout-alerts.ts"],
+  },
+  {
+    key: "returnables_digest",
+    workflowName: "Pack Incomplete / Returnables Checklist Digest",
+    workflowFile: "returnables-digest.yml",
+    kind: "cron",
+    cronUtc: "40 4 * * *",
+    cadenceSast: "Daily, 06:40 SAST",
+    targetAudience: "Companies with a tracked tender 3-5 business days from closing and a mandatory returnable missing, expired or unverified",
+    scriptPaths: ["scripts/send-returnables-digest.ts"],
   },
   {
     key: "founder_digest",
