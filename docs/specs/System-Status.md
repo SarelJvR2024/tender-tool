@@ -1,5 +1,19 @@
 # System Status
 
+> **STANDING RULE (Sarel, 2026-10-27, after Phase 7's live-database cleanup) - read this before any
+> live-database write, every session, not just this one:** never execute a direct `DELETE`/`UPDATE`
+> (or any other mutation) against the live production database without Sarel's prior sign-off, even
+> with the service-role key already available in the environment. Read-only queries for diagnosis
+> remain fine on their own (this is how Phase 7's own cleanup, and the earlier SANRAL-404 diagnosis,
+> were correctly investigated first). Before any destructive mutation: (1) post a dry-run summary -
+> exact table names, row counts, and record ids affected; (2) state the exact command/script that
+> would run; (3) wait for Sarel's explicit authorization before running it. This applies whether the
+> mutation would run via the service-role REST API directly (as Phase 7's cleanup did, before this
+> rule existed) or via a script/migration handed to Sarel to run himself - the former is now only ever
+> done with his explicit go-ahead on the exact statement, the same as the latter already was.
+
+---
+
 **2026-10-27 ~22:05 UTC — Phase 7: data cleanup - removed the demo-tender pursuit from the two REAL
 companies flagged in the Phase 4/SANRAL-404 entries below ("Tender Ready" and "Reviewer Civils &
 Consulting Pty Ltd"). A direct live-database action (via the service-role REST API), not a code
