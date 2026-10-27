@@ -1,5 +1,66 @@
 # System Status
 
+**2026-10-27 ~21:45 UTC — Migrations 0099-0102 confirmed live; Admin Command Center Phase 5: Tender
+Catalog (`/admin/tenders`), the last tab from the original 7-tab brief.**
+
+Sarel ran all 4 of this session's outstanding migrations (`0099` workflow_heartbeats, `0100` Quality
+Scout triage, `0101` telemetry/billing, `0102` impersonation) against the live project. `0100` hit a
+real error on first run - `42P13: cannot change return type of existing function... Row type defined
+by OUT parameters is different`, on `platform_admin_low_confidence_requirement_items()` - because
+that function's OUT columns changed (added `source_document_url`/`source_document_note`) and Postgres
+refuses a bare `CREATE OR REPLACE` across a return-shape change; the file now `drop function if
+exists ...` first, per the error's own `HINT`. Confirmed (by reading every other migration in the
+batch) that `0099`/`0101`/`0102` don't have the same issue - each creates brand-new functions, none
+redefines an existing one's OUT columns. All 4 then ran clean. The **status note from Phase 4 below is
+now resolved** for those 4 migrations - every admin page from Phases 1-4 can now read real live data;
+it still applies to this entry's own new migration (`0103`, not yet applied).
+
+**Phase 5 - Tender Catalog & Intelligence.** Not one of the 4 phases originally scoped with Sarel;
+it's the one remaining tab from the original 7-tab brief that never got assigned a phase number
+("Total active tenders... filters [Client/Organ of State, Category, CIDB grading, Closing date].
+Extraction status badges: Native Text Ready/OCR Required/Parsing Failed. Aggregate popularity
+counter"). Proceeded on that reading after saying so to Sarel; flagging again here in case it's wrong.
+
+Audited before building (same discipline as every prior phase) rather than inventing fields:
+- **Filters are all real, existing columns/jsonb** - `buyer` (Client/Organ of State), `industry_tags`/
+  `discipline_tags` (Category - migration `0060`'s discipline taxonomy), `closing_date`. **CIDB
+  grading is NOT a dedicated column** - confirmed by reading `engine/general/requirements.py`'s own
+  extraction, it's `document_requirements -> 'cidb' ->> 'grading'`, only present once a tender has
+  actually been through extraction. Read from there, not added as a new column.
+- **Extraction-status badges are honest, not the brief's 3 labels forced onto data that doesn't carry
+  them.** `document_requirements -> 'documents'` (the per-document manifest `strip_local()` keeps -
+  confirmed it only strips `_work_dir`/`_all_text`/`_local`, nothing else) really does carry each
+  document's own `unreadable` (a reason string, set when a document couldn't be read at all) and
+  `ocr` (a summary object, set only when some/all of that document's text came from OCR rather than a
+  native text layer) - both real, stored, non-fabricated signals. So: no `document_requirements` row
+  at all → **"Not yet extracted"** (a real 4th state the brief didn't list, shown as such rather than
+  forced into one of its 3); any document `unreadable` → **"Parsing Failed"**; else any document used
+  `ocr` → **"OCR Required"**; else → **"Native Text Ready"**. This is tender-level (the shared
+  `tenders.document_requirements`) - a company's own private-document override on `tender_packs` is a
+  separate, per-company reading, out of scope for a cross-tenant catalog page.
+- **Popularity counter** = `count(*) from tender_packs group by tender_id` - the exact same pattern
+  `platform_admin_companies()` (`0098`) already uses for a company's own `tenders_pursued_count`,
+  just grouped the other way round.
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint`/`vitest run` 274/274/`npm run build` clean):
+- Migration `0103`: `platform_admin_tender_catalog()` - every tender with the above filter fields,
+  computed `extraction_status`, and `pursuing_count`. Platform-admin gated (`0043`), same
+  `security definer` pattern as every prior admin RPC. **Not yet applied to the live project** -
+  same "give me the migrations to run" handoff as Phases 1-4, not run unprompted.
+- `/admin/tenders` (`page.tsx` + `TenderCatalogTable.tsx` + `TenderCatalogRow.tsx`): client-side
+  filter/sort over the full RPC result, same proven pattern as `discovered-opportunities`'s
+  `OpportunityTable.tsx` (proportionate to an admin-sized dataset, no new searchParams-filter
+  convention invented). Category filter options come from the live taxonomy itself
+  (`loadDisciplineTaxonomy`/`taxonomyLabel`/`taxonomyGroups`), not just tags already present on a
+  tender, so filtering to a category with zero matches today still works correctly. Added `tenders`
+  to `AdminNav.tsx`'s shared nav list.
+- Confirmed via `npm run build` that `/admin/tenders` renders `ƒ` (dynamic, same as every other
+  `/admin/*` page) and no public/marketing page's prerendering class changed - the Phase 4 regression
+  (`cookies()` in the root layout breaking static prerendering) has no equivalent risk here since
+  this page, like every admin page, already mounts through the already-dynamic `AppShell`.
+
+---
+
 **2026-10-27 ~21:05 UTC — Admin Command Center, Phase 4: "View Tenant Workspace" impersonation +
 immutable audit log, built under Sarel's own 5 explicit guardrails. Live-verified the one genuinely
 novel, highest-risk mechanism (real session minting) against the live project using Sarel's own

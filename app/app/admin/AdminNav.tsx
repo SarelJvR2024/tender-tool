@@ -2,11 +2,12 @@ import Link from "next/link";
 
 export type AdminNavKey =
   | "alerts" | "customers" | "notifications" | "settings" | "taxonomy"
-  | "discovered-opportunities" | "requirement-extractions" | "telemetry" | "billing";
+  | "discovered-opportunities" | "requirement-extractions" | "telemetry" | "billing" | "tenders";
 
 const ADMIN_NAV_ITEMS: { key: AdminNavKey; href: string; label: string }[] = [
   { key: "alerts", href: "/admin", label: "Alerts & harness results" },
   { key: "customers", href: "/admin/customers", label: "Customers" },
+  { key: "tenders", href: "/admin/tenders", label: "Tender catalog" },
   { key: "telemetry", href: "/admin/telemetry", label: "Telemetry" },
   { key: "billing", href: "/admin/billing", label: "Billing" },
   { key: "notifications", href: "/admin/notifications", label: "Notifications" },
