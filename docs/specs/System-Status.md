@@ -4330,6 +4330,46 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-eighth run): the Lephalale discovery reader's "recent enough to fetch" cutoff used a naive UTC today(), one day too lenient - a proactive repo-wide sweep after Finding 85, same follow-through discipline as the docx_text() sweep two cycles ago
+
+Orientation: synced a sibling commit (`6c4f461`, a clean sweep of the narrative anti-collusion
+uniqueness check - `engine/narrative/uniqueness.py`, no overlap; the sibling also flagged that this
+routine's own Finding 85 entry landed mid-file rather than at the very top of `System-Status.md`,
+same place every one of this routine's entries has always landed - a different, parallel top-of-
+file convention another standing routine keeps, not something to change here).
+
+Given Finding 85 was the SIXTH independent occurrence of the naive-UTC-"today" bug class in this
+codebase, did a proactive repo-wide grep for the pattern before picking a new rotation area -
+found 8 candidates, triaged each by real reachability and stakes rather than fixing every hit
+(`suggest_pack.py`/`fingerprint.py`/`harness_pack.py`: informational timestamps only;
+`etenders_national.py`: CLI-only, never called by the live path; `gov_sources.py`'s
+`"etenders_ocds"` branch: not in the production `ALL_SOURCES`; `process_narrative_jobs.py`'s
+years-of-experience calc: real but inert for this bug, `// 365` absorbs a 1-day error on all but
+the exact anniversary day; `assemble_pack.py`'s "Generated" footer: cosmetic only).
+
+**Finding 86 (CONFIRMED, FIXED, moderate).** `lephalale.py`'s `_recent_enough()` stood out as the
+one candidate that's both a real decision gate (not metadata) and genuinely reachable (`lephalale`
+IS in `gov_sources.ALL_SOURCES`, the real daily-discovery default). It computed its cutoff via
+naive `datetime.date.today()`, despite already importing `source_http as sh`, which defines the
+standard `SAST` constant every sibling reader uses. Worked out the actual DIRECTION of the bug by
+hand: a naive UTC "today" one day behind means the cutoff is also one day further back, making the
+filter one day MORE lenient, not stricter - the opposite shape from most of this bug class's prior
+findings. The practical effect: a batch that should already be excluded as too old is still
+fetched for one extra day, during the 00:00-01:59 SAST window - not a tender silently dropped.
+
+**Fix:** reused the already-imported `sh.SAST` - no new constant needed.
+
+**Verified the regression test actually catches the regression - the hard way, again.** The first
+version of the new test case repeated Finding 85's exact mistake (only mocked `datetime.datetime`,
+not `datetime.date`), and reverting the real fix with only that mock showed `ALL PASSED` at first
+(one check happened to agree with the real sandbox clock's actual date). Caught this immediately
+with the lesson still fresh, fixed the test to mock both classes to a moment deliberately
+different from today's real date. Re-reverted with the corrected test: failed with the exact
+predicted wrong verdict; restored: `0 failure(s)`, full suite passing. `test_gov_sources.py`
+re-run clean.
+
+Full details: Finding 86 in `QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-seventh run): a real authority-to-sign letter's own {{date}} field could print yesterday's date - the naive-UTC-"today" bug class independently found yet again, this time in company_documents.py
 
 Orientation: synced two sibling commits (`2ee1e9c` real `tenderCompliance.ts` SACNASP-regex fix,

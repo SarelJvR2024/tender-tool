@@ -129,6 +129,51 @@ check("the BUYER_FAMILY pattern actually matches 'Lephalale Local Municipality'"
 check("...and does not match an unrelated buyer (no false-positive fold)",
       not gov_sources.BUYER_FAMILY["lephalale"].search("Vaal Central Water Board"))
 
+# --- _recent_enough()'s cutoff uses SAST, not a naive UTC today() ---------
+
+# Finding (2026-10-27): _recent_enough() computed "today" via naive
+# datetime.date.today() - a bridge worker container has no TZ set and runs
+# in UTC by default, so this is one calendar day BEHIND the real SAST date
+# for the whole 00:00-01:59 SAST window every day, making the cutoff one day
+# too lenient (a batch that should already be excluded as too old is still
+# fetched) during that window - the same naive-UTC-"today" bug class this
+# repo has independently fixed in several other files. Simulates the system
+# clock at UTC 2026-10-20 23:30 (= SAST 2026-10-21 01:30, inside the bad
+# window) by monkeypatching this module's own datetime.date AND
+# datetime.datetime (the fixed code reads the aware one; the original buggy
+# code called datetime.date.today() directly, so both must be patched for
+# this test to actually exercise either version - patching only one of them
+# let a reverted fix pass by accident, falling through to the real sandbox
+# clock instead, confirmed the hard way on a different file this same day),
+# restored immediately after.
+
+
+class _FixedDateTime(datetime.datetime):
+    @classmethod
+    def now(cls, tz=None):
+        base = datetime.datetime(2026, 10, 20, 23, 30, tzinfo=datetime.timezone.utc)
+        return base.astimezone(tz) if tz else base
+
+
+class _FixedDate(datetime.date):
+    @classmethod
+    def today(cls):
+        return cls(2026, 10, 20)  # the naive UTC date at that same simulated moment
+
+
+_real_datetime, _real_date = lephalale.datetime.datetime, lephalale.datetime.date
+lephalale.datetime.datetime, lephalale.datetime.date = _FixedDateTime, _FixedDate
+try:
+    # cutoff_days=10: the real SAST today is 2026-10-21, so the real cutoff is
+    # 2026-10-11 - a batch closing on 2026-10-10 is one day too old and must be excluded.
+    check("a batch exactly one day older than the real SAST cutoff is correctly excluded, "
+          "not let through by a naive UTC 'today' that's one day behind",
+          lephalale._recent_enough("2026-10-10", 10) is False)
+    check("a batch closing exactly on the real SAST cutoff day is still included",
+          lephalale._recent_enough("2026-10-11", 10) is True)
+finally:
+    lephalale.datetime.datetime, lephalale.datetime.date = _real_datetime, _real_date
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)

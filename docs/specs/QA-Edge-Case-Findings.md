@@ -4933,3 +4933,61 @@ restored: `0 failure(s)`, full suite (all 6 cases plus the new 6b) passing. `tes
 **Regression:** `engine/company_documents.py`'s `authority_facts()` only - its `"date"` field now
 reads the real SAST date. No schema or other call-site changes; every other field (confirmed
 unaffected by reading the diff) is untouched.
+
+### Finding 86 (CONFIRMED, FIXED, moderate - a real tender's own "recent enough to fetch" cutoff in the Lephalale discovery reader used a naive UTC today(), one day too lenient during the same daily blind window several other findings this session have hit)
+
+**Where:** `engine/discovery/lephalale.py`'s `_recent_enough()`.
+
+**What was tested:** given Finding 85 (this same session, one cycle earlier) was the SIXTH
+independent occurrence of the naive-UTC-"today" bug class in this exact codebase (after
+`fill_a_forms.py`, `fill_sbd_docx.py`'s `_today_iso()`, `watch_deadlines.py`'s closing-day math,
+`pdf_merge.py`'s `expiry_warning()`, and `company_documents.py`'s `authority_facts()`), did a
+proactive, repo-wide grep for the pattern (`datetime\.date\.today()` / naive `datetime.now()`)
+before picking a new rotation area, the same follow-through discipline as the Finding
+82/83/84 `docx_text()` sweep two cycles ago. Found 8 real candidates; triaged each by actual
+reachability and stakes rather than fixing every hit on sight: `suggest_pack.py`/`fingerprint.py`/
+`harness_pack.py`'s own `today()` calls are all informational metadata timestamps, not decision
+inputs; `etenders_national.py`'s is CLI-only (`main()`'s own `--days` argument, never called by the
+live production path, which uses `watch_deadlines.SAST`-aware code instead); `gov_sources.py`'s
+`read_source("etenders_ocds", ...)` branch is for a source name that isn't in the production
+`ALL_SOURCES` tuple, so not reachable via the default daily rotation either;
+`process_narrative_jobs.py`'s years-of-experience calculation is real but functionally inert for
+this specific bug (`// 365` integer division absorbs a 1-day clock error on all but the exact
+anniversary day); `assemble_pack.py`'s "Generated {date}" contents-page footer is cosmetic
+(informational only, never checked against anything). `lephalale.py`'s `_recent_enough()` stood out
+as the one candidate that is both a real DECISION (a hard include/exclude gate, not metadata) and
+genuinely reachable (`lephalale` IS in `gov_sources.ALL_SOURCES`, the real daily-discovery feed's
+default source list).
+
+**Finding (CONFIRMED, moderate).** `_recent_enough(closing_date_text, cutoff_days)` computed its
+cutoff as `datetime.date.today() - timedelta(days=cutoff_days)`, naive, with no SAST adjustment -
+despite this file already importing `source_http as sh`, which already defines the standard
+`SAST` constant every sibling reader uses. Worked through the actual DIRECTION of the bug by hand
+rather than assuming it matched the more common "misses a real tender" shape: since a naive UTC
+`today()` is one calendar day BEHIND the real SAST date during the 00:00-01:59 SAST window, the
+computed cutoff is also one day further back (older) than intended - making the filter one day
+MORE LENIENT, not stricter. The practical effect is the opposite of what most of this bug class's
+prior findings looked like: not a tender silently dropped, but a batch that should already have
+been excluded as too old still being fetched and processed for one extra day, during a ~2-hour
+daily window. Reproduced directly: with the clock simulated inside that window, a batch closing
+exactly one day before the real SAST cutoff was incorrectly judged "recent enough" (`True`) when it
+should have read `False`.
+
+**Fix:** reused the already-imported `sh.SAST` (no new constant needed, unlike every other fix in
+this bug class this session) - `today = datetime.datetime.now(sh.SAST).date()`.
+
+**Verified the regression test actually catches the regression - the hard way, again.** The first
+version of the new test case only monkeypatched `lephalale.datetime.datetime`, not
+`lephalale.datetime.date` - the exact same mistake Finding 85 made and caught one cycle earlier,
+repeated here before catching it a second time: reverting the real fix with only the `.datetime`
+mock in place still showed `ALL PASSED` at first (one check coincidentally agreed with the real
+sandbox clock's own actual date; the other failed, but for the wrong reason - the real sandbox
+date, not the simulated one, drove the result). Caught this immediately this time (the lesson from
+Finding 85 was still fresh) and fixed the test to patch both `lephalale.datetime.date` and
+`lephalale.datetime.datetime` to the same simulated moment, deliberately different from today's
+real date. Re-reverted with the corrected test: failed with the exact predicted wrong verdict on
+the boundary case; restored: `0 failure(s)`, full suite passing. `test_gov_sources.py` (the
+adjacent module) re-run clean.
+
+**Regression:** `engine/discovery/lephalale.py`'s `_recent_enough()` only. No schema or other
+call-site changes.

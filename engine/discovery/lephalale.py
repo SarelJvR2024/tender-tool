@@ -125,7 +125,15 @@ def _recent_enough(closing_date_text, cutoff_days):
         d = datetime.date.fromisoformat(closing_date_text)
     except ValueError:
         return False  # a malformed/placeholder date ("0000-00-00") - always from deep archive, skip
-    return d >= (datetime.date.today() - datetime.timedelta(days=cutoff_days))
+    # Same naive-UTC-"today" bug class this repo has independently fixed in several other files
+    # (fill_a_forms.py, fill_sbd_docx.py, watch_deadlines.py, pdf_merge.py, company_documents.py):
+    # a bridge worker container has no TZ set and runs in UTC by default, so a naive
+    # datetime.date.today() is one calendar day BEHIND the real SAST date for the whole
+    # 00:00-01:59 SAST window every day - making this cutoff one day too lenient (a batch that
+    # should already be excluded as too old is still fetched) during that window. QA pass,
+    # 2026-10-27.
+    today = datetime.datetime.now(sh.SAST).date()
+    return d >= (today - datetime.timedelta(days=cutoff_days))
 
 
 def parse_batch(text):
