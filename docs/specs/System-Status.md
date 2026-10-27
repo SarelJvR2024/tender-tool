@@ -1,5 +1,68 @@
 # System Status
 
+**2026-10-27 ~15:10 UTC — Admin Command Center, Phase 2: Quality Scout triage extended (source-
+document link, note tags, a real Reprocess action) and a genuine "Discovery scrape" health chip
+added to /admin. Built autonomously per Sarel's "start phase 2, continue without me" - 3 real
+scoping gaps surfaced and flagged rather than built around, same discipline as every prior phase.**
+Same branch/PR as the entries below (`claude/practical-babbage-oxf9u3`, PR #166).
+
+Audited before building (read-only, no guessing): `item.document` on a low-confidence manifest
+item is just a sanitised basename with no stored link back to the real file anywhere (confirmed by
+reading `download_tender_documents()` in `engine/general/process_general_jobs.py`); extraction runs
+via the existing, always-on `general` bridge (`engine/worker/run_bridges.py`) polling
+`pack_generation_jobs` (migration 0026's unified job queue), which already has a `kind =
+'extract_requirements'` row shape that does ONLY extraction (confirmed by reading `process_job()`
+- no pack assembly, no pack-ready email); `/admin`'s existing "Quick Health Status" section
+(2026-10-25) is alert-count-derived only, with no per-source scraper freshness signal anywhere, and
+its own header comment already documents a deliberate prior choice not to add a heartbeat table for
+exactly this - Phase 1's `workflow_heartbeats` covers `daily_discovery` as one unit, not
+eTenders/SANRAL/CIDB separately; the review-correction feedback loop (`requirement_extraction_reviews`
+-> `recent_corrections()` -> `extract_requirements()`'s own few-shot examples) was confirmed real
+and already live, not aspirational.
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint .`/`vitest run` 274/274/`npm run build`
+clean after every step):
+- Migration `0100`: extended `platform_admin_low_confidence_requirement_items()` to return a
+  best-effort `source_document_url` (shared-manifest items only, matched by title against
+  `tenders.document_urls`) or `source_document_note` (company-override items - named, never linked,
+  see below for why) per item; added `platform_admin_reprocess_requirement_extraction(company_id,
+  tender_id)` - queues a real `kind='extract_requirements'` job, claimed by the existing bridge,
+  returning `queued=false` (not an error) when one's already in flight for that pair.
+- `/admin/requirement-extractions` (nav-relabelled "Quality Scout", explicit heuristic-not-AI
+  badge): each item now shows its resolved source-document link/note, a note-field with one-click
+  anomaly tags ("Novel SBD format", "Unreadable scan", "Table misaligned" - free text under the
+  hood, `requirement_extraction_reviews.note` was never a structured column and a migration to make
+  it one wasn't judged worth it for this), and a real "Reprocess" button on every company-scoped
+  row.
+- `/admin` (main page): added a "Discovery scrape" health chip, tone from Phase 1's
+  `heartbeatStatusFor()` against the real `daily_discovery` heartbeat row, detail text showing a
+  genuine rolling-24h `discovered_opportunities` count (labelled "last 24h", not "today" - avoids a
+  SAST-vs-UTC day-boundary judgment call that isn't worth getting wrong for a minor freshness
+  signal).
+
+**3 real gaps surfaced, not built around - flagged here for Sarel's own call, same as every prior
+phase's honest-gap pattern:**
+1. **No "Reprocess" exists for a SHARED-manifest item** (company_id null) - `pack_generation_jobs`
+   is fundamentally company-scoped (`company_id not null`), and the shared manifest has no
+   equivalent narrow job kind anywhere in this codebase; it is only ever rebuilt as a side effect of
+   some company's own real extraction run. Building a standalone "reprocess the shared manifest"
+   path would mean new job-queue architecture, not a wire-up - the button is honestly disabled for
+   these rows instead of faked.
+2. **A company's own private uploaded document (`tender_private_documents`) cannot be opened from
+   this admin console** - its Storage object sits under a bucket RLS policy gated on
+   `is_company_member()` (migration 0032); a platform admin's own session is not a member of an
+   arbitrary tenant, so `createSignedUrl()` would fail. Extending that policy to also allow
+   `is_platform_admin()` is a real privacy-boundary decision (every tenant's private uploads become
+   readable by any platform admin via the Storage API directly, not just through a curated admin
+   page) - Sarel's own call, not made unilaterally here. Today the row just names the file on file
+   rather than linking to it or silently failing.
+3. **No per-source (eTenders/SANRAL/CIDB) scraper health exists** - `daily_discovery`'s heartbeat
+   covers `watch_new_tenders.py` as one unit; breaking it down by government source would need new
+   instrumentation inside that script itself (each source writing its own sub-heartbeat), which is
+   a scoping decision, not something to build speculatively inside this pass.
+
+---
+
 **2026-10-27 ~15:00 UTC — Admin Command Center, Phase 1: Notification Command Center built and
 verified (gallery, schedule/heartbeat health, dispatch-log drawer), plus a tenant-detail
 enhancement. Phases 2-4 (Quality Scout triage, Telemetry/Billing, Impersonation) not started -

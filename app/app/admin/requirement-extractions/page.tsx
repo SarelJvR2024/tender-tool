@@ -19,6 +19,8 @@ type Rpc = {
   item_type: RequirementItemRowData["itemType"];
   item_key: string;
   item: Record<string, unknown>;
+  source_document_url: string | null;
+  source_document_note: string | null;
 };
 
 /**
@@ -55,6 +57,8 @@ export default async function AdminRequirementExtractionsPage({ searchParams }: 
     itemType: r.item_type,
     itemKey: r.item_key,
     item: r.item,
+    sourceDocumentUrl: r.source_document_url,
+    sourceDocumentNote: r.source_document_note,
   }));
 
   return (

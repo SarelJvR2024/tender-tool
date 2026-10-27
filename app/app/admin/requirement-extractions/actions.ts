@@ -57,3 +57,31 @@ export async function submitRequirementReview(input: {
   }
   return { ok: true };
 }
+
+/**
+ * "Reprocess" - queues a real kind=extract_requirements pack_generation_jobs
+ * row (migration 0100/0026) for this one company's own reading of this
+ * tender, claimed by the existing always-on engine/general/
+ * process_general_jobs.py bridge. Company-scoped items only - see the
+ * migration's own header for why the shared manifest (company_id null) has
+ * no equivalent narrow reprocess path.
+ */
+export async function reprocessRequirementExtraction(input: {
+  companyId: string;
+  tenderId: string;
+}): Promise<{ ok: true; queued: boolean; reason: string } | { ok: false; error: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+
+  const { data, error } = await supabase.rpc("platform_admin_reprocess_requirement_extraction", {
+    p_company_id: input.companyId,
+    p_tender_id: input.tenderId,
+  });
+  if (error) {
+    console.error("platform_admin_reprocess_requirement_extraction rpc failed", error);
+    return { ok: false, error: "Could not queue a reprocess - try again. If it keeps happening, let us know." };
+  }
+  const row = (data ?? [])[0] as { queued: boolean; reason: string } | undefined;
+  return { ok: true, queued: row?.queued ?? false, reason: row?.reason ?? "" };
+}
