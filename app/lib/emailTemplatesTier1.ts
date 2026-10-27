@@ -269,3 +269,84 @@ export function discoveredTendersDigestEmail(opts: {
     .join("\n")}${remaining > 0 ? `\n+ ${remaining} more in your Discovery feed.` : ""}\n\n${opts.appUrl}/discovery`;
   return { subject, html, text };
 }
+
+// 1.5 Clarification Window Expiry Reminder
+// --------------------------------------------------------------------------
+// Data source: tender_tasks where kind='clarification' (migration 0009/
+// 0021's own standard-milestone enum) - a MANUALLY-entered due_date, not an
+// auto-extracted one (this schema has no question-cutoff field anywhere -
+// see lib/clarificationWindowReminders.ts's own header for the full
+// reasoning). daysLeft of 10 or 2 ("48h", the closest honest equivalent on
+// a date-only column) - never any other value, enforced by
+// clarificationThresholdFor() before this function is ever called.
+export function clarificationWindowReminderEmail(opts: {
+  reference: string;
+  tenderTitle?: string | null;
+  buyerShortName: string;
+  taskDescription: string;
+  dueDate: string;
+  daysLeft: number;
+  appUrl: string;
+  tenderId: string;
+}): NotificationEmail {
+  const action = opts.daysLeft <= 2 ? "Clarification Window Closing (48h)" : "Clarification Window Closing (10 Days)";
+  const subject = tenderSubject({ reference: opts.reference, action, buyer: opts.buyerShortName });
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill("CLARIFICATION WINDOW", opts.daysLeft <= 2 ? "warning" : "info")}</p>
+      ${tenderHeader({ reference: opts.reference, title: opts.tenderTitle, buyerShortName: opts.buyerShortName })}
+      <p style="margin:0 0 16px;">The window to submit clarification questions on this tender closes soon:</p>
+      ${infoCard([
+        { label: "Task", value: escapeHtml(opts.taskDescription) },
+        { label: "Due", value: escapeHtml(formatDate(opts.dueDate) ?? opts.dueDate), emphasis: opts.daysLeft <= 2 ? "warning" : undefined },
+      ])}
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open Tender Workspace")}
+    `,
+    `${opts.reference}: clarification window closes in ${opts.daysLeft} day${opts.daysLeft === 1 ? "" : "s"}.`,
+    { appUrl: opts.appUrl, badgeText: opts.buyerShortName }
+  );
+  const text = `${opts.reference} (${opts.buyerShortName}) - clarification window closes in ${opts.daysLeft} day(s), due ${formatDate(opts.dueDate) ?? opts.dueDate}.\n${opts.taskDescription}\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text };
+}
+
+// 1.6 Bid Pack Compilation Complete
+// --------------------------------------------------------------------------
+// Data source: engine/general/process_general_jobs.py's own process_job()
+// (generate_pack job kind) - the moment a pack job's status flips to
+// "ready". That job runs in the Python worker, not this Next.js app, so
+// THIS function is only ever called indirectly: Python invokes
+// scripts/render-pack-ready-email.ts (a thin render-only CLI wrapper
+// around this exact function) over a subprocess, then sends the result via
+// Resend's own HTTP API directly - see that script's own header and
+// engine/notify/send_pack_ready_email.py for the full architecture
+// reasoning (Sarel's own explicit decision, 2026-10-27: instant delivery
+// matters here because teams are often working against tight courier/print
+// deadlines, and the one canonical template still lives in TypeScript, not
+// duplicated in Python).
+export function packReadyEmail(opts: {
+  reference: string;
+  tenderTitle?: string | null;
+  buyerShortName: string;
+  companyName: string;
+  pageCount: number;
+  appUrl: string;
+  tenderId: string;
+}): NotificationEmail {
+  const action = "Bid Pack Compiled & Ready for Print/Review";
+  const subject = tenderSubject({ reference: opts.reference, action, buyer: opts.buyerShortName });
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill("PACK READY", "success")}</p>
+      ${tenderHeader({ reference: opts.reference, title: opts.tenderTitle, buyerShortName: opts.buyerShortName })}
+      <p style="margin:0 0 16px;">Your submission pack has finished compiling and is ready to download, print and review.</p>
+      ${infoCard([{ label: "Pages", value: escapeHtml(String(opts.pageCount)) }])}
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open Tender Workspace")}
+    `,
+    `${opts.reference}: your bid pack is ready.`,
+    { appUrl: opts.appUrl, badgeText: opts.buyerShortName, recipientContext: { kind: "tender", tenderReference: opts.reference, companyName: opts.companyName } }
+  );
+  const text = `${opts.reference} (${opts.buyerShortName}) - bid pack ready, ${opts.pageCount} page(s).\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text };
+}

@@ -33,6 +33,7 @@ export type NotificationType =
   | "print_sign_cutoff"
   | "corrigendum_alert"
   | "discovered_tenders_digest"
+  | "clarification_window"
   // Tier 2 - compliance & vault alerts
   | "sars_pin_expiry"
   | "csd_refresh"

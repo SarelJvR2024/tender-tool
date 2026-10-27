@@ -43,6 +43,7 @@ const TYPE_LABEL: Record<string, string> = {
   briefing_reminder: "Briefing countdown",
   corrigendum_alert: "Corrigendum / addendum alert",
   discovered_tenders_digest: "New discovered tenders digest",
+  clarification_window: "Clarification window expiry",
   compliance_expiry: "Compliance document expiry",
   scout_anomaly: "Quality Scout anomaly",
   founder_daily_digest: "Founder daily digest",
@@ -53,7 +54,7 @@ const TIER_LABEL: Record<string, string> = {
   trial_day_7_milestone: "Tier 0", trial_expiring_48h: "Tier 0", trial_expired: "Tier 0",
   team_invite: "Tier 0", admin_new_signup: "Tier 0", admin_paid_conversion: "Tier 0",
   deadline_reminder: "Tier 1", print_sign_cutoff: "Tier 1", briefing_reminder: "Tier 1",
-  corrigendum_alert: "Tier 1", discovered_tenders_digest: "Tier 1",
+  corrigendum_alert: "Tier 1", discovered_tenders_digest: "Tier 1", clarification_window: "Tier 1",
   compliance_expiry: "Tier 2",
   scout_anomaly: "Tier 3", founder_daily_digest: "Tier 3",
 };

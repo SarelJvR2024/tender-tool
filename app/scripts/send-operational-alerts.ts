@@ -8,6 +8,13 @@
 //      transit hour estimates).
 //   2. Briefing session countdown - 5 days and 24 hours before
 //      tenders.briefing_date.
+//   3. Clarification window expiry - 10 days and 2 days ("48h", the
+//      closest honest equivalent on a date-only column) before a
+//      tender_tasks row of kind='clarification' is due. Added 2026-10-27 -
+//      notification engine migration, item A4. This schema has no
+//      auto-extracted question-cutoff date anywhere, so coverage is
+//      limited to tenders where a person has manually added this task -
+//      see lib/clarificationWindowReminders.ts's own header.
 //
 // Compliance-document expiry (originally a 3rd stage here: SARS PIN/COID
 // only, 14 days) was REMOVED 2026-10-27 - notification engine migration -
@@ -48,7 +55,9 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "../lib/dates.ts";
 import { printCutoffCandidates, type PrintCutoffTenderPackRow, type PrintCutoffTenderRow } from "../lib/printCutoffReminders.ts";
 import { briefingReminderCandidates, type BriefingReminderTenderRow } from "../lib/briefingReminders.ts";
+import { clarificationWindowCandidates, type ClarificationTaskRow } from "../lib/clarificationWindowReminders.ts";
 import { printCutoffEmail, briefingReminderEmail } from "../lib/emailTemplates.ts";
+import { clarificationWindowReminderEmail } from "../lib/emailTemplatesTier1.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { printSignDeadline } from "../lib/dispatchTriage.ts";
 import { operationalRecipients as companyRecipients } from "../lib/notificationRecipients.ts";
@@ -171,6 +180,44 @@ async function runBriefingReminders(supabase: SupabaseService, appUrl: string): 
   return { sent, candidates: candidates.length };
 }
 
+async function runClarificationWindow(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
+  const { data: taskRows, error } = await supabase
+    .from("tender_tasks")
+    .select("id, company_id, tender_id, description, due_date, status, kind, tenders(id, contract_no, description, buyer)")
+    .eq("kind", "clarification")
+    .not("due_date", "is", null);
+  if (error) {
+    console.error("clarification-window: could not read tender_tasks", error);
+    return { sent: 0, candidates: 0 };
+  }
+  const candidates = clarificationWindowCandidates((taskRows ?? []) as unknown as ClarificationTaskRow[], daysUntil);
+  let sent = 0;
+  for (const { task, daysLeft, threshold } of candidates) {
+    const tender = (task as unknown as { tenders: { id: string; contract_no: string | null; description: string | null; buyer: string | null } | null }).tenders;
+    if (!tender) continue;
+    const firstClaim = await claim(supabase, "clarification_window", tender.id, task.company_id, String(threshold));
+    if (!firstClaim) continue;
+    const recipients = await companyRecipients(supabase, task.company_id);
+    if (recipients.length === 0) continue;
+    const { subject, html, text } = clarificationWindowReminderEmail({
+      reference: tender.contract_no || tender.id,
+      tenderTitle: tender.description,
+      buyerShortName: tender.buyer || "the buyer",
+      taskDescription: task.description,
+      dueDate: task.due_date!,
+      daysLeft,
+      appUrl,
+      tenderId: tender.id,
+    });
+    for (const to of recipients) {
+      const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
+      if (result.status === "sent") sent++;
+      await logSend(supabase, "clarification_window", `clarification-${tender.id}-${task.company_id}-${threshold}-${to}`, to, task.company_id, tender.id, subject, result);
+    }
+  }
+  return { sent, candidates: candidates.length };
+}
+
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -194,6 +241,9 @@ async function main() {
 
   const briefing = await runBriefingReminders(supabase, appUrl);
   console.log(`Briefing countdown: ${briefing.sent} sent, out of ${briefing.candidates} candidate(s).`);
+
+  const clarification = await runClarificationWindow(supabase, appUrl);
+  console.log(`Clarification window: ${clarification.sent} sent, out of ${clarification.candidates} candidate(s).`);
 }
 
 main().catch((e) => {

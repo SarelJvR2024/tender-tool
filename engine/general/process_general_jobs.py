@@ -73,6 +73,10 @@ sys.path.insert(0, os.path.join(ENGINE_DIR, "intake"))
 import classify_tender as intake  # noqa: E402
 sys.path.insert(0, os.path.join(ENGINE_DIR, "alerts"))
 import system_alerts  # noqa: E402
+sys.path.insert(0, os.path.join(ENGINE_DIR, "notify"))
+from send_pack_ready_email import send_pack_ready_email  # noqa: E402
+
+APP_URL = os.environ.get("APP_URL") or "https://tender-ready.vercel.app"
 
 
 class JobRefusal(RuntimeError):
@@ -795,6 +799,7 @@ def process_job(client, job, work_root, fetch=None):
             result = run_pack(client, job, work_root, fetch)
             client.update(JOBS_TABLE, {"id": job["id"]}, {"status": "ready", "completed_at": _now(), **result})
             print(f"[ready] pack {job['id']}: {result['page_count']} pages -> {result['storage_path_pdf']}")
+            send_pack_ready_email(client, job, result["page_count"], APP_URL)
         else:
             raise RuntimeError(f"unknown job kind {job['kind']}")
     except Exception as e:
