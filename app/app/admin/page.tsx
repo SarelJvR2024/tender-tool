@@ -5,6 +5,7 @@ import { AppShell } from "../_components/AppShell";
 import { AdminNav } from "./AdminNav";
 import { StatCard } from "@/components/tt/stat-card";
 import { WORKFLOW_REGISTRY, heartbeatStatusFor, type WorkflowHeartbeatRow, type HeartbeatStatus } from "@/lib/workflowRegistry";
+import { HEALTH_SOURCE_GROUPS } from "@/lib/adminHealthGroups";
 
 // Reads per-request session/DB data (admin_harness_runs, gated by RLS on the
 // signed-in user being a platform admin - migration 0043) - same escape hatch as
@@ -48,10 +49,6 @@ function oneDayAgoIso(): string {
 // severity for routine completions" ask: skip it, keep system_alerts a
 // high-signal exception queue, and answer "is everything healthy" here
 // instead, from data that already exists.
-const HEALTH_SOURCE_GROUPS: Record<string, string[]> = {
-  "Scraper / Discovery feed": ["discovery", "scraper"],
-  "OCR & extraction workers": ["pack", "narrative", "cv", "cv_extract", "general", "onboarding", "worker"],
-};
 type HealthStatus = { label: string; tone: "success" | "warning" | "destructive"; detail: string };
 
 function healthFromAlerts(label: string, sources: string[], openAlerts: SystemAlert[]): HealthStatus {

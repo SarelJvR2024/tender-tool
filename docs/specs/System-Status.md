@@ -1,5 +1,49 @@
 # System Status
 
+**2026-10-27 ~15:20 UTC — Admin Command Center, Phase 3: Telemetry + Billing tabs built, both on
+real existing data - no new instrumentation for either. Built autonomously per Sarel's "start
+phase 3, continue without me."** Same branch/PR as the entries below
+(`claude/practical-babbage-oxf9u3`, PR #166).
+
+Audited before building: 4 real job-queue tables with usable status/timestamp columns already
+exist (`pack_generation_jobs` split by `engine` 'sanral'/'general', `generated_cvs`,
+`narrative_documents`, `onboarding_uploads`) - "worker queue depth and engine latency" needed zero
+new instrumentation, just aggregate queries. `lib/billing.ts` already has fully tested, canonical
+pricing (`PLAN_MONTHLY_ZAR`, `priceForPlanZar`, `effectiveSubscriptionStatus`) and
+`company_packs_this_period()` (0084) already computes real per-company quota usage - MRR/billing
+needed no new pricing logic, only a new RPC surfacing the raw columns for the UI to apply that
+existing logic to.
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint .`/`vitest run` 274/274/`npm run build`
+clean):
+- Migration `0101`: `platform_admin_engine_telemetry()` (queue depth + avg latency per engine,
+  unioned across the 4 real job tables), `platform_admin_alert_counts_24h()` (per-source
+  `system_alerts` occurrence count in the last 24h - a different question from `/admin`'s own
+  "what's still open"), `platform_admin_billing_overview()` (raw per-company billing columns only -
+  no pricing math in SQL at all).
+- `/admin/telemetry` (new): queue depth table across all 5 queues (SANRAL pack, general
+  extraction/pack, CV, narrative, onboarding), avg latency over the last 7 days, and a 24h
+  error-rate chip row reusing the exact same `HEALTH_SOURCE_GROUPS` `/admin`'s own Quick Health
+  Status already uses (extracted to `lib/adminHealthGroups.ts` so the two pages can never disagree
+  on groupings).
+- `/admin/billing` (new): MRR (active, payable-tier subscriptions only, yearly billing normalised
+  to monthly, Enterprise excluded and counted separately as "custom pricing") computed entirely by
+  calling `lib/billing.ts`'s own tested functions against `platform_admin_billing_overview()`'s raw
+  columns - never re-derived. Per-company table: plan, billing interval, effective status (a
+  lapsed trial correctly reads `past_due`, not a stale `trialing`), packs used this period vs
+  quota, and whether a PayFast token is on file. Test companies excluded from every count.
+  Deliberately NO AI-unit-economics card - Sarel's own Phase 1 "omit entirely, don't invent an
+  estimate" decision carries forward unchanged; nothing about this pass changed what cost-tracking
+  exists (still none).
+- Caught one real lint-rule violation before it shipped: mutating `mrrZar`/`tierCounts` from inside
+  a `.map()` callback (React's `react-hooks/immutability` rule, flagged even in a Server
+  Component's own render body) - fixed by computing a pure per-row array first and deriving every
+  aggregate via `reduce`/`filter` afterward, never reassigning an outer variable mid-map.
+
+**Phase 4 (Impersonation + audit log) remains the only phase not started.**
+
+---
+
 **2026-10-27 ~15:10 UTC — Admin Command Center, Phase 2: Quality Scout triage extended (source-
 document link, note tags, a real Reprocess action) and a genuine "Discovery scrape" health chip
 added to /admin. Built autonomously per Sarel's "start phase 2, continue without me" - 3 real
