@@ -4115,6 +4115,41 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-fifth run): a third independent occurrence of Findings 82/83's exact bug, this time in the CV-upload AI field-extraction pipeline
+
+Orientation: synced two sibling commits (`eeb216d` - a real SANRAL intake fix, `_docx_head()`'s
+60-paragraph cap missing a real A-Forms heading past that window in one of six real samples;
+`a46b199` - a real diagnostic-loss fix in `opportunity_requirements.py`'s fetch-error reporting -
+both confirmed no overlap, `intake`/`discovery` respectively, re-ran `test_classify_tender.py`
+clean after the first). Two open PRs (`#164`/`#165`), already read by sibling passes, confirmed
+not touching anything here.
+
+Followed through on the prior cycle's own flagged follow-up: grepped the whole repo for every
+other caller of `docx_text()`/`convert_with_soffice()` beyond the two already-fixed files
+(Findings 82/83), since two independent occurrences of the identical mistake in one session is a
+real pattern worth finishing the sweep on, not leaving to chance. Found exactly one more real hit.
+
+**Finding 84 (CONFIRMED, FIXED, moderate).** `engine/cv/extract_cv_fields.py`'s `read_cv_text()` -
+the CV-upload AI field-extraction pipeline - has the identical `docx`/`doc` branch structure as
+the two already-fixed files, and the identical gap: the `docx` branch guards `docx_text()`
+against a corrupt file, the `doc` branch's call on LibreOffice's own conversion output doesn't.
+Reproduced with the same technique as Findings 82/83: a broken conversion raised
+`PackageNotFoundError` straight out, uncaught, instead of the clean `ExtractionFailed` the sibling
+branch gives for the identical problem - a realistic shape (a company uploading a legacy `.doc` CV
+for a key person), not a rare one.
+
+**Fix:** same `try/except` -> `ExtractionFailed` pattern as the sibling branch and Findings 82/83.
+
+**Verified red, then green:** new case in `test_extract_cv_fields.py` (identical monkeypatch
+technique). Reverted the fix (keeping the test): crashed with the exact predicted traceback;
+restored: `0 failure(s)`, full suite passing. `test_generate_cv.py` re-run clean.
+
+**Sweep now complete**: every caller of `docx_text()` in this repo (`requirements.py`,
+`classify_documents.py`, `extract_cv_fields.py`) guards both branches identically. No further
+occurrence of this pattern exists to find.
+
+Full details: Finding 84 in `QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-fourth run): the identical asymmetric-exception-guard bug from Finding 82 existed independently in the onboarding document classifier's own, separate document reader
 
 Orientation: synced a sibling commit (`354c791`, a standing-review pass flagging a document-expiry

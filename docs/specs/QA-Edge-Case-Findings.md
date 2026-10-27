@@ -4831,3 +4831,47 @@ passing. `test_process_onboarding_jobs.py` re-run clean.
 **Regression:** `engine/onboarding/classify_documents.py`'s `read_document_text()` only - one
 `try/except` added around the `doc` branch's conversion-output read, same shape as Finding 82's
 fix in the unrelated `requirements.py`. No schema or other call-site changes.
+
+### Finding 84 (CONFIRMED, FIXED, moderate - a third independent occurrence of Findings 82/83's exact bug, this time in the CV-upload AI field-extraction pipeline)
+
+**Where:** `engine/cv/extract_cv_fields.py`'s `read_cv_text()`.
+
+**What was tested:** at the end of the prior cycle's report (Finding 83), flagged a proactive
+follow-up worth doing: grep the whole repo for every other reader built on the same
+`docx_text()`/`convert_with_soffice()` primitives, since two independent occurrences of the
+identical mistake in one session is a real pattern, not a coincidence worth leaving unchecked.
+`grep -rln "convert_with_soffice\|docx_text(" engine/ --include="*.py"` (excluding test files)
+found exactly two more callers beyond the two already fixed: `engine/general/build_general_pack.py`
+(only calls `convert_with_soffice()` directly for its own PDF-conversion needs, never `docx_text()`
+on the result - not this pattern) and `engine/cv/extract_cv_fields.py` - the CV-upload AI
+field-extraction pipeline (`extract_from_file()` -> `read_cv_text()`), never reviewed for this
+specific bug class this session.
+
+**Finding (CONFIRMED, moderate).** Found it, verbatim, a third time. `read_cv_text()`'s `ext ==
+"docx"` branch wraps `docx_text(path)` in `try/except Exception as e: raise ExtractionFailed(f"This
+.docx file could not be opened ({e})...")`. The `ext == "doc"` branch's own call to the SAME
+`docx_text()` function - on LibreOffice's conversion output - has no such guard, same root cause
+as Findings 82/83 (`convert_with_soffice()` only checks the output path exists). Reproduced with
+the identical technique: a monkeypatched `convert_with_soffice()` returning a path to a genuinely
+broken file made `read_cv_text()` raise `docx.opc.exceptions.PackageNotFoundError` straight out,
+uncaught, instead of the clean `ExtractionFailed` its own sibling branch gives for the identical
+problem. This is the CV-upload pipeline specifically - a company uploading a legacy `.doc` CV for
+a key person is a realistic, not rare, real-world shape.
+
+**Fix:** same `try/except` -> `ExtractionFailed` pattern as the sibling `docx` branch, Finding 82's
+fix, and Finding 83's fix.
+
+**Verified the regression test actually catches the regression:** new case in
+`test_extract_cv_fields.py`'s `test_failure_modes()` (identical monkeypatch technique as Findings
+82/83). Reverted the fix (`git apply -R`, keeping the new test): the test script crashed with the
+exact predicted `PackageNotFoundError` traceback; restored: `0 failure(s)`, full suite passing
+(including the queue-plumbing/OCR/SA-ID-redaction cases). `test_generate_cv.py` (sibling CV area,
+unaffected) re-run clean.
+
+**Regression:** `engine/cv/extract_cv_fields.py`'s `read_cv_text()` only - one `try/except` added
+around the `doc` branch's conversion-output read, same shape as Findings 82 and 83's fixes in the
+two unrelated files. No schema or other call-site changes.
+
+**Grep now confirmed clean**: every caller of `docx_text()` in this repo (`requirements.py`,
+`classify_documents.py`, `extract_cv_fields.py`) now guards both its `docx` and `doc` branches
+identically. No further occurrence of this pattern exists to find.
