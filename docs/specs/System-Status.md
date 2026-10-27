@@ -4445,6 +4445,44 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-ninth run): rotated to compliance (engine/compliance/registration_reminders.py) - thorough review, no new bug found this time
+
+Orientation: synced two sibling commits (`15f9e9c` field-provenance/ACTIONS_TO_SIGN.md trust-
+mechanism audit, confirmed sound; `ba2d63c` a real, flagged-not-fixed Form B7 compulsory-vs-matrix
+disagreement in `sanral_b7.py`, confirmed on all 6 real committed samples - correctly left for
+Sarel's own judgment call, not a code bug to force a fix on, so not touched here). Three open PRs
+(`#164`/`#165`/`#166`), all confirmed by sibling passes to be TypeScript-only with no overlap.
+
+Rotated to compliance - `watch_deadlines.py` itself got a thorough sibling review two passes ago,
+so picked the one file in that area this routine hadn't reviewed this session:
+`registration_reminders.py` (the shared-registrations-catalog and property-document expiry
+reminders, migration 0050). Read `find_due_registrations()`, `find_due_property_documents()`,
+`_names()` and `_mark_company()` end to end, specifically checking two real adversarial angles:
+
+- Whether `_names()`'s `sorted(ids)` call could ever crash on a `None` mixed into a set of UUID
+  strings (a real, reachable `TypeError` class if any of the three id-sets it's built from -
+  `company_id`, `registration_type_id`, `property_id` - were ever nullable). Checked the real
+  schema directly (migration `0050_principals_registrations_properties.sql`) rather than
+  assuming: all three are `not null` with a `references ... on delete cascade/restrict`
+  constraint - not reachable. `person_id`/`principal_id` ARE nullable, but both call sites
+  already filter with `if r.get(...)` before building the set.
+- Whether `_mark_company()`'s own post-hoc company_id patch (used here instead of
+  `watch_deadlines._expiry_window()`'s own `company_id=` kwarg, which `find_due_documents()` uses
+  directly) could ever run AFTER `save_seen_db()` had already persisted the seen store, leaving a
+  `company_id`-less entry in the database. Traced the real call order in `daily_digest.py`'s live
+  mode: all four `find_due_*` functions (including this file's own two) run to completion BEFORE
+  `save_seen_db()` is called once, at the end - every entry is already patched by the time it's
+  persisted. A real simplification worth naming (reuse `_expiry_window()`'s own `company_id=`
+  kwarg directly, like `find_due_documents()` does, instead of a separate post-patch helper) but
+  not a bug - not forced into a fix for its own sake.
+
+Ran both real test files covering this module directly, not just read the code:
+`test_principals_registrations.py` (12 cases, in-memory rows) and `test_watch_deadlines_urgency.py`
+- both `0 failure(s)`, confirming the escalation/seen-store/digest-routing behaviour this file's
+own comments claim actually holds up.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle.
+
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-eighth run): the Lephalale discovery reader's "recent enough to fetch" cutoff used a naive UTC today(), one day too lenient - a proactive repo-wide sweep after Finding 85, same follow-through discipline as the docx_text() sweep two cycles ago
 
 Orientation: synced a sibling commit (`6c4f461`, a clean sweep of the narrative anti-collusion
