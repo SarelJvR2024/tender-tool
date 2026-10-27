@@ -24,8 +24,8 @@
 // in the detail text but doesn't change the status - same as COID, whose
 // status has always come from the number + expiry on file.
 
-import { closingDayOf, daysUntil, formatDate } from "./dates";
-import { SACQSP_POSITION_RE, SAGC_POSITION_RE, catalogSlug, type CatalogBody, type HeldCatalogRegistration, type PersonCredentialFields } from "./personCredentials";
+import { closingDayOf, daysUntil, formatDate } from "./dates.ts";
+import { SACNASP_POSITION_RE, SACQSP_POSITION_RE, SAGC_POSITION_RE, catalogSlug, type CatalogBody, type HeldCatalogRegistration, type PersonCredentialFields } from "./personCredentials.ts";
 
 export type ComplianceStatus = "have" | "missing" | "check";
 
@@ -283,18 +283,21 @@ export function sanralConventionalDocumentChecks(input: {
     });
   }
 
-  // Stage 2 #4 - attendance of compulsory briefing session.
-  items.push({
-    key: "briefing",
-    form: "Briefing",
-    label: "Attendance at the compulsory briefing session",
-    mandatory: true,
-    ...(input.briefingTask
-      ? input.briefingTask.status === "done"
-        ? { status: "have" as const, detail: "Briefing task marked done." }
-        : { status: "check" as const, detail: `Briefing task is ${input.briefingTask.status.replace("_", " ")}${input.briefingTask.due_date ? `, due ${fmt(input.briefingTask.due_date)}` : ""}. Missing it disqualifies the tender.` }
-      : { status: "check" as const, detail: "No briefing task on this tender. Add one under Tasks & milestones with its date - the date isn't extracted from the tender document yet." }),
-  });
+  // Stage 2 #4 - attendance of compulsory briefing session. QA finding,
+  // 2026-10-26: this used to push a ComplianceItem here, rendered by
+  // compliance-report.tsx with the exact same "On file / Confirm by hand /
+  // Don't have" document-evidence vocabulary as a real document check
+  // (CSD, Tax, COID...) - but attending a session isn't evidence on file,
+  // it's an action to complete, and this schema already tracks it correctly
+  // as exactly that: a real tender_tasks row (kind "briefing",
+  // ensureBriefingMilestone() - see page.tsx), shown in Tasks & milestones
+  // with its own real status (not_started/in_progress/done) and due date,
+  // and again in the day-before Submission Plan's own "Attend the
+  // briefing" step (submission-plan-view.tsx). Showing it a third time
+  // here, re-labelled into document vocabulary it doesn't fit, is the
+  // conflation this fix removes - input.briefingTask is still read by the
+  // caller for other summaries, just no longer turned into a document
+  // chip here.
 
   // A9 - tax compliance status (SARS TCS PIN). Real fields since 0014.
   {
@@ -691,10 +694,18 @@ export type PersonFacts = {
 } & PersonCredentialFields;
 
 // A position whose own SETUP description names a profession with its own
-// council is checked against that council, not ECSA.
+// council is checked against that council, not ECSA. Uses the same
+// SACNASP/SAGC/SACQSP position regexes personCredentials.ts's
+// registrationsAskedFor() already relies on to decide a tender asks for that
+// body - one shared pattern per body, not a second copy that could drift
+// (Finding, 2026-10-27: this previously tested a narrower ad-hoc `/geolog/i`
+// here, so a position described as e.g. "Natural Scientist" or naming
+// "Pr Sci.Nat" without the word "geolog" would correctly surface SACNASP
+// fields on the People page, but silently fall back to the generic ECSA
+// Pr Eng/Pr Tech Eng minimum here instead of the real SACNASP requirement).
 function specialistOf(description: string | null): string | null {
   if (!description) return null;
-  if (/geolog/i.test(description)) return "engineering_geologist";
+  if (SACNASP_POSITION_RE.test(description)) return "engineering_geologist";
   if (SACQSP_POSITION_RE.test(description)) return "quantity_surveyor";
   if (SAGC_POSITION_RE.test(description)) return "surveyor";
   return null;

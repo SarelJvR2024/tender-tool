@@ -133,8 +133,13 @@ def part1():
     check(v == "strong_fit" and "Security guarding" in reasons[0], f"guarding company on TN051: strong_fit, reason names the discipline ({v}: {reasons[0][:90]})")
     v, _ = assess_tender.assess_fit(tn051, sig, "full_document", arch)
     check(v == "not_a_fit", f"architects on TN051: not_a_fit ({v})")
-    v, _ = assess_tender.assess_fit(tn051, sig, "full_document", none)
+    v, reasons = assess_tender.assess_fit(tn051, sig, "full_document", none)
     check(v == "needs_review", f"no disciplines on file: needs_review, never rejected ({v})")
+    # Sarel's own live feedback, 2026-10-23: the live Discovery feed showed a
+    # generic "has no disciplines recorded yet" with no way for a user to
+    # know where that comes from - fixed at the root (assess_fit() itself,
+    # not just classify_tender.py's own call site) to name where it's fixed.
+    check("Experience Library tags" in reasons[0], f"no disciplines on file: reason tells the user where to fix it ({reasons[0]})")
     v, reasons = assess_tender.assess_fit(["roads_civil"], sig, "full_document", roads_child)
     check(v == "possible" and "Same discipline group" in reasons[0], f"broad group match: possible (not strong) + 'check scope' reason ({v})")
     scmu5 = assess_tender.categorize(None, REAL[1][1], taxonomy=tax)

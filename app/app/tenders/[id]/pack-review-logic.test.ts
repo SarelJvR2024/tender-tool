@@ -43,7 +43,13 @@ test("fieldStatus: 0 is a real value, not empty", () => {
 
 test("provenanceStatus maps field_provenance's four statuses", () => {
   assert.equal(provenanceStatus("confirmed"), "confirmed");
-  assert.equal(provenanceStatus("computed"), "confirmed");
+  // QA finding, 2026-10-26: "computed" (mechanically derived, no human
+  // judgment call - 0002_field_provenance.sql's own table comment) must NOT
+  // collapse into "confirmed" (a human entered/approved it) - that silently
+  // fed tender-readiness.ts's confirmedCount/score from values nobody ever
+  // looked at. It maps to "assumed_default" instead - same Verify bucket,
+  // excluded from the confirmed count.
+  assert.equal(provenanceStatus("computed"), "assumed_default");
   assert.equal(provenanceStatus("assumed_default"), "assumed_default");
   assert.equal(provenanceStatus("missing"), "missing");
   assert.equal(provenanceStatus("something_unexpected"), "needs_input");

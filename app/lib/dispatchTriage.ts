@@ -69,6 +69,23 @@ export function hoursUntilPrintSignDeadline(input: DispatchLogisticsInput, now: 
   return (deadline.getTime() - now.getTime()) / (60 * 60 * 1000);
 }
 
+/**
+ * The separate "must leave for delivery by" cutoff - closing time minus
+ * transit only, with no print/bind/sign buffer subtracted. QA finding,
+ * 2026-10-26: printSignDeadline() alone collapsed the whole day-before plan
+ * into one number, which read as "the one thing to hit" when it's really
+ * two sequential steps with two different owners (prep finishes, THEN the
+ * vehicle leaves) - this gives the UI the second point on that timeline
+ * without inventing a new buffer this schema doesn't have. Same nulls as
+ * printSignDeadline() (digital submission, or no closing date).
+ */
+export function departureDeadline(input: DispatchLogisticsInput): Date | null {
+  if (!input.closingDate || input.submissionType !== "physical_box") return null;
+  const closing = new Date(input.closingDate);
+  if (Number.isNaN(closing.getTime())) return null;
+  return new Date(closing.getTime() - input.estimatedTransitHours * 60 * 60 * 1000);
+}
+
 export type DecisionInput = {
   briefingDate: string | null;
   briefingTaskStatus: "not_started" | "in_progress" | "done" | null; // null = no auto-seeded briefing task on file

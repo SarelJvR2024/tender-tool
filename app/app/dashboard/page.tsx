@@ -6,6 +6,7 @@ import { AppShell } from "../_components/AppShell";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { getNotifications } from "@/lib/notifications";
 import { IN_PROGRESS_STAGES } from "@/lib/pipeline";
+import { computeDashboardStats, stageOf } from "@/lib/dashboardStats";
 import { loadDocumentExpiryOverview } from "@/lib/documentExpiry";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
 import { fetchAllRows } from "@/lib/supabasePaging";
@@ -13,7 +14,6 @@ import { loadDispatchCards, type ActiveBidInput } from "@/lib/dispatchDashboard"
 import { SavingsCounterCard } from "@/components/tt/savings-counter-card";
 import { PageHeader } from "@/components/tt/page-header";
 import { StatCard } from "@/components/tt/stat-card";
-import type { TenderStatus } from "@/components/tt/status-badge";
 import { DeadlineChip } from "@/components/tt/deadline-chip";
 import { EmptyState } from "@/components/tt/empty-state";
 import { ErrorState } from "@/components/tt/error-state";
@@ -82,38 +82,6 @@ const VERDICT_TONE: Record<string, string> = {
   needs_review: "border-warning/20 bg-warning/10 text-warning",
 };
 
-/**
- * Pack-completeness for this list, not a pipeline stage - keeps the
- * original wording in every case (StatusBadge's own default label for
- * each variant differs: "ready" defaults to "Ready", "in-progress" to
- * "In progress") so the migration doesn't quietly change user-facing copy.
- *
- * Deliberately NOT reclassified into Verify/Provide/Fix (product-promise
- * audit, see app/AGENTS.md "Home cockpit: StatusBadge vocabulary is
- * intentional, not a gap") - this is a whole-tender PACK-COMPLETION status
- * (no pack / still being worked / complete), not a single task's type. A
- * tender can genuinely have both open Fix items and open Provide items on
- * its own pack at once (computeTenderReadiness's own per-tender fix/provide
- * arrays prove this); collapsing that down to one V/P/F badge per row would
- * either lose information or arbitrarily pick one. The badge's TEXT already
- * carries the real next action (nextStepFor()'s short Fix/Provide-shaped
- * phrase) once a pack exists - only the three-state colour/variant here is
- * a different, valid vocabulary, same pattern as the Bids board's own
- * stage machine.
- */
-function statusFor(tender: TenderRow): { variant: TenderStatus; label: string } {
-  const pack = tender.tender_packs?.[0];
-  if (!pack) return { variant: "needs-docs", label: "Needs documents" };
-  if (pack.status === "confirmed" || pack.status === "filled") {
-    return { variant: "ready", label: "Complete" };
-  }
-  return { variant: "in-progress", label: "Needs your input" };
-}
-
-function stageOf(tender: TenderRow): string {
-  return tender.tender_packs?.[0]?.pipeline_stage ?? "found";
-}
-
 // Phase 2 targeted polish (2026-10-23): the greeting prefers csd_trading_name
 // already (below) - this only fires when a company has none on file and
 // falls back to its registered legal_name, which almost always carries a SA
@@ -144,8 +112,13 @@ function greetingFor(date: Date): string {
   return "Good evening";
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ docsProcessing?: string }>;
+}) {
   const supabase = await createClient();
+  const { docsProcessing } = await searchParams;
 
   // Every read below is a real Supabase round-trip that can genuinely fail
   // (network blip, RLS/session hiccup) - a thrown error here used to crash
@@ -156,7 +129,7 @@ export default async function DashboardPage() {
   // is nothing honest left to show, so the whole page falls back to a
   // friendly retry instead of Next's generic error boundary.
   try {
-    return await renderDashboard(supabase);
+    return await renderDashboard(supabase, docsProcessing === "1");
   } catch (e) {
     console.error("dashboard failed to load", e);
     return (
@@ -175,7 +148,7 @@ export default async function DashboardPage() {
   }
 }
 
-async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>>) {
+async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>>, docsProcessing: boolean) {
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
@@ -209,12 +182,10 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   const rows = tenders as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
 
-  const activeBidsCount = rows.filter((t) => (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t))).length;
-  const packsReadyCount = rows.filter((t) => statusFor(t).variant === "ready").length;
-  const closingThisWeekCount = rows.filter((t) => {
-    const left = daysUntil(t.closing_date);
-    return left !== null && left >= 0 && left <= ACTION_WINDOW_DAYS;
-  }).length;
+  // See lib/dashboardStats.ts's own header for why this can't just filter
+  // `rows` directly in place: `rows` is every tender in the shared,
+  // not-tenant-scoped `tenders` table, not this company's own list.
+  const { myRows, activeBidsCount, packsReadyCount, closingThisWeekCount } = computeDashboardStats(rows, ACTION_WINDOW_DAYS);
   const documentsExpiringCount = notifications.filter((n) => n.kind === "document").length;
 
   // Tender Command Center (Sarel's own brief, 2026-10-24): every active bid
@@ -225,15 +196,10 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // Next Best Action - both were a weaker version of the same "what's
   // urgent" question this now answers directly, with a real physical-
   // submission cutoff instead of just the tender's own closing date.
-  const activeBids: ActiveBidInput[] = rows
-    // A tender with no tender_packs row yet (nobody's hit "Start a tender
-    // pack" on it - stageOf() falls back to "found" for exactly this case)
-    // has no real submission logistics to triage: nothing to print, nothing
-    // to dispatch. Excluding it here, not just trusting the stage filter,
-    // is what actually matters - t.tender_packs[0] below would otherwise be
-    // undefined and crash the whole dashboard the moment a company has any
-    // not-yet-started opportunity sitting in the pipeline.
-    .filter((t) => t.tender_packs.length > 0 && (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t)))
+  const activeBids: ActiveBidInput[] = myRows
+    // myRows is already "has a real tender_packs row" - t.tender_packs[0]
+    // below is never undefined for these.
+    .filter((t) => (IN_PROGRESS_STAGES as readonly string[]).includes(stageOf(t)))
     .map((t) => {
       const pack = t.tender_packs[0];
       return {
@@ -293,7 +259,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // expiring-soon window doesn't apply here); the CV check reuses
   // ReadinessResult's own peopleWithCvCount count, just against a lower bar
   // (>=1) than the 10-point criterion's own >=2.
-  const isNewCompany = rows.length === 0 && readiness.percent < 50;
+  const isNewCompany = myRows.length === 0 && readiness.percent < 50;
   let setupChecklistItems: SetupChecklistItem[] = [];
   if (isNewCompany) {
     const documentExpiryRows = await loadDocumentExpiryOverview(supabase);
@@ -344,6 +310,12 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
           </div>
         )}
 
+        {docsProcessing && (
+          <div className="mb-5 rounded-lg border border-info/20 bg-info/10 px-4 py-3 text-sm text-info">
+            Your documents are being processed in the background. We&apos;ll alert you when they&apos;re ready to review.
+          </div>
+        )}
+
         <div className="mb-5 grid gap-3 lg:grid-cols-2">
           <BidReadinessCard result={readiness} />
           <NextBestActionCard action={nextBestAction} />
@@ -378,7 +350,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
               </Link>
             </div>
           </div>
-        ) : rows.length === 0 && !error ? (
+        ) : myRows.length === 0 && !error ? (
           <div className="mb-5 overflow-hidden rounded-lg border border-border bg-card">
             <EmptyState
               icon={FolderOpen}

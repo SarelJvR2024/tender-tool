@@ -52,21 +52,25 @@ export function briefingReminderDetailedEmail(opts: {
 }): NotificationEmail {
   const briefingIso = opts.briefingTime ? `${opts.briefingDate}T${opts.briefingTime}:00+02:00` : `${opts.briefingDate}T00:00:00+02:00`;
   const when = opts.briefingTime ? formatSastDateTime(briefingIso) ?? opts.briefingDate : formatDate(opts.briefingDate) ?? opts.briefingDate;
-  const action = opts.window === "24_hours" ? "Compulsory Briefing in 24h" : "Compulsory Briefing in 5 Days";
+  const action = opts.window === "24_hours" ? "Briefing Session in 24h" : "Briefing Session in 5 Days";
   const subject = tenderSubject({ reference: opts.reference, action: opts.isVirtual ? `${action} (Virtual Link Attached)` : action, buyer: opts.buyerShortName });
   const tone = opts.window === "24_hours" ? "urgent" : "warning";
 
+  // Honest naming note (see lib/briefingReminders.ts's own header comment for
+  // the full reasoning): tenders.briefing_date/briefing_time never records
+  // whether a briefing is compulsory once a tender is pursued, so this can't
+  // claim it is - a buyer-specific fact this system doesn't reliably have.
   const attendanceLabel = opts.isVirtual
     ? `Virtual${opts.venueOrLink ? ` (${opts.venueOrLink})` : " (link attached)"}`
     : opts.venueOrLink
-      ? `Compulsory site attendance - ${opts.venueOrLink}`
-      : `Compulsory attendance - see this tender's documents for the venue, not captured on this tender's record yet.`;
+      ? `Attendance - ${opts.venueOrLink}`
+      : `See this tender's documents for the venue - not captured on this tender's record yet.`;
 
   const ics = opts.briefingTime
     ? buildIcs({
         uid: `briefing-${opts.tenderId}@tenderready.app`,
         title: `Briefing - ${opts.reference}`,
-        description: `Compulsory briefing for ${opts.reference} (${opts.buyerShortName}). Failure to attend disqualifies your bid automatically.`,
+        description: `Briefing session for ${opts.reference} (${opts.buyerShortName}). Check the tender notice for whether attendance is compulsory.`,
         startIso: briefingIso,
         location: opts.venueOrLink ?? undefined,
       })
@@ -77,14 +81,14 @@ export function briefingReminderDetailedEmail(opts: {
       <p style="margin:0 0 12px;">${pill(opts.window === "24_hours" ? "24H TO BRIEFING" : "BRIEFING IN 5 DAYS", tone)}</p>
       ${tenderHeader({ reference: opts.reference, title: opts.tenderTitle, buyerShortName: opts.buyerShortName })}
       ${briefingDetailCard({ whenLabel: when ?? opts.briefingDate, attendanceLabel })}
-      <p style="margin:0 0 20px;font-weight:700;color:#991B1B;">Failure to attend disqualifies your bid automatically.</p>
+      <p style="margin:0 0 20px;font-weight:700;color:#991B1B;">Check the tender notice for whether attendance is compulsory - some buyers disqualify a bid automatically for a missed compulsory briefing.</p>
       ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "View Briefing Details & RFP")}
       ${ics ? `<p style="margin:12px 0 0;color:#64748B;font-size:12px;">A calendar invite (${escapeHtml(ics.filename)}) is attached to this email.</p>` : ""}
     `,
     `${opts.reference} briefing ${when}.`,
     { appUrl: opts.appUrl, badgeText: opts.buyerShortName, recipientContext: { kind: "tender", tenderReference: opts.reference, companyName: opts.companyName } }
   );
-  const text = `${opts.reference} (${opts.buyerShortName}) - compulsory briefing ${when}.\n${opts.isVirtual ? "Link" : "Venue"}: ${opts.venueOrLink ?? "see tender documents"}\n\nFailure to attend disqualifies your bid automatically.\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  const text = `${opts.reference} (${opts.buyerShortName}) - briefing session ${when}.\n${opts.isVirtual ? "Link" : "Venue"}: ${opts.venueOrLink ?? "see tender documents"}\n\nCheck the tender notice for whether attendance is compulsory - some buyers disqualify a bid automatically for a missed compulsory briefing.\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
   return { subject, html, text, attachments: ics ? [ics] : undefined };
 }
 

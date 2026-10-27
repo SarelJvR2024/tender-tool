@@ -30,6 +30,12 @@ FAILS = []
 # general route, by design, when no workbook is present at all).
 TECH_WORKBOOK = os.path.join(os.path.dirname(HERE), "..", "templates", "samples", "R.352-020-2025.1F_ran.xlsm")
 
+# Finding, 2026-10-27: a real A-Forms.docx that genuinely needs more than the
+# old 60-paragraph head to find its own "Part T2: Returnable Schedules"
+# heading (it sits at paragraph 521 of 2104, behind a long notes/TOC
+# section) - see classify_tender.py's own _docx_head() comment.
+REAL_A_FORMS = os.path.join(os.path.dirname(HERE), "..", "templates", "forms", "R.352-020-2025.1F", "A_Forms.docx")
+
 
 def check(name, cond, detail=""):
     print(("  ok   " if cond else "  FAIL ") + name + (f"  ({detail})" if detail and not cond else ""))
@@ -149,6 +155,18 @@ def test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_us
     os.remove(new_path)
 
 
+def test_real_a_forms_heading_deep_in_the_document_is_still_found():
+    print("classify_documents: a real A-Forms.docx whose own heading sits at paragraph "
+          "521 of 2104, well past the old 60-paragraph head cap")
+    entries = [_doc_entry("A_Forms.docx", REAL_A_FORMS), _doc_entry("Technical Submission.xlsm", TECH_WORKBOOK, fmt="xlsm")]
+    decision = ct.classify_documents(entries, buyer="SANRAL", all_text="SANRAL tender")
+    check("the real A-Forms document is recognized, not silently missed",
+          decision["sanral_files"].get("a_forms") == REAL_A_FORMS, decision)
+    check("it's not reported as a missing SANRAL document",
+          not any("A-Forms / returnable schedules" in n and "Not found" in n for n in decision["notes"]),
+          decision["notes"])
+
+
 def test_docx_already_marked_unreadable_is_skipped_without_a_note():
     print("classify_documents: a doc_entry already flagged unreadable upstream")
     entry = _doc_entry("whatever.docx", "/tmp/does-not-matter.docx")
@@ -158,13 +176,49 @@ def test_docx_already_marked_unreadable_is_skipped_without_a_note():
     check("no note is added for a doc_entry with no _local path at all", decision["notes"] == [])
 
 
+def test_assess_fit_from_text_categorized_tender_no_disciplines_not_duplicated():
+    print("assess_fit_from_text: categorized tender, company has no disciplines on file - "
+          "the actionable message appears once, not duplicated")
+    # Sarel's own live feedback, 2026-10-23: the live Discovery feed showed a
+    # generic, unhelpful version of this message. Fixed at the root
+    # (assess_tender.assess_fit()) so assess_fit_from_text()'s own call site
+    # - which already had a correct, duplicate-ANY-other-reason workaround -
+    # doesn't double it up now that the root supplies the same wording.
+    title = "APPOINTMENT OF EXTERNAL SECURITY SERVICES AT THE EILAND HOLIDAY RESORT, ROSE PARK & REITZPARK"
+    result = ct.assess_fit_from_text(title, "", "", {"disciplines": [], "has_cidb_grading": False})
+    check("verdict is needs_review, not rejected", result["verdict"] == "needs_review", result["verdict"])
+    hits = [r for r in result["reasons"] if "Experience Library tags" in r]
+    check("the actionable message appears exactly once (assess_fit() supplied it; "
+          "assess_fit_from_text() must not add a second copy)", len(hits) == 1, result["reasons"])
+
+
+def test_assess_fit_from_text_uncategorized_tender_no_disciplines_still_appends():
+    print("assess_fit_from_text: uncategorized tender AND no disciplines on file - both facts "
+          "are true and both are worth telling the user, so the no-disciplines note is still appended")
+    # Here assess_fit() itself takes the "uncategorized" branch first (a
+    # different primary reason), which never mentions disciplines at all -
+    # this is the one case assess_fit_from_text()'s own extra check exists
+    # for, and it must keep firing.
+    title = "Appointment of a service provider ref ABC123-XYZ"
+    result = ct.assess_fit_from_text(title, "", "", {"disciplines": [], "has_cidb_grading": False})
+    check("verdict is needs_review", result["verdict"] == "needs_review", result["verdict"])
+    check("the uncategorized reason is present",
+          any("Could not determine discipline" in r for r in result["reasons"]), result["reasons"])
+    hits = [r for r in result["reasons"] if "Experience Library tags" in r]
+    check("the no-disciplines note is still appended exactly once, even though a different "
+          "reason fired first", len(hits) == 1, result["reasons"])
+
+
 def main():
     test_corrupt_docx_is_noted_not_silently_dropped()
     test_valid_docx_is_classified_with_no_spurious_note()
     test_period_after_the_form_letter_is_also_recognized()
     test_duplicate_candidates_prefer_the_more_recently_modified_file()
     test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used()
+    test_real_a_forms_heading_deep_in_the_document_is_still_found()
     test_docx_already_marked_unreadable_is_skipped_without_a_note()
+    test_assess_fit_from_text_categorized_tender_no_disciplines_not_duplicated()
+    test_assess_fit_from_text_uncategorized_tender_no_disciplines_still_appends()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

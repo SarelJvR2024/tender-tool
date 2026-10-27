@@ -154,6 +154,27 @@ def test_failure_modes(tmp):
     expect_fail(lambda: x.read_cv_text(os.path.join(tmp, "cv.pages"), tmp), "can't be read", "unsupported format")
     check(not x._plausible_sa_id("2016999912345"), "a 13-digit non-ID number is not treated as an ID")
 
+    # Finding (2026-10-27): the "docx" branch above already guards docx_text() against a
+    # corrupt file - the "doc" branch's own call to the SAME function on LibreOffice's own
+    # conversion output didn't. convert_with_soffice() only checks the output path EXISTS,
+    # never that LibreOffice actually wrote a readable docx, so a broken conversion raised a
+    # bare PackageNotFoundError straight out of read_cv_text() instead of the clean,
+    # user-facing ExtractionFailed every other failure mode here gets - same bug class
+    # independently found in requirements.py's read_document() and classify_documents.py's
+    # read_document_text(). Simulated (no real .doc sample known to trigger this in
+    # LibreOffice itself) by monkeypatching convert_with_soffice() to return a path to a
+    # genuinely broken "conversion".
+    broken_docx = os.path.join(tmp, "broken_conversion.docx")
+    with open(broken_docx, "wb") as f:
+        f.write(b"not a real docx file, just garbage bytes")
+    real_convert = x.convert_with_soffice
+    x.convert_with_soffice = lambda path, target_ext, out_dir: broken_docx
+    try:
+        expect_fail(lambda: x.read_cv_text(os.path.join(tmp, "cv.doc"), tmp),
+                    "could not be read", "a .doc whose LibreOffice conversion produced a broken file")
+    finally:
+        x.convert_with_soffice = real_convert
+
 
 GOOD_ANSWER = {  # TEST DOUBLE: what a correct model answer for make_docx()'s CV looks like
     "document_kind": "cv", "document_kind_reason": "One engineer's CV.",

@@ -24,13 +24,16 @@ import { DOCUMENT_TYPES, findMatchingExperience, labelFor } from "@/lib/experien
 import { COMPANY_OFFICE_COLUMNS, matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
 import { TENDER_ROLE_COLUMNS, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
 import { requestGeneralPack, requestRequirementsExtraction, saveGeneralAnswers, uploadTenderDocument } from "./general-actions";
-import { OcrNotice, OCR_TAG } from "./ocr-notice";
+import { OcrNotice } from "./ocr-notice";
 import { PackChecklist, checklistOf } from "./pack-checklist";
 import { PrivateDocuments, type PrivateDoc } from "./private-documents";
-import { GeneralPackReview } from "./general-pack-review";
+import { GeneralPackReview, MatchStrengthBadge } from "./general-pack-review";
 import { loadGeneralPackReviewSnapshot } from "./general-pack-review-data";
 import { computeTenderReadiness } from "./tender-readiness";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatDate, formatDateTime, type StatusChip } from "@/lib/dates";
+import { RequirementRow } from "@/components/tt/requirement-row";
+import { QuickBlockerDrawer } from "./quick-blocker-drawer";
+import { VAULT_DRAWER_CONFIG } from "./quick-fix-config";
 
 /**
  * Non-SANRAL tender preparation (Sarel, 2026-10-16: "keep working on
@@ -59,6 +62,20 @@ const STATUS_STYLE: Record<ComplianceStatus, { label: string; className: string 
   have: { label: "On file", className: "bg-success/10 text-success" },
   missing: { label: "Don't have", className: "bg-destructive/10 text-destructive" },
   check: { label: "Confirm by hand", className: "bg-warning/10 text-warning" },
+};
+
+// Requirements & Compliance tab brief (2026-10-25): the same have/missing/
+// check meaning as STATUS_STYLE above, but RequirementRow's own 3 clean,
+// unambiguous states for a vault-document check specifically - "have" is
+// genuinely done (never re-labelled "Verify" the way bid-task-status.ts's
+// separate Fix/Provide/Verify grouping would), "missing" is a real blocker,
+// "check" is the one state that genuinely needs a human to confirm an
+// uncertain match. tone "accent" renders blue (--accent, Trust Blue) via
+// ChipBadge - matches the brief's own "Verification Needed: blue badge" ask.
+const REQUIREMENT_STATUS_CHIP: Record<ComplianceStatus, StatusChip> = {
+  have: { label: "Compliant (On File)", tone: "success" },
+  missing: { label: "Action Required (Missing)", tone: "destructive" },
+  check: { label: "Verification Needed", tone: "accent" },
 };
 const input: React.CSSProperties = { width: "100%", boxSizing: "border-box", minHeight: 38, padding: "8px 10px", borderRadius: 8, border: "1px solid var(--border)", fontSize: 13, fontFamily: "inherit", background: "var(--card)", color: "var(--foreground)" };
 const primaryBtn: React.CSSProperties = { minHeight: 40, padding: "0 16px", borderRadius: 8, background: "var(--primary)", color: "var(--primary-foreground)", fontSize: 13, fontWeight: 600, border: "none", cursor: "pointer", whiteSpace: "nowrap" };
@@ -187,7 +204,32 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
       </div>
       </>
     );
-    return { overview, documents: null, questions: null, people: null, pack: null, badges: { docsMissing: 0, needAnswer: 0, peopleGaps: 0, generalFixCount: 0 } };
+    // QA finding, 2026-10-26: this used to be a bare `people: null`, which the
+    // Team & CVs tab (page.tsx) renders as `{generalSections?.people}` with
+    // nothing else guaranteed to fill that tab for a general-family tender
+    // (no ComplianceReport, and no key-positions card until positions exist)
+    // - so the tab could render completely empty with zero explanation. Key
+    // positions, registrations and experience requirements are read off this
+    // tender's own documents (see the comment above), so there is a genuine,
+    // honest reason nothing can show yet - say it, and point at the one
+    // action (Overview tab) that unblocks it, rather than leaving a blank tab.
+    const peopleBlocked = (
+      <div id="general-people" style={card}>
+        <SectionTitle title="Key people & requirements" />
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+          {extractJob && extractJob.status === "failed"
+            ? "Couldn't read this tender's documents, so key positions, registrations and experience requirements aren't known yet."
+            : extractJob
+              ? "Still reading this tender's documents - key positions, registrations and experience requirements will appear here once that finishes."
+              : "Key positions, registrations and experience requirements are read from this tender's own documents, which haven't been read yet."}{" "}
+          <a href="#general-preparation" style={{ color: "var(--accent)", fontWeight: 600 }}>
+            See Overview to read the documents
+          </a>
+          .
+        </div>
+      </div>
+    );
+    return { overview, documents: null, questions: null, people: peopleBlocked, pack: null, badges: { docsMissing: 0, needAnswer: 0, peopleGaps: 0, generalFixCount: 0 } };
   }
 
   // ----- supporting documents -----
@@ -306,9 +348,16 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           </ul>
           {privateCard && (
             <div style={{ marginTop: 6 }}>
-              <Link href="#private-documents" style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>
+              {/* Plain <a>, not next/link's <Link>: this jumps to #private-documents,
+                  which WorkspaceTabs registers under a DIFFERENT tab (Overview) than
+                  this component's own (Compliance). WorkspaceTabs switches tabs by
+                  listening for the native `hashchange` event - which a same-page
+                  history.pushState navigation (what <Link> does for a hash-only href)
+                  never fires, so a <Link> here would silently fail to switch tabs
+                  while an ordinary anchor click still does (QA finding, 2026-10-26). */}
+              <a href="#private-documents" style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>
                 See your private documents above
-              </Link>
+              </a>
             </div>
           )}
         </details>
@@ -318,27 +367,86 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         <Link href="/company" style={{ color: "var(--accent)", fontWeight: 600 }}>company vault</Link> on the closing date; anything the vault has no
         place for can be uploaded for this tender only.
       </div>
-      {returnables.length === 0 && <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>No supporting documents named in the readable text.</div>}
-      {returnables.map((r) => {
-        const st = STATUS_STYLE[r.status];
+      {returnables.length === 0 && (() => {
+        // QA finding, 2026-10-26: this used to be a flat "No supporting
+        // documents named in the readable text" with no explanation and no
+        // way forward - indistinguishable from "this tender genuinely asks
+        // for nothing" even when the real cause is that none of the
+        // documents could actually be read (manifest.documents[].unreadable
+        // - a real, already-captured per-document fact, just never
+        // surfaced here). Give the real reason, and the same retry action
+        // the pre-manifest state above offers, instead of a dead end.
+        const unreadableDocs = manifest.documents.filter((d) => d.unreadable);
+        const allUnreadable = manifest.documents.length > 0 && unreadableDocs.length === manifest.documents.length;
         return (
-          <div key={r.key} title={r.quote} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
-              <div style={{ minWidth: 0, flex: "1 1 280px" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>
-                  {r.label}
-                  {r.strength === "mentioned" && <span style={{ fontWeight: 500, color: "var(--muted-foreground)" }}> - mentioned, may not be required</span>}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginTop: 2 }}>{r.detail}</div>
-                <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontStyle: "italic", marginTop: 2, wordBreak: "break-word" }}>{r.from_ocr ? OCR_TAG : ""}&ldquo;{r.quote.slice(0, 160)}{r.quote.length > 160 ? "…" : ""}&rdquo;</div>
-              </div>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                {r.expiring && <Chip label="Renew soon" className="bg-warning/10 text-warning" />}
-                <Chip {...st} />
-              </div>
+          <div>
+            <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: allUnreadable ? 8 : 0 }}>
+              {allUnreadable
+                ? `None of this tender's ${manifest.documents.length} document${manifest.documents.length === 1 ? "" : "s"} could actually be read (${unreadableDocs[0].unreadable}${unreadableDocs.length > 1 ? `, and ${unreadableDocs.length - 1} more` : ""}) - that's why nothing is listed, not because this tender asks for nothing.`
+                : "No supporting documents named in the readable text."}
             </div>
+            {allUnreadable && (
+              <form action={requestRequirementsExtraction}>
+                <input type="hidden" name="tender_id" value={tenderId} />
+                <button type="submit" style={secondaryBtn}>Try reading the documents again</button>
+                {isShared && (
+                  <a href="#private-documents" style={{ marginLeft: 10, fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>
+                    Or upload a clearer copy
+                  </a>
+                )}
+              </form>
+            )}
+          </div>
+        );
+      })()}
+      {returnables.map((r) => {
+        // Requirements & Compliance tab brief: RequirementRow (quote
+        // provenance, already built for the demo page) wired in here for
+        // real, plus the Quick Blocker Resolver drawer for a "missing" item
+        // whose vault kind VAULT_DRAWER_CONFIG actually covers (csd/tax/
+        // bbbee/coid/bank/insurance - cidb has no drawer entry, same gap
+        // compliance-report.tsx's own BidTaskRow already lives with, falls
+        // back to the plain upload/vault-link block below).
+        const drawerConfig = r.vault ? VAULT_DRAWER_CONFIG[r.vault] : undefined;
+        return (
+          <div key={r.key}>
+            <RequirementRow
+              label={r.label}
+              labelSuffix={r.strength === "mentioned" ? <span className="font-medium text-muted-foreground"> - mentioned, may not be required</span> : undefined}
+              detail={r.detail}
+              quote={r.quote}
+              fromOcr={r.from_ocr}
+              status={REQUIREMENT_STATUS_CHIP[r.status]}
+              trailing={
+                <>
+                  {r.expiring && <Chip label="Renew soon" className="bg-warning/10 text-warning" />}
+                  {/* Only meaningful on "check" (Verification Needed) - confidence is about how
+                      confidently the requirement text itself was extracted, not whether the
+                      company's own data satisfies it, so it's suppressed for "missing" to avoid
+                      the exact "Fix ... Strong match" contradiction this brief named. */}
+                  <MatchStrengthBadge confidence={r.confidence} reason={r.confidenceReason} hideWhenBlocking={r.status !== "check"} />
+                </>
+              }
+            />
+            {r.status === "missing" && drawerConfig && company && (
+              <div style={{ marginTop: -6, marginBottom: 8 }}>
+                <QuickBlockerDrawer
+                  tenderId={tenderId}
+                  companyId={company.id}
+                  config={drawerConfig}
+                  currentValues={Object.fromEntries(
+                    drawerConfig.fields.map((f) => {
+                      const raw = (company as unknown as Record<string, string | number | null>)[f.name];
+                      return [f.name, raw === null || raw === undefined ? "" : String(raw)];
+                    }),
+                  )}
+                  triggerElement={<button type="button" style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 12, fontWeight: 600, color: "var(--destructive)" }} />}
+                  triggerLabel="Resolve in Vault →"
+                />
+              </div>
+            )}
             {(r.uploadable || r.vaultLink) && r.status !== "have" && (
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
                 {r.uploadable && (
                   <form action={uploadTenderDocument} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                     <input type="hidden" name="tender_id" value={tenderId} />
@@ -347,7 +455,12 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                     <button type="submit" style={secondaryBtn}>{r.upload ? "Replace" : "Upload for this tender"}</button>
                   </form>
                 )}
-                {r.vaultLink && <Link href="/company" style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>Fix in the vault</Link>}
+                {/* Only a plain Link now when no drawer covers this item (missing) or it's
+                    "check" (Verification Needed, which never gets the drawer - that's for
+                    resolving a real gap, not confirming an uncertain match). */}
+                {r.vaultLink && !(r.status === "missing" && drawerConfig) && (
+                  <Link href="/company" style={{ fontSize: 12, color: "var(--accent)", fontWeight: 600 }}>Fix in the vault</Link>
+                )}
               </div>
             )}
           </div>
@@ -444,20 +557,31 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           {personRegs.map((pr) => {
             const holders = holdersOf(pr.body);
             const valid = holders.filter((p) => !p.expiry || validityAtClosing(p.expiry, closingDate).status === "have");
-            const st = valid.length > 0 ? STATUS_STYLE.have : holders.length > 0 ? STATUS_STYLE.check : STATUS_STYLE.missing;
+            // Kept as their own specific labels (not the generic Compliant/
+            // Action Required/Verification Needed 3-state vocabulary) -
+            // "Lapses before closing" is real, useful information that
+            // vocabulary would flatten away, and this isn't an instance of
+            // the brief's contradictory-copy problem.
+            const status: StatusChip =
+              valid.length > 0
+                ? { label: "On file", tone: "success" }
+                : holders.length > 0
+                  ? { label: "Lapses before closing", tone: "warning" }
+                  : { label: "Not on file", tone: "destructive" };
             return (
-              <div key={pr.body} title={pr.quote} style={{ borderTop: "1px solid var(--border)", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <div style={{ minWidth: 0, flex: "1 1 280px" }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{pr.body} registration ({REGISTRATION_BODY_INFO[pr.body].name})</div>
-                  <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-                    {holders.length > 0
-                      ? `On file: ${holders.map((p) => `${p.name}${p.category ? ` (${p.category})` : ""}${p.expiry ? `, valid to ${p.expiry}` : ", renewal date not on file"}`).join("; ")}`
-                      : `Nobody has a ${pr.body} registration on file - add it on the person's page (it shows there now that this tender asks for it)${isCatalogBody(pr.body) ? " or under Company > Registrations" : ""}.`}
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontStyle: "italic", wordBreak: "break-word" }}>{pr.from_ocr ? OCR_TAG : ""}&ldquo;{pr.quote.slice(0, 150)}…&rdquo;</div>
-                </div>
-                <Chip {...st} label={valid.length > 0 ? "On file" : holders.length > 0 ? "Lapses before closing" : "Not on file"} />
-              </div>
+              <RequirementRow
+                key={pr.body}
+                label={`${pr.body} registration (${REGISTRATION_BODY_INFO[pr.body].name})`}
+                detail={
+                  holders.length > 0
+                    ? `On file: ${holders.map((p) => `${p.name}${p.category ? ` (${p.category})` : ""}${p.expiry ? `, valid to ${p.expiry}` : ", renewal date not on file"}`).join("; ")}`
+                    : `Nobody has a ${pr.body} registration on file - add it on the person's page (it shows there now that this tender asks for it)${isCatalogBody(pr.body) ? " or under Company > Registrations" : ""}.`
+                }
+                quote={pr.quote}
+                fromOcr={pr.from_ocr}
+                status={status}
+                trailing={<MatchStrengthBadge confidence={pr.confidence} reason={pr.confidence_reason} hideWhenBlocking={holders.length === 0} />}
+              />
             );
           })}
         </>
@@ -466,16 +590,15 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         <>
           <SubTitle text="Roles this tender names" />
           {roleRowsForTender.map(({ mr, role, tagged }) => (
-            <div key={mr.role_code} title={mr.quote} style={{ borderTop: "1px solid var(--border)", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <div style={{ minWidth: 0, flex: "1 1 280px" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{role?.title ?? mr.role_code}</div>
-                <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
-                  {tagged.length > 0 ? `Tagged for this role: ${tagged.map((p) => p.name).join(", ")}` : "Nobody tagged for this role yet - tag CVs on the People page."}
-                </div>
-                <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontStyle: "italic", wordBreak: "break-word" }}>{mr.from_ocr ? OCR_TAG : ""}&ldquo;{mr.quote.slice(0, 150)}…&rdquo;</div>
-              </div>
-              <Chip {...(tagged.length > 0 ? STATUS_STYLE.have : STATUS_STYLE.missing)} label={tagged.length > 0 ? "Someone tagged" : "Nobody tagged"} />
-            </div>
+            <RequirementRow
+              key={mr.role_code}
+              label={role?.title ?? mr.role_code}
+              detail={tagged.length > 0 ? `Tagged for this role: ${tagged.map((p) => p.name).join(", ")}` : "Nobody tagged for this role yet - tag CVs on the People page."}
+              quote={mr.quote}
+              fromOcr={mr.from_ocr}
+              status={tagged.length > 0 ? { label: "Someone tagged", tone: "success" } : { label: "Nobody tagged", tone: "destructive" }}
+              trailing={<MatchStrengthBadge confidence={mr.confidence} reason={mr.confidence_reason} hideWhenBlocking={tagged.length === 0} />}
+            />
           ))}
         </>
       )}
@@ -615,10 +738,12 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
         {savedNote && <SavedBanner text={savedNote} />}
         <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
           Read from{" "}
-          <Link href="#general-documents" style={{ color: "var(--accent)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}>
+          {/* Plain <a>, not <Link> - same cross-tab hashchange reason as the
+              #private-documents link above (this points into the Compliance tab). */}
+          <a href="#general-documents" style={{ color: "var(--accent)", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 3 }}>
             <FileText style={{ width: 12, height: 12 }} />
             {manifest.documents.length} {readingIsPrivate ? "" : "published "}document{manifest.documents.length === 1 ? "" : "s"}
-          </Link>
+          </a>
           {readingIsPrivate ? ` (including your ${privateDocs.length} private one${privateDocs.length === 1 ? "" : "s"})` : ""}
           {tender.buyer ? ` by ${tender.buyer}` : ""} on {(formatDate(manifest.extracted_at) ?? "—")}.{" "}
           {manifest.form_suite === "MBD"

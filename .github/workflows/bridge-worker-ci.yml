@@ -116,6 +116,14 @@ jobs:
           python3 engine/discovery/taxonomy.py check
           python3 engine/discovery/test_taxonomy.py
 
+      - name: Intake classification - manual tender-by-URL document routing, discipline-match messaging (offline fixtures)
+        if: ${{ !cancelled() }}
+        run: python3 engine/intake/test_classify_tender.py
+
+      - name: Template fingerprint - sheet-scoped named ranges disambiguated, not collapsed (offline synthetic workbook)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fingerprint.py
+
       - name: Award outcomes - parsing of eTenders/SANRAL award records (offline fixtures)
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_award_outcomes.py
@@ -139,6 +147,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_discovery_fanout.py
 
+      - name: Discovery document reader fallback - docx/doc reading and scanned note (offline fixtures)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_document_reader_fallback.py
+
       - name: Discovery downgrades - a re-score that makes a verdict worse is flagged (real sample PDFs)
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_discovery_downgrades.py
@@ -146,6 +158,14 @@ jobs:
       - name: Daily digest live mode - per-company scoring and per-company sections (in-memory rows, real sample PDFs)
         if: ${{ !cancelled() }}
         run: python3 engine/notify/test_digest_live.py
+
+      - name: Daily digest opt-in gate - migration 0073, opt-in not opt-out (pure function)
+        if: ${{ !cancelled() }}
+        run: python3 engine/notify/test_digest_opt_in.py
+
+      - name: Daily digest email delivery - Resend send/retry/dry-run, malformed-entry isolation (no network)
+        if: ${{ !cancelled() }}
+        run: python3 engine/notify/test_send_digest_emails.py
 
       - name: Tender updates - addenda classified from real documents, watch end to end, pursuers only (in-memory rows)
         if: ${{ !cancelled() }}
@@ -163,6 +183,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/test_sanral_b7.py
 
+      - name: Pack bridge sync functions - tender_requirements/B7-setup/position-suggestion writes (fake Supabase, real sample workbook)
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack/test_sync_functions.py
+
       - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
         if: ${{ !cancelled() }}
         run: python3 engine/security/test_tenant_isolation.py
@@ -178,6 +202,10 @@ jobs:
       - name: Form-field audit - no Klipcorp-shaped default on any SANRAL/general form field (real templates, un-Klipcorp-like company)
         if: ${{ !cancelled() }}
         run: python3 engine/test_form_field_audit.py
+
+      - name: SBD/MBD form filling - the four real Yes/No layouts, SBD4's assumed-default vs SBD8's never-assumed declarations (synthetic docx fixtures)
+        if: ${{ !cancelled() }}
+        run: python3 engine/general/test_fill_sbd_docx.py
 
   tenant-isolation-db:
     # Part 2 of engine/security/test_tenant_isolation.py: real RLS + the

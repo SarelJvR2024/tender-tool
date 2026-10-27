@@ -41,6 +41,7 @@ import os
 import sys
 import re
 import json
+import shutil
 import subprocess
 import tempfile
 import argparse
@@ -108,14 +109,21 @@ def _read_bounded(r, max_bytes=MAX_DOCUMENT_BYTES):
     return data
 
 
-def _download_to_tempfile(url, timeout, result_q, abandoned):
-    """abandoned: set by fetch_pdf_text once it has given up waiting (past the
-    wall-clock deadline) - this thread keeps running regardless (it is not
-    cancellable), so it must clean up its own temp file itself in that case
-    rather than queueing a path nobody will ever read and ask to delete."""
+def _download_to_tempfile(url, timeout, result_q, abandoned, suffix=".pdf"):
+    """abandoned: set by fetch_pdf_text (or fetch_document_text) once it has
+    given up waiting (past the wall-clock deadline) - this thread keeps
+    running regardless (it is not cancellable), so it must clean up its own
+    temp file itself in that case rather than queueing a path nobody will
+    ever read and ask to delete.
+
+    suffix: the real file extension (".docx"/".doc") when
+    fetch_document_text() is downloading a non-PDF document - LibreOffice's
+    --convert-to and python-docx both need a correctly-suffixed path to know
+    what they're opening; fetch_pdf_text's own call keeps the original
+    ".pdf" default."""
     tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp_path = tmp.name
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -196,6 +204,81 @@ def fetch_pdf_text(url, timeout=30):
             os.unlink(path)
         except OSError:
             pass
+
+
+# Real-corpus format mix (findings doc, 300 live releases, 2026-10-16):
+# pdf 476 / docx 35 / zip 25 / xlsx 7 / doc 5. Only docx/doc are handled here -
+# zip/xlsx aren't text-bearing tender documents in the same sense, and are out
+# of this fallback's scope (PR #118's own diagnosis named .docx/.doc
+# specifically as the live feed's gap; widening to zip/xlsx here would be
+# scope creep beyond that diagnosis).
+_FALLBACK_EXTS = ("docx", "doc")
+
+
+def fetch_document_text(url, timeout=30):
+    """Returns (text, fetch_error) - same honest-degrade contract as
+    fetch_pdf_text, for whichever of the live corpus's own document formats
+    `url` actually is. A .docx/.doc document - previously always run through
+    fetch_pdf_text's own pdftotext, which can only ever fail on a non-PDF
+    file - is instead downloaded (the same hardened, wall-clock-bounded
+    thread fetch_pdf_text uses, so a slow/hanging non-PDF host can't stall
+    the daily fan-out any differently than a slow PDF host already can't)
+    and read with engine/general/requirements.read_document() - the richer,
+    format-dispatching reader this engine already has, wired into manual
+    intake but never into this live feed before now (PR #118's own
+    diagnosis). Anything else - PDF, or a URL whose extension isn't
+    confidently docx/doc - goes through fetch_pdf_text exactly as before;
+    this function changes nothing about that path.
+
+    Deliberately does NOT run OCR: this function never routes a PDF through
+    read_document() (OCR there is PDF-only), and read_document()'s own
+    docx/doc branches never call OCR at all - so the daily fan-out stays
+    fast and lightweight, per this task's own scope. A docx/doc that comes
+    back as a pure scanned image (an embedded scan with no real text run -
+    read_document()'s own <50-real-character rule, the same one it applies
+    to a scanned PDF) is reported with a note specific to this unattended
+    batch context rather than read_document()'s own "read it by eye" wording
+    (which assumes a human is already reviewing it, true for manual intake,
+    not true here) - the real OCR pass still happens later, at intake."""
+    ext = os.path.splitext((url or "").split("?")[0])[1].lower().lstrip(".")
+    if ext not in _FALLBACK_EXTS:
+        return fetch_pdf_text(url, timeout=timeout)
+
+    deadline = timeout + 15
+    result_q = queue.Queue(maxsize=1)
+    abandoned = threading.Event()
+    t = threading.Thread(target=_download_to_tempfile, args=(url, timeout, result_q, abandoned, "." + ext), daemon=True)
+    t.start()
+    try:
+        status, value = result_q.get(timeout=deadline)
+    except queue.Empty:
+        abandoned.set()
+        return "", f"could not download document: stalled past {deadline}s (no response, or a trickling/hung connection)"
+    if status == "error":
+        if isinstance(value, (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError)):
+            return "", f"could not download document: {value}"
+        raise value
+    path = value
+    work_dir = tempfile.mkdtemp(prefix="discovery_docfallback_")
+    try:
+        general_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "general")
+        if general_dir not in sys.path:
+            sys.path.insert(0, general_dir)
+        import requirements as _requirements  # noqa: E402  (deferred: requirements.py itself imports this module at its own top level)
+        doc = {"name": os.path.basename(url or path), "path": path, "format": ext}
+        _requirements.read_document(doc, work_dir)
+        if doc.get("unreadable"):
+            reason = doc["unreadable"]
+            if reason.startswith("no text layer (scanned image)"):
+                return "", "Document is a scanned image — full text requires OCR during tender intake"
+            return "", reason
+        return doc.get("text") or "", None
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 def document_depth(text):
@@ -357,9 +440,16 @@ def assess_fit(categories, signals, depth, profile):
         # classify_tender.assess_fit_from_text() already worked around this
         # at its own call site; this is the same fix at the root, so every
         # caller (including the live OCDS discovery feed, which had no
-        # workaround) gets it.
-        reasons.append(f"Discipline ({labels(categories)}) matched, but the company has no disciplines "
-                        "recorded yet to compare against - needs a human look, not an automatic rejection.")
+        # workaround) gets it. The WORDING fix was only ever applied at that
+        # one call site though (a plain "has no disciplines recorded yet"
+        # told the live Discovery feed's own users nothing about where to
+        # fix it) - this is that same actionable wording, moved to the root
+        # so every caller gets it, matching this comment's own original
+        # intent. Sarel's own live feedback, 2026-10-23: "I see a lot [of
+        # this message]... this is not helpful."
+        reasons.append(f"Discipline ({labels(categories)}) matched, but your company has no disciplines on file "
+                        "yet (they come from your Experience Library tags) - needs a human look, not an "
+                        "automatic rejection.")
         verdict = "needs_review"
     else:
         reasons.append(f"Discipline ({labels(categories)}) doesn't match the company's known disciplines "
@@ -471,8 +561,9 @@ def read_release(release, fetch_document=True, max_documents=3, fetch_text=None)
     the Discovery fan-out (watch_new_tenders.py) scores the same reading for
     every company, so a buyer's server is asked for each document once, not
     once per company. `fetch_text(url) -> (text, error)` defaults to
-    fetch_pdf_text; a test passes its own."""
-    fetch_text = fetch_text or fetch_pdf_text
+    fetch_document_text (PDF, or a .docx/.doc fallback - see its own
+    docstring); a test passes its own."""
+    fetch_text = fetch_text or fetch_document_text
     categories = categorize(release.get("title"), release.get("description"),
                              release.get("procurement_category"))
     # The buyer's own eTenders category, as a cross-check only (audit O1):

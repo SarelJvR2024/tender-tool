@@ -4560,3 +4560,318 @@ than one Technical Submission workbook is uploaded. `sanral_files`/`sanral_docum
 AMBIGUOUS note were already correct and are unchanged. No schema or other call-site changes;
 `process_pack_jobs.py` (which reads `sanral_files`, not `signal`) was never affected by the bug and
 is untouched by the fix.
+
+### Finding 79 (CONFIRMED, FIXED, severe - the Submission Plan told a person to "Complete by hand" SBD 2, the tax clearance form on virtually every tender, directly contradicting its own detail text saying it was already satisfied from the vault)
+
+**Where:** `engine/general/submission_plan.py`'s `_form_step()`.
+
+**What was tested:** rotated to non-SANRAL pack (`engine/general`). PR #141 (the "Batch 2B" pass)
+merged into `main` since the last pass through this rotation, touching `assess_tender.py`'s
+`labels()` helper, 4 discovery sources' closing-time defaults, and `process_general_jobs.py`'s own
+closing-time placeholder (12:00 -> 11:00) - all already baked into the checked-out tree, no
+overlap to avoid. A sibling standing-review pass (same morning) already gave `fill_flat_pdf.py`'s
+prefix handling a thorough, confirmed-correct look, so picked a different file in the same area:
+`submission_plan.py` (236 lines, the "what do we actually have to go and do for this tender"
+compiler, Sarel's own framing 2026-10-21) - not given a dedicated adversarial look since its own
+regression test file was written. Read `_form_step()`, `_returnable_step()`, `compile_plan()`'s
+gap-de-duplication prefix logic end to end, checking each branch against every real status value
+its own upstream (`requirements.py`) can actually produce - not just the three `_form_step()`
+itself already names.
+
+**Finding (CONFIRMED, severe).** `requirements.py`'s own form-status assignment
+(`extract_requirements()`, ~line 1056) has FOUR real status values a form can carry, not three:
+`"auto"`, `"overlay"`, `"by_hand"` - and `"attach"`, assigned whenever `FORMS[code][1] ==
+"attach"`. Exactly one form code currently has that capability: `"2"` - "Tax clearance / tax
+compliance status" (SBD 2), required on essentially every South African public-sector tender.
+`_form_step()` only ever checked for `"auto"` and `"overlay"` explicitly; `"attach"` fell through
+to the generic `return {"status": "by_hand", "detail": f["reason"]}` at the bottom - despite
+`f["reason"]` for this exact status being the literal string *"Satisfied by the tax compliance
+status (TCS PIN) - attached from the vault."* The result, reproduced directly with a synthetic SBD
+2 bundle: a plan step titled "SBD 2 - Tax clearance / tax compliance status", status "Complete by
+hand", detail "Satisfied by the tax compliance status (TCS PIN) - attached from the vault." - the
+status label and the detail text of the SAME step directly contradict each other, on what is very
+likely the single most common form this engine ever classifies. Confirmed this isn't a stale or
+unused status: `build_general_pack.py` (the real pack builder) has its own explicit handling for
+`f["status"] == "attach"` (`form_results[f["code"]] = {"status": "from the vault"}`, no by-hand
+path at all) - proving the real, intended semantics of "attach" is "already satisfied", exactly
+what `_form_step()` should have mapped to `"ready"`, the same treatment `"auto"` already gets.
+
+**Fix:** `_form_step()` now treats `"attach"` the same as `"auto"` (`status in ("auto",
+"attach")` -> `"ready"`), matching `build_general_pack.py`'s own real-world treatment of the
+identical status value.
+
+**Verified the regression test actually catches the regression:** new synthetic-bundle test in
+`test_submission_plan.py` (an SBD 2 mention - no existing test in this file's SBD_BUNDLE fixture
+mentioned SBD 2 at all, which is exactly why this had gone unnoticed). Reverted the fix (`git apply
+-R`, keeping the new test): failed with the predicted status/detail contradiction; restored: `0
+failure(s)`. Full `test_submission_plan.py` (now covering this case) and the unrelated
+`test_requirements.py` re-run clean.
+
+**Regression:** `engine/general/submission_plan.py`'s `_form_step()` only - `"attach"`-status
+forms (SBD 2 today; any future form code given that same capability) now read "ready" instead of
+"by_hand". No schema or other call-site changes; `build_general_pack.py`'s own, already-correct
+`"attach"` handling is untouched.
+
+### Finding 80 (CONFIRMED, FIXED, severe - a real project with no captured position title printed the literal word "None" into a client-facing World Bank-format CV, the exact bug class this same function was already fixed for on its sibling fields)
+
+**Where:** `engine/cv/generate_cv.py`'s `build_world_bank()`, Employment Record section.
+
+**What was tested:** rotated to CV - the most overdue standing area (last dedicated pass the
+ninety-second run). PR #157 (draft, test-only additions to `engine/pack/process_pack_jobs.py`, from
+the pack-focused standing-review routine) and the `eb60f96` fingerprint fix (both already merged/in
+`origin/main`, both `engine/alerts`/`engine/pack` only) - no overlap with `engine/cv`. Read
+`generate_cv.py` end to end, specifically checking whether every "prints the literal word None"
+fix this function has already received (Finding 49, then the 2026-10-23/2026-10-25 follow-ups)
+was actually applied to every nullable field it touches, or only some of them - the same
+"did the earlier fix actually cover everywhere it needed to" question that found Finding 78 last
+cycle in a different file.
+
+**Finding (CONFIRMED, severe).** It wasn't. `build_world_bank()`'s Employment Record loop has a
+comment (just above it) explicitly listing which nullable project fields were fixed for Finding 49
+("start/end/value_rm/contact_name/contact_phone... all nullable columns... sailed straight through
+as the literal string 'None'") - `position_held` is not on that list, and the line just below still
+read `f"Position: {proj.get('position_held', '')} ..."` with no `or` guard at all.
+`position_held` is independently nullable (confirmed from `0001_init_schema.sql`'s own `projects`
+table, and from this exact file's OWN comment three lines above, on `build_sanral_keyperson()`'s
+sibling table-cell version of this field) - a real project captured with no position title reaches
+this line with the key PRESENT but value `None`, and since this is an f-string (not a direct
+`_safe_text(None)` call like the sibling table-cell version, which crashes instead - the 2026-10-23
+fix for THAT), Python silently renders `str(None)` = `"None"` into the paragraph, with nothing to
+crash and catch it. Reproduced directly: a project row with `position_held: None` produced a
+real CV paragraph reading `"Position: None    Value: R10m\nReferee: A Buyer  012 345 6789"`. Traced
+why both existing tests missed this exact gap: Finding 49's own regression test deliberately set
+`position_held="Site Engineer"` (a valid value, since it was testing the OTHER fields), and the
+2026-10-23 fix's own test only covers `build_sanral_keyperson()`, never `build_world_bank()`'s
+sibling field - the two tests' deliberate field choices structurally guaranteed this one slipped
+through both passes.
+
+**Fix:** `proj.get('position_held') or '?'` (matching the `'?'` placeholder this same f-string
+already uses for `start`/`end` one line above), same pattern already correctly applied to every
+other field in this loop.
+
+**Verified the regression test actually catches the regression:** new
+`test_world_bank_project_with_null_position_held_does_not_print_the_word_none()` in
+`test_generate_cv.py`. Reverted the fix (`git apply -R`, keeping the new test): failed with the
+exact predicted "Position: None" text; restored: `0 failure(s)`. Full `test_generate_cv.py` (now 11
+functions) and the unrelated `test_extract_cv_fields.py` re-run clean.
+
+**Regression:** `engine/cv/generate_cv.py`'s `build_world_bank()` only - the Employment Record
+section's `position_held` cell now reads "?" instead of "None" when the field is null.
+`build_sanral_keyperson()`'s own (already-correct) handling of the identical field is untouched.
+
+### Finding 81 (CONFIRMED, FIXED, severe - a company's explicit "Form B7 is waived" answer could be silently overridden by a stale legacy Targeted Enterprise, writing a false subcontracting declaration into the real submitted SANRAL workbook)
+
+**Where:** `engine/fill_tender.py` and `engine/fill_conventional.py` (identical logic, both fixed) -
+the Form B7 (Targeted Enterprise subcontracting) fill branch.
+
+**What was tested:** rotated to SANRAL pack - tied with discovery for most overdue, picked SANRAL
+pack. Open PRs checked: `#157` (draft, test-only additions to `process_pack_jobs.py`'s `sync_*`
+functions - avoided that file) and `#118` (draft, stale, `assess_tender.py`/`classify_tender.py` -
+not touched either way). A sibling pass (same day) had just fixed a DIFFERENT contradiction in
+`submission_plan.py`'s CIDB returnable step - same "two things in the same output disagree about
+the same fact" shape that's been a recurring theme this session, worth specifically hunting for
+elsewhere. Read `engine/sanral_b7.py` (B7 applicability/validation/fill) end to end first - it is
+extremely well-guarded, with its own self-check assertions - then its real callers
+(`fill_tender.py`/`fill_conventional.py`'s Form B7 branch, `assemble_pack.py`'s own B7
+orchestration) to see whether the INTENDED precedence rule `assemble_pack.py` itself already
+encodes is actually enforced where the cells get written.
+
+**Finding (CONFIRMED, severe).** It wasn't. Both fillers decide which Form B7 source to use with:
+`if (td.get("subcontracting_plan") or {}).get("mode") == "subcontract": <use the new plan> elif
+te: <use the legacy td["targeted_enterprise"] block>` - the legacy fallback fires whenever a
+`targeted_enterprise` block is present, REGARDLESS of whether an explicit `subcontracting_plan` of
+a DIFFERENT mode (most importantly `"waived_by_tender"` - the company's own, more authoritative
+"Book 1 says B7 isn't required" answer) also exists on the same pack.yaml. Confirmed this isn't
+purely theoretical: a real pack.yaml in this repo (`packs/r334-030-2025-1f.yaml`) has a `targeted_
+enterprise:` field literally named in its own comments as a once-real field ("omitted - Form B7
+confirmed NOT required"), proving the legacy single-TE format was real, hand-written data before
+`sanral_b7.py`/the Tender Workspace migration existed - a long-running tender whose pack.yaml
+predates that migration and is STILL in use today would carry exactly this shape, and the
+company's later, explicit "waived" answer (captured via the Tender Workspace Form B7 card) would
+silently lose to the untouched legacy block. `assemble_pack.py`'s own `b7_filled` bookkeeping
+(`bool(legacy_te) and not b7_plan`) ALREADY assumes the correct precedence rule ("the legacy block
+only applies when there's no explicit plan AT ALL") - this is the same shape of bug as Finding 78
+(a reporting layer's own assumption not matching what the real write path actually does), just
+with the real submitted SANRAL workbook as the thing that ends up wrong, not just a status message.
+
+Reproduced directly against a real sample (`templates/samples/R.334-030-2025.1F_ran.xlsm`,
+"Conventional" family): a pack.yaml with BOTH a legacy `targeted_enterprise` block ("Stale Legacy
+TE (Pty) Ltd") AND an explicit `subcontracting_plan` with `mode: "waived_by_tender"` ran through
+`fill_conventional.main()` and produced a workbook whose `TEND 1X!C3906` (the Targeted Enterprise
+name cell) read **"Stale Legacy TE (Pty) Ltd"** - a false subcontracting commitment physically
+written into the real Technical Submission workbook, directly contradicting the company's own
+explicit "this tender waives B7" answer, with nothing in the pack's own manifest/contents page
+aware of the mismatch (per `b7_filled`'s own, separately-correct computation, it believed B7 was
+NOT included).
+
+**Fix:** both fillers' legacy fallback condition changed from `elif te:` to `elif te and not
+td.get("subcontracting_plan"):` - the legacy block now only fires when there is no explicit plan
+of ANY mode, matching the precedence `assemble_pack.py` already assumed. An explicit
+`"subcontract"` plan, an explicit `"waived_by_tender"` plan, and the legacy-only case (an old
+pack.yaml with no Tender Workspace answer at all) were all re-verified to behave correctly.
+
+**Verified the regression test actually catches the regression:** new
+`engine/test_fill_b7_legacy_precedence.py` (no dedicated test file existed for either filler's
+Form B7 branch before this, confirmed by grep) - four cases (explicit waiver overrides legacy;
+legacy-only still fills, for back-compat; explicit subcontract plan still fills normally; neither
+present stays blank), driven directly against the real committed sample workbook. Reverted the fix
+(`git apply -R`, keeping the new test): failed exactly as predicted (the stale legacy name written
+despite the waiver); restored: `0 failure(s)`. `test_sanral_b7.py` and `test_form_field_audit.py`
+(which already exercises `fill_conventional.py` via `confirm_pack.py`) both re-run clean. No
+RRM-family sample workbook is committed to this repo to drive an identical end-to-end test of
+`fill_tender.py` (the RRM sibling filler) - its identical fix was verified by direct code
+inspection and the same manual repro technique used to confirm this finding, not a second
+end-to-end test.
+
+**Regression:** `engine/fill_tender.py` and `engine/fill_conventional.py`'s Form B7 branch only -
+one condition changed in each, same fix, same reasoning. No schema or other call-site changes;
+`sanral_b7.py`'s own functions and `assemble_pack.py`'s `b7_filled`/manifest reporting (already
+correct) are untouched.
+
+### Finding 82 (CONFIRMED, FIXED, moderate - a legacy .doc whose LibreOffice conversion produced a broken file raised an uncaught exception straight out of the document reader shared by discovery, intake and general-pack extraction)
+
+**Where:** `engine/general/requirements.py`'s `read_document()`, the `fmt == "doc"` branch.
+
+**What was tested:** a sibling standing-review pass (same day) had just merged PR #163 - a new
+`.docx`/`.doc` fallback reader for the live OCDS discovery feed (`assess_tender.fetch_document_text()`,
+routing non-PDF documents through `requirements.read_document()` instead of always failing on
+`pdftotext`) - and given it a real, direct review (ran the new test suite, confirmed its claims).
+Freshly-landed glue code wiring an EXISTING shared function into a NEW caller is exactly the shape
+this routine's own history keeps finding real bugs in (the sixty-second run's PayFast pass, this
+same reasoning). Read `read_document()` itself end to end, specifically checking whether the error
+handling around each of its format branches (`pdf`/`docx`/`doc`) is actually symmetric, since this
+exact asymmetry class (a guard applied to one branch, not its sibling) is what Findings 80 and 81
+both turned out to be.
+
+**Finding (CONFIRMED, moderate).** It wasn't symmetric. The `fmt == "docx"` branch wraps its
+`docx_text(doc["path"])` call in `try/except Exception as e: doc["unreadable"] = f"python-docx
+could not open it: {e}"` (handling "corrupt / not really a docx", per its own comment). The
+`fmt == "doc"` branch's own call to the SAME `docx_text()` function - on `conv`, LibreOffice's
+own `.doc` -> `.docx` conversion output - has no such guard, and `convert_with_soffice()` only
+checks that the output path EXISTS (`os.path.exists(out)`), never that LibreOffice actually wrote
+a readable docx; it also never checks the subprocess's own return code. An unusual legacy `.doc`
+feature that makes `soffice` exit non-zero while still leaving a truncated or empty file at the
+expected output path (not reproduced from a real `.doc` sample - no committed sample triggers it -
+but simulated with a monkeypatched `convert_with_soffice()` returning a path to a genuinely broken
+file, the same "exists but isn't valid" shape) raises `docx.opc.exceptions.PackageNotFoundError`
+straight out of `read_document()`, uncaught. This function is shared by three real callers: the
+brand-new discovery fallback (`fetch_document_text()`, no guard around its own call to
+`read_document()` either), the pre-existing manual-intake pipeline, and general-pack extraction -
+all three inherit the same gap, not just the new one. Confirmed the actual blast radius for
+discovery specifically: `watch_new_tenders.py`'s `fan_out()` already wraps each release's
+`read_release()` call in a per-release `try/except` inside its thread pool, so this degrades to a
+generic `"ERROR"` verdict plus a `system_alerts` entry for that one tender rather than crashing the
+whole daily discovery run - real, but moderate, not severe.
+
+**Fix:** wrapped `text = docx_text(conv)` in the `fmt == "doc"` branch with the same
+`try/except Exception as e: doc["unreadable"] = f"..."` pattern the sibling `docx` branch already
+uses, naming the conversion (not python-docx generically) as the problem since the file itself
+came from `soffice`, not the original upload.
+
+**Verified the regression test actually catches the regression:** new case in the sibling's own
+`test_document_reader_fallback.py` (monkeypatching `requirements.convert_with_soffice()` to return
+a path to a deliberately broken "converted" file, then calling the real
+`assess_tender.fetch_document_text()` against a real `.doc` sample). Reverted the fix (`git apply
+-R`, keeping the new test): the test script itself crashed with the exact predicted
+`PackageNotFoundError` traceback, uncaught; restored: `0 failure(s)`, all 18 pre-existing checks
+plus the 2 new ones. `engine/general/test_requirements.py` (the shared function's own existing
+suite) re-run clean.
+
+**Regression:** `engine/general/requirements.py`'s `read_document()` only - one `try/except`
+added around the `fmt == "doc"` branch's conversion-output read. No schema or other call-site
+changes; every caller (discovery's new fallback, manual intake, general-pack extraction) now
+degrades honestly on this path instead of raising.
+
+### Finding 83 (CONFIRMED, FIXED, moderate - the identical asymmetric-exception-guard bug from Finding 82 existed independently in the onboarding document classifier's own, separate document reader)
+
+**Where:** `engine/onboarding/classify_documents.py`'s `read_document_text()`.
+
+**What was tested:** rotated toward worker/job-queue (most overdue untouched area after a sibling's
+thorough same-day review of compliance/CV), but `poll_loop.py`/`run_bridges.py`/`system_alerts.py`/
+`check_system_alerts.py` were already given a dedicated adversarial look at this session's own run
+96 (Finding 77) with nothing further to add. Widened to the shared job-queue CONTRACT across every
+bridge instead (`poll_once()`'s claim/process/store shape, same as `cv/process_cv_jobs.py`'s), and
+picked `engine/onboarding/process_onboarding_jobs.py` - never reviewed this session - as the least
+covered. Its own module docstring says it reuses `extract_cv_fields.py`'s Supabase/Storage helpers
+but deliberately does NOT reuse `requirements.py`'s `read_document()` for the actual text
+extraction - `classify_documents.py` has its own, separate implementation
+(`read_document_text()`), explicitly because the CV/general-pack failure wording would be wrong
+here. Given Finding 82 (this same session, one cycle earlier) just found an asymmetric
+exception-guard bug in `requirements.py`'s own `.doc`/`.docx` handling, worth checking whether this
+SEPARATE, parallel implementation of the same idea repeated the same mistake independently.
+
+**Finding (CONFIRMED, moderate).** It did, verbatim. `read_document_text()`'s `ext == "docx"`
+branch wraps `docx_text(path)` in `try/except Exception as e: raise ClassificationFailed(f"This
+.docx file could not be opened ({e})...")`. The `ext == "doc"` branch's own call to the SAME
+`docx_text()` function - on `conv`, LibreOffice's `.doc` -> `.docx` conversion output - has no
+such guard, and (same root cause as Finding 82) `convert_with_soffice()` only checks the output
+path exists, never that LibreOffice wrote a valid docx. Reproduced directly with the identical
+technique as Finding 82 (a monkeypatched `convert_with_soffice()` returning a path to a genuinely
+broken file): `read_document_text()` raised `docx.opc.exceptions.PackageNotFoundError` straight out,
+uncaught, instead of the clean `ClassificationFailed` its own sibling branch would give for the
+exact same root problem. Traced the blast radius: the real bridge
+(`process_onboarding_jobs.py`'s `process_upload()`) already has a generic `except Exception`
+around the whole call, so this degrades to a less-specific "Classification hit an unexpected
+error" message rather than crashing the poll cycle - but the local CLI (`classify_documents.py`'s
+own `main()`/`run_local_file()`) only catches `ClassificationFailed`/`SetupError`/`TransientError`
+specifically, so this exact exception would have crashed the CLI tool outright with a raw
+traceback, not the "ERROR: ..." it gives every other failure mode.
+
+**Fix:** wrapped `docx_text(conv)` in the same `try/except` -> `ClassificationFailed` pattern the
+sibling `docx` branch already uses, naming the conversion (not python-docx generically) as the
+problem.
+
+**Verified the regression test actually catches the regression:** new case in
+`test_classify_documents.py`'s `test_text_extraction()` (monkeypatching `convert_with_soffice()`
+the identical way Finding 82's own test does). Reverted the fix (`git apply -R`, keeping the new
+test): the test script crashed with the exact predicted `PackageNotFoundError` traceback;
+restored: `0 failure(s)`, full suite (including the queue-plumbing/stale-reclaim cases at the end)
+passing. `test_process_onboarding_jobs.py` re-run clean.
+
+**Regression:** `engine/onboarding/classify_documents.py`'s `read_document_text()` only - one
+`try/except` added around the `doc` branch's conversion-output read, same shape as Finding 82's
+fix in the unrelated `requirements.py`. No schema or other call-site changes.
+
+### Finding 84 (CONFIRMED, FIXED, moderate - a third independent occurrence of Findings 82/83's exact bug, this time in the CV-upload AI field-extraction pipeline)
+
+**Where:** `engine/cv/extract_cv_fields.py`'s `read_cv_text()`.
+
+**What was tested:** at the end of the prior cycle's report (Finding 83), flagged a proactive
+follow-up worth doing: grep the whole repo for every other reader built on the same
+`docx_text()`/`convert_with_soffice()` primitives, since two independent occurrences of the
+identical mistake in one session is a real pattern, not a coincidence worth leaving unchecked.
+`grep -rln "convert_with_soffice\|docx_text(" engine/ --include="*.py"` (excluding test files)
+found exactly two more callers beyond the two already fixed: `engine/general/build_general_pack.py`
+(only calls `convert_with_soffice()` directly for its own PDF-conversion needs, never `docx_text()`
+on the result - not this pattern) and `engine/cv/extract_cv_fields.py` - the CV-upload AI
+field-extraction pipeline (`extract_from_file()` -> `read_cv_text()`), never reviewed for this
+specific bug class this session.
+
+**Finding (CONFIRMED, moderate).** Found it, verbatim, a third time. `read_cv_text()`'s `ext ==
+"docx"` branch wraps `docx_text(path)` in `try/except Exception as e: raise ExtractionFailed(f"This
+.docx file could not be opened ({e})...")`. The `ext == "doc"` branch's own call to the SAME
+`docx_text()` function - on LibreOffice's conversion output - has no such guard, same root cause
+as Findings 82/83 (`convert_with_soffice()` only checks the output path exists). Reproduced with
+the identical technique: a monkeypatched `convert_with_soffice()` returning a path to a genuinely
+broken file made `read_cv_text()` raise `docx.opc.exceptions.PackageNotFoundError` straight out,
+uncaught, instead of the clean `ExtractionFailed` its own sibling branch gives for the identical
+problem. This is the CV-upload pipeline specifically - a company uploading a legacy `.doc` CV for
+a key person is a realistic, not rare, real-world shape.
+
+**Fix:** same `try/except` -> `ExtractionFailed` pattern as the sibling `docx` branch, Finding 82's
+fix, and Finding 83's fix.
+
+**Verified the regression test actually catches the regression:** new case in
+`test_extract_cv_fields.py`'s `test_failure_modes()` (identical monkeypatch technique as Findings
+82/83). Reverted the fix (`git apply -R`, keeping the new test): the test script crashed with the
+exact predicted `PackageNotFoundError` traceback; restored: `0 failure(s)`, full suite passing
+(including the queue-plumbing/OCR/SA-ID-redaction cases). `test_generate_cv.py` (sibling CV area,
+unaffected) re-run clean.
+
+**Regression:** `engine/cv/extract_cv_fields.py`'s `read_cv_text()` only - one `try/except` added
+around the `doc` branch's conversion-output read, same shape as Findings 82 and 83's fixes in the
+two unrelated files. No schema or other call-site changes.
+
+**Grep now confirmed clean**: every caller of `docx_text()` in this repo (`requirements.py`,
+`classify_documents.py`, `extract_cv_fields.py`) now guards both its `docx` and `doc` branches
+identically. No further occurrence of this pattern exists to find.

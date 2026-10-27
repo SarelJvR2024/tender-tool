@@ -105,6 +105,25 @@ def test_text_extraction(tmp):
     expect_fail(lambda: cd.assess_text_quality("□■#$%&*+=" * 60 + "ab"), "garbled", "garbled font encoding")
     expect_fail(lambda: cd.assess_text_quality("word " * 40000), "far more than one compliance document", "far too long")
     expect_fail(lambda: cd.read_document_text(os.path.join(tmp, "x.pages"), tmp), "can't be read", "unsupported format")
+
+    # Finding (2026-10-27): the "docx" branch above already guards docx_text() against a
+    # corrupt file - the "doc" branch's own call to the SAME function on LibreOffice's own
+    # conversion output didn't. convert_with_soffice() only checks the output path EXISTS,
+    # never that LibreOffice actually wrote a readable docx, so a broken conversion raised a
+    # bare PackageNotFoundError straight out of read_document_text() instead of the clean,
+    # user-facing ClassificationFailed every other failure mode here gets. Simulated (no real
+    # .doc sample known to trigger this in LibreOffice itself) by monkeypatching
+    # convert_with_soffice() to return a path to a genuinely broken "conversion".
+    broken_docx = os.path.join(tmp, "broken_conversion.docx")
+    with open(broken_docx, "wb") as f:
+        f.write(b"not a real docx file, just garbage bytes")
+    real_convert = cd.convert_with_soffice
+    cd.convert_with_soffice = lambda path, target_ext, out_dir: broken_docx
+    try:
+        expect_fail(lambda: cd.read_document_text(os.path.join(tmp, "legacy.doc"), tmp),
+                    "could not be read", "a .doc whose LibreOffice conversion produced a broken file")
+    finally:
+        cd.convert_with_soffice = real_convert
     return docx_path
 
 

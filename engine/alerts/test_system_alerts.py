@@ -87,6 +87,15 @@ def part1():
           == fp("cv", "job 9c01ffff-1111-4111-8111-111111111111 failed after 75 minutes")
           and fp("cv", "x failed") != fp("pack", "x failed") and fp("cv", "a failed") != fp("cv", "b failed"),
           "fingerprint: same failure with other ids/numbers = one alert; other source or message = another")
+    # A Python object's repr (e.g. the tail of a traceback) commonly embeds a
+    # "0x..." memory address - different every process run even for the exact
+    # same underlying failure. \b[0-9a-f]{12,}\b alone misses this: there is
+    # no word boundary between "x" and the hex digits that follow it (both
+    # are \w characters), so the hex run falls through to the digit-only
+    # blanking instead and leaves the letters in place, differing per run.
+    check(fp("pack", "job failed: <Workbook object at 0x7f8a3c2d1e40> could not be closed")
+          == fp("pack", "job failed: <Workbook object at 0x55b19a001230> could not be closed"),
+          "fingerprint: a '0x...' memory address is blanked the same as any other hex id")
 
     fake = FakeSupabase().start()
     try:

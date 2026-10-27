@@ -143,13 +143,26 @@ def classify_release(client, release_key, log=print):
             doc_entries.append({"name": r.get("document_title") or r.get("document_url"), "format": ext, "_local": local})
 
         if not doc_entries:
+            if fetch_errors:
+                # At least one of these WAS a workbook/.docx classify_documents()
+                # could look inside - it just couldn't be re-fetched from
+                # Storage this run (object moved/deleted since download, or a
+                # transient error). Distinct from "every downloaded file is a
+                # PDF" below: say so honestly, and keep the real error instead
+                # of letting it vanish past this early return.
+                signal = (f"{len(fetch_errors)} of {len(downloaded)} downloaded document(s) looked like a "
+                          "workbook or .docx form, but couldn't be re-fetched from storage just now - see "
+                          "unreadable_documents.")
+            else:
+                signal = (f"{len(downloaded)} document(s) downloaded, none of them a workbook or .docx form "
+                          "classify_documents() can look inside (PDFs, mostly) - nothing to route on yet.")
             return {
                 "release_key": release_key, "source": source, "buyer": buyer,
                 "route": "general", "family": None,
-                "signal": f"{len(downloaded)} document(s) downloaded, none of them a workbook or .docx form "
-                          "classify_documents() can look inside (PDFs, mostly) - nothing to route on yet.",
+                "signal": signal,
                 "required_documents": [], "missing": [], "fingerprint_status": None,
-                "unreadable_documents": [], "failed_downloads": failed_count,
+                "unreadable_documents": [f"(storage fetch failed) {e}" for e in fetch_errors],
+                "failed_downloads": failed_count,
                 "document_count": len(downloaded),
             }
 

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { HashAwareLink } from "./hash-aware-link";
 import { Info } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { loadTenderCompliance } from "./compliance-data";
@@ -119,12 +120,38 @@ export async function ComplianceReport({ tenderId }: { tenderId: string }): Prom
 
   const documents = (
     <div id="compliance-check" style={card}>
-      <SectionTitle title="Compliance check - required documents" />
+      {/* QA finding, 2026-10-26: trimmed from an always-visible 3-sentence
+          paragraph to one line + the full explanation on demand - same
+          Tooltip pattern narrative-documents.tsx already uses for its own
+          "how this is written" explainer, for consistency. */}
+      <div className="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span>
+          Checked against your company vault on the closing date - <strong>Fix</strong>, <strong>Provide</strong> or{" "}
+          <strong>Verify</strong>.
+        </span>
+        <Tooltip>
+          <TooltipTrigger aria-label="What Fix, Provide and Verify mean" className="inline-flex size-4 flex-none items-center justify-center rounded-full text-muted-foreground">
+            <Info size={14} aria-hidden />
+          </TooltipTrigger>
+          <TooltipContent className="max-w-xs text-left font-normal">
+            SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria.{" "}
+            <strong>Fix</strong> items would disqualify the bid at Stage 2 if left as is. <strong>Provide</strong>{" "}
+            items only you can supply. <strong>Verify</strong> items are already filled from your vault - just
+            confirm them.
+          </TooltipContent>
+        </Tooltip>
+      </div>
       <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 12 }}>
-        SANRAL&apos;s returnable-documents list (Part T2.1) and mandatory administration criteria, checked against your
-        company vault on the closing date. <strong>Fix</strong> items would disqualify the bid at Stage 2 if left as is.{" "}
-        <strong>Provide</strong> items only you can supply. <strong>Verify</strong> items are already filled from your
-        vault - just confirm them.
+        {/* QA finding, 2026-10-26: attendance at the compulsory briefing session is
+            an action to complete, not a document to have on file - it belongs with
+            the other tasks, tracked with its own real status/due date, not re-labelled
+            into this list's document vocabulary. Plain <a>, not <Link>: same-page hash
+            into a different tab - see hash-aware-link.tsx's own doc comment. */}
+        Attendance at the compulsory briefing session is tracked as a task, not a document - see{" "}
+        <a href="#tasks-milestones" style={{ color: "var(--accent)", fontWeight: 600 }}>
+          Tasks &amp; milestones
+        </a>
+        .
       </div>
       {fixCount > 0 && (
         <div className="border border-destructive/40 bg-destructive/10 text-destructive" style={{ borderRadius: 9, padding: "10px 14px", marginBottom: 12, fontSize: 12, fontWeight: 600 }}>
@@ -580,9 +607,9 @@ function BidTaskRow({
             triggerLabel={`${task.fixLabel} →`}
           />
         ) : (
-          <Link href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: fixColor }}>
+          <HashAwareLink href={task.fixHref} style={{ fontSize: 12, fontWeight: 600, color: fixColor }}>
             {task.fixLabel} →
-          </Link>
+          </HashAwareLink>
         )}
       </div>
     </div>

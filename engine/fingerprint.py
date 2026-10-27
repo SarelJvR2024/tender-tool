@@ -78,12 +78,32 @@ def dropdown_counts(wb):
 
 
 def named_ranges(wb):
+    """{key: range-formula}, one entry per <definedName>. A sheet-scoped name
+    (localSheetId set - Excel auto-creates one of these PER SHEET for e.g.
+    _xlnm.Print_Area the moment any sheet has ever had a print area set, so
+    the same name repeats across sheets with genuinely different ranges) is
+    keyed as "name#sheetN" so same-named entries from different sheets don't
+    collide; a workbook-scoped name (no localSheetId) keeps its bare name,
+    unchanged from before. Confirmed reachable, not hypothetical: the real
+    committed baseline (fingerprints/Conventional_Consultant_Tender.json)
+    already shows exactly one _xlnm.Print_Area despite this being a
+    multi-sheet workbook - the old plain-name-keyed dict silently dropped
+    every sheet's own print area but the last one written, so a change to
+    any OTHER sheet's print area (or any other sheet-scoped name) was
+    invisible to this fingerprint's diff - directly against this module's
+    own stated job. QA pass, 2026-10-27."""
     N = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     root = wb._xml("xl/workbook.xml")
     dn = root.find("m:definedNames", N)
     if dn is None:
         return {}
-    return {d.get("name"): "".join(d.itertext()) for d in dn}
+    out = {}
+    for d in dn:
+        name = d.get("name")
+        scope = d.get("localSheetId")
+        key = f"{name}#sheet{scope}" if scope is not None else name
+        out[key] = "".join(d.itertext())
+    return out
 
 
 def cell_layout_hashes(wb):

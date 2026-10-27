@@ -75,6 +75,867 @@ enabled until that gap is closed or Sarel explicitly accepts the gap.
 
 ---
 
+**2026-10-27 ~12:17 UTC — standing review pass: found a real contract violation in the Tender
+Command Center's dispatch triage — `director_resolution` fires on routine work items, not just
+genuine disqualification risks. Documented for Sarel's own call, NOT fixed this pass (needs a
+small refactor, not a one-line patch).** Orientation: `git fetch origin main` showed no new commits
+since this routine's own last pass (`2ee1e9c`) — local HEAD already matched `origin/main` exactly.
+Three open PRs (`#164` savings-counter rework, `#165` pre-demo defect fixes, `#166` notification
+migration + savings-calculator fix) all read in full via the GitHub API — all three correctly still
+draft/unmerged, none overlapping the file reviewed this pass. Stayed clear of the self-merge
+incident PRs.
+
+**The finding, traced end to end, not assumed from a comment:** `lib/dispatchTriage.ts`'s own
+`DecisionInput` type documents `hasRealFixBlocker` explicitly as "a real Disqualification Guard
+'Fix' item, not fabricated" — the signal `deriveDecisionNeeded()` uses to decide whether a tender
+closing within 7 days needs `director_resolution` (the brief's own "a director needs to personally
+resolve this" escalation, the most urgent of the two real decision types this module computes).
+The one real caller, `lib/dispatchDashboard.ts`'s `loadDispatchCards()`, instead sets
+`hasRealFixBlocker: !!blockingStep` where `blockingStep` comes from `tenderNextStep.ts`'s
+`nextStepFor()` — a *different*, much broader function ("the one concrete, unfinished thing for
+this tender's pack", its own docstring) that returns non-null for routine, non-disqualifying
+situations: no submission pack started yet, compliance not yet checked at all, a key position still
+needing a person confirmed, a general-pack item merely flagged `needs_input`. None of these are a
+genuine Disqualification Guard "Fix" item (`app/tenders/[id]/disqualification-guard.tsx`'s own
+narrower `fixCount`, built from `classifyComplianceItem()`/`bidTaskStatus === "fix"` specifically -
+"Would disqualify", not "you still need to do this").
+
+**Real, reachable impact**: any active bid closing within 7 days with ANY outstanding next-step item
+at all - which is most active bids most of the time - gets escalated to `director_resolution` and
+lands in the Dashboard's "Decision" bucket, the lane the brief's own design explicitly reserves for
+genuine disqualification risk needing a director's personal call. This is live in production (PR
+#132, merged earlier this session) - not a draft feature. The practical effect: the Decision lane is
+very likely far noisier than intended, which undermines exactly the "the system speaks to you, only
+when it's real" trust the whole Command Center feature is built around (same stated design goal as
+`operationalStatusMessage()`'s own header comment in the same file).
+
+**Why this isn't fixed in this pass**: the one real source of a genuine fix-count
+(`DisqualificationGuard()` in `disqualification-guard.tsx`) is itself an async React Server
+Component that mixes data-fetching with JSX rendering - there's no pure, importable function
+computing just `fixCount` today. A correct fix means extracting that computation into a shared pure
+function both `DisqualificationGuard()` and `loadDispatchCards()` import (same "never a second
+number that could disagree" rule this codebase already follows everywhere else), verifying the
+extraction doesn't change `DisqualificationGuard()`'s own rendered output, and wiring it into the
+dashboard's per-tender loop. That's a real refactor touching a live, already-shipped UI screen, not
+a safe one-line patch to rush through without Sarel seeing the shape of it first - flagged plainly
+instead, per this routine's own standing rule to document a judgment call rather than force a fix.
+
+**QA tooling**: sound - no application code touched this pass, no regression risk from this entry.
+
+**Backlog waiting on Sarel, re-confirmed this pass, nothing new resolved**: migration `0096`
+(pack-quota trial-expiry), the `narrative_documents` PostgREST schema-cache reload, a PayFast
+idempotency design question (not urgent), the "missing ISO 9001 flagged as urgent" UX question, the
+expected `fingerprint.py` `named_ranges` baseline-mismatch heads-up (not a regression), and now this
+`director_resolution` over-triggering finding.
+
+---
+
+**2026-10-27 ~10:24 UTC — standing review pass: a real drift fixed between two same-purpose SACNASP
+position-detection regexes, plus a missing-`.ts`-extension bug on the file that blocked testing it
+directly.** Orientation: `git fetch origin main` showed one new commit since this routine's own last
+pass (`1026f3a`, a sibling QA routine's `fill_sbd_docx.py` coverage close, unrelated) - confirmed by
+reading the log, local checkout fast-forwarded to match before starting. Three open PRs (`#164`,
+`#165`, `#166`, all draft) read via the GitHub API, correctly left unmerged, none overlapping the
+file touched here. Stayed clear of the ongoing self-merge incident PRs entirely, per the standing
+guardrail.
+
+**The finding**: `app/lib/tenderCompliance.ts`'s `specialistOf()` - which decides whether a SANRAL
+key position is checked against the real engineering-geologist SACNASP minimum (Pr Sci.Nat, SAIEG,
+5 years) instead of falling back to the generic ECSA Pr Eng/Pr Tech Eng requirement - tested only a
+narrow ad-hoc `/geolog/i` against the position's own free-text description. `app/lib/
+personCredentials.ts` already exports `SACNASP_POSITION_RE` (`/geolog|natural\s+scien|pr\.?\s*sci\.?
+\s*nat/i`) for this exact same purpose, used by `registrationsAskedFor()` to decide whether SACNASP
+fields show on the People page - and `specialistOf()` already imports and correctly shares `
+SACQSP_POSITION_RE`/`SAGC_POSITION_RE` from the same module for the sibling quantity-surveyor/
+surveyor checks, just not this one. A position whose SETUP description is extracted as (e.g.) "Design
+Specialist 2 - Natural Scientist" or names "Pr Sci.Nat" directly, without the literal substring
+"geolog", would correctly surface SACNASP fields on the People page but silently fall back to the
+wrong (generic ECSA) minimum requirement here - a real "two writers that could disagree" split this
+codebase otherwise avoids deliberately (CLAUDE.md's own standing rule). `position_description` is
+free text extracted per-tender from each buyer's own SETUP sheet (`engine/pack/process_pack_jobs.py`
+`p["description"]`), not a fixed enum, so this isn't guaranteed never to come up, though no real
+committed fixture in this repo happens to phrase it that way today - documented honestly as a code-
+level inconsistency confirmed by direct comparison, not as "observed live."
+
+**Fix**: `specialistOf()` now imports and uses `SACNASP_POSITION_RE` the same way it already uses the
+other two position regexes - a pure widening (every string matching the old `/geolog/i` still matches
+the new regex, its first alternative), so no existing "geolog"-phrased match changes.
+
+**A second, separate bug found while adding a test for this**: `tenderCompliance.ts`'s own `import
+{ closingDayOf, daysUntil, formatDate } from "./dates"` (no `.ts` extension) broke `node
+--experimental-strip-types --test` on a freshly-written test file for this exact module - the
+established, previously-documented bug class (`lib/printCutoffReminders.ts`'s own `./dispatchTriage`
+import, fixed earlier in this session) biting a module that had simply never been run that way before
+since it had zero test coverage. Tracing the import chain surfaced a second instance one level
+deeper: `personCredentials.ts` imported `dates.ts` via the `@/lib/dates` alias, which plain
+`node --experimental-strip-types` can't resolve at all (no tsconfig "paths" support, same documented
+limitation `disciplineTaxonomy.ts`'s own header comment already states for this reason). Both fixed
+to relative, extension-qualified imports; this does not change runtime behaviour for Next.js's own
+bundler (which already resolved both forms), only unblocks direct-node execution.
+
+**New test file**: `app/lib/tenderCompliance.test.ts` (this module had zero test coverage of any
+kind before this pass - flagged as a QA-routine candidate, not built out further than this one fix's
+own regression coverage). Verified properly: reverted `specialistOf()`'s fix alone (not the import
+fixes) first - confirmed exactly the 2 predicted tests (`Natural Scientist` / `Pr Sci.Nat` positions)
+failed with the exact predicted wrong requirement, the other 4 (literal "Geologist", generic
+fallback, quantity-surveyor, surveyor orderings) stayed green - restored, confirmed all 6/6 pass.
+
+**Pushed directly to `main`, no PR, no self-merge**: `app/lib/tenderCompliance.ts`,
+`app/lib/personCredentials.ts`, `app/lib/tenderCompliance.test.ts`, this file - per the guardrail
+added 2026-10-25 after the self-merge incident: a small, safe, fully-verified fix goes straight to
+`main`, never a self-merged PR.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing warnings),
+`npx vitest run` 202/202 (unchanged - no vitest-covered file touched), the new `tenderCompliance.test.ts`
+6/6 via `node --experimental-strip-types --test`, and every other `*.test.ts` file re-run directly to
+confirm the two import fixes (`dates.ts`/`personCredentials.ts`) caused no regression elsewhere.
+
+**Backlog waiting on Sarel, unchanged by this pass** (confirmed, not assumed - each is still exactly
+as the prior entry below describes it): migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question, and the `fingerprint.py` named_ranges
+fix from two passes ago (expect a baseline mismatch on the next real SANRAL fingerprint check - not a
+regression).
+
+---
+
+**2026-10-27 ~08:28 UTC — standing review pass: clean sweep of `lib/dealEconomics.ts` (Pipeline's
+"Price & credit" form + the pricing-history page), zero new bug, zero test coverage flagged.**
+Orientation: `git fetch origin main` showed one new commit since this routine's own last pass
+(`a46b199`) - `728685a`, the Edge-case QA routine's Finding 84 (CV-upload extraction, unrelated area,
+no overlap). Confirmed the local checkout was 1 commit behind and fast-forwarded before starting,
+per this routine's own standing habit after getting burned twice before. Two open PRs (`#164`
+savings-counter rework, `#165` four pre-demo defect fixes) read via the GitHub API, both correctly
+still draft/unmerged - no self-merge this round, and neither touches `lib/dealEconomics.ts`, so no
+file collision either.
+
+**Reviewed in depth, no fix needed**: traced every function in `dealEconomics.ts` by hand against
+real inputs rather than skimming - `parseRand()`'s SA-vs-US thousands/decimal disambiguation (a
+single comma followed by exactly 1-2 digits reads as decimal, anything else as a thousands
+separator), `parsePercent()`'s rejection of a negative or out-of-range value, and `commissionRand()`'s
+`Math.round(price * pct) / 100` - which looks like a bug at a glance (multiply-then-round-then-divide
+instead of the more obvious divide-then-round) but is mathematically identical to rounding
+`price * pct / 100` to the nearest cent, confirmed by working through a non-integer example
+(R1,234,567.89 at 7.5%) by hand. `derivedSector()`'s hardcoded `"roads_civil"` SANRAL fallback is
+still a real, current taxonomy slug (checked directly against `config/discipline_taxonomy.json`, not
+assumed from memory - this exact slug was the subject of a 2026-10-18 group-tag-matching regression
+elsewhere in this codebase, so worth confirming rather than trusting it's still valid).
+
+**Flagged, not built**: this file has zero test coverage anywhere (`ls`+`grep` both confirm no
+`dealEconomics.test.ts` and no other test file imports from it) despite handling real money -
+commission percentages and rand amounts a company member types in, on a live pricing-history record.
+Same shape as `sanralScoring.ts`'s own zero-coverage finding from an earlier pass in this same
+routine - a good candidate for the Edge-case QA routine's rotation, not built here since the logic
+itself checked out correct and a light pass shouldn't invent new test infrastructure around code
+that isn't currently broken.
+
+**Pushed directly to `main`, no PR, no self-merge**: `docs/specs/System-Status.md` only - commit
+TBD (this entry).
+
+**QA tooling**: sound - no application code touched this pass, so no suite re-run needed beyond
+confirming the repo's own last-known-green baseline (185+/185+ vitest, 0 lint errors, 3
+pre-existing warnings) is unchanged by this doc-only commit.
+
+**Backlog, re-stated not re-verified live this pass**: migration `0096` (pack-quota trial-expiry),
+the `narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question, and the `fingerprint.py` named_ranges
+fix from two passes ago (expect a baseline mismatch next real SANRAL fingerprint check - not a
+regression) - all still waiting on Sarel's own next look.
+
+---
+
+**2026-10-27 ~06:17 UTC — standing review pass: a real diagnostic-loss bug fixed in the discovered-
+opportunity document classifier, reproduced with a dedicated regression test.** Orientation: `git
+fetch origin main` showed no new commits since this routine's own last pass (`eeb216d`) - local
+checkout confirmed on the real tip before starting. Two open PRs (`#164` savings-counter rework,
+`#165` four pre-demo defect fixes) read in full, both correctly left as unmerged drafts, neither
+overlapping this pass. Stayed clear of the self-merge incident PRs, per the standing guardrail.
+
+**The finding**: `engine/discovery/opportunity_requirements.py`'s `classify_release()` downloads
+each release's documents fresh from Supabase Storage every time it runs (a separate read step from
+the original `download_discovered_documents.py` download), to classify them. When a document the
+`discovered_opportunity_documents` table says is `status='downloaded'` turns out to no longer be
+fetchable from Storage right now (the object moved/was deleted after the original download, or a
+transient Storage error on this particular run) - a real, reachable scenario since this script can
+run long after the original download - the fetch failure was recorded in `fetch_errors` but then
+**silently discarded**: the early-return branch for "nothing ended up classifiable" always claimed
+`"none of them a workbook or .docx form classify_documents() can look inside (PDFs, mostly)"`,
+even when the actual document genuinely WAS a workbook/.docx that just couldn't be re-fetched - and
+`unreadable_documents` (the field `app/lib/compileReadiness.ts` already docks the compile-readiness
+score for, `-25: N document(s) could not be opened at all`) was hard-coded to `[]` in this branch,
+so the real problem never reached that penalty or the admin review UI at all. Reproduced directly
+(not assumed): added a 404-on-fetch case to `test_opportunity_requirements.py` seeding a
+`status='downloaded'` `.xlsm` row whose storage object was deliberately never written, confirmed the
+exact predicted wrong signal text and empty `unreadable_documents` before the fix, both corrected
+after it. **Fix**: when `fetch_errors` is non-empty, the signal now says so honestly ("N of M
+downloaded document(s) looked like a workbook or .docx form, but couldn't be re-fetched from storage
+just now") and the real fetch-error strings are included in `unreadable_documents` - the exact same
+list-of-strings shape the success path already used for this field, so no downstream type change.
+
+Verified: `test_opportunity_requirements.py` - all checks pass, including the new case 7 (previously
+2 failures, matching the predicted wrong behaviour exactly). Confirmed via grep that
+`compileReadiness.ts`'s own `unreadable_documents?: string[] | null` type and `-25` scoring logic,
+and `intake-card.tsx`'s rendering, are untouched by this change in shape - this fix makes an
+existing, already-wired penalty/display path actually fire for this case, not a new feature.
+`test_download_discovered_documents.py` (adjacent module) re-run clean. `tsc --noEmit`/`eslint`
+clean (no TypeScript touched) - same 3 pre-existing warnings as every prior pass.
+
+**Pushed directly to `main`, no PR, no self-merge**: `engine/discovery/opportunity_requirements.py`,
+`engine/discovery/test_opportunity_requirements.py`.
+
+**Backlog confirmed, not assumed, unchanged**: migration `0096` (pack-quota trial-expiry) still
+outstanding; the `narrative_documents` PostgREST schema-cache reload not re-checked this pass; the
+PayFast idempotency design question still open, still not urgent; the "missing ISO 9001 flagged as
+urgent" UX question from two passes ago still open; the `fingerprint.py` `named_ranges` fix from
+three passes ago will still show a baseline mismatch on the next real SANRAL fingerprint check -
+expected, not a regression.
+
+---
+
+**2026-10-27 ~04:15 UTC — standing review pass: a real SANRAL intake gap fixed and reproduced
+against a genuine uploaded tender form, not a synthetic one.** Orientation: `git fetch origin main`
+showed one new commit since this routine's own last pass (`2580263`, Finding 83 - the onboarding
+document reader's own `.docx` fallback had the same gap Finding 82 already fixed elsewhere - no
+overlap). Local checkout confirmed on the real tip before starting (fast-forwarded 1 commit). Two
+open PRs (`#164` savings-counter rework, `#165` 4 pre-demo defect fixes) read in full, both correctly
+left as unmerged drafts, neither overlapping this pass. Stayed clear of the self-merge incident PRs
+entirely, per the standing guardrail.
+
+**The finding**: `engine/intake/classify_tender.py`'s `_docx_head()` read only the first 60
+paragraphs of an uploaded `.docx` to classify which SANRAL form it is (C.1.1.1 Form of Offer,
+C.1.2.3 Contract Data, or the A-Forms/returnable schedules bundle). Checked against every real SANRAL
+form sample already committed in `templates/forms/*/` rather than guessing - 5 of 6 real
+`A_Forms.docx` samples match comfortably inside that window, but
+`templates/forms/R.352-020-2025.1F/A_Forms.docx` doesn't: its own "Part T2: Returnable Schedules"
+heading sits at paragraph 521 of 2104, behind a long notes/table-of-contents section other buyers'
+packs don't carry. With the old cap, this genuinely real, genuinely uploaded document was silently
+classified as "not found" - the SANRAL pack would report the A-Forms bundle as missing to a company
+that had, in fact, uploaded it.
+
+**The fix**: raised the cap from 60 to 5000 paragraphs - not a number tuned to this one file, but a
+generous safety margin given every other real sample matches well inside the first 100. Reading the
+largest real sample in the repo under the new cap takes 0.3s, no performance concern for a step that
+already does heavier work (fingerprinting, OCR fallback). Still a cap, not an unconditional full read,
+so a pathological/corrupted `.docx` can't make this read unboundedly large.
+
+**Verified properly, not just read**: added `test_real_a_forms_heading_deep_in_the_document_is_still_found()`
+to `engine/intake/test_classify_tender.py`, using the real committed file directly (not a synthetic
+stand-in, following this test file's own established convention of reusing real template samples).
+Reverted the fix first to confirm the new test fails with the exact predicted result (the document
+reported as "Not found among the uploaded documents"), restored to confirm all 9 tests in this file
+pass. `py_compile` clean on both touched files.
+
+**Pushed directly to `main`, no PR, per the standing guardrail**: `engine/intake/classify_tender.py`,
+`engine/intake/test_classify_tender.py` - a self-contained, test-covered Python fix, not a schema
+change and not a UI change needing visual review.
+
+**Backlog, confirmed not assumed**: migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question from the previous pass, and the
+`fingerprint.py` `named_ranges` fix from two passes ago (expect a baseline mismatch on the next real
+SANRAL fingerprint check - that's the fix surfacing real data for the first time, not a regression) -
+all still waiting on Sarel, none newly resolved or newly added this pass.
+
+---
+
+**2026-10-27 ~02:13 UTC — standing review pass: no code change, a genuine open product question
+surfaced instead of forced into a code fix.** Orientation: `git fetch origin main` showed one new
+commit since this routine's own last pass (`bcc3236`, a sibling QA routine closing
+`send_digest_emails.py`'s zero test coverage - no overlap). Local checkout confirmed on the real
+tip before starting. Two open PRs, both read in full and correctly left as unmerged drafts: `#164`
+(savings-counter capacity-messaging rework) and `#165` (4 pre-demo production defect fixes) -
+neither overlaps anything reviewed this pass. Stayed clear of the self-merge incident PRs entirely,
+per the standing guardrail.
+
+**What was reviewed, at real depth, and why it's a flag rather than a fix**: `app/lib/documentExpiry.ts`
+(the Company Vault's "N documents need attention before your next bid" overview, last touched
+2026-10-21 - the oldest-untouched file among several candidates checked) and its one UI caller,
+`app/app/company/DocumentExpiryOverview.tsx`. The code itself is correct and does what its own
+header comment says: it deliberately shows MORE than the topbar bell (`lib/notifications.ts`'s
+`getNotifications()`), which explicitly skips any field with no date at all
+(`withinWindow()`'s `daysLeft !== null` guard, and `held_registrations`' own `.not("expiry_date",
+"is", null)` filter) - the vault overview instead surfaces a genuinely-missing date as its own
+`"missing"` status, on purpose, per its own comment ("unknowns...itself a gap worth seeing").
+
+The real question, not a bug in the code as written: `DocumentExpiryOverview.tsx`'s `needsAttention`
+count treats `"missing"` as equally attention-worthy as `"expired"`/`"expiring_soon"`, for all 7
+`COMPANY_EXPIRY_FIELDS` uniformly - including `iso_9001_expiry`. ISO 9001 certification is
+optional/quality-scoring (worth 5-10 SANRAL functionality points per
+`Tender-Evaluation-Engine-Audit.md`'s own finding), not a universal compliance requirement the way
+SARS TCS PIN or COID are - most SA tendering SMEs legitimately never have one and may never need
+one. As built, a company in that position will see "1 document needs attention before your next
+bid" permanently, for a document that may never apply to them, with no way to dismiss or mark it
+not-applicable. Checked `docs/specs/Document-Expiry-Tracked-Fields-Open-Item.md` first, since its
+name looked directly on-point - it resolves a different, already-closed question (which fields got
+real expiry columns at all, 2026-10-16), not this one. This may be entirely intentional (nudging a
+company toward a document that genuinely helps its functionality score, framed the same as a hard
+compliance gap) rather than a design oversight - that's Sarel's own call to make, not something to
+guess at and build around either way. Not touched.
+
+**QA tooling**: confirmed sound, unchanged - no code modified this pass (`tsc`/`eslint` baseline
+unaffected).
+
+---
+
+**2026-10-27 ~00:14 UTC — standing review pass: a real, already-occurring fingerprint blind spot
+fixed in `engine/fingerprint.py`'s `named_ranges()` - confirmed in the real committed baseline, not
+hypothetical.** Orientation: `git fetch origin main` showed no new commits since this routine's own
+last pass (`023a8f7`) - local HEAD matched `origin/main` exactly. Two open PRs (`#164` savings-counter
+rework, `#165` four pre-demo production defect fixes) read in full and confirmed correctly left as
+unmerged drafts, neither touching anything this pass reviewed.
+
+**The finding**: `named_ranges()` built its dict as `{d.get("name"): "".join(d.itertext()) for d in dn}`
+over every `<definedName>` in the workbook. Excel auto-creates a SHEET-SCOPED defined name
+(`localSheetId` attribute set) the moment any sheet ever has its own print area set - `_xlnm.Print_Area`
+being the standard example - so a multi-sheet workbook very normally carries several entries that all
+share the exact same `name` but genuinely different ranges, one per sheet. The plain-name-keyed dict
+comprehension silently collapsed all of them down to whichever one iterated last, discarding every
+other sheet's own value entirely before it ever reached the stored fingerprint - directly against this
+module's own one stated job ("refuses to proceed silently on any mismatch," Sarel's own rule, quoted
+in this file's own header). **Not hypothetical**: the real committed baseline
+(`fingerprints/Conventional_Consultant_Tender.json`) already shows exactly one `_xlnm.Print_Area`
+entry despite this being SANRAL's genuinely multi-sheet Conventional Consultant Tender workbook -
+confirmed directly by reading that file, not assumed. Reproduced further with a minimal synthetic
+`.xlsm` built in-memory (two sheets, each with its own `_xlnm.Print_Area`): `named_ranges()` returned
+exactly 1 key instead of 2, and a `diff()` comparison with one sheet's print area changed and the
+other's unchanged showed **no difference at all** under the old code - the exact silent-miss this
+module exists to prevent.
+
+**The fix**: a sheet-scoped name is now keyed as `"name#sheetN"` (using its own `localSheetId`), so
+same-named entries from different sheets no longer collide; a workbook-scoped name (no `localSheetId`)
+keeps its bare name, unchanged from before - confirmed the one other real entry in the committed
+baseline (`MarkupCost`, workbook-scoped) round-trips identically. Verified properly: reverted the fix
+first (`git stash`) and confirmed the new test fails with the exact predicted result (3 of 6 cases),
+restored and confirmed all 6 pass. Grepped the rest of the codebase for any other reader of
+`named_ranges()`'s output keyed by a specific name - none exists; it's only ever compared as a whole
+dict inside `diff()`, so this is a safe, self-contained change.
+
+**New test file added, since none existed for this module at all**: `engine/test_fingerprint.py` (6
+cases - the collision reproduction, a workbook-scoped name staying unchanged, an empty
+`<definedNames>`, and a direct `diff()` check that a single sheet's own change is now actually
+caught). Registered as its own step in `bridge-worker-ci.yml`, matching this repo's existing
+one-step-per-test-file convention - it was not previously discovered by anything automatic.
+
+**Real, honest operational consequence - not silently absorbed**: the next real SANRAL Conventional
+Consultant Tender processed will very likely show a `named_ranges` **mismatch** against the existing
+committed baseline, purely because the baseline was computed with the old under-counting logic and
+now genuinely carries fewer keys than a correct re-computation would. This is the fingerprint check
+working as designed - Sarel's own rule is that any mismatch stops the pack run and needs a person to
+check and update the baseline - but it's worth knowing in advance that this specific mismatch, when it
+shows up, is this fix surfacing previously-hidden sheets' own print areas for the first time, not a
+sign the real template itself changed. A fresh, correct baseline can be regenerated at that point by
+deleting the stored file and letting the next run's "no baseline yet" path re-seed it (same as any
+other legitimate baseline update) - **not done here**, since this sandbox has no live tender to
+fingerprint against, and overwriting the one real committed baseline from a synthetic test would
+replace real data with fabricated data.
+
+**Pushed directly to `main`, no PR**: `engine/fingerprint.py`, `engine/test_fingerprint.py`,
+`.github/workflows/bridge-worker-ci.yml`, this file.
+
+**QA tooling**: sound - `py_compile` clean on both Python files touched, `engine/test_fingerprint.py`
+6/6, no TypeScript touched.
+
+**Backlog unchanged, re-confirmed from this file rather than assumed**: migration `0096`
+(pack-quota trial-expiry) still outstanding; the `narrative_documents` PostgREST schema-cache reload
+status not re-checked this pass; the PayFast idempotency design question still open, still not
+urgent.
+
+---
+
+**2026-10-26 ~22:16 UTC — standing review pass: clean sweep of the deadline-watch engine and the
+CV-generation bridge, no new bug found; two draft PRs confirmed left correctly unmerged.**
+Orientation: `git fetch origin main` showed one new commit since this routine's own last pass
+(`3ade4a0`) - `1b466b8`, Finding 82 (a broken `.doc`→`.docx` conversion raised uncaught from
+`read_document()`), unrelated area, no overlap. Two open PRs, both correctly left as unmerged
+drafts (not another self-merge instance) - #164 (savings-counter rework) and #165 (4 pre-demo
+production defect fixes: a WhatsApp RSC client-boundary crash, a savings-calculator period
+mismatch, two fake `tendertool.co.za` mailboxes switched to the real, already-live
+`support@tenderready.app`, and glued demo-candidate text) - both read in full to confirm neither
+touches anything this pass would, not assumed from the title.
+
+**Reviewed in depth, no fix needed**: `engine/compliance/watch_deadlines.py` (document/person-
+credential/task deadline reminders, the sibling this routine hadn't read end to end since
+`registration_reminders.py`'s own company_id-patching was traced two passes ago) and
+`engine/cv/process_cv_jobs.py` (the CV-generation bridge between `generated_cvs` and
+`generate_cv.py`). Both are already heavily self-documented with real, dated findings from prior
+QA passes (malformed-date guards, the PostgREST 1000-row pagination fix, the closing-day UTC
+conversion fix, the path-traversal guard on a person's own name) - read every one of those claims
+against the actual code rather than trusting the comments, and they all held up. Specifically
+checked whether `process_cv_jobs.py --self-test` (its own adapter-correctness check, not a
+`test_*.py` file a pattern-based CI sweep would catch automatically) was actually wired into
+`bridge-worker-ci.yml` rather than assuming it from the filename - confirmed it is (line 88).
+
+**QA tooling**: sound - `py_compile` clean on both files read, `tsc --noEmit`/`eslint` unaffected
+(no TypeScript touched). No application code changed this pass.
+
+**Backlog unchanged, not re-verified live this pass**: migration `0096` (pack-quota trial-expiry),
+the `narrative_documents` PostgREST schema-cache reload, and the PayFast idempotency design
+question (not urgent) - all still waiting on Sarel.
+
+---
+
+**2026-10-26 ~20:16 UTC — standing review pass: gave real review to two previously-unreviewed
+self-merged PRs instead of hunting a fresh bug elsewhere; both check out sound.** Orientation:
+`git fetch origin main` showed 12 new commits since this routine's own last pass (`9fb3e33`) - local
+checkout was fast-forwarded before anything else. No open PRs at all right now (`list_pull_requests`
+state=open returned empty) - nothing to collide with.
+
+Two substantial PRs landed since the last pass, both merged with zero reviews (`get_reviews`
+returned `[]` for each - two more self-merge instances, not investigated or reverted, same as every
+other one this file already documents):
+
+- **PR #159** (dashboard/onboarding fixes) - the PR body claims a real cross-company dashboard-stats
+  leak (Home's "Active bids"/"Closing this week" cards counting every company's tenders, not just
+  the logged-in company's own pursued ones, because `tenders` is deliberately a shared, non-tenant-
+  scoped table and the old code never filtered to rows with a real `tender_packs` entry). Read
+  `lib/dashboardStats.ts` directly rather than trusting the PR prose: the fix is real and correctly
+  scoped - `myTenderRows()` filters to rows with a real pack, and `app/dashboard/page.tsx` actually
+  uses `myRows` (not raw `rows`) for both the stat counts and the fresh-company empty-state check.
+  Ran `lib/dashboardStats.test.ts` directly - 8/8 pass, including the exact "10 unpursued rows a
+  naive count would sweep in" shape the PR describes as the real bug. Sound.
+- **PR #163** (discovery .docx/.doc fallback reader) - `fetch_document_text()` routes a `.docx`/
+  `.doc` tender attachment through `engine/general/requirements.read_document()` instead of always
+  trying `pdftotext` (which can't read non-PDF files at all) in the live daily discovery feed. Ran
+  the new `test_document_reader_fallback.py` directly rather than trusting the commit message - all
+  18 checks pass against real `.docx`/`.doc`/scanned-image sample files, with genuine evidence (real
+  extracted character counts, real content substring checks), not just "no exception raised". Sound.
+
+**Not acted on**: PR #118 (discovery scoring, previously logged here as stale/draft) is no longer
+open - it was resolved and merged (`9b461a8`) in the same stretch; nothing left to track on it.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing warnings
+- `Logo.tsx`'s `<img>` tags, `analytics/page.tsx`'s unused `STAGE_META`). No code touched this pass
+(review-only; both PRs' own fixes already shipped before this pass started).
+
+**Backlog, re-confirmed from this file's own prior entries, not assumed**: migration `0096`
+(pack-quota trial-expiry) and the `narrative_documents` PostgREST schema-cache reload are both still
+outstanding - not independently re-verified live this pass. The PayFast idempotency design question
+remains open and not urgent.
+
+---
+
+**2026-10-26 ~18:16 UTC — standing review pass: a real cross-component bug fixed (the WhatsApp
+floating widget built a broken link whenever the configured number had any formatting), QA sound,
+no collisions.** Orientation: `git fetch origin main` showed 4 new commits since this routine's own
+last pass (`92f04f3`) - PR #162 (WhatsApp footer link made clickable + widget extended to `/tools`
+and its calculators), merged with zero reviews (`get_reviews` returned `[]` - a further self-merge
+instance, not investigated or reverted, same as every other one this file already documents). Three
+open PRs checked and avoided: `#159` (dashboard/onboarding fixes, draft, real and well-verified per
+its own PR body), `#157` (pack bridge test-only additions, draft), `#118` (discovery scoring, draft,
+stale) - none collided with this pass's own work.
+
+**The bug**: the floating `WhatsAppContactButton` (`components/public/whatsapp-contact-button.tsx`,
+landed via the self-merged PRs #160-162) and the home page's own footer WhatsApp link (`app/page.tsx`)
+both read the same `NEXT_PUBLIC_WHATSAPP_NUMBER` env var, but only the footer link's code stripped
+it to digits-only (`number.replace(/\D/g, "")`) before building the `wa.me/` URL - the floating
+widget used the raw env-var string directly. A phone number typed into an env var with its natural
+formatting ("+27 82 123 4567" - spaces and a leading "+", exactly how a person would type it) would
+produce a malformed `https://wa.me/+27 82 123 4567?...` link from the widget while the footer's own
+link to the *same number* worked correctly - confirmed directly (not assumed) by constructing both
+URLs side by side with a realistic formatted value. Found by comparing the two call sites of the
+same env var directly against each other, since neither one in isolation reads as wrong.
+
+**Fix**: `whatsapp-contact-button.tsx` now strips to digits the same way `app/page.tsx` already
+does - one source of sanitization logic duplicated correctly instead of one correct and one
+missing, rather than extracting a shared helper for a two-line regex. Verified: `tsc --noEmit`/
+`eslint` clean on the changed file, full `npx vitest run` 202/202 unchanged (no existing coverage of
+this component to begin with - a real gap worth a future pass, not built here to stay scoped), and
+the before/after URL construction demonstrated directly with a realistic formatted number.
+
+**Pushed directly to `main`, no PR, no self-merge**: `app/components/public/whatsapp-contact-button.tsx`.
+
+**Backlog waiting on Sarel, re-confirmed not assumed**: migration `0096` (pack-quota trial-expiry,
+still outstanding), the `narrative_documents` PostgREST schema-cache reload (not re-checked this
+pass, don't assume it's cleared), and the PayFast idempotency design question (not urgent, still
+open).
+
+---
+
+**2026-10-26 ~16:17 UTC — standing review pass: no fix, a real test-coverage gap flagged instead
+of forced into a weak finding.** Orientation: `git fetch origin main` showed 3 new commits since
+this routine's own last pass (`e27e380`) - Finding 81 (a legacy TE field could override an explicit
+Form B7 waiver, already fixed by the Edge-case QA routine), and PR #160 (WhatsApp contact widget on
+the public site), merged with zero reviews (`get_reviews` returned `[]` - a further self-merge
+instance, not investigated or reverted, same as every other one this file already documents). Four
+open PRs checked and avoided: `#161` (WhatsApp widget refinements, draft, builds on #160), `#159`
+(dashboard/onboarding fixes, draft), `#157` (pack bridge test-only additions, draft), `#118`
+(discovery scoring, draft, stale) - none collided with this pass's own work.
+
+**The finding**: `app/lib/sanralScoring.ts` (341 lines) - the engine behind "does this bid clear
+SANRAL's functionality threshold", shown live on `/tools/b6-estimator` and the tender workspace's
+own compliance report (`compliance-data.ts`, `compliance-report.tsx`) - has **zero test coverage,
+direct or indirect**. Confirmed by searching every actual caller (`compliance-data.ts`,
+`compliance-report.tsx`, `B6EstimatorClient.tsx`, `tenderCompliance.ts`) and finding no test file
+for any of them either. This is real money/bid-decision logic - a wrong `outlook` ("clears" /
+"cannot_clear" / "depends") reaching a customer is a materially different risk than a cosmetic UI
+bug, and nothing here would catch a regression.
+
+Read the whole file looking for a concrete bug to fix rather than just reporting the coverage gap,
+and found one genuine correctness question, but couldn't establish it's actually reachable: when
+more than 6 key positions have an unknown SANRAL "managerial" flag (`estimateSanralConventional`'s
+own `unknownIdx`), the code deliberately stops brute-forcing all `2^n` combinations and checks only
+"all managerial" vs "all non-managerial" as the two bounds (`scenarios = ... <= 6 ? 1 << n : 2`).
+Because making a position managerial changes both the numerator (adds `manPos`, which can be 0) and
+the denominator (`managementMax` 15→30) together, the true min/max of the ratio isn't guaranteed to
+sit at either all-same extreme - a mixed combination could in principle score more extreme than
+both. **Not fixed**: `MAN_POSITION_COLUMNS` (PL/CE/RE/RM + toll equivalents, the only codes that can
+even be managerial) means this needs more than 6 of specifically those position types on one
+tender's Form B1 to ever engage the >6 branch at all - real SANRAL tenders this repo has templates
+for run one PL plus a handful of DS-class (never-managerial) specialists, so this is very unlikely
+to be reachable in practice. Noted here rather than built around a case I can't demonstrate actually
+happens, and rather than silently left for the next pass to rediscover.
+
+**Not acted on this pass**: writing the missing test suite itself - this needs real SANRAL matrix
+fixtures (multiple positions, multiple projects, both managerial-known and -unknown cases) built
+carefully against the actual Book 1 source the file's own header cites, not assembled quickly as a
+light-touch pass's afterthought. A solid candidate for either a dedicated follow-up or the Edge-case
+QA routine's own rotation.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings). No code touched this pass.
+
+**Backlog, re-confirmed from this file's own prior entries, not assumed**: migration `0096`
+(pack-quota trial-expiry) and the `narrative_documents` PostgREST schema-cache reload are both still
+outstanding - not independently re-verified live this pass. The PayFast idempotency design question
+remains open and not urgent.
+
+---
+
+**2026-10-26 ~14:33 UTC — standing review pass: fixed a false "Ready" claim in
+`engine/general/submission_plan.py`'s `compile_plan()` for a CIDB grading requirement - scoped to
+the Python module, verified NOT reachable from the deployed app, which already handles this
+correctly.** Orientation: `git fetch origin main` showed 16 new commits since this routine's own
+last pass (`af59b6d`) - the big one being PR #156 (Tender Workspace: RequirementRow wiring,
+contradictory-badge fixes, confidence %, cover-page print, buyer pill), merged with zero reviews
+(`get_reviews` returned `[]` - a further self-merge instance, not investigated or reverted per the
+standing guardrail, same as every other one this file already documents). Also landed: Finding 80
+(`build_world_bank()` printing the literal word "None"), and a System Admin Command Center feature
+that was reverted once and reapplied as its own split PR. Three open PRs checked and avoided: `#159`
+(dashboard/onboarding fixes, draft), `#157` (pack bridge test-only additions, draft), `#118`
+(discovery scoring, draft, stale) - none collided with this pass's own work.
+
+**The finding**: `compile_plan()`'s returnables loop produces a generic "CIDB registration /
+grading" step for the `cidb` returnable (keyword match on the bare word "CIDB" anywhere in the
+text) *in addition to* the dedicated `cidb_grading` step (triggered when a specific grading number,
+e.g. "7GB", is actually found) - and in practice these fire together almost every time a specific
+grading is named, since the grading sentence itself contains the word "CIDB". The generic step's
+own status logic only ever asked "does the company have ANY grading on file at all", marking it
+**"ready" the moment any grading exists - even one well below what's required**. Reproduced live
+with the test suite's own existing SBD_BUNDLE fixture (company has 5GB on file, tender requires
+7GB+): the dedicated step correctly showed `review - "confirm this actually meets or exceeds 7GB"`,
+while the generic step simultaneously showed **`ready - "Company CIDB grading on file: 5GB."`** -
+genuinely contradictory, false-confidence information about the exact same fact, sorted near the
+bottom of the plan (where "ready" items sit) where a skimming user would read it as resolved.
+
+**Important correction made before claiming user-facing impact, not assumed**: `compile_plan()` is
+NOT reachable from the deployed Next.js app - confirmed by reading `submission-plan-logic.ts`'s own
+header comment and the architecture decision it cites (2026-10-21, already recorded in this file):
+every "read the manifest, classify it" screen computes fresh in TypeScript against the
+already-stored manifest, never by calling this Python module live. The live TS port
+(`submission-plan-data.ts` + `generalTender.ts`'s `checkReturnable()`) keeps the CIDB returnable
+(**"is a document on file for this tender"**) and the CIDB grading-comparison step (**"does the
+grading actually meet the requirement"**) as two *deliberately* separate concerns -
+`checkReturnable()`'s own "cidb" case only ever says "CIDB grading X on file" / "attach the
+certificate", never "meets the requirement" or "ready" in the misleading sense this Python bug
+produced. Confirmed directly by reading both files, not inferred. So this is a real conflation bug
+in the Python reference implementation (the one other code is explicitly documented as being
+*ported from*, and the one a local CLI dry run exercises), not a live, user-facing one - worth
+having fixed for that reason, but not reported as more impactful than it actually is.
+
+**The fix**: the generic "cidb" returnable step is now skipped when `manifest.get("cidb")` is
+truthy (a specific grading was found) - the dedicated step is strictly more informative in that
+case (names the actual grading, never claims "ready" without a human confirming the comparison) and
+wins; the generic step still shows on its own when only a bare "CIDB" mention exists with no
+specific number to anchor a dedicated step. Two new regression cases added to
+`test_submission_plan.py` (one per branch); reverted the fix first to confirm the new case fails
+with the exact predicted result (16 steps, both present) before restoring it (15 steps, only the
+dedicated one) - full suite re-run clean (`python3 engine/general/test_submission_plan.py`), plus
+`test_requirements.py`, `test_process_general_jobs.py`, `test_general_bridge.py` (all unaffected,
+confirmed clean) and `tsc`/`eslint` (no TypeScript touched).
+
+**Pushed directly to `main`, no PR, no self-merge**: `engine/general/submission_plan.py`,
+`engine/general/test_submission_plan.py`.
+
+**Backlog re-confirmed, not re-verified live this pass** (unchanged from last pass): migration
+`0096` (pack-quota trial-expiry) still outstanding, the `narrative_documents` PostgREST
+schema-cache reload status not re-checked, PayFast idempotency design question still open and not
+urgent. Migrations `0093`/`0094`/`0095`/`0098` already confirmed genuinely resolved in earlier
+passes.
+
+---
+
+**2026-10-26 ~12:17 UTC — standing review pass: fixed a false "compulsory briefing" claim in an
+unused-by-the-live-sender but still-rendered email template; backlog re-confirmed against two real
+billing fixes that landed this pass (not self-reported, read directly).** Orientation: `git fetch
+origin main` showed 5 new commits since this routine's own last pass (`eb60f96`) - two real billing
+fixes (`e4047af`/`ce52b88`, blocking a silent sandbox PayFast checkout + dropping an unproven
+"we will email you" promise + a button label-clipping fix, all from a different session,
+`session_01Vd1T9z64NZpeXgC6pWcWny`) and a correction entry (`6af4cac`) resolving migration `0098`'s
+backlog status as genuinely live, confirmed via a direct RPC call against production rather than
+assumed from the merged PR alone - read both diffs directly rather than trusting the commit
+messages alone, per this routine's own standing caution after a real misreporting incident two
+nights ago. Local checkout was 5 commits behind `origin/main`; fast-forwarded before starting, per
+the stale-checkout habit this routine adopted after getting burned twice. One open PR, `#157`
+(draft, test-only additions to `engine/pack/process_pack_jobs.py`) - avoided that file entirely to
+not collide with it. Stayed clear of the self-merge incident PRs, as directed.
+
+**The finding**: `lib/emailTemplatesTier1.ts`'s `briefingReminderDetailedEmail()` - not the live
+sender's own briefing template (`send-operational-alerts.ts` calls `briefingReminderEmail()` from
+`lib/emailTemplates.ts` instead; this one exists only for `scripts/render-email-samples.ts`'s
+preview set, per a documented 2026-10-23 PR-collision rename, this file's own earlier entry on that)
+- hardcoded "Compulsory Briefing" in its subject/action text and, worse, stated as unconditional
+fact in a bold red line: "Failure to attend disqualifies your bid automatically." This directly
+contradicts the exact honesty principle `lib/briefingReminders.ts`'s own header comment documents in
+detail: `tenders.briefing_date`/`briefing_time` never records whether a briefing is actually
+compulsory once a tender is pursued, so claiming it is would be a fabricated fact - which is
+precisely why the LIVE template (`briefingReminderEmail`) correctly hedges ("Check the tender notice
+for whether attendance is compulsory"). This dead-to-the-live-sender template still gets rendered
+and likely reviewed by Sarel via the preview script, so a false, alarming claim sitting in it is a
+real problem even though no customer currently receives it. **Fix**: reworded the subject action,
+attendance label, bold warning line, `.ics` description, and plain-text fallback to the same honest
+hedge the live template already uses - "Check the tender notice for whether attendance is
+compulsory - some buyers disqualify a bid automatically for a missed compulsory briefing" - true
+regardless of which specific tender this fires for. Verified: `tsc --noEmit` clean, `eslint` clean
+(0 errors), `npx vitest run` 194/194 (no spec file exists for this exact module; confirmed no other
+test references the old wording via a repo-wide grep before and after). No live sender behavior
+changed - this function isn't wired into any scheduled job.
+
+**Backlog, re-confirmed against this pass's own direct reads, not carried forward unchanged**:
+migration `0096` (pack-quota trial-expiry) still outstanding - not touched by this pass's PRs.
+Migration `0098` - confirmed live (see the correction entry directly below this one; not repeating
+it here). `narrative_documents` PostgREST schema-cache status - not re-checked this pass, don't
+assume it's cleared since the last confirmed check. PayFast idempotency design question - still
+open, still not urgent (unrelated to the two sandbox-checkout fixes that landed this pass, which
+fixed UI/route-level gating, not the webhook redelivery dedupe question itself).
+
+**QA tooling**: sound - `tsc`/`eslint`/`npx vitest run` all clean, matching `main`'s real current
+baseline (194 tests, up from 189 two passes ago - new coverage landed from sibling sessions' own
+work, not a regression).
+
+---
+
+**2026-10-26 ~12:00 UTC — PR #156: 6 of 7 targeted review fixes pushed (commit `7c8a21f`), re-tested
+against real tenders GG12700238 and N.007-030-2026/1F; 1 fix explicitly not done, for a stated reason.**
+A relayed review (claimed to be Sarel's own, against the Vercel preview of PR #156 - the tender-
+workspace wire-up pass) listed 7 fixes to make before approval, with explicit constraints: no rewrite,
+no splitting admin work out again, don't touch migration 0098. Verified the premise before acting on
+it (per this file's own standing "weigh, don't blindly trust" rule for cross-session/relayed input) -
+each of the 7 findings was independently re-derived from the actual code, not taken on faith:
+
+1. **Cross-tab anchor links didn't switch tabs** - confirmed root cause: `next/link`'s `<Link href="#x">`
+   navigates via `history.pushState`, which never fires the native `hashchange` event
+   `workspace-tabs.tsx`'s `WorkspaceTabs` listens for to switch tabs (a real, well-known Next.js/browser
+   quirk, not a guess - a plain `<a href="#x">` fires it correctly, and both styles already coexisted in
+   this codebase). Found 2 same-page `<Link>` hash jumps in `general-workspace.tsx` and 3 more dynamic
+   ones (`fixHref`/`changeHref`, which mix same-page hashes like `#tender-templates`/`#form-b7`/
+   `#key-positions` with real cross-page paths like `/company#bee-cidb` in the same field) in
+   `compliance-report.tsx`, `pack-review.tsx`, `general-pack-review.tsx`. Fixed with plain `<a>` for the
+   first case and a new `HashAwareLink` helper (`app/app/tenders/[id]/hash-aware-link.tsx`) for the
+   mixed case - picks `<a>` for a same-page hash, `<Link>` for a real route. Tested (`hash-aware-link.spec.ts`).
+2. **Misleading blocked-document flow** - for a general-family tender with no manifest read yet, "Team &
+   CVs" could render completely empty (`generalSections.people` was a bare `null`, and nothing else fills
+   that tab for a general-family tender) - now explains why and points at Overview's read-documents
+   action. Separately, a manifest where every document came back `unreadable` gave a dead-end "No
+   supporting documents named in the readable text" with zero indication anything had gone wrong - now
+   names the real reason and offers "Try reading the documents again" (+ an upload pointer for a shared
+   tender).
+3. **Deadline/countdown math wasn't actually shared** - `app/app/tenders/[id]/page.tsx` carried its own
+   independently-drifted local copies of `lib/dates.ts`'s exported `closingCountdown()` (missing the
+   remaining-hours breakdown the shared one has) and `daysUntil()` (as a locally-defined `taskDaysLeft()`,
+   byte-for-byte the same logic under a different name) - both deleted in favour of the one shared,
+   tested implementation. Added direct `daysUntil()` coverage (date-only/already-overdue matrix) to
+   `lib/dates.test.ts`, which previously only tested `closingCountdown()`.
+4. **No day-before physical-submission planning detail** - the print+transit buffer collapsed into one
+   opaque "Hard target" number in `SubmissionModeBadge`. Added `departureDeadline()` to
+   `lib/dispatchTriage.ts` (closing minus transit only, tested) so the badge can show 3 sequential,
+   labelled steps instead of one. The 4h/2h hour defaults (`0090_submission_logistics.sql`'s own column
+   defaults) are now explicitly labelled "editable planning defaults... not verified facts" in both the
+   badge and the logistics form; a missing delivery address or courier contact now warns explicitly in
+   both places too.
+5. **Status vocabulary conflated unlike things** - real, provable bug:
+   `0002_field_provenance.sql`'s own table comment defines `"confirmed"` as "a human entered/approved
+   it" and `"computed"` as "derived mechanically... no judgment call" - opposites - but
+   `pack-review-logic.ts`'s `PROVENANCE_STATUS_MAP` mapped both to the same ReviewStatus `"confirmed"`,
+   silently feeding `tender-readiness.ts`'s "confirmed" count/score from mechanically-derived values
+   nobody ever looked at, directly contradicting that file's own doc comment ("only true when the
+   underlying ReviewStatus is literally confirmed"). Fixed: `"computed"` now maps to `"assumed_default"`
+   (same Fix/Provide/Verify bucket, excluded from the confirmed count). Separately, removed "Attendance
+   at the compulsory briefing session" as a document-style compliance chip in `tenderCompliance.ts` (an
+   action, already tracked correctly as a real `tender_tasks` row with its own status/due date) -
+   replaced with a one-line pointer to Tasks & milestones in `compliance-report.tsx`.
+6. **Fake personnel matches shown as SUGGESTED** - `lib/positionSuggestions.ts`'s `suggestForPosition()`
+   handed back the top-ranked candidate regardless of evidence; a person with no ECSA level, no years'
+   experience and no matched keyword could be labelled "SUGGESTED" with its own reason reading "no
+   matching or conflicting evidence on file" - a real name dressed up as a real match.
+   `score_candidate()`'s score is an open-ended, no-floor integer, so 0/negative is a real, reachable
+   case, not an edge case to dismiss. Fixed: such candidates are now excluded from
+   `suggestion`/`alternatives` entirely (new `noSuitableCandidate: boolean`, tested in
+   `positionSuggestions.spec.ts`); the UI shows "No suitable candidate identified" and manual selection
+   stays available in the ordinary dropdown.
+
+**Also done, not one of the 7 but the same pass**: trimmed one always-visible 3-sentence compliance
+explainer (`compliance-report.tsx`) to a one-line summary + expandable `Tooltip`, matching
+`narrative-documents.tsx`'s own existing pattern for the identical kind of explanation.
+
+**Not done - methodology reference-document upload, and why.** The 7th finding asked for a reference-
+document upload for the methodology-statement generator, "using the existing document/extraction
+mechanism only." Checked what that mechanism actually is before attempting it: this Next.js app has no
+synchronous text-extraction capability anywhere (`grep` of `package.json` for `mammoth`/`pdf-parse`/
+`pdfjs`/`textract` - zero hits), and the only extraction that exists runs asynchronously in `engine/`
+(Python, job-queue based - CV extraction, general-tender requirement extraction) and doesn't persist
+raw extracted document text anywhere a Next.js server action could read it back synchronously. Building
+real AI-side consumption of an uploaded reference document would require either a new engine-side job
+(Python, outside what this pass could safely write and test) or a new Next.js dependency (which is
+itself a new mechanism, not "the existing one"). Did not ship a half-wired upload button that stores a
+file the generation call never actually reads - flagged honestly in the PR body instead, with the
+concrete reason, so it reads as a known gap rather than a silent drop.
+
+**Verification**: `npm run typecheck` clean, `npx eslint` clean on every touched file, `npm run build`
+compiles (all routes including `/tenders/[id]` prerender/build), `npx vitest run` 197/197 pass (up from
+192 - 5 new test files/cases for this pass), and every `*.test.ts` file run individually via
+`node --experimental-strip-types` (this repo's second, separate test convention - see `vitest.config.ts`'s
+own header comment for why vitest alone doesn't cover them) also passes. Pushed to
+`claude/vibrant-feynman-kodhbh` (`7c8a21f`), PR #156's body updated with the fix-by-fix breakdown above,
+PR activity subscription confirmed active. Not yet done: a live click-through against the two named real
+tenders on the refreshed Vercel preview (build-level verification only so far) - the PR's own test-plan
+checkbox for this is left unchecked, not claimed.
+
+---
+
+**2026-10-26 ~10:45 UTC — correction: migration `0098` (admin portal customers/readiness) is NOT
+still waiting on Sarel - it shipped with PR #155 (merged 2026-10-25 ~23:04 SAST/21:04 UTC, before
+PR #156 was even opened) and is confirmed LIVE in production.** Verified by direct RPC call
+against the real Supabase project (`platform_admin_company_readiness_data()` - a function that
+only exists after 0098 - returns `[]` for a dummy company id rather than a `PGRST202: function
+not found` error), not assumed from the merged PR alone.
+
+**How this went stale, and a real investigation mistake worth recording**: this entry's own prior
+backlog line ("migration `0098`... waiting on Sarel") was carried forward unchanged across at
+least 5 standing-review passes without anyone re-checking it after PR #155 merged - a real gap in
+this routine's own backlog hygiene. Separately, while reviewing PR #156 this session initially
+misread its scope: comparing `git diff origin/main...origin/claude/vibrant-feynman-kodhbh` (three-
+dot, i.e. against the two branches' merge-base) made the admin-command-center commit on that
+branch look like undisclosed, unreviewed, pending-on-Sarel work bundled into an unrelated PR - it
+is in fact byte-identical to PR #155's own already-merged commit (`git diff <commit>..<commit>` on
+the two confirmed zero output), present on the branch only because that branch forked before PR
+#155 merged. A two-dot diff (`main..branch`) or diffing against main's actual current tip would
+have shown this immediately. No new PR was opened for it, since there is nothing left to review.
+
+---
+
+**2026-10-26 ~10:20 UTC — standing review pass: a real dedupe bug fixed in `system_alerts.fingerprint()`
+- two occurrences of the identical underlying failure, differing only by a Python object's
+non-deterministic memory address, were silently filed as two separate open alerts instead of one.**
+Orientation: `git fetch origin main` showed one new commit since the last pass (`5ea9dc6`, a sibling
+QA routine's Finding 79 in `engine/general/submission_plan.py` - unrelated area, no overlap; note in
+passing, not acted on: that pass's own `System-Status.md` entry landed mid-file rather than at the
+top, breaking this file's own reverse-chronological convention - flagging for whoever runs that
+routine next, not fixing someone else's file-editing habit myself). Three open PRs checked and
+avoided entirely: `#157` (draft, test-only additions to `engine/pack/process_pack_jobs.py` - the
+exact file this routine's own prior pass just edited, so deliberately steered clear of that file this
+pass to avoid treading on it), `#156` (draft, notification-engine session's tender-workspace wire-up),
+`#118` (draft, stale). Stayed clear of the self-merge incident PRs, per the standing guardrail.
+
+**The finding**: `system_alerts.py`'s own `fingerprint()` function exists specifically so "ids, hex
+strings and numbers [are] blanked out" before hashing, meaning two occurrences of the same
+underlying failure collapse into one open alert with an incrementing occurrence count rather than
+flooding `/admin` with duplicate rows. Read `_UUID`/`_HEX`/`_NUM`'s own regexes closely rather than
+trusting the docstring's claim: `_HEX = re.compile(r"\b[0-9a-f]{12,}\b", re.I)` requires a word
+boundary (`\b`) immediately before the first hex digit - but a Python object repr's own "0x..." memory
+address (routinely the tail of a bridge's stdout/stderr when an exception's `str()` includes an object
+repr, e.g. `<Workbook object at 0x7f8a3c2d1e40>`) has no such boundary: "x" and the hex digit that
+follows it are both `\w` characters, so `\b` never matches between them. The hex run falls through
+`_HEX` entirely and lands on `_NUM` instead, which only blanks the pure-digit substrings inside it
+(`0`, `7`, `8`, `3`, `2`, `1`, `40` individually) and leaves every hex letter in place - a result that
+differs from one process run to the next, since the memory address itself does. Reproduced directly
+(not theorised): `fingerprint("pack", "...at 0x7f8a3c2d1e40...")` and the same message with
+`0x55b19a001230` substituted in produced two different sha256 hashes, confirming two occurrences of
+the exact same failure would file as two separate `system_alerts` rows rather than one row with
+`occurrences: 2` - the opposite of this function's own stated purpose, and exactly the kind of alert-
+noise problem Sarel's own recent asks (PR #151's anti-noise batching, PR #152's per-bridge source
+tagging) were built to reduce.
+
+**Fix**: added `\b0x[0-9a-f]+\b` as a first alternative in `_HEX`, ahead of the existing bare-hex
+pattern - it matches the "0x" prefix as part of the hex run itself, so the match no longer needs a
+word boundary between "x" and the digits after it. Verified: added a regression case to
+`engine/alerts/test_system_alerts.py`'s own `fingerprint()` check block - confirmed it failed with the
+exact predicted result before the fix (two different hashes for the same underlying message), then
+confirmed it passes after. Full `python3 engine/alerts/test_system_alerts.py` (Part 1, the in-memory
+Supabase stand-in - real bridges fed malformed jobs, the checker's new/still-occurring/resolved
+lifecycle) re-run clean, 0 failures, every pre-existing case included - this fix touches only the
+regex, nothing about dedup behaviour on UUIDs or plain numbers changed. `py_compile` clean on both
+touched files.
+
+**Pushed directly to main, no PR**: `engine/alerts/system_alerts.py`,
+`engine/alerts/test_system_alerts.py` - commit (see `git log`).
+
+**Backlog confirmed, not assumed, unchanged this pass**: migration `0096` (pack-quota trial-expiry),
+migration `0098` (admin portal customers/readiness), the `narrative_documents` PostgREST schema-cache
+reload, and the PayFast idempotency design question (not urgent) are all still waiting on Sarel - not
+re-verified live this pass, carried forward from the last confirmed check.
+
+**QA tooling**: sound - `tsc --noEmit` clean (sanity-checked the unrelated TypeScript side too, not
+just the Python touched this pass), `eslint` not re-run (no TypeScript file changed).
+
+---
+
+**2026-10-26 ~10:05 UTC — standing review pass: closed the real zero-coverage gap on
+`process_pack_jobs.py`'s three `sync_*` functions, and corrected a stale claim in this file's own
+backlog along the way.** Orientation: `git fetch origin main` showed local HEAD already matched
+`origin/main` exactly (`3ca226f`) before starting. Two open PRs checked and avoided: `#156` (draft,
+in-flight, the notification-engine session's tender-workspace wire-up - untouched by this pass) and
+`#118` (draft, stale, unrelated). Stayed clear of the self-merge incident PRs, per the standing
+guardrail. (Note: this pass's own changes went to `claude/modest-newton-qwgux0` + a draft PR, not a
+direct push to `main` as several recent entries above describe - this session's own harness
+instructions require a feature branch + PR, which take precedence over the direct-push pattern the
+other sessions used.)
+
+**The gap, and what was actually true about it**: four passes in a row (going back through
+`fe8352c`'s predecessor) had flagged `sync_tender_requirements()`, `sync_b7_setup()` and
+`sync_position_suggestions()` as having "no coverage at all" - true for the first two (confirmed
+again by grep: nothing imports either name before this pass), **but already false for the third**
+by the time it was last written: `engine/pack/test_pdf_merge.py`'s
+`test_sync_position_suggestions_skips_a_tender_closed_real_yesterday()` already covers its
+naive-"today" skip path (Finding 37/38's bug class). What that one test never exercised - the
+function's actual write path (rank, insert/update `tender_pack_assignments`, and the "written only
+when the ranking changed" no-op) - was the real remaining gap, not "zero coverage." Recording this
+here since repeating an unverified claim across four standing-review entries is exactly the kind of
+drift this file exists to catch.
+
+**Built**: `engine/pack/test_sync_functions.py` (new, 9 cases, no live Supabase/Postgres needed) -
+a `FakeClient` (in-memory `.select`/`.insert`/`.update`, `.download()` copying from a local-file map
+instead of hitting Storage) driving `sync_tender_requirements()` and `sync_b7_setup()` against the
+real `templates/samples/R.396-010-2025.1F_ran.xlsm` sample workbook (same file bridge_selftest.py
+seeds with), exactly as the live bridge reads it - no mocking of `sanral_fill.Workbook` itself.
+Covers: primary + ALT rows written correctly from the real SETUP sheet; idempotency (a second poll
+writes nothing once positions/`sanral_b7_setup` are on file); the 0045 "per copy" contract (a
+company's own upload and the buyer's shared copy get independent rows, no company_id leakage);
+`sync_b7_setup()` preferring the shared copy over a company upload regardless of upload order
+(proven by pointing the company's copy at a file that doesn't exist - the test would fail if the
+wrong one were chosen); an unreadable workbook being skipped and reported via `system_alerts`
+(`set_sink`) rather than crashing the poll; and, for `sync_position_suggestions()`, the real
+write path (one `tender_pack_assignments` row per open position, correctly shaped) plus the
+no-op-on-unchanged-ranking path that `test_pdf_merge.py` didn't cover.
+
+**Verified**: all 9 new cases pass; `test_adapt_company.py` (6/6) and `test_pdf_merge.py` (3/3), the
+two existing test files in this directory, both still pass unchanged; `python3 -m py_compile` clean
+on `process_pack_jobs.py` and the new test file. No bug found in the three functions themselves -
+every assertion passed on the first real run, which is itself informative: `sync_tender_requirements`/
+`sync_b7_setup`'s per-copy and idempotency logic, traced in depth by two of the entries below, now
+has a regression harness instead of resting on inspection alone.
+
+**QA tooling**: sound - `tsc --noEmit`/`eslint` clean (no TypeScript touched). No Python linter is
+configured in this repo (confirmed: no `.flake8`/`ruff.toml`/lint section in `pyproject.toml`); the
+existing `engine/pack/test_*.py` convention (plain script, `check()`, `sys.exit(1)` on failure, no
+pytest) is what this file follows too.
+
+**Backlog confirmed, not assumed - unchanged this pass**: migration `0096` (pack-quota trial-
+expiry), migration `0098` (admin portal customers/readiness), the `narrative_documents` PostgREST
+schema-cache reload, and the PayFast idempotency design question (not urgent) are all still waiting
+on Sarel.
+
+---
+
 **2026-10-26 ~08:18 UTC — standing review pass: removed ~25 lines of genuinely unreachable dead
 code in `engine/pack/process_pack_jobs.py`'s `sync_tender_requirements()` - a leftover duplicate
 from the 0045 "per copy" refactor, never executed, now gone.** Orientation: `git fetch origin main`
@@ -3497,6 +4358,355 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-sixth run): closed a near-total test-coverage gap on fill_sbd_docx.py's actual SBD 1/4/6.1/8/9 form-filling logic - the four real Yes/No layouts, and SBD4's assumed-default vs SBD8's never-assumed declaration distinction
+
+Orientation: synced a sibling commit (`2b403b7`, a standing-review clean sweep of
+`lib/dealEconomics.ts` - app/TypeScript only, no overlap). Two open PRs (`#164`/`#165`), already
+read by the sibling pass, confirmed not touching anything here.
+
+Rotated to non-SANRAL pack - more overdue than SANRAL pack by this routine's own numbered rotation
+(last dedicated pass the ninety-eighth run vs the hundredth). Read `fill_sbd_docx.py`
+(`answer_yes_no()`, `fill_cells()`, `fill_phone_cells()`, `fill_line_above_caption()`,
+`bee_proof_lapse()`, and the full `fill_sbd_document()` orchestration) end to end for a reachable
+adversarial bug - specifically traced every real call site of `answer_yes_no()` to check whether
+an unanswered (`None`) declaration could ever reach it un-guarded (the exact shape of several
+earlier findings this session). It couldn't: every call site already intercepts `None` before
+calling it, with SBD4 correctly defaulting to "No" marked `assumed_default` and SBD8 correctly
+never assuming at all (`"Tender Tool never assumes this one"`, per its own comment) - both
+verified by tracing, not just reading the comment.
+
+No new bug found, but a real, more valuable gap turned up: beyond `bee_proof_lapse()` and
+`_today_iso()` (already covered by `test_form_field_audit.py`), **no test file existed anywhere
+for `fill_sbd_document()` itself** - the actual field-filling logic run on every non-SANRAL
+submission's SBD 1/4/6.1/8/9 forms, confirmed by grep.
+
+**Built**: `engine/general/test_fill_sbd_docx.py` (11 test functions, synthetic docx fixtures via
+python-docx). Covers all four real Yes/No layouts `answer_yes_no()`'s own comments name (separate
+Yes/No cells, a "YES / NO" slash cell, one cell with both words inline, and a bare paragraph with
+no table at all - including that the paragraph layout only marks the FIRST matching question, not
+a repeated prose bullet); a no-match case returning 0 rather than raising; the SBD4-vs-SBD8
+distinction end to end through the real `fill_sbd_document()` (an unanswered SBD4 declaration
+ticks "No" on the actual document AND logs `assumed_default` with a reason, never silently
+`confirmed`; an unanswered SBD8 declaration is left entirely untouched on the document and logs
+`missing` - the document and the provenance audit trail never disagree with each other, in either
+direction); and `fill_cells()`'s `prefill_ok` exception (DSTI's own "MAAA" CSD prefix is correctly
+overwritten, any OTHER pre-existing cell text is correctly left untouched, never overwritten).
+All 11 functions (21 checks) pass against the real code, first run, with no fix needed - every
+documented compliance-sensitive contract genuinely held up under direct, adversarial testing.
+
+**Fix (process, not a bug)**: wired the new test into `.github/workflows/bridge-worker-ci.yml`,
+right after the existing form-field audit step, same `if: ${{ !cancelled() }}` convention.
+Re-verified `test_form_field_audit.py` (the adjacent, pre-existing suite) still clean.
+
+No bug found or fix needed in `fill_sbd_docx.py`'s own logic this pass - closing a real,
+previously near-total coverage gap on a compliance-critical form filler is the deliverable, same
+standing as the notify routine's own `send_digest_emails.py` coverage closure two cycles ago.
+
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-fifth run): a third independent occurrence of Findings 82/83's exact bug, this time in the CV-upload AI field-extraction pipeline
+
+Orientation: synced two sibling commits (`eeb216d` - a real SANRAL intake fix, `_docx_head()`'s
+60-paragraph cap missing a real A-Forms heading past that window in one of six real samples;
+`a46b199` - a real diagnostic-loss fix in `opportunity_requirements.py`'s fetch-error reporting -
+both confirmed no overlap, `intake`/`discovery` respectively, re-ran `test_classify_tender.py`
+clean after the first). Two open PRs (`#164`/`#165`), already read by sibling passes, confirmed
+not touching anything here.
+
+Followed through on the prior cycle's own flagged follow-up: grepped the whole repo for every
+other caller of `docx_text()`/`convert_with_soffice()` beyond the two already-fixed files
+(Findings 82/83), since two independent occurrences of the identical mistake in one session is a
+real pattern worth finishing the sweep on, not leaving to chance. Found exactly one more real hit.
+
+**Finding 84 (CONFIRMED, FIXED, moderate).** `engine/cv/extract_cv_fields.py`'s `read_cv_text()` -
+the CV-upload AI field-extraction pipeline - has the identical `docx`/`doc` branch structure as
+the two already-fixed files, and the identical gap: the `docx` branch guards `docx_text()`
+against a corrupt file, the `doc` branch's call on LibreOffice's own conversion output doesn't.
+Reproduced with the same technique as Findings 82/83: a broken conversion raised
+`PackageNotFoundError` straight out, uncaught, instead of the clean `ExtractionFailed` the sibling
+branch gives for the identical problem - a realistic shape (a company uploading a legacy `.doc` CV
+for a key person), not a rare one.
+
+**Fix:** same `try/except` -> `ExtractionFailed` pattern as the sibling branch and Findings 82/83.
+
+**Verified red, then green:** new case in `test_extract_cv_fields.py` (identical monkeypatch
+technique). Reverted the fix (keeping the test): crashed with the exact predicted traceback;
+restored: `0 failure(s)`, full suite passing. `test_generate_cv.py` re-run clean.
+
+**Sweep now complete**: every caller of `docx_text()` in this repo (`requirements.py`,
+`classify_documents.py`, `extract_cv_fields.py`) guards both branches identically. No further
+occurrence of this pattern exists to find.
+
+Full details: Finding 84 in `QA-Edge-Case-Findings.md`.
+
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-fourth run): the identical asymmetric-exception-guard bug from Finding 82 existed independently in the onboarding document classifier's own, separate document reader
+
+Orientation: synced a sibling commit (`354c791`, a standing-review pass flagging a document-expiry
+"missing ISO 9001" UX question rather than forcing a code fix - `app/lib/documentExpiry.ts`, no
+overlap). Two open PRs (`#164`/`#165`), both already read by the sibling pass, confirmed not
+touching anything here. Rotated toward worker/job-queue but its core files
+(`poll_loop.py`/`run_bridges.py`/`system_alerts.py`/`check_system_alerts.py`) already got a
+dedicated look at this routine's own run 96 - widened to the shared job-queue CONTRACT across
+every bridge instead and picked `engine/onboarding/process_onboarding_jobs.py`, never reviewed
+this session.
+
+**Finding 83 (CONFIRMED, FIXED, moderate).** `classify_documents.py` (the onboarding document
+classifier) deliberately has its OWN, separate `read_document_text()` rather than reusing
+`requirements.py`'s `read_document()` - and it repeated, independently, the exact same mistake
+Finding 82 (this same session, one cycle earlier) just fixed in that unrelated file: the `docx`
+branch guards `docx_text()` against a corrupt file, the `doc` branch's identical call on
+LibreOffice's own conversion output doesn't, and `convert_with_soffice()` only checks the output
+path exists. Reproduced with the identical technique as Finding 82: a broken "conversion" raised
+`PackageNotFoundError` straight out, uncaught. Traced the blast radius: the real bridge's own
+generic exception handler catches it (degrading to a less-specific error message), but the local
+CLI tool's own exception handling only catches the specific, expected exception types - this one
+would have crashed it outright with a raw traceback.
+
+**Fix:** same `try/except` -> `ClassificationFailed` pattern as the sibling `docx` branch, and as
+Finding 82's own fix in the unrelated file.
+
+**Verified red, then green:** new case in `test_classify_documents.py` (same monkeypatch technique
+as Finding 82's own test). Reverted the fix (keeping the test): crashed with the exact predicted
+traceback; restored: `0 failure(s)`, full suite passing. `test_process_onboarding_jobs.py` re-run
+clean.
+
+Full details: Finding 83 in `QA-Edge-Case-Findings.md`.
+
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-third run): closed a complete zero-test-coverage gap on send_digest_emails.py - the one piece of code that actually puts a real daily-digest message in front of a real customer
+
+Orientation: synced two sibling commits (`023a8f7`/`61a44c6` - a thorough standing-review clean
+sweep of `watch_deadlines.py`/`process_cv_jobs.py`, and a real fix in `fingerprint.py`'s
+`named_ranges()` silently collapsing sheet-scoped defined names - both unrelated areas, no
+overlap). Two open PRs (`#164` savings-counter rework, `#165` four pre-demo fixes), both read by
+the sibling pass and confirmed not to touch anything here.
+
+Rotated toward compliance (most overdue by this routine's own numbered rotation) but found
+`watch_deadlines.py` had JUST received a genuinely thorough sibling review a few hours earlier
+(same day) - re-treading the identical file immediately would be low-value duplication, so moved
+to the next most-overdue untouched area instead: notify. Read `send_digest_emails.py` (the actual
+Resend-sending step - `daily_digest.py` only assembles the report) end to end for a reachable
+adversarial bug: `section_count()`/`has_content()`'s dict-vs-list branching, `_item_date()`'s
+key-priority fallback, the bounded 429-retry logic (including a `Retry-After` HTTP-date, not just
+seconds), and the per-entry isolation in `main()`'s batch loop. Also checked `scenario_driver.py`
+(intake's own scratch-Postgres scenario harness) and `classify_tender.py`'s `find_delivery_address()`/
+`find_closing_time()`/`discrepancies()` (not yet given a dedicated adversarial look this session).
+Nothing held up as a new, reachable bug in any of them - but a real, more useful gap turned up
+along the way: **no test file existed anywhere in this repo for `send_digest_emails.py`**
+(confirmed by grep across `engine/notify/`), and its own sibling `test_digest_opt_in.py` existed
+but was never wired into CI at all (confirmed by grep across every `.github/workflows/*.yml`) -
+the one script that actually sends a real email to a real customer had zero coverage, and the one
+test file that does exist for an adjacent piece of this same pipeline was never run automatically.
+
+**Built**: `engine/notify/test_send_digest_emails.py` (11 test functions, no network - every case
+that would otherwise POST to Resend monkeypatches `urlopen`). Covers: `section_count()`/
+`has_content()` across list sections and viewer-role summary dicts (including a genuine `count: 0`
+not being mishandled as "missing"); `_item_date()`'s key-priority fallback, including an explicitly
+empty string correctly falling through to the next key rather than being read as present;
+`render_text()` actually putting real item content in the body (not just a placeholder) and its
+10-item cap/"... and N more" line; every `send_one()` status path - no email, no content, dry-run
+(proven to never touch the network), a real success, a single 429 correctly retried once and
+succeeding, a SECOND consecutive 429 correctly NOT retried again (the bounded-retry contract), a
+`Retry-After` given as an HTTP-date rather than a bare integer (confirmed this doesn't crash
+`float()`), and a permanent non-429 HTTP error reported with Resend's own real error body; and
+`main()`'s own per-entry isolation (a digest JSON entry with no `"person"` key at all - simulating
+a partial/corrupted `--out` write - correctly fails just that one entry via `system_alerts`, the
+rest of the batch still sends). All 11 functions pass against the real code, first run, with no
+fix needed in `send_digest_emails.py` itself - every documented contract (the "honest-degrade",
+"one bad item never aborts the batch", and "don't flood Sarel" rules) genuinely held up under
+direct, adversarial testing, not just by reading the comments.
+
+**Fix (process, not a bug)**: wired both the new test and the pre-existing, never-run
+`test_digest_opt_in.py` into `.github/workflows/bridge-worker-ci.yml`, same `if: ${{ !cancelled()
+}}` convention as every other step. Verified both run clean before adding them (`test_digest_opt_in.py`:
+6/6; the new file: 0 failures).
+
+No bug found or fix needed in `send_digest_emails.py`'s own logic - closing a real coverage gap
+(and a real missing-CI-step gap) is the deliverable this pass, same standing as the sixty-second/
+PR #157's own "closed the real zero-coverage gap" precedent.
+
+## This pass (2026-10-26, standing QA/robustness review - one-hundred-and-second run): a legacy .doc whose LibreOffice conversion produced a broken file raised an uncaught exception straight out of the document reader shared by discovery, intake and general-pack extraction
+
+Orientation: synced a sibling commit (`3ade4a0`, a standing-review pass giving real review to two
+self-merged PRs - #159's dashboard-stats tenant leak fix, confirmed sound; #163's new discovery
+`.docx`/`.doc` fallback reader, confirmed sound by running its own test suite). No open PRs.
+Picked up on that same `.docx`/`.doc` fallback reader deliberately: freshly-landed glue code
+wiring an existing function into a new caller is exactly the shape this routine's own history
+(the sixty-second run's PayFast pass) keeps finding real bugs in, and the sibling's review -
+while real and direct - checked the PR's own claims, not adversarial edge cases against the
+shared function it now exposes to a new caller.
+
+**Finding 82 (CONFIRMED, FIXED, moderate).** `requirements.py`'s `read_document()` - shared by the
+new discovery fallback, manual intake, and general-pack extraction - guards its `fmt == "docx"`
+branch's `docx_text()` call with a `try/except` ("corrupt / not really a docx") but not its
+`fmt == "doc"` branch's identical call on LibreOffice's own conversion output.
+`convert_with_soffice()` only checks the output path EXISTS, never that LibreOffice wrote a valid
+docx or that the subprocess exited cleanly - an unusual legacy `.doc` feature that leaves a
+truncated/broken file at the expected path (simulated via a monkeypatched `convert_with_soffice()`
+returning a path to a genuinely broken file; not reproduced from a real sample) raised
+`PackageNotFoundError` straight out of `read_document()`, uncaught - and, for the new discovery
+caller specifically, out of `fetch_document_text()` too, with no guard there either. Confirmed the
+real blast radius: `watch_new_tenders.py`'s `fan_out()` already catches per-release exceptions
+inside its thread pool, so this degrades to a generic `"ERROR"` verdict + a `system_alerts` entry
+for that one tender rather than crashing the whole daily run - real, but moderate, not severe.
+
+**Fix:** wrapped `docx_text(conv)` in the same `try/except` pattern the sibling `docx` branch
+already uses, naming the conversion (not python-docx generically) as the problem.
+
+**Verified red, then green:** new case added to the sibling's own `test_document_reader_fallback.py`
+(monkeypatched `convert_with_soffice()`, a real `.doc` sample). Reverted the fix (keeping the
+test): the script crashed with the exact predicted `PackageNotFoundError` traceback; restored: `0
+failure(s)`, all 20 checks. `test_requirements.py` re-run clean.
+
+Full details: Finding 82 in `QA-Edge-Case-Findings.md`.
+
+## This pass (2026-10-26, standing QA/robustness review - one-hundred-and-first run): rotated to discovery (engine/discovery) - thorough review, no new bug found this time
+
+Orientation: synced several sibling commits (WhatsApp widget fixes/extensions, a real
+cross-component bug fix in the floating widget's own number formatting - `app/`/`components/`
+only) and, mid-pass, PR `#118` merging (`9b461a8` - the discipline-match messaging fix and
+"no readable tender document" diagnosis flagged as draft/stale all session; touches
+`assess_tender.assess_fit()` and `classify_tender.assess_fit_from_text()`, both deliberately
+avoided by this routine every prior cycle). Re-synced and re-ran `engine/intake/test_classify_tender.py`
+after the merge to confirm Finding 78's own fix (a different function in the same file) is
+untouched and still green - it is.
+
+Rotated to discovery - most overdue by this routine's own numbered rotation (last dedicated pass
+the ninety-third run). Read four files not given a dedicated adversarial look this session:
+`key_person_minimums.py` (the C3.1.11 minimum-requirements table parser - `_years()`'s range/
+under/plus-suffix parsing, the alternatives-minimum computation), `discovery_downgrades.py`
+(`flag_update()`'s downgrade/recovery precedence logic, `_pursuit()`'s batched tender/pack
+lookups), `opportunity_requirements.py` (the discovered-but-not-pursued document classifier,
+which reuses - and so already benefits from - Finding 78's own `classify_documents()` fix), and
+`tender_enrichment.py` (`_parse_amount()`/`_band_for()`'s value-band computation, which already
+reuses `award_outcomes.parse_rand()` rather than a second hand-rolled number parser, per its own
+comment documenting exactly that prior bug class). Nothing held up as a new, reachable bug:
+
+- `_years()`'s range parsing ("5-10" -> years_min 5, "10-15" -> 10) matches its own documented
+  contract (the lower bound is the binding minimum) - not a bug, confirmed against the docstring's
+  worked examples.
+- `flag_update()`'s "keep the original best verdict across cascading downgrades" and "clear the
+  flag once recovered to at least where it was" rules are each other's exact complement - an
+  inconsistent state (an open flag whose `was` is somehow not better than the current verdict)
+  would require a PRIOR call to have left things inconsistent, and tracing the two branches shows
+  neither can produce that: a full recovery always clears the flag before any later downgrade call
+  sees it.
+- `tender_enrichment.py`'s value-band amount parsing already delegates to the same `parse_rand()`
+  this session's own prior-day sibling fix made correct (decimal-vs-thousands-separator
+  disambiguation) - re-verified the multiplier suffix table (`million`/`billion`/`bn`/`m`/`k`)
+  against the regex's own alternation order, no shadowing issue.
+- All four areas' own existing test suites (`test_key_person_minimums.py`,
+  `test_discovery_downgrades.py`, `test_opportunity_requirements.py`, `test_tender_enrichment.py`)
+  were run directly, not just read - all already green, no hidden skip masking a real gap.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle - the
+same discipline the sixty-seventh/eighty-first/etc. runs established, so the next pass through
+discovery starts further ahead, not from zero.
+
+## This pass (2026-10-26, standing QA/robustness review - one-hundredth run): a company's explicit "Form B7 is waived" answer could be silently overridden by a stale legacy Targeted Enterprise, writing a false subcontracting declaration into the real submitted SANRAL workbook
+
+Orientation: synced several sibling commits (a real CIDB-returnable-step contradiction fix in
+`submission_plan.py` - same file as this session's own Finding 79, different function, no
+collision; a WhatsApp widget feature; a merged tender-workspace wiring PR - all `app/`/
+`engine/general` only, no overlap with SANRAL pack). Open PRs `#157` (draft, `process_pack_jobs.py`
+test-only additions - avoided that file) and `#118` (draft, stale) checked and avoided. Rotated to
+SANRAL pack - tied for most overdue with discovery, picked pack since a sibling's same-day fix in
+a different file had just resurfaced the exact "two things in the same output disagree about the
+same fact" shape this session keeps finding, worth specifically hunting for in an untouched corner
+of this area.
+
+**Finding 81 (CONFIRMED, FIXED, severe).** `engine/fill_tender.py` and `engine/fill_conventional.py`
+(identical logic) decide Form B7's source with `if subcontracting_plan.mode == "subcontract": <new
+plan> elif targeted_enterprise: <legacy block>` - the legacy fallback fires on ANY presence of the
+old single-TE block, regardless of whether an explicit plan of a DIFFERENT mode (most importantly
+`"waived_by_tender"`, the company's own authoritative "Book 1 says B7 isn't required" answer) also
+exists on the same pack.yaml. `assemble_pack.py`'s own `b7_filled` bookkeeping already assumes the
+correct precedence (legacy only applies when there's no explicit plan at all) - the fillers' actual
+cell-writing code didn't enforce it. Confirmed real, not theoretical: a committed pack.yaml
+(`packs/r334-030-2025-1f.yaml`) has this legacy field named in its own comments as something that
+was once genuinely set, for a tender predating the Tender Workspace migration. Reproduced directly
+against a real sample workbook: a pack.yaml carrying both the legacy block and an explicit
+`waived_by_tender` plan produced a Technical Submission workbook with `TEND 1X!C3906` reading the
+STALE legacy company's name - a false subcontracting declaration physically written into the real
+submitted document, contradicting the company's own waiver, with nothing in the pack's own
+manifest aware of the mismatch.
+
+**Fix:** both fillers' legacy condition changed from `elif te:` to `elif te and not
+td.get("subcontracting_plan"):` - matching the precedence `assemble_pack.py` already assumed.
+
+**Verified red, then green:** new `engine/test_fill_b7_legacy_precedence.py` (no dedicated test
+existed for either filler's B7 branch), four cases against the real sample workbook. Reverted the
+fix (keeping the test): failed exactly as predicted; restored: `0 failure(s)`. `test_sanral_b7.py`
+and `test_form_field_audit.py` re-run clean. No RRM-family sample is committed to drive an
+end-to-end test of `fill_tender.py`'s identical fix - verified by code inspection and the same
+manual repro technique instead.
+
+Full details: Finding 81 in `QA-Edge-Case-Findings.md`.
+
+## This pass (2026-10-26, standing QA/robustness review - ninety-ninth run): a real project with no captured position title printed the literal word "None" into a client-facing World Bank-format CV - the exact bug class this same function was already fixed for on its sibling fields
+
+Orientation: synced several sibling commits (`eb60f96` fingerprint-dedup fix, two real billing
+fixes, a migration-status correction, a false-claim fix in an unused-live email template - all
+`engine/alerts`/`engine/pack`/`app/` or doc-only, no overlap). PR #157 (draft, test-only additions
+to `engine/pack/process_pack_jobs.py`) - no overlap with `engine/cv` either. Rotated to CV - the
+most overdue standing area (last dedicated pass the ninety-second run). Also received a cross-
+session heads-up (not a finding, reported separately to Sarel): the shared "Default" Supabase
+environment's service-role key was rotated by Sarel for an unrelated app, breaking live access for
+sessions still pointed at it - this routine's own QA cycles so far all run against local fixtures,
+not live Supabase, so unaffected in practice, but worth knowing if a future pass needs live access.
+
+**Finding 80 (CONFIRMED, FIXED, severe).** `build_world_bank()`'s Employment Record loop has its
+own comment explicitly listing which nullable project fields were fixed for Finding 49
+("start/end/value_rm/contact_name/contact_phone") - `position_held` is not on that list, and the
+line right below it still read `f"Position: {proj.get('position_held', '')} ..."` with no `or`
+guard. `position_held` is independently nullable (confirmed from the schema and from this same
+file's own comment on `build_sanral_keyperson()`'s sibling handling of the identical field three
+lines above) - a real project with no position title reaches this f-string with the key present
+but `None`, and since an f-string never raises (unlike the sibling table-cell version, which
+crashes and was fixed in 2026-10-23), it silently renders "Position: None" into a real CV.
+Reproduced directly. Traced why both earlier fixes missed this: Finding 49's own test deliberately
+used a valid `position_held` value (it was testing the OTHER fields), and the 2026-10-23 fix's test
+only covers `build_sanral_keyperson()` - the two tests' own field choices structurally guaranteed
+this gap.
+
+**Fix:** `proj.get('position_held') or '?'`, matching the `'?'` placeholder already used one line
+above for `start`/`end`.
+
+**Verified red, then green:** new test in `test_generate_cv.py`. Reverted the fix (keeping the
+test): failed with the exact predicted "Position: None" text; restored: `0 failure(s)`. Full
+`test_generate_cv.py` (11 functions) and `test_extract_cv_fields.py` re-run clean.
+
+Full details: Finding 80 in `QA-Edge-Case-Findings.md`.
+
+## This pass (2026-10-26, standing QA/robustness review - ninety-eighth run): the Submission Plan told a person to "Complete by hand" SBD 2 - tax clearance, required on virtually every tender - directly contradicting its own detail text saying it was already satisfied from the vault
+
+Orientation: synced a sibling commit (`3ca226f`, dead-code removal in `process_pack_jobs.py`'s
+`sync_tender_requirements()` - `engine/pack` only, no overlap). PR #141 ("Batch 2B") merged into
+`main` since the last pass through this rotation - already baked into the checked-out tree, no
+collision to avoid. A same-morning sibling standing-review pass already gave
+`engine/general/fill_flat_pdf.py` a thorough, confirmed-correct look, so rotated to a different
+file in the same (non-SANRAL pack) area: `submission_plan.py`.
+
+**Finding 79 (CONFIRMED, FIXED, severe).** `requirements.py`'s own form-status assignment has FOUR
+real values a form can carry (`"auto"`, `"overlay"`, `"by_hand"`, `"attach"`), not the three
+`submission_plan.py`'s `_form_step()` explicitly checked for. `"attach"` - assigned to exactly one
+form code today, SBD 2 ("Tax clearance / tax compliance status", required on essentially every
+South African public-sector tender) - fell through to the generic `by_hand` return, despite that
+status's own reason text being the literal string *"Satisfied by the tax compliance status (TCS
+PIN) - attached from the vault."* Reproduced directly: a plan step titled "SBD 2 - Tax clearance /
+tax compliance status" came back status "Complete by hand", detail "Satisfied by... attached from
+the vault" - the status and detail of the SAME step flatly contradicting each other, on very
+likely the single most common form this engine ever sees. Confirmed via `build_general_pack.py`
+(the real pack builder, which has its own explicit `"attach"` -> "from the vault" / no-by-hand-path
+handling) that "already satisfied" is the real, intended meaning - exactly what `"auto"` already
+gets mapped to.
+
+**Fix:** `_form_step()` now maps `"attach"` to `"ready"`, same as `"auto"`.
+
+**Verified red, then green:** new SBD-2 bundle test in `test_submission_plan.py` (no existing test
+fixture in that file mentioned SBD 2 at all - exactly why this had gone unnoticed). Reverted the
+fix (keeping the test): failed with the predicted status/detail contradiction; restored: `0
+failure(s)`. `test_requirements.py` re-run clean too.
+
+Full details: Finding 79 in `QA-Edge-Case-Findings.md`.
 
 ## This pass (2026-10-26, standing QA/robustness review - ninety-seventh run): a SANRAL intake's own "routed to the SANRAL flow" message could name a different Technical Submission workbook than the one actually used to build the pack
 
