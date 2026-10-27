@@ -120,6 +120,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/intake/test_classify_tender.py
 
+      - name: Template fingerprint - sheet-scoped named ranges disambiguated, not collapsed (offline synthetic workbook)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fingerprint.py
+
       - name: Award outcomes - parsing of eTenders/SANRAL award records (offline fixtures)
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_award_outcomes.py

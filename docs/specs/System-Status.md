@@ -1,5 +1,70 @@
 # System Status
 
+**2026-10-27 ~00:14 UTC — standing review pass: a real, already-occurring fingerprint blind spot
+fixed in `engine/fingerprint.py`'s `named_ranges()` - confirmed in the real committed baseline, not
+hypothetical.** Orientation: `git fetch origin main` showed no new commits since this routine's own
+last pass (`023a8f7`) - local HEAD matched `origin/main` exactly. Two open PRs (`#164` savings-counter
+rework, `#165` four pre-demo production defect fixes) read in full and confirmed correctly left as
+unmerged drafts, neither touching anything this pass reviewed.
+
+**The finding**: `named_ranges()` built its dict as `{d.get("name"): "".join(d.itertext()) for d in dn}`
+over every `<definedName>` in the workbook. Excel auto-creates a SHEET-SCOPED defined name
+(`localSheetId` attribute set) the moment any sheet ever has its own print area set - `_xlnm.Print_Area`
+being the standard example - so a multi-sheet workbook very normally carries several entries that all
+share the exact same `name` but genuinely different ranges, one per sheet. The plain-name-keyed dict
+comprehension silently collapsed all of them down to whichever one iterated last, discarding every
+other sheet's own value entirely before it ever reached the stored fingerprint - directly against this
+module's own one stated job ("refuses to proceed silently on any mismatch," Sarel's own rule, quoted
+in this file's own header). **Not hypothetical**: the real committed baseline
+(`fingerprints/Conventional_Consultant_Tender.json`) already shows exactly one `_xlnm.Print_Area`
+entry despite this being SANRAL's genuinely multi-sheet Conventional Consultant Tender workbook -
+confirmed directly by reading that file, not assumed. Reproduced further with a minimal synthetic
+`.xlsm` built in-memory (two sheets, each with its own `_xlnm.Print_Area`): `named_ranges()` returned
+exactly 1 key instead of 2, and a `diff()` comparison with one sheet's print area changed and the
+other's unchanged showed **no difference at all** under the old code - the exact silent-miss this
+module exists to prevent.
+
+**The fix**: a sheet-scoped name is now keyed as `"name#sheetN"` (using its own `localSheetId`), so
+same-named entries from different sheets no longer collide; a workbook-scoped name (no `localSheetId`)
+keeps its bare name, unchanged from before - confirmed the one other real entry in the committed
+baseline (`MarkupCost`, workbook-scoped) round-trips identically. Verified properly: reverted the fix
+first (`git stash`) and confirmed the new test fails with the exact predicted result (3 of 6 cases),
+restored and confirmed all 6 pass. Grepped the rest of the codebase for any other reader of
+`named_ranges()`'s output keyed by a specific name - none exists; it's only ever compared as a whole
+dict inside `diff()`, so this is a safe, self-contained change.
+
+**New test file added, since none existed for this module at all**: `engine/test_fingerprint.py` (6
+cases - the collision reproduction, a workbook-scoped name staying unchanged, an empty
+`<definedNames>`, and a direct `diff()` check that a single sheet's own change is now actually
+caught). Registered as its own step in `bridge-worker-ci.yml`, matching this repo's existing
+one-step-per-test-file convention - it was not previously discovered by anything automatic.
+
+**Real, honest operational consequence - not silently absorbed**: the next real SANRAL Conventional
+Consultant Tender processed will very likely show a `named_ranges` **mismatch** against the existing
+committed baseline, purely because the baseline was computed with the old under-counting logic and
+now genuinely carries fewer keys than a correct re-computation would. This is the fingerprint check
+working as designed - Sarel's own rule is that any mismatch stops the pack run and needs a person to
+check and update the baseline - but it's worth knowing in advance that this specific mismatch, when it
+shows up, is this fix surfacing previously-hidden sheets' own print areas for the first time, not a
+sign the real template itself changed. A fresh, correct baseline can be regenerated at that point by
+deleting the stored file and letting the next run's "no baseline yet" path re-seed it (same as any
+other legitimate baseline update) - **not done here**, since this sandbox has no live tender to
+fingerprint against, and overwriting the one real committed baseline from a synthetic test would
+replace real data with fabricated data.
+
+**Pushed directly to `main`, no PR**: `engine/fingerprint.py`, `engine/test_fingerprint.py`,
+`.github/workflows/bridge-worker-ci.yml`, this file.
+
+**QA tooling**: sound - `py_compile` clean on both Python files touched, `engine/test_fingerprint.py`
+6/6, no TypeScript touched.
+
+**Backlog unchanged, re-confirmed from this file rather than assumed**: migration `0096`
+(pack-quota trial-expiry) still outstanding; the `narrative_documents` PostgREST schema-cache reload
+status not re-checked this pass; the PayFast idempotency design question still open, still not
+urgent.
+
+---
+
 **2026-10-26 ~22:16 UTC — standing review pass: clean sweep of the deadline-watch engine and the
 CV-generation bridge, no new bug found; two draft PRs confirmed left correctly unmerged.**
 Orientation: `git fetch origin main` showed one new commit since this routine's own last pass
