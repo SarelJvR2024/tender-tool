@@ -51,6 +51,16 @@ import os
 import re
 import shutil
 
+# Same constant/pattern as engine/fill_a_forms.py's own SAST (that file's own
+# comment has the full reasoning): a bridge worker container has no TZ set
+# and runs in UTC by default, so a naive datetime.date.today() is one
+# calendar day behind the real SAST date for the whole 00:00-01:59 SAST
+# window every day - authority_facts()'s own "date" field ("Today's date",
+# a real {{date}} a company can mark on its own authority-to-sign letter)
+# used datetime.date.today() directly, printing yesterday's date on a real
+# legal document generated inside that window. QA pass, 2026-10-27.
+SAST = datetime.timezone(datetime.timedelta(hours=2))
+
 DOCUMENT_TYPES = {
     "authority_to_sign": {
         "label": "Letter of authority to sign",
@@ -298,5 +308,5 @@ def authority_facts(profile, signatory, tender, rfp_number=None, today=None):
         "contract_number": tender.get("contract_no"),
         "nra_reference": tender.get("nra_reference"),
         "closing_date": closing,
-        "date": (today or datetime.date.today()).strftime("%-d %B %Y"),
+        "date": (today or datetime.datetime.now(SAST).date()).strftime("%-d %B %Y"),
     }

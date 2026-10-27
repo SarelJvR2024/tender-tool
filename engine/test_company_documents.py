@@ -161,6 +161,46 @@ def run(out):
         outs[name] = text_of(os.path.join(d, sorted(os.listdir(d))[0]))
     check(outs["uploaded"] != outs["guideline"], "uploaded and guideline companies' letters differ")
 
+    print("6b. authority_facts()'s {{date}} field uses SAST, not a naive UTC date")
+    # Finding (2026-10-27): authority_facts() computed "today" via naive
+    # datetime.date.today() - a bridge worker container has no TZ set and
+    # runs in UTC by default, so this is one calendar day behind the real
+    # SAST date for the whole 00:00-01:59 SAST window every day, printing
+    # yesterday's date on a real authority-to-sign letter. Simulates the
+    # system clock at UTC 2026-10-20 23:30 (= SAST 2026-10-21 01:30, inside
+    # the bad window) by monkeypatching this module's own datetime.date AND
+    # datetime.datetime (the fixed code reads the aware one; the original
+    # buggy code called datetime.date.today() directly, so both must be
+    # patched for this test to actually exercise either version), restored
+    # immediately after - never leaves the real clock patched. Deliberately
+    # NOT today's real date, so a coincidental match can't hide a reverted
+    # fix (confirmed: patching only datetime.datetime here first let the
+    # revert pass by accident, since the then-still-live datetime.date.today()
+    # fell through to the real sandbox clock, which happened to already read
+    # the target date).
+    import datetime as real_datetime
+
+    class FixedDateTime(real_datetime.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            base = real_datetime.datetime(2026, 10, 20, 23, 30, tzinfo=real_datetime.timezone.utc)
+            return base.astimezone(tz) if tz else base
+
+    class FixedDate(real_datetime.date):
+        @classmethod
+        def today(cls):
+            return cls(2026, 10, 20)  # the naive UTC date at that same simulated moment
+
+    real_dt, real_date = cd.datetime.datetime, cd.datetime.date
+    cd.datetime.datetime, cd.datetime.date = FixedDateTime, FixedDate
+    try:
+        facts = cd.authority_facts(profile("SAST Date Test (Pty) Ltd"), {"name": "Jane"}, {}, "REF1")
+    finally:
+        cd.datetime.datetime, cd.datetime.date = real_dt, real_date
+    check(facts["date"] == "21 October 2026",
+          f"authority_facts()'s date reads the real SAST date (21 October 2026), not the naive "
+          f"UTC one (20 October 2026) - got {facts['date']!r}")
+
 
 def run_db(psql, out):
     sys.path.insert(0, os.path.join(HERE, "intake"))
