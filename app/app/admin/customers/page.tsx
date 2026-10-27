@@ -5,6 +5,7 @@ import { StatCard } from "@/components/tt/stat-card";
 import { computeBidReadiness } from "@/lib/readiness";
 import { daysUntil } from "@/lib/dates";
 import CustomerRow, { type Customer, type CustomerMember } from "./CustomerRow";
+import { impersonationConfigured } from "@/lib/impersonation";
 
 // Reads per-request session/DB data (RPCs gated by is_platform_admin, 0064) -
 // same escape hatch as ../page.tsx.
@@ -51,8 +52,8 @@ type ReadinessDataRow = {
 // throughout (navy #16233B, muted #5B6472, border #E3E6EA, error banner
 // #FEE2E2/#FCA5A5/#B91C1C) - now Tailwind + tokens, same mapping as every
 // other admin page in this pass.
-export default async function AdminCustomersPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const { error: actionError } = await searchParams;
+export default async function AdminCustomersPage({ searchParams }: { searchParams: Promise<{ error?: string; company?: string }> }) {
+  const { error: actionError, company: autoOpenCompanyId } = await searchParams;
   const supabase = await createClient();
 
   const [{ data: companies, error }, { count: tendersTrackedCount }] = await Promise.all([
@@ -125,7 +126,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
             <div className="p-4.5 text-[13px] text-muted-foreground">No companies have signed up yet.</div>
           )}
           {customers.map((c) => (
-            <CustomerRow key={c.id} customer={c} />
+            <CustomerRow key={c.id} customer={c} defaultOpen={c.id === autoOpenCompanyId} impersonationAvailable={impersonationConfigured()} />
           ))}
         </div>
       </div>

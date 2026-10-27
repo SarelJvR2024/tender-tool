@@ -1,5 +1,85 @@
 # System Status
 
+**2026-10-27 ~21:05 UTC — Admin Command Center, Phase 4: "View Tenant Workspace" impersonation +
+immutable audit log, built under Sarel's own 5 explicit guardrails. Live-verified the one genuinely
+novel, highest-risk mechanism (real session minting) against the live project using Sarel's own
+test account; the DB-dependent half (audit logging, the banner) cannot be live-tested until
+migrations land - see the status note below, which also applies to Phases 1-3.**
+
+Design, in one sentence: the admin's own real sign-in (the `sb-*-auth-token` cookie(s)
+@supabase/ssr already manages) is NEVER touched; a single SEPARATE cookie carries the TARGET
+user's own session tokens, and `lib/supabase/server.ts`'s `createClient()` - the one function
+nearly every Server Component/Action in this app already calls - prefers that session when the
+cookie is present. Every existing page therefore renders exactly as the impersonated member would
+see it, with zero per-page changes, and "Exit" is just deleting that one cookie - nothing to
+"restore" because nothing else was ever overwritten. This is the first time the deployed Next.js
+app itself needs the service-role key (confirmed by grepping the whole `app/` tree before building
+- every other service-role caller is a GitHub Actions workflow or standalone script) - isolated
+entirely inside the new `lib/impersonation.ts`, which never returns the key itself, only a
+short-lived target-user session.
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint .`/`vitest run` 274/274/`npm run build`
+clean after every step):
+- Migration `0102`: `impersonation_audit_logs` (admin_user_id, target_company_id, target_user_id,
+  a DENORMALISED target_company_name/target_user_email captured once at start so the banner never
+  needs a live join, reason, started_at, ended_at - immutable except ended_at, which only the same
+  admin can set once), `platform_admin_start_impersonation()` (resolves the target - the company's
+  owner, else earliest member - and opens the row), `platform_admin_end_impersonation()` (closes
+  it, idempotent).
+- `lib/impersonation.ts`: the session-mint (`admin.generateLink` + `verifyOtp` two-step Auth API
+  dance - supabase-js has no direct "sign in as" call), cookie read/write/clear helpers, and
+  `impersonationConfigured()` so the UI hides the action entirely rather than offering a button
+  that would fail, when no service-role key exists in an environment yet.
+- `lib/supabase/server.ts`: `createClient()` now checks the impersonation cookie first and returns
+  a client hydrated with the target session when present; `{ bypassImpersonation: true }` always
+  returns the real admin's own session (used by the banner and both impersonation Server Actions
+  themselves, which are inherently "real admin" operations).
+- `app/_components/ImpersonationBanner.tsx`: the sticky amber banner (guardrail 2's exact wording),
+  reading the REAL admin's session, never the swapped one. **Caught a real site-wide regression
+  before shipping**: mounting this in the root layout (`app/layout.tsx`) forced every page in the
+  app - including every public marketing/tool page (`/login`, `/signup`, `/privacy`,
+  `/tools/*`, `/_not-found`) - out of static prerendering, because `cookies()` access anywhere in
+  the root layout taints the whole tree. Fixed by moving it into `AppShell.tsx` instead (outside
+  `SidebarProvider`, for true full-width-above-everything placement) - the right mounting point
+  architecturally too (same place `SubscriptionBanner`/`DemoBanner` already live, and the one
+  already-dynamic component every signed-in page, and only signed-in pages, renders through).
+  Confirmed by re-running the build: every public page is back to `○` static, matching the
+  pre-Phase-4 baseline exactly; nothing changed for the already-dynamic authenticated pages.
+- `/admin/customers`: "View Tenant Workspace" button (guardrail 5) on both the row and the expanded
+  drawer, hidden when impersonation isn't configured. Exit redirects to `/admin/customers?company=
+  <id>` (guardrail 4 asked for `/admin/customers/[id]`, which does not exist in this codebase - the
+  company detail view is the expand panel on the one listing page, not a separate route; adapted to
+  land on that exact company's own context via a query param that auto-expands its row, same intent
+  as the brief, no fabricated route).
+- **Live-verified the session-mint mechanism** against the real project (Sarel's own Clevapp test
+  account, `sareljvr101@gmail.com` - confirmed as the account owner via the Auth Admin API before
+  using it): `generateLink` + `verifyOtp` produced a real access/refresh token pair for exactly the
+  intended user id, with no email ever sent (generateLink only generates a token; it never
+  dispatches anything) and nothing written anywhere. This is the one mechanism in Phase 4 that
+  doesn't depend on any of the new migrations, so it's the one half that COULD be live-tested today.
+
+**Status note - applies to Phases 1 through 4, not just this one**: none of this session's
+migrations (`0099` workflow_heartbeats, `0100` Quality Scout triage, `0101` telemetry/billing,
+`0102` impersonation) have been applied to the live Supabase project yet - confirmed directly
+(`workflow_heartbeats` 404s via the REST API right now). This is the normal, expected state for
+code still in an open draft PR, not a bug: `notification_logs` (migration `0093`, from before this
+PR existed) IS live, confirming migrations DO get applied, just not yet for schema still sitting in
+an unmerged PR. Every new admin page built across all 4 phases will error against the live database
+until these migrations are applied - worth knowing before expecting them to work in production,
+not something I applied myself (schema changes to the live project were outside what this pass was
+asked to do unprompted).
+
+**Guardrail-by-guardrail confirmation**: (1) service-role key never leaves `lib/impersonation.ts`,
+admin's own session cookie never touched - confirmed by reading every file that touches either.
+(2) Banner matches the exact wording asked for, amber (`bg-warning`, a real design token, not
+invented), `z-50` via `sticky top-0 z-50`, no dismiss separate from Exit (a hideable "still
+impersonating" banner would defeat its own purpose). (3) Audit table immutable except `ended_at`,
+no client insert/update/delete policy at all. (4) Exit clears the one cookie and redirects, adapted
+to this app's real route structure as above. (5) Button on both the row and the drawer, platform-
+admin-gated by the layout guard that already exists on every `/admin/*` page.
+
+---
+
 **2026-10-27 ~15:20 UTC — Admin Command Center, Phase 3: Telemetry + Billing tabs built, both on
 real existing data - no new instrumentation for either. Built autonomously per Sarel's "start
 phase 3, continue without me."** Same branch/PR as the entries below
