@@ -4781,3 +4781,53 @@ suite) re-run clean.
 added around the `fmt == "doc"` branch's conversion-output read. No schema or other call-site
 changes; every caller (discovery's new fallback, manual intake, general-pack extraction) now
 degrades honestly on this path instead of raising.
+
+### Finding 83 (CONFIRMED, FIXED, moderate - the identical asymmetric-exception-guard bug from Finding 82 existed independently in the onboarding document classifier's own, separate document reader)
+
+**Where:** `engine/onboarding/classify_documents.py`'s `read_document_text()`.
+
+**What was tested:** rotated toward worker/job-queue (most overdue untouched area after a sibling's
+thorough same-day review of compliance/CV), but `poll_loop.py`/`run_bridges.py`/`system_alerts.py`/
+`check_system_alerts.py` were already given a dedicated adversarial look at this session's own run
+96 (Finding 77) with nothing further to add. Widened to the shared job-queue CONTRACT across every
+bridge instead (`poll_once()`'s claim/process/store shape, same as `cv/process_cv_jobs.py`'s), and
+picked `engine/onboarding/process_onboarding_jobs.py` - never reviewed this session - as the least
+covered. Its own module docstring says it reuses `extract_cv_fields.py`'s Supabase/Storage helpers
+but deliberately does NOT reuse `requirements.py`'s `read_document()` for the actual text
+extraction - `classify_documents.py` has its own, separate implementation
+(`read_document_text()`), explicitly because the CV/general-pack failure wording would be wrong
+here. Given Finding 82 (this same session, one cycle earlier) just found an asymmetric
+exception-guard bug in `requirements.py`'s own `.doc`/`.docx` handling, worth checking whether this
+SEPARATE, parallel implementation of the same idea repeated the same mistake independently.
+
+**Finding (CONFIRMED, moderate).** It did, verbatim. `read_document_text()`'s `ext == "docx"`
+branch wraps `docx_text(path)` in `try/except Exception as e: raise ClassificationFailed(f"This
+.docx file could not be opened ({e})...")`. The `ext == "doc"` branch's own call to the SAME
+`docx_text()` function - on `conv`, LibreOffice's `.doc` -> `.docx` conversion output - has no
+such guard, and (same root cause as Finding 82) `convert_with_soffice()` only checks the output
+path exists, never that LibreOffice wrote a valid docx. Reproduced directly with the identical
+technique as Finding 82 (a monkeypatched `convert_with_soffice()` returning a path to a genuinely
+broken file): `read_document_text()` raised `docx.opc.exceptions.PackageNotFoundError` straight out,
+uncaught, instead of the clean `ClassificationFailed` its own sibling branch would give for the
+exact same root problem. Traced the blast radius: the real bridge
+(`process_onboarding_jobs.py`'s `process_upload()`) already has a generic `except Exception`
+around the whole call, so this degrades to a less-specific "Classification hit an unexpected
+error" message rather than crashing the poll cycle - but the local CLI (`classify_documents.py`'s
+own `main()`/`run_local_file()`) only catches `ClassificationFailed`/`SetupError`/`TransientError`
+specifically, so this exact exception would have crashed the CLI tool outright with a raw
+traceback, not the "ERROR: ..." it gives every other failure mode.
+
+**Fix:** wrapped `docx_text(conv)` in the same `try/except` -> `ClassificationFailed` pattern the
+sibling `docx` branch already uses, naming the conversion (not python-docx generically) as the
+problem.
+
+**Verified the regression test actually catches the regression:** new case in
+`test_classify_documents.py`'s `test_text_extraction()` (monkeypatching `convert_with_soffice()`
+the identical way Finding 82's own test does). Reverted the fix (`git apply -R`, keeping the new
+test): the test script crashed with the exact predicted `PackageNotFoundError` traceback;
+restored: `0 failure(s)`, full suite (including the queue-plumbing/stale-reclaim cases at the end)
+passing. `test_process_onboarding_jobs.py` re-run clean.
+
+**Regression:** `engine/onboarding/classify_documents.py`'s `read_document_text()` only - one
+`try/except` added around the `doc` branch's conversion-output read, same shape as Finding 82's
+fix in the unrelated `requirements.py`. No schema or other call-site changes.

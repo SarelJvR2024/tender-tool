@@ -274,7 +274,20 @@ def read_document_text(path, work_dir):
         if not conv:
             raise ClassificationFailed("This old-style Word .doc file could not be converted to read its text. "
                                        "Save it as .docx or PDF and upload that instead.")
-        text, method = docx_text(conv), "LibreOffice .doc->.docx, python-docx"
+        # convert_with_soffice() only checks that the output path EXISTS, not that LibreOffice
+        # actually wrote a readable docx - an unusual legacy .doc feature can leave a broken file
+        # at the expected path. The sibling "docx" branch just above already guards the identical
+        # docx_text() call for this exact reason; this one didn't, so a broken conversion raised
+        # straight out of read_document_text() uncaught (confirmed: PackageNotFoundError from
+        # python-docx) - same bug class as engine/general/requirements.py's read_document(),
+        # independently present here since this module deliberately doesn't wrap that function.
+        # QA pass, 2026-10-27.
+        try:
+            text = docx_text(conv)
+        except Exception as e:
+            raise ClassificationFailed(f"This .doc file's conversion to .docx could not be read ({e}). "
+                                       "Save it as .docx or PDF and upload that instead.")
+        method = "LibreOffice .doc->.docx, python-docx"
     elif ext == "txt":
         with open(path, encoding="utf-8", errors="replace") as f:
             text, method = f.read(), "plain text"

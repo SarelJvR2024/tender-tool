@@ -4021,6 +4021,39 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-fourth run): the identical asymmetric-exception-guard bug from Finding 82 existed independently in the onboarding document classifier's own, separate document reader
+
+Orientation: synced a sibling commit (`354c791`, a standing-review pass flagging a document-expiry
+"missing ISO 9001" UX question rather than forcing a code fix - `app/lib/documentExpiry.ts`, no
+overlap). Two open PRs (`#164`/`#165`), both already read by the sibling pass, confirmed not
+touching anything here. Rotated toward worker/job-queue but its core files
+(`poll_loop.py`/`run_bridges.py`/`system_alerts.py`/`check_system_alerts.py`) already got a
+dedicated look at this routine's own run 96 - widened to the shared job-queue CONTRACT across
+every bridge instead and picked `engine/onboarding/process_onboarding_jobs.py`, never reviewed
+this session.
+
+**Finding 83 (CONFIRMED, FIXED, moderate).** `classify_documents.py` (the onboarding document
+classifier) deliberately has its OWN, separate `read_document_text()` rather than reusing
+`requirements.py`'s `read_document()` - and it repeated, independently, the exact same mistake
+Finding 82 (this same session, one cycle earlier) just fixed in that unrelated file: the `docx`
+branch guards `docx_text()` against a corrupt file, the `doc` branch's identical call on
+LibreOffice's own conversion output doesn't, and `convert_with_soffice()` only checks the output
+path exists. Reproduced with the identical technique as Finding 82: a broken "conversion" raised
+`PackageNotFoundError` straight out, uncaught. Traced the blast radius: the real bridge's own
+generic exception handler catches it (degrading to a less-specific error message), but the local
+CLI tool's own exception handling only catches the specific, expected exception types - this one
+would have crashed it outright with a raw traceback.
+
+**Fix:** same `try/except` -> `ClassificationFailed` pattern as the sibling `docx` branch, and as
+Finding 82's own fix in the unrelated file.
+
+**Verified red, then green:** new case in `test_classify_documents.py` (same monkeypatch technique
+as Finding 82's own test). Reverted the fix (keeping the test): crashed with the exact predicted
+traceback; restored: `0 failure(s)`, full suite passing. `test_process_onboarding_jobs.py` re-run
+clean.
+
+Full details: Finding 83 in `QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-third run): closed a complete zero-test-coverage gap on send_digest_emails.py - the one piece of code that actually puts a real daily-digest message in front of a real customer
 
 Orientation: synced two sibling commits (`023a8f7`/`61a44c6` - a thorough standing-review clean
