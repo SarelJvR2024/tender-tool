@@ -190,7 +190,23 @@ async function runClarificationWindow(supabase: SupabaseService, appUrl: string)
     console.error("clarification-window: could not read tender_tasks", error);
     return { sent: 0, candidates: 0 };
   }
-  const candidates = clarificationWindowCandidates((taskRows ?? []) as unknown as ClarificationTaskRow[], daysUntil);
+  const tasks = (taskRows ?? []) as unknown as ClarificationTaskRow[];
+
+  // tender_packs has no direct foreign key to tender_tasks (both
+  // independently reference company_id+tender_id, so PostgREST can't
+  // auto-embed across that) - a small up-front lookup, keyed the same way,
+  // so clarificationWindowCandidates() can apply submission-suppression as
+  // a pure, synchronous, independently-tested function rather than an
+  // inline async check buried in this script.
+  const stageByKey = new Map<string, string | null>();
+  for (const task of tasks) {
+    const key = `${task.company_id}:${task.tender_id}`;
+    if (stageByKey.has(key)) continue;
+    const { data: pack } = await supabase.from("tender_packs").select("pipeline_stage").eq("company_id", task.company_id).eq("tender_id", task.tender_id).maybeSingle();
+    stageByKey.set(key, pack?.pipeline_stage ?? null);
+  }
+
+  const candidates = clarificationWindowCandidates(tasks, daysUntil, (task) => stageByKey.get(`${task.company_id}:${task.tender_id}`));
   let sent = 0;
   for (const { task, daysLeft, threshold } of candidates) {
     const tender = (task as unknown as { tenders: { id: string; contract_no: string | null; description: string | null; buyer: string | null } | null }).tenders;

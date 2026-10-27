@@ -37,14 +37,30 @@ export type ClarificationWindowCandidate = {
   threshold: ClarificationWindowThresholdDays;
 };
 
-/** Every clarification task due a reminder today - kind='clarification', not already done (a completed task has nothing left to remind about). */
+/**
+ * Submission-suppression (notification engine migration, Step 3.3) - unlike
+ * a corrigendum alert (see lib/corrigendumAlerts.ts's own
+ * isCorrigendumCandidate: an addendum can still matter even after
+ * submission), a reminder to ASK clarification questions is genuinely
+ * pointless once the bid is already submitted, won or lost - the whole
+ * point was prompting the question before the bid was finalised. null (no
+ * tender_packs row at all for this company+tender) is kept, same "don't
+ * exclude by accident" rule isCorrigendumCandidate follows.
+ */
+export function isClarificationCandidate(pipelineStage: string | null | undefined): boolean {
+  return pipelineStage !== "submitted" && pipelineStage !== "won" && pipelineStage !== "lost";
+}
+
+/** Every clarification task due a reminder today - kind='clarification', not already done (a completed task has nothing left to remind about), and not already past the point where asking a question still matters (see isClarificationCandidate). pipelineStageFor is injected (not read off the row) because tender_packs has no direct foreign key to tender_tasks - the caller resolves it with its own lookup. */
 export function clarificationWindowCandidates(
   taskRows: ClarificationTaskRow[],
   daysUntilFn: (dateStr: string | null) => number | null,
+  pipelineStageFor: (task: ClarificationTaskRow) => string | null | undefined,
 ): ClarificationWindowCandidate[] {
   const out: ClarificationWindowCandidate[] = [];
   for (const task of taskRows) {
     if (task.kind !== "clarification" || task.status === "done") continue;
+    if (!isClarificationCandidate(pipelineStageFor(task))) continue;
     const daysLeft = daysUntilFn(task.due_date);
     if (daysLeft === null) continue;
     const threshold = clarificationThresholdFor(daysLeft);
