@@ -159,6 +159,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/notify/test_digest_live.py
 
+      - name: Daily digest opt-in gate - migration 0073, opt-in not opt-out (pure function)
+        if: ${{ !cancelled() }}
+        run: python3 engine/notify/test_digest_opt_in.py
+
+      - name: Daily digest email delivery - Resend send/retry/dry-run, malformed-entry isolation (no network)
+        if: ${{ !cancelled() }}
+        run: python3 engine/notify/test_send_digest_emails.py
+
       - name: Tender updates - addenda classified from real documents, watch end to end, pursuers only (in-memory rows)
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_tender_updates.py

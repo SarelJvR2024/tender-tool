@@ -3982,6 +3982,58 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-third run): closed a complete zero-test-coverage gap on send_digest_emails.py - the one piece of code that actually puts a real daily-digest message in front of a real customer
+
+Orientation: synced two sibling commits (`023a8f7`/`61a44c6` - a thorough standing-review clean
+sweep of `watch_deadlines.py`/`process_cv_jobs.py`, and a real fix in `fingerprint.py`'s
+`named_ranges()` silently collapsing sheet-scoped defined names - both unrelated areas, no
+overlap). Two open PRs (`#164` savings-counter rework, `#165` four pre-demo fixes), both read by
+the sibling pass and confirmed not to touch anything here.
+
+Rotated toward compliance (most overdue by this routine's own numbered rotation) but found
+`watch_deadlines.py` had JUST received a genuinely thorough sibling review a few hours earlier
+(same day) - re-treading the identical file immediately would be low-value duplication, so moved
+to the next most-overdue untouched area instead: notify. Read `send_digest_emails.py` (the actual
+Resend-sending step - `daily_digest.py` only assembles the report) end to end for a reachable
+adversarial bug: `section_count()`/`has_content()`'s dict-vs-list branching, `_item_date()`'s
+key-priority fallback, the bounded 429-retry logic (including a `Retry-After` HTTP-date, not just
+seconds), and the per-entry isolation in `main()`'s batch loop. Also checked `scenario_driver.py`
+(intake's own scratch-Postgres scenario harness) and `classify_tender.py`'s `find_delivery_address()`/
+`find_closing_time()`/`discrepancies()` (not yet given a dedicated adversarial look this session).
+Nothing held up as a new, reachable bug in any of them - but a real, more useful gap turned up
+along the way: **no test file existed anywhere in this repo for `send_digest_emails.py`**
+(confirmed by grep across `engine/notify/`), and its own sibling `test_digest_opt_in.py` existed
+but was never wired into CI at all (confirmed by grep across every `.github/workflows/*.yml`) -
+the one script that actually sends a real email to a real customer had zero coverage, and the one
+test file that does exist for an adjacent piece of this same pipeline was never run automatically.
+
+**Built**: `engine/notify/test_send_digest_emails.py` (11 test functions, no network - every case
+that would otherwise POST to Resend monkeypatches `urlopen`). Covers: `section_count()`/
+`has_content()` across list sections and viewer-role summary dicts (including a genuine `count: 0`
+not being mishandled as "missing"); `_item_date()`'s key-priority fallback, including an explicitly
+empty string correctly falling through to the next key rather than being read as present;
+`render_text()` actually putting real item content in the body (not just a placeholder) and its
+10-item cap/"... and N more" line; every `send_one()` status path - no email, no content, dry-run
+(proven to never touch the network), a real success, a single 429 correctly retried once and
+succeeding, a SECOND consecutive 429 correctly NOT retried again (the bounded-retry contract), a
+`Retry-After` given as an HTTP-date rather than a bare integer (confirmed this doesn't crash
+`float()`), and a permanent non-429 HTTP error reported with Resend's own real error body; and
+`main()`'s own per-entry isolation (a digest JSON entry with no `"person"` key at all - simulating
+a partial/corrupted `--out` write - correctly fails just that one entry via `system_alerts`, the
+rest of the batch still sends). All 11 functions pass against the real code, first run, with no
+fix needed in `send_digest_emails.py` itself - every documented contract (the "honest-degrade",
+"one bad item never aborts the batch", and "don't flood Sarel" rules) genuinely held up under
+direct, adversarial testing, not just by reading the comments.
+
+**Fix (process, not a bug)**: wired both the new test and the pre-existing, never-run
+`test_digest_opt_in.py` into `.github/workflows/bridge-worker-ci.yml`, same `if: ${{ !cancelled()
+}}` convention as every other step. Verified both run clean before adding them (`test_digest_opt_in.py`:
+6/6; the new file: 0 failures).
+
+No bug found or fix needed in `send_digest_emails.py`'s own logic - closing a real coverage gap
+(and a real missing-CI-step gap) is the deliverable this pass, same standing as the sixty-second/
+PR #157's own "closed the real zero-coverage gap" precedent.
+
 ## This pass (2026-10-26, standing QA/robustness review - one-hundred-and-second run): a legacy .doc whose LibreOffice conversion produced a broken file raised an uncaught exception straight out of the document reader shared by discovery, intake and general-pack extraction
 
 Orientation: synced a sibling commit (`3ade4a0`, a standing-review pass giving real review to two
