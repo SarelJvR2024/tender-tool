@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { submitRequirementReview } from "./actions";
+import { submitRequirementReview, reprocessRequirementExtraction } from "./actions";
 
 export type RequirementItemRowData = {
   tenderId: string;
@@ -12,7 +12,14 @@ export type RequirementItemRowData = {
   itemType: "forms" | "buyer_forms" | "returnables" | "roles" | "person_registrations" | "cidb" | "briefing";
   itemKey: string;
   item: Record<string, unknown>;
+  /** Best-effort match against this tender's own published document link (shared items only) - see migration 0100's own header. */
+  sourceDocumentUrl: string | null;
+  /** Set instead of a URL when a private company upload matches by title but isn't previewable from this console - see migration 0100. */
+  sourceDocumentNote: string | null;
 };
+
+/** Quick-fill tags for the note field, matching the issue types Sarel's own Phase 2 brief named - not a structured column (requirement_extraction_reviews.note is free text), just a faster way to write the same thing a heuristic-tuning pass would want to search for later. */
+const ANOMALY_TAGS = ["Novel SBD format", "Unreadable scan", "Table misaligned"];
 
 const ITEM_TYPE_LABEL: Record<RequirementItemRowData["itemType"], string> = {
   forms: "Form",
@@ -70,6 +77,8 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
   const [reviewedAs, setReviewedAs] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [reprocessMessage, setReprocessMessage] = useState<string | null>(null);
+  const [reprocessPending, startReprocessTransition] = useTransition();
 
   if (reviewedAs) {
     // Dropped out of the active queue without a full page reload - left as
@@ -105,6 +114,15 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
         return;
       }
       setReviewedAs(verdict);
+    });
+  }
+
+  function reprocess() {
+    if (!row.companyId) return; // no narrow reprocess path for the shared manifest - see migration 0100
+    setReprocessMessage(null);
+    startReprocessTransition(async () => {
+      const result = await reprocessRequirementExtraction({ companyId: row.companyId!, tenderId: row.tenderId });
+      setReprocessMessage(result.ok ? result.reason : result.error);
     });
   }
 
@@ -154,6 +172,18 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
                 <div className="whitespace-pre-wrap text-muted-foreground italic">&quot;{quote}&quot;</div>
               </>
             )}
+            {(row.sourceDocumentUrl || row.sourceDocumentNote) && (
+              <div className="mt-2 border-t border-border pt-2">
+                <div className="mb-1 font-semibold">Source document</div>
+                {row.sourceDocumentUrl ? (
+                  <a href={row.sourceDocumentUrl} target="_blank" rel="noopener noreferrer" className="font-semibold text-accent no-underline hover:underline">
+                    Open source document ↗
+                  </a>
+                ) : (
+                  <div className="text-muted-foreground">{row.sourceDocumentNote}</div>
+                )}
+              </div>
+            )}
           </div>
 
           <details className="mb-3">
@@ -198,6 +228,18 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
                 placeholder="Anything worth recording about this call"
                 className="mt-0.5 block min-h-11 w-full rounded-md border border-border px-2 text-[12.5px]"
               />
+              <span className="mt-1 flex flex-wrap gap-1">
+                {ANOMALY_TAGS.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => setNote((n) => (n ? `${n}; ${tag}` : tag))}
+                    className="rounded-full border border-border bg-muted px-2 py-0.5 text-[10.5px] text-muted-foreground hover:bg-border"
+                  >
+                    + {tag}
+                  </button>
+                ))}
+              </span>
             </label>
 
             <button
@@ -207,8 +249,28 @@ export default function RequirementItemRow({ row }: { row: RequirementItemRowDat
             >
               {pending ? "Saving..." : "Save review"}
             </button>
+
+            {row.companyId ? (
+              <button
+                type="button"
+                onClick={reprocess}
+                disabled={reprocessPending}
+                className="min-h-11 rounded-md border border-border bg-card px-3 text-xs text-foreground disabled:text-muted-foreground"
+                title="Queues a fresh extraction run against this company's own documents for this tender - picked up by the always-on engine worker, not run instantly."
+              >
+                {reprocessPending ? "Queuing..." : "Reprocess"}
+              </button>
+            ) : (
+              <span
+                className="min-h-11 rounded-md border border-border bg-muted px-3 py-2 text-[11px] text-muted-foreground"
+                title="The shared manifest has no standalone reprocess job - it's only ever rebuilt as a side effect of a real company's own extraction run."
+              >
+                Reprocess (shared manifest - not wired)
+              </span>
+            )}
           </div>
 
+          {reprocessMessage && <div className="mt-2 text-xs text-muted-foreground">{reprocessMessage}</div>}
           {error && <div className="mt-2 text-xs text-destructive">{error}</div>}
         </div>
       )}

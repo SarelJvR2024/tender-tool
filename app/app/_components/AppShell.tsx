@@ -8,6 +8,7 @@ import { AppSidebar } from "./AppSidebar";
 import { TopBar } from "./TopBar";
 import { SubscriptionBanner } from "@/components/tt/subscription-banner";
 import { DemoBanner } from "@/components/tt/demo-banner";
+import { ImpersonationBanner } from "./ImpersonationBanner";
 
 /**
  * Replaces SiteNav (the old navy top bar every signed-in page mounted) with
@@ -61,22 +62,34 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
   const sidebarOpen = cookieStore.get("sidebar_state")?.value !== "false";
 
   return (
-    <SidebarProvider defaultOpen={sidebarOpen}>
-      <AppSidebar isPlatformAdmin={isPlatformAdmin} isEmployee={isEmployee} userEmail={user?.email ?? null} companyName={companyName} />
-      <SidebarInset>
-        <TopBar
-          companyName={companyName}
-          isPlatformAdmin={isPlatformAdmin}
-          isEmployee={isEmployee}
-          notifications={notifications}
-          notificationsError={notificationsError}
-        />
-        {!isEmployee && <SubscriptionBanner subscription={subscription} />}
-        <div className="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
-          {isDemo && <DemoBanner />}
-          {children}
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+    // ImpersonationBanner (Admin Command Center Phase 4) sits OUTSIDE
+    // SidebarProvider on purpose - guardrail 2 asks for a full-width banner
+    // "at the very top of the app", spanning the whole viewport above both
+    // the sidebar and the content area, not just the content inset.
+    // AppShell (not the root layout) is the right mounting point: this
+    // component is already dynamic (reads cookies()/the signed-in session
+    // on every call), so adding one more cookie read here costs nothing in
+    // prerendering terms - the public marketing/tool pages, which never
+    // mount AppShell at all, stay fully static exactly as before.
+    <>
+      <ImpersonationBanner />
+      <SidebarProvider defaultOpen={sidebarOpen}>
+        <AppSidebar isPlatformAdmin={isPlatformAdmin} isEmployee={isEmployee} userEmail={user?.email ?? null} companyName={companyName} />
+        <SidebarInset>
+          <TopBar
+            companyName={companyName}
+            isPlatformAdmin={isPlatformAdmin}
+            isEmployee={isEmployee}
+            notifications={notifications}
+            notificationsError={notificationsError}
+          />
+          {!isEmployee && <SubscriptionBanner subscription={subscription} />}
+          <div className="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)]">
+            {isDemo && <DemoBanner />}
+            {children}
+          </div>
+        </SidebarInset>
+      </SidebarProvider>
+    </>
   );
 }

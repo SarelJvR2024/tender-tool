@@ -1,0 +1,87 @@
+# Sends Tier 1 buyer corrigenda/addenda alerts (app/scripts/send-corrigendum-alerts.ts)
+# every 2 hours during SA business hours - the Resend replacement for the
+# old Claude-scheduled "Tender update/addendum watch" check-in's plain-text
+# Gmail report. Same cadence that check-in ran on (0 5-17/2 * * 1-5 in UTC =
+# every 2 hours, 07:00-17:00 SAST, weekdays).
+#
+# This workflow only renders and sends what engine/discovery/watch_tender_updates.py
+# (run separately, unchanged) has already found and written to
+# tender_update_notifications - it does not re-scrape or re-classify
+# anything itself. See that script's own header for the full reasoning.
+#
+# Needs the same repository secrets operational-alerts.yml already uses:
+# NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY,
+# RESEND_FROM_BIDS (falls back to RESEND_FROM_ADDRESS, then a literal
+# bids@tenderready.app, if unset). Until RESEND_API_KEY is set, this
+# workflow still runs safely and still goes green.
+
+name: corrigendum-alerts
+
+on:
+  schedule:
+    - cron: "0 5-17/2 * * 1-5"
+  workflow_dispatch: {} # manual test run, e.g. right after adding RESEND_API_KEY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: corrigendum-alerts
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      # Heartbeat (Notification Command Center, migration 0099) - the start
+      # step fires before anything else can fail, so a dead runner still
+      # leaves a "running" row the admin UI can flag as stuck. Zero-dep
+      # stdlib script, no npm ci/setup-python needed.
+      - name: Record heartbeat (start)
+        working-directory: ${{ github.workspace }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py start --key corrigendum_alerts
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies (needs @supabase/supabase-js and resend)
+        run: npm ci
+
+      - name: Send today's corrigendum/addendum alerts
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_BIDS: ${{ secrets.RESEND_FROM_BIDS }}
+          RESEND_FROM_ADDRESS: ${{ secrets.RESEND_FROM_ADDRESS }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: node --experimental-strip-types scripts/send-corrigendum-alerts.ts
+
+      # Two steps, not one if: always() - GitHub Actions has no single
+      # "did the job pass" value available mid-job, only the success()/
+      # failure() context functions on separate steps.
+      - name: Record heartbeat (success)
+        if: success()
+        working-directory: ${{ github.workspace }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py finish --key corrigendum_alerts --status success
+
+      - name: Record heartbeat (failure)
+        if: failure()
+        working-directory: ${{ github.workspace }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py finish --key corrigendum_alerts --status failed --error "One or more steps in this job failed - see the run log"

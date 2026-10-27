@@ -4,6 +4,8 @@ import SystemAlertRow, { type SystemAlert } from "./SystemAlertRow";
 import { AppShell } from "../_components/AppShell";
 import { AdminNav } from "./AdminNav";
 import { StatCard } from "@/components/tt/stat-card";
+import { WORKFLOW_REGISTRY, heartbeatStatusFor, type WorkflowHeartbeatRow, type HeartbeatStatus } from "@/lib/workflowRegistry";
+import { HEALTH_SOURCE_GROUPS } from "@/lib/adminHealthGroups";
 
 // Reads per-request session/DB data (admin_harness_runs, gated by RLS on the
 // signed-in user being a platform admin - migration 0043) - same escape hatch as
@@ -29,6 +31,16 @@ type CvDocumentStats = {
 
 type CompanyNameRow = { id: string; legal_name: string; csd_trading_name: string | null };
 
+// Wrapped so the component body itself never calls an impure built-in
+// directly (react-hooks/purity) - same pattern as
+// app/app/admin/notifications/page.tsx's own currentTimeMs().
+function currentTimeMs(): number {
+  return Date.now();
+}
+function oneDayAgoIso(): string {
+  return new Date(currentTimeMs() - 24 * 60 * 60 * 1000).toISOString();
+}
+
 // Quick Health Status (System Admin Command Center brief, 2026-10-25):
 // green/amber/red per engine area, derived entirely from signals this app
 // already has - system_alerts (open critical/error/warning, source-scoped)
@@ -37,10 +49,6 @@ type CompanyNameRow = { id: string; legal_name: string; csd_trading_name: string
 // severity for routine completions" ask: skip it, keep system_alerts a
 // high-signal exception queue, and answer "is everything healthy" here
 // instead, from data that already exists.
-const HEALTH_SOURCE_GROUPS: Record<string, string[]> = {
-  "Scraper / Discovery feed": ["discovery", "scraper"],
-  "OCR & extraction workers": ["pack", "narrative", "cv", "cv_extract", "general", "onboarding", "worker"],
-};
 type HealthStatus = { label: string; tone: "success" | "warning" | "destructive"; detail: string };
 
 function healthFromAlerts(label: string, sources: string[], openAlerts: SystemAlert[]): HealthStatus {
@@ -72,6 +80,27 @@ const HEALTH_CHIP_CLASS: Record<HealthStatus["tone"], string> = {
   warning: "bg-warning/10 text-warning border-warning/20",
   destructive: "bg-destructive/10 text-destructive border-destructive/20",
 };
+
+// Scraper/cron health (Admin Command Center Phase 2, 2026-10-27): the one
+// genuinely new, honest signal added here, on top of the Phase 1
+// workflow_heartbeats table (daily_discovery covers watch_new_tenders.py as
+// ONE unit - not eTenders/SANRAL/CIDB separately; true per-source
+// granularity would need new instrumentation inside that script itself, a
+// scoping decision flagged in docs/specs/System-Status.md, not built here).
+// discoveredLast24h is a real, cheap count - "today" is deliberately avoided
+// as a label (SAST vs UTC day-boundary ambiguity for something this minor
+// isn't worth getting wrong), a rolling 24h window reads the same either way.
+const HEARTBEAT_STATUS_TONE: Record<HeartbeatStatus, HealthStatus["tone"]> = {
+  healthy: "success", running: "success", never_run: "warning", stale: "warning", failed: "destructive",
+};
+function healthFromDiscoveryHeartbeat(heartbeat: WorkflowHeartbeatRow | null, nowMs: number, discoveredLast24h: number): HealthStatus {
+  const entry = WORKFLOW_REGISTRY.find((w) => w.key === "daily_discovery")!;
+  const status = heartbeatStatusFor(entry, heartbeat, nowMs);
+  const STATUS_WORD: Record<HeartbeatStatus, string> = {
+    healthy: "healthy", running: "running now", never_run: "never run yet", stale: "overdue/stale", failed: "failed",
+  };
+  return { label: "Discovery scrape", tone: HEARTBEAT_STATUS_TONE[status], detail: `${STATUS_WORD[status]} - ${discoveredLast24h} found in the last 24h` };
+}
 
 type RunRow = {
   id: string;
@@ -116,7 +145,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   // / did we get the tender documents" check, computed server-side rather
   // than left as a one-off query - see that migration's header for exactly
   // what each number counts.
-  const [{ data: openAlerts, error: alertsError }, { data: resolvedAlerts }, { data: cvStatsRows, error: cvStatsError }, { data: recentLogs }, { data: companyNameRows }] = await Promise.all([
+  const [{ data: openAlerts, error: alertsError }, { data: resolvedAlerts }, { data: cvStatsRows, error: cvStatsError }, { data: recentLogs }, { data: companyNameRows }, { data: discoveryHeartbeatRows }, { count: discoveredLast24h }] = await Promise.all([
     supabase.from("system_alerts").select(ALERT_COLUMNS).is("resolved_at", null)
       .order("last_seen_at", { ascending: false }),
     supabase.from("system_alerts").select(ALERT_COLUMNS).not("resolved_at", "is", null)
@@ -128,6 +157,9 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
     // reuses platform_admin_companies() (0064/0098) rather than a second,
     // narrower "company name by id" RPC for the same admin-gated lookup.
     supabase.rpc("platform_admin_companies"),
+    // Discovery scrape chip (Phase 2) - this one workflow's own heartbeat row.
+    supabase.from("workflow_heartbeats").select("*").eq("workflow_key", "daily_discovery"),
+    supabase.from("discovered_opportunities").select("id", { count: "exact", head: true }).gte("created_at", oneDayAgoIso()),
   ]);
   const cvStats = cvStatsRows?.[0] as CvDocumentStats | undefined;
   const open = (openAlerts ?? []) as SystemAlert[];
@@ -159,6 +191,7 @@ export default async function AdminPage({ searchParams }: { searchParams: Promis
   const health: HealthStatus[] = [
     ...Object.entries(HEALTH_SOURCE_GROUPS).map(([label, sources]) => healthFromAlerts(label, sources, open)),
     healthFromNotificationLogs((recentLogs ?? []).map((r) => r.status as string)),
+    healthFromDiscoveryHeartbeat((discoveryHeartbeatRows ?? [])[0] as WorkflowHeartbeatRow | undefined ?? null, currentTimeMs(), discoveredLast24h ?? 0),
   ];
 
   if (error) console.error("admin_harness_runs select failed", error);

@@ -19,6 +19,8 @@ type Rpc = {
   item_type: RequirementItemRowData["itemType"];
   item_key: string;
   item: Record<string, unknown>;
+  source_document_url: string | null;
+  source_document_note: string | null;
 };
 
 /**
@@ -55,6 +57,8 @@ export default async function AdminRequirementExtractionsPage({ searchParams }: 
     itemType: r.item_type,
     itemKey: r.item_key,
     item: r.item,
+    sourceDocumentUrl: r.source_document_url,
+    sourceDocumentNote: r.source_document_note,
   }));
 
   return (
@@ -62,7 +66,13 @@ export default async function AdminRequirementExtractionsPage({ searchParams }: 
       <div className="mx-auto w-full max-w-[1200px] p-4 sm:p-6 md:px-8 md:py-6">
         <AdminNav active="requirement-extractions" />
 
-        <h1 className="mb-1 font-display text-[22px] font-bold text-foreground">Requirement extractions below {DEFAULT_THRESHOLD}/100</h1>
+        <div className="mb-1 flex flex-wrap items-center gap-2">
+          <h1 className="font-display text-[22px] font-bold text-foreground">Quality Scout</h1>
+          <span className="inline-flex rounded-full border border-border bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+            Heuristic &amp; parser extraction quality - not an AI model
+          </span>
+        </div>
+        <p className="mb-1 text-[13px] font-semibold text-foreground">Extractions below {DEFAULT_THRESHOLD}/100</p>
         <p className="mb-2.5 max-w-[860px] text-[13px] text-muted-foreground">
           Every form, buyer form, returnable, role, person registration, CIDB and briefing item that
           engine/general/requirements.py read out of a tender&apos;s documents with a confidence below {DEFAULT_THRESHOLD}, across

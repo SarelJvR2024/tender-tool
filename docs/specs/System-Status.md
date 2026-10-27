@@ -1,5 +1,550 @@
 # System Status
 
+**2026-10-27 ~22:05 UTC — Phase 7: data cleanup - removed the demo-tender pursuit from the two REAL
+companies flagged in the Phase 4/SANRAL-404 entries below ("Tender Ready" and "Reviewer Civils &
+Consulting Pty Ltd"). A direct live-database action (via the service-role REST API), not a code
+change - no migration, no new commit on its own; recorded here per this repo's own "never leave a
+real finding/action only in chat" rule.**
+
+**Audited read-only before touching anything** (same discipline as every prior phase): confirmed via
+PostgREST, not assumed -
+- The two companies' real ids (`companies.is_test_company = false` for both, i.e. genuinely real
+  customers, not a seeded test account): Tender Ready `d4136fe0-8c0b-43dd-b11c-ca1b8e41036c`, Reviewer
+  Civils & Consulting Pty Ltd `f9d57287-a80e-4c56-995c-02330c1608b2`.
+- The demo/fixture tender itself (`009bfe1c-42b6-4915-8c85-94f519148fb4`, slug
+  `demo-n7-section-3-2026-1f`, the one diagnosed in the SANRAL-404 entry further below) - confirmed
+  these were the ONLY demo-slug tender either company had a `tender_packs` row against (checked all 3
+  seeded demo tenders, not just this one).
+- Every table with a real row for (either company, this tender): `tender_packs` (2 rows, one per
+  company) and `tender_tasks` (2 rows, the default "Tender closes" milestone each pack gets on
+  creation) - checked every other company-and-tender-scoped table in the schema
+  (`tender_answers`, `financial_captures`, `generated_documents`, `tender_engine_jobs`,
+  `tender_private_documents`, `tender_comments`, `tender_subcontracting_plans`,
+  `pack_review_confirmations`, `savings_counted_steps`, `narrative_documents`,
+  `tender_update_notifications`) and confirmed 0 rows in every one - neither company's "pursuit" of
+  this demo tender ever produced a real document, answer, financial capture or upload to lose.
+- Read every migration's own FK definition for `tender_packs(id)` (not guessed): `tender_pack_assignments`,
+  `field_provenance`, `cv_uploads.tender_pack_id`, `pack_generation_jobs.tender_pack_id` are ALL
+  `on delete cascade` - so deleting the 2 `tender_packs` rows directly was enough to clean every real
+  child row with no separate deletes, and no orphans. (`tender_engine_jobs.tender_pack_id` is `on
+  delete set null`, not cascade - checked separately and confirmed 0 rows anyway, so moot here.)
+- Confirmed the standalone `/demo` route (`app/demo/page.tsx`) reads from `lib/demoData.ts`'s own
+  hand-built fixture object, not a live Supabase query at all - it was never at risk from this cleanup
+  regardless. The SEEDED demo *account* ("Mzansi Roads & Civils (Pty) Ltd",
+  `26294b10-1a6e-43cc-968a-2cbe77ac5d4f`, `lib/demoCompany.ts`'s own `DEMO_COMPANY_ID`) is a third,
+  separate company from the two cleaned up here - its own legitimate pursuit of this same demo tender
+  is exactly what the fixture is FOR, and was explicitly left untouched (confirmed by re-querying after
+  the delete).
+
+**Deleted**: both `tender_packs` rows and both `tender_tasks` rows, by exact id, via the service-role
+REST API (not a migration - this is a one-time data fix on specific live rows, not a schema change).
+`tender_pack_assignments` (6 rows, 3 per pack) cascade-deleted automatically as predicted.
+
+**Verified clean after, not just before** (re-queried live): both companies now have 0 rows against
+this tender in every table checked; the shared `tenders` row itself, Mzansi's own pursuit of it, and
+Tender Ready's/Reviewer Civils' OTHER real tenders (Reviewer Civils has 1 genuine pack left, untouched)
+are all exactly as they were. Tender Ready now has 0 tender_packs at all - this demo tender was the
+only one its pipeline had, so its workspace is now genuinely empty and ready for real onboarding, not
+"empty except for a leftover fixture."
+
+**Not touched, out of scope on purpose**: `sent_deadline_reminders`/`sent_operational_alerts`/
+`notification_logs`/`notification_claims` (idempotency/audit-trail rows, invisible to either company's
+own workspace - deleting them serves no visible purpose and `sent_deadline_reminders` is tender-only
+scoped, so clearing it would also reset Mzansi's own reminder dedup state, out of scope for this
+cleanup) and `requirement_extraction_reviews` (Sarel's own admin review decisions, tender-only scoped,
+no company_id column at all - not a per-company row to begin with).
+
+---
+
+**2026-10-27 ~21:55 UTC — Phase 6: "Pack Incomplete / Returnables Checklist" digest (A6), closing out
+the notification brief.** Not part of the Admin Command Center's own 7 tabs (those finished at Phase
+5) - a separate, explicitly-scoped item from Sarel's own instructions, with its own detailed spec
+(cadence, subject line format, idempotency, verification) given directly rather than inferred.
+
+Reused the REAL, already-existing "mandatory returnable" concept for each tender family rather than
+inventing a second one:
+- **SANRAL Conventional** (`lib/tenderCompliance.ts`): `ComplianceItem.mandatory` - the actual Stage 2
+  "Mandatory Administration Criteria" (CSD registration, COID Letter of Good Standing, Form of Offer).
+  Deliberately computes ONLY these 3 items' real inputs (company vault, `field_provenance`, pack
+  existence) - confirmed by reading `sanralConventionalDocumentChecks()` that experience/financial-
+  capture/briefing/role data feeds only NON-mandatory items this digest never reports, so none of that
+  heavier machinery (positions, experience matching, score estimate) needed re-implementing service-
+  role-safe for a batch script.
+- **General (non-SANRAL)** (`lib/generalTender.ts`): `ManifestReturnable.strength === "required"`,
+  requirements.py's own reading of the tender's documents - via the existing `checkReturnable()`.
+  Reads the company's own private-document pack manifest over the shared one when both exist, same
+  resolution rule `general-workspace.tsx` itself uses.
+- A family mapping to neither (confirmed against `app/tenders/[id]/page.tsx`'s own `isSanralFamily`/
+  `isGeneralFamily` checks - e.g. "RRM Consultant Tender", or no family at all) has no mandatory-item
+  concept anywhere in this codebase yet - reported `mapped:false` and skipped, the same "not mapped
+  yet" honesty `compliance-data.ts`'s own `loadTenderCompliance()` already uses, never guessed at.
+
+**Real finding, not a bug to silently work around**: SANRAL's own Form of Offer (C1.1.1) item is
+*always* `status: "check"` by construction - confirmed by reading `sanralConventionalDocumentChecks()`,
+`formFillNote()` can only ever return `null` or `"check"`, and the outer code does
+`fill.status ?? "check"` - so it can never read `"have"`, whatever the data. This means every SANRAL
+tender a company tracks will show "C1.1.1 Form of Offer, completed and signed" in this digest at least
+once, every time it enters the window - a real, always-true fact (it genuinely always needs a human
+signature, the same "Verify: Sign the Form of Offer" the live compliance report already shows forever
+until signed), not a defect this digest introduces. Worth knowing before expecting a SANRAL company's
+digest to ever come back empty-missing.
+
+**Pre-existing real bug fixed in passing**: `lib/generalTender.ts` imported `"./dates"` and
+`"./tenderCompliance"` with no file extension - fine for Next.js's bundler, but Node's own
+`--experimental-strip-types` (every standalone `scripts/*.ts` sender uses this, no bundler) can't
+resolve an extensionless relative specifier at all. Confirmed by actually running
+`node --experimental-strip-types -e "import('./lib/generalTender.ts')"` before, which failed
+(`Cannot find module '.../lib/dates'`), and after the fix, which succeeded. This module had never
+been imported by a direct-node script before this digest - only by Next.js-bundled pages - so the bug
+was real but latent. Fixed with `.ts` extensions, matching every other lib file already written this
+way (`lib/tenderCompliance.ts`'s own imports, `lib/deadlineReminders.ts`'s own header comment on
+exactly this constraint).
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint`/`vitest run` 284/284/`npm run build` clean):
+- `lib/returnablesDigestCandidates.ts`: pure `returnablesWindowCandidates()` (3-5 BUSINESS day window,
+  `lib/publicHolidays.ts`'s own `businessDaysBetween()` injected the same way
+  `deadlineReminderCandidates()` injects `daysUntil` - one entry per company tracking a shared tender,
+  same QA-fix shape as that function's own 2026-10-22 finding) + async, service-role-safe
+  `returnablesMissingMandatoryItems()` (explicit `company_id`/`tender_id` filters throughout, never
+  RLS - same pattern `lib/complianceDigestCandidates.ts`'s own header documents).
+- `lib/emailTemplates.ts`: `returnablesDigestEmail()` - Sarel's own literal subject format
+  (`[ACTION REQUIRED] {ref}: {n} Returnables Missing — Closes {date}`), not `operationalSubject()`'s
+  usual shape (every email type here already has its own convention; a one-off format for one new
+  type is consistent with, not a break from, how this file already works), built on the shared
+  `emailBrand.ts` layout/pill/checklist/button components like every other template.
+- `scripts/send-returnables-digest.ts` + `.github/workflows/returnables-digest.yml` (daily, 06:40
+  SAST): the generalised `claim_notification()`/`record_notification_sent()` engine (migration 0093),
+  NOT a new one-off claim table - that migration's own header explicitly warns against exactly that
+  for a type like this one. Idempotency key has no date component - fires at most ONCE EVER per
+  (tender, company), meeting "does not spam for the same tender state" by construction rather than a
+  time-window re-send rule that could still double up.
+- `lib/workflowRegistry.ts` (+ its own spec, now 10 not 9): registered for Template Gallery/Schedule &
+  Cron Health visibility, zero other admin-UI changes needed - the Dispatch Log already reads
+  `notification_logs` generically by `notification_type`, with no hardcoded label list to extend.
+- 8 new/updated unit tests (pure window logic + the async per-family mandatory-item logic, with a
+  minimal Supabase stub matching `complianceDigestCandidates.spec.ts`'s own pattern) - all genuinely
+  exercising the real `sanralConventionalDocumentChecks()`/`checkReturnable()` functions, not a
+  reimplementation of their rules.
+
+**Status note, same as every other sender here**: this is a new GitHub Actions cron workflow -
+nothing to apply to the live database (no new migration; `claim_notification`/`record_notification_sent`
+and `workflow_heartbeats` already exist), but the workflow itself needs the same 3 repository secrets
+every other digest already uses, and will not fire until this branch merges to the branch GitHub
+Actions runs cron schedules from (`main`).
+
+---
+
+**2026-10-27 ~21:45 UTC — Migrations 0099-0102 confirmed live; Admin Command Center Phase 5: Tender
+Catalog (`/admin/tenders`), the last tab from the original 7-tab brief.**
+
+Sarel ran all 4 of this session's outstanding migrations (`0099` workflow_heartbeats, `0100` Quality
+Scout triage, `0101` telemetry/billing, `0102` impersonation) against the live project. `0100` hit a
+real error on first run - `42P13: cannot change return type of existing function... Row type defined
+by OUT parameters is different`, on `platform_admin_low_confidence_requirement_items()` - because
+that function's OUT columns changed (added `source_document_url`/`source_document_note`) and Postgres
+refuses a bare `CREATE OR REPLACE` across a return-shape change; the file now `drop function if
+exists ...` first, per the error's own `HINT`. Confirmed (by reading every other migration in the
+batch) that `0099`/`0101`/`0102` don't have the same issue - each creates brand-new functions, none
+redefines an existing one's OUT columns. All 4 then ran clean. The **status note from Phase 4 below is
+now resolved** for those 4 migrations - every admin page from Phases 1-4 can now read real live data;
+it still applies to this entry's own new migration (`0103`, not yet applied).
+
+**Phase 5 - Tender Catalog & Intelligence.** Not one of the 4 phases originally scoped with Sarel;
+it's the one remaining tab from the original 7-tab brief that never got assigned a phase number
+("Total active tenders... filters [Client/Organ of State, Category, CIDB grading, Closing date].
+Extraction status badges: Native Text Ready/OCR Required/Parsing Failed. Aggregate popularity
+counter"). Proceeded on that reading after saying so to Sarel; flagging again here in case it's wrong.
+
+Audited before building (same discipline as every prior phase) rather than inventing fields:
+- **Filters are all real, existing columns/jsonb** - `buyer` (Client/Organ of State), `industry_tags`/
+  `discipline_tags` (Category - migration `0060`'s discipline taxonomy), `closing_date`. **CIDB
+  grading is NOT a dedicated column** - confirmed by reading `engine/general/requirements.py`'s own
+  extraction, it's `document_requirements -> 'cidb' ->> 'grading'`, only present once a tender has
+  actually been through extraction. Read from there, not added as a new column.
+- **Extraction-status badges are honest, not the brief's 3 labels forced onto data that doesn't carry
+  them.** `document_requirements -> 'documents'` (the per-document manifest `strip_local()` keeps -
+  confirmed it only strips `_work_dir`/`_all_text`/`_local`, nothing else) really does carry each
+  document's own `unreadable` (a reason string, set when a document couldn't be read at all) and
+  `ocr` (a summary object, set only when some/all of that document's text came from OCR rather than a
+  native text layer) - both real, stored, non-fabricated signals. So: no `document_requirements` row
+  at all → **"Not yet extracted"** (a real 4th state the brief didn't list, shown as such rather than
+  forced into one of its 3); any document `unreadable` → **"Parsing Failed"**; else any document used
+  `ocr` → **"OCR Required"**; else → **"Native Text Ready"**. This is tender-level (the shared
+  `tenders.document_requirements`) - a company's own private-document override on `tender_packs` is a
+  separate, per-company reading, out of scope for a cross-tenant catalog page.
+- **Popularity counter** = `count(*) from tender_packs group by tender_id` - the exact same pattern
+  `platform_admin_companies()` (`0098`) already uses for a company's own `tenders_pursued_count`,
+  just grouped the other way round.
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint`/`vitest run` 274/274/`npm run build` clean):
+- Migration `0103`: `platform_admin_tender_catalog()` - every tender with the above filter fields,
+  computed `extraction_status`, and `pursuing_count`. Platform-admin gated (`0043`), same
+  `security definer` pattern as every prior admin RPC. **Not yet applied to the live project** -
+  same "give me the migrations to run" handoff as Phases 1-4, not run unprompted.
+- `/admin/tenders` (`page.tsx` + `TenderCatalogTable.tsx` + `TenderCatalogRow.tsx`): client-side
+  filter/sort over the full RPC result, same proven pattern as `discovered-opportunities`'s
+  `OpportunityTable.tsx` (proportionate to an admin-sized dataset, no new searchParams-filter
+  convention invented). Category filter options come from the live taxonomy itself
+  (`loadDisciplineTaxonomy`/`taxonomyLabel`/`taxonomyGroups`), not just tags already present on a
+  tender, so filtering to a category with zero matches today still works correctly. Added `tenders`
+  to `AdminNav.tsx`'s shared nav list.
+- Confirmed via `npm run build` that `/admin/tenders` renders `ƒ` (dynamic, same as every other
+  `/admin/*` page) and no public/marketing page's prerendering class changed - the Phase 4 regression
+  (`cookies()` in the root layout breaking static prerendering) has no equivalent risk here since
+  this page, like every admin page, already mounts through the already-dynamic `AppShell`.
+
+---
+
+**2026-10-27 ~21:05 UTC — Admin Command Center, Phase 4: "View Tenant Workspace" impersonation +
+immutable audit log, built under Sarel's own 5 explicit guardrails. Live-verified the one genuinely
+novel, highest-risk mechanism (real session minting) against the live project using Sarel's own
+test account; the DB-dependent half (audit logging, the banner) cannot be live-tested until
+migrations land - see the status note below, which also applies to Phases 1-3.**
+
+Design, in one sentence: the admin's own real sign-in (the `sb-*-auth-token` cookie(s)
+@supabase/ssr already manages) is NEVER touched; a single SEPARATE cookie carries the TARGET
+user's own session tokens, and `lib/supabase/server.ts`'s `createClient()` - the one function
+nearly every Server Component/Action in this app already calls - prefers that session when the
+cookie is present. Every existing page therefore renders exactly as the impersonated member would
+see it, with zero per-page changes, and "Exit" is just deleting that one cookie - nothing to
+"restore" because nothing else was ever overwritten. This is the first time the deployed Next.js
+app itself needs the service-role key (confirmed by grepping the whole `app/` tree before building
+- every other service-role caller is a GitHub Actions workflow or standalone script) - isolated
+entirely inside the new `lib/impersonation.ts`, which never returns the key itself, only a
+short-lived target-user session.
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint .`/`vitest run` 274/274/`npm run build`
+clean after every step):
+- Migration `0102`: `impersonation_audit_logs` (admin_user_id, target_company_id, target_user_id,
+  a DENORMALISED target_company_name/target_user_email captured once at start so the banner never
+  needs a live join, reason, started_at, ended_at - immutable except ended_at, which only the same
+  admin can set once), `platform_admin_start_impersonation()` (resolves the target - the company's
+  owner, else earliest member - and opens the row), `platform_admin_end_impersonation()` (closes
+  it, idempotent).
+- `lib/impersonation.ts`: the session-mint (`admin.generateLink` + `verifyOtp` two-step Auth API
+  dance - supabase-js has no direct "sign in as" call), cookie read/write/clear helpers, and
+  `impersonationConfigured()` so the UI hides the action entirely rather than offering a button
+  that would fail, when no service-role key exists in an environment yet.
+- `lib/supabase/server.ts`: `createClient()` now checks the impersonation cookie first and returns
+  a client hydrated with the target session when present; `{ bypassImpersonation: true }` always
+  returns the real admin's own session (used by the banner and both impersonation Server Actions
+  themselves, which are inherently "real admin" operations).
+- `app/_components/ImpersonationBanner.tsx`: the sticky amber banner (guardrail 2's exact wording),
+  reading the REAL admin's session, never the swapped one. **Caught a real site-wide regression
+  before shipping**: mounting this in the root layout (`app/layout.tsx`) forced every page in the
+  app - including every public marketing/tool page (`/login`, `/signup`, `/privacy`,
+  `/tools/*`, `/_not-found`) - out of static prerendering, because `cookies()` access anywhere in
+  the root layout taints the whole tree. Fixed by moving it into `AppShell.tsx` instead (outside
+  `SidebarProvider`, for true full-width-above-everything placement) - the right mounting point
+  architecturally too (same place `SubscriptionBanner`/`DemoBanner` already live, and the one
+  already-dynamic component every signed-in page, and only signed-in pages, renders through).
+  Confirmed by re-running the build: every public page is back to `○` static, matching the
+  pre-Phase-4 baseline exactly; nothing changed for the already-dynamic authenticated pages.
+- `/admin/customers`: "View Tenant Workspace" button (guardrail 5) on both the row and the expanded
+  drawer, hidden when impersonation isn't configured. Exit redirects to `/admin/customers?company=
+  <id>` (guardrail 4 asked for `/admin/customers/[id]`, which does not exist in this codebase - the
+  company detail view is the expand panel on the one listing page, not a separate route; adapted to
+  land on that exact company's own context via a query param that auto-expands its row, same intent
+  as the brief, no fabricated route).
+- **Live-verified the session-mint mechanism** against the real project (Sarel's own Clevapp test
+  account, `sareljvr101@gmail.com` - confirmed as the account owner via the Auth Admin API before
+  using it): `generateLink` + `verifyOtp` produced a real access/refresh token pair for exactly the
+  intended user id, with no email ever sent (generateLink only generates a token; it never
+  dispatches anything) and nothing written anywhere. This is the one mechanism in Phase 4 that
+  doesn't depend on any of the new migrations, so it's the one half that COULD be live-tested today.
+
+**Status note - applies to Phases 1 through 4, not just this one**: none of this session's
+migrations (`0099` workflow_heartbeats, `0100` Quality Scout triage, `0101` telemetry/billing,
+`0102` impersonation) have been applied to the live Supabase project yet - confirmed directly
+(`workflow_heartbeats` 404s via the REST API right now). This is the normal, expected state for
+code still in an open draft PR, not a bug: `notification_logs` (migration `0093`, from before this
+PR existed) IS live, confirming migrations DO get applied, just not yet for schema still sitting in
+an unmerged PR. Every new admin page built across all 4 phases will error against the live database
+until these migrations are applied - worth knowing before expecting them to work in production,
+not something I applied myself (schema changes to the live project were outside what this pass was
+asked to do unprompted).
+
+**Guardrail-by-guardrail confirmation**: (1) service-role key never leaves `lib/impersonation.ts`,
+admin's own session cookie never touched - confirmed by reading every file that touches either.
+(2) Banner matches the exact wording asked for, amber (`bg-warning`, a real design token, not
+invented), `z-50` via `sticky top-0 z-50`, no dismiss separate from Exit (a hideable "still
+impersonating" banner would defeat its own purpose). (3) Audit table immutable except `ended_at`,
+no client insert/update/delete policy at all. (4) Exit clears the one cookie and redirects, adapted
+to this app's real route structure as above. (5) Button on both the row and the drawer, platform-
+admin-gated by the layout guard that already exists on every `/admin/*` page.
+
+---
+
+**2026-10-27 ~15:20 UTC — Admin Command Center, Phase 3: Telemetry + Billing tabs built, both on
+real existing data - no new instrumentation for either. Built autonomously per Sarel's "start
+phase 3, continue without me."** Same branch/PR as the entries below
+(`claude/practical-babbage-oxf9u3`, PR #166).
+
+Audited before building: 4 real job-queue tables with usable status/timestamp columns already
+exist (`pack_generation_jobs` split by `engine` 'sanral'/'general', `generated_cvs`,
+`narrative_documents`, `onboarding_uploads`) - "worker queue depth and engine latency" needed zero
+new instrumentation, just aggregate queries. `lib/billing.ts` already has fully tested, canonical
+pricing (`PLAN_MONTHLY_ZAR`, `priceForPlanZar`, `effectiveSubscriptionStatus`) and
+`company_packs_this_period()` (0084) already computes real per-company quota usage - MRR/billing
+needed no new pricing logic, only a new RPC surfacing the raw columns for the UI to apply that
+existing logic to.
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint .`/`vitest run` 274/274/`npm run build`
+clean):
+- Migration `0101`: `platform_admin_engine_telemetry()` (queue depth + avg latency per engine,
+  unioned across the 4 real job tables), `platform_admin_alert_counts_24h()` (per-source
+  `system_alerts` occurrence count in the last 24h - a different question from `/admin`'s own
+  "what's still open"), `platform_admin_billing_overview()` (raw per-company billing columns only -
+  no pricing math in SQL at all).
+- `/admin/telemetry` (new): queue depth table across all 5 queues (SANRAL pack, general
+  extraction/pack, CV, narrative, onboarding), avg latency over the last 7 days, and a 24h
+  error-rate chip row reusing the exact same `HEALTH_SOURCE_GROUPS` `/admin`'s own Quick Health
+  Status already uses (extracted to `lib/adminHealthGroups.ts` so the two pages can never disagree
+  on groupings).
+- `/admin/billing` (new): MRR (active, payable-tier subscriptions only, yearly billing normalised
+  to monthly, Enterprise excluded and counted separately as "custom pricing") computed entirely by
+  calling `lib/billing.ts`'s own tested functions against `platform_admin_billing_overview()`'s raw
+  columns - never re-derived. Per-company table: plan, billing interval, effective status (a
+  lapsed trial correctly reads `past_due`, not a stale `trialing`), packs used this period vs
+  quota, and whether a PayFast token is on file. Test companies excluded from every count.
+  Deliberately NO AI-unit-economics card - Sarel's own Phase 1 "omit entirely, don't invent an
+  estimate" decision carries forward unchanged; nothing about this pass changed what cost-tracking
+  exists (still none).
+- Caught one real lint-rule violation before it shipped: mutating `mrrZar`/`tierCounts` from inside
+  a `.map()` callback (React's `react-hooks/immutability` rule, flagged even in a Server
+  Component's own render body) - fixed by computing a pure per-row array first and deriving every
+  aggregate via `reduce`/`filter` afterward, never reassigning an outer variable mid-map.
+
+**Phase 4 (Impersonation + audit log) remains the only phase not started.**
+
+---
+
+**2026-10-27 ~15:10 UTC — Admin Command Center, Phase 2: Quality Scout triage extended (source-
+document link, note tags, a real Reprocess action) and a genuine "Discovery scrape" health chip
+added to /admin. Built autonomously per Sarel's "start phase 2, continue without me" - 3 real
+scoping gaps surfaced and flagged rather than built around, same discipline as every prior phase.**
+Same branch/PR as the entries below (`claude/practical-babbage-oxf9u3`, PR #166).
+
+Audited before building (read-only, no guessing): `item.document` on a low-confidence manifest
+item is just a sanitised basename with no stored link back to the real file anywhere (confirmed by
+reading `download_tender_documents()` in `engine/general/process_general_jobs.py`); extraction runs
+via the existing, always-on `general` bridge (`engine/worker/run_bridges.py`) polling
+`pack_generation_jobs` (migration 0026's unified job queue), which already has a `kind =
+'extract_requirements'` row shape that does ONLY extraction (confirmed by reading `process_job()`
+- no pack assembly, no pack-ready email); `/admin`'s existing "Quick Health Status" section
+(2026-10-25) is alert-count-derived only, with no per-source scraper freshness signal anywhere, and
+its own header comment already documents a deliberate prior choice not to add a heartbeat table for
+exactly this - Phase 1's `workflow_heartbeats` covers `daily_discovery` as one unit, not
+eTenders/SANRAL/CIDB separately; the review-correction feedback loop (`requirement_extraction_reviews`
+-> `recent_corrections()` -> `extract_requirements()`'s own few-shot examples) was confirmed real
+and already live, not aspirational.
+
+**Built and verified this pass** (`tsc --noEmit`/`eslint .`/`vitest run` 274/274/`npm run build`
+clean after every step):
+- Migration `0100`: extended `platform_admin_low_confidence_requirement_items()` to return a
+  best-effort `source_document_url` (shared-manifest items only, matched by title against
+  `tenders.document_urls`) or `source_document_note` (company-override items - named, never linked,
+  see below for why) per item; added `platform_admin_reprocess_requirement_extraction(company_id,
+  tender_id)` - queues a real `kind='extract_requirements'` job, claimed by the existing bridge,
+  returning `queued=false` (not an error) when one's already in flight for that pair.
+- `/admin/requirement-extractions` (nav-relabelled "Quality Scout", explicit heuristic-not-AI
+  badge): each item now shows its resolved source-document link/note, a note-field with one-click
+  anomaly tags ("Novel SBD format", "Unreadable scan", "Table misaligned" - free text under the
+  hood, `requirement_extraction_reviews.note` was never a structured column and a migration to make
+  it one wasn't judged worth it for this), and a real "Reprocess" button on every company-scoped
+  row.
+- `/admin` (main page): added a "Discovery scrape" health chip, tone from Phase 1's
+  `heartbeatStatusFor()` against the real `daily_discovery` heartbeat row, detail text showing a
+  genuine rolling-24h `discovered_opportunities` count (labelled "last 24h", not "today" - avoids a
+  SAST-vs-UTC day-boundary judgment call that isn't worth getting wrong for a minor freshness
+  signal).
+
+**3 real gaps surfaced, not built around - flagged here for Sarel's own call, same as every prior
+phase's honest-gap pattern:**
+1. **No "Reprocess" exists for a SHARED-manifest item** (company_id null) - `pack_generation_jobs`
+   is fundamentally company-scoped (`company_id not null`), and the shared manifest has no
+   equivalent narrow job kind anywhere in this codebase; it is only ever rebuilt as a side effect of
+   some company's own real extraction run. Building a standalone "reprocess the shared manifest"
+   path would mean new job-queue architecture, not a wire-up - the button is honestly disabled for
+   these rows instead of faked.
+2. **A company's own private uploaded document (`tender_private_documents`) cannot be opened from
+   this admin console** - its Storage object sits under a bucket RLS policy gated on
+   `is_company_member()` (migration 0032); a platform admin's own session is not a member of an
+   arbitrary tenant, so `createSignedUrl()` would fail. Extending that policy to also allow
+   `is_platform_admin()` is a real privacy-boundary decision (every tenant's private uploads become
+   readable by any platform admin via the Storage API directly, not just through a curated admin
+   page) - Sarel's own call, not made unilaterally here. Today the row just names the file on file
+   rather than linking to it or silently failing.
+3. **No per-source (eTenders/SANRAL/CIDB) scraper health exists** - `daily_discovery`'s heartbeat
+   covers `watch_new_tenders.py` as one unit; breaking it down by government source would need new
+   instrumentation inside that script itself (each source writing its own sub-heartbeat), which is
+   a scoping decision, not something to build speculatively inside this pass.
+
+---
+
+**2026-10-27 ~15:00 UTC — Admin Command Center, Phase 1: Notification Command Center built and
+verified (gallery, schedule/heartbeat health, dispatch-log drawer), plus a tenant-detail
+enhancement. Phases 2-4 (Quality Scout triage, Telemetry/Billing, Impersonation) not started -
+explicitly scoped as separate, reviewable PRs by Sarel's own instruction.** Same branch/PR as the
+entry below (`claude/practical-babbage-oxf9u3`, PR #166) - this is additive, not a replacement.
+
+Before building anything, audited what already existed against the full 7-tab "Production Founder
+Admin Command Center" brief Sarel sent (telemetry, tenants, Quality Scout, tender catalog,
+notifications, billing, impersonation) - found the brief's own assumptions didn't match this repo
+in several places, surfaced to Sarel via `AskUserQuestion` before writing any code rather than
+guessing: `is_platform_admin()` already gates every `/admin/*` route (migration 0043, needs no new
+guard code); `/admin/customers` (migration 0098) already covers most of the "Tenant Directory" ask;
+`/admin/requirement-extractions` already **is** the "Quality Scout" triage queue under a different
+name, with its own header comment explicit that its confidence score is heuristic/regex, not an
+LLM - calling it "AI confidence" in a new UI would misdescribe it; impersonation mode does not exist
+anywhere; MRR has real subscription data but **no stored revenue amount anywhere** (prices are
+hardcoded constants on the marketing page); AI-unit-economics has **zero cost-tracking** in
+`engine/` at all; the brief's own "6 GitHub Actions workflows" is actually 9; and a prior session's
+`/admin` pass (2026-10-25) **deliberately chose not to** build a job-queue heartbeat table for
+OCR/parser/dispatcher queues, for the same reason (nothing writes to one yet) Sarel then explicitly
+overrode for the notification-workflow case specifically, after being shown that precedent.
+
+Sarel's phasing decision (verbatim, binding): 4 phases, each its own reviewable PR-worthy unit -
+Phase 1 (this entry) Notification Command Center + tenant polish; Phase 2 Quality Scout + engine
+watcher; Phase 3 Telemetry + Billing; Phase 4 Impersonation + audit log. Also decided: workflow
+health via a new Supabase heartbeat table (not a live GitHub API read - no credential exists for
+that in the deployed app); MRR computed from real subscription counts x hardcoded tier prices, AI
+unit economics card **omitted entirely** rather than shown as an invented estimate; Quality Scout
+extends `/admin/requirement-extractions` in place rather than a duplicate `/admin/scout` route.
+
+**Built and verified this pass** (full `tsc --noEmit`/`eslint .`/`vitest run`/`npm run build` clean
+after every step, same discipline as the entry below):
+- `workflow_heartbeats` (migration 0099): one row per workflow, two service-role-only RPCs
+  (`record_workflow_heartbeat_start`/`_finish`), RLS gated to `is_platform_admin()`. Deliberately
+  does NOT store `workflow_name`/`cadence_cron` - those stay in `app/lib/workflowRegistry.ts`
+  (code, PR-reviewable) as the one source of truth, never duplicated into a migration seed that
+  could drift from the YAML.
+- `engine/notify/record_heartbeat.py`: zero-dependency CLI (stdlib only, no pip/npm install step
+  needed), mirrors `engine/alerts/system_alerts.py`'s own urllib pattern. 9/9 unit checks (`test_record_heartbeat.py`).
+- `app/lib/workflowRegistry.ts`: the real 9 workflows (not 6), plus `heartbeatStatusFor()` - a pure,
+  cadence-scaled staleness function. Caught and fixed a real bug before it shipped: a flat 3-hour
+  staleness grace period made a 10-minute-cadence workflow's "stale" threshold meaningless (3h10m);
+  replaced with a grace scaled to each workflow's own interval (half the interval, 15-minute
+  floor). 8/8 vitest checks.
+- Wired heartbeat start/success/failure steps into all 9 `.github/workflows/*.yml` files, as
+  separate steps around each job's existing business logic (never inside the sender scripts
+  themselves, so this can never touch tested send logic) - start right after checkout, finish
+  gated on `success()`/`failure()` (GitHub Actions has no single "did the job pass" value available
+  mid-job). Verified every workflow's `--key` matches the registry exactly and every YAML still
+  parses.
+- `/admin/notifications` rebuilt as a 3-tab Command Center (same route, same nav entry):
+  - **Template Gallery**: `app/lib/emailTemplateSamples.ts` - 19 live templates, one realistic
+    sample each, keyed by the exact `notification_type` string each live sender logs under.
+    Deliberately excludes 3 template functions confirmed dead by grepping every sender's imports
+    (`briefingReminderDetailedEmail`/`printSignCutoffEmail` in `emailTemplatesTier1.ts`, superseded
+    by the live `emailTemplates.ts` versions; `complianceExpiryEmail`, whose sender stage this
+    branch already removed earlier to prevent a double-send). 19, not the brief's assumed 12 -
+    every real template gets a card rather than being cut to match a round number. "Send Test to
+    Me" (`app/app/admin/notifications/actions.ts`) sends to the signed-in admin's own email only,
+    through the same `claim_notification`/`record_notification_sent` RPCs every real sender uses,
+    under a `test-sample-` idempotency prefix that can't collide with a real send.
+  - **Schedule & Cron Health**: all 9 workflows, cadence/target-audience from the static registry,
+    status badge from the real heartbeat row (Healthy/Running/Failed/Stale/Never run) - never a
+    live GitHub Actions API read.
+  - **Dispatch Log**: existing table, now with a Category column (derived from each type's own
+    Tier, per `lib/resendEmail.ts`'s own documented Tier->sender-profile mapping - never a new,
+    independently-maintained column) and a slide-over drawer on row click showing every real
+    metadata field (status, recipient, idempotency key, Resend ID, company/tender ID, error).
+    Deliberately does NOT claim to show "the exact HTML content of that dispatch" (the original
+    brief's wording) - `notification_logs` (migration 0093) was never built to store email bodies,
+    only metadata, and Sarel's own narrower Phase 1 instruction asked for "recipient metadata," not
+    historical HTML - the drawer says so plainly rather than faking a reconstruction.
+- `/admin/customers`: kept `computeBidReadiness()`'s already-computed `criteria` array (previously
+  discarded down to just the `%`) and rendered the full per-criterion breakdown (satisfied/missing/
+  expired/expiring, with weight and days-left) inside the existing expand panel - real data that
+  was already being computed, just never shown. This is the "quick deep-link into company details"
+  item from Sarel's own Phase 1 ask, delivered as a drill-down rather than a new route, since a
+  separate `/admin/customers/[id]` page would have duplicated most of what the existing accordion
+  already shows.
+
+**Explicitly NOT built this pass** (Sarel's own phasing, not an oversight): `/admin/telemetry`,
+`/admin/scout` (extending the existing requirement-extractions page instead, not yet done),
+`/admin/billing`, `/admin/impersonate/:id`. The AI-unit-economics metric is permanently out of
+scope until real token/OCR cost tracking exists somewhere in `engine/` - flagged, not built as an
+estimate.
+
+---
+
+**2026-10-27 ~12:50 UTC — notification migration: wired 5 of 12 brief items onto the branded
+Resend pipeline, replacing the matching Claude-scheduled + Gmail check-ins; 1 item deferred, 1
+real backlog item flagged, not built.** Full account on `claude/practical-babbage-oxf9u3`
+(PR #166, same branch as an earlier, unrelated savings-calculator fix) - built incrementally with
+real verification at each step (typecheck/lint/full-suite/build after every change), not a single
+end-of-task commit.
+
+**Built and live-send-verified against real data**: discovered-tenders digest
+(`discoveredTendersDigestEmail` + `scripts/send-discovered-tenders.ts`, wired into
+`daily-discovery.yml` as a post-scrape step) - a real send to a real, opted-in company (see opt-in
+note below) delivered correctly, 71 tenders in one digest, confirmed via `notification_logs`.
+Caught and fixed a real bug first: an unpaginated query would have silently capped at 1,000 of a
+real 6,052-row batch (PostgREST's own per-request cap) - confirmed live before and after the fix.
+
+**Built, dry-run-verified (0 live candidates right now) and sample-send-verified**: corrigendum/
+addenda alerts (`corrigendumAlertEmail`, previously orphaned, + `scripts/send-corrigendum-alerts.ts`
++ `corrigendum-alerts.yml`), comprehensive compliance expiry digest (`complianceDigestEmail`,
+previously orphaned, + `lib/complianceDigestCandidates.ts` + `scripts/send-compliance-digest.ts` +
+`compliance-alerts.yml` - SARS PIN/COID/B-BBEE/CIDB/registrations/ECSA/SACPCMP at 30/14/7-day
+thresholds; CSD deliberately excluded, no expiry field exists for it anywhere in this schema),
+clarification-window reminder (`clarificationWindowReminderEmail`, new, wired as a 3rd stage into
+`send-operational-alerts.ts` - honestly scoped to whole-day thresholds, 10d/2d, since
+`tender_tasks.due_date` has no time component), and bid-pack-ready email (`packReadyEmail`, new -
+Python calls Resend directly via `engine/notify/send_pack_ready_email.py`, rendering the one
+canonical TS template through a thin CLI bridge, `scripts/render-pack-ready-email.ts`, rather than
+duplicating the HTML in Python). Caught and fixed a 2nd real bug: `complianceDigestCandidates.ts`
+imported a constant from `lib/notifications.ts`, which has its own extensionless `./dates` import
+that `node --experimental-strip-types` can't resolve - same limitation `lib/deadlineReminders.ts`'s
+own header already documents; fixed by extracting the constant into a new, zero-import file
+(`lib/companyExpiryFields.ts`). Also caught and fixed a real duplicate-send risk before it shipped:
+`send-operational-alerts.ts` already covered SARS PIN/COID at 14 days under a different
+idempotency-key format than the new compliance digest - removed that overlapping stage rather than
+running both.
+
+**Added `--dry-run`/`--company-id`/`--test-recipient` to every new sender** (`lib/senderCliArgs.ts`),
+per Sarel's own explicit requirement that no unverified test run touch real companies. A dry run
+never claims a real one-time `notification_claims` token; `--test-recipient` requires
+`--company-id` too (refuses otherwise) and uses a test-prefixed idempotency key so it never burns
+a real future send.
+
+**Deferred, not built**: pack-incomplete/returnables-checklist digest (item A6) - the real "what's
+missing for this bid" computation (`submission-plan-logic.ts` + `general-pack-review-data.ts`'s
+`returnableReviewStatus`/`checkReturnable` + `tenderTimeline.ts`) is correct-layer but only
+exercised today from within a signed-in Next.js render, with no live-credentialed way in this
+session to verify a standalone reproduction wouldn't silently disagree with what the in-app
+Submission Plan shows. Flagged rather than shipped as a shallow/approximate guess.
+
+**Real finding, not a bug in this work**: every `company_members` row in the live database (33/33)
+has `daily_digest_opt_in = false` - confirmed directly against the table, not just inferred from
+dry-run output. This single column gates recipients for every Tier 1/2 sender, old and new
+(deadline reminders, print-cutoff, briefing, and now corrigendum/compliance-digest/clarification-
+window too) - practical effect: none of them currently reach a real person regardless of how
+correct the code is. Migration 0073's own comment documents this as Sarel's deliberate decision
+("an opt-in, not an opt-out, feature"), so NOT changed here - only one row (Sarel's own company,
+`0db4fa19-...`, "Clevapp (Pty) Ltd") was opted in, for the one real-data verification send above.
+**Backlog item flagged for a dedicated future PR, Sarel's own framing (2026-10-27)**: split
+operational/transactional notifications (deadline reminders, print-cutoff, corrigenda on tracked
+bids - should probably stay opt-in, closer to Sarel's original intent) from discovery digests
+(new-tender matches - arguably should default to opt-in-true so paying clients actually see them),
+with a granular toggle in `/company` settings rather than the one shared boolean. Not built, not
+guessed at further here.
+
+**Claude-scheduled trigger state** (the mechanism this migration replaces): `trig_01RCendu1NoQddCCP8eMmkwW`
+("System alerts check-in") disabled - fully superseded by the pre-existing `scout-alerts.yml`/
+`founder-digest.yml`, confirmed via PR #148's own prior decision to retire it, resurrected only by
+an unrelated environment-migration accident. The SANRAL/national tender watch and tender-update/
+addendum watch Claude triggers are candidates to disable next (their Resend replacements are built
+and verified above) - left enabled pending Sarel's own go-ahead in chat, not disabled unilaterally
+here. The compliance-deadline-reminder Claude trigger should NOT be disabled yet - its Resend
+replacement has a real, documented scope gap (`documents_before_closing`, generic tender `tasks` -
+a different shape of fact than a flat calendar threshold) that A6 above would have closed; stays
+enabled until that gap is closed or Sarel explicitly accepts the gap.
+
+---
+
 **2026-10-27 ~20:40 UTC — fixed the recurring "SANRAL page could not be read (404)"
 system_alerts noise: root cause was a seeded DEMO/fixture tender, not a dead real tender,
 a URL bug, or a SANRAL site-scheme change.** Diagnosed on Sarel's own direct request (SANRAL

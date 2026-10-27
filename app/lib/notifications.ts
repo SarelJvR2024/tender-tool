@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "./dates";
 import { DEADLINE_WINDOW_DAYS } from "./deadlineReminders";
+import { COMPANY_EXPIRY_FIELDS } from "./companyExpiryFields";
 
 export type AppNotification = {
   id: string;
@@ -29,19 +30,12 @@ function withinWindow(daysLeft: number | null, windowDays: number): daysLeft is 
   return daysLeft !== null && daysLeft <= windowDays;
 }
 
-// Exported for documentExpiry.ts's own vault-wide overview - the one list of
-// which company-level fields carry an expiry date, shared so the two
-// screens (notification bell, vault overview) never silently diverge on
-// which fields count as "a document with an expiry".
-export const COMPANY_EXPIRY_FIELDS: { field: string; label: string }[] = [
-  { field: "coid_letter_of_good_standing_expiry", label: "COID Letter of Good Standing" },
-  { field: "cidb_expiry", label: "CIDB grading" },
-  { field: "sars_tcs_pin_expiry", label: "SARS Tax Compliance PIN" },
-  { field: "pi_insurance_expiry", label: "Professional Indemnity insurance" },
-  { field: "iso_9001_expiry", label: "ISO 9001 certificate" },
-  { field: "bank_confirmation_letter_valid_until", label: "Bank confirmation letter" },
-  { field: "bee_proof_expiry", label: "B-BBEE proof" },
-];
+// Re-exported for documentExpiry.ts's own vault-wide overview and
+// scripts/send-compliance-digest.ts - the one list of which company-level
+// fields carry an expiry date, shared so no caller silently diverges on
+// which fields count as "a document with an expiry". Now defined in
+// lib/companyExpiryFields.ts (see that file's own header for why).
+export { COMPANY_EXPIRY_FIELDS };
 
 type HeldRegistrationRow = {
   id: string;

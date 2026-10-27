@@ -5,6 +5,7 @@ import { StatCard } from "@/components/tt/stat-card";
 import { computeBidReadiness } from "@/lib/readiness";
 import { daysUntil } from "@/lib/dates";
 import CustomerRow, { type Customer, type CustomerMember } from "./CustomerRow";
+import { impersonationConfigured } from "@/lib/impersonation";
 
 // Reads per-request session/DB data (RPCs gated by is_platform_admin, 0064) -
 // same escape hatch as ../page.tsx.
@@ -51,8 +52,8 @@ type ReadinessDataRow = {
 // throughout (navy #16233B, muted #5B6472, border #E3E6EA, error banner
 // #FEE2E2/#FCA5A5/#B91C1C) - now Tailwind + tokens, same mapping as every
 // other admin page in this pass.
-export default async function AdminCustomersPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const { error: actionError } = await searchParams;
+export default async function AdminCustomersPage({ searchParams }: { searchParams: Promise<{ error?: string; company?: string }> }) {
+  const { error: actionError, company: autoOpenCompanyId } = await searchParams;
   const supabase = await createClient();
 
   const [{ data: companies, error }, { count: tendersTrackedCount }] = await Promise.all([
@@ -70,7 +71,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
   const customers: Customer[] = rows.map((c, i) => {
     const members = (memberLists[i].data ?? []) as CustomerMember[];
     const r = (readinessRows[i].data?.[0] ?? null) as ReadinessDataRow | null;
-    const readinessPercent = r
+    const readiness = r
       ? computeBidReadiness({
           legalName: r.legal_name,
           csdSupplierNumber: r.csd_supplier_number,
@@ -84,11 +85,11 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
           principalCount: r.principal_count,
           peopleWithCvCount: r.people_with_cv_count,
           experienceProjectCount: r.experience_project_count,
-        }).percent
+        })
       : null;
     const primaryContact = members.find((m) => m.role === "owner")?.email ?? members[0]?.email ?? null;
     const trialDaysRemaining = c.subscription_status === "trialing" ? daysUntil(c.trial_ends_at) : null;
-    return { ...c, members, readinessPercent, primaryContact, trialDaysRemaining };
+    return { ...c, members, readinessPercent: readiness?.percent ?? null, readinessCriteria: readiness?.criteria ?? null, primaryContact, trialDaysRemaining };
   });
 
   const testCount = customers.filter((c) => c.is_test_company).length;
@@ -125,7 +126,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
             <div className="p-4.5 text-[13px] text-muted-foreground">No companies have signed up yet.</div>
           )}
           {customers.map((c) => (
-            <CustomerRow key={c.id} customer={c} />
+            <CustomerRow key={c.id} customer={c} defaultOpen={c.id === autoOpenCompanyId} impersonationAvailable={impersonationConfigured()} />
           ))}
         </div>
       </div>

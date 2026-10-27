@@ -48,6 +48,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Heartbeat (Notification Command Center, migration 0099) - the start
+      # step fires before anything else can fail, so a dead runner still
+      # leaves a "running" row the admin UI can flag as stuck. Zero-dep
+      # stdlib script, no npm ci/setup-python needed.
+      - name: Record heartbeat (start)
+        working-directory: ${{ github.workspace }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py start --key scout_alerts
+
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -64,3 +75,22 @@ jobs:
           ADMIN_NOTIFICATION_EMAIL: ${{ secrets.ADMIN_NOTIFICATION_EMAIL }}
           APP_URL: ${{ vars.APP_URL }}
         run: node --experimental-strip-types scripts/send-scout-alerts.ts
+
+      # Two steps, not one if: always() - GitHub Actions has no single
+      # "did the job pass" value available mid-job, only the success()/
+      # failure() context functions on separate steps.
+      - name: Record heartbeat (success)
+        if: success()
+        working-directory: ${{ github.workspace }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py finish --key scout_alerts --status success
+
+      - name: Record heartbeat (failure)
+        if: failure()
+        working-directory: ${{ github.workspace }}
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py finish --key scout_alerts --status failed --error "One or more steps in this job failed - see the run log"

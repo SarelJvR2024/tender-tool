@@ -3,7 +3,7 @@
 // from a column or computation that already exists in this schema - no new
 // "briefing venue" or "checklist" source was invented for this file (see
 // each function's own comment for exactly where its data comes from).
-import { formatDate } from "./dates.ts";
+import { closingCountdown, formatDate } from "./dates.ts";
 import {
   briefingDetailCard,
   button,
@@ -17,7 +17,7 @@ import {
   pill,
   tenderHeader,
 } from "./emailBrand.ts";
-import { tenderSubject } from "./emailSubjects.ts";
+import { discoveredTendersSubject, tenderSubject } from "./emailSubjects.ts";
 import { printSignDeadline, type DispatchLogisticsInput } from "./dispatchTriage.ts";
 import type { NotificationEmail } from "./notificationEngine.ts";
 
@@ -193,5 +193,164 @@ export function corrigendumAlertEmail(opts: {
     { appUrl: opts.appUrl, badgeText: opts.buyerShortName, recipientContext: { kind: "tender", tenderReference: opts.reference, companyName: opts.companyName } }
   );
   const text = `${opts.reference} (${opts.buyerShortName}) - addendum published.\n${rows.map((r) => `${r.label}: ${r.value.replace(/<[^>]+>/g, "")}`).join("\n")}\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text };
+}
+
+// 1.4 New Discovered Tenders Digest
+// --------------------------------------------------------------------------
+// Data source: discovered_opportunities (migration 0004/0071), one row per
+// (company, release) - already seeded daily by engine/discovery/watch_new_tenders.py
+// via .github/workflows/daily-discovery.yml, which writes but never emails.
+// This renders a digest of one company's own newly-seeded rows, cards per
+// tender (contract number, buyer, category/CIDB signal, closing countdown),
+// never one email per tender - the brief's own anti-noise framing, same as
+// scoutAnomalyBatchEmail's "a batch of one is just a list with one row" rule
+// so there is exactly one template for 1..N tenders, not two drifting ones.
+//
+// Only ONE button() per email (this file's own established convention,
+// see its doc comment: "exactly one per email") - each card gets a plain
+// text link to its own tender, the single big CTA at the end goes to the
+// in-app Discovery feed where every one of them (and anything this digest's
+// own cap left out) can be reviewed.
+export type DiscoveredTenderCard = {
+  id: string;
+  contractNumber: string | null;
+  buyer: string | null;
+  title: string | null;
+  category: string | null;
+  cidbGrading: string | null;
+  closingDate: string | null;
+  verdict: "strong_fit" | "possible" | "needs_review" | string;
+};
+
+const MAX_CARDS_SHOWN = 10;
+
+export function discoveredTendersDigestEmail(opts: {
+  companyName: string;
+  tenders: DiscoveredTenderCard[];
+  appUrl: string;
+}): NotificationEmail {
+  const subject = discoveredTendersSubject({ count: opts.tenders.length, companyName: opts.companyName });
+  const shown = opts.tenders.slice(0, MAX_CARDS_SHOWN);
+  const remaining = opts.tenders.length - shown.length;
+
+  const cardsHtml = shown
+    .map((t) => {
+      const countdown = closingCountdown(t.closingDate);
+      const rows = [
+        { label: "Tender #", value: escapeHtml(t.contractNumber || "—") },
+        { label: "Client", value: escapeHtml(t.buyer || "—") },
+        { label: "Category / CIDB", value: escapeHtml([t.category, t.cidbGrading].filter(Boolean).join(" · ") || "—") },
+        {
+          label: "Closing",
+          value: countdown ? escapeHtml(countdown.text) : "Not stated",
+          emphasis: countdown?.urgent ? ("warning" as const) : undefined,
+        },
+      ];
+      return `
+        <div style="margin:0 0 16px;">
+          <p style="margin:0 0 6px;">${pill(t.verdict === "strong_fit" ? "STRONG FIT" : t.verdict === "possible" ? "POSSIBLE FIT" : "NEEDS REVIEW", t.verdict === "strong_fit" ? "success" : "info")}</p>
+          <p style="margin:0 0 8px;font-size:15px;font-weight:600;color:#0B1F3A;">${escapeHtml(t.title || "Untitled tender")}</p>
+          ${infoCard(rows)}
+          <a href="${escapeHtml(`${opts.appUrl}/tenders/${t.id}`)}" style="font-size:13px;color:#1D4ED8;text-decoration:none;">Review this tender &rarr;</a>
+        </div>`;
+    })
+    .join("");
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill("NEW TENDERS FOUND", "info")}</p>
+      <p style="margin:0 0 16px;">${opts.tenders.length} new tender${opts.tenders.length === 1 ? "" : "s"} matched your company's profile:</p>
+      ${cardsHtml}
+      ${remaining > 0 ? `<p style="margin:0 0 16px;font-size:13px;color:#5C6374;">+ ${remaining} more in your Discovery feed.</p>` : ""}
+      ${button(`${opts.appUrl}/discovery`, "Open Discovery Feed")}
+    `,
+    `${opts.tenders.length} new tender${opts.tenders.length === 1 ? "" : "s"} found for you.`,
+    { appUrl: opts.appUrl }
+  );
+  const text = `${opts.tenders.length} new tender(s) found:\n${shown
+    .map((t) => `- ${t.contractNumber || t.id} (${t.buyer || "unknown buyer"}): ${t.title || "Untitled"} - ${opts.appUrl}/tenders/${t.id}`)
+    .join("\n")}${remaining > 0 ? `\n+ ${remaining} more in your Discovery feed.` : ""}\n\n${opts.appUrl}/discovery`;
+  return { subject, html, text };
+}
+
+// 1.5 Clarification Window Expiry Reminder
+// --------------------------------------------------------------------------
+// Data source: tender_tasks where kind='clarification' (migration 0009/
+// 0021's own standard-milestone enum) - a MANUALLY-entered due_date, not an
+// auto-extracted one (this schema has no question-cutoff field anywhere -
+// see lib/clarificationWindowReminders.ts's own header for the full
+// reasoning). daysLeft of 10 or 2 ("48h", the closest honest equivalent on
+// a date-only column) - never any other value, enforced by
+// clarificationThresholdFor() before this function is ever called.
+export function clarificationWindowReminderEmail(opts: {
+  reference: string;
+  tenderTitle?: string | null;
+  buyerShortName: string;
+  taskDescription: string;
+  dueDate: string;
+  daysLeft: number;
+  appUrl: string;
+  tenderId: string;
+}): NotificationEmail {
+  const action = opts.daysLeft <= 2 ? "Clarification Window Closing (48h)" : "Clarification Window Closing (10 Days)";
+  const subject = tenderSubject({ reference: opts.reference, action, buyer: opts.buyerShortName });
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill("CLARIFICATION WINDOW", opts.daysLeft <= 2 ? "warning" : "info")}</p>
+      ${tenderHeader({ reference: opts.reference, title: opts.tenderTitle, buyerShortName: opts.buyerShortName })}
+      <p style="margin:0 0 16px;">The window to submit clarification questions on this tender closes soon:</p>
+      ${infoCard([
+        { label: "Task", value: escapeHtml(opts.taskDescription) },
+        { label: "Due", value: escapeHtml(formatDate(opts.dueDate) ?? opts.dueDate), emphasis: opts.daysLeft <= 2 ? "warning" : undefined },
+      ])}
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open Tender Workspace")}
+    `,
+    `${opts.reference}: clarification window closes in ${opts.daysLeft} day${opts.daysLeft === 1 ? "" : "s"}.`,
+    { appUrl: opts.appUrl, badgeText: opts.buyerShortName }
+  );
+  const text = `${opts.reference} (${opts.buyerShortName}) - clarification window closes in ${opts.daysLeft} day(s), due ${formatDate(opts.dueDate) ?? opts.dueDate}.\n${opts.taskDescription}\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text };
+}
+
+// 1.6 Bid Pack Compilation Complete
+// --------------------------------------------------------------------------
+// Data source: engine/general/process_general_jobs.py's own process_job()
+// (generate_pack job kind) - the moment a pack job's status flips to
+// "ready". That job runs in the Python worker, not this Next.js app, so
+// THIS function is only ever called indirectly: Python invokes
+// scripts/render-pack-ready-email.ts (a thin render-only CLI wrapper
+// around this exact function) over a subprocess, then sends the result via
+// Resend's own HTTP API directly - see that script's own header and
+// engine/notify/send_pack_ready_email.py for the full architecture
+// reasoning (Sarel's own explicit decision, 2026-10-27: instant delivery
+// matters here because teams are often working against tight courier/print
+// deadlines, and the one canonical template still lives in TypeScript, not
+// duplicated in Python).
+export function packReadyEmail(opts: {
+  reference: string;
+  tenderTitle?: string | null;
+  buyerShortName: string;
+  companyName: string;
+  pageCount: number;
+  appUrl: string;
+  tenderId: string;
+}): NotificationEmail {
+  const action = "Bid Pack Compiled & Ready for Print/Review";
+  const subject = tenderSubject({ reference: opts.reference, action, buyer: opts.buyerShortName });
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill("PACK READY", "success")}</p>
+      ${tenderHeader({ reference: opts.reference, title: opts.tenderTitle, buyerShortName: opts.buyerShortName })}
+      <p style="margin:0 0 16px;">Your submission pack has finished compiling and is ready to download, print and review.</p>
+      ${infoCard([{ label: "Pages", value: escapeHtml(String(opts.pageCount)) }])}
+      ${button(`${opts.appUrl}/tenders/${opts.tenderId}`, "Open Tender Workspace")}
+    `,
+    `${opts.reference}: your bid pack is ready.`,
+    { appUrl: opts.appUrl, badgeText: opts.buyerShortName, recipientContext: { kind: "tender", tenderReference: opts.reference, companyName: opts.companyName } }
+  );
+  const text = `${opts.reference} (${opts.buyerShortName}) - bid pack ready, ${opts.pageCount} page(s).\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
   return { subject, html, text };
 }
