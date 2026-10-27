@@ -109,6 +109,16 @@ WATCH_DAYS_AFTER_CLOSING = 7
 RECENT_DAYS = 3
 WALK_BACK_DAYS = 21
 URGENCY_ORDER = {"critical": 0, "high": 1, "info": 2}
+# engine/seed_demo_company.py's own fixture tenders (TENDER_SLUGS there) are
+# all given this prefix deliberately - a sales-demo "SANRAL" tender with a
+# slug that was never a real detail.fetch_detail() URL on nra.co.za, so it
+# can never be fetched successfully. Confirmed live 2026-10-27: the pursued
+# tender behind the recurring "SANRAL page could not be read (404)" alert
+# (contract_no N.007-030-2026/1F) has slug 'demo-n7-section-3-2026-1f' - a
+# fixture, not a dead/removed real tender or a URL-construction bug. Real
+# SANRAL slugs look like 'r-343-020-2025-1f' (detail.py's own docstring
+# example) - never this prefix - so this check can't false-positive on one.
+DEMO_SLUG_PREFIX = "demo-"
 SAST = datetime.timezone(datetime.timedelta(hours=2))
 
 
@@ -318,6 +328,17 @@ def check_tender(client, tender, today, ocds, fetch_sanral=None, fetch_doc=None,
     known = {r["doc_key"]: r for r in client.select("tender_watched_documents", {"tender_id": tender["id"]})}
     first_look = not known and not state.get("last_found_at")
     new_state = {"tender_id": tender["id"], "last_checked_at": _now()}
+
+    # A seeded demo/fixture tender (see DEMO_SLUG_PREFIX above) - its SANRAL
+    # page was never real, so fetching it can never succeed. Recorded as a
+    # clean, no-error skip (last_error stays None) rather than retried every
+    # run forever and logged as a system_alerts error indistinguishable from
+    # a genuine page-read failure on a real pursued tender.
+    if (tender.get("slug") or "").startswith(DEMO_SLUG_PREFIX):
+        new_state.update({"last_checked_at": _now(), "last_error": None})
+        client.upsert("tender_watch_state", [{**state, **new_state}], "tender_id")
+        log(f"  {tender.get('contract_no') or tender['id']}: demo/fixture tender (slug '{tender['slug']}') - skipped, not watched")
+        return []
 
     if tender.get("ocid"):
         known_day = datetime.date.fromisoformat(state["release_date"]) if state.get("release_date") else None
