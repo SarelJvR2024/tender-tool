@@ -1,55 +1,93 @@
 "use client";
 
 import { useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { PLAN_MONTHLY_ZAR } from "@/lib/billing";
-import { SAVINGS_STEP_HOURS, extraCapacity, formatRand, hoursSavedForTender } from "@/lib/savingsCounter";
+import { formatRand } from "@/lib/savingsCounter";
+import { ADMIN_TIME_SAVED_FRACTION, calculateSavingsEstimate } from "@/lib/savingsEstimateCalculator";
 
-const TYPICAL_HOURS_SAVED_PER_TENDER = Object.values(SAVINGS_STEP_HOURS).reduce((sum, s) => sum + s.hours, 0);
 const PROFESSIONAL_MONTHLY_ZAR = PLAN_MONTHLY_ZAR.professional as number;
 
 /**
- * Pricing-page savings calculator (spec §9.5). A marketing estimate, not the
- * real per-tender counter (lib/savingsCounterData.ts) - there's no real
- * tender to read actual counted steps from here, so this assumes a
- * "typical" tender saves the sum of every configured step's placeholder
- * hours (the same SAVINGS_STEP_HOURS the real counter uses - not a
- * separately invented number), capped at whatever baseline the visitor
- * types in, then reuses the exact same extraCapacity()/formatRand()
- * formulas the real Home counter card uses, for the same reason billing.ts
- * reuses PLAN_MONTHLY_ZAR instead of a 4th hardcoded price: one formula,
- * checked once, not quietly reinvented per surface.
+ * Homepage "estimate your own savings" calculator. A marketing estimate,
+ * not the real per-tender counter (lib/savingsCounter.ts) - there's no real
+ * tender to read actual counted steps from here, so this uses its own
+ * simpler, self-consistent model (lib/savingsEstimateCalculator.ts): every
+ * annual figure is derived directly from its own monthly figure (x12), so
+ * the two can never show contradictory numbers the way an earlier version
+ * of this calculator did (e.g. "+11 extra tenders a month" with no
+ * consistent annual figure alongside it).
  */
 export function SavingsCalculator() {
   const [tendersPerMonth, setTendersPerMonth] = useState(2);
   const [hoursPerTender, setHoursPerTender] = useState(20);
-  const [hourlyCost, setHourlyCost] = useState(450);
+  const [hourlyRate, setHourlyRate] = useState(450);
 
-  const typicalHoursSaved = hoursSavedForTender([TYPICAL_HOURS_SAVED_PER_TENDER], Math.max(0, hoursPerTender));
-  const hoursSavedPerMonth = Math.max(0, tendersPerMonth) * typicalHoursSaved;
-  const yearlyHours = hoursSavedPerMonth * 12;
-  const yearlyRand = Math.round(yearlyHours * Math.max(0, hourlyCost));
-  const extraTendersPerMonth = extraCapacity(hoursSavedPerMonth, Math.max(0, tendersPerMonth), hoursPerTender);
+  const estimate = calculateSavingsEstimate({ tendersPerMonth, hoursPerTender, hourlyRate });
   const professionalAnnualZar = PROFESSIONAL_MONTHLY_ZAR * 12;
+  const adminSavedPct = Math.round(ADMIN_TIME_SAVED_FRACTION * 100);
 
   return (
     <div className="mx-auto max-w-[620px] rounded-xl border border-border bg-card p-6">
-      <div className="mb-4 text-sm font-semibold text-foreground">Estimate your own savings</div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="text-sm font-semibold text-foreground">Estimate your own savings</div>
+        <Badge variant="secondary">Estimated, based on your numbers</Badge>
+      </div>
       <div className="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <NumberField label="Tenders a month" value={tendersPerMonth} onChange={setTendersPerMonth} min={0} />
         <NumberField label="Hours per tender today" value={hoursPerTender} onChange={setHoursPerTender} min={0} />
-        <NumberField label="Cost per hour (R)" value={hourlyCost} onChange={setHourlyCost} min={0} />
+        <NumberField label="Cost per hour (R)" value={hourlyRate} onChange={setHourlyRate} min={0} />
       </div>
       <div className="grid grid-cols-1 gap-3 border-t border-border pt-4 sm:grid-cols-3">
-        <Stat label="Hours saved a year" value={`${Math.round(yearlyHours)}h`} />
-        <Stat label="Rand saved a year" value={formatRand(yearlyRand)} money />
         <Stat
-          label="Extra tenders a month"
-          value={extraTendersPerMonth > 0 ? `+${extraTendersPerMonth}` : "-"}
+          label={`${estimate.monthlyHoursSaved}h saved / month`}
+          subtitle={`(${estimate.annualHoursSaved} hours / year)`}
+        />
+        <Stat
+          label={`${formatRand(estimate.monthlyRandSaved)} / month`}
+          subtitle={`(${formatRand(estimate.annualRandSaved)} / year)`}
+          money
+        />
+        <Stat
+          label={`+${estimate.monthlyExtraCapacity} extra tenders / month`}
+          subtitle={`Room for ~${estimate.annualExtraCapacity} additional bids a year without hiring`}
         />
       </div>
+
+      <details className="mt-4 rounded-lg border border-border">
+        <summary className="cursor-pointer list-none px-3 py-2.5 text-xs font-semibold text-foreground">
+          How is this calculated?
+        </summary>
+        <div className="space-y-2.5 px-3 pb-3 text-xs leading-relaxed text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Compilation time saved. </span>
+            We estimate Tender Ready eliminates ~{adminSavedPct}% of administrative bid preparation (finding
+            compliance docs, formatting staff CVs, indexing returnables, and assembling the submission pack). Based
+            on your {hoursPerTender}h estimate, you save ~{estimate.adminHoursSavedPerTender}h on every tender.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Direct cost saving. </span>
+            {estimate.monthlyHoursSaved} hours freed up per month &times; R{hourlyRate}/hour ={" "}
+            {formatRand(estimate.monthlyRandSaved)} in recovered billable value each month.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Capacity math. </span>
+            Freeing up {estimate.monthlyHoursSaved} hours a month gives your existing team the hours to submit +
+            {estimate.monthlyExtraCapacity} additional tenders per month (~{estimate.annualExtraCapacity} per year)
+            without adding headcount.
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Note: </span>
+            Estimating, bill of quantities (BoQ) pricing, site visits, and design still require your professional
+            judgment. Tender Ready eliminates the administrative paperwork so your estimators can focus on winning.
+          </p>
+        </div>
+      </details>
+
       <div className="mt-4 text-xs leading-relaxed text-muted-foreground">
-        That&apos;s {formatRand(yearlyRand)} a year against the Professional plan&apos;s {formatRand(professionalAnnualZar)} a year (R{PROFESSIONAL_MONTHLY_ZAR.toLocaleString()}/month). Estimated,
-        based on the numbers you typed in above - not a guarantee for every tender.
+        That&apos;s {formatRand(estimate.annualRandSaved)} a year against the Professional plan&apos;s{" "}
+        {formatRand(professionalAnnualZar)} a year (R{PROFESSIONAL_MONTHLY_ZAR.toLocaleString()}/month). Not a
+        guarantee for every tender.
       </div>
     </div>
   );
@@ -70,11 +108,11 @@ function NumberField({ label, value, onChange, min }: { label: string; value: nu
   );
 }
 
-function Stat({ label, value, money }: { label: string; value: string; money?: boolean }) {
+function Stat({ label, subtitle, money }: { label: string; subtitle: string; money?: boolean }) {
   return (
     <div>
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`font-display text-xl font-medium ${money ? "text-money" : "text-foreground"}`}>{value}</div>
+      <div className={`font-display text-lg font-medium ${money ? "text-money" : "text-foreground"}`}>{label}</div>
+      <div className="text-xs text-muted-foreground">{subtitle}</div>
     </div>
   );
 }
