@@ -1,5 +1,60 @@
 # System Status
 
+**2026-10-27 ~12:17 UTC — standing review pass: found a real contract violation in the Tender
+Command Center's dispatch triage — `director_resolution` fires on routine work items, not just
+genuine disqualification risks. Documented for Sarel's own call, NOT fixed this pass (needs a
+small refactor, not a one-line patch).** Orientation: `git fetch origin main` showed no new commits
+since this routine's own last pass (`2ee1e9c`) — local HEAD already matched `origin/main` exactly.
+Three open PRs (`#164` savings-counter rework, `#165` pre-demo defect fixes, `#166` notification
+migration + savings-calculator fix) all read in full via the GitHub API — all three correctly still
+draft/unmerged, none overlapping the file reviewed this pass. Stayed clear of the self-merge
+incident PRs.
+
+**The finding, traced end to end, not assumed from a comment:** `lib/dispatchTriage.ts`'s own
+`DecisionInput` type documents `hasRealFixBlocker` explicitly as "a real Disqualification Guard
+'Fix' item, not fabricated" — the signal `deriveDecisionNeeded()` uses to decide whether a tender
+closing within 7 days needs `director_resolution` (the brief's own "a director needs to personally
+resolve this" escalation, the most urgent of the two real decision types this module computes).
+The one real caller, `lib/dispatchDashboard.ts`'s `loadDispatchCards()`, instead sets
+`hasRealFixBlocker: !!blockingStep` where `blockingStep` comes from `tenderNextStep.ts`'s
+`nextStepFor()` — a *different*, much broader function ("the one concrete, unfinished thing for
+this tender's pack", its own docstring) that returns non-null for routine, non-disqualifying
+situations: no submission pack started yet, compliance not yet checked at all, a key position still
+needing a person confirmed, a general-pack item merely flagged `needs_input`. None of these are a
+genuine Disqualification Guard "Fix" item (`app/tenders/[id]/disqualification-guard.tsx`'s own
+narrower `fixCount`, built from `classifyComplianceItem()`/`bidTaskStatus === "fix"` specifically -
+"Would disqualify", not "you still need to do this").
+
+**Real, reachable impact**: any active bid closing within 7 days with ANY outstanding next-step item
+at all - which is most active bids most of the time - gets escalated to `director_resolution` and
+lands in the Dashboard's "Decision" bucket, the lane the brief's own design explicitly reserves for
+genuine disqualification risk needing a director's personal call. This is live in production (PR
+#132, merged earlier this session) - not a draft feature. The practical effect: the Decision lane is
+very likely far noisier than intended, which undermines exactly the "the system speaks to you, only
+when it's real" trust the whole Command Center feature is built around (same stated design goal as
+`operationalStatusMessage()`'s own header comment in the same file).
+
+**Why this isn't fixed in this pass**: the one real source of a genuine fix-count
+(`DisqualificationGuard()` in `disqualification-guard.tsx`) is itself an async React Server
+Component that mixes data-fetching with JSX rendering - there's no pure, importable function
+computing just `fixCount` today. A correct fix means extracting that computation into a shared pure
+function both `DisqualificationGuard()` and `loadDispatchCards()` import (same "never a second
+number that could disagree" rule this codebase already follows everywhere else), verifying the
+extraction doesn't change `DisqualificationGuard()`'s own rendered output, and wiring it into the
+dashboard's per-tender loop. That's a real refactor touching a live, already-shipped UI screen, not
+a safe one-line patch to rush through without Sarel seeing the shape of it first - flagged plainly
+instead, per this routine's own standing rule to document a judgment call rather than force a fix.
+
+**QA tooling**: sound - no application code touched this pass, no regression risk from this entry.
+
+**Backlog waiting on Sarel, re-confirmed this pass, nothing new resolved**: migration `0096`
+(pack-quota trial-expiry), the `narrative_documents` PostgREST schema-cache reload, a PayFast
+idempotency design question (not urgent), the "missing ISO 9001 flagged as urgent" UX question, the
+expected `fingerprint.py` `named_ranges` baseline-mismatch heads-up (not a regression), and now this
+`director_resolution` over-triggering finding.
+
+---
+
 **2026-10-27 ~10:24 UTC — standing review pass: a real drift fixed between two same-purpose SACNASP
 position-detection regexes, plus a missing-`.ts`-extension bug on the file that blocked testing it
 directly.** Orientation: `git fetch origin main` showed one new commit since this routine's own last
