@@ -1,5 +1,51 @@
 # System Status
 
+**2026-10-27 ~14:22 UTC — standing review pass: clean sweep of the narrative-generation
+anti-collusion uniqueness check, no new bug found; QA tooling unaffected.** Orientation: `git fetch
+origin main` showed one new commit since this routine's own last pass (`b3bd916`) — `167f6ed`,
+Finding 85 from the Edge-case QA routine (`authority_facts()`'s `{{date}}` used a naive UTC
+`today()`, already confirmed fixed by that pass) — no overlap with anything reviewed here. Three
+open PRs (`#164` savings-counter rework, `#165` four pre-demo defect fixes, `#166` savings
+calculator fix + notification migration) read in full via the GitHub API — all correctly still
+draft/unmerged, none overlapping the files this pass touched. Stayed clear of the self-merge
+incident PRs entirely, per the standing guardrail.
+
+**Minor process note, not corrected myself**: Finding 85's own entry (`167f6ed`) landed at line
+~4301 of this file, not at the top — the same "landed mid-file instead of at the top" slip flagged
+once before for a different routine's pass. Worth that routine's own attention next time it fires;
+not reordered here since it's not this pass's own entry to move.
+
+**Reviewed, no fix needed**: `engine/narrative/uniqueness.py` (the mechanical anti-collusion
+similarity check - difflib-based, stdlib-only, Sarel's own hard requirement that this feature "may
+NEVER generate the same or similar versions for two companies") and its two real callers,
+`generate_narrative.py`'s `generate_with_uniqueness_check()` and `process_narrative_jobs.py`'s
+`load_other_companies_text()`. Traced the full flow by hand: the cross-tenant read (every OTHER
+company's `ready` document of the same kind for the same tender) is correctly scoped - tender_id +
+kind + status=ready + company_id!=self - and only ever runs under the service role, never exposed
+to any client; the one-retry-then-accept regeneration policy on a flagged draft is sound and
+matches its own documented reasoning; `generated_text` written to the database is confirmed to be
+the FINAL, post-quality-review-pass text (not a pre-review draft), so a competing company's own
+later uniqueness check is always compared against real, final shipped text, not a stale draft. One
+genuine, already-self-documented tradeoff noticed while tracing this (not a new finding): the
+similarity score itself is computed on the pre-quality-review draft, not the final text the quality
+passes may still adjust afterward - the module's own docstring already names this explicitly as a
+deliberate ordering choice ("review passes... not re-run through the uniqueness check again, which
+would risk chasing the two checks against each other"), so this is confirmed-as-designed, not
+flagged as a gap.
+
+**No code change this pass** - `docs/specs/System-Status.md` only.
+
+**QA tooling**: unaffected - no application code touched.
+
+**Backlog re-confirmed, unchanged**: migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question, the `fingerprint.py` named_ranges fix
+(expect a baseline mismatch on the next real SANRAL fingerprint check - not a regression), and the
+Dashboard "Decision needed" bucket over-triggering finding (needs a real refactor, not fixed yet) -
+all still waiting on Sarel.
+
+---
+
 **2026-10-27 ~12:17 UTC — standing review pass: found a real contract violation in the Tender
 Command Center's dispatch triage — `director_resolution` fires on routine work items, not just
 genuine disqualification risks. Documented for Sarel's own call, NOT fixed this pass (needs a
