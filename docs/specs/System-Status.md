@@ -1,5 +1,46 @@
 # System Status
 
+**2026-10-27 ~20:40 UTC — fixed the recurring "SANRAL page could not be read (404)"
+system_alerts noise: root cause was a seeded DEMO/fixture tender, not a dead real tender,
+a URL bug, or a SANRAL site-scheme change.** Diagnosed on Sarel's own direct request (SANRAL
+is the company's primary launch wedge, so this got a real investigation, not a guess).
+
+**Root cause, confirmed against the live database**: the pursued tender behind the alert
+(`contract_no` `N.007-030-2026/1F`) has `slug` `demo-n7-section-3-2026-1f` and `source`
+`sanral` - traced to `engine/seed_demo_company.py`'s own `TENDER_SLUGS` fixture list (one of
+3 sales-demo tenders seeded for the shared "Mzansi Roads & Civils (Pty) Ltd" demo account).
+Its slug was never a real page on `nra.co.za` - `detail.fetch_detail()` correctly 404s
+fetching `https://www.nra.co.za/open-tenders/demo-n7-section-3-2026-1f`, because that page
+never existed. `watch_tender_updates.py`'s "actively pursued" query has no exclusion for a
+demo/fixture tender, so it retried this doomed fetch every 2 hours, forever, logging a real
+`system_alerts` error indistinguishable from a genuine page-read failure on an actual pursued
+tender each time.
+
+**Fixed**: `engine/discovery/watch_tender_updates.py` - added `DEMO_SLUG_PREFIX = "demo-"`
+(matching `seed_demo_company.py`'s own naming convention for every fixture slug it seeds,
+confirmed none of SANRAL's real slugs use this prefix - they look like `r-343-020-2025-1f`,
+per `detail.py`'s own docstring example) and an early guard in `check_tender()` that skips a
+demo-slug tender with a clean, visible log line and `last_error = null` in
+`tender_watch_state` - never a silent swallow, and never attempting the live fetch at all.
+A genuine SANRAL page-read failure on a real tender still raises `system_alerts` exactly as
+before - only the demo fixture is excluded. 4 new checks added to
+`engine/discovery/test_tender_updates.py` (Part 0): the demo tender returns no updates and
+never calls `fetch_sanral`, no alert is raised, its watch state records a clean check, and a
+real (non-demo) SANRAL slug is still fetched normally. Full existing suite (Parts 1/2/2b) still
+passes. Verified live: re-ran `watch_tender_updates.py` against the real Supabase project -
+the 404 is gone, replaced by a clean one-line skip.
+
+**Flagged, not fixed in this pass (a product call, not a bug)**: two REAL (non-test) companies
+- "Tender Ready" and "Reviewer Civils & Consulting Pty Ltd" - are also pursuing this same demo
+fixture tender via their own `tender_packs` rows (`is_test_company = false` on both), likely
+because the demo tender is a public/shared `tenders` row that surfaced in Discovery like any
+real one and got pursued without anyone realising it was fictional. Whether the demo tender
+should be hidden from Discovery for non-demo companies, or whether those two companies' pursuit
+of it should be cleaned up, is Sarel's own call - not touched here, since it's a data/product
+question, not the recurring-alert bug this pass was asked to fix.
+
+---
+
 **2026-10-27 ~20:16 UTC — standing review pass: another real "hover-only hides real
 information" instance found and fixed on `/discovery`'s "Done N similar tenders before"
 badge - same bug class this repo's own passes have now fixed 8+ times, each one

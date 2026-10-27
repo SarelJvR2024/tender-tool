@@ -65,6 +65,47 @@ def fixture(name):
 
 
 # ---------------------------------------------------------------------------
+# Part 0 - a seeded demo/fixture tender's SANRAL page is never live-fetched
+# (2026-10-27 fix: the recurring "SANRAL page could not be read (404)"
+# system_alerts error on contract_no N.007-030-2026/1F, slug
+# 'demo-n7-section-3-2026-1f' - a sales-demo fixture from
+# engine/seed_demo_company.py, not a dead real tender or a URL bug).
+# ---------------------------------------------------------------------------
+
+def part0_demo_slug_skip():
+    print("Part 0 - a demo/fixture tender's SANRAL page is skipped, never fetched")
+    sys.path.insert(0, os.path.join(ROOT, "engine", "alerts"))
+    import system_alerts
+    alerts = []
+    system_alerts.set_sink(lambda p: alerts.append(p) or "alert-id")
+    try:
+        c = MemClient()
+        demo = {"id": str(uuid.uuid4()), "status": "open", "created_at": "2026-10-16T12:00:00Z",
+                "slug": "demo-n7-section-3-2026-1f", "contract_no": "N.007-030-2026/1F", "source": "sanral",
+                "closing_date": "2026-11-27T10:00:00Z"}
+        c.rows("tenders").append(demo)
+
+        def boom(slug):
+            raise AssertionError(f"fetch_sanral must never be called for a demo slug ({slug})")
+
+        result = watch.check_tender(c, demo, TODAY, ocds=None, fetch_sanral=boom, log=lambda *a: None)
+        check(result == [], "a demo-slug tender returns no updates, never attempts a live fetch")
+        check(alerts == [], f"no system_alerts error is raised for a demo-slug tender ({alerts})")
+        state = c.select("tender_watch_state", {"tender_id": demo["id"]})
+        check(len(state) == 1 and state[0]["last_error"] is None,
+              f"its own watch state records a clean check, not an error ({state})")
+
+        real = {**demo, "id": str(uuid.uuid4()), "slug": "nra-2026-9999-c", "contract_no": "NRA 2026/9999 (C)"}
+        c.rows("tenders").append(real)
+        called = []
+        watch.check_tender(c, real, TODAY, ocds=None, fetch_sanral=lambda slug: called.append(slug) or {"attached_files": []},
+                           log=lambda *a: None)
+        check(called == ["nra-2026-9999-c"], f"a real (non-demo) SANRAL slug is still fetched as normal ({called})")
+    finally:
+        system_alerts.set_sink(None)
+
+
+# ---------------------------------------------------------------------------
 # Part 1 - classifier on real documents
 # ---------------------------------------------------------------------------
 
@@ -697,6 +738,7 @@ def part3(psql):
 
 
 if __name__ == "__main__":
+    part0_demo_slug_skip()
     part1()
     scenario(MemClient(), "2 - the watch end to end (in-memory rows)", seed_mem)
     part2b()
