@@ -1,5 +1,51 @@
 # System Status
 
+**2026-10-27 ~04:15 UTC — standing review pass: a real SANRAL intake gap fixed and reproduced
+against a genuine uploaded tender form, not a synthetic one.** Orientation: `git fetch origin main`
+showed one new commit since this routine's own last pass (`2580263`, Finding 83 - the onboarding
+document reader's own `.docx` fallback had the same gap Finding 82 already fixed elsewhere - no
+overlap). Local checkout confirmed on the real tip before starting (fast-forwarded 1 commit). Two
+open PRs (`#164` savings-counter rework, `#165` 4 pre-demo defect fixes) read in full, both correctly
+left as unmerged drafts, neither overlapping this pass. Stayed clear of the self-merge incident PRs
+entirely, per the standing guardrail.
+
+**The finding**: `engine/intake/classify_tender.py`'s `_docx_head()` read only the first 60
+paragraphs of an uploaded `.docx` to classify which SANRAL form it is (C.1.1.1 Form of Offer,
+C.1.2.3 Contract Data, or the A-Forms/returnable schedules bundle). Checked against every real SANRAL
+form sample already committed in `templates/forms/*/` rather than guessing - 5 of 6 real
+`A_Forms.docx` samples match comfortably inside that window, but
+`templates/forms/R.352-020-2025.1F/A_Forms.docx` doesn't: its own "Part T2: Returnable Schedules"
+heading sits at paragraph 521 of 2104, behind a long notes/table-of-contents section other buyers'
+packs don't carry. With the old cap, this genuinely real, genuinely uploaded document was silently
+classified as "not found" - the SANRAL pack would report the A-Forms bundle as missing to a company
+that had, in fact, uploaded it.
+
+**The fix**: raised the cap from 60 to 5000 paragraphs - not a number tuned to this one file, but a
+generous safety margin given every other real sample matches well inside the first 100. Reading the
+largest real sample in the repo under the new cap takes 0.3s, no performance concern for a step that
+already does heavier work (fingerprinting, OCR fallback). Still a cap, not an unconditional full read,
+so a pathological/corrupted `.docx` can't make this read unboundedly large.
+
+**Verified properly, not just read**: added `test_real_a_forms_heading_deep_in_the_document_is_still_found()`
+to `engine/intake/test_classify_tender.py`, using the real committed file directly (not a synthetic
+stand-in, following this test file's own established convention of reusing real template samples).
+Reverted the fix first to confirm the new test fails with the exact predicted result (the document
+reported as "Not found among the uploaded documents"), restored to confirm all 9 tests in this file
+pass. `py_compile` clean on both touched files.
+
+**Pushed directly to `main`, no PR, per the standing guardrail**: `engine/intake/classify_tender.py`,
+`engine/intake/test_classify_tender.py` - a self-contained, test-covered Python fix, not a schema
+change and not a UI change needing visual review.
+
+**Backlog, confirmed not assumed**: migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question from the previous pass, and the
+`fingerprint.py` `named_ranges` fix from two passes ago (expect a baseline mismatch on the next real
+SANRAL fingerprint check - that's the fix surfacing real data for the first time, not a regression) -
+all still waiting on Sarel, none newly resolved or newly added this pass.
+
+---
+
 **2026-10-27 ~02:13 UTC — standing review pass: no code change, a genuine open product question
 surfaced instead of forced into a code fix.** Orientation: `git fetch origin main` showed one new
 commit since this routine's own last pass (`bcc3236`, a sibling QA routine closing

@@ -30,6 +30,12 @@ FAILS = []
 # general route, by design, when no workbook is present at all).
 TECH_WORKBOOK = os.path.join(os.path.dirname(HERE), "..", "templates", "samples", "R.352-020-2025.1F_ran.xlsm")
 
+# Finding, 2026-10-27: a real A-Forms.docx that genuinely needs more than the
+# old 60-paragraph head to find its own "Part T2: Returnable Schedules"
+# heading (it sits at paragraph 521 of 2104, behind a long notes/TOC
+# section) - see classify_tender.py's own _docx_head() comment.
+REAL_A_FORMS = os.path.join(os.path.dirname(HERE), "..", "templates", "forms", "R.352-020-2025.1F", "A_Forms.docx")
+
 
 def check(name, cond, detail=""):
     print(("  ok   " if cond else "  FAIL ") + name + (f"  ({detail})" if detail and not cond else ""))
@@ -149,6 +155,18 @@ def test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_us
     os.remove(new_path)
 
 
+def test_real_a_forms_heading_deep_in_the_document_is_still_found():
+    print("classify_documents: a real A-Forms.docx whose own heading sits at paragraph "
+          "521 of 2104, well past the old 60-paragraph head cap")
+    entries = [_doc_entry("A_Forms.docx", REAL_A_FORMS), _doc_entry("Technical Submission.xlsm", TECH_WORKBOOK, fmt="xlsm")]
+    decision = ct.classify_documents(entries, buyer="SANRAL", all_text="SANRAL tender")
+    check("the real A-Forms document is recognized, not silently missed",
+          decision["sanral_files"].get("a_forms") == REAL_A_FORMS, decision)
+    check("it's not reported as a missing SANRAL document",
+          not any("A-Forms / returnable schedules" in n and "Not found" in n for n in decision["notes"]),
+          decision["notes"])
+
+
 def test_docx_already_marked_unreadable_is_skipped_without_a_note():
     print("classify_documents: a doc_entry already flagged unreadable upstream")
     entry = _doc_entry("whatever.docx", "/tmp/does-not-matter.docx")
@@ -197,6 +215,7 @@ def main():
     test_period_after_the_form_letter_is_also_recognized()
     test_duplicate_candidates_prefer_the_more_recently_modified_file()
     test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used()
+    test_real_a_forms_heading_deep_in_the_document_is_still_found()
     test_docx_already_marked_unreadable_is_skipped_without_a_note()
     test_assess_fit_from_text_categorized_tender_no_disciplines_not_duplicated()
     test_assess_fit_from_text_uncategorized_tender_no_disciplines_still_appends()
