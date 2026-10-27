@@ -1,5 +1,71 @@
 # System Status
 
+**2026-10-27 ~20:16 UTC — standing review pass: another real "hover-only hides real
+information" instance found and fixed on `/discovery`'s "Done N similar tenders before"
+badge - same bug class this repo's own passes have now fixed 8+ times, each one
+independently rediscovered.** Orientation: `git fetch origin main` showed one new commit
+since this routine's own last pass (`c1f1e6d`, a sibling QA routine's docs-only clean
+sweep of `registration_reminders.py`, no overlap) - fast-forwarded before starting. Open
+PRs checked via the GitHub API, not assumed: `#164` (savings-counter rework), `#165`
+(4 pre-demo defect fixes, already merged into neither - still draft/unmerged, correctly
+untouched), `#166` (savings calculator + a large notification-admin build-out). All three
+touch `savings-calculator.tsx`; `#166` alone touches ~25 files across `app/app/admin/*`,
+every `.github/workflows/*-alerts.yml`, and billing. Both areas avoided entirely this
+pass rather than risk colliding with in-flight work. Stayed clear of the self-merge
+incident PRs per the standing guardrail.
+
+**The finding**: `app/lib/opportunityInsights.ts` itself (the pure "has this company done
+a similar tender before" matcher) is correct and already well-defensive - read it in full,
+traced `buildDoneHistory()`/`similarTendersBefore()` by hand against null-buyer,
+null-category, and self-match edge cases, all handled. The bug is at the render site,
+`app/app/discovery/page.tsx`'s "Done N similar tenders before" badge: `similar.count` and
+`similar.wonCount` were shown as visible text, but `similar.sameBuyerCount` - arguably the
+single most decision-relevant number here (this buyer specifically has a track record with
+you, not just a shared discipline tag) - was buried entirely inside a `title=` hover
+tooltip, invisible on touch and unreachable without a mouse. The sibling "Market size
+range" badge immediately below it was checked too and is fine - its visible text already
+carries the real numbers, `title=` there is genuinely supplementary methodology context,
+not hidden decision data.
+
+**Fix**: `sameBuyerCount` now renders as a visible `· N with this buyer` suffix on the
+badge itself, same compact style as the existing `· won N` suffix beside it. The
+`stages` breakdown stays in `title=` as a fallback, same tradeoff every prior fix of this
+bug class has made (e.g. the Pipeline owner-name fix kept `title=` as a fallback for an
+over-length name) - the single most useful number is now always visible, the full stage
+list stays available on hover for anyone who wants it, rather than engineering a bigger
+layout change for a light pass. Verified: `tsc --noEmit` clean, `eslint` clean on the
+changed file, `node --experimental-strip-types --test lib/opportunityInsights.test.ts`
+9/9 (unchanged - pure-logic module untouched, this was a markup-only fix), full
+`npx vitest run` 202/202 unchanged, `npm run build` clean.
+
+**Pushed directly to `main`, no PR, no self-merge**: `app/app/discovery/page.tsx`,
+this entry.
+
+**A pattern worth naming plainly, not acted on in this light pass**: this is now the 8th+
+independently-found instance of "a real number sits only in a hover tooltip" across this
+codebase (PrimaryPackActionLink, Discovery's readiness blockers, SANRAL schedules,
+Analytics trend counts, Market Intelligence frequency counts, People's role-source
+citations, Pipeline's owner initials, and now this one) - each one found and fixed
+separately rather than as one sweep, because nothing enforces the rule structurally. A
+shared `VisibleTooltip`/`InlineDisclosure` component (title text also always rendered as
+small visible text by default) would likely close this whole class at once rather than
+relying on the next pass to independently rediscover instance #9. Flagged here again,
+still not built - genuinely out of scope for a single light-touch pass, but the backlog
+of independent rediscoveries is itself the signal that this is worth Sarel's own call on
+priority.
+
+**Backlog, unchanged by this pass**: migration `0096` (pack-quota trial-expiry) and the
+`narrative_documents` PostgREST schema-cache reload still waiting on Sarel's own apply
+step; a PayFast idempotency design question (not urgent, sandbox-only); the "missing ISO
+9001 flagged as urgent" document-expiry UX question; the `fingerprint.py` `named_ranges`
+fix from an earlier pass (expect a baseline mismatch on the next real SANRAL fingerprint
+check - that's the fix surfacing previously-hidden data, not a regression); the Dashboard
+"Decision needed" bucket over-triggering finding (needs a real refactor, not fixed yet);
+and Form B7's compulsory-vs-matrix disagreement on a real template (a live compliance
+question, flagged in the entry directly below this one, not fixed).
+
+---
+
 **2026-10-27 ~18:16 UTC — standing review pass: Form B7's SETUP sheet carries two
 disagreeing subcontracting signals, confirmed disagreeing on a real committed sample -
 flagged for Sarel's own call, not fixed (compliance-critical, needs a reconciliation

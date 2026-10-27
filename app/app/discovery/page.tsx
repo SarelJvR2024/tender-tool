@@ -862,11 +862,12 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                     <div className="mb-1.5 flex flex-wrap gap-1.5">
                       {similar && (
                         <span
-                          title={`${similar.sameBuyerCount > 0 ? `${similar.sameBuyerCount} with this same buyer. ` : ""}Stages reached: ${similar.stages.join(", ")}.`}
+                          title={`Stages reached: ${similar.stages.join(", ")}.`}
                           className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent"
                         >
                           Done {similar.count} similar tender{similar.count === 1 ? "" : "s"} before
                           {similar.wonCount > 0 && ` · won ${similar.wonCount}`}
+                          {similar.sameBuyerCount > 0 && ` · ${similar.sameBuyerCount} with this buyer`}
                         </span>
                       )}
                       {pricing && (
