@@ -1,5 +1,93 @@
 # System Status
 
+**2026-10-27 ~15:00 UTC — Admin Command Center, Phase 1: Notification Command Center built and
+verified (gallery, schedule/heartbeat health, dispatch-log drawer), plus a tenant-detail
+enhancement. Phases 2-4 (Quality Scout triage, Telemetry/Billing, Impersonation) not started -
+explicitly scoped as separate, reviewable PRs by Sarel's own instruction.** Same branch/PR as the
+entry below (`claude/practical-babbage-oxf9u3`, PR #166) - this is additive, not a replacement.
+
+Before building anything, audited what already existed against the full 7-tab "Production Founder
+Admin Command Center" brief Sarel sent (telemetry, tenants, Quality Scout, tender catalog,
+notifications, billing, impersonation) - found the brief's own assumptions didn't match this repo
+in several places, surfaced to Sarel via `AskUserQuestion` before writing any code rather than
+guessing: `is_platform_admin()` already gates every `/admin/*` route (migration 0043, needs no new
+guard code); `/admin/customers` (migration 0098) already covers most of the "Tenant Directory" ask;
+`/admin/requirement-extractions` already **is** the "Quality Scout" triage queue under a different
+name, with its own header comment explicit that its confidence score is heuristic/regex, not an
+LLM - calling it "AI confidence" in a new UI would misdescribe it; impersonation mode does not exist
+anywhere; MRR has real subscription data but **no stored revenue amount anywhere** (prices are
+hardcoded constants on the marketing page); AI-unit-economics has **zero cost-tracking** in
+`engine/` at all; the brief's own "6 GitHub Actions workflows" is actually 9; and a prior session's
+`/admin` pass (2026-10-25) **deliberately chose not to** build a job-queue heartbeat table for
+OCR/parser/dispatcher queues, for the same reason (nothing writes to one yet) Sarel then explicitly
+overrode for the notification-workflow case specifically, after being shown that precedent.
+
+Sarel's phasing decision (verbatim, binding): 4 phases, each its own reviewable PR-worthy unit -
+Phase 1 (this entry) Notification Command Center + tenant polish; Phase 2 Quality Scout + engine
+watcher; Phase 3 Telemetry + Billing; Phase 4 Impersonation + audit log. Also decided: workflow
+health via a new Supabase heartbeat table (not a live GitHub API read - no credential exists for
+that in the deployed app); MRR computed from real subscription counts x hardcoded tier prices, AI
+unit economics card **omitted entirely** rather than shown as an invented estimate; Quality Scout
+extends `/admin/requirement-extractions` in place rather than a duplicate `/admin/scout` route.
+
+**Built and verified this pass** (full `tsc --noEmit`/`eslint .`/`vitest run`/`npm run build` clean
+after every step, same discipline as the entry below):
+- `workflow_heartbeats` (migration 0099): one row per workflow, two service-role-only RPCs
+  (`record_workflow_heartbeat_start`/`_finish`), RLS gated to `is_platform_admin()`. Deliberately
+  does NOT store `workflow_name`/`cadence_cron` - those stay in `app/lib/workflowRegistry.ts`
+  (code, PR-reviewable) as the one source of truth, never duplicated into a migration seed that
+  could drift from the YAML.
+- `engine/notify/record_heartbeat.py`: zero-dependency CLI (stdlib only, no pip/npm install step
+  needed), mirrors `engine/alerts/system_alerts.py`'s own urllib pattern. 9/9 unit checks (`test_record_heartbeat.py`).
+- `app/lib/workflowRegistry.ts`: the real 9 workflows (not 6), plus `heartbeatStatusFor()` - a pure,
+  cadence-scaled staleness function. Caught and fixed a real bug before it shipped: a flat 3-hour
+  staleness grace period made a 10-minute-cadence workflow's "stale" threshold meaningless (3h10m);
+  replaced with a grace scaled to each workflow's own interval (half the interval, 15-minute
+  floor). 8/8 vitest checks.
+- Wired heartbeat start/success/failure steps into all 9 `.github/workflows/*.yml` files, as
+  separate steps around each job's existing business logic (never inside the sender scripts
+  themselves, so this can never touch tested send logic) - start right after checkout, finish
+  gated on `success()`/`failure()` (GitHub Actions has no single "did the job pass" value available
+  mid-job). Verified every workflow's `--key` matches the registry exactly and every YAML still
+  parses.
+- `/admin/notifications` rebuilt as a 3-tab Command Center (same route, same nav entry):
+  - **Template Gallery**: `app/lib/emailTemplateSamples.ts` - 19 live templates, one realistic
+    sample each, keyed by the exact `notification_type` string each live sender logs under.
+    Deliberately excludes 3 template functions confirmed dead by grepping every sender's imports
+    (`briefingReminderDetailedEmail`/`printSignCutoffEmail` in `emailTemplatesTier1.ts`, superseded
+    by the live `emailTemplates.ts` versions; `complianceExpiryEmail`, whose sender stage this
+    branch already removed earlier to prevent a double-send). 19, not the brief's assumed 12 -
+    every real template gets a card rather than being cut to match a round number. "Send Test to
+    Me" (`app/app/admin/notifications/actions.ts`) sends to the signed-in admin's own email only,
+    through the same `claim_notification`/`record_notification_sent` RPCs every real sender uses,
+    under a `test-sample-` idempotency prefix that can't collide with a real send.
+  - **Schedule & Cron Health**: all 9 workflows, cadence/target-audience from the static registry,
+    status badge from the real heartbeat row (Healthy/Running/Failed/Stale/Never run) - never a
+    live GitHub Actions API read.
+  - **Dispatch Log**: existing table, now with a Category column (derived from each type's own
+    Tier, per `lib/resendEmail.ts`'s own documented Tier->sender-profile mapping - never a new,
+    independently-maintained column) and a slide-over drawer on row click showing every real
+    metadata field (status, recipient, idempotency key, Resend ID, company/tender ID, error).
+    Deliberately does NOT claim to show "the exact HTML content of that dispatch" (the original
+    brief's wording) - `notification_logs` (migration 0093) was never built to store email bodies,
+    only metadata, and Sarel's own narrower Phase 1 instruction asked for "recipient metadata," not
+    historical HTML - the drawer says so plainly rather than faking a reconstruction.
+- `/admin/customers`: kept `computeBidReadiness()`'s already-computed `criteria` array (previously
+  discarded down to just the `%`) and rendered the full per-criterion breakdown (satisfied/missing/
+  expired/expiring, with weight and days-left) inside the existing expand panel - real data that
+  was already being computed, just never shown. This is the "quick deep-link into company details"
+  item from Sarel's own Phase 1 ask, delivered as a drill-down rather than a new route, since a
+  separate `/admin/customers/[id]` page would have duplicated most of what the existing accordion
+  already shows.
+
+**Explicitly NOT built this pass** (Sarel's own phasing, not an oversight): `/admin/telemetry`,
+`/admin/scout` (extending the existing requirement-extractions page instead, not yet done),
+`/admin/billing`, `/admin/impersonate/:id`. The AI-unit-economics metric is permanently out of
+scope until real token/OCR cost tracking exists somewhere in `engine/` - flagged, not built as an
+estimate.
+
+---
+
 **2026-10-27 ~12:50 UTC — notification migration: wired 5 of 12 brief items onto the branded
 Resend pipeline, replacing the matching Claude-scheduled + Gmail check-ins; 1 item deferred, 1
 real backlog item flagged, not built.** Full account on `claude/practical-babbage-oxf9u3`

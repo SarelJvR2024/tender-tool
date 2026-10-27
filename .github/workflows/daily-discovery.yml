@@ -86,6 +86,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Heartbeat (Notification Command Center, migration 0099) - the start
+      # step fires before anything else can fail, so a dead runner still
+      # leaves a "running" row the admin UI can flag as stuck. Zero-dep
+      # stdlib script, no pip install needed for this step itself.
+      - name: Record heartbeat (start)
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py start --key daily_discovery
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -142,6 +152,26 @@ jobs:
           RESEND_FROM_ADDRESS: ${{ secrets.RESEND_FROM_ADDRESS }}
           APP_URL: ${{ vars.APP_URL }}
         run: node --experimental-strip-types scripts/send-discovered-tenders.ts
+
+      # Two steps, not one if: always() - GitHub Actions has no single
+      # "did the job pass" value available mid-job, only the success()/
+      # failure() context functions on separate steps. Covers both the
+      # Python scrape step and the Node send step above - either one
+      # failing marks this one workflow_key failed, which is accurate: a
+      # scrape failure means the send step never had anything new to send.
+      - name: Record heartbeat (success)
+        if: success()
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py finish --key daily_discovery --status success
+
+      - name: Record heartbeat (failure)
+        if: failure()
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python3 engine/notify/record_heartbeat.py finish --key daily_discovery --status failed --error "One or more steps in this job failed - see the run log"
 
       - name: Upload the run's own report-worthy-releases JSON (debugging aid, kept a week)
         if: ${{ !cancelled() }}

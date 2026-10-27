@@ -70,7 +70,7 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
   const customers: Customer[] = rows.map((c, i) => {
     const members = (memberLists[i].data ?? []) as CustomerMember[];
     const r = (readinessRows[i].data?.[0] ?? null) as ReadinessDataRow | null;
-    const readinessPercent = r
+    const readiness = r
       ? computeBidReadiness({
           legalName: r.legal_name,
           csdSupplierNumber: r.csd_supplier_number,
@@ -84,11 +84,11 @@ export default async function AdminCustomersPage({ searchParams }: { searchParam
           principalCount: r.principal_count,
           peopleWithCvCount: r.people_with_cv_count,
           experienceProjectCount: r.experience_project_count,
-        }).percent
+        })
       : null;
     const primaryContact = members.find((m) => m.role === "owner")?.email ?? members[0]?.email ?? null;
     const trialDaysRemaining = c.subscription_status === "trialing" ? daysUntil(c.trial_ends_at) : null;
-    return { ...c, members, readinessPercent, primaryContact, trialDaysRemaining };
+    return { ...c, members, readinessPercent: readiness?.percent ?? null, readinessCriteria: readiness?.criteria ?? null, primaryContact, trialDaysRemaining };
   });
 
   const testCount = customers.filter((c) => c.is_test_company).length;

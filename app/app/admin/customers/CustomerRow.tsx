@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { setTestCompany } from "../actions";
 import { formatDate, formatDateTime } from "@/lib/dates";
+import type { Criterion } from "@/lib/readiness";
 
 export type CustomerMember = { user_id: string; email: string; role: string; joined_at: string };
 
@@ -24,6 +25,8 @@ export type Customer = {
   members: CustomerMember[];
   /** null when readiness couldn't be computed (no readiness data row, e.g. a company somehow missing). */
   readinessPercent: number | null;
+  /** Full per-criterion breakdown behind readinessPercent - same null case. */
+  readinessCriteria: Criterion[] | null;
   primaryContact: string | null;
   /** Only meaningful when subscription_status === "trialing"; null otherwise. Can be negative (trial already expired). */
   trialDaysRemaining: number | null;
@@ -120,6 +123,27 @@ export default function CustomerRow({ customer }: { customer: Customer }) {
             <span>Primary contact: {customer.primaryContact ?? "no members"}</span>
             <span>{customer.tenders_pursued_count} pack{customer.tenders_pursued_count === 1 ? "" : "s"} total ({customer.active_tenders_count} active)</span>
           </div>
+
+          {customer.readinessCriteria && customer.readinessCriteria.length > 0 && (
+            <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
+              <div className="border-b border-border bg-muted/30 px-3.5 py-1.5 text-[11px] font-semibold text-muted-foreground">
+                Readiness breakdown ({customer.readinessPercent}%)
+              </div>
+              {customer.readinessCriteria.map((c) => (
+                <div key={c.key} className="flex flex-wrap items-center gap-x-2.5 gap-y-1 border-t border-border px-3.5 py-2 text-xs first:border-t-0">
+                  <span className={c.satisfied ? "text-success" : "text-destructive"}>{c.satisfied ? "✓" : "✗"}</span>
+                  <span className="min-w-0 flex-1 text-foreground">{c.label}</span>
+                  <span className="text-muted-foreground">weight {c.weight}</span>
+                  {!c.satisfied && c.reason && (
+                    <span className="rounded-full border border-warning/20 bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning">
+                      {c.reason === "missing" ? "Missing" : c.reason === "expired" ? "Expired" : "Expiring soon"}
+                      {c.daysLeft !== null && c.daysLeft !== undefined ? ` (${c.daysLeft}d)` : ""}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
 
           <div className="mb-3 overflow-hidden rounded-lg border border-border bg-card">
             {customer.members.length === 0 && <div className="px-3.5 py-2.5 text-xs text-muted-foreground">No members.</div>}
