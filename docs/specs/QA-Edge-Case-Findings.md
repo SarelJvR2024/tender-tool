@@ -4875,3 +4875,61 @@ two unrelated files. No schema or other call-site changes.
 **Grep now confirmed clean**: every caller of `docx_text()` in this repo (`requirements.py`,
 `classify_documents.py`, `extract_cv_fields.py`) now guards both its `docx` and `doc` branches
 identically. No further occurrence of this pattern exists to find.
+
+### Finding 85 (CONFIRMED, FIXED, moderate - a real authority-to-sign letter's own {{date}} field could print yesterday's date, the same naive-UTC-"today" bug class this repo has fixed in `fill_a_forms.py`/`fill_sbd_docx.py`/several other files, now found independently in `company_documents.py`)
+
+**Where:** `engine/company_documents.py`'s `authority_facts()`.
+
+**What was tested:** rotated to SANRAL pack (most overdue by this routine's own numbered rotation).
+Read `engine/fill_authority_letter.py` (SANRAL Form A2's authority-to-sign letter, produced per the
+company's own upload-or-guideline choice, migration 0037) and its real logic in
+`company_documents.py` end to end - `fill_fields()`, `guard_only_company_wording()` (the
+AI-placement anti-hallucination guard), `render_guideline()`, `produce()`. Given this exact
+codebase has independently found and fixed the naive-UTC-"today" bug class in `fill_a_forms.py`
+(A12/A20 lapse checks), `fill_sbd_docx.py`'s own `_today_iso()`, `watch_deadlines.py`'s closing-day
+math, and `pdf_merge.py`'s `expiry_warning()` - each one its own separate finding, none of them
+a shared root fix - worth checking whether this file's own `authority_facts()` (which computes its
+own "today" independently, for the `{{date}}` field a company can mark in its own letter guideline)
+had made the identical mistake.
+
+**Finding (CONFIRMED, moderate).** It had. `authority_facts()`'s `"date"` field was computed as
+`(today or datetime.date.today()).strftime("%-d %B %Y")` - a naive `datetime.date.today()`, with
+no SAST adjustment at all (confirmed by grep: this file imports `datetime` directly, with no `SAST`
+constant anywhere in it, unlike its siblings `fill_a_forms.py`/`watch_deadlines.py`/
+`generate_cv.py`/`source_http.py`, which all define `SAST = datetime.timezone(datetime.timedelta
+(hours=2))`). A bridge worker container has no TZ set and runs in UTC by default, so this is one
+calendar day behind the real SAST date for the whole 00:00-01:59 SAST window every day - printing
+YESTERDAY's date on a real authority-to-sign letter, a legal document, whenever a pack is
+generated in that window. `"date"` ("Today's date") is a real, documented `DOCUMENT_TYPES[...]`
+field a company can mark with `{{date}}` in its own letter guideline, not a theoretical one.
+Reproduced directly by monkeypatching the clock to a real UTC moment inside the bad window.
+
+**Why the existing test suite never caught it**: `test_company_documents.py`'s own guideline case
+already exercises `{{date}}`, but its own expected-value comparison calls
+`cd.authority_facts(...)` a SECOND time, live, to build the "expected" text - so both the real call
+and the test's own comparison always computed "today" the same (buggy) way at essentially the same
+real moment, and would always agree with each other regardless of correctness. The bug could only
+ever be exposed by comparing against an independently-known, injected date - exactly what this
+session's own `test_today_iso_is_sast_not_naive_utc()` precedent in the sibling file already does,
+and what this fix's own new test now does here too.
+
+**Fix:** added `SAST = datetime.timezone(datetime.timedelta(hours=2))` to `company_documents.py`
+(same constant/pattern as every sibling file) and changed the `"date"` computation to
+`(today or datetime.datetime.now(SAST).date()).strftime("%-d %B %Y")`.
+
+**Verified the regression test actually catches the regression - the hard way.** The first attempt
+at the new test only monkeypatched `cd.datetime.datetime`, not `cd.datetime.date` - which let a
+REVERTED (buggy) version of the fix pass anyway, because the still-live `datetime.date.today()`
+fell through to the real sandbox clock, which happened to already read the test's own target date
+by coincidence. Caught this by actually reverting and re-running rather than assuming the first
+green run meant the test worked: rewrote the test to patch BOTH `cd.datetime.date` AND
+`cd.datetime.datetime` to a fixed, simulated moment deliberately NOT equal to today's real date (the
+same 2026-10-20 23:30 UTC / 2026-10-21 01:30 SAST moment `test_today_iso_is_sast_not_naive_utc()`
+already uses), eliminating the coincidence. Re-reverted the fix with the corrected test in place:
+failed with the exact predicted wrong date (`20 October 2026` instead of `21 October 2026`);
+restored: `0 failure(s)`, full suite (all 6 cases plus the new 6b) passing. `test_form_field_audit.py`
+(the sibling SAST-date test for the other two files) re-run clean.
+
+**Regression:** `engine/company_documents.py`'s `authority_facts()` only - its `"date"` field now
+reads the real SAST date. No schema or other call-site changes; every other field (confirmed
+unaffected by reading the diff) is untouched.

@@ -163,6 +163,52 @@ enabled until that gap is closed or Sarel explicitly accepts the gap.
 
 ---
 
+**2026-10-27 ~14:22 UTC — standing review pass: clean sweep of the narrative-generation
+anti-collusion uniqueness check, no new bug found; QA tooling unaffected.** Orientation: `git fetch
+origin main` showed one new commit since this routine's own last pass (`b3bd916`) — `167f6ed`,
+Finding 85 from the Edge-case QA routine (`authority_facts()`'s `{{date}}` used a naive UTC
+`today()`, already confirmed fixed by that pass) — no overlap with anything reviewed here. Three
+open PRs (`#164` savings-counter rework, `#165` four pre-demo defect fixes, `#166` savings
+calculator fix + notification migration) read in full via the GitHub API — all correctly still
+draft/unmerged, none overlapping the files this pass touched. Stayed clear of the self-merge
+incident PRs entirely, per the standing guardrail.
+
+**Minor process note, not corrected myself**: Finding 85's own entry (`167f6ed`) landed at line
+~4301 of this file, not at the top — the same "landed mid-file instead of at the top" slip flagged
+once before for a different routine's pass. Worth that routine's own attention next time it fires;
+not reordered here since it's not this pass's own entry to move.
+
+**Reviewed, no fix needed**: `engine/narrative/uniqueness.py` (the mechanical anti-collusion
+similarity check - difflib-based, stdlib-only, Sarel's own hard requirement that this feature "may
+NEVER generate the same or similar versions for two companies") and its two real callers,
+`generate_narrative.py`'s `generate_with_uniqueness_check()` and `process_narrative_jobs.py`'s
+`load_other_companies_text()`. Traced the full flow by hand: the cross-tenant read (every OTHER
+company's `ready` document of the same kind for the same tender) is correctly scoped - tender_id +
+kind + status=ready + company_id!=self - and only ever runs under the service role, never exposed
+to any client; the one-retry-then-accept regeneration policy on a flagged draft is sound and
+matches its own documented reasoning; `generated_text` written to the database is confirmed to be
+the FINAL, post-quality-review-pass text (not a pre-review draft), so a competing company's own
+later uniqueness check is always compared against real, final shipped text, not a stale draft. One
+genuine, already-self-documented tradeoff noticed while tracing this (not a new finding): the
+similarity score itself is computed on the pre-quality-review draft, not the final text the quality
+passes may still adjust afterward - the module's own docstring already names this explicitly as a
+deliberate ordering choice ("review passes... not re-run through the uniqueness check again, which
+would risk chasing the two checks against each other"), so this is confirmed-as-designed, not
+flagged as a gap.
+
+**No code change this pass** - `docs/specs/System-Status.md` only.
+
+**QA tooling**: unaffected - no application code touched.
+
+**Backlog re-confirmed, unchanged**: migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question, the `fingerprint.py` named_ranges fix
+(expect a baseline mismatch on the next real SANRAL fingerprint check - not a regression), and the
+Dashboard "Decision needed" bucket over-triggering finding (needs a real refactor, not fixed yet) -
+all still waiting on Sarel.
+
+---
+
 **2026-10-27 ~12:17 UTC — standing review pass: found a real contract violation in the Tender
 Command Center's dispatch triage — `director_resolution` fires on routine work items, not just
 genuine disqualification risks. Documented for Sarel's own call, NOT fixed this pass (needs a
@@ -4446,6 +4492,48 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-seventh run): a real authority-to-sign letter's own {{date}} field could print yesterday's date - the naive-UTC-"today" bug class independently found yet again, this time in company_documents.py
+
+Orientation: synced two sibling commits (`2ee1e9c` real `tenderCompliance.ts` SACNASP-regex fix,
+`b3bd916` a flagged-not-fixed `dispatchDashboard.ts` over-triggering question - both app/TypeScript
+only, no overlap). Three open PRs (`#164`/`#165`/`#166`), all read by the sibling passes, confirmed
+not touching anything here.
+
+Rotated to SANRAL pack (most overdue by this routine's own numbered rotation). Read
+`fill_authority_letter.py` and its real logic in `company_documents.py` end to end. This exact
+codebase has independently found and fixed the naive-UTC-"today" bug class in `fill_a_forms.py`,
+`fill_sbd_docx.py`'s own `_today_iso()`, `watch_deadlines.py`'s closing-day math and `pdf_merge.py`'s
+`expiry_warning()` - each its own separate finding, never a shared root fix - so worth checking
+whether `authority_facts()`'s own independent "today" computation had made the identical mistake.
+
+**Finding 85 (CONFIRMED, FIXED, moderate).** It had. `authority_facts()`'s `"date"` field (a real,
+documented `{{date}}` field a company can mark in its own authority-to-sign letter guideline) used
+naive `datetime.date.today()` with no SAST adjustment at all - confirmed by grep that this file,
+unlike every sibling (`fill_a_forms.py`/`watch_deadlines.py`/`generate_cv.py`/`source_http.py`),
+defines no `SAST` constant. A bridge worker container runs in UTC by default, so this prints
+YESTERDAY's date on a real legal document during the 00:00-01:59 SAST window every day. Reproduced
+directly by monkeypatching the clock.
+
+**Why the existing test suite never caught it**: `test_company_documents.py`'s guideline case
+exercises `{{date}}`, but its own expected-value comparison calls the SAME buggy function a second
+time, live, so both sides always agreed regardless of correctness - the bug could only be exposed
+by comparing against an independently-injected date, which no existing case did.
+
+**Fix:** added the standard `SAST = datetime.timezone(datetime.timedelta(hours=2))` constant and
+switched to `datetime.datetime.now(SAST).date()`.
+
+**Verified the regression test actually catches the regression - the hard way.** The first attempt
+at the new test only patched `datetime.datetime`, not `datetime.date` - which let a REVERTED
+(buggy) version pass anyway, since the still-live `datetime.date.today()` fell through to the real
+sandbox clock, which happened to already read the test's own target date by coincidence. Caught
+this by actually reverting and re-running rather than trusting the first green result; rewrote the
+test to patch both classes to a moment deliberately different from today's real date. Re-reverted
+with the corrected test: failed with the exact predicted wrong date; restored: `0 failure(s)`,
+full suite passing. `test_form_field_audit.py` (the sibling SAST-date tests for the other two
+files) re-run clean.
+
+Full details: Finding 85 in `QA-Edge-Case-Findings.md`.
 
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-sixth run): closed a near-total test-coverage gap on fill_sbd_docx.py's actual SBD 1/4/6.1/8/9 form-filling logic - the four real Yes/No layouts, and SBD4's assumed-default vs SBD8's never-assumed declaration distinction
 
