@@ -1,5 +1,76 @@
 # System Status
 
+**2026-10-27 ~18:16 UTC — standing review pass: Form B7's SETUP sheet carries two
+disagreeing subcontracting signals, confirmed disagreeing on a real committed sample -
+flagged for Sarel's own call, not fixed (compliance-critical, needs a reconciliation
+decision, not a guess).** Orientation: `git fetch origin main` showed no new commits since
+this routine's own last pass (`15f9e9c`) - local checkout already matched. Three open PRs
+(`#164` savings-counter rework, `#165` four pre-demo defect fixes, `#166` notification
+migration + Admin Command Center) read in full via the GitHub API - all correctly still
+draft/unmerged, none overlapping `engine/sanral_b7.py` or anything this pass touched.
+Stayed clear of the self-merge incident PRs, as directed.
+
+**The finding.** `engine/sanral_b7.py`'s `read_setup()` reads two separate signals off the
+Technical Submission workbook's own SETUP sheet: `L1` ("App. D Category of Tender") plus a
+policy matrix (`J27:L35`) that together drive `applicability()`'s category+company-size
+subcontracting answer, AND `L2` - labelled, in SANRAL's own template, literally
+`"Subcontracting Compulsary:"` (their spelling) - a direct YES/NO the buyer states for that
+specific tender. `read_setup()` already parses `L2` into a `compulsory` field on the dict it
+returns (`str(wb.cached("SETUP", "L2") or "").strip().upper() or None`) - but nothing in this
+file, or either of its two callers (`engine/pack/assemble_pack.py`,
+`engine/pack/process_pack_jobs.py`), ever reads that field again. It's computed and
+discarded. Confirmed this isn't a hypothetical edge case: read `SETUP!L2` directly off all 6
+committed real samples (`templates/samples/*_ran.xlsm`) -
+
+| Sample | Category (L1) | Matrix says, Generic tenderer | `SETUP!L2` "Subcontracting Compulsary" |
+|---|---|---|---|
+| R.334-030-2025.1F | 2 | **required** | **NO** |
+| R.343-020-2025.1F | 3 | required | YES |
+| R.352-020-2025.1F | 3 | required | YES |
+| R.352-030-2025.1F | 3 | required | YES |
+| R.394-010-2025.1F | 3 | required | YES |
+| R.396-010-2025.1F | 3 | required | YES |
+
+R.334 is a real, live disagreement: the category/matrix path (what the product actually
+tells a Generic-sized company today) says B7 is **required**, while SANRAL's own template
+states on the same sheet, in plain words, that subcontracting is **not compulsory** for this
+exact tender. A company reading `applicability()`'s `"required"` reason today would be told
+to complete a form SANRAL's own document says it doesn't need to - real wasted effort on a
+compliance document, and the kind of "two writers that could disagree" shape this codebase
+already treats as a hard rule to avoid elsewhere (0043's cross-tenant trigger, this same
+file's own Book-1-waiver path for `R.396`).
+
+**Why this isn't fixed in this pass, not just documented as a shortcut.** The right
+reconciliation isn't obvious enough to guess at silently on a compliance gate that already
+exists specifically to never guess (`applicability()`'s whole design is "ask, don't skip"
+the moment anything is unknown). Candidates worth Sarel's own call, not mine: (a) treat `L2`
+as authoritative over the matrix when they disagree - but it's unclear whether `L2` is
+genuinely tender-specific or just echoes the category's own "Generic" row of the matrix
+verbatim, which would make it redundant rather than an override in the 5 category-3 samples
+and only meaningfully informative in the one category-2 sample where it disagrees; (b) treat
+a disagreement as its own `"unknown"`-shaped outcome (same "required until you answer"
+posture the module already uses for a missing category or company size), surfacing both
+readings in the reason text; (c) leave the matrix as authoritative and treat `L2` as a
+documented cross-check only shown to the user, never driving the actual required/not_required
+split. Not picking one of these without Sarel's steer, given a wrong guess here either makes
+a company jump through an unneeded hoop or - worse - tells them a required compliance form
+isn't needed.
+
+**Verified, not assumed**: re-ran `engine/test_sanral_b7.py` (full suite, unchanged) - still
+`ALL PASSED`; this pass made no code changes, so nothing to regress. `tsc`/`eslint` unaffected
+(no TypeScript touched).
+
+QA tooling: sound. Backlog otherwise unchanged and re-confirmed, not re-verified live this
+pass: migration `0096` (pack-quota trial-expiry), the `narrative_documents` PostgREST
+schema-cache reload, the PayFast idempotency design question (not urgent), the "missing ISO
+9001 flagged as urgent" UX question, the `fingerprint.py` `named_ranges` fix (expect a
+baseline mismatch on the next real SANRAL fingerprint check - not a regression), and the
+Dashboard "Decision needed" bucket over-triggering finding (needs a real refactor, not fixed
+yet). This pass adds the Form B7 `compulsory`-vs-matrix disagreement above as a new item for
+Sarel's own call.
+
+---
+
 **2026-10-27 ~16:16 UTC — standing review pass: audited the SANRAL engine's field-provenance /
 ACTIONS_TO_SIGN.md trust mechanism end to end, held up correctly; no new bug found; QA tooling
 unaffected.** Orientation: `git fetch origin main` showed one new commit since this routine's own
