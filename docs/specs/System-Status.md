@@ -1,5 +1,44 @@
 # System Status
 
+**2026-10-27 ~02:13 UTC — standing review pass: no code change, a genuine open product question
+surfaced instead of forced into a code fix.** Orientation: `git fetch origin main` showed one new
+commit since this routine's own last pass (`bcc3236`, a sibling QA routine closing
+`send_digest_emails.py`'s zero test coverage - no overlap). Local checkout confirmed on the real
+tip before starting. Two open PRs, both read in full and correctly left as unmerged drafts: `#164`
+(savings-counter capacity-messaging rework) and `#165` (4 pre-demo production defect fixes) -
+neither overlaps anything reviewed this pass. Stayed clear of the self-merge incident PRs entirely,
+per the standing guardrail.
+
+**What was reviewed, at real depth, and why it's a flag rather than a fix**: `app/lib/documentExpiry.ts`
+(the Company Vault's "N documents need attention before your next bid" overview, last touched
+2026-10-21 - the oldest-untouched file among several candidates checked) and its one UI caller,
+`app/app/company/DocumentExpiryOverview.tsx`. The code itself is correct and does what its own
+header comment says: it deliberately shows MORE than the topbar bell (`lib/notifications.ts`'s
+`getNotifications()`), which explicitly skips any field with no date at all
+(`withinWindow()`'s `daysLeft !== null` guard, and `held_registrations`' own `.not("expiry_date",
+"is", null)` filter) - the vault overview instead surfaces a genuinely-missing date as its own
+`"missing"` status, on purpose, per its own comment ("unknowns...itself a gap worth seeing").
+
+The real question, not a bug in the code as written: `DocumentExpiryOverview.tsx`'s `needsAttention`
+count treats `"missing"` as equally attention-worthy as `"expired"`/`"expiring_soon"`, for all 7
+`COMPANY_EXPIRY_FIELDS` uniformly - including `iso_9001_expiry`. ISO 9001 certification is
+optional/quality-scoring (worth 5-10 SANRAL functionality points per
+`Tender-Evaluation-Engine-Audit.md`'s own finding), not a universal compliance requirement the way
+SARS TCS PIN or COID are - most SA tendering SMEs legitimately never have one and may never need
+one. As built, a company in that position will see "1 document needs attention before your next
+bid" permanently, for a document that may never apply to them, with no way to dismiss or mark it
+not-applicable. Checked `docs/specs/Document-Expiry-Tracked-Fields-Open-Item.md` first, since its
+name looked directly on-point - it resolves a different, already-closed question (which fields got
+real expiry columns at all, 2026-10-16), not this one. This may be entirely intentional (nudging a
+company toward a document that genuinely helps its functionality score, framed the same as a hard
+compliance gap) rather than a design oversight - that's Sarel's own call to make, not something to
+guess at and build around either way. Not touched.
+
+**QA tooling**: confirmed sound, unchanged - no code modified this pass (`tsc`/`eslint` baseline
+unaffected).
+
+---
+
 **2026-10-27 ~00:14 UTC — standing review pass: a real, already-occurring fingerprint blind spot
 fixed in `engine/fingerprint.py`'s `named_ranges()` - confirmed in the real committed baseline, not
 hypothetical.** Orientation: `git fetch origin main` showed no new commits since this routine's own
