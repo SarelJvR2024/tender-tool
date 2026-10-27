@@ -270,6 +270,187 @@ enabled until that gap is closed or Sarel explicitly accepts the gap.
 
 ---
 
+**2026-10-27 ~20:16 UTC — standing review pass: another real "hover-only hides real
+information" instance found and fixed on `/discovery`'s "Done N similar tenders before"
+badge - same bug class this repo's own passes have now fixed 8+ times, each one
+independently rediscovered.** Orientation: `git fetch origin main` showed one new commit
+since this routine's own last pass (`c1f1e6d`, a sibling QA routine's docs-only clean
+sweep of `registration_reminders.py`, no overlap) - fast-forwarded before starting. Open
+PRs checked via the GitHub API, not assumed: `#164` (savings-counter rework), `#165`
+(4 pre-demo defect fixes, already merged into neither - still draft/unmerged, correctly
+untouched), `#166` (savings calculator + a large notification-admin build-out). All three
+touch `savings-calculator.tsx`; `#166` alone touches ~25 files across `app/app/admin/*`,
+every `.github/workflows/*-alerts.yml`, and billing. Both areas avoided entirely this
+pass rather than risk colliding with in-flight work. Stayed clear of the self-merge
+incident PRs per the standing guardrail.
+
+**The finding**: `app/lib/opportunityInsights.ts` itself (the pure "has this company done
+a similar tender before" matcher) is correct and already well-defensive - read it in full,
+traced `buildDoneHistory()`/`similarTendersBefore()` by hand against null-buyer,
+null-category, and self-match edge cases, all handled. The bug is at the render site,
+`app/app/discovery/page.tsx`'s "Done N similar tenders before" badge: `similar.count` and
+`similar.wonCount` were shown as visible text, but `similar.sameBuyerCount` - arguably the
+single most decision-relevant number here (this buyer specifically has a track record with
+you, not just a shared discipline tag) - was buried entirely inside a `title=` hover
+tooltip, invisible on touch and unreachable without a mouse. The sibling "Market size
+range" badge immediately below it was checked too and is fine - its visible text already
+carries the real numbers, `title=` there is genuinely supplementary methodology context,
+not hidden decision data.
+
+**Fix**: `sameBuyerCount` now renders as a visible `· N with this buyer` suffix on the
+badge itself, same compact style as the existing `· won N` suffix beside it. The
+`stages` breakdown stays in `title=` as a fallback, same tradeoff every prior fix of this
+bug class has made (e.g. the Pipeline owner-name fix kept `title=` as a fallback for an
+over-length name) - the single most useful number is now always visible, the full stage
+list stays available on hover for anyone who wants it, rather than engineering a bigger
+layout change for a light pass. Verified: `tsc --noEmit` clean, `eslint` clean on the
+changed file, `node --experimental-strip-types --test lib/opportunityInsights.test.ts`
+9/9 (unchanged - pure-logic module untouched, this was a markup-only fix), full
+`npx vitest run` 202/202 unchanged, `npm run build` clean.
+
+**Pushed directly to `main`, no PR, no self-merge**: `app/app/discovery/page.tsx`,
+this entry.
+
+**A pattern worth naming plainly, not acted on in this light pass**: this is now the 8th+
+independently-found instance of "a real number sits only in a hover tooltip" across this
+codebase (PrimaryPackActionLink, Discovery's readiness blockers, SANRAL schedules,
+Analytics trend counts, Market Intelligence frequency counts, People's role-source
+citations, Pipeline's owner initials, and now this one) - each one found and fixed
+separately rather than as one sweep, because nothing enforces the rule structurally. A
+shared `VisibleTooltip`/`InlineDisclosure` component (title text also always rendered as
+small visible text by default) would likely close this whole class at once rather than
+relying on the next pass to independently rediscover instance #9. Flagged here again,
+still not built - genuinely out of scope for a single light-touch pass, but the backlog
+of independent rediscoveries is itself the signal that this is worth Sarel's own call on
+priority.
+
+**Backlog, unchanged by this pass**: migration `0096` (pack-quota trial-expiry) and the
+`narrative_documents` PostgREST schema-cache reload still waiting on Sarel's own apply
+step; a PayFast idempotency design question (not urgent, sandbox-only); the "missing ISO
+9001 flagged as urgent" document-expiry UX question; the `fingerprint.py` `named_ranges`
+fix from an earlier pass (expect a baseline mismatch on the next real SANRAL fingerprint
+check - that's the fix surfacing previously-hidden data, not a regression); the Dashboard
+"Decision needed" bucket over-triggering finding (needs a real refactor, not fixed yet);
+and Form B7's compulsory-vs-matrix disagreement on a real template (a live compliance
+question, flagged in the entry directly below this one, not fixed).
+
+---
+
+**2026-10-27 ~18:16 UTC — standing review pass: Form B7's SETUP sheet carries two
+disagreeing subcontracting signals, confirmed disagreeing on a real committed sample -
+flagged for Sarel's own call, not fixed (compliance-critical, needs a reconciliation
+decision, not a guess).** Orientation: `git fetch origin main` showed no new commits since
+this routine's own last pass (`15f9e9c`) - local checkout already matched. Three open PRs
+(`#164` savings-counter rework, `#165` four pre-demo defect fixes, `#166` notification
+migration + Admin Command Center) read in full via the GitHub API - all correctly still
+draft/unmerged, none overlapping `engine/sanral_b7.py` or anything this pass touched.
+Stayed clear of the self-merge incident PRs, as directed.
+
+**The finding.** `engine/sanral_b7.py`'s `read_setup()` reads two separate signals off the
+Technical Submission workbook's own SETUP sheet: `L1` ("App. D Category of Tender") plus a
+policy matrix (`J27:L35`) that together drive `applicability()`'s category+company-size
+subcontracting answer, AND `L2` - labelled, in SANRAL's own template, literally
+`"Subcontracting Compulsary:"` (their spelling) - a direct YES/NO the buyer states for that
+specific tender. `read_setup()` already parses `L2` into a `compulsory` field on the dict it
+returns (`str(wb.cached("SETUP", "L2") or "").strip().upper() or None`) - but nothing in this
+file, or either of its two callers (`engine/pack/assemble_pack.py`,
+`engine/pack/process_pack_jobs.py`), ever reads that field again. It's computed and
+discarded. Confirmed this isn't a hypothetical edge case: read `SETUP!L2` directly off all 6
+committed real samples (`templates/samples/*_ran.xlsm`) -
+
+| Sample | Category (L1) | Matrix says, Generic tenderer | `SETUP!L2` "Subcontracting Compulsary" |
+|---|---|---|---|
+| R.334-030-2025.1F | 2 | **required** | **NO** |
+| R.343-020-2025.1F | 3 | required | YES |
+| R.352-020-2025.1F | 3 | required | YES |
+| R.352-030-2025.1F | 3 | required | YES |
+| R.394-010-2025.1F | 3 | required | YES |
+| R.396-010-2025.1F | 3 | required | YES |
+
+R.334 is a real, live disagreement: the category/matrix path (what the product actually
+tells a Generic-sized company today) says B7 is **required**, while SANRAL's own template
+states on the same sheet, in plain words, that subcontracting is **not compulsory** for this
+exact tender. A company reading `applicability()`'s `"required"` reason today would be told
+to complete a form SANRAL's own document says it doesn't need to - real wasted effort on a
+compliance document, and the kind of "two writers that could disagree" shape this codebase
+already treats as a hard rule to avoid elsewhere (0043's cross-tenant trigger, this same
+file's own Book-1-waiver path for `R.396`).
+
+**Why this isn't fixed in this pass, not just documented as a shortcut.** The right
+reconciliation isn't obvious enough to guess at silently on a compliance gate that already
+exists specifically to never guess (`applicability()`'s whole design is "ask, don't skip"
+the moment anything is unknown). Candidates worth Sarel's own call, not mine: (a) treat `L2`
+as authoritative over the matrix when they disagree - but it's unclear whether `L2` is
+genuinely tender-specific or just echoes the category's own "Generic" row of the matrix
+verbatim, which would make it redundant rather than an override in the 5 category-3 samples
+and only meaningfully informative in the one category-2 sample where it disagrees; (b) treat
+a disagreement as its own `"unknown"`-shaped outcome (same "required until you answer"
+posture the module already uses for a missing category or company size), surfacing both
+readings in the reason text; (c) leave the matrix as authoritative and treat `L2` as a
+documented cross-check only shown to the user, never driving the actual required/not_required
+split. Not picking one of these without Sarel's steer, given a wrong guess here either makes
+a company jump through an unneeded hoop or - worse - tells them a required compliance form
+isn't needed.
+
+**Verified, not assumed**: re-ran `engine/test_sanral_b7.py` (full suite, unchanged) - still
+`ALL PASSED`; this pass made no code changes, so nothing to regress. `tsc`/`eslint` unaffected
+(no TypeScript touched).
+
+QA tooling: sound. Backlog otherwise unchanged and re-confirmed, not re-verified live this
+pass: migration `0096` (pack-quota trial-expiry), the `narrative_documents` PostgREST
+schema-cache reload, the PayFast idempotency design question (not urgent), the "missing ISO
+9001 flagged as urgent" UX question, the `fingerprint.py` `named_ranges` fix (expect a
+baseline mismatch on the next real SANRAL fingerprint check - not a regression), and the
+Dashboard "Decision needed" bucket over-triggering finding (needs a real refactor, not fixed
+yet). This pass adds the Form B7 `compulsory`-vs-matrix disagreement above as a new item for
+Sarel's own call.
+
+---
+
+**2026-10-27 ~16:16 UTC — standing review pass: audited the SANRAL engine's field-provenance /
+ACTIONS_TO_SIGN.md trust mechanism end to end, held up correctly; no new bug found; QA tooling
+unaffected.** Orientation: `git fetch origin main` showed one new commit since this routine's own
+last pass (`6c4f461`) — `a4da119`, the Edge-case QA routine's own `Finding 86` (Lephalale's
+"recent enough" cutoff using a naive UTC `today()`), unrelated area, no overlap. Three open PRs
+(`#164` savings-counter rework, `#165` four pre-demo defect fixes, `#166` a large, actively-growing
+notification-migration + Admin Command Center PR now on its own designated branch) — all correctly
+still draft/unmerged, read in full via the GitHub API rather than assumed from their titles, none
+overlapping what this pass touched. Stayed clear of the self-merge incident PRs entirely, per the
+standing guardrail.
+
+**Reviewed in depth, confirmed sound, no fix needed**: `engine/provenance.py` +
+`engine/generate_action_checklist.py` — "the single rule tying the whole SANRAL engine together"
+(this file's own earlier description) deserved a real audit rather than being taken on faith. The
+specific risk checked: `merge_and_save()` concatenates every filler script's own provenance log
+with no dedup by `field_key`, and `generate_action_checklist.py` lists every `assumed_default`/
+`missing` entry verbatim with no suppression — so if the SAME `field_key` were ever written twice
+with two different statuses in one real run (e.g. once as `missing`, once later as `confirmed`),
+the checklist would show a stale, contradictory "please verify/provide this" line for something
+already confirmed. Checked for real, not assumed: grepped every `.confirmed/.computed/
+.assumed_default/.missing(...)` call across `fill_a_forms.py`/`fill_docx_forms.py`/
+`fill_financial_hours.py` for a repeated `field_key`, found several (e.g. `a_forms.A20.coid_letter`,
+`c123.director_name`), then read each one's actual code — every single one sits in mutually
+exclusive `if`/`elif`/`else` branches within ONE script (e.g. COID current → `confirmed` + a
+separate `missing` for the attachment reminder; COID expired → `missing`; no COID on file →
+`missing`), so exactly one status is ever written per `field_key` per real run. No cross-script
+duplication found either. The mechanism holds.
+
+**Pushed directly to `main`, no PR, no self-merge**: this entry only (`docs/specs/System-Status.md`)
+— commit to follow.
+
+**QA tooling**: sound — `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings — `Logo.tsx`'s `<img>` tags, `analytics/page.tsx`'s unused `STAGE_META`). No application
+code touched this pass.
+
+**Backlog re-confirmed, unchanged**: migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question, the `fingerprint.py` named_ranges
+fix (expect a baseline mismatch next real SANRAL fingerprint check — not a regression), and the
+Dashboard "Decision needed" bucket over-triggering finding (needs a real refactor) — all still
+waiting on Sarel.
+
+---
+
 **2026-10-27 ~14:22 UTC — standing review pass: clean sweep of the narrative-generation
 anti-collusion uniqueness check, no new bug found; QA tooling unaffected.** Orientation: `git fetch
 origin main` showed one new commit since this routine's own last pass (`b3bd916`) — `167f6ed`,
@@ -4599,6 +4780,84 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-ninth run): rotated to compliance (engine/compliance/registration_reminders.py) - thorough review, no new bug found this time
+
+Orientation: synced two sibling commits (`15f9e9c` field-provenance/ACTIONS_TO_SIGN.md trust-
+mechanism audit, confirmed sound; `ba2d63c` a real, flagged-not-fixed Form B7 compulsory-vs-matrix
+disagreement in `sanral_b7.py`, confirmed on all 6 real committed samples - correctly left for
+Sarel's own judgment call, not a code bug to force a fix on, so not touched here). Three open PRs
+(`#164`/`#165`/`#166`), all confirmed by sibling passes to be TypeScript-only with no overlap.
+
+Rotated to compliance - `watch_deadlines.py` itself got a thorough sibling review two passes ago,
+so picked the one file in that area this routine hadn't reviewed this session:
+`registration_reminders.py` (the shared-registrations-catalog and property-document expiry
+reminders, migration 0050). Read `find_due_registrations()`, `find_due_property_documents()`,
+`_names()` and `_mark_company()` end to end, specifically checking two real adversarial angles:
+
+- Whether `_names()`'s `sorted(ids)` call could ever crash on a `None` mixed into a set of UUID
+  strings (a real, reachable `TypeError` class if any of the three id-sets it's built from -
+  `company_id`, `registration_type_id`, `property_id` - were ever nullable). Checked the real
+  schema directly (migration `0050_principals_registrations_properties.sql`) rather than
+  assuming: all three are `not null` with a `references ... on delete cascade/restrict`
+  constraint - not reachable. `person_id`/`principal_id` ARE nullable, but both call sites
+  already filter with `if r.get(...)` before building the set.
+- Whether `_mark_company()`'s own post-hoc company_id patch (used here instead of
+  `watch_deadlines._expiry_window()`'s own `company_id=` kwarg, which `find_due_documents()` uses
+  directly) could ever run AFTER `save_seen_db()` had already persisted the seen store, leaving a
+  `company_id`-less entry in the database. Traced the real call order in `daily_digest.py`'s live
+  mode: all four `find_due_*` functions (including this file's own two) run to completion BEFORE
+  `save_seen_db()` is called once, at the end - every entry is already patched by the time it's
+  persisted. A real simplification worth naming (reuse `_expiry_window()`'s own `company_id=`
+  kwarg directly, like `find_due_documents()` does, instead of a separate post-patch helper) but
+  not a bug - not forced into a fix for its own sake.
+
+Ran both real test files covering this module directly, not just read the code:
+`test_principals_registrations.py` (12 cases, in-memory rows) and `test_watch_deadlines_urgency.py`
+- both `0 failure(s)`, confirming the escalation/seen-store/digest-routing behaviour this file's
+own comments claim actually holds up.
+
+No Python file changed this pass. Logging this as a genuine clean sweep, not a skipped cycle.
+
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-eighth run): the Lephalale discovery reader's "recent enough to fetch" cutoff used a naive UTC today(), one day too lenient - a proactive repo-wide sweep after Finding 85, same follow-through discipline as the docx_text() sweep two cycles ago
+
+Orientation: synced a sibling commit (`6c4f461`, a clean sweep of the narrative anti-collusion
+uniqueness check - `engine/narrative/uniqueness.py`, no overlap; the sibling also flagged that this
+routine's own Finding 85 entry landed mid-file rather than at the very top of `System-Status.md`,
+same place every one of this routine's entries has always landed - a different, parallel top-of-
+file convention another standing routine keeps, not something to change here).
+
+Given Finding 85 was the SIXTH independent occurrence of the naive-UTC-"today" bug class in this
+codebase, did a proactive repo-wide grep for the pattern before picking a new rotation area -
+found 8 candidates, triaged each by real reachability and stakes rather than fixing every hit
+(`suggest_pack.py`/`fingerprint.py`/`harness_pack.py`: informational timestamps only;
+`etenders_national.py`: CLI-only, never called by the live path; `gov_sources.py`'s
+`"etenders_ocds"` branch: not in the production `ALL_SOURCES`; `process_narrative_jobs.py`'s
+years-of-experience calc: real but inert for this bug, `// 365` absorbs a 1-day error on all but
+the exact anniversary day; `assemble_pack.py`'s "Generated" footer: cosmetic only).
+
+**Finding 86 (CONFIRMED, FIXED, moderate).** `lephalale.py`'s `_recent_enough()` stood out as the
+one candidate that's both a real decision gate (not metadata) and genuinely reachable (`lephalale`
+IS in `gov_sources.ALL_SOURCES`, the real daily-discovery default). It computed its cutoff via
+naive `datetime.date.today()`, despite already importing `source_http as sh`, which defines the
+standard `SAST` constant every sibling reader uses. Worked out the actual DIRECTION of the bug by
+hand: a naive UTC "today" one day behind means the cutoff is also one day further back, making the
+filter one day MORE lenient, not stricter - the opposite shape from most of this bug class's prior
+findings. The practical effect: a batch that should already be excluded as too old is still
+fetched for one extra day, during the 00:00-01:59 SAST window - not a tender silently dropped.
+
+**Fix:** reused the already-imported `sh.SAST` - no new constant needed.
+
+**Verified the regression test actually catches the regression - the hard way, again.** The first
+version of the new test case repeated Finding 85's exact mistake (only mocked `datetime.datetime`,
+not `datetime.date`), and reverting the real fix with only that mock showed `ALL PASSED` at first
+(one check happened to agree with the real sandbox clock's actual date). Caught this immediately
+with the lesson still fresh, fixed the test to mock both classes to a moment deliberately
+different from today's real date. Re-reverted with the corrected test: failed with the exact
+predicted wrong verdict; restored: `0 failure(s)`, full suite passing. `test_gov_sources.py`
+re-run clean.
+
+Full details: Finding 86 in `QA-Edge-Case-Findings.md`.
 
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-seventh run): a real authority-to-sign letter's own {{date}} field could print yesterday's date - the naive-UTC-"today" bug class independently found yet again, this time in company_documents.py
 
