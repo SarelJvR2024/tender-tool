@@ -115,6 +115,34 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python3 engine/discovery/watch_new_tenders.py --out discovery_report.json
 
+      # Post-scrape email step (notification engine migration, 2026-10-27):
+      # the Python step above only ever WRITES discovered_opportunities -
+      # confirmed by reading its own module docstring, it has never emailed
+      # anyone. This renders and sends the digest of whatever that step (or
+      # any earlier run still unclaimed) just seeded, replacing the old
+      # Claude-scheduled "SANRAL/national tender watch" check-in's plain-
+      # text Gmail report. Needs Node alongside the Python already set up
+      # above - a separate language runtime in the same job, same pattern
+      # bridge-worker-ci.yml already uses elsewhere in this repo.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install app dependencies (needs @supabase/supabase-js and resend)
+        working-directory: app
+        run: npm ci
+
+      - name: Send the new-discovered-tenders digest
+        working-directory: app
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_BIDS: ${{ secrets.RESEND_FROM_BIDS }}
+          RESEND_FROM_ADDRESS: ${{ secrets.RESEND_FROM_ADDRESS }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: node --experimental-strip-types scripts/send-discovered-tenders.ts
+
       - name: Upload the run's own report-worthy-releases JSON (debugging aid, kept a week)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4

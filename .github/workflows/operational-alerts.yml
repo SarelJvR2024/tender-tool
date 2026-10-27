@@ -1,18 +1,20 @@
-# Sends the 3 "Operational Notification Engine" alerts
+# Sends 2 of the original 3 "Operational Notification Engine" alerts
 # (app/scripts/send-operational-alerts.ts) once a day: print & transit
-# cutoff (48h), briefing countdown (5 days/24h), compliance-document expiry
-# (14 days). Same architecture as deadline-reminders.yml, same reasoning -
+# cutoff (48h), briefing countdown (5 days/24h). Compliance-document expiry
+# (the 3rd, originally SARS PIN/COID at 14 days) moved to
+# compliance-alerts.yml's own send-compliance-digest.ts 2026-10-27 - see
+# that script's own header for why running both would have double-emailed
+# companies. Same architecture as deadline-reminders.yml, same reasoning -
 # a scheduled batch job, not an always-on worker, needing the Supabase
 # SERVICE ROLE key the deployed Next.js app never holds.
 #
 # Needs 3 repository secrets (Settings > Secrets and variables > Actions),
 # the same NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY/RESEND_API_KEY
-# deadline-reminders.yml already uses, plus (optional) RESEND_FROM_BIDS and
-# RESEND_FROM_COMPLIANCE (lib/resendEmail.ts's own fromFor() - falls back to
-# RESEND_FROM_ADDRESS, then a literal bids@/compliance@tenderready.app, if
-# unset). Until RESEND_API_KEY is set, this workflow still runs safely and
-# still goes green: the script detects the missing key and exits 0 having
-# sent or claimed nothing.
+# deadline-reminders.yml already uses, plus (optional) RESEND_FROM_BIDS
+# (lib/resendEmail.ts's own fromFor() - falls back to RESEND_FROM_ADDRESS,
+# then a literal bids@tenderready.app, if unset). Until RESEND_API_KEY is
+# set, this workflow still runs safely and still goes green: the script
+# detects the missing key and exits 0 having sent or claimed nothing.
 
 name: operational-alerts
 
@@ -54,7 +56,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           RESEND_FROM_BIDS: ${{ secrets.RESEND_FROM_BIDS }}
-          RESEND_FROM_COMPLIANCE: ${{ secrets.RESEND_FROM_COMPLIANCE }}
           RESEND_FROM_ADDRESS: ${{ secrets.RESEND_FROM_ADDRESS }}
           APP_URL: ${{ vars.APP_URL }}
         run: node --experimental-strip-types scripts/send-operational-alerts.ts

@@ -3,7 +3,7 @@
 // from a column or computation that already exists in this schema - no new
 // "briefing venue" or "checklist" source was invented for this file (see
 // each function's own comment for exactly where its data comes from).
-import { formatDate } from "./dates.ts";
+import { closingCountdown, formatDate } from "./dates.ts";
 import {
   briefingDetailCard,
   button,
@@ -17,7 +17,7 @@ import {
   pill,
   tenderHeader,
 } from "./emailBrand.ts";
-import { tenderSubject } from "./emailSubjects.ts";
+import { discoveredTendersSubject, tenderSubject } from "./emailSubjects.ts";
 import { printSignDeadline, type DispatchLogisticsInput } from "./dispatchTriage.ts";
 import type { NotificationEmail } from "./notificationEngine.ts";
 
@@ -189,5 +189,83 @@ export function corrigendumAlertEmail(opts: {
     { appUrl: opts.appUrl, badgeText: opts.buyerShortName, recipientContext: { kind: "tender", tenderReference: opts.reference, companyName: opts.companyName } }
   );
   const text = `${opts.reference} (${opts.buyerShortName}) - addendum published.\n${rows.map((r) => `${r.label}: ${r.value.replace(/<[^>]+>/g, "")}`).join("\n")}\n\n${opts.appUrl}/tenders/${opts.tenderId}`;
+  return { subject, html, text };
+}
+
+// 1.4 New Discovered Tenders Digest
+// --------------------------------------------------------------------------
+// Data source: discovered_opportunities (migration 0004/0071), one row per
+// (company, release) - already seeded daily by engine/discovery/watch_new_tenders.py
+// via .github/workflows/daily-discovery.yml, which writes but never emails.
+// This renders a digest of one company's own newly-seeded rows, cards per
+// tender (contract number, buyer, category/CIDB signal, closing countdown),
+// never one email per tender - the brief's own anti-noise framing, same as
+// scoutAnomalyBatchEmail's "a batch of one is just a list with one row" rule
+// so there is exactly one template for 1..N tenders, not two drifting ones.
+//
+// Only ONE button() per email (this file's own established convention,
+// see its doc comment: "exactly one per email") - each card gets a plain
+// text link to its own tender, the single big CTA at the end goes to the
+// in-app Discovery feed where every one of them (and anything this digest's
+// own cap left out) can be reviewed.
+export type DiscoveredTenderCard = {
+  id: string;
+  contractNumber: string | null;
+  buyer: string | null;
+  title: string | null;
+  category: string | null;
+  cidbGrading: string | null;
+  closingDate: string | null;
+  verdict: "strong_fit" | "possible" | "needs_review" | string;
+};
+
+const MAX_CARDS_SHOWN = 10;
+
+export function discoveredTendersDigestEmail(opts: {
+  companyName: string;
+  tenders: DiscoveredTenderCard[];
+  appUrl: string;
+}): NotificationEmail {
+  const subject = discoveredTendersSubject({ count: opts.tenders.length, companyName: opts.companyName });
+  const shown = opts.tenders.slice(0, MAX_CARDS_SHOWN);
+  const remaining = opts.tenders.length - shown.length;
+
+  const cardsHtml = shown
+    .map((t) => {
+      const countdown = closingCountdown(t.closingDate);
+      const rows = [
+        { label: "Tender #", value: escapeHtml(t.contractNumber || "—") },
+        { label: "Client", value: escapeHtml(t.buyer || "—") },
+        { label: "Category / CIDB", value: escapeHtml([t.category, t.cidbGrading].filter(Boolean).join(" · ") || "—") },
+        {
+          label: "Closing",
+          value: countdown ? escapeHtml(countdown.text) : "Not stated",
+          emphasis: countdown?.urgent ? ("warning" as const) : undefined,
+        },
+      ];
+      return `
+        <div style="margin:0 0 16px;">
+          <p style="margin:0 0 6px;">${pill(t.verdict === "strong_fit" ? "STRONG FIT" : t.verdict === "possible" ? "POSSIBLE FIT" : "NEEDS REVIEW", t.verdict === "strong_fit" ? "success" : "info")}</p>
+          <p style="margin:0 0 8px;font-size:15px;font-weight:600;color:#0B1F3A;">${escapeHtml(t.title || "Untitled tender")}</p>
+          ${infoCard(rows)}
+          <a href="${escapeHtml(`${opts.appUrl}/tenders/${t.id}`)}" style="font-size:13px;color:#1D4ED8;text-decoration:none;">Review this tender &rarr;</a>
+        </div>`;
+    })
+    .join("");
+
+  const html = layout(
+    `
+      <p style="margin:0 0 12px;">${pill("NEW TENDERS FOUND", "info")}</p>
+      <p style="margin:0 0 16px;">${opts.tenders.length} new tender${opts.tenders.length === 1 ? "" : "s"} matched your company's profile:</p>
+      ${cardsHtml}
+      ${remaining > 0 ? `<p style="margin:0 0 16px;font-size:13px;color:#5C6374;">+ ${remaining} more in your Discovery feed.</p>` : ""}
+      ${button(`${opts.appUrl}/discovery`, "Open Discovery Feed")}
+    `,
+    `${opts.tenders.length} new tender${opts.tenders.length === 1 ? "" : "s"} found for you.`,
+    { appUrl: opts.appUrl }
+  );
+  const text = `${opts.tenders.length} new tender(s) found:\n${shown
+    .map((t) => `- ${t.contractNumber || t.id} (${t.buyer || "unknown buyer"}): ${t.title || "Untitled"} - ${opts.appUrl}/tenders/${t.id}`)
+    .join("\n")}${remaining > 0 ? `\n+ ${remaining} more in your Discovery feed.` : ""}\n\n${opts.appUrl}/discovery`;
   return { subject, html, text };
 }

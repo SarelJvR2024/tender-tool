@@ -21,6 +21,11 @@ export function tenderSubject(opts: { reference: string; action: string; buyer: 
   return clamp(`[${opts.reference}] ${opts.action} | ${opts.buyer}`);
 }
 
+/** "[New Tenders] N found | <Company Short Name>" - the discovered-tenders digest (a batch of N, not one bracketed reference - there is no single tender reference to lead with when the email covers several at once). */
+export function discoveredTendersSubject(opts: { count: number; companyName: string }): string {
+  return clamp(`[New Tenders] ${opts.count} found | ${opts.companyName}`);
+}
+
 /** "[Compliance Alert] <Action Required> | <Company Name>" - Tier 2 (vault/registration expiries). */
 export function complianceSubject(opts: { action: string; companyName: string }): string {
   return clamp(`[Compliance Alert] ${opts.action} | ${opts.companyName}`);

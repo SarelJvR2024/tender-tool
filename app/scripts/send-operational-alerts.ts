@@ -1,28 +1,34 @@
 #!/usr/bin/env node
-// Operational Notification Engine (Sarel's own brief) - the 3 critical
-// operational alerts beyond the existing "closing in 3 days/24 hours"
-// reminder (scripts/send-deadline-reminders.ts, left untouched):
+// Operational Notification Engine (Sarel's own brief) - 2 of the original 3
+// critical operational alerts beyond the existing "closing in 3 days/24
+// hours" reminder (scripts/send-deadline-reminders.ts, left untouched):
 //   1. Print & transit cutoff - 48 hours before a physical-box submission's
 //      real operational deadline (lib/dispatchTriage.ts's own
 //      printSignDeadline(): closing time minus the tender's own print +
 //      transit hour estimates).
 //   2. Briefing session countdown - 5 days and 24 hours before
 //      tenders.briefing_date.
-//   3. Compliance-document expiry - 14 days before a company's SARS Tax
-//      Compliance PIN or COID Letter of Good Standing expires (CSD has no
-//      expiry field in this schema - see lib/complianceExpiryReminders.ts's
-//      own header comment for why that one is honestly left out rather than
-//      invented).
+//
+// Compliance-document expiry (originally a 3rd stage here: SARS PIN/COID
+// only, 14 days) was REMOVED 2026-10-27 - notification engine migration -
+// once scripts/send-compliance-digest.ts started covering those same 2
+// fields (plus B-BBEE/CIDB/registrations/ECSA/SACPCMP, at 30/14/7 days).
+// Keeping both would have double-emailed every company about the same
+// SARS PIN/COID expiry from two different scripts with two different
+// idempotency-key formats - notification_claims' uniqueness can't catch
+// that, since the keys genuinely differ. lib/complianceExpiryReminders.ts
+// and emailTemplates.ts's complianceExpiryEmail() are now unused by any
+// live sender - left in place (still tested, harmless) rather than deleted
+// as part of an unrelated cleanup; a candidate for a future dead-code pass.
 //
 // Same architecture as scripts/send-deadline-reminders.ts, on purpose - one
 // standalone script (not a Next.js route: needs the Supabase SERVICE ROLE
 // key, which the deployed app never holds - see that script's own header
-// comment), run by .github/workflows/operational-alerts.yml. The 3 triggers
-// are scaffolded as one script with one schedule rather than three nearly-
-// identical ones: they're one coherent "Operational Notification Engine" by
-// the brief's own framing, share the same Supabase setup and Resend
-// transport, and each still dedupes and fails independently (one trigger's
-// error doesn't stop the other two - see runStage() below).
+// comment), run by .github/workflows/operational-alerts.yml. The 2
+// remaining triggers are scaffolded as one script with one schedule rather
+// than two nearly-identical ones: they share the same Supabase setup and
+// Resend transport, and each still dedupes and fails independently (one
+// stage's error doesn't stop the other - see runStage() below).
 //
 // Run: node --experimental-strip-types scripts/send-operational-alerts.ts
 // Needs: NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY
@@ -42,8 +48,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "../lib/dates.ts";
 import { printCutoffCandidates, type PrintCutoffTenderPackRow, type PrintCutoffTenderRow } from "../lib/printCutoffReminders.ts";
 import { briefingReminderCandidates, type BriefingReminderTenderRow } from "../lib/briefingReminders.ts";
-import { complianceExpiryCandidates, COMPLIANCE_EXPIRY_THRESHOLD_DAYS, type ComplianceExpiryCompanyRow } from "../lib/complianceExpiryReminders.ts";
-import { printCutoffEmail, briefingReminderEmail, complianceExpiryEmail } from "../lib/emailTemplates.ts";
+import { printCutoffEmail, briefingReminderEmail } from "../lib/emailTemplates.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { printSignDeadline } from "../lib/dispatchTriage.ts";
 import { operationalRecipients as companyRecipients } from "../lib/notificationRecipients.ts";
@@ -166,32 +171,6 @@ async function runBriefingReminders(supabase: SupabaseService, appUrl: string): 
   return { sent, candidates: candidates.length };
 }
 
-async function runComplianceExpiry(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
-  const { data: companyRows, error } = await supabase
-    .from("companies")
-    .select("id, legal_name, sars_tcs_pin_expiry, coid_letter_of_good_standing_expiry");
-  if (error) {
-    console.error("compliance-expiry: could not read companies", error);
-    return { sent: 0, candidates: 0 };
-  }
-  const candidates = complianceExpiryCandidates((companyRows ?? []) as ComplianceExpiryCompanyRow[], daysUntil);
-  let sent = 0;
-  for (const { company, field, label, daysLeft } of candidates) {
-    const firstClaim = await claim(supabase, "compliance_expiry", null, company.id, `${field}:${COMPLIANCE_EXPIRY_THRESHOLD_DAYS}`);
-    if (!firstClaim) continue;
-    const recipients = await companyRecipients(supabase, company.id);
-    if (recipients.length === 0) continue;
-    const companyName = company.legal_name || "Your company";
-    const { subject, html, text } = complianceExpiryEmail({ companyName, fieldLabel: label, daysLeft, appUrl });
-    for (const to of recipients) {
-      const result = await sendTransactionalEmail({ to, subject, html, text, category: "compliance" });
-      if (result.status === "sent") sent++;
-      await logSend(supabase, "compliance_expiry", `compliance-expiry-${company.id}-${field}-${to}`, to, company.id, null, subject, result);
-    }
-  }
-  return { sent, candidates: candidates.length };
-}
-
 async function main() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -215,9 +194,6 @@ async function main() {
 
   const briefing = await runBriefingReminders(supabase, appUrl);
   console.log(`Briefing countdown: ${briefing.sent} sent, out of ${briefing.candidates} candidate(s).`);
-
-  const complianceExpiry = await runComplianceExpiry(supabase, appUrl);
-  console.log(`Compliance expiry: ${complianceExpiry.sent} sent, out of ${complianceExpiry.candidates} candidate(s).`);
 }
 
 main().catch((e) => {

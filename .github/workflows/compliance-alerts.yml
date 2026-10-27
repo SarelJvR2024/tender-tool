@@ -1,0 +1,58 @@
+# Sends the Tier 2 Comprehensive Compliance Expiry Digest
+# (app/scripts/send-compliance-digest.ts) once a day - SARS Tax PIN, COID
+# Letter of Good Standing, B-BBEE proof, CIDB registration,
+# catalog/property registrations, and per-person ECSA/SACPCMP, at 30/14/7-
+# day thresholds. Daily, not weekly, because the threshold check is "is
+# today exactly 30/14/7 days before this item's own expiry" - a weekly
+# schedule would miss most exact-day crossings. Replaces the old Claude-
+# scheduled "Compliance deadline reminder check-in"'s plain-text Gmail
+# report for the overlapping part of its scope - see the sender script's
+# own header for what's deliberately NOT covered yet
+# (documents_before_closing, generic tender tasks).
+#
+# Same architecture as deadline-reminders.yml/operational-alerts.yml -
+# needs NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY,
+# RESEND_FROM_COMPLIANCE (falls back to RESEND_FROM_ADDRESS, then a literal
+# compliance@tenderready.app, if unset).
+
+name: compliance-alerts
+
+on:
+  schedule:
+    # 03:30 UTC = 05:30 SAST
+    - cron: "30 3 * * *"
+  workflow_dispatch: {} # manual test run, e.g. right after adding RESEND_API_KEY
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compliance-alerts
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install dependencies (needs @supabase/supabase-js and resend)
+        run: npm ci
+
+      - name: Send today's compliance digest
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          RESEND_FROM_COMPLIANCE: ${{ secrets.RESEND_FROM_COMPLIANCE }}
+          RESEND_FROM_ADDRESS: ${{ secrets.RESEND_FROM_ADDRESS }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: node --experimental-strip-types scripts/send-compliance-digest.ts
