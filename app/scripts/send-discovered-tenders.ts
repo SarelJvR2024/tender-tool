@@ -26,6 +26,7 @@ import { resendApiKeyConfigured, sendTransactionalEmail } from "../lib/resendEma
 import { operationalRecipients } from "../lib/notificationRecipients.ts";
 import { discoveredTenderIdempotencyKey, toDiscoveredTenderCard, type DiscoveredOpportunityRow } from "../lib/discoveredTendersDigest.ts";
 import { fetchAllRows } from "../lib/supabasePaging.ts";
+import { parseSenderCliArgs, printDryRunTable, testIdempotencyKey, type DryRunRow } from "../lib/senderCliArgs.ts";
 
 // A busy day's seeding can be large (confirmed live: a single --include-needs-review
 // run has produced 6,000+ company x opportunity rows) - PostgREST's own
@@ -37,6 +38,7 @@ import { fetchAllRows } from "../lib/supabasePaging.ts";
 const MAX_CANDIDATE_ROWS = 20_000;
 
 async function main() {
+  const { dryRun, companyId: scopeCompanyId, testRecipient } = parseSenderCliArgs(process.argv.slice(2));
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) {
@@ -52,14 +54,17 @@ async function main() {
   const sinceIso = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
   const supabase = createClient(url, serviceKey);
   const { rows, error } = await fetchAllRows<DiscoveredOpportunityRow>(
-    (from, to) =>
-      supabase
+    (from, to) => {
+      let q = supabase
         .from("discovered_opportunities")
         .select("id, company_id, contract_number, buyer, title, description, etenders_category, categories, closing_date, verdict, created_at")
         .gte("created_at", sinceIso)
-        .in("verdict", ["strong_fit", "possible", "needs_review"])
-        .order("id")
-        .range(from, to),
+        .in("verdict", ["strong_fit", "possible", "needs_review"]);
+      // --company-id scopes the query itself, as early as possible - another
+      // tenant's data is never even read, let alone claimed or sent to.
+      if (scopeCompanyId) q = q.eq("company_id", scopeCompanyId);
+      return q.order("id").range(from, to);
+    },
     MAX_CANDIDATE_ROWS,
   );
   if (error) {
@@ -72,26 +77,35 @@ async function main() {
     return;
   }
 
-  if (!resendApiKeyConfigured()) {
+  if (!dryRun && !resendApiKeyConfigured()) {
     console.log(`RESEND_API_KEY not set - not sending or claiming any of the ${allRows.length} candidate(s) this run (will retry once a key is added).`);
     return;
   }
 
-  const claimed: DiscoveredOpportunityRow[] = [];
-  for (const row of allRows) {
-    const { data: ok, error: claimError } = await supabase.rpc("claim_notification", {
-      p_idempotency_key: discoveredTenderIdempotencyKey(row.id),
-      p_notification_type: "discovered_tenders_digest",
-    });
-    if (claimError) {
-      console.error(`claim_notification failed for ${discoveredTenderIdempotencyKey(row.id)}`, claimError);
-      continue;
+  // --dry-run never claims - claiming is a one-time-only token
+  // (notification_claims' own unique constraint), and this run must leave
+  // every real future send untouched. Every candidate is shown, as if all
+  // of them were new.
+  let claimed: DiscoveredOpportunityRow[];
+  if (dryRun) {
+    claimed = allRows;
+  } else {
+    claimed = [];
+    for (const row of allRows) {
+      const { data: ok, error: claimError } = await supabase.rpc("claim_notification", {
+        p_idempotency_key: discoveredTenderIdempotencyKey(row.id),
+        p_notification_type: "discovered_tenders_digest",
+      });
+      if (claimError) {
+        console.error(`claim_notification failed for ${discoveredTenderIdempotencyKey(row.id)}`, claimError);
+        continue;
+      }
+      if (ok) claimed.push(row);
     }
-    if (ok) claimed.push(row);
-  }
-  if (claimed.length === 0) {
-    console.log(`Discovered-tenders digest: all ${allRows.length} candidate(s) already claimed by an earlier run, nothing new to send.`);
-    return;
+    if (claimed.length === 0) {
+      console.log(`Discovered-tenders digest: all ${allRows.length} candidate(s) already claimed by an earlier run, nothing new to send.`);
+      return;
+    }
   }
 
   const byCompany = new Map<string, DiscoveredOpportunityRow[]>();
@@ -101,31 +115,56 @@ async function main() {
     byCompany.set(row.company_id, list);
   }
 
+  const dryRunRows: DryRunRow[] = [];
   let companiesSent = 0;
   let skippedNoRecipients = 0;
 
   for (const [companyId, companyRows] of byCompany) {
     const recipients = await operationalRecipients(supabase, companyId);
-    if (recipients.length === 0) {
-      skippedNoRecipients++;
-      continue;
-    }
     const { data: company } = await supabase.from("companies").select("legal_name").eq("id", companyId).maybeSingle();
+    const companyName = company?.legal_name || "your company";
 
     const { subject, html, text } = discoveredTendersDigestEmail({
-      companyName: company?.legal_name || "your company",
+      companyName,
       tenders: companyRows.map(toDiscoveredTenderCard),
       appUrl,
     });
 
-    for (const email of recipients) {
+    if (dryRun) {
+      const shown = companyRows.slice(0, 5).map((r) => r.contract_number || r.id);
+      const more = companyRows.length - shown.length;
+      dryRunRows.push({
+        companyName,
+        companyId,
+        recipients,
+        targetItems: `${shown.join(", ")}${more > 0 ? ` (+${more} more)` : ""}`,
+        subject,
+        status: recipients.length === 0 ? "Skipped (no opted-in recipients)" : "Simulated OK",
+      });
+      continue;
+    }
+
+    if (recipients.length === 0) {
+      skippedNoRecipients++;
+      continue;
+    }
+
+    // --test-recipient redirects the real "to" address but keeps every
+    // other real fact (company, items, subject) - sent to exactly this one
+    // override address, never the real resolved recipients, regardless of
+    // how many real recipients there are.
+    const sendTo = testRecipient ? [testRecipient] : recipients;
+    for (const email of sendTo) {
       const result = await sendTransactionalEmail({ to: email, subject, html, text, from: "ops" });
       if (result.status === "sent") companiesSent++;
       else console.log(`  ${result.status} -> ${email} (company ${companyId})`);
 
       for (const row of companyRows) {
+        const realKey = discoveredTenderIdempotencyKey(row.id);
         const { error: logError } = await supabase.rpc("record_notification_sent", {
-          p_idempotency_key: discoveredTenderIdempotencyKey(row.id),
+          // A test-recipient send uses a DIFFERENT key so it never burns
+          // the real one-time claim the real recipient still needs later.
+          p_idempotency_key: testRecipient ? testIdempotencyKey(realKey) : realKey,
           p_notification_type: "discovered_tenders_digest",
           p_recipient_email: email,
           p_company_id: companyId,
@@ -138,6 +177,11 @@ async function main() {
         if (logError) console.error(`record_notification_sent failed for discovered_tenders_digest (opportunity ${row.id})`, logError);
       }
     }
+  }
+
+  if (dryRun) {
+    printDryRunTable("New Discovered Tenders Digest", dryRunRows);
+    return;
   }
 
   console.log(`Discovered-tenders digest: ${claimed.length} tender(s) claimed across ${byCompany.size} company(ies), ${companiesSent} email send attempt(s), ${skippedNoRecipients} company(ies) skipped (no opted-in recipients).`);

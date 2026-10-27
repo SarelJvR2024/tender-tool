@@ -23,8 +23,10 @@ import { complianceDigestEmail } from "../lib/emailTemplatesTier2.ts";
 import { resendApiKeyConfigured, sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { operationalRecipients } from "../lib/notificationRecipients.ts";
 import { complianceDigestCandidatesForCompany, complianceDigestIdempotencyKey } from "../lib/complianceDigestCandidates.ts";
+import { parseSenderCliArgs, printDryRunTable, testIdempotencyKey, type DryRunRow } from "../lib/senderCliArgs.ts";
 
 async function main() {
+  const { dryRun, companyId: scopeCompanyId, testRecipient } = parseSenderCliArgs(process.argv.slice(2));
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) {
@@ -34,17 +36,20 @@ async function main() {
   const appUrl = process.env.APP_URL || "https://tender-ready.vercel.app";
   const supabase = createClient(url, serviceKey);
 
-  const { data: companies, error: companiesError } = await supabase.from("companies").select("id, legal_name");
+  let companiesQuery = supabase.from("companies").select("id, legal_name");
+  if (scopeCompanyId) companiesQuery = companiesQuery.eq("id", scopeCompanyId);
+  const { data: companies, error: companiesError } = await companiesQuery;
   if (companiesError) {
     console.error("Could not read companies", companiesError);
     process.exit(1);
   }
 
-  if (!resendApiKeyConfigured()) {
+  if (!dryRun && !resendApiKeyConfigured()) {
     console.log("RESEND_API_KEY not set - not sending or claiming any compliance-digest item this run (will retry once a key is added).");
     return;
   }
 
+  const dryRunRows: DryRunRow[] = [];
   let companiesSent = 0;
   let skippedNoRecipients = 0;
   let itemsClaimed = 0;
@@ -53,41 +58,63 @@ async function main() {
     const candidates = await complianceDigestCandidatesForCompany(supabase, company.id as string);
     if (candidates.length === 0) continue;
 
-    const claimedItems: typeof candidates = [];
-    for (const candidate of candidates) {
-      const idempotencyKey = complianceDigestIdempotencyKey(company.id as string, candidate.itemKey, candidate.threshold);
-      const { data: ok, error: claimError } = await supabase.rpc("claim_notification", {
-        p_idempotency_key: idempotencyKey,
-        p_notification_type: "compliance_expiry",
-      });
-      if (claimError) {
-        console.error(`claim_notification failed for ${idempotencyKey}`, claimError);
-        continue;
+    // --dry-run never claims - every candidate is shown as if new.
+    let claimedItems: typeof candidates;
+    if (dryRun) {
+      claimedItems = candidates;
+    } else {
+      claimedItems = [];
+      for (const candidate of candidates) {
+        const idempotencyKey = complianceDigestIdempotencyKey(company.id as string, candidate.itemKey, candidate.threshold);
+        const { data: ok, error: claimError } = await supabase.rpc("claim_notification", {
+          p_idempotency_key: idempotencyKey,
+          p_notification_type: "compliance_expiry",
+        });
+        if (claimError) {
+          console.error(`claim_notification failed for ${idempotencyKey}`, claimError);
+          continue;
+        }
+        if (ok) claimedItems.push(candidate);
       }
-      if (ok) claimedItems.push(candidate);
+      if (claimedItems.length === 0) continue;
+      itemsClaimed += claimedItems.length;
     }
-    if (claimedItems.length === 0) continue;
-    itemsClaimed += claimedItems.length;
 
     const recipients = await operationalRecipients(supabase, company.id as string);
+    const companyName = (company.legal_name as string) || "your company";
+
+    const { subject, html, text } = complianceDigestEmail({
+      companyName,
+      items: claimedItems.map((c) => c.item),
+      appUrl,
+    });
+
+    if (dryRun) {
+      dryRunRows.push({
+        companyName,
+        companyId: company.id as string,
+        recipients,
+        targetItems: claimedItems.map((c) => c.item.label).join(", "),
+        subject,
+        status: recipients.length === 0 ? "Skipped (no opted-in recipients)" : "Simulated OK",
+      });
+      continue;
+    }
+
     if (recipients.length === 0) {
       skippedNoRecipients++;
       continue;
     }
 
-    const { subject, html, text } = complianceDigestEmail({
-      companyName: (company.legal_name as string) || "your company",
-      items: claimedItems.map((c) => c.item),
-      appUrl,
-    });
-
-    for (const email of recipients) {
+    const sendTo = testRecipient ? [testRecipient] : recipients;
+    for (const email of sendTo) {
       const result = await sendTransactionalEmail({ to: email, subject, html, text, from: "compliance" });
       if (result.status === "sent") companiesSent++;
       else console.log(`  ${result.status} -> ${email} (company ${company.id})`);
 
       for (const candidate of claimedItems) {
-        const idempotencyKey = complianceDigestIdempotencyKey(company.id as string, candidate.itemKey, candidate.threshold);
+        const realKey = complianceDigestIdempotencyKey(company.id as string, candidate.itemKey, candidate.threshold);
+        const idempotencyKey = testRecipient ? testIdempotencyKey(realKey) : realKey;
         const { error: logError } = await supabase.rpc("record_notification_sent", {
           p_idempotency_key: idempotencyKey,
           p_notification_type: "compliance_expiry",
@@ -102,6 +129,11 @@ async function main() {
         if (logError) console.error(`record_notification_sent failed for compliance_expiry (${idempotencyKey})`, logError);
       }
     }
+  }
+
+  if (dryRun) {
+    printDryRunTable("Comprehensive Compliance Expiry Digest", dryRunRows);
+    return;
   }
 
   console.log(`Compliance digest: ${itemsClaimed} item(s) claimed, ${companiesSent} email send attempt(s), ${skippedNoRecipients} company(ies) skipped (no opted-in recipients).`);

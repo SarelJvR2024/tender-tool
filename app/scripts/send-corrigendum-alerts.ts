@@ -44,8 +44,10 @@ import { corrigendumAlertEmail } from "../lib/emailTemplatesTier1.ts";
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { operationalRecipients } from "../lib/notificationRecipients.ts";
 import { changesForDoc, isCorrigendumCandidate, type WatchedDocRow } from "../lib/corrigendumAlerts.ts";
+import { parseSenderCliArgs, printDryRunTable, testIdempotencyKey, type DryRunRow } from "../lib/senderCliArgs.ts";
 
 async function main() {
+  const { dryRun, companyId: scopeCompanyId, testRecipient } = parseSenderCliArgs(process.argv.slice(2));
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) {
@@ -54,7 +56,7 @@ async function main() {
   }
   const appUrl = process.env.APP_URL || "https://tender-ready.vercel.app";
 
-  if (!process.env.RESEND_API_KEY) {
+  if (!dryRun && !process.env.RESEND_API_KEY) {
     console.log("RESEND_API_KEY not set - not sending or claiming any corrigendum alert this run (will retry once a key is added).");
     return;
   }
@@ -66,10 +68,12 @@ async function main() {
   // nothing new to find past this horizon - same reasoning
   // deadlineReminderCandidates() bounds its own tender read.
   const sinceIso = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-  const { data: rows, error: rowsError } = await supabase
+  let query = supabase
     .from("tender_update_notifications")
     .select("company_id, watched_document_id, tender_id, pipeline_stage, created_at")
     .gte("created_at", sinceIso);
+  if (scopeCompanyId) query = query.eq("company_id", scopeCompanyId);
+  const { data: rows, error: rowsError } = await query;
   if (rowsError) {
     console.error("Could not read tender_update_notifications", rowsError);
     process.exit(1);
@@ -80,6 +84,7 @@ async function main() {
     return;
   }
 
+  const dryRunRows: DryRunRow[] = [];
   let sent = 0;
   let skippedAlreadySent = 0;
   let skippedNoRecipients = 0;
@@ -106,23 +111,39 @@ async function main() {
     const { data: company } = await supabase.from("companies").select("legal_name").eq("id", row.company_id).maybeSingle();
 
     const recipients = await operationalRecipients(supabase, row.company_id);
-    if (recipients.length === 0) {
-      skippedNoRecipients++;
-      continue;
-    }
+    const companyName = company?.legal_name || "your company";
 
     const { subject, html, text } = corrigendumAlertEmail({
       reference: tender.contract_no || tender.id,
       tenderTitle: tender.description,
       buyerShortName: tender.buyer || "the buyer",
-      companyName: company?.legal_name || "your company",
+      companyName,
       changes: changesForDoc(doc as WatchedDocRow),
       appUrl,
       tenderId: tender.id,
     });
 
-    for (const email of recipients) {
-      const idempotencyKey = `corrigendum-${row.watched_document_id}-${row.company_id}-${email}`;
+    if (dryRun) {
+      dryRunRows.push({
+        companyName,
+        companyId: row.company_id,
+        recipients,
+        targetItems: tender.contract_no || tender.id,
+        subject,
+        status: recipients.length === 0 ? "Skipped (no opted-in recipients)" : "Simulated OK",
+      });
+      continue;
+    }
+
+    if (recipients.length === 0) {
+      skippedNoRecipients++;
+      continue;
+    }
+
+    const sendTo = testRecipient ? [testRecipient] : recipients;
+    for (const email of sendTo) {
+      const realKey = `corrigendum-${row.watched_document_id}-${row.company_id}-${email}`;
+      const idempotencyKey = testRecipient ? testIdempotencyKey(realKey) : realKey;
       const { data: claimed, error: claimError } = await supabase.rpc("claim_notification", {
         p_idempotency_key: idempotencyKey,
         p_notification_type: "corrigendum_alert",
@@ -153,6 +174,11 @@ async function main() {
       });
       if (logError) console.error("record_notification_sent failed for corrigendum_alert", logError);
     }
+  }
+
+  if (dryRun) {
+    printDryRunTable("Corrigenda / Addenda Alerts", dryRunRows);
+    return;
   }
 
   console.log(`Corrigendum alerts: ${sent} sent, ${skippedAlreadySent} already sent before, ${skippedNoRecipients} skipped (no opted-in recipients).`);

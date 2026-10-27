@@ -61,8 +61,11 @@ import { clarificationWindowReminderEmail } from "../lib/emailTemplatesTier1.ts"
 import { sendTransactionalEmail } from "../lib/resendEmail.ts";
 import { printSignDeadline } from "../lib/dispatchTriage.ts";
 import { operationalRecipients as companyRecipients } from "../lib/notificationRecipients.ts";
+import { parseSenderCliArgs, printDryRunTable, type DryRunRow } from "../lib/senderCliArgs.ts";
 
 type SupabaseService = SupabaseClient;
+
+type RunOpts = { dryRun: boolean; scopeCompanyId: string | null; testRecipient: string | null };
 
 /** Audit-log write for /admin/notifications (the unified Tier 0-3 dispatch log) - record_notification_sent() (migration 0093) is a plain, no-constraint audit insert, deliberately decoupled from this script's own record_operational_alert_sent()/notification_claims dedupe, so this can be added without touching that dedupe flow at all. */
 async function logSend(
@@ -89,25 +92,39 @@ async function logSend(
   if (error) console.error(`record_notification_sent failed for ${notificationType}`, error);
 }
 
-async function claim(supabase: SupabaseService, alertType: string, tenderId: string | null, companyId: string, thresholdKey: string): Promise<boolean> {
+async function companyName(supabase: SupabaseService, companyId: string): Promise<string> {
+  const { data } = await supabase.from("companies").select("legal_name").eq("id", companyId).maybeSingle();
+  return data?.legal_name || "your company";
+}
+
+async function claim(supabase: SupabaseService, alertType: string, tenderId: string | null, companyId: string, thresholdKey: string, opts: RunOpts): Promise<boolean> {
+  // --dry-run never claims - the whole point is leaving every real future
+  // send untouched; the caller treats a dry run as "always claimed" so
+  // every candidate shows up for review. A --test-recipient send still
+  // claims for real, but under a test-prefixed threshold key so it can
+  // never collide with (and burn) the real one-time claim.
+  if (opts.dryRun) return true;
+  const key = opts.testRecipient ? `test-${thresholdKey}` : thresholdKey;
   const { data: claimed, error } = await supabase.rpc("record_operational_alert_sent", {
     p_alert_type: alertType,
     p_tender_id: tenderId,
     p_company_id: companyId,
-    p_threshold_key: thresholdKey,
+    p_threshold_key: key,
   });
   if (error) {
-    console.error(`record_operational_alert_sent failed (${alertType}, tender ${tenderId}, company ${companyId}, ${thresholdKey})`, error);
+    console.error(`record_operational_alert_sent failed (${alertType}, tender ${tenderId}, company ${companyId}, ${key})`, error);
     return false;
   }
   return !!claimed;
 }
 
-async function runPrintCutoff(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
-  const { data: packRows, error } = await supabase
+async function runPrintCutoff(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
+  let query = supabase
     .from("tender_packs")
     .select("id, tender_id, company_id, pipeline_stage, submission_type, estimated_print_hours, estimated_transit_hours, dispatch_status, tenders(id, contract_no, description, closing_date)")
     .eq("submission_type", "physical_box");
+  if (opts.scopeCompanyId) query = query.eq("company_id", opts.scopeCompanyId);
+  const { data: packRows, error } = await query;
   if (error) {
     console.error("print-cutoff: could not read tender_packs", error);
     return { sent: 0, candidates: 0 };
@@ -123,10 +140,9 @@ async function runPrintCutoff(supabase: SupabaseService, appUrl: string): Promis
   const candidates = printCutoffCandidates(packs, tendersById);
   let sent = 0;
   for (const { pack, tender, hoursLeft } of candidates) {
-    const firstClaim = await claim(supabase, "print_cutoff", tender.id, pack.company_id, "48h");
+    const firstClaim = await claim(supabase, "print_cutoff", tender.id, pack.company_id, "48h", opts);
     if (!firstClaim) continue;
     const recipients = await companyRecipients(supabase, pack.company_id);
-    if (recipients.length === 0) continue;
     const deadline = printSignDeadline({
       closingDate: tender.closing_date,
       submissionType: pack.submission_type,
@@ -137,16 +153,25 @@ async function runPrintCutoff(supabase: SupabaseService, appUrl: string): Promis
     if (!deadline) continue;
     const contractLabel = tender.contract_no || tender.description || "Tender";
     const { subject, html, text } = printCutoffEmail({ contractLabel, printSignDeadline: deadline.toISOString(), hoursLeft, appUrl, tenderId: tender.id });
-    for (const to of recipients) {
+    if (opts.dryRun) {
+      dryRunRows.push({
+        companyName: await companyName(supabase, pack.company_id), companyId: pack.company_id, recipients, targetItems: contractLabel, subject,
+        status: recipients.length === 0 ? "Skipped (no opted-in recipients)" : "Simulated OK",
+      });
+      continue;
+    }
+    if (recipients.length === 0) continue;
+    const sendTo = opts.testRecipient ? [opts.testRecipient] : recipients;
+    for (const to of sendTo) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
       if (result.status === "sent") sent++;
-      await logSend(supabase, "print_sign_cutoff", `print-cutoff-${tender.id}-${pack.company_id}-${to}`, to, pack.company_id, tender.id, subject, result);
+      await logSend(supabase, "print_sign_cutoff", `${opts.testRecipient ? "test-" : ""}print-cutoff-${tender.id}-${pack.company_id}-${to}`, to, pack.company_id, tender.id, subject, result);
     }
   }
   return { sent, candidates: candidates.length };
 }
 
-async function runBriefingReminders(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
+async function runBriefingReminders(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
   const { data: tenderRows, error } = await supabase
     .from("tenders")
     .select("id, contract_no, description, briefing_date, briefing_time, tender_packs!inner(company_id)")
@@ -155,13 +180,17 @@ async function runBriefingReminders(supabase: SupabaseService, appUrl: string): 
     console.error("briefing: could not read tenders", error);
     return { sent: 0, candidates: 0 };
   }
-  const candidates = briefingReminderCandidates((tenderRows ?? []) as unknown as BriefingReminderTenderRow[], daysUntil);
+  let candidates = briefingReminderCandidates((tenderRows ?? []) as unknown as BriefingReminderTenderRow[], daysUntil);
+  // --company-id post-filters here (no direct FK-friendly way to push this
+  // into the query above without an extra join) - still safe: nothing is
+  // claimed or sent for a filtered-out candidate, it's just discarded from
+  // this in-memory list before any action is taken on it.
+  if (opts.scopeCompanyId) candidates = candidates.filter((c) => c.companyId === opts.scopeCompanyId);
   let sent = 0;
   for (const { tender, companyId, daysLeft, threshold } of candidates) {
-    const firstClaim = await claim(supabase, "briefing", tender.id, companyId, String(threshold));
+    const firstClaim = await claim(supabase, "briefing", tender.id, companyId, String(threshold), opts);
     if (!firstClaim) continue;
     const recipients = await companyRecipients(supabase, companyId);
-    if (recipients.length === 0) continue;
     const contractLabel = tender.contract_no || tender.description || "Tender";
     const { subject, html, text } = briefingReminderEmail({
       contractLabel,
@@ -171,21 +200,32 @@ async function runBriefingReminders(supabase: SupabaseService, appUrl: string): 
       appUrl,
       tenderId: tender.id,
     });
-    for (const to of recipients) {
+    if (opts.dryRun) {
+      dryRunRows.push({
+        companyName: await companyName(supabase, companyId), companyId, recipients, targetItems: contractLabel, subject,
+        status: recipients.length === 0 ? "Skipped (no opted-in recipients)" : "Simulated OK",
+      });
+      continue;
+    }
+    if (recipients.length === 0) continue;
+    const sendTo = opts.testRecipient ? [opts.testRecipient] : recipients;
+    for (const to of sendTo) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
       if (result.status === "sent") sent++;
-      await logSend(supabase, "briefing_reminder", `briefing-${tender.id}-${companyId}-${threshold}-${to}`, to, companyId, tender.id, subject, result);
+      await logSend(supabase, "briefing_reminder", `${opts.testRecipient ? "test-" : ""}briefing-${tender.id}-${companyId}-${threshold}-${to}`, to, companyId, tender.id, subject, result);
     }
   }
   return { sent, candidates: candidates.length };
 }
 
-async function runClarificationWindow(supabase: SupabaseService, appUrl: string): Promise<{ sent: number; candidates: number }> {
-  const { data: taskRows, error } = await supabase
+async function runClarificationWindow(supabase: SupabaseService, appUrl: string, opts: RunOpts, dryRunRows: DryRunRow[]): Promise<{ sent: number; candidates: number }> {
+  let query = supabase
     .from("tender_tasks")
     .select("id, company_id, tender_id, description, due_date, status, kind, tenders(id, contract_no, description, buyer)")
     .eq("kind", "clarification")
     .not("due_date", "is", null);
+  if (opts.scopeCompanyId) query = query.eq("company_id", opts.scopeCompanyId);
+  const { data: taskRows, error } = await query;
   if (error) {
     console.error("clarification-window: could not read tender_tasks", error);
     return { sent: 0, candidates: 0 };
@@ -211,10 +251,9 @@ async function runClarificationWindow(supabase: SupabaseService, appUrl: string)
   for (const { task, daysLeft, threshold } of candidates) {
     const tender = (task as unknown as { tenders: { id: string; contract_no: string | null; description: string | null; buyer: string | null } | null }).tenders;
     if (!tender) continue;
-    const firstClaim = await claim(supabase, "clarification_window", tender.id, task.company_id, String(threshold));
+    const firstClaim = await claim(supabase, "clarification_window", tender.id, task.company_id, String(threshold), opts);
     if (!firstClaim) continue;
     const recipients = await companyRecipients(supabase, task.company_id);
-    if (recipients.length === 0) continue;
     const { subject, html, text } = clarificationWindowReminderEmail({
       reference: tender.contract_no || tender.id,
       tenderTitle: tender.description,
@@ -225,16 +264,28 @@ async function runClarificationWindow(supabase: SupabaseService, appUrl: string)
       appUrl,
       tenderId: tender.id,
     });
-    for (const to of recipients) {
+    if (opts.dryRun) {
+      dryRunRows.push({
+        companyName: await companyName(supabase, task.company_id), companyId: task.company_id, recipients,
+        targetItems: tender.contract_no || tender.id, subject,
+        status: recipients.length === 0 ? "Skipped (no opted-in recipients)" : "Simulated OK",
+      });
+      continue;
+    }
+    if (recipients.length === 0) continue;
+    const sendTo = opts.testRecipient ? [opts.testRecipient] : recipients;
+    for (const to of sendTo) {
       const result = await sendTransactionalEmail({ to, subject, html, text, category: "bids" });
       if (result.status === "sent") sent++;
-      await logSend(supabase, "clarification_window", `clarification-${tender.id}-${task.company_id}-${threshold}-${to}`, to, task.company_id, tender.id, subject, result);
+      await logSend(supabase, "clarification_window", `${opts.testRecipient ? "test-" : ""}clarification-${tender.id}-${task.company_id}-${threshold}-${to}`, to, task.company_id, tender.id, subject, result);
     }
   }
   return { sent, candidates: candidates.length };
 }
 
 async function main() {
+  const { dryRun, companyId: scopeCompanyId, testRecipient } = parseSenderCliArgs(process.argv.slice(2));
+  const opts: RunOpts = { dryRun, scopeCompanyId, testRecipient };
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !serviceKey) {
@@ -243,7 +294,7 @@ async function main() {
   }
   const appUrl = process.env.APP_URL || "https://tender-ready.vercel.app";
 
-  if (!process.env.RESEND_API_KEY) {
+  if (!dryRun && !process.env.RESEND_API_KEY) {
     console.log("RESEND_API_KEY not set - not sending or claiming any operational alert this run (will retry once a key is added).");
     return;
   }
@@ -251,15 +302,23 @@ async function main() {
   const supabase = createClient(url, serviceKey);
 
   // Each stage runs and reports independently - one stage's own error
-  // (logged inside it) never stops the other two from running.
-  const printCutoff = await runPrintCutoff(supabase, appUrl);
-  console.log(`Print & transit cutoff: ${printCutoff.sent} sent, out of ${printCutoff.candidates} candidate(s).`);
+  // (logged inside it) never stops the other two from running. Each also
+  // gets its own dry-run table - they're genuinely different email types,
+  // not one combined list.
+  const printCutoffRows: DryRunRow[] = [];
+  const printCutoff = await runPrintCutoff(supabase, appUrl, opts, printCutoffRows);
+  if (dryRun) printDryRunTable("Print & Transit Cutoff", printCutoffRows);
+  else console.log(`Print & transit cutoff: ${printCutoff.sent} sent, out of ${printCutoff.candidates} candidate(s).`);
 
-  const briefing = await runBriefingReminders(supabase, appUrl);
-  console.log(`Briefing countdown: ${briefing.sent} sent, out of ${briefing.candidates} candidate(s).`);
+  const briefingRows: DryRunRow[] = [];
+  const briefing = await runBriefingReminders(supabase, appUrl, opts, briefingRows);
+  if (dryRun) printDryRunTable("Briefing Countdown", briefingRows);
+  else console.log(`Briefing countdown: ${briefing.sent} sent, out of ${briefing.candidates} candidate(s).`);
 
-  const clarification = await runClarificationWindow(supabase, appUrl);
-  console.log(`Clarification window: ${clarification.sent} sent, out of ${clarification.candidates} candidate(s).`);
+  const clarificationRows: DryRunRow[] = [];
+  const clarification = await runClarificationWindow(supabase, appUrl, opts, clarificationRows);
+  if (dryRun) printDryRunTable("Clarification Window Expiry", clarificationRows);
+  else console.log(`Clarification window: ${clarification.sent} sent, out of ${clarification.candidates} candidate(s).`);
 }
 
 main().catch((e) => {

@@ -28,7 +28,7 @@
 // architecture note warns against.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "./dates.ts";
-import { COMPANY_EXPIRY_FIELDS } from "./notifications.ts";
+import { COMPANY_EXPIRY_FIELDS } from "./companyExpiryFields.ts";
 import type { ComplianceItem } from "./emailTemplatesTier2.ts";
 import { SARS_PIN_RISK_NOTE } from "./emailTemplatesTier2.ts";
 
