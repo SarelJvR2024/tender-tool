@@ -5,11 +5,11 @@ export type AdminNavKey = "alerts" | "customers" | "notifications" | "settings" 
 const ADMIN_NAV_ITEMS: { key: AdminNavKey; href: string; label: string }[] = [
   { key: "alerts", href: "/admin", label: "Alerts & harness results" },
   { key: "customers", href: "/admin/customers", label: "Customers" },
-  { key: "notifications", href: "/admin/notifications", label: "Notification logs" },
+  { key: "notifications", href: "/admin/notifications", label: "Notifications" },
   { key: "settings", href: "/admin/settings", label: "Settings" },
   { key: "taxonomy", href: "/admin/taxonomy", label: "Discipline list" },
   { key: "discovered-opportunities", href: "/admin/discovered-opportunities", label: "Discovered opportunities" },
-  { key: "requirement-extractions", href: "/admin/requirement-extractions", label: "Requirement extractions" },
+  { key: "requirement-extractions", href: "/admin/requirement-extractions", label: "Quality Scout" },
 ];
 
 /**
