@@ -1,5 +1,61 @@
 # System Status
 
+**2026-10-27 ~22:05 UTC — Phase 7: data cleanup - removed the demo-tender pursuit from the two REAL
+companies flagged in the Phase 4/SANRAL-404 entries below ("Tender Ready" and "Reviewer Civils &
+Consulting Pty Ltd"). A direct live-database action (via the service-role REST API), not a code
+change - no migration, no new commit on its own; recorded here per this repo's own "never leave a
+real finding/action only in chat" rule.**
+
+**Audited read-only before touching anything** (same discipline as every prior phase): confirmed via
+PostgREST, not assumed -
+- The two companies' real ids (`companies.is_test_company = false` for both, i.e. genuinely real
+  customers, not a seeded test account): Tender Ready `d4136fe0-8c0b-43dd-b11c-ca1b8e41036c`, Reviewer
+  Civils & Consulting Pty Ltd `f9d57287-a80e-4c56-995c-02330c1608b2`.
+- The demo/fixture tender itself (`009bfe1c-42b6-4915-8c85-94f519148fb4`, slug
+  `demo-n7-section-3-2026-1f`, the one diagnosed in the SANRAL-404 entry further below) - confirmed
+  these were the ONLY demo-slug tender either company had a `tender_packs` row against (checked all 3
+  seeded demo tenders, not just this one).
+- Every table with a real row for (either company, this tender): `tender_packs` (2 rows, one per
+  company) and `tender_tasks` (2 rows, the default "Tender closes" milestone each pack gets on
+  creation) - checked every other company-and-tender-scoped table in the schema
+  (`tender_answers`, `financial_captures`, `generated_documents`, `tender_engine_jobs`,
+  `tender_private_documents`, `tender_comments`, `tender_subcontracting_plans`,
+  `pack_review_confirmations`, `savings_counted_steps`, `narrative_documents`,
+  `tender_update_notifications`) and confirmed 0 rows in every one - neither company's "pursuit" of
+  this demo tender ever produced a real document, answer, financial capture or upload to lose.
+- Read every migration's own FK definition for `tender_packs(id)` (not guessed): `tender_pack_assignments`,
+  `field_provenance`, `cv_uploads.tender_pack_id`, `pack_generation_jobs.tender_pack_id` are ALL
+  `on delete cascade` - so deleting the 2 `tender_packs` rows directly was enough to clean every real
+  child row with no separate deletes, and no orphans. (`tender_engine_jobs.tender_pack_id` is `on
+  delete set null`, not cascade - checked separately and confirmed 0 rows anyway, so moot here.)
+- Confirmed the standalone `/demo` route (`app/demo/page.tsx`) reads from `lib/demoData.ts`'s own
+  hand-built fixture object, not a live Supabase query at all - it was never at risk from this cleanup
+  regardless. The SEEDED demo *account* ("Mzansi Roads & Civils (Pty) Ltd",
+  `26294b10-1a6e-43cc-968a-2cbe77ac5d4f`, `lib/demoCompany.ts`'s own `DEMO_COMPANY_ID`) is a third,
+  separate company from the two cleaned up here - its own legitimate pursuit of this same demo tender
+  is exactly what the fixture is FOR, and was explicitly left untouched (confirmed by re-querying after
+  the delete).
+
+**Deleted**: both `tender_packs` rows and both `tender_tasks` rows, by exact id, via the service-role
+REST API (not a migration - this is a one-time data fix on specific live rows, not a schema change).
+`tender_pack_assignments` (6 rows, 3 per pack) cascade-deleted automatically as predicted.
+
+**Verified clean after, not just before** (re-queried live): both companies now have 0 rows against
+this tender in every table checked; the shared `tenders` row itself, Mzansi's own pursuit of it, and
+Tender Ready's/Reviewer Civils' OTHER real tenders (Reviewer Civils has 1 genuine pack left, untouched)
+are all exactly as they were. Tender Ready now has 0 tender_packs at all - this demo tender was the
+only one its pipeline had, so its workspace is now genuinely empty and ready for real onboarding, not
+"empty except for a leftover fixture."
+
+**Not touched, out of scope on purpose**: `sent_deadline_reminders`/`sent_operational_alerts`/
+`notification_logs`/`notification_claims` (idempotency/audit-trail rows, invisible to either company's
+own workspace - deleting them serves no visible purpose and `sent_deadline_reminders` is tender-only
+scoped, so clearing it would also reset Mzansi's own reminder dedup state, out of scope for this
+cleanup) and `requirement_extraction_reviews` (Sarel's own admin review decisions, tender-only scoped,
+no company_id column at all - not a per-company row to begin with).
+
+---
+
 **2026-10-27 ~21:55 UTC — Phase 6: "Pack Incomplete / Returnables Checklist" digest (A6), closing out
 the notification brief.** Not part of the Admin Command Center's own 7 tabs (those finished at Phase
 5) - a separate, explicitly-scoped item from Sarel's own instructions, with its own detailed spec
