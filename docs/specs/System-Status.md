@@ -14,6 +14,77 @@
 
 ---
 
+**2026-10-27 ~22:17 UTC — standing review pass: a real reliability gap found and traced to the SDK
+source in the brand-new "View Tenant Workspace" impersonation feature (Admin Command Center Phase 4) -
+not fixed, flagged for Sarel's own call given the complexity and no live Supabase credentials in this
+sandbox to verify an end-to-end fix against.** Orientation: `git fetch origin main` showed 10 new
+commits since this routine's own last pass (`18ac558`) - fast-forwarded cleanly, no stale-checkout
+risk. The bulk of it is the huge Admin Command Center Phase 4-7 build-out (impersonation, billing,
+telemetry, tender catalog, returnables digest) plus a new standing rule (above, this file's own top)
+after a real live-database-cleanup incident Sarel caught and corrected directly - not this routine's
+own incident, nothing for this pass to add to it beyond reading and respecting the new rule going
+forward. Three open PRs (`#164`, `#165`, `#166` - the last of these is in fact what just landed as
+Phase 4-7, already merged by the time this pass checked) re-confirmed via the GitHub API, not assumed;
+stayed clear of the self-merge incident PRs per the standing guardrail.
+
+**The finding, traced to the actual installed `@supabase/auth-js` source rather than guessed at**:
+`lib/impersonation.ts`'s own header documents a 4-hour ceiling
+(`IMPERSONATION_MAX_AGE_SECONDS`) as the intended maximum length of an impersonation session, enforced
+via the cookie's own `maxAge`. In practice the underlying Supabase session dies far sooner than that,
+silently, with no clean fallback:
+
+- `lib/supabase/server.ts`'s `createClient()` rebuilds a fresh impersonated client on every single
+  request by calling `setSession({ access_token, refresh_token })` with the SAME two tokens read back
+  from the cookie - the cookie itself is written exactly once, at mint time
+  (`impersonation-actions.ts`'s `startImpersonation()`), and never updated again anywhere in the
+  codebase (confirmed via `grep` across `middleware.ts` too - zero mentions of the impersonation cookie
+  there).
+- Read `node_modules/@supabase/auth-js/dist/module/GoTrueClient.js`'s own `_setSession()` directly
+  (lines ~3033-3081): when the access token has expired, it calls `_callRefreshToken()` internally and
+  returns a **refreshed session with a new access/refresh token pair** - this part works, and is
+  presumably why 1-hour-ish Supabase access-token lifetimes don't break the very first refresh.
+  Supabase's own refresh tokens rotate by default on use (the standard, documented Supabase Auth
+  behaviour) - the old refresh token becomes invalid the moment the new one is issued. Since nothing in
+  this codebase captures that refreshed pair and re-persists it into the cookie, the **next** request
+  after the first refresh presents the now-already-rotated, now-invalid refresh token, which
+  `_callRefreshToken()` will reject.
+- Net effect: an admin's impersonated session can silently stop working well inside the documented
+  4-hour window (as early as shortly after the first natural access-token expiry, commonly ~1 hour by
+  Supabase default), with no clear "your impersonation session has ended, please restart" message - the
+  client simply falls back to an unauthenticated/anonymous Supabase client for that request, which
+  could surface as a confusing broken page or an unexplained empty state rather than the deliberate,
+  honest failure messages this feature's other paths (`mintTargetSession()`, `startImpersonation()`)
+  were clearly built to give.
+
+**Not fixed this pass, and not a quick patch**: the correct fix needs the refreshed token pair captured
+from `setSession()`'s own return value and re-persisted via `setImpersonationCookie()` - straightforward
+from a Server Action or Route Handler, but `createClient()` is also called from plain Server Components
+(this file's own existing comment already notes cookie writes are rejected there, which is exactly why
+`middleware.ts` exists to refresh the ADMIN's own `sb-*` session cookies today) - the impersonation
+cookie would need the same middleware-level treatment to stay correctly refreshed across every request
+shape this app makes, not just Server Actions. That is real surface area in a security-sensitive,
+brand-new path, and this sandbox has no live Supabase credentials to verify an end-to-end fix actually
+works (refresh-token rotation behaviour can also be a per-project Supabase Auth setting, not purely a
+code question) - documented in full here rather than guessed at or rushed. **Worth Sarel's own look**,
+not urgent in the sense that no privilege escalation results (a dead session just goes anonymous, it
+never silently grants the admin's own elevated rights or another user's session), but real enough that
+a genuine diagnostic session longer than ~1 hour will likely break without warning.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing warnings).
+No application code touched this pass (investigation + SDK source reading only).
+
+**Backlog, re-confirmed not assumed, unchanged from the last several passes**: migration `0096`
+(pack-quota trial-expiry) still outstanding; the `narrative_documents` PostgREST schema-cache reload
+status not re-checked this pass; a PayFast idempotency design question (not urgent, sandbox-only); the
+"missing ISO 9001 flagged as urgent" document-expiry UX question; the `fingerprint.py` `named_ranges`
+fix from an earlier pass (expect a baseline mismatch on the next real SANRAL fingerprint check - that's
+expected, not a regression); the Dashboard "Decision needed" bucket over-triggering finding (needs a
+real refactor, not fixed yet); and Form B7's compulsory-vs-matrix disagreement confirmed on a real
+template sample (a live compliance question, flagged not fixed) - plus, new as of this pass, the
+impersonation token-refresh gap above.
+
+---
+
 **2026-10-27 ~22:05 UTC — Phase 7: data cleanup - removed the demo-tender pursuit from the two REAL
 companies flagged in the Phase 4/SANRAL-404 entries below ("Tender Ready" and "Reviewer Civils &
 Consulting Pty Ltd"). A direct live-database action (via the service-role REST API), not a code
