@@ -1,5 +1,49 @@
 # System Status
 
+**2026-10-27 ~16:16 UTC — standing review pass: audited the SANRAL engine's field-provenance /
+ACTIONS_TO_SIGN.md trust mechanism end to end, held up correctly; no new bug found; QA tooling
+unaffected.** Orientation: `git fetch origin main` showed one new commit since this routine's own
+last pass (`6c4f461`) — `a4da119`, the Edge-case QA routine's own `Finding 86` (Lephalale's
+"recent enough" cutoff using a naive UTC `today()`), unrelated area, no overlap. Three open PRs
+(`#164` savings-counter rework, `#165` four pre-demo defect fixes, `#166` a large, actively-growing
+notification-migration + Admin Command Center PR now on its own designated branch) — all correctly
+still draft/unmerged, read in full via the GitHub API rather than assumed from their titles, none
+overlapping what this pass touched. Stayed clear of the self-merge incident PRs entirely, per the
+standing guardrail.
+
+**Reviewed in depth, confirmed sound, no fix needed**: `engine/provenance.py` +
+`engine/generate_action_checklist.py` — "the single rule tying the whole SANRAL engine together"
+(this file's own earlier description) deserved a real audit rather than being taken on faith. The
+specific risk checked: `merge_and_save()` concatenates every filler script's own provenance log
+with no dedup by `field_key`, and `generate_action_checklist.py` lists every `assumed_default`/
+`missing` entry verbatim with no suppression — so if the SAME `field_key` were ever written twice
+with two different statuses in one real run (e.g. once as `missing`, once later as `confirmed`),
+the checklist would show a stale, contradictory "please verify/provide this" line for something
+already confirmed. Checked for real, not assumed: grepped every `.confirmed/.computed/
+.assumed_default/.missing(...)` call across `fill_a_forms.py`/`fill_docx_forms.py`/
+`fill_financial_hours.py` for a repeated `field_key`, found several (e.g. `a_forms.A20.coid_letter`,
+`c123.director_name`), then read each one's actual code — every single one sits in mutually
+exclusive `if`/`elif`/`else` branches within ONE script (e.g. COID current → `confirmed` + a
+separate `missing` for the attachment reminder; COID expired → `missing`; no COID on file →
+`missing`), so exactly one status is ever written per `field_key` per real run. No cross-script
+duplication found either. The mechanism holds.
+
+**Pushed directly to `main`, no PR, no self-merge**: this entry only (`docs/specs/System-Status.md`)
+— commit to follow.
+
+**QA tooling**: sound — `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings — `Logo.tsx`'s `<img>` tags, `analytics/page.tsx`'s unused `STAGE_META`). No application
+code touched this pass.
+
+**Backlog re-confirmed, unchanged**: migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question, the `fingerprint.py` named_ranges
+fix (expect a baseline mismatch next real SANRAL fingerprint check — not a regression), and the
+Dashboard "Decision needed" bucket over-triggering finding (needs a real refactor) — all still
+waiting on Sarel.
+
+---
+
 **2026-10-27 ~14:22 UTC — standing review pass: clean sweep of the narrative-generation
 anti-collusion uniqueness check, no new bug found; QA tooling unaffected.** Orientation: `git fetch
 origin main` showed one new commit since this routine's own last pass (`b3bd916`) — `167f6ed`,
