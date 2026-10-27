@@ -22,6 +22,15 @@
 -- own call, not made unilaterally here. So a private-document match returns
 -- only its filename as a "document on file, not previewable yet" note, never
 -- a broken or over-privileged link.
+--
+-- drop first, not just create or replace: Postgres refuses to CREATE OR
+-- REPLACE a function when its OUT-parameter row type changes (adding
+-- source_document_url/source_document_note below) - confirmed live when
+-- Sarel first ran this migration ("42P13: cannot change return type of
+-- existing function... Row type defined by OUT parameters is different").
+-- Safe to drop unconditionally: the only caller is app/app/admin/
+-- requirement-extractions/page.tsx, redefined in this same migration/PR.
+drop function if exists platform_admin_low_confidence_requirement_items(smallint, int);
 create or replace function platform_admin_low_confidence_requirement_items(
   p_threshold smallint default 60, p_limit int default 200
 )
