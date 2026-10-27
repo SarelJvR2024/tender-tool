@@ -234,6 +234,26 @@ def main():
     finally:
         os.remove(pdf_path)
 
+    # 7. a classifiable file (xlsm) is marked 'downloaded' in the documents
+    # table, but the bytes are no longer actually fetchable from Storage
+    # (object deleted/moved after download_discovered_documents.py ran, or a
+    # transient Storage error this run) - distinct from "never downloaded"
+    # and from "it's a PDF, nothing to look inside": this document WAS a real
+    # workbook, it just couldn't be re-fetched right now.
+    release_key = "fetch-fails-release"
+    fake.tables.setdefault(oreq.DOCS_TABLE, []).append({
+        "release_key": release_key, "document_title": "Technical Submission.xlsm",
+        "document_url": "https://example/missing.xlsm", "status": "downloaded",
+        "storage_path": f"test/{release_key}/missing.xlsm",
+        "source": "etenders_portal", "buyer": "Test Buyer",
+    })  # deliberately never put() into fake.storage - GET returns 404
+    r7 = oreq.classify_release(client, release_key)
+    check("case 7: a fetch-failed classifiable doc still returns a row, not None", r7 is not None)
+    check("case 7: signal does not falsely claim the file is a PDF/non-classifiable format",
+          r7 and "PDF" not in r7["signal"], r7 and r7.get("signal"))
+    check("case 7: the real fetch error is surfaced in unreadable_documents, not silently dropped",
+          r7 and len(r7["unreadable_documents"]) == 1, r7 and r7.get("unreadable_documents"))
+
     # classify_all() writes rows via upsert and is idempotent on release_key
     summary = oreq.classify_all(client)
     check("classify_all: covers every release with downloaded documents", summary["classified"] >= 2, summary)

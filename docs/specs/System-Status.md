@@ -1,5 +1,53 @@
 # System Status
 
+**2026-10-27 ~06:17 UTC — standing review pass: a real diagnostic-loss bug fixed in the discovered-
+opportunity document classifier, reproduced with a dedicated regression test.** Orientation: `git
+fetch origin main` showed no new commits since this routine's own last pass (`eeb216d`) - local
+checkout confirmed on the real tip before starting. Two open PRs (`#164` savings-counter rework,
+`#165` four pre-demo defect fixes) read in full, both correctly left as unmerged drafts, neither
+overlapping this pass. Stayed clear of the self-merge incident PRs, per the standing guardrail.
+
+**The finding**: `engine/discovery/opportunity_requirements.py`'s `classify_release()` downloads
+each release's documents fresh from Supabase Storage every time it runs (a separate read step from
+the original `download_discovered_documents.py` download), to classify them. When a document the
+`discovered_opportunity_documents` table says is `status='downloaded'` turns out to no longer be
+fetchable from Storage right now (the object moved/was deleted after the original download, or a
+transient Storage error on this particular run) - a real, reachable scenario since this script can
+run long after the original download - the fetch failure was recorded in `fetch_errors` but then
+**silently discarded**: the early-return branch for "nothing ended up classifiable" always claimed
+`"none of them a workbook or .docx form classify_documents() can look inside (PDFs, mostly)"`,
+even when the actual document genuinely WAS a workbook/.docx that just couldn't be re-fetched - and
+`unreadable_documents` (the field `app/lib/compileReadiness.ts` already docks the compile-readiness
+score for, `-25: N document(s) could not be opened at all`) was hard-coded to `[]` in this branch,
+so the real problem never reached that penalty or the admin review UI at all. Reproduced directly
+(not assumed): added a 404-on-fetch case to `test_opportunity_requirements.py` seeding a
+`status='downloaded'` `.xlsm` row whose storage object was deliberately never written, confirmed the
+exact predicted wrong signal text and empty `unreadable_documents` before the fix, both corrected
+after it. **Fix**: when `fetch_errors` is non-empty, the signal now says so honestly ("N of M
+downloaded document(s) looked like a workbook or .docx form, but couldn't be re-fetched from storage
+just now") and the real fetch-error strings are included in `unreadable_documents` - the exact same
+list-of-strings shape the success path already used for this field, so no downstream type change.
+
+Verified: `test_opportunity_requirements.py` - all checks pass, including the new case 7 (previously
+2 failures, matching the predicted wrong behaviour exactly). Confirmed via grep that
+`compileReadiness.ts`'s own `unreadable_documents?: string[] | null` type and `-25` scoring logic,
+and `intake-card.tsx`'s rendering, are untouched by this change in shape - this fix makes an
+existing, already-wired penalty/display path actually fire for this case, not a new feature.
+`test_download_discovered_documents.py` (adjacent module) re-run clean. `tsc --noEmit`/`eslint`
+clean (no TypeScript touched) - same 3 pre-existing warnings as every prior pass.
+
+**Pushed directly to `main`, no PR, no self-merge**: `engine/discovery/opportunity_requirements.py`,
+`engine/discovery/test_opportunity_requirements.py`.
+
+**Backlog confirmed, not assumed, unchanged**: migration `0096` (pack-quota trial-expiry) still
+outstanding; the `narrative_documents` PostgREST schema-cache reload not re-checked this pass; the
+PayFast idempotency design question still open, still not urgent; the "missing ISO 9001 flagged as
+urgent" UX question from two passes ago still open; the `fingerprint.py` `named_ranges` fix from
+three passes ago will still show a baseline mismatch on the next real SANRAL fingerprint check -
+expected, not a regression.
+
+---
+
 **2026-10-27 ~04:15 UTC — standing review pass: a real SANRAL intake gap fixed and reproduced
 against a genuine uploaded tender form, not a synthetic one.** Orientation: `git fetch origin main`
 showed one new commit since this routine's own last pass (`2580263`, Finding 83 - the onboarding
