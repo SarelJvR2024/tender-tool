@@ -1,5 +1,50 @@
 # System Status
 
+**2026-10-27 ~08:28 UTC — standing review pass: clean sweep of `lib/dealEconomics.ts` (Pipeline's
+"Price & credit" form + the pricing-history page), zero new bug, zero test coverage flagged.**
+Orientation: `git fetch origin main` showed one new commit since this routine's own last pass
+(`a46b199`) - `728685a`, the Edge-case QA routine's Finding 84 (CV-upload extraction, unrelated area,
+no overlap). Confirmed the local checkout was 1 commit behind and fast-forwarded before starting,
+per this routine's own standing habit after getting burned twice before. Two open PRs (`#164`
+savings-counter rework, `#165` four pre-demo defect fixes) read via the GitHub API, both correctly
+still draft/unmerged - no self-merge this round, and neither touches `lib/dealEconomics.ts`, so no
+file collision either.
+
+**Reviewed in depth, no fix needed**: traced every function in `dealEconomics.ts` by hand against
+real inputs rather than skimming - `parseRand()`'s SA-vs-US thousands/decimal disambiguation (a
+single comma followed by exactly 1-2 digits reads as decimal, anything else as a thousands
+separator), `parsePercent()`'s rejection of a negative or out-of-range value, and `commissionRand()`'s
+`Math.round(price * pct) / 100` - which looks like a bug at a glance (multiply-then-round-then-divide
+instead of the more obvious divide-then-round) but is mathematically identical to rounding
+`price * pct / 100` to the nearest cent, confirmed by working through a non-integer example
+(R1,234,567.89 at 7.5%) by hand. `derivedSector()`'s hardcoded `"roads_civil"` SANRAL fallback is
+still a real, current taxonomy slug (checked directly against `config/discipline_taxonomy.json`, not
+assumed from memory - this exact slug was the subject of a 2026-10-18 group-tag-matching regression
+elsewhere in this codebase, so worth confirming rather than trusting it's still valid).
+
+**Flagged, not built**: this file has zero test coverage anywhere (`ls`+`grep` both confirm no
+`dealEconomics.test.ts` and no other test file imports from it) despite handling real money -
+commission percentages and rand amounts a company member types in, on a live pricing-history record.
+Same shape as `sanralScoring.ts`'s own zero-coverage finding from an earlier pass in this same
+routine - a good candidate for the Edge-case QA routine's rotation, not built here since the logic
+itself checked out correct and a light pass shouldn't invent new test infrastructure around code
+that isn't currently broken.
+
+**Pushed directly to `main`, no PR, no self-merge**: `docs/specs/System-Status.md` only - commit
+TBD (this entry).
+
+**QA tooling**: sound - no application code touched this pass, so no suite re-run needed beyond
+confirming the repo's own last-known-green baseline (185+/185+ vitest, 0 lint errors, 3
+pre-existing warnings) is unchanged by this doc-only commit.
+
+**Backlog, re-stated not re-verified live this pass**: migration `0096` (pack-quota trial-expiry),
+the `narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question, and the `fingerprint.py` named_ranges
+fix from two passes ago (expect a baseline mismatch next real SANRAL fingerprint check - not a
+regression) - all still waiting on Sarel's own next look.
+
+---
+
 **2026-10-27 ~06:17 UTC — standing review pass: a real diagnostic-loss bug fixed in the discovered-
 opportunity document classifier, reproduced with a dedicated regression test.** Orientation: `git
 fetch origin main` showed no new commits since this routine's own last pass (`eeb216d`) - local
