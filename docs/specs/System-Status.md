@@ -4552,6 +4552,55 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-tenth run): Finding 87 - the narrative-document generation bridge (LLM cover letter / methodology statements, with its own anti-collusion uniqueness check) had zero CI coverage and zero test coverage of its own claim/fulfil mechanism
+
+Orientation: `git fetch origin main` showed two new sibling commits (`18ac558` Discovery "same
+buyer" count made visible, `05d7635` Discovery stopped retrying a seeded demo tender's dead SANRAL
+page) - both Discovery-area, already covered extensively by this routine at runs 101/102/109, no
+overlap with this pass. Checked open PRs via the GitHub API directly (not assumed from a prior
+pass): `#164`/`#165`/`#166`, all still draft/unmerged, all confirmed TypeScript-/`app/`-only with
+zero `engine/` overlap by reading each one's own PR body in full.
+
+Rotated to worker/job-queue - last genuinely touched at run 96 (Finding 77), and `poll_loop.py`/
+`run_bridges.py` themselves already got a thorough review then, so this pass looked at the actual
+bridges they drive instead, picking the one wired in most recently and least reviewed:
+`engine/narrative/process_narrative_jobs.py` (added to `run_bridges.py`'s `BRIDGES` dict in a
+2026-10-25 standing-review pass, after being found missing entirely).
+
+Read the whole bridge end to end, specifically the parts no prior pass had exercised:
+`claim_job()`'s atomic requested->generating claim, `fail_stale_jobs()`'s stuck-job recovery, and
+`process_one()`'s full success path. Found that `test_process_narrative_jobs.py`'s existing
+`StubSupabase` ignores the querystring entirely - any GET/PATCH on a resource returns or mutates
+every row regardless of filter - so none of those three had ever actually been exercised against
+the real atomic-claim contract this whole bridge depends on; a literal zero, not reduced fidelity.
+Built `FakeDB`, a stand-in that actually applies PostgREST-style `eq.`/`neq.`/`in.` filters to GET
+and PATCH, and wrote adversarial cases against it: two sequential claims on the same row (second
+must fail), a stale `generating` job sitting beside a fresh one (only the old one may be failed),
+a full happy-path run with the LLM/docx/upload calls stubbed (every one of
+`generated_text`/`similarity_score`/`quality_review_passes`/`generated_storage_path` must actually
+land in the row), and the documented TransientError-swallowed-vs-SetupError-reraises asymmetry.
+**No bug found in the bridge's own logic** - all four contracts held, confirmed correct (including
+a deliberate before/after check that broke `claim_job()`'s filter on a scratch copy and confirmed
+the new test actually goes red for that regression, not passing by construction).
+
+**A second, independent problem surfaced while adding this coverage, and this one IS a real gap
+(Finding 87, logged in full in QA-Edge-Case-Findings.md):** `.github/workflows/bridge-worker-ci.yml`
+- which names close to 30 test files individually, each gated `if: ${{ !cancelled() }}` specifically
+so one failure can't hide the rest - had no step for any of the 5 `engine/narrative/test_*.py`
+files. A plain grep across every workflow file: zero matches for "narrative" anywhere. The entire
+LLM-backed cover-letter/methodology bridge - including the anti-collusion uniqueness check whose
+whole purpose is stopping two companies' submissions reading identically - has been rebuilt into
+the worker container on every `engine/**` push with CI green regardless of whether its own tests
+pass, fail, or exist. Fixed: two new steps added to `bridge-worker-ci.yml` running all 5 files (no
+new dependencies - `python-docx`/`anthropic` are already in `engine/worker/requirements.txt`, which
+this job already installs; all 5 confirmed to run clean from the repo root first, exactly how the
+new steps invoke them).
+
+Verified: `test_process_narrative_jobs.py` - `0 failure(s)` (19 checks, 11 new). Sibling suites
+unaffected: `test_uniqueness.py` 12/12, `test_generate_narrative.py` 3/3, `test_build_docx.py` and
+`test_build_prompt.py` both clean. No production code touched - this pass closed a test/CI gap, not
+a code bug.
+
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-ninth run): rotated to compliance (engine/compliance/registration_reminders.py) - thorough review, no new bug found this time
 
 Orientation: synced two sibling commits (`15f9e9c` field-provenance/ACTIONS_TO_SIGN.md trust-

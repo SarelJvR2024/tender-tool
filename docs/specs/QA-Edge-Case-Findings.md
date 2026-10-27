@@ -4991,3 +4991,68 @@ adjacent module) re-run clean.
 
 **Regression:** `engine/discovery/lephalale.py`'s `_recent_enough()` only. No schema or other
 call-site changes.
+
+### Finding 87 (CONFIRMED, FIXED, moderate - the narrative-document generation bridge, LLM-backed and carrying its own anti-collusion uniqueness check, had zero CI coverage and zero test coverage of its claim/fulfil mechanism)
+
+**Where:** worker/job-queue rotation this cycle (last touched run 96; `poll_loop.py`/`run_bridges.py`
+themselves have already been thoroughly reviewed - see Finding 77 - so this pass went looking at
+the actual bridges they drive instead). `engine/narrative/process_narrative_jobs.py` - the cover
+letter / methodology statement bridge wired into `run_bridges.py`'s `BRIDGES` dict after being
+found missing entirely in a 2026-10-25 standing-review pass (a customer's "Generate narrative"
+request sat unpolled until then).
+
+**What was tested:** read the whole bridge, then its existing `test_process_narrative_jobs.py` -
+8 tests, all unit-level adapter checks (`load_key_people`, `load_experience`,
+`load_other_companies_text`, `build_context`, and the 2026-10-25 raw-exception-leak fix) against a
+`StubSupabase` that **ignores the querystring entirely** - any GET or PATCH on a resource returns
+or (it doesn't even mutate anything) every row regardless of filter. That means `claim_job()`'s own
+atomic `status=eq.requested` claim, `fail_stale_jobs()`'s stuck-job recovery, and `process_one()`'s
+entire success path (the PATCH that actually writes `status: "ready"` plus every generation field)
+had never been exercised by anything, anywhere in the repo - not a reduced-fidelity stub, a literal
+zero. Constructed adversarial cases against the real mechanism instead: two sequential claims on
+the same row (must the second one really fail, not just "look like" it should); a stale
+`generating` job sitting right next to a fresh one (must only the old one fail); a full happy-path
+run with `generate_with_uniqueness_check`/`build_docx`/`storage_upload` stubbed out (must every one
+of `generated_text`/`similarity_score`/`quality_review_passes`/`generated_storage_path` actually
+land in the row, not just the status flip); and the documented-but-never-tested asymmetry between
+`TransientError` (swallowed, loop continues this cycle) and `SetupError` (reverts the row too, but
+re-raises, deliberately aborting the rest of this poll's batch).
+
+**Finding (CONFIRMED, moderate - a real, exploitable gap, not a bug in the generation logic
+itself).** No bug was found in `process_narrative_jobs.py`'s own logic - the claim/fulfil mechanism,
+stale-job recovery and the TransientError/SetupError split are all correct, confirmed by building a
+`FakeDB` that actually applies PostgREST-style `eq.`/`neq.`/`in.` filters to GET and PATCH (unlike
+the existing `StubSupabase`) and proving each contract directly, including a before/after check that
+deliberately broke `claim_job()`'s filter and confirmed the new atomicity test actually goes red for
+that regression, not just passing by construction. **But a second, independent problem surfaced
+while adding this coverage**: `.github/workflows/bridge-worker-ci.yml` - which runs on every push
+touching `engine/**` and lists close to 30 test files by name, each with its own
+`if: ${{ !cancelled() }}` step specifically so one failure never hides the rest - has **no step for
+any of the 5 test files under `engine/narrative/`** (`test_build_docx.py`, `test_build_prompt.py`,
+`test_generate_narrative.py`, `test_uniqueness.py`, `test_process_narrative_jobs.py`). Confirmed with
+a plain grep across every workflow file: zero matches for "narrative" anywhere. The whole bridge -
+an LLM call, a docx build, a cross-company similarity check whose entire reason for existing is
+preventing two companies' submissions from reading identically - has been pushed to `main` and
+rebuilt into the worker container on every `engine/**` change with CI reporting green regardless of
+whether any of its own tests pass, fail, or exist at all.
+
+**Fix:** no code change to `process_narrative_jobs.py` itself (nothing broken there). Two additions:
+(1) new tests in `test_process_narrative_jobs.py` - `FakeDB`, `test_claim_job_is_atomic_...`,
+`test_fail_stale_jobs_marks_old_generating_jobs_failed_...`,
+`test_process_one_happy_path_writes_ready_with_every_generation_field`,
+`test_process_one_transient_error_requeues_quietly_but_setup_error_requeues_and_raises`; (2) two new
+steps in `bridge-worker-ci.yml` running all 5 narrative test files (no new dependencies needed -
+`python-docx`/`anthropic` are already in `engine/worker/requirements.txt`, which this job already
+installs; confirmed all 5 run clean from the repo root, exactly how the new CI steps invoke them).
+
+**Verified:** full `test_process_narrative_jobs.py` - `0 failure(s)` (19 checks, 11 new). Sanity-check
+on the new atomicity test: temporarily removed `claim_job()`'s `status=eq.requested` filter in a
+scratch run - the new test correctly went red (`a second claim on the SAME row... FAIL`), confirmed
+the test exercises the real contract rather than trivially passing. Sibling suites unaffected -
+`test_uniqueness.py` (12/12), `test_generate_narrative.py` (3/3), `test_build_docx.py`,
+`test_build_prompt.py` all still clean. All 5 files re-run exactly as the new CI steps will invoke
+them (`python3 engine/narrative/test_*.py` from the repo root).
+
+**Regression:** `engine/narrative/test_process_narrative_jobs.py` (additive only - no existing test
+changed) and `.github/workflows/bridge-worker-ci.yml` (two new steps, nothing removed or reordered).
+No production code touched.
