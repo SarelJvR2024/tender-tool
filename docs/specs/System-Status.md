@@ -1,5 +1,80 @@
 # System Status
 
+**2026-10-27 ~12:50 UTC — notification migration: wired 5 of 12 brief items onto the branded
+Resend pipeline, replacing the matching Claude-scheduled + Gmail check-ins; 1 item deferred, 1
+real backlog item flagged, not built.** Full account on `claude/practical-babbage-oxf9u3`
+(PR #166, same branch as an earlier, unrelated savings-calculator fix) - built incrementally with
+real verification at each step (typecheck/lint/full-suite/build after every change), not a single
+end-of-task commit.
+
+**Built and live-send-verified against real data**: discovered-tenders digest
+(`discoveredTendersDigestEmail` + `scripts/send-discovered-tenders.ts`, wired into
+`daily-discovery.yml` as a post-scrape step) - a real send to a real, opted-in company (see opt-in
+note below) delivered correctly, 71 tenders in one digest, confirmed via `notification_logs`.
+Caught and fixed a real bug first: an unpaginated query would have silently capped at 1,000 of a
+real 6,052-row batch (PostgREST's own per-request cap) - confirmed live before and after the fix.
+
+**Built, dry-run-verified (0 live candidates right now) and sample-send-verified**: corrigendum/
+addenda alerts (`corrigendumAlertEmail`, previously orphaned, + `scripts/send-corrigendum-alerts.ts`
++ `corrigendum-alerts.yml`), comprehensive compliance expiry digest (`complianceDigestEmail`,
+previously orphaned, + `lib/complianceDigestCandidates.ts` + `scripts/send-compliance-digest.ts` +
+`compliance-alerts.yml` - SARS PIN/COID/B-BBEE/CIDB/registrations/ECSA/SACPCMP at 30/14/7-day
+thresholds; CSD deliberately excluded, no expiry field exists for it anywhere in this schema),
+clarification-window reminder (`clarificationWindowReminderEmail`, new, wired as a 3rd stage into
+`send-operational-alerts.ts` - honestly scoped to whole-day thresholds, 10d/2d, since
+`tender_tasks.due_date` has no time component), and bid-pack-ready email (`packReadyEmail`, new -
+Python calls Resend directly via `engine/notify/send_pack_ready_email.py`, rendering the one
+canonical TS template through a thin CLI bridge, `scripts/render-pack-ready-email.ts`, rather than
+duplicating the HTML in Python). Caught and fixed a 2nd real bug: `complianceDigestCandidates.ts`
+imported a constant from `lib/notifications.ts`, which has its own extensionless `./dates` import
+that `node --experimental-strip-types` can't resolve - same limitation `lib/deadlineReminders.ts`'s
+own header already documents; fixed by extracting the constant into a new, zero-import file
+(`lib/companyExpiryFields.ts`). Also caught and fixed a real duplicate-send risk before it shipped:
+`send-operational-alerts.ts` already covered SARS PIN/COID at 14 days under a different
+idempotency-key format than the new compliance digest - removed that overlapping stage rather than
+running both.
+
+**Added `--dry-run`/`--company-id`/`--test-recipient` to every new sender** (`lib/senderCliArgs.ts`),
+per Sarel's own explicit requirement that no unverified test run touch real companies. A dry run
+never claims a real one-time `notification_claims` token; `--test-recipient` requires
+`--company-id` too (refuses otherwise) and uses a test-prefixed idempotency key so it never burns
+a real future send.
+
+**Deferred, not built**: pack-incomplete/returnables-checklist digest (item A6) - the real "what's
+missing for this bid" computation (`submission-plan-logic.ts` + `general-pack-review-data.ts`'s
+`returnableReviewStatus`/`checkReturnable` + `tenderTimeline.ts`) is correct-layer but only
+exercised today from within a signed-in Next.js render, with no live-credentialed way in this
+session to verify a standalone reproduction wouldn't silently disagree with what the in-app
+Submission Plan shows. Flagged rather than shipped as a shallow/approximate guess.
+
+**Real finding, not a bug in this work**: every `company_members` row in the live database (33/33)
+has `daily_digest_opt_in = false` - confirmed directly against the table, not just inferred from
+dry-run output. This single column gates recipients for every Tier 1/2 sender, old and new
+(deadline reminders, print-cutoff, briefing, and now corrigendum/compliance-digest/clarification-
+window too) - practical effect: none of them currently reach a real person regardless of how
+correct the code is. Migration 0073's own comment documents this as Sarel's deliberate decision
+("an opt-in, not an opt-out, feature"), so NOT changed here - only one row (Sarel's own company,
+`0db4fa19-...`, "Clevapp (Pty) Ltd") was opted in, for the one real-data verification send above.
+**Backlog item flagged for a dedicated future PR, Sarel's own framing (2026-10-27)**: split
+operational/transactional notifications (deadline reminders, print-cutoff, corrigenda on tracked
+bids - should probably stay opt-in, closer to Sarel's original intent) from discovery digests
+(new-tender matches - arguably should default to opt-in-true so paying clients actually see them),
+with a granular toggle in `/company` settings rather than the one shared boolean. Not built, not
+guessed at further here.
+
+**Claude-scheduled trigger state** (the mechanism this migration replaces): `trig_01RCendu1NoQddCCP8eMmkwW`
+("System alerts check-in") disabled - fully superseded by the pre-existing `scout-alerts.yml`/
+`founder-digest.yml`, confirmed via PR #148's own prior decision to retire it, resurrected only by
+an unrelated environment-migration accident. The SANRAL/national tender watch and tender-update/
+addendum watch Claude triggers are candidates to disable next (their Resend replacements are built
+and verified above) - left enabled pending Sarel's own go-ahead in chat, not disabled unilaterally
+here. The compliance-deadline-reminder Claude trigger should NOT be disabled yet - its Resend
+replacement has a real, documented scope gap (`documents_before_closing`, generic tender `tasks` -
+a different shape of fact than a flat calendar threshold) that A6 above would have closed; stays
+enabled until that gap is closed or Sarel explicitly accepts the gap.
+
+---
+
 **2026-10-26 ~08:18 UTC — standing review pass: removed ~25 lines of genuinely unreachable dead
 code in `engine/pack/process_pack_jobs.py`'s `sync_tender_requirements()` - a leftover duplicate
 from the 0045 "per copy" refactor, never executed, now gone.** Orientation: `git fetch origin main`
