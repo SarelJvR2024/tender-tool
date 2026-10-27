@@ -203,6 +203,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/test_form_field_audit.py
 
+      - name: SBD/MBD form filling - the four real Yes/No layouts, SBD4's assumed-default vs SBD8's never-assumed declarations (synthetic docx fixtures)
+        if: ${{ !cancelled() }}
+        run: python3 engine/general/test_fill_sbd_docx.py
+
   tenant-isolation-db:
     # Part 2 of engine/security/test_tenant_isolation.py: real RLS + the
     # tt_check_same_company trigger, enforced by an actual Postgres with

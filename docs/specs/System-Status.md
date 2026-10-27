@@ -4160,6 +4160,50 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-sixth run): closed a near-total test-coverage gap on fill_sbd_docx.py's actual SBD 1/4/6.1/8/9 form-filling logic - the four real Yes/No layouts, and SBD4's assumed-default vs SBD8's never-assumed declaration distinction
+
+Orientation: synced a sibling commit (`2b403b7`, a standing-review clean sweep of
+`lib/dealEconomics.ts` - app/TypeScript only, no overlap). Two open PRs (`#164`/`#165`), already
+read by the sibling pass, confirmed not touching anything here.
+
+Rotated to non-SANRAL pack - more overdue than SANRAL pack by this routine's own numbered rotation
+(last dedicated pass the ninety-eighth run vs the hundredth). Read `fill_sbd_docx.py`
+(`answer_yes_no()`, `fill_cells()`, `fill_phone_cells()`, `fill_line_above_caption()`,
+`bee_proof_lapse()`, and the full `fill_sbd_document()` orchestration) end to end for a reachable
+adversarial bug - specifically traced every real call site of `answer_yes_no()` to check whether
+an unanswered (`None`) declaration could ever reach it un-guarded (the exact shape of several
+earlier findings this session). It couldn't: every call site already intercepts `None` before
+calling it, with SBD4 correctly defaulting to "No" marked `assumed_default` and SBD8 correctly
+never assuming at all (`"Tender Tool never assumes this one"`, per its own comment) - both
+verified by tracing, not just reading the comment.
+
+No new bug found, but a real, more valuable gap turned up: beyond `bee_proof_lapse()` and
+`_today_iso()` (already covered by `test_form_field_audit.py`), **no test file existed anywhere
+for `fill_sbd_document()` itself** - the actual field-filling logic run on every non-SANRAL
+submission's SBD 1/4/6.1/8/9 forms, confirmed by grep.
+
+**Built**: `engine/general/test_fill_sbd_docx.py` (11 test functions, synthetic docx fixtures via
+python-docx). Covers all four real Yes/No layouts `answer_yes_no()`'s own comments name (separate
+Yes/No cells, a "YES / NO" slash cell, one cell with both words inline, and a bare paragraph with
+no table at all - including that the paragraph layout only marks the FIRST matching question, not
+a repeated prose bullet); a no-match case returning 0 rather than raising; the SBD4-vs-SBD8
+distinction end to end through the real `fill_sbd_document()` (an unanswered SBD4 declaration
+ticks "No" on the actual document AND logs `assumed_default` with a reason, never silently
+`confirmed`; an unanswered SBD8 declaration is left entirely untouched on the document and logs
+`missing` - the document and the provenance audit trail never disagree with each other, in either
+direction); and `fill_cells()`'s `prefill_ok` exception (DSTI's own "MAAA" CSD prefix is correctly
+overwritten, any OTHER pre-existing cell text is correctly left untouched, never overwritten).
+All 11 functions (21 checks) pass against the real code, first run, with no fix needed - every
+documented compliance-sensitive contract genuinely held up under direct, adversarial testing.
+
+**Fix (process, not a bug)**: wired the new test into `.github/workflows/bridge-worker-ci.yml`,
+right after the existing form-field audit step, same `if: ${{ !cancelled() }}` convention.
+Re-verified `test_form_field_audit.py` (the adjacent, pre-existing suite) still clean.
+
+No bug found or fix needed in `fill_sbd_docx.py`'s own logic this pass - closing a real,
+previously near-total coverage gap on a compliance-critical form filler is the deliverable, same
+standing as the notify routine's own `send_digest_emails.py` coverage closure two cycles ago.
+
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-fifth run): a third independent occurrence of Findings 82/83's exact bug, this time in the CV-upload AI field-extraction pipeline
 
 Orientation: synced two sibling commits (`eeb216d` - a real SANRAL intake fix, `_docx_head()`'s
