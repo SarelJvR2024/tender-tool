@@ -1,5 +1,74 @@
 # System Status
 
+**2026-10-27 ~10:24 UTC — standing review pass: a real drift fixed between two same-purpose SACNASP
+position-detection regexes, plus a missing-`.ts`-extension bug on the file that blocked testing it
+directly.** Orientation: `git fetch origin main` showed one new commit since this routine's own last
+pass (`1026f3a`, a sibling QA routine's `fill_sbd_docx.py` coverage close, unrelated) - confirmed by
+reading the log, local checkout fast-forwarded to match before starting. Three open PRs (`#164`,
+`#165`, `#166`, all draft) read via the GitHub API, correctly left unmerged, none overlapping the
+file touched here. Stayed clear of the ongoing self-merge incident PRs entirely, per the standing
+guardrail.
+
+**The finding**: `app/lib/tenderCompliance.ts`'s `specialistOf()` - which decides whether a SANRAL
+key position is checked against the real engineering-geologist SACNASP minimum (Pr Sci.Nat, SAIEG,
+5 years) instead of falling back to the generic ECSA Pr Eng/Pr Tech Eng requirement - tested only a
+narrow ad-hoc `/geolog/i` against the position's own free-text description. `app/lib/
+personCredentials.ts` already exports `SACNASP_POSITION_RE` (`/geolog|natural\s+scien|pr\.?\s*sci\.?
+\s*nat/i`) for this exact same purpose, used by `registrationsAskedFor()` to decide whether SACNASP
+fields show on the People page - and `specialistOf()` already imports and correctly shares `
+SACQSP_POSITION_RE`/`SAGC_POSITION_RE` from the same module for the sibling quantity-surveyor/
+surveyor checks, just not this one. A position whose SETUP description is extracted as (e.g.) "Design
+Specialist 2 - Natural Scientist" or names "Pr Sci.Nat" directly, without the literal substring
+"geolog", would correctly surface SACNASP fields on the People page but silently fall back to the
+wrong (generic ECSA) minimum requirement here - a real "two writers that could disagree" split this
+codebase otherwise avoids deliberately (CLAUDE.md's own standing rule). `position_description` is
+free text extracted per-tender from each buyer's own SETUP sheet (`engine/pack/process_pack_jobs.py`
+`p["description"]`), not a fixed enum, so this isn't guaranteed never to come up, though no real
+committed fixture in this repo happens to phrase it that way today - documented honestly as a code-
+level inconsistency confirmed by direct comparison, not as "observed live."
+
+**Fix**: `specialistOf()` now imports and uses `SACNASP_POSITION_RE` the same way it already uses the
+other two position regexes - a pure widening (every string matching the old `/geolog/i` still matches
+the new regex, its first alternative), so no existing "geolog"-phrased match changes.
+
+**A second, separate bug found while adding a test for this**: `tenderCompliance.ts`'s own `import
+{ closingDayOf, daysUntil, formatDate } from "./dates"` (no `.ts` extension) broke `node
+--experimental-strip-types --test` on a freshly-written test file for this exact module - the
+established, previously-documented bug class (`lib/printCutoffReminders.ts`'s own `./dispatchTriage`
+import, fixed earlier in this session) biting a module that had simply never been run that way before
+since it had zero test coverage. Tracing the import chain surfaced a second instance one level
+deeper: `personCredentials.ts` imported `dates.ts` via the `@/lib/dates` alias, which plain
+`node --experimental-strip-types` can't resolve at all (no tsconfig "paths" support, same documented
+limitation `disciplineTaxonomy.ts`'s own header comment already states for this reason). Both fixed
+to relative, extension-qualified imports; this does not change runtime behaviour for Next.js's own
+bundler (which already resolved both forms), only unblocks direct-node execution.
+
+**New test file**: `app/lib/tenderCompliance.test.ts` (this module had zero test coverage of any
+kind before this pass - flagged as a QA-routine candidate, not built out further than this one fix's
+own regression coverage). Verified properly: reverted `specialistOf()`'s fix alone (not the import
+fixes) first - confirmed exactly the 2 predicted tests (`Natural Scientist` / `Pr Sci.Nat` positions)
+failed with the exact predicted wrong requirement, the other 4 (literal "Geologist", generic
+fallback, quantity-surveyor, surveyor orderings) stayed green - restored, confirmed all 6/6 pass.
+
+**Pushed directly to `main`, no PR, no self-merge**: `app/lib/tenderCompliance.ts`,
+`app/lib/personCredentials.ts`, `app/lib/tenderCompliance.test.ts`, this file - per the guardrail
+added 2026-10-25 after the self-merge incident: a small, safe, fully-verified fix goes straight to
+`main`, never a self-merged PR.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing warnings),
+`npx vitest run` 202/202 (unchanged - no vitest-covered file touched), the new `tenderCompliance.test.ts`
+6/6 via `node --experimental-strip-types --test`, and every other `*.test.ts` file re-run directly to
+confirm the two import fixes (`dates.ts`/`personCredentials.ts`) caused no regression elsewhere.
+
+**Backlog waiting on Sarel, unchanged by this pass** (confirmed, not assumed - each is still exactly
+as the prior entry below describes it): migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not
+urgent), the "missing ISO 9001 flagged as urgent" UX question, and the `fingerprint.py` named_ranges
+fix from two passes ago (expect a baseline mismatch on the next real SANRAL fingerprint check - not a
+regression).
+
+---
+
 **2026-10-27 ~08:28 UTC — standing review pass: clean sweep of `lib/dealEconomics.ts` (Pipeline's
 "Price & credit" form + the pricing-history page), zero new bug, zero test coverage flagged.**
 Orientation: `git fetch origin main` showed one new commit since this routine's own last pass

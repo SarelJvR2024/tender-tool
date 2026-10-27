@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { expiryStatus, type StatusChip } from "@/lib/dates";
+import { expiryStatus, type StatusChip } from "./dates.ts";
 
 // Per-person professional registrations that carry an expiry / renewal date
 // (migrations 0035, 0040). Mirrors engine/compliance/watch_deadlines.py

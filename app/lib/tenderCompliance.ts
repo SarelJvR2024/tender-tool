@@ -24,8 +24,8 @@
 // in the detail text but doesn't change the status - same as COID, whose
 // status has always come from the number + expiry on file.
 
-import { closingDayOf, daysUntil, formatDate } from "./dates";
-import { SACQSP_POSITION_RE, SAGC_POSITION_RE, catalogSlug, type CatalogBody, type HeldCatalogRegistration, type PersonCredentialFields } from "./personCredentials";
+import { closingDayOf, daysUntil, formatDate } from "./dates.ts";
+import { SACNASP_POSITION_RE, SACQSP_POSITION_RE, SAGC_POSITION_RE, catalogSlug, type CatalogBody, type HeldCatalogRegistration, type PersonCredentialFields } from "./personCredentials.ts";
 
 export type ComplianceStatus = "have" | "missing" | "check";
 
@@ -694,10 +694,18 @@ export type PersonFacts = {
 } & PersonCredentialFields;
 
 // A position whose own SETUP description names a profession with its own
-// council is checked against that council, not ECSA.
+// council is checked against that council, not ECSA. Uses the same
+// SACNASP/SAGC/SACQSP position regexes personCredentials.ts's
+// registrationsAskedFor() already relies on to decide a tender asks for that
+// body - one shared pattern per body, not a second copy that could drift
+// (Finding, 2026-10-27: this previously tested a narrower ad-hoc `/geolog/i`
+// here, so a position described as e.g. "Natural Scientist" or naming
+// "Pr Sci.Nat" without the word "geolog" would correctly surface SACNASP
+// fields on the People page, but silently fall back to the generic ECSA
+// Pr Eng/Pr Tech Eng minimum here instead of the real SACNASP requirement).
 function specialistOf(description: string | null): string | null {
   if (!description) return null;
-  if (/geolog/i.test(description)) return "engineering_geologist";
+  if (SACNASP_POSITION_RE.test(description)) return "engineering_geologist";
   if (SACQSP_POSITION_RE.test(description)) return "quantity_surveyor";
   if (SAGC_POSITION_RE.test(description)) return "surveyor";
   return null;
