@@ -632,17 +632,36 @@ def gather_pack_inputs(client, job, tender, manifest, work, prefer_manifest_rule
 
     signatory = None
     sid = answers.get("signatory_person_id")
+    person = None
     if sid:
         ppl = client.select("people", {"id": sid, "company_id": job["company_id"]})
         if ppl:
-            # Capacity = the People page's signatory capacity only. It used to
-            # fall back to the person's job title ("role"), which then went onto
-            # SBD 1 "capacity under which this bid is signed" logged confirmed
-            # (form-field audit 2026-10-18); not on file now stays blank/missing,
-            # and the workspace already says "no signatory capacity on file".
-            signatory = {"name": ppl[0]["name"], "capacity": ppl[0].get("signatory_capacity"),
-                         # MBD 4 3.2 "Identity Number" of the representative (typed onto flat PDFs)
-                         "id_number": ppl[0].get("id_number")}
+            person = ppl[0]
+    else:
+        # No signatory picked for THIS tender: fall back to the company's own
+        # designated signatory - the same "first person given a signatory
+        # capacity, oldest first" convention engine/pack/process_pack_jobs.py
+        # already uses for the SANRAL engine's Form of Offer/A-Forms
+        # signatory (gather(), "signatories[0]") - so a company with a
+        # Director/signatory on file for one engine isn't blank for the
+        # other. Real incident, 2026-10-28: Mzansi had a person on file with
+        # signatory_capacity="Director" and still showed signatory_name/
+        # capacity as "Not on file" for RFP165/2026, because nobody had
+        # picked a signatory for that specific tender - a one-time missed UI
+        # step, not a naming/tag mismatch, but one this fallback now covers.
+        candidates = [p for p in client.select("people", {"company_id": job["company_id"]}, order="created_at.asc")
+                      if p.get("signatory_capacity")]
+        if candidates:
+            person = candidates[0]
+    if person:
+        # Capacity = the People page's signatory capacity only. It used to
+        # fall back to the person's job title ("role"), which then went onto
+        # SBD 1 "capacity under which this bid is signed" logged confirmed
+        # (form-field audit 2026-10-18); not on file now stays blank/missing,
+        # and the workspace already says "no signatory capacity on file".
+        signatory = {"name": person["name"], "capacity": person.get("signatory_capacity"),
+                     # MBD 4 3.2 "Identity Number" of the representative (typed onto flat PDFs)
+                     "id_number": person.get("id_number")}
 
     # experience the tender's own rule accepts (never SANRAL's B6 by default)
     evidence = []

@@ -413,6 +413,27 @@ def subcontracting_plan_for(client, company_id, tender_id):
     return plan
 
 
+def pack_suggestions_positions(required, by_code, people, index_of):
+    """pack_suggestions.json's "positions" dict: one entry per position this
+    tender's OWN SETUP sheet currently requires (`required`), never every row
+    `by_code` happens to hold. tender_pack_assignments keeps one row per
+    position_code for the pack's whole lifetime (0001's unique constraint is
+    (tender_pack_id, position_code), no delete on re-upload), so a company
+    that re-attaches a different/corrected Technical workbook - fewer or
+    differently-coded positions than an earlier one - leaves a stale,
+    still-confirmed row for a position the CURRENT workbook no longer asks
+    for. Iterating by_code.items() (pre-fix) picked that row up too and
+    crashed with a KeyError: index_of/people are built from `required` alone
+    (line ~505), so a stale position's confirmed_person_id is never in
+    either. Real incident, 2026-10-28: Mzansi's SANRAL pack-assembly test hit
+    this exact case (a leftover "RE" assignment from an earlier seed, the
+    freshly-uploaded workbook asking only for PL/DS1)."""
+    return {p["code"]: {"candidates": [{"person_id": f"person_{index_of[by_code[p['code']]['confirmed_person_id']]}",
+                                        "name": people[by_code[p["code"]]["confirmed_person_id"]]["name"],
+                                        "specialism_warning": bool(by_code[p["code"]].get("specialism_warning"))}]}
+            for p in required if by_code.get(p["code"], {}).get("confirmed_person_id")}
+
+
 def gather(client, job, work):
     """Downloads/reads everything for one job into `work`. Returns the kwargs
     for build_submission_pack() plus the path of the confirmed pack.yaml."""
@@ -548,11 +569,9 @@ def gather(client, job, work):
     if not closing:
         raise ValueError("tender has no closing date - years of experience can't be computed")
     sugg_path = os.path.join(dp, "pack_suggestions.json")
-    json.dump({"contract_no": tender.get("contract_no"), "closing_date": closing, "positions": {
-        code: {"candidates": [{"person_id": f"person_{index_of[a['confirmed_person_id']]}",
-                               "name": people[a["confirmed_person_id"]]["name"],
-                               "specialism_warning": bool(a.get("specialism_warning"))}]}
-        for code, a in by_code.items() if a.get("confirmed_person_id")}}, open(sugg_path, "w"), indent=2)
+    json.dump({"contract_no": tender.get("contract_no"), "closing_date": closing,
+               "positions": pack_suggestions_positions(required, by_code, people, index_of)},
+              open(sugg_path, "w"), indent=2)
     sel_path = os.path.join(dp, "pack_selections.yaml")
     yaml.safe_dump({
         "contract_no": tender.get("contract_no"),
