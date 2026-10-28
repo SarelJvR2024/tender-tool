@@ -5821,6 +5821,36 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-eighteenth run): rotated to compliance/reminders (watch_deadlines.py's find_due_tasks()) - two plausible leads chased, both ruled out against the real schema, no new bug found this time
+
+Orientation: `git fetch origin main` showed one new sibling commit (`3699e4a`, closing a second site
+of the "days to close" drift fix in `app/app/analytics/page.tsx` - TypeScript, no overlap). Open PR
+`#170` unchanged, still touching `engine/general/process_general_jobs.py`,
+`engine/pack/process_pack_jobs.py`, `fingerprints/Conventional_Consultant_Tender.json` and Mzansi
+seed data - avoided entirely again. Other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to compliance/reminders (intake was heavily covered 4 cycles ago via Finding 90; its only
+other file, `scenario_driver.py`, is a manual debugging CLI with no assertions of its own, not a
+fruitful adversarial-testing target). Picked `watch_deadlines.py`'s `find_due_tasks()` - the generic
+tender-task reminder category, genuinely still live in production (confirmed last cycle via Finding
+91's investigation: `daily_digest.py` calls it directly, unlike the orphaned `find_documents_
+lapsing_before_closing()`).
+
+Chased two real-looking leads, both ruled out by reading the actual schema rather than assumed:
+1. `task["tender_id"]` is read with bracket access after a `t.get("tender_id")` guard earlier in the
+   same function implied it could be missing/null for some tasks - would print a literal `None` as
+   `tender_label` for a generic (non-tender) task. Ruled out: `tender_tasks.tender_id uuid not null`
+   (migration `0009`) - every task is always tender-specific, the `.get()` guard is defensive but
+   unreachable.
+2. Whether `seen_key`'s inclusion of both `due_date` and `status` could let an overdue-then-
+   deadline-extended-then-overdue-again task get silently suppressed on its second escalation -
+   traced the actual key construction: `due_date` changing OR `status` changing (`due_soon` ->
+   `overdue`) both produce a genuinely different `seen_key`, so both transitions correctly re-report,
+   matching the same "overdue escalates" pattern `find_due_documents()` already uses. Not a bug.
+
+No code change this pass - two plausible leads investigated and closed with real evidence, not
+assumed away, but neither panned out. Logged as a genuine clean sweep.
+
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-seventeenth run): Finding 93 (minor) - process_cv_jobs.py's own docstring claimed it calls generate_as_is() for the "use as-is" CV path; it never has, confirmed by tracing the real feature to app/app/people/actions.ts instead
 
 Orientation: `git fetch origin main` showed 2 new sibling commits (`47497ac` `confirm_pack.py`
