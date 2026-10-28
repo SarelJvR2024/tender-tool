@@ -14,6 +14,38 @@
 
 ---
 
+**2026-10-28 ~10:50 UTC — document-mismatch guard, closing the real COID/B-BBEE-misfile defect found
+in Phase 7's/this phase's live pack runs.** Built as a filename-only heuristic, not real PDF/DOCX
+content inspection - confirmed first (`package.json` has no PDF/DOCX-parsing dependency) that real
+document-text reading is this engine's own job (`requirements.py`, Python, run async by the bridge
+worker), never something a Next.js Server Action can do synchronously. A filename check costs no new
+infrastructure and would have caught the real incident outright (the file was literally named
+`...BBBEE_Affidavit.docx`).
+
+- `lib/vaultDocuments.ts`: `vaultDocumentMismatchWarning(kind, filename)` - covers the three vault
+  slots with zero existing content inspection either way (`coid`, `bee_proof`, `sars_tcs_pin`); `coid`
+  gets both a reject list (B-BBEE/affidavit keywords) and an expect list (COID/compensation/good-
+  standing keywords), matching the stronger pattern the other two already used in the brief.
+- `DirectVaultDocumentUploader.tsx`: a non-blocking `window.confirm()` on a mismatch (the same pattern
+  `ConfirmSubmitButton` already uses elsewhere) - never a hard refusal, since a real, correctly-chosen
+  document can legitimately have an unusual filename.
+- `app/company/actions.ts`'s `uploadVaultDocument()`: re-checks the same rule server-side and refuses
+  an unacknowledged mismatch, so the warning can't be skipped by bypassing the client confirm.
+- `engine/general/build_general_pack.py`: the Python twin, wired into the pack manifest's own
+  existing `sections[].warning` field (confirmed live, via the real DBSA runs, that this field already
+  exists and was always `null` before this) - only checked against a vault-slot document actually
+  merged into the pack, never a fresh per-tender upload (chosen deliberately for that one tender, so a
+  mismatch there would be a false positive by construction).
+- New tests: `lib/vaultDocuments.test.ts` (extended) and `engine/general/test_build_general_pack.py`
+  (new) both carry the real `BBBEE_Affidavit.docx` -> `coid` case as a named regression.
+
+Built in an isolated worktree, reviewed in full and independently re-verified on this branch before
+merging in (not just trusted) - `tsc --noEmit`/`eslint`/`vitest run` 289/289/`python3
+test_build_general_pack.py` 11/11/`test_general_bridge.py` ALL PASSED/`npm run build`, all clean, same
+route classification as before.
+
+---
+
 **2026-10-28 ~10:45 UTC — flagged, and Sarel agreed, that "stock a real company's vault with sample
 SARS/CIDB/CIPC/B-BBEE/COID documents" was a real risk, not a UX nicety; re-ran the DBSA RFP165/2026
 compilation against the Mzansi demo company instead, and it surfaced a real, honest finding of its

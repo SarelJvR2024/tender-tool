@@ -65,6 +65,53 @@ export function filenameFromPath(path: string | null): string | null {
   return last.replace(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}-/i, "");
 }
 
+// Real incident, 2026-10-28 (Reviewer Civils & Consulting): a file literally
+// named "...BBBEE_Affidavit.docx" was uploaded into the 'coid' slot, and a
+// real pack-generation run merged it into the pack labelled as the COID
+// Letter of Good Standing. uploadVaultDocument() has no way to read a
+// document's actual text (this app has no PDF/DOCX parser - that's
+// engine/general/requirements.py's job, in Python, run async by the bridge
+// worker, never synchronously inside a Server Action) - the filename is the
+// one signal already on hand with zero new parsing infrastructure, and it
+// would have caught this exact case. Each kind gets `reject` (filenames that
+// clearly belong to a DIFFERENT compliance document) and/or `expect`
+// (filenames a real document of this kind should actually contain) - coid
+// only had a `reject` list in the original brief; `expect` keywords are
+// added here for it too, by the same pattern bee_proof/sars_tcs_pin already
+// use, not a weaker check than theirs.
+const VAULT_MISMATCH_KEYWORDS: Partial<Record<VaultDocumentKind, { reject?: { words: string[]; looksLike: string }; expect?: string[] }>> = {
+  coid: {
+    reject: { words: ["bbbee", "b-bbee", "bee", "affidavit", "broad-based", "broadbased"], looksLike: "a B-BBEE Affidavit" },
+    expect: ["coid", "compensation", "good standing", "letter of good standing"],
+  },
+  bee_proof: {
+    expect: ["bee", "bbbee", "b-bbee", "affidavit", "sanas", "broad-based", "broadbased"],
+  },
+  sars_tcs_pin: {
+    expect: ["tax", "sars", "pin", "tcs", "compliance"],
+  },
+};
+
+/**
+ * Filename-only heuristic (see VAULT_MISMATCH_KEYWORDS's own comment for
+ * why) - a non-blocking warning, never a hard refusal: a real document can
+ * be named anything, so this only ever prompts a human to double check, the
+ * same "are you sure" pattern ConfirmSubmitButton already uses elsewhere in
+ * this app, never a silent rejection of a correctly-chosen file.
+ */
+export function vaultDocumentMismatchWarning(kind: VaultDocumentKind, filename: string): string | null {
+  const rule = VAULT_MISMATCH_KEYWORDS[kind];
+  if (!rule) return null;
+  const name = filename.toLowerCase();
+  if (rule.reject && rule.reject.words.some((w) => name.includes(w))) {
+    return `This document appears to be ${rule.reject.looksLike}, not ${VAULT_DOCUMENTS[kind].label}.`;
+  }
+  if (rule.expect && !rule.expect.some((w) => name.includes(w))) {
+    return `This file's name doesn't look like ${VAULT_DOCUMENTS[kind].label} - check you picked the right file.`;
+  }
+  return null;
+}
+
 // The bank letter is "usable" for 3 months from its date (derived column
 // bank_confirmation_letter_valid_until), so a 60-day "renew soon" window would
 // turn it amber a month after issue. 30 days is used for it everywhere: the
