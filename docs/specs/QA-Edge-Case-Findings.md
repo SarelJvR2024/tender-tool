@@ -5288,3 +5288,82 @@ stay ONLY in a doc either.
 
 **Regression:** none - no code or configuration was changed by this pass. Purely a documentation/
 escalation entry and a live `list_triggers` read (no mutation).
+
+### Finding 92 (CONFIRMED, FIXED - a real `kouga.py` boundary bug (`--max-pages 0` silently fetched every page instead of none more) plus a repo-wide CI-wiring gap far larger than Findings 87-89: 28 engine/test_*.py files, 18 of them in engine/discovery/ alone, had never once run in CI)
+
+**Where:** discovery rotation this cycle (last dedicated pass: run 109, Lephalale's naive-today
+bug - genuinely the most overdue area by this routine's own rotation history). Picked
+`engine/discovery/kouga.py` (Kouga Local Municipality's own open-tenders listing, a 28-real-page
+site) as the under-reviewed candidate: `test_kouga.py` (306 lines) thoroughly unit-tests
+`parse_cards()`/`max_page()`/`normalize()`, but `fetch_releases()` itself - the real multi-page
+loop, the `MAX_PAGES_CAP` safety raise, the "0 cards on page 1" raise, the "0 cards on a LATER page
+stops early" break - had never been exercised end to end by anything.
+
+**The bug (CONFIRMED, moderate - a boundary value silently ignored, not a data-correctness defect).**
+`fetch_releases(max_pages=None, ...)`'s own cap logic read `if max_pages: last = min(last,
+max_pages)`. `0` is falsy in Python, so `--max-pages 0` - a real, valid request ("just page 1, no
+more") a person debugging this reader from the CLI could reasonably type - was silently treated as
+"not given at all," fetching every one of the site's real pages (confirmed: 28 HTTP requests, not
+1) instead of stopping after page 1 as asked. CLI-only reachability (the real production path via
+`gov_sources.read_source("kouga")` never passes `max_pages` at all, so this never affected a live
+discovery run) - moderate, not severe, but a genuine, confirmed boundary-value defect, the exact
+"malformed/boundary input" shape this routine's own standing instructions ask to construct test
+cases for.
+
+**Fix:** `if max_pages is not None:` in place of the truthiness check. **Verified red-then-green**:
+new tests exercise `fetch_releases()` end to end for the first time (multi-page assembly across 3
+real pages via a URL-keyed `sh.http_get` fake, the `max_pages=0` boundary case, the "stops early on
+an empty later page" case, the "0 cards on page 1 raises" case, and the "last page past
+`MAX_PAGES_CAP` raises before even fetching page 2" case). Reverted the real fix (`git apply -R`):
+the `max_pages=0` test failed exactly as predicted (28 HTTP calls instead of 1, 280 cards instead of
+10); the other 4 new tests, which don't touch this code path, correctly stayed green, confirming the
+new tests are precise, not just broad. Restored: `ALL PASSED`.
+
+**The much bigger finding, found while checking whether `test_kouga.py` itself was wired into
+CI**: it wasn't - and neither were 26 other `engine/test_*.py` files repo-wide, confirmed by a full
+sweep (`for f in $(find engine -name "test_*.py"); do grep -q "$(basename $f)"
+.github/workflows/*.yml || echo "$f"; done`), the same check Findings 87-89 ran at a smaller, more
+local scale each time. 18 of the 28 are in `engine/discovery/` alone (`test_boq_extraction.py`,
+`test_company_profiles.py`, `test_download_discovered_documents.py`, `test_etenders_portal.py`,
+`test_key_person_minimums.py`, `test_kouga.py`, `test_lephalale.py`, `test_market_trend.py`,
+`test_opportunity_requirements.py`, `test_randwater.py`, `test_scope_llm.py`,
+`test_score_outlook.py`, `test_source_http.py`, `test_store_award_outcomes.py`,
+`test_tender_changes.py`, `test_tender_enrichment.py`, `test_tender_enrichment_cli.py`,
+`test_vaal_central_water.py`); the rest spread across `engine/cv/` (`test_generate_cv.py`),
+`engine/general/` (`test_process_general_jobs.py`, `test_requirements.py`,
+`test_submission_plan.py`), `engine/onboarding/` (`test_classify_documents.py`,
+`test_process_onboarding_jobs.py`), `engine/pack/` (`test_adapt_company.py`, `test_pdf_merge.py`),
+`engine/pack_generator/` (`test_suggest_pack.py`), and `engine/compliance/`
+(`test_principals_registrations.py`). Every one of the 27 (all but
+`engine/intake/test_manual_intake.py` - see below) confirmed, individually, to run clean standalone
+(`exit 0`, no live Supabase/Postgres/Anthropic key required) before being wired in - several
+already self-skip their own live-only part gracefully by design (`test_market_trend.py` without
+`MARKET_TREND_PSQL`, `test_key_person_minimums.py`'s Part 3 without a gitignored PDF,
+`test_scope_llm.py` without `ANTHROPIC_API_KEY`), which is correct, pre-existing behaviour, not
+something this pass needed to change.
+
+**One file deliberately left out, not missed**: `engine/intake/test_manual_intake.py` needs
+`INTAKE_PSQL` to run any real assertion at all - without it, every check inside it self-skips (0
+assertions run, confirmed directly). Wiring it into CI bare would be theatre, not coverage; giving
+it a real Postgres service (like the `tenant-isolation-db` job already does for
+`test_tenant_isolation.py`'s own Part 2) is a separate, larger piece of infrastructure work, not a
+one-line CI add - flagged in the workflow file's own new comment, not silently skipped without a
+reason given.
+
+**Fix:** added 27 new CI steps to `bridge-worker-ci.yml`, one per file (not bundled under a shared
+`run: |` block) - deliberately consistent with this same workflow file's own stated reasoning for
+why every step already carries `if: ${{ !cancelled() }}` (one step's failure must never hide
+whether the others would have passed). A YAML syntax error from an unquoted colon inside one new
+step's own name (`"...(Finding 92: fetch_releases()...)"` - YAML parses a bare `key: value` out of
+that) was caught by `python3 -c "import yaml; yaml.safe_load(...)"` before committing, not left for
+a live Actions run to discover.
+
+**Verified**: all 27 newly-wired files re-run individually after the YAML fix, every one still
+`exit 0`. Confirmed via the same repo-wide sweep that only the one deliberately-excluded file (`test_
+manual_intake.py`) remains outside CI, and that it's genuinely excluded (no `run:` step invokes it
+anywhere - the sweep's own match on it is from this pass's own explanatory comment mentioning its
+name, not a real invocation).
+
+**Regression:** `engine/discovery/kouga.py` (one truthiness-to-`is not None` fix),
+`engine/discovery/test_kouga.py` (5 new end-to-end tests for `fetch_releases()`),
+`.github/workflows/bridge-worker-ci.yml` (27 new steps). No other production code touched.

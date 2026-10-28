@@ -102,6 +102,72 @@ vault-fixtures finding above.
 
 ---
 
+**2026-10-28 — standing review pass, clean sweep: job-bridge `completed_at`-on-crash bug class
+checked across all 5 sibling bridges, none affected beyond the one already fixed
+(`process_cv_jobs.py`, commit `a987198`).**
+
+Follow-up to the prior pass's real fix: `process_cv_jobs.py`'s top-level crash handler marked a job
+`failed` without setting `completed_at`, undercounting Telemetry failures and leaving a failed
+request invisible in the customer's own tender activity feed. Checked whether the same gap exists in
+every sibling job-processing bridge the always-on worker runs:
+
+- `engine/pack/process_pack_jobs.py`, `engine/general/process_general_jobs.py`,
+  `engine/narrative/process_narrative_jobs.py` - clean. Each top-level crash handler sets its own
+  `completed_at`-equivalent field on the failure path.
+- `engine/onboarding/process_onboarding_jobs.py` - clean. `process_upload()`'s top-level
+  `except Exception` (line 144) routes through `_safe_update(lambda: fail_upload(...), ...)`, and
+  `fail_upload()` (lines 72-74) sets `classification_completed_at`.
+- `engine/cv/extract_cv_fields.py` - clean. `process_upload()`'s top-level `except Exception`
+  (line 859, "a bug, not a user problem - still never leave it 'extracting'") routes through the same
+  `_safe_update(lambda: fail_upload(...), ...)` pattern, and `fail_upload()` (lines 790-792) sets
+  `extraction_completed_at`.
+
+No fix needed here - documenting the clean sweep per this routine's own standing instruction, rather
+than forcing a weak finding elsewhere. The bug class is now confirmed closed across every bridge the
+worker runs.
+
+---
+
+**2026-10-28 — standing review pass, real bug fixed: `ownPosition()` could show an impossible
+"rank past the field size" when the company's own bid was itself an outlier
+(`app/lib/marketPricing.ts`).**
+
+Picked `app/lib/marketPricing.ts` (523 lines - money-adjacent bid/award analysis logic, only 105
+lines of test coverage and zero tests for `ownPosition()` specifically, the function that computes
+"Rank X of Y" for the Market Intelligence pages) as this pass's under-reviewed candidate.
+
+The bug: `columnField()` excludes any bid more than `OUTLIER_FACTOR` (5x) off the field's median from
+`amounts`/`low`/`median`/`high` - correct, it's how a register's own typing errors are kept out of the
+aggregate. But `ownPosition()`'s `rank`/`of` were both read off that same outlier-filtered
+`field.amounts` with no account taken of whether the company's *own* price was itself one of the
+excluded values. When it was, `of` (the field size) silently dropped the company from its own count
+while `rank` (counted by `1 + amounts below price`) did not - producing a result like **"Rank 4 of
+3"**, a contradiction (rank can't exceed the field size) that would have read as broken or confusing
+on the Market Intelligence page for any company whose own submitted price happened to be a genuine
+(if unusual) 5x-off-median outlier - a real, if not everyday, scenario: a fat-fingered price, or a
+company legitimately bidding far outside the pack on a complex scope.
+
+Fixed by confirming whether the company's own `price` is present in `field.amounts` (`ownCounted`)
+and, when it isn't, adding the company back into `of` (`field.amounts.length + 1`) so rank and field
+size are always self-consistent in both directions - a high-outlier price now correctly reads "last
+of N+1", a low-outlier price "first of N+1", not "Nth of N" or "1st of N" undercounting the company's
+own presence in the field.
+
+Verified with the full revert-confirm-restore-confirm discipline: wrote two new tests in
+`app/lib/marketPricing.spec.ts` (`describe("ownPosition", ...)`) reproducing the exact "rank 4 of 3"
+case and the symmetric low-outlier undercount, confirmed both failed against the unfixed code
+(`expected 4 to be not greater than 3` / `expected 3 to be 4`), applied the fix, confirmed both pass,
+then ran the full app test suite (`npx vitest run`, 291/291 passing, 31/31 files) and `tsc --noEmit`
+(clean) with no regressions. Committed and pushed directly to `main` (self-contained logic fix inside
+one file plus its own new tests, no schema/API/behavioural surface beyond this function - no PR, per
+this routine's convention).
+
+No other open items touched this pass. Open PRs #164, #165, #169 are all still correctly
+draft/unmerged (checked via `git fetch origin main` + `list_pull_requests` before starting - no new
+self-merge, no file overlap with this change).
+
+---
+
 **2026-10-28 — standing review pass, clean sweep: Form B7 (Targeted Enterprise subcontracting)
 plan-mode handling in `engine/pack/assemble_pack.py` + `engine/sanral_b7.py`, no real bug found.**
 
@@ -5615,6 +5681,50 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-fifteenth run): Finding 92 - a real kouga.py boundary bug (`--max-pages 0` silently fetched every page instead of none more) plus a repo-wide CI-wiring gap far bigger than Findings 87-89: 28 engine/test_*.py files, 18 of them in engine/discovery/ alone, had never once run in CI
+
+Orientation: `git fetch origin main` showed 4 new sibling commits (`184ec61` Form B7 plan-mode
+clean sweep, `5384d71`/`7320904` recording a real DBSA pack-generation test + CV/COID/SANRAL
+findings, `d38d107` `marketPricing.ts`'s `ownPosition()` rank-exceeds-field-size fix) - all
+TypeScript/`app/`-area or documentation, no `engine/` overlap. New PR `#169` (Mzansi pack re-run +
+a document-mismatch guard) touches `engine/general/build_general_pack.py` - avoided entirely.
+Other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to discovery - genuinely the most overdue area by this routine's own rotation history
+(last dedicated pass: run 109, Lephalale). Picked `kouga.py` (Kouga Local Municipality, a real
+28-page listing) since `test_kouga.py` thoroughly unit-tests its parse functions but never
+`fetch_releases()` itself end to end.
+
+**The bug**: `fetch_releases()`'s own page-cap logic read `if max_pages: last = min(last,
+max_pages)` - `0` is falsy, so `--max-pages 0` (a real, reasonable "just page 1" debug request)
+was silently ignored, fetching every one of the site's real pages instead of none more. CLI-only
+reachability (production never passes `max_pages`), so moderate not severe - but a genuine,
+confirmed boundary-value defect. Fixed (`is not None`), verified red-then-green with 5 new
+end-to-end tests for `fetch_releases()` (multi-page assembly, the `max_pages=0` boundary, early-
+stop on an empty later page, 0-cards-on-page-1 raise, past-the-safety-cap raise).
+
+**The much bigger finding, found while checking `test_kouga.py`'s own CI wiring**: a full
+repo-wide sweep (`for f in $(find engine -name "test_*.py"); do grep -q "$(basename $f)"
+.github/workflows/*.yml || echo "$f"; done`) found 27 more files never once run in CI - 18 in
+`engine/discovery/` alone, the rest spread across `engine/cv/`, `engine/general/`,
+`engine/onboarding/`, `engine/pack/`, `engine/pack_generator/`, and `engine/compliance/`. Every one
+confirmed, individually, to run clean standalone (several already self-skip their own live-only
+part gracefully by design - `test_market_trend.py` without `MARKET_TREND_PSQL`,
+`test_scope_llm.py` without `ANTHROPIC_API_KEY` - correct, unchanged behaviour) before being wired
+in. Added 27 new CI steps, one per file (not bundled - consistent with this workflow's own stated
+reasoning for why every step already carries `if: ${{ !cancelled() }}`).
+
+**One file deliberately left out**: `engine/intake/test_manual_intake.py` needs `INTAKE_PSQL` to
+run any real assertion at all (0 assertions without it, confirmed) - wiring it in bare would be
+theatre; a real Postgres service for it is separate infrastructure work, flagged in the workflow's
+own new comment, not silently skipped.
+
+A YAML syntax error (an unquoted colon inside one new step's own name) was caught with `python3 -c
+"import yaml; yaml.safe_load(...)"` before committing. Re-ran the sweep after fixing it: only the
+one deliberately-excluded file remains outside CI.
+
+Full writeup: Finding 92, `docs/specs/QA-Edge-Case-Findings.md`.
 
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-fourteenth run): Finding 91 (severe, FLAGGED NOT FIXED) - the compliance "document lapses before this tender's closing date" early-warning check has had zero delivery channel in production since 2026-10-27 ~20:30 UTC, contradicting this repo's own explicit prior decision not to disable its trigger until the replacement's documented gap was closed
 
