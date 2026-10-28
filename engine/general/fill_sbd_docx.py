@@ -1,8 +1,10 @@
 """
 First version of a general (non-SANRAL) filler: National Treasury's Standard
-Bidding Documents - SBD1 (Invitation to Bid), SBD4 (Bidder's Disclosure) and
-SBD6.1 (Preference Points Claim) - **only when a buyer supplies the editable
-.docx edition of the form**.
+Bidding Documents - SBD1 (Invitation to Bid), SBD4 (Bidder's Disclosure),
+SBD6.1 (Preference Points Claim), SBD8 (Declaration of Bidder's Past
+Supply Chain Practices) and SBD9 (Certificate of Independent Bid
+Determination) - **only when a buyer supplies the editable .docx edition of
+the form**.
 
 Why this exists, and why it is this narrow: see
 docs/specs/General-Tender-Engine-Findings.md, written from six real,
@@ -24,8 +26,10 @@ assumption, and that this script is built around:
    confirmed directly with pypdf's get_fields(). Overlaying text onto a flat,
    non-fillable PDF at guessed coordinates is exactly the kind of silent,
    unverifiable fill this project's provenance model exists to prevent, so
-   this script does not attempt it: load_sbd_docx() refuses anything that
-   isn't a real .docx and says why, instead of guessing at a PDF layout.
+   this script does not attempt it: fill_sbd_file() raises on anything that
+   isn't a real .docx, and build_general_pack.py's own call site catches
+   that and logs the reason as 'by hand', instead of guessing at a PDF
+   layout.
 
 Scope guard (Sarel's own principle, restated in the competitor-deep-dive
 spec's "Scope discipline" section): this is its own importer, kept out of
@@ -37,18 +41,17 @@ fill_a_forms.py does - confirmed/computed/assumed_default/missing, with a
 reason for the latter two - and generate_action_checklist.py already turns
 that log into ACTIONS_TO_SIGN.md with zero changes needed on its side.
 
-Usage:
-    python3 fill_sbd_docx.py <profile.json> <out_dir> [--sbd1 path] [--sbd4 path] [--sbd6_1 path]
-
-At least one of --sbd1/--sbd4/--sbd6_1 must be given. Each path must be a
-real .docx; anything else (.pdf, .doc, .xlsx) is refused with a clear reason
-logged as 'missing', not silently skipped.
+Usage: this module has no standalone CLI - it is a library called from
+build_general_pack.py's own pipeline (fill_sbd_docx.fill_sbd_file(src, out,
+ctx, log, set(codes)), gated on FILLABLE_CODES = {"1", "4", "6.1", "8", "9"}
+there), the same way fill_a_forms.py is called for SANRAL's forms. Each
+source path must be a real .docx; anything else (.pdf, .doc, .xlsx) is
+refused by load_sbd_docx() with a clear reason logged as 'missing', not
+silently skipped.
 """
 import os
 import sys
 import re
-import json
-import argparse
 import datetime
 import docx
 

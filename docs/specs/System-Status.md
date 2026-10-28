@@ -14,6 +14,53 @@
 
 ---
 
+**2026-10-28 ~08:20 UTC — standing review pass: clean sweep on `engine/general/fill_sbd_docx.py` (the
+non-SANRAL SBD1/4/6.1/8/9 `.docx` form filler, 547 lines) - no functional bug found, but its own
+top-of-file docstring was materially wrong about its interface, not just stale wording.** Orientation:
+`git fetch origin main` confirmed local HEAD already matched `origin/main` at `293eba9` ("Finding 90:
+coverage-gap closure for 6 untested classify_tender.py functions", a sibling QA routine) - no new
+commits to catch up on. Two open PRs (`#164`, `#165`) re-confirmed via the GitHub API, both still
+draft/unmerged, neither touching this file.
+
+Read the whole file and traced every function (`fill_cells`, `fill_phone_cells`, `fill_blank_paragraphs`,
+`answer_yes_no`'s four real Yes/No layouts, `fill_line_above_caption`, `bee_proof_lapse`,
+`fill_sbd_document()`'s per-code logic, `fill_dotted_paragraph_count`) against the edge cases its own
+extensive internal comments document (bundled forms, labels shared between bidder/buyer blocks,
+mixed blank-indicator conventions). No functional bug. Confirmed `test_fill_sbd_docx.py` (11 tests,
+already registered in `bridge-worker-ci.yml` line 239) genuinely exercises this module directly,
+including the SBD4-assumed-vs-SBD8-never-assumed distinction - this file is NOT an untested one; an
+earlier note in this routine's own backlog assuming otherwise was wrong and is retracted here.
+
+**What was actually wrong**: the docstring (1) described a standalone CLI (`python3 fill_sbd_docx.py
+<profile.json> <out_dir> [--sbd1 path] [--sbd4 path] [--sbd6_1 path]`) that does not exist anywhere in
+the file - no `__main__` block, no `ArgumentParser` instantiation, despite `import argparse` sitting at
+the top; (2) referenced a `load_sbd_docx()` function that was never defined in this file either - the
+real refusal-with-reason behaviour for a non-.docx input happens one layer up, in
+`build_general_pack.py`'s own `try/except` around `fill_sbd_docx.fill_sbd_file()` (confirmed at that
+call site, line ~320); (3) omitted SBD8/SBD9 from its opening description even though
+`fill_sbd_document()` fully implements both and `FILLABLE_CODES = {"1", "4", "6.1", "8", "9"}` in
+`build_general_pack.py` line 68 exactly matches the real behaviour. Fixed all three: corrected the
+opening description to list all five forms, replaced the fictional CLI usage section with the real
+call path, corrected the `load_sbd_docx()` reference, and removed the two dead imports (`argparse`,
+`json` - zero uses of either anywhere in the file, confirmed by grep before removing). Text/import-only,
+no behaviour change.
+
+**Verified**: `py_compile` clean; `python3 engine/general/test_fill_sbd_docx.py` - all 11 tests still
+pass; `python3 engine/general/test_general_bridge.py` - `ALL PASSED`; `tsc --noEmit` clean (app-wide,
+unaffected by this change but re-run as the standing QA check); `eslint` - 0 errors (3 pre-existing
+warnings in unrelated files, not touched this pass). Commit: see `git log` for this pass's SHA on
+`main` (direct commit, no PR - text/import-only, in scope of the standing self-merge guardrail for
+small/safe changes).
+
+Backlog unchanged (still 9 items awaiting Sarel's own judgement call): migration `0096` not yet applied;
+`narrative_documents` PostgREST schema-cache reload; PayFast idempotency design question; "missing ISO
+9001 flagged as urgent" UX question; `fingerprint.py` named_ranges baseline-mismatch heads-up (expected,
+not a bug); Dashboard "Decision needed" bucket over-triggering (needs a real refactor, not a one-line
+fix); Form B7 compulsory-vs-matrix disagreement on a real template; impersonation-feature token-refresh
+gap; submitted-tender nagging gap across `send-returnables-digest.ts`/`send-deadline-reminders.ts`.
+
+---
+
 **2026-10-28 ~06:25 UTC — standing review pass: a real, reachable bug fixed in `app/lib/workflowRegistry.ts`'s
 `cronIntervalMs()` - the new `/admin/telemetry` page (Phase 6) was falsely flagging the perfectly-healthy
 `corrigendum_alerts` workflow as "stale" every single morning and every weekend.** Orientation: `git fetch
