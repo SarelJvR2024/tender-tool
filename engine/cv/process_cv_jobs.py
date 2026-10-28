@@ -373,6 +373,7 @@ def process_job(url, key, job, out_dir):
             supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}", {
                 "status": "failed",
                 "error_message": "Could not generate this CV - try again. If it keeps happening, let us know.",
+                "completed_at": _now_iso(),
             })
         except Exception as e2:
             system_alerts.record("cv", f"Could not mark a failed CV job as failed: {type(e2).__name__}: {e2}",

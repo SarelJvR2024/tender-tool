@@ -14,6 +14,52 @@
 
 ---
 
+**2026-10-28 ~04:16 UTC — standing review pass: a real, reachable bug fixed in `engine/cv/process_cv_jobs.py`
+- a genuine CV-generation crash never set `completed_at`, silently hiding the failure from both the
+admin Telemetry page and the tender's own activity feed.** Orientation: `git fetch origin main` showed
+1 new commit since this routine's own last pass (`6930b17` → `e92beed`, a sibling QA routine's Finding 89
+on `fill_financial_hours.py`, unrelated, no overlap) - fast-forwarded cleanly. Two open PRs (`#164`, `#165`)
+re-confirmed via the GitHub API, both still correctly draft/unmerged; avoided every file either touches.
+Stayed clear of the self-merge incident PRs per the standing guardrail.
+
+**The finding**: `process_job()`'s own main exception handler (the path that catches any real crash during
+CV building/conversion/upload - a bad profile field, a LibreOffice failure, an upload error) marked the
+`generated_cvs` row `status: "failed"` but never set `completed_at`, unlike every other failure path in
+this exact file (`fail_stale_jobs()`'s own worker-died-mid-job timeout path) and every sibling
+`process_*_jobs.py` bridge (pack/general/narrative/onboarding all set their own completion timestamp on
+failure too). Two real, reachable consequences, both confirmed by reading the actual call sites, not
+guessed: (1) `app/supabase/migrations/0101`'s `platform_admin_engine_telemetry()` RPC counts a CV as
+"failed in the last 24h" only when `completed_at >= now() - interval '24 hours'` - a null `completed_at`
+never satisfies that, so a real crash (the common failure path) never showed up on the brand-new admin
+Telemetry page (Phase 3, landed two passes ago) at all, only the rare stale-timeout case did, making the
+dashboard look healthier than it really was; (2) `app/lib/tenderActivity.ts`'s own activity-feed logic
+only shows a CV ready/failed event when `cv.completed_at` is set, so a genuinely failed CV request was
+silently invisible on the tender's own activity feed too, not just in admin telemetry.
+
+**Fix**: added `"completed_at": _now_iso()` to that one PATCH call, matching the pattern every other
+failure/success path in this bridge already follows. **Verified properly, both directions**: `git stash`'d
+the fix, confirmed the new regression test fails with exactly the predicted result (`completed_at` absent
+from the captured PATCH body), restored the fix, confirmed the same test passes. `engine/cv/
+test_process_cv_jobs.py` is a new file - this bridge had no test coverage of its own before this pass, only
+a self-test smoke check - built on the same `StubSupabase`-captures-calls pattern `test_process_narrative_jobs.py`
+already established. Registered as its own CI step in `.github/workflows/bridge-worker-ci.yml`, right after
+the existing CV bridge self-test. Every existing `engine/cv/test_*.py` file re-run clean, `engine/worker/
+test_poll_loop.py` (exercises the CV bridge inside the real polling loop) re-run clean, `tsc --noEmit`
+clean (no TypeScript touched).
+
+**Pushed directly to `main` - no PR, per the standing guardrail**: this is a one-line dict-key addition in
+a Python file with its own brand-new, passing test coverage, not a schema change and not a UI change
+needing visual review.
+
+**Backlog re-confirmed, unchanged otherwise**: migration `0096` (pack-quota trial-expiry), the
+`narrative_documents` PostgREST schema-cache reload, a PayFast idempotency design question (not urgent),
+the "missing ISO 9001 flagged as urgent" UX question, the `fingerprint.py` named_ranges baseline-mismatch
+heads-up, the Dashboard "Decision needed" bucket over-triggering finding, the Form B7 compulsory-vs-matrix
+disagreement on a real template, the impersonation-feature token-refresh gap, and the submitted-tender
+nagging gap across reminder scripts - all still waiting on Sarel's own call.
+
+---
+
 **2026-10-28 ~02:16 UTC — standing review pass: a real cross-script gap found and traced across
 three reminder/digest senders - none filter out a tender a company has already marked submitted -
 not fixed, flagged for Sarel's own call given it spans multiple pre-existing scripts, not one.**

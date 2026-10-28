@@ -87,6 +87,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/cv/process_cv_jobs.py --self-test --out-dir "$RUNNER_TEMP/cv-self-test"
 
+      - name: CV job-processing bridge (claim/crash/stale-job PATCH shapes, fake Supabase, no secrets)
+        if: ${{ !cancelled() }}
+        run: python3 engine/cv/test_process_cv_jobs.py
+
       - name: CV AI-extraction - text step, failure modes, checks, queue, OCR of a scan (no API key, no secrets)
         if: ${{ !cancelled() }}
         run: |
