@@ -83,6 +83,59 @@ VAULT_EXPIRY_FOR = {
     "pi_insurance": "pi_insurance_expiry",
 }
 
+# Real incident, 2026-10-28 (Reviewer Civils & Consulting): a file named
+# "...BBBEE_Affidavit.docx" was uploaded into the COID vault slot, and a real
+# pack-generation run merged it into the pack labelled as the COID Letter of
+# Good Standing. Same filename-only heuristic as lib/vaultDocuments.ts's own
+# vaultDocumentMismatchWarning() on the app side (that file's own comment
+# explains why filename, not real text extraction: this engine is the only
+# place that reads real PDF/DOCX content, and build_general_pack() only ever
+# sees a document AFTER it's already in the pack - too late to ask the vault
+# page's own upload-time check to run again). Keyed by the companies.*_path
+# column (VAULT_FILE_FOR's own values), not the returnable key, since that's
+# the one name both VAULT_FILE_FOR here and VAULT_DOCUMENTS there agree on.
+VAULT_MISMATCH_KEYWORDS = {
+    "coid_letter_document_path": {
+        "reject": (["bbbee", "b-bbee", "bee", "affidavit", "broad-based", "broadbased"], "a B-BBEE Affidavit"),
+        "expect": ["coid", "compensation", "good standing", "letter of good standing"],
+    },
+    "bee_proof_document_path": {
+        "expect": ["bee", "bbbee", "b-bbee", "affidavit", "sanas", "broad-based", "broadbased"],
+    },
+    "sars_tcs_pin_document_path": {
+        "expect": ["tax", "sars", "pin", "tcs", "compliance"],
+    },
+}
+
+
+def vault_document_mismatch_warning(column, local_path):
+    """Non-blocking content-sanity warning for one vault document already
+    downloaded to `local_path` - filename only, same reasoning as this
+    module's own VAULT_MISMATCH_KEYWORDS comment. Returns None for a column
+    with no rule, or for a filename that passes its rule."""
+    rule = VAULT_MISMATCH_KEYWORDS.get(column)
+    if not rule or not local_path:
+        return None
+    name = os.path.basename(local_path).lower()
+    reject = rule.get("reject")
+    if reject:
+        words, looks_like = reject
+        if any(w in name for w in words):
+            return f"This document appears to be {looks_like}, not {VAULT_LABEL_FOR.get(column, 'this compliance document')}."
+    expect = rule.get("expect")
+    if expect and not any(w in name for w in expect):
+        return f"This file's name doesn't look like {VAULT_LABEL_FOR.get(column, 'this compliance document')} - check the right file was uploaded."
+    return None
+
+
+# Labels for vault_document_mismatch_warning()'s own messages - same wording
+# lib/vaultDocuments.ts's VAULT_DOCUMENTS gives each column on the app side.
+VAULT_LABEL_FOR = {
+    "coid_letter_document_path": "COID Letter of Good Standing",
+    "bee_proof_document_path": "a B-BBEE certificate or sworn affidavit",
+    "sars_tcs_pin_document_path": "a SARS Tax Compliance Status PIN letter",
+}
+
 
 def to_pdf(path, work_dir):
     """PDF / image / Word file -> (pdf_path, None) or (None, reason).
@@ -464,6 +517,12 @@ def build_general_pack(*, manifest, local_docs, company, signatory, answers, ten
         # (pdf_merge.expiry_warning, same rule as the SANRAL pack) - a
         # per-tender upload replaces the vault copy, so its date isn't known.
         warning = expiry_warning(company.get(exp_col), closing) if exp_col and not files.get("upload:" + r["key"]) else None
+        # Content-sanity check (see VAULT_MISMATCH_KEYWORDS's own comment) -
+        # only against the vault copy's own filename: a per-tender upload
+        # (files.get("upload:" + r["key"])) was chosen fresh for THIS tender,
+        # not pulled blind from a vault slot that might hold the wrong thing.
+        if not warning and col and not files.get("upload:" + r["key"]):
+            warning = vault_document_mismatch_warning(col, path)
         if warning:
             by_hand.append({"title": title, "reason": f"the vault copy {warning[0].lower() + warning[1:]}"})
         sections.append({"title": title, "envelope": DOCS_ENV, "pdf": pdf, "warning": warning if pdf else None,

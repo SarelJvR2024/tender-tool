@@ -14,6 +14,94 @@
 
 ---
 
+**2026-10-28 ~10:50 UTC — document-mismatch guard, closing the real COID/B-BBEE-misfile defect found
+in Phase 7's/this phase's live pack runs.** Built as a filename-only heuristic, not real PDF/DOCX
+content inspection - confirmed first (`package.json` has no PDF/DOCX-parsing dependency) that real
+document-text reading is this engine's own job (`requirements.py`, Python, run async by the bridge
+worker), never something a Next.js Server Action can do synchronously. A filename check costs no new
+infrastructure and would have caught the real incident outright (the file was literally named
+`...BBBEE_Affidavit.docx`).
+
+- `lib/vaultDocuments.ts`: `vaultDocumentMismatchWarning(kind, filename)` - covers the three vault
+  slots with zero existing content inspection either way (`coid`, `bee_proof`, `sars_tcs_pin`); `coid`
+  gets both a reject list (B-BBEE/affidavit keywords) and an expect list (COID/compensation/good-
+  standing keywords), matching the stronger pattern the other two already used in the brief.
+- `DirectVaultDocumentUploader.tsx`: a non-blocking `window.confirm()` on a mismatch (the same pattern
+  `ConfirmSubmitButton` already uses elsewhere) - never a hard refusal, since a real, correctly-chosen
+  document can legitimately have an unusual filename.
+- `app/company/actions.ts`'s `uploadVaultDocument()`: re-checks the same rule server-side and refuses
+  an unacknowledged mismatch, so the warning can't be skipped by bypassing the client confirm.
+- `engine/general/build_general_pack.py`: the Python twin, wired into the pack manifest's own
+  existing `sections[].warning` field (confirmed live, via the real DBSA runs, that this field already
+  exists and was always `null` before this) - only checked against a vault-slot document actually
+  merged into the pack, never a fresh per-tender upload (chosen deliberately for that one tender, so a
+  mismatch there would be a false positive by construction).
+- New tests: `lib/vaultDocuments.test.ts` (extended) and `engine/general/test_build_general_pack.py`
+  (new) both carry the real `BBBEE_Affidavit.docx` -> `coid` case as a named regression.
+
+Built in an isolated worktree, reviewed in full and independently re-verified on this branch before
+merging in (not just trusted) - `tsc --noEmit`/`eslint`/`vitest run` 289/289/`python3
+test_build_general_pack.py` 11/11/`test_general_bridge.py` ALL PASSED/`npm run build`, all clean, same
+route classification as before.
+
+---
+
+**2026-10-28 ~10:45 UTC — flagged, and Sarel agreed, that "stock a real company's vault with sample
+SARS/CIDB/CIPC/B-BBEE/COID documents" was a real risk, not a UX nicety; re-ran the DBSA RFP165/2026
+compilation against the Mzansi demo company instead, and it surfaced a real, honest finding of its
+own.**
+
+**The ask declined, and why**: Sarel's next-phase instructions asked to seed Reviewer Civils &
+Consulting's real vault with "realistic sample" SARS Tax PIN / B-BBEE affidavit / COID letter / CIPC
+certificate / bank letter / CIDB certificate documents, purely to raise its pack prefill rate for a
+demo. Flagged before doing anything: these are official South African regulatory certificates: Reviewer
+Civils is a real, `is_test_company`-flagged-for-reporting-purposes-only company, still reachable from
+real UI and still capable of submitting a real tender - fabricating documents that look like real
+government certificates against it is a materially different risk than a UX bug (POPIA/fraud exposure
+if one ever reached a real submission), and would have falsified the very "this company hasn't
+onboarded" signal Phase 7's own diagnostic worked to make honest in the first place. Put 3 options to
+Sarel via AskUserQuestion; he chose: use the Mzansi demo company (already seeded with complete,
+legitimate sample vault data for exactly this purpose) instead, and leave Reviewer Civils' vault
+untouched so he can test the real drag-and-drop upload flow himself with real documents.
+
+**Re-ran the same real `generate_pack` job (RFP165/2026, DBSA) against Mzansi
+(`26294b10-1a6e-43cc-968a-2cbe77ac5d4f`)** - same mechanism as the Reviewer Civils run (tender_packs
+insert + pack_generation_jobs insert + `process_general_jobs.py --once`, no stub. 111 real pages (112
+for Reviewer Civils was bulked out by exactly the misfiled COID page, correctly absent here).
+
+**Real finding: the prefill rate did NOT improve** - still 1 of 26 `field_provenance` rows confirmed,
+all 8 company-document checklist items still `not_included`, even though Mzansi has every STRUCTURED
+compliance fact on file (`csd_supplier_number`, `sars_tcs_pin`, `bee_level`+`bee_proof_type`,
+`cidb_grading`, `coid_letter_of_good_standing_number`, `pi_insurance_policy_number`,
+`bank_confirmation_letter_date` - all populated, confirmed read live). Checked why, not guessed: every
+one of the matching `*_document_path` columns (`coid_letter_document_path`,
+`sars_tcs_pin_document_path`, `pi_insurance_document_path`, `bank_confirmation_letter_path`,
+`bee_proof_document_path`, `cidb_document_path`) is **null** - Mzansi has the compliance FACTS on
+file but no actual uploaded COPY of any certificate. `checkReturnable()`/the pack's own
+assembly need a real file to merge into the submission pack, not just the structured data - so this
+particular gap is genuinely about missing document uploads, for both companies, not a vault-data
+gap `is_test_company` or prefilled text fields alone can close. Left exactly as found; this is a real
+product finding (worth deciding whether Mzansi's own seed script should also attach sample document
+files), not something fixed unilaterally here.
+
+**Separately, verified SANRAL Form B7/personnel parsing against a real document, no CAPTCHA bypass, no
+fabrication**: ran the engine's own real pipeline (`fingerprint.detect_family`, then
+`classify_tender.read_setup`, then `sanral_b7.applicability`) directly against
+`templates/samples/R.396-010-2025.1F_ran.xlsm` - an already-legitimate sample Technical Submission
+workbook already checked into this repo (used elsewhere for the engine's own seed/demo data, not
+newly fabricated or scraped). Results, all real: correctly fingerprinted as a Conventional Consultant
+Tender; `read_setup()` correctly extracted the real personnel schedule (positions `PL`/"Project
+Leader" and `DS1`/"Design Specialist 1 - Pavement and Materials", both non-managerial, both with an
+alternate); the SETUP sheet's real B7 category/matrix cells (category 3, the full
+category/status/required matrix) read correctly and fed into `sanral_b7.applicability()`, which
+correctly returned "Category 3 tender (over R25 million)... B7 is treated as required until you
+answer it." Full SANRAL pack-assembly / dual-envelope staging (the actual submission-pack merge, as
+opposed to this classification/intake step) still needs a company context to run meaningfully -
+natural next step once Sarel decides how he wants that company context handled, same reasoning as the
+vault-fixtures finding above.
+
+---
+
 **2026-10-28 — standing review pass, clean sweep: job-bridge `completed_at`-on-crash bug class
 checked across all 5 sibling bridges, none affected beyond the one already fixed
 (`process_cv_jobs.py`, commit `a987198`).**

@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { randomUUID } from "node:crypto";
-import { MAX_UPLOAD_BYTES, VAULT_BUCKET, VAULT_DOCUMENTS, isVaultDocumentKind } from "@/lib/vaultDocuments";
+import { MAX_UPLOAD_BYTES, VAULT_BUCKET, VAULT_DOCUMENTS, isVaultDocumentKind, vaultDocumentMismatchWarning } from "@/lib/vaultDocuments";
 import { COMPANY_DOCUMENT_TYPES, GUIDELINE_MAX_CHARS, isCompanyDocumentType, isDocumentTemplateMode } from "@/lib/companyDocuments";
 import { safeFileName } from "@/lib/safeFileName";
 import { buildCompanyUpdate } from "@/lib/companyProfileUpdate";
@@ -56,6 +56,14 @@ export async function uploadVaultDocument(companyId: string, formData: FormData)
   if (!file || file.size === 0) redirect(`/company?error=${encodeURIComponent("Choose a file to upload.")}`);
   if (file.size > MAX_UPLOAD_BYTES) {
     redirect(`/company?error=${encodeURIComponent("File is larger than 4.4 MB - scan it at a lower resolution or compress the PDF.")}`);
+  }
+
+  // Re-checked here, not just client-side (DirectVaultDocumentUploader's own
+  // window.confirm) - a request with no acknowledgement must not silently
+  // skip the warning just because it didn't come through that confirm step.
+  const mismatch = vaultDocumentMismatchWarning(kind, file.name);
+  if (mismatch && formData.get("acknowledge_mismatch") !== "true") {
+    redirect(`/company?error=${encodeURIComponent(mismatch)}`);
   }
 
   const column = VAULT_DOCUMENTS[kind].column;

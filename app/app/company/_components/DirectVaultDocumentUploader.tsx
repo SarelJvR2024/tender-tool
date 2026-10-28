@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { ACCEPTED_EXTENSIONS } from "@/lib/onboardingScan";
-import { MAX_UPLOAD_BYTES, type VaultDocumentKind } from "@/lib/vaultDocuments";
+import { MAX_UPLOAD_BYTES, vaultDocumentMismatchWarning, type VaultDocumentKind } from "@/lib/vaultDocuments";
 import { uploadVaultDocument } from "../actions";
 import { FileDropzone, validateFiles } from "../../_components/document-intake/FileDropzone";
 import { Button } from "@/components/ui/button";
@@ -46,11 +46,21 @@ export function DirectVaultDocumentUploader({
   function upload(files: File[]) {
     const bad = validateFiles(files, { acceptedExtensions: ACCEPTED_EXTENSIONS, maxBytes: MAX_UPLOAD_BYTES, maxFiles: 1 });
     if (bad) return setError(bad);
+    // Filename-only heuristic (lib/vaultDocuments.ts's own comment explains
+    // why - no PDF/DOCX content reading in this app) - a real "Tender Ready
+    // live incident" caught by this exact check: a file named
+    // "...BBBEE_Affidavit.docx" uploaded into this slot. Never a hard block:
+    // the same window.confirm pattern ConfirmSubmitButton already uses
+    // elsewhere in this app, so a real, correctly-chosen file with an
+    // unusual name is never trapped.
+    const warning = vaultDocumentMismatchWarning(kind, files[0].name);
+    if (warning && !window.confirm(`${warning}\n\nUpload it anyway?`)) return;
     setError(null);
     startTransition(async () => {
       const fd = new FormData();
       fd.append("kind", kind);
       fd.append("file", files[0]);
+      if (warning) fd.append("acknowledge_mismatch", "true");
       // uploadVaultDocument redirects to /company?saved=doc on success (and
       // to /company?error=... on failure) - same as every other caller of
       // this action, so a thrown redirect here is expected, not an error.
