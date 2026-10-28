@@ -14,6 +14,45 @@
 
 ---
 
+**2026-10-28 ~22:15 UTC — standing review: clean sweep, no new finding.**
+
+Oriented from `3699e4a` (second "days to close" drift site fixed); fetched `origin/main` and found one
+newer commit already landed by a different session, `8968a21` ("QA cycle (compliance): clean sweep of
+`watch_deadlines.py`'s `find_due_tasks()`") - docs-only, no code changed, no overlap with this pass's
+work. Fast-forwarded local `main` to match before starting, per this session's own standing discipline
+about not trusting a stale checkout.
+
+Open PRs checked (`#164`, `#165`, `#170`) - all still correctly unmerged drafts, unchanged, no
+collision.
+
+Due diligence on the last two passes' "days to close" drift fix (`ba00473`, `3699e4a`): re-grepped the
+whole `app/` tree for the same `Math.ceil((... .getTime() - now.getTime()) / <ms-per-day>)` shape
+(several variants: `86_400_000`, `86400000`, `1000 * 60 * 60 * 24`, `24 * 60 * 60 * 1000`). Confirmed
+the only remaining match combined with a closing-date field is `lib/dates.ts`'s own `daysUntil()`
+implementation itself - genuinely fully closed, not just claimed. The broader day-math grep turned up a
+handful of other, unrelated day-count computations (`billing.ts` trial-days-left, `principals.ts`
+certification-age, a few `onboardingNudges.ts`/experience-page "days since" displays) - each is a
+standalone calculation with no second, competing source of truth for the same value anywhere else in
+the app, so none of these are the same bug class (the original bug was specifically two different
+functions disagreeing about the identical real-world fact for the same card/tender). Read `billing.ts`
+end to end given its tie to the still-open migration `0096` backlog item - `effectiveSubscriptionStatus()`/
+`isSubscriptionLapsed()`/`trialDaysLeft()` are internally consistent and already correctly reasoned
+through; no code bug here, migration `0096` application itself remains the only open item.
+
+Checked for stray TODOs across `app/` and `engine/` - the one genuine hit
+(`app/app/tenders/[id]/actions.ts` reviewed_at TODO) is already documented and deliberately deferred,
+not a new finding. Checked `app/supabase/migrations/` for numbering collisions - none, latest is `0103`.
+
+QA tooling confirmed sound: `node --experimental-strip-types --test lib/*.test.ts` 178/178 passing.
+
+No code change this pass - genuine clean sweep, not a forced fix. Backlog unchanged at 9 items (migration
+`0096`, `narrative_documents` PostgREST schema-cache reload, PayFast idempotency design question,
+"missing ISO 9001 flagged as urgent" UX question, fingerprint.py baseline-mismatch heads-up, Dashboard
+"Decision needed" over-triggering finding, Form B7 compulsory-vs-matrix disagreement, impersonation
+token-refresh gap, submitted-tender nagging gap) - none resolved, none newly added.
+
+---
+
 **2026-10-28 ~20:15 UTC — standing review: the prior pass's "days to close" drift fix
 (`daysUntil()`/`ba00473`) missed a second, pre-existing site with the exact same bug; fixed.**
 
