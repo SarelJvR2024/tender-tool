@@ -14,6 +14,49 @@
 
 ---
 
+**2026-10-28 ~00:14 UTC — standing review pass: clean sweep of `engine/general/requirements.py`
+(the non-SANRAL requirement-extraction engine) - no new bug found after real digging; QA tooling
+re-confirmed sound; no collisions.** Orientation: `git fetch origin main` showed no new commits
+since this routine's own last pass (`9bd4b55`) - local HEAD already matched `origin/main` exactly,
+no stale-checkout risk. Two open PRs (`#164` savings-counter rework - including a new, not-yet-
+applied migration `0099_savings_baseline_range_limits.sql`, `#165` 4 pre-demo production defects),
+both read in full via the GitHub API, not assumed from their titles - `#165`'s own diff fixes the
+exact "`HOME_MESSAGE` server/client boundary crash" bug class this file's own earlier entries have
+independently found elsewhere, confirms `support@tenderready.app` as a second real contact address,
+and reworks `savings-calculator.tsx`'s own "extra tenders" stat onto a consistent annual basis - all
+correctly still open/draft, neither self-merged, neither touched this pass. Read the new standing
+rule above in full before starting; it doesn't apply to this pass (no live-database access used at
+all, only `git`/local test runs).
+
+**What was checked, specifically**: `find_roles()`/`_is_buyers_own_person()` (excluding the buyer's
+own named agent, e.g. "the Transnet Contract Manager", from counting as a bidder-role ask -
+Finding 47's own fix, re-verified by reading the code, not just trusting its test names), the
+MBD-vs-SBD suite-majority vote (Finding 29/one-stray-mention class), the winning-suite-only form-
+code union (Finding 35), the combined-bulletin detector's row regex (Finding 42), and
+`forms_in_text()`'s two regexes (`FORM_RE`'s suite+major+minor groups vs `FORM_TYPO_RE`'s shifted
+group numbering for the "MDB" typo case, confirmed each `_form_code()` call site passes the right
+groups for its own pattern) - all held up as correct on inspection. `python3
+engine/general/test_requirements.py` re-run clean, 0 failures, all 40+ existing cases including the
+buyer-agent exclusion suite. No application code touched this pass - a real, demonstrable new bug
+wasn't found in this module after genuine effort, so a clean sweep is reported honestly rather than
+a forced weak finding.
+
+**Backlog re-confirmed, unchanged** (don't assume stale - checked each is still accurate as of this
+pass): migration `0096` (pack-quota trial-expiry) still outstanding; the `narrative_documents`
+PostgREST schema-cache reload status not re-checked this pass; a PayFast idempotency design question,
+not urgent; the "missing ISO 9001 flagged as urgent" document-expiry UX question; the fingerprint.py
+`named_ranges()` fix from an earlier pass (expect a baseline mismatch the next time a real SANRAL
+tender is fingerprint-checked - that's the fix correctly surfacing previously-hidden data, not a
+regression); the Dashboard "Decision needed" bucket over-triggering finding (needs a real refactor,
+not fixed yet); the Form B7 compulsory-vs-matrix disagreement confirmed on a real template
+(`R.334-030-2025.1F`); and the impersonation feature's token-refresh gap traced to the actual SDK
+source, not fixed (no live Supabase credentials in this sandbox to verify an end-to-end fix against).
+One new item from this pass's own orientation: migration `0099` (savings-counter baseline range
+limits) is queued inside still-open draft PR `#164` - not yet something needing Sarel's apply step,
+since the PR itself hasn't merged, but worth knowing it exists for when it does.
+
+---
+
 **2026-10-27 ~22:17 UTC — standing review pass: a real reliability gap found and traced to the SDK
 source in the brand-new "View Tenant Workspace" impersonation feature (Admin Command Center Phase 4) -
 not fixed, flagged for Sarel's own call given the complexity and no live Supabase credentials in this
