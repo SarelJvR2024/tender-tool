@@ -5225,6 +5225,52 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-eleventh run): Finding 88 (severe) - the pack-ready notification claimed its one-time idempotency token BEFORE checking RESEND_API_KEY was configured, permanently losing a company's "bid pack ready" email if the key happened to be unset at that moment
+
+Orientation: `git fetch origin main` showed one new sibling commit (`db06ad3`, a standing-review
+clean sweep of `engine/general/requirements.py` - the non-SANRAL requirement-extraction engine,
+no new bug found, no overlap with this pass) - fast-forwarded cleanly before starting. Read the
+standing rule at this file's own top (no direct production DB mutations without sign-off) - didn't
+apply, no live-database access used this pass. Two open PRs (`#164`, `#165`), both re-confirmed via
+the GitHub API to be TypeScript-only, no `engine/` overlap; `#166` (the big Admin Command Center
+build-out) already merged by this point.
+
+Rotated to notify - `send_digest_emails.py`/`daily_digest.py` had already had dedicated passes
+(coverage closure + live-mode checks), so picked the two files in that area with effectively zero
+prior review: `send_pack_ready_email.py` and `record_heartbeat.py`.
+
+**The finding.** `send_pack_ready_email.py`'s own docstring explicitly claims to use "the SAME
+notification_claims/record_notification_sent RPCs every TypeScript sender already uses" - checked
+whether it actually follows the canonical TypeScript sender's own stated ordering rule
+(`app/lib/notificationEngine.ts`'s `sendNotification()`, whose header comment says plainly: check
+`RESEND_API_KEY` is configured BEFORE calling `claim_notification()`, specifically because
+`notification_claims` is a one-time-only token that claiming-without-sending would permanently
+waste). It didn't: the Python sender claimed the token first, unconditionally, and only checked the
+key deep inside the per-recipient send loop. Since this job id never fires a second time (nothing
+re-invokes the sender once a pack is `"ready"`), a key that happened to be unset at that exact
+moment (a staging environment, a key-rotation gap) would permanently lose that company's one-and-
+only pack-ready email, even after the key was later configured - the exact bug
+`notificationEngine.ts`'s own comment names and was written to avoid.
+
+**Fix:** moved the `RESEND_API_KEY` check to the top of the function, before any claim is made - an
+early, un-claimed return when the key is missing, mirroring the canonical sender exactly. A related
+test-hygiene gap surfaced while writing the regression test (two pre-existing tests implicitly
+depended on this sandbox's own ambient `RESEND_API_KEY` once the check moved earlier) - fixed with
+a `setdefault` so the suite is deterministic regardless of ambient state, confirmed by running it
+both with and without the sandbox's own key present.
+
+**Verified red-then-green**: new test asserts `claim_notification` is never called with no key
+configured; reverting the real fix made it (and one existing test) fail exactly as predicted;
+restored: `0 failure(s)`, 11 checks. `engine/general/test_general_bridge.py` - the real integration
+path that actually calls this function - re-run clean, `ALL PASSED`.
+
+**A second, independent gap, same shape as Finding 87, fixed in the same pass**: neither
+`test_send_pack_ready_email.py` nor `test_record_heartbeat.py` had ever been wired into
+`bridge-worker-ci.yml` - confirmed by grep, zero mentions anywhere. Added two new CI steps running
+both, after confirming both run clean from the repo root first.
+
+Full writeup: Finding 88, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-27, standing QA/robustness review - one-hundred-and-tenth run): Finding 87 - the narrative-document generation bridge (LLM cover letter / methodology statements, with its own anti-collusion uniqueness check) had zero CI coverage and zero test coverage of its own claim/fulfil mechanism
 
 Orientation: `git fetch origin main` showed two new sibling commits (`18ac558` Discovery "same

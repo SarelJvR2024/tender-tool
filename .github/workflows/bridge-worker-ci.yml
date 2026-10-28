@@ -167,6 +167,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/notify/test_send_digest_emails.py
 
+      - name: Pack-ready email - claim-before-send ordering (Finding 88), recipient opt-in, render/send failure isolation (no network)
+        # Was not wired into CI at all before this pass (same gap shape as
+        # Finding 87's narrative tests) - confirmed via grep across every
+        # workflow file before adding this step.
+        if: ${{ !cancelled() }}
+        run: python3 engine/notify/test_send_pack_ready_email.py
+
+      - name: Workflow heartbeats - cron/bridge health recording, step-failure and no-env isolation (no network)
+        if: ${{ !cancelled() }}
+        run: python3 engine/notify/test_record_heartbeat.py
+
       - name: Tender updates - addenda classified from real documents, watch end to end, pursuers only (in-memory rows)
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_tender_updates.py

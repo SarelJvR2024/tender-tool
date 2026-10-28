@@ -5056,3 +5056,73 @@ them (`python3 engine/narrative/test_*.py` from the repo root).
 **Regression:** `engine/narrative/test_process_narrative_jobs.py` (additive only - no existing test
 changed) and `.github/workflows/bridge-worker-ci.yml` (two new steps, nothing removed or reordered).
 No production code touched.
+
+### Finding 88 (CONFIRMED, FIXED, severe - the pack-ready notification engine claimed its one-time idempotency token BEFORE checking RESEND_API_KEY was even configured, permanently losing a company's "your bid pack is ready" email forever if the key happened to be unset at that moment)
+
+**Where:** notify rotation this cycle (zero/near-zero prior review of `engine/notify/
+send_pack_ready_email.py`, `record_heartbeat.py` specifically - `send_digest_emails.py`/
+`daily_digest.py` had already had dedicated passes). `engine/notify/send_pack_ready_email.py` -
+called once, synchronously, by `engine/general/process_general_jobs.py` right after a non-SANRAL
+pack-generation job's status flips to `"ready"` (2026-10-27, notification-engine item B12).
+
+**What was tested:** read `send_pack_ready_email()` against the canonical pattern it explicitly
+claims to mirror - `app/lib/notificationEngine.ts`'s `sendNotification()`, the one entrypoint every
+other Tier 0-3 notification in this codebase goes through. That file's own header comment states
+the exact rule directly: *"Checked BEFORE claiming, not after: notification_claims (0092) is a
+one-time-only token... claiming it without a real send would permanently waste it, so once
+RESEND_API_KEY is finally set, this exact notification could never be sent at all"* - and its code
+calls `resendApiKeyConfigured()` before `claim_notification()`, never after. Checked whether the
+Python sender actually follows its own stated mirror.
+
+**Finding (CONFIRMED, severe).** It didn't. `send_pack_ready_email()`'s own order was: claim
+`pack-ready-{job['id']}` via `claim_notification` (migration 0093's one-row-per-idempotency_key,
+primary-key-gated, never cleared, never retried) **first**, unconditionally - then fetch
+recipients, render the email, and only **inside the per-recipient send loop**, deep inside
+`_send_via_resend()`, check `os.environ.get("RESEND_API_KEY")`. Confirmed reachable: the caller
+(`process_general_jobs.py`) does no pre-check of its own, and this job id is a one-time event -
+nothing anywhere re-invokes `send_pack_ready_email()` for the same job once its pack is `"ready"`.
+So if `RESEND_API_KEY` happened to be unset at the exact moment a pack finished (a staging
+environment before the key is added, a key-rotation gap, any config-timing accident), the claim was
+already permanently burned by the time the missing key was discovered - `record_notification_sent`
+would log `status: "skipped_no_api_key"` honestly, but that company's one-and-only "bid pack ready
+for print/review" email for that specific tender pack could never be sent again, even the moment
+the key was finally configured, because nothing would ever retry a job already marked `"ready"`.
+Exactly the failure mode `notificationEngine.ts`'s own comment names and was deliberately written
+to avoid - the Python sender just never followed it.
+
+**Fix:** moved the `RESEND_API_KEY` check to the very top of `send_pack_ready_email()`, before
+`claim_notification` is ever called - an early, un-claimed return (logged via `print`, same
+severity as `notificationEngine.ts`'s own `console.log` for the identical case) when the key isn't
+configured, so the idempotency token stays unspent and a later manual/backfill resend of this exact
+pack's email remains possible. `_send_via_resend()`'s own inner check is left in place as
+belt-and-suspenders, not removed.
+
+**A test-hygiene gap surfaced by writing the regression test, fixed in the same pass:** the two
+pre-existing tests that return early for unrelated reasons (`test_skips_cleanly_when_already_claimed`,
+`test_skips_cleanly_with_no_opted_in_recipients`) never set `RESEND_API_KEY` themselves - harmless
+under the old code (the key was never checked before either of them already returned), but silently
+dependent on this sandbox's own ambient environment once the fix moved the check to the top (this
+sandbox happens to have a real key exported for its own live-send verification elsewhere). Added
+`os.environ.setdefault("RESEND_API_KEY", "re_test_dummy_key")` at module load so the whole suite is
+deterministic regardless of ambient state, confirmed by running it both with and without the
+sandbox's own key present - identical result either way.
+
+**Verified red-then-green the standard way.** New test
+`test_missing_api_key_does_not_claim_so_the_email_can_still_be_sent_once_one_is_added` (pops/restores
+`RESEND_API_KEY` itself, independent of the new `setdefault`): asserts `claim_notification` is never
+even called with no key configured. Reverted the real fix (`git apply -R`): the new test, and
+`test_render_failure_is_caught_and_never_raises`'s own log-count assertion, both failed exactly as
+predicted (the reverted code still claims and logs `skipped_no_api_key` before any key check).
+Restored: `0 failure(s)`, 11 checks, run clean both with and without the sandbox's ambient key.
+`engine/general/test_general_bridge.py` (the real integration path that actually calls this
+function) re-run clean, `ALL PASSED`, no regression.
+
+**A second, independent gap found while verifying CI, fixed in the same pass:** neither
+`test_send_pack_ready_email.py` nor `test_record_heartbeat.py` (the third, also-unreviewed file in
+`engine/notify/`) had ever been wired into `bridge-worker-ci.yml` - the same shape of gap as Finding
+87, confirmed the same way (a grep across every workflow file). Added two new steps running both,
+after confirming both run clean from the repo root first.
+
+**Regression:** `engine/notify/send_pack_ready_email.py` (the ordering fix only - no RPC/behaviour
+shape changed), `engine/notify/test_send_pack_ready_email.py` (one new test, one `setdefault` line),
+`.github/workflows/bridge-worker-ci.yml` (two new steps). No schema or other call-site changes.

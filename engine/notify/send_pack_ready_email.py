@@ -78,6 +78,20 @@ def send_pack_ready_email(client, job, page_count, app_url):
     if not company_id or not tender_id:
         return
     try:
+        # Checked BEFORE claiming, not after - same reasoning and same bug
+        # class lib/notificationEngine.ts's own sendNotification() is
+        # deliberately written to avoid (see its own header comment):
+        # notification_claims is a one-time-only token, and this job will
+        # never run again for this job id (no cron/retry re-invokes this
+        # function once the pack is "ready"), so claiming it while
+        # RESEND_API_KEY happens to be unset would permanently lose this
+        # pack's one and only "ready" email, even once the key is added
+        # later - QA pass, 2026-10-28.
+        if not os.environ.get("RESEND_API_KEY"):
+            print(f"RESEND_API_KEY not set - not sending or claiming pack-ready-{job['id']} "
+                  "(would be lost forever once claimed with no key to send with).")
+            return
+
         idempotency_key = f"pack-ready-{job['id']}"
         claimed = client.rpc("claim_notification", {"p_idempotency_key": idempotency_key, "p_notification_type": "pack_ready"})
         if not claimed:

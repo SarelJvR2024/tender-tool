@@ -18,6 +18,13 @@ sys.path.insert(0, HERE)
 # environment's own live Supabase credentials - system_alerts.record()'s
 # own documented escape hatch, not a monkeypatch of its urlopen call.
 os.environ["SYSTEM_ALERTS_DISABLED"] = "1"
+# Every test here except the one that specifically targets the missing-key
+# path (which pops/restores this itself) is about something else entirely
+# (claim/recipient/render behaviour) and must not silently depend on
+# whatever this sandbox's own ambient environment happens to have set -
+# setdefault so a real exported key (e.g. for live-send verification
+# elsewhere) is left alone, but a run with none set is still deterministic.
+os.environ.setdefault("RESEND_API_KEY", "re_test_dummy_key")
 import send_pack_ready_email as pr  # noqa: E402
 
 FAILS = []
@@ -92,6 +99,31 @@ def test_skips_cleanly_with_no_opted_in_recipients():
     check("no send was logged when nobody is opted in", "record_notification_sent" not in rpc_names)
 
 
+def test_missing_api_key_does_not_claim_so_the_email_can_still_be_sent_once_one_is_added():
+    """lib/notificationEngine.ts's own sendNotification() checks
+    resendApiKeyConfigured() BEFORE calling claim_notification() - its own
+    header comment explains why: notification_claims is a one-time-only
+    token, so claiming it with no key to actually send with would
+    permanently lose this exact notification, even after a key is later
+    configured. send_pack_ready_email.py used to claim first and only
+    discover the missing key deep inside the per-recipient send loop -
+    this job never runs again for the same job id, so that claim would
+    have burned the pack's one and only "ready" email forever."""
+    had_key = "RESEND_API_KEY" in os.environ
+    old_key = os.environ.pop("RESEND_API_KEY", None)
+    try:
+        client = _base_client()
+        pr.send_pack_ready_email(client, _job(), 42, "https://tenderready.app")
+        rpc_names = [c[0] for c in client.rpc_calls]
+        check("claim_notification was never even attempted with no API key configured",
+              "claim_notification" not in rpc_names, rpc_names)
+        check("nothing was logged either - there was never a real send attempt",
+              "record_notification_sent" not in rpc_names, rpc_names)
+    finally:
+        if had_key:
+            os.environ["RESEND_API_KEY"] = old_key
+
+
 def test_happy_path_renders_sends_and_logs(monkeypatch):
     client = _base_client()
     rendered = {"subject": "[N.007-030-2026/1F] Bid Pack Compiled & Ready for Print/Review | SANRAL", "html": "<p>hi</p>", "text": "hi"}
@@ -160,6 +192,7 @@ def monkeypatch_module(obj, attr, value, env=None):
 def main():
     test_skips_cleanly_when_already_claimed()
     test_skips_cleanly_with_no_opted_in_recipients()
+    test_missing_api_key_does_not_claim_so_the_email_can_still_be_sent_once_one_is_added()
     test_happy_path_renders_sends_and_logs(None)
     test_render_failure_is_caught_and_never_raises(None)
 
