@@ -14,6 +14,75 @@
 
 ---
 
+**2026-10-28 ~14:30 UTC — PR #169 merged; root-caused the 1/26 Mzansi/RFP165 prefill rate field-by-
+field; confirmed the SANRAL demo tenders carry zero real document content, so a live pack-assembly
+test needs a decision before it can run.**
+
+**PR #169 merged** (squash, `2012f89`) after rebasing onto main's new tip (`3b2f7f2`, the
+`ownPosition`/kouga/clean-sweep commits that landed while #169 was in review) - one conflict, same
+anchor point in this file as the previous near-miss, resolved the same way (kept both entries,
+newest-first). Re-verified after the rebase: `tsc --noEmit` clean, `vitest run` 291/291 (291, not 289 -
+main's own `ownPosition` fix added 2), `test_build_general_pack.py` 11/11. Branch restarted from the
+confirmed-merged tip per the standing git-workflow rule, this time checking `pull_request_read` for
+`merged: true` before resetting (not just chat approval) - the exact check skipped last time.
+
+**1/26 prefill root cause, verified against the real field_provenance rows and the real filler code
+(not guessed):** all 26 rows are fields inside SBD4/SBD6.1/SBD8/SBD9/Form of Offer - none are the 8
+vault-document checklist items (CSD, SARS TCS PIN, B-BBEE, COID, CIDB, CIPC, PI/PL insurance), which
+are a separate, additional gap already recorded in the prior entry below. Five real categories, by
+cause:
+- **A - never automatable (5 fields):** every `*.signature_and_date` field. By design - a real
+  signature is never typed in.
+- **B - document-format limited (13 fields):** all of SBD 6.1 (8) and SBD 8 (5). DBSA published only a
+  flat PDF edition of the Tender Volume for this specific RFP; `fill_flat_pdf.py` has no fillable
+  layout to write into. Not an engine gap - improves only if a fillable edition is ever published.
+- **C - layout-detection misses (4 fields):** `form_of_offer.tenderer`/`.address`,
+  `sbd9.bid_number_and_description`/`.name_of_bidder`. The data is known; `fill_flat_pdf.py`
+  (`"no blank cell or dotted line next to the label"`, line ~568) found no safe place to type it onto
+  *this* PDF's layout without risking an overlap. Tunable - a real engine improvement, not a data gap.
+- **D - signatory not selected for this tender run (4 fields):** `form_of_offer.capacity`,
+  `form_of_offer.signatory_name`, `sbd4.designation_footer`, `sbd9.position_footer`. Verified against
+  `process_general_jobs.py gather_pack_inputs()` (line 633-645): the signatory is read **only** from
+  `tender_answers.signatory_person_id` for *this* tender - never a fallback to `companies.director_name`
+  or any person's `signatory_capacity` - a deliberate decision per the code's own comment, dated
+  2026-10-18. Mzansi has a person on file with `signatory_capacity="Director"` (Lindiwe Dlamini); nobody
+  picked her as RFP165/2026's signatory before this test run. **Not a mapping bug** - one unperformed
+  UI step, not a naming/tag mismatch.
+- **D2 - genuine data gap (1 field):** `sbd4.representative_id_number` reads
+  `signatory["id_number"]` -> `people.id_number`, which is `null` for every one of Mzansi's 3 people.
+  Stays missing even after a signatory is picked, until an ID number is captured on that person's
+  profile.
+- **E - already filled (1 field):** `sbd4.name_of_bidder_footer`.
+
+**Realistic ceiling, concrete not aspirational:** A (5) and B (13) - 18 of 26 (69%) - stay by-hand no
+matter how good the matching gets; that is not a product gap, that is what "signature required" and
+"buyer published a flat PDF" actually mean. Of the other 8: D/D2's 5 fields are 100% recoverable today
+with zero engine work - pick a signatory on the Tender Workspace, capture that person's ID number -
+taking Mzansi to 6/26 (23%) immediately. C's 4 fields need real layout-detection tuning on
+`fill_flat_pdf.py`; optimistic but plausible recovery on most of them would take it to roughly 9-10/26
+(~35-38%). The 8 vault-document checklist items are separate from this 26 and 100% recoverable the
+moment real compliance documents are uploaded to a company's vault - already recorded below, no engine
+change needed.
+
+**SANRAL pack-assembly test (Sarel's task #4) - blocked on a decision, not attempted blind:** checked
+live before running anything. Both SANRAL demo tenders (`N.007-030-2026/1F` id `009bfe1c...`,
+`N.003-120-2025/1F` id `5039736d...`) have `document_urls: []`, `document_requirements: null`, and
+`sanral_b7_setup: null` - no real Technical/Financial Submission workbook has ever been attached to
+either in this database, and zero `pack_generation_jobs` rows with `engine='sanral'` have ever existed,
+for any company. The earlier Form B7/personnel-parsing verification (previous entry below) ran directly
+against the local sample file - it never touched these DB rows. Running the real pipeline
+(`process_pack_jobs.py`) needs a `tender_documents` row (bucket `tender-documents`) pointing at an
+actual workbook, `tender_requirements`/`tender_pack_assignments.confirmed_person_id` filled in per
+position, then a `pack_generation_jobs` row - several live writes to a shared demo-fixture tender, not
+a single scoped insert like the DBSA run. The only workbook available without a CAPTCHA bypass is the
+already-legitimate repo sample (`templates/samples/R.396-010-2025.1F_ran.xlsm`, contract no.
+`R.396-010-2025/1F`) - real, but a *different* contract number than either demo tender's. Per the
+standing live-DB-mutation rule and the same caution that redirected the vault-fixtures work to Mzansi,
+this needs Sarel's explicit sign-off before attaching a mismatched-contract-number sample to either
+demo tender, rather than silently relabelling it as that tender's own document.
+
+---
+
 **2026-10-28 ~10:50 UTC — document-mismatch guard, closing the real COID/B-BBEE-misfile defect found
 in Phase 7's/this phase's live pack runs.** Built as a filename-only heuristic, not real PDF/DOCX
 content inspection - confirmed first (`package.json` has no PDF/DOCX-parsing dependency) that real
