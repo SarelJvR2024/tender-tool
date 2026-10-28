@@ -14,6 +14,42 @@
 
 ---
 
+**2026-10-28 ~16:15 UTC — `confirm_pack.py` was silently dropping a key person's incomplete
+project citations with zero trace, anywhere, violating this gate's own "refuses loudly, not
+silently" docstring; fixed.**
+
+`confirm_pack.py` only requires a person's first 3 projects (raw profile order) to have every
+field `sanral_fill.py`'s filler needs (`client_type`, `project_type`, `position_code`,
+`contact_number`) - intentional, documented behaviour, since a position's 3 Form B1 rows don't
+need every project a person has ever done. A 4th-or-later project missing a field was dropped via
+a bare `continue` - no print, no note, nothing written to the generated `pack.yaml` at all. Found
+because `sanral_fill.projects_for_block()` (the function that actually decides which of a
+person's projects fill a given position's 3 rows) picks **by project_type matching that
+position's own Book 1 matrix, not by raw list order** - so a project dropped here for a missing
+field could easily have been the one a *later* position's block actually needed, and that drop
+had no trace anywhere (contrast: the project-type-mismatch case in `projects_for_block()` itself
+already generates a user-facing note, "surfaced on the contents page, never silent" per
+`assemble_pack.py`'s own comment - this one bypassed that path entirely, before the project ever
+reached it).
+
+Fix: record each such drop (person, project, missing fields) into a new
+`pack['_provenance']['dropped_incomplete_projects']` list - same place/convention the file
+already uses for AI-suggestion overrides - and print it to stdout the same way overrides are
+printed. Doesn't change what gets filled (a project still needs a complete profile to be cited;
+that's correct and unchanged); only makes the drop visible instead of invisible.
+
+Verified with the revert-confirm-fail-restore-confirm-pass discipline: reverted the fix, ran a
+synthetic 4-project person through `confirm()` - the 4th project vanished with nothing printed and
+no `dropped_incomplete_projects` key in the output at all (confirmed bug); restored the fix, same
+input - printed "1 project(s) dropped..." and `pack.yaml`'s `_provenance.dropped_incomplete_projects`
+named the person and the missing fields. `py_compile` clean; no dedicated test file exists for
+`confirm_pack.py` (noted previously, still true) - not adding one now would be inconsistent with
+this session's own "verify properly" discipline, but a full test file is a larger lift than this
+pass's scope; flagging that `confirm_pack.py` having zero dedicated tests (unlike `suggest_pack.py`,
+which got one on 2026-10-21) is itself worth a future pass, not just this one finding.
+
+---
+
 **2026-10-28 ~10:50 UTC — document-mismatch guard, closing the real COID/B-BBEE-misfile defect found
 in Phase 7's/this phase's live pack runs.** Built as a filename-only heuristic, not real PDF/DOCX
 content inspection - confirmed first (`package.json` has no PDF/DOCX-parsing dependency) that real
