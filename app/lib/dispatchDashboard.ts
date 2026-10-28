@@ -7,6 +7,7 @@
 // the real blocking-item summary, rather than re-deriving one.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { nextStepFor } from "./tenderNextStep";
+import { daysUntil } from "./dates";
 import type { PipelineStage } from "./pipeline";
 import {
   classifyDispatchBucket,
@@ -51,13 +52,6 @@ export type DispatchCard = ActiveBidInput & {
 // nothing time-pressured about it yet.
 const DEEP_CHECK_WINDOW_DAYS = 14;
 
-function daysUntilFrom(dateStr: string | null, now: Date): number | null {
-  if (!dateStr) return null;
-  const t = new Date(dateStr);
-  if (Number.isNaN(t.getTime())) return null;
-  return Math.ceil((t.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
-}
-
 export async function loadDispatchCards(
   activeBids: ActiveBidInput[],
   supabase: SupabaseClient,
@@ -85,9 +79,9 @@ export async function loadDispatchCards(
         estimatedTransitHours: b.estimatedTransitHours,
         dispatchStatus: b.dispatchStatus,
       };
-      const daysToClose = daysUntilFrom(b.closingDate, now);
+      const daysToClose = daysUntil(b.closingDate, now);
       const briefingSoon = (() => {
-        const d = daysUntilFrom(b.briefingDate, now);
+        const d = daysUntil(b.briefingDate, now);
         return d !== null && d <= DEEP_CHECK_WINDOW_DAYS;
       })();
       const worthDeepCheck = (daysToClose !== null && daysToClose <= DEEP_CHECK_WINDOW_DAYS) || briefingSoon;

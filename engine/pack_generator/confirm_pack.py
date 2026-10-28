@@ -48,6 +48,7 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
     key_persons = []
     pack_people = {}
     overrides = []
+    dropped_projects = []
 
     for code, sel in selections["selections"].items():
         person_id = sel.get("confirmed_person")
@@ -103,6 +104,20 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
                 proj["contact_number"] = proj["contact_phone"]
             missing = [r for r in ("client_type", "project_type", "position_code", "contact_number") if r not in proj]
             if missing and n >= 3:
+                # Dropped silently until now (this gate's own docstring says it
+                # refuses "loudly, not silently" - that only held for positions,
+                # not for a project cited beyond the first 3). sanral_fill.
+                # projects_for_block() picks per-block from exactly this list by
+                # project_type, not by raw order, so a dropped project could have
+                # been the one a later position actually needed - recorded here
+                # the same way an AI-suggestion override already is, so it's at
+                # least visible in the generated pack.yaml instead of vanishing
+                # with no trace anywhere.
+                dropped_projects.append(
+                    f"{person['name']}: project '{proj.get('client_and_number', '(unnamed)')}' left out of the "
+                    f"pack entirely - missing {', '.join(missing)}. Add it on the People page if a position needs "
+                    f"this project cited."
+                )
                 continue
             for required in missing:
                 if required not in proj:
@@ -140,6 +155,7 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
             "confirmed_date": selections["confirmed_date"],
             "overrides": [f"{code}: suggested {s}, confirmed {c} instead" for code, s, c in overrides]
                          or "none - every position was assigned its top-suggested candidate",
+            "dropped_incomplete_projects": dropped_projects or "none",
         },
         "company": {
             "name": comp["legal_name"],
@@ -176,6 +192,10 @@ def confirm(suggestions_path, selections_path, profile_path, out_path):
         print(f"{len(overrides)} override(s) from the AI's suggestion:")
         for code, s, c in overrides:
             print(f"  {code}: suggested {s}, human confirmed {c} instead")
+    if dropped_projects:
+        print(f"{len(dropped_projects)} project(s) dropped for an incomplete field - check before relying on this pack:")
+        for note in dropped_projects:
+            print(f"  {note}")
 
 
 if __name__ == "__main__":

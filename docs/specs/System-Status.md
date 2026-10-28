@@ -189,6 +189,95 @@ demo tender, rather than silently relabelling it as that tender's own document.
 
 ---
 
+**2026-10-28 ~18:30 UTC — Standing review: Tender Command Center's own "days to close" math had
+drifted into a second, disagreeing copy of `lib/dates.ts`'s canonical `daysUntil()`; fixed.**
+
+Found while cross-checking the Command Center feature (dashboard/page.tsx's dispatch lanes,
+`command-center.tsx`) against the same "never a second number that could disagree" rule this app
+already documents and enforces elsewhere (`dispatchTriage.ts`'s own module header literally states
+this rule for blocking-item lists - just not for day counts). `lib/dispatchTriage.ts` had two inline
+`Math.ceil((closingDate - now) / day)` computations (in `deriveDecisionNeeded` and
+`classifyDispatchBucket`, the latter deciding the `in_progress`/`radar` 7-day bucket boundary), and
+`lib/dispatchDashboard.ts` had a third copy as its own local `daysUntilFrom()` helper (the 14-day
+`DEEP_CHECK_WINDOW_DAYS` gate) - none of the three imported or called `lib/dates.ts`'s own
+`daysUntil()`, which every card's own displayed `DeadlineChip` uses instead. The difference: the
+inline copies measured from the exact current instant (`now.getTime()`); `daysUntil()` measures from
+today's midnight, by design, "so the count is stable all day" (its own doc comment).
+
+Concrete, reproducible failure: a tender closing `2026-11-04T09:00+02:00`, viewed at
+`2026-10-28T15:00+02:00` (an ordinary afternoon) - `classifyDispatchBucket()`'s inline math computed
+7 days left and placed the card in the **Urgent Actions & Blocked Items** lane (`in_progress`,
+"closing within 7 days"), while the very same card's own `DeadlineChip` (driven by `daysUntil()`)
+read **8 days left** right next to it. Since midnight-of-today is always earlier than "now", the
+canonical `daysUntil()` is mathematically always ≥ the inline copies' answer - so this wasn't a rare
+edge case, it fires every afternoon/evening for any tender sitting near the 7-day or 14-day boundary.
+
+Fix: gave `daysUntil()` an optional injectable `now` param (defaults to `new Date()`, so every
+existing single-arg call site is unaffected) and made it the one shared function; removed all three
+duplicate copies, replacing them with calls to `daysUntil(dateStr, now)`.
+
+- `app/lib/dates.ts`: `daysUntil(dateStr, now = new Date())`.
+- `app/lib/dispatchTriage.ts`: both inline day-count computations replaced; now imports `daysUntil`.
+- `app/lib/dispatchDashboard.ts`: local `daysUntilFrom()` deleted; now imports `daysUntil`.
+- `app/lib/dispatchTriage.test.ts`: new regression test pins the exact `2026-11-04`/afternoon-viewing
+  case above (reverted the fix first, confirmed the test fails - the old code put the card in
+  `in_progress` while `daysUntil()` said 8 days - then restored the fix, confirmed it passes, same
+  discipline as every other pass).
+
+Verified: `node --experimental-strip-types --test lib/*.test.ts` 178/178 passed (including the new
+regression test and every other existing `dispatchTriage.test.ts`/`dates.test.ts` case, none of
+which sit near the midnight-vs-now boundary, so none broke from the signature change); `tsc --noEmit`
+and `eslint` on all four touched files clean. Pushed directly to `main` (small, fully verified, no
+PR/self-merge involved, per this routine's standing guardrail).
+
+Backlog waiting on Sarel, reconfirmed unchanged this pass: migration `0096` (pack-quota trial-expiry)
+still not applied to the live DB; the `narrative_documents` PostgREST schema-cache reload; the
+PayFast idempotency design question (not urgent); the "missing ISO 9001 flagged as urgent" UX
+question; the fingerprint.py `named_ranges()` fix's expected baseline mismatch on the next real
+SANRAL fingerprint check (not a regression); the Dashboard "Decision needed" bucket over-triggering
+finding; the Form B7 compulsory-vs-matrix disagreement on a real template; the impersonation-feature
+token-refresh gap; the submitted-tender nagging gap across two reminder scripts. No new judgment call
+added this pass. Open PRs checked before starting (`#164`, `#165`, `#170`, all still correctly
+unmerged drafts, none touching the files above) - no collision.
+
+---
+
+**2026-10-28 ~16:15 UTC — `confirm_pack.py` was silently dropping a key person's incomplete
+project citations with zero trace, anywhere, violating this gate's own "refuses loudly, not
+silently" docstring; fixed.**
+
+`confirm_pack.py` only requires a person's first 3 projects (raw profile order) to have every
+field `sanral_fill.py`'s filler needs (`client_type`, `project_type`, `position_code`,
+`contact_number`) - intentional, documented behaviour, since a position's 3 Form B1 rows don't
+need every project a person has ever done. A 4th-or-later project missing a field was dropped via
+a bare `continue` - no print, no note, nothing written to the generated `pack.yaml` at all. Found
+because `sanral_fill.projects_for_block()` (the function that actually decides which of a
+person's projects fill a given position's 3 rows) picks **by project_type matching that
+position's own Book 1 matrix, not by raw list order** - so a project dropped here for a missing
+field could easily have been the one a *later* position's block actually needed, and that drop
+had no trace anywhere (contrast: the project-type-mismatch case in `projects_for_block()` itself
+already generates a user-facing note, "surfaced on the contents page, never silent" per
+`assemble_pack.py`'s own comment - this one bypassed that path entirely, before the project ever
+reached it).
+
+Fix: record each such drop (person, project, missing fields) into a new
+`pack['_provenance']['dropped_incomplete_projects']` list - same place/convention the file
+already uses for AI-suggestion overrides - and print it to stdout the same way overrides are
+printed. Doesn't change what gets filled (a project still needs a complete profile to be cited;
+that's correct and unchanged); only makes the drop visible instead of invisible.
+
+Verified with the revert-confirm-fail-restore-confirm-pass discipline: reverted the fix, ran a
+synthetic 4-project person through `confirm()` - the 4th project vanished with nothing printed and
+no `dropped_incomplete_projects` key in the output at all (confirmed bug); restored the fix, same
+input - printed "1 project(s) dropped..." and `pack.yaml`'s `_provenance.dropped_incomplete_projects`
+named the person and the missing fields. `py_compile` clean; no dedicated test file exists for
+`confirm_pack.py` (noted previously, still true) - not adding one now would be inconsistent with
+this session's own "verify properly" discipline, but a full test file is a larger lift than this
+pass's scope; flagging that `confirm_pack.py` having zero dedicated tests (unlike `suggest_pack.py`,
+which got one on 2026-10-21) is itself worth a future pass, not just this one finding.
+
+---
+
 **2026-10-28 ~10:50 UTC — document-mismatch guard, closing the real COID/B-BBEE-misfile defect found
 in Phase 7's/this phase's live pack runs.** Built as a filename-only heuristic, not real PDF/DOCX
 content inspection - confirmed first (`package.json` has no PDF/DOCX-parsing dependency) that real
@@ -5856,6 +5945,46 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-sixteenth run): rotated to notify (engine/notify/daily_digest.py's less-tested functions) - thorough review, no new bug found this time
+
+Orientation: `git fetch origin main` showed 2 new sibling commits (`3b2f7f2`, a docs-only
+confirmation that the `completed_at`-on-crash bug class found in `process_cv_jobs.py` is already
+closed across pack/general/narrative/onboarding/cv_extract - worker/job-queue area, so skipped that
+rotation this cycle to avoid duplicating; `2012f89`/PR #169 merged, the COID/B-BBEE document-mismatch
+guard - non-SANRAL pack, no overlap). New PR `#170` (docs-only prefill diagnosis) - no code, no
+overlap. Other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to notify - picked `daily_digest.py`'s less-reviewed functions (`find_readiness_changes()`,
+`load_roster_live()`, `submission_due_signals()`, `listing_change_signals()`, `company_signals()`'s
+own `own()` tenant-isolation filter), since prior passes in this area focused on
+`send_pack_ready_email.py`/`send_digest_emails.py`/`record_heartbeat.py`.
+
+Specifically chased one real-looking lead: `save_readiness_seen_db()` only upserts a `prov::` seen-
+store row when `owners.get(k)` is truthy, and `find_readiness_changes()` sets `owners[key] = None`
+whenever a field_provenance row's `tender_pack_id` doesn't resolve to a pack in `packs_by_id` - if
+that ever happened, the status change would be computed in-memory this run but never persisted,
+causing the SAME row to be treated as "never seen" again on every future run (a permanent, repeating
+false "readiness change" notification for an assumed_default/missing status, or a silently-reset
+seen-store entry for a confirmed/computed one). Traced whether this is actually reachable rather than
+assuming: read the real schema directly (`field_provenance.tender_pack_id uuid not null references
+tender_packs(id) on delete cascade`, and `tender_packs.company_id uuid not null`) - both are `not
+null`, and the cascade delete means a field_provenance row can never outlive its own tender_pack
+(so the only way to hit this is a tender_pack deleted in the exact window between this function's
+own two queries - a real but vanishingly low-probability race, not a reachable bug worth forcing a
+fix for).
+
+Confirmed `find_readiness_changes()`'s own normal-case behaviour (first-sighting-and-already-fine
+suppressed, a genuine status change correctly reported and persisted, a second run with no change
+reports nothing) is already exercised end to end by `test_digest_live.py`'s own 3-scenario live-mode
+test - not zero coverage, just not unit-tested by function name directly, which is fine. `own()`'s
+tenant-isolation filter (document_expiry/tender_tasks/readiness_changes/tender_updates/
+reassessed_tenders, all narrowed to `company_id`) read correctly - a readiness change with no
+resolvable `company_id` (the same race-condition case above) is excluded from EVERY company's
+digest, not leaked to any of them, the safe direction.
+
+No code change this pass - a thorough look turned up nothing reachable, so a clean sweep is logged
+honestly rather than a forced weak finding.
 
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-fifteenth run): Finding 92 - a real kouga.py boundary bug (`--max-pages 0` silently fetched every page instead of none more) plus a repo-wide CI-wiring gap far bigger than Findings 87-89: 28 engine/test_*.py files, 18 of them in engine/discovery/ alone, had never once run in CI
 

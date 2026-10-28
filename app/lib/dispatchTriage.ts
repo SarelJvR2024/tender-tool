@@ -28,6 +28,7 @@
 //     silently dropped (see docs/specs/System-Status.md).
 
 import type { PipelineStage } from "./pipeline";
+import { daysUntil } from "./dates.ts";
 
 export type SubmissionType = "physical_box" | "etenders_portal" | "email" | "other_digital";
 export type DispatchStatus = "not_ready" | "compiling" | "print_ready" | "printed_and_bound" | "out_for_delivery" | "submitted_and_receipted";
@@ -110,8 +111,8 @@ export function deriveDecisionNeeded(input: DecisionInput, now: Date = new Date(
     }
   }
   if (input.hasRealFixBlocker) {
-    const daysLeft = input.closingDate ? Math.ceil((new Date(input.closingDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
-    if (daysLeft !== null && !Number.isNaN(daysLeft) && daysLeft <= 7) return "director_resolution";
+    const daysLeft = daysUntil(input.closingDate, now);
+    if (daysLeft !== null && daysLeft <= 7) return "director_resolution";
   }
   return "none";
 }
@@ -146,8 +147,8 @@ export function classifyDispatchBucket(input: ClassifyInput, now: Date = new Dat
 
   if (input.decisionNeeded !== "none") return "decision";
 
-  const daysToClose = input.closingDate ? Math.ceil((new Date(input.closingDate).getTime() - now.getTime()) / (24 * 60 * 60 * 1000)) : null;
-  if (daysToClose !== null && !Number.isNaN(daysToClose) && daysToClose <= 7) return "in_progress";
+  const daysToClose = daysUntil(input.closingDate, now);
+  if (daysToClose !== null && daysToClose <= 7) return "in_progress";
 
   return "radar";
 }
