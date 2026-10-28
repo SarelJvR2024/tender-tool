@@ -6,6 +6,7 @@ import { StatCard } from "@/components/tt/stat-card";
 import { EmptyState } from "@/components/tt/empty-state";
 import { ErrorState } from "@/components/tt/error-state";
 import { PIPELINE_STAGES, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { daysUntil } from "@/lib/dates";
 import { ECONOMICS_COLUMNS, formatRand, median, toNumber, type PackEconomics } from "@/lib/dealEconomics";
 import { buildWinLossTrend, monthLabel } from "@/lib/analyticsLogic";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
@@ -165,7 +166,7 @@ export default async function AnalyticsPage() {
             ) : (
               <ul className="space-y-2.5">
                 {upcoming.map(({ tender }) => {
-                  const days = Math.ceil((new Date(tender.closing_date as string).getTime() - now.getTime()) / 86_400_000);
+                  const days = daysUntil(tender.closing_date as string, now) ?? 0;
                   return (
                     <li key={tender.id} className="flex items-center justify-between gap-3 border-t border-border pt-2.5 first:border-t-0 first:pt-0">
                       <Link href={`/tenders/${tender.id}`} className="min-w-0 flex-1 truncate text-sm text-foreground no-underline hover:text-accent hover:underline">

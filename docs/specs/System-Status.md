@@ -14,6 +14,56 @@
 
 ---
 
+**2026-10-28 ~20:15 UTC — standing review: the prior pass's "days to close" drift fix
+(`daysUntil()`/`ba00473`) missed a second, pre-existing site with the exact same bug; fixed.**
+
+Grepped the whole `app/` tree for the same `Math.ceil((... .getTime() - now.getTime()) / 86_400_000)`
+shape the last pass just removed from `dispatchTriage.ts`/`dispatchDashboard.ts`, to check whether it
+was truly fully closed. One more site: `app/app/analytics/page.tsx`'s "Upcoming deadlines" widget
+computed its own inline, instant-based day count instead of importing `lib/dates.ts`'s canonical,
+midnight-normalized `daysUntil()` - the same disagreement, same mechanism, same 7-day warning
+boundary, just on a different page.
+
+Concretely verified with the exact same reproducible case the last pass used (`2026-11-04T09:00+02:00`
+closing, viewed `2026-10-28T15:00+02:00`): the old inline math here gives **7 days** (triggers the
+`text-warning` styling), `daysUntil()` gives **8** - so a tender could show up flagged urgent on the
+Analytics page while the Command Center (now fixed) correctly shows it's not, for the identical
+tender at the identical moment.
+
+Fix: `app/app/analytics/page.tsx` now imports `daysUntil` from `@/lib/dates` and calls
+`daysUntil(tender.closing_date as string, now)` in place of the inline formula; `now` was already a
+locally-defined `Date` in this file, reused as-is (same param the last pass's signature change was
+designed to take). No other call site repeats this shape anywhere else in `app/` (re-grepped after the
+fix - one remaining match, `lib/dates.ts`'s own `daysUntil()` implementation itself, which is correct
+by definition).
+
+Verified: reproduced the 7-vs-8 disagreement numerically against the unmodified file first (confirmed
+the bug), then with the fix applied the same scenario correctly agrees with `daysUntil()`'s own answer
+(8, no warning) by construction, since it now calls the same function. `node --experimental-strip-types
+--test lib/*.test.ts` still 178/178 (this file has no existing unit test harness of its own - it's a
+Next.js server component, not an extracted pure function like `dispatchTriage.ts`/`dispatchDashboard.ts`
+were, so there was nothing to add a regression test to without a larger refactor out of this pass's
+scope - flagging that as a smaller follow-up: extracting the "Upcoming deadlines" day-count/label logic
+into a testable `lib/` function, the same shape the Command Center fix already has, would close this
+gap). `tsc --noEmit` clean; `eslint` on the touched file shows only a pre-existing, unrelated
+`STAGE_META` unused-import warning (present before this change, not touched by it, not in scope here).
+
+Pushed directly to `main` (small, fully verified, no PR/self-merge, per this routine's standing
+guardrail).
+
+Open PRs checked before starting (`#164`, `#165`, `#170`, all still correctly unmerged drafts) - no
+collision; none touch `analytics/page.tsx` or `dates.ts`.
+
+Backlog waiting on Sarel, reconfirmed unchanged this pass (9 items: migration `0096`, `narrative_documents`
+PostgREST schema-cache reload, PayFast idempotency design question, "missing ISO 9001 flagged as
+urgent" UX question, fingerprint.py baseline-mismatch heads-up, Dashboard "Decision needed"
+over-triggering finding, Form B7 compulsory-vs-matrix disagreement, impersonation token-refresh gap,
+submitted-tender nagging gap) - no new judgment-call item added this pass, only the small follow-up
+noted above (extract analytics' day-count logic into a tested `lib/` function - low priority, not
+blocking anything).
+
+---
+
 **2026-10-28 ~18:30 UTC — Standing review: Tender Command Center's own "days to close" math had
 drifted into a second, disagreeing copy of `lib/dates.ts`'s canonical `daysUntil()`; fixed.**
 
