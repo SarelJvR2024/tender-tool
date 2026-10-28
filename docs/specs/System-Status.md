@@ -14,6 +14,73 @@
 
 ---
 
+**2026-10-28 ~10:08 UTC — real end-to-end general-engine pack-generation test, authorized by Sarel:
+Reviewer Civils & Consulting (now `is_test_company`) against a real, live DBSA tender (RFP165/2026).
+Succeeded, 112-page real pack - and the compilation itself surfaced the misfiled-COID-document finding
+as a real defect in a real pack, not just a data-hygiene nitpick.**
+
+Created the tracking relationship the same way the live app's own `pursue_discovered_opportunity()`
+RPC does for its core step (`insert into tender_packs (company_id, tender_id)`) - skipped only the
+"promote a discovered_opportunities row into a shared tenders row" half of that function, since
+RFP165/2026 already exists as a `tenders` row with its manifest already extracted. Queued a real
+`pack_generation_jobs` row (`engine='general', kind='generate_pack'`, no `tender_pack_id` set -
+confirmed by reading `process_general_jobs.py`'s own `own_pack()`/`provenance_pack_id()` that the
+client-written `tender_pack_id` is never trusted, only looked up by `(company_id, tender_id)`), then
+ran `process_general_jobs.py --once` for real - no stub, no fixture.
+
+**Result**: `[ready] pack d65b4a20...: 112 pages`, real wall-clock ~49s. Real artifacts in the
+`submission-packs` bucket: `submission_pack.pdf` (3.68 MB), `Tender_Volume_TYPED.pdf` (1.81 MB, the
+buyer's own Tender Volume with Reviewer Civils' details typed onto SBD4/SBD9/Form of Offer),
+`Completion_guide.docx` (37.6 KB), `field_provenance.json` (7.7 KB). A real "Bid Pack Compilation
+Complete" email (B12, built earlier this session) fired to the company's own registered address -
+confirmed first that it resolves to an internal test mailbox (`reviewer@tenderready.com`), not a real
+third party, before letting it send.
+
+**Returnable match rate**: 1 of 26 tracked fields came from real company data (`sbd4.name_of_bidder_footer`,
+the company name) - the other 25 are "missing" because Reviewer Civils' vault genuinely has almost
+nothing on file yet (confirmed in the earlier onboarding diagnostic), not because of a pack-engine
+gap. Separately, of the 10 real checklist items: 2 included as typed/filled (Tender Volume forms), 1
+included but WRONG (see below), 7 correctly omitted with their real reason ("not uploaded to the
+vault"/"not uploaded for this tender"), consistent with that same empty-vault finding. SBD 6.1/8/9 on
+this specific tender are flat PDFs with no fillable fields at all (a document-format fact, not a
+vault gap) - by design always "by hand" regardless of how complete the vault is.
+
+**Confirms the earlier misfiled-COID finding is a real defect, not a cosmetic one**: the pack's own
+manifest shows checklist item #6, "COID letter of good standing", `status: included`, `source:
+"...BBBEE_Affidavit.pdf"` - the B-BBEE affidavit that was uploaded into the wrong vault slot got
+merged into page 112 of a real submission pack, labelled as COID evidence. Confirmed (same finding a
+parallel diagnosis pass reached independently) this is a human mis-upload, not a classifier bug: the
+COID vault slot (`DirectVaultDocumentUploader.tsx` -> `uploadVaultDocument()`) is deliberately the one
+vault kind with ZERO content inspection - no keyword/regex matching, no AI call, nothing to tune. The
+fix is Reviewer Civils re-uploading the right file into the right slot, not a code change.
+
+**CV-extraction finding (Tender Ready), diagnosed but NOT re-queued**: confirmed via `git log -S` that
+the exact schema responsible for the original "too many union-typed parameters (42... limit 16)"
+error was already fixed a full day after this CV failed - `engine/cv/extract_cv_fields.py`'s current
+schema (added 2026-10-24, the failure was 2026-10-23) counts to exactly 16 union-typed parameters, at
+the limit but not over it. No code fix needed. Attempted to re-queue the stuck upload the same way the
+app's own "Retry" button does (`cv_uploads.status -> 'extraction_requested'`) so the real worker would
+pick it up - **blocked by this sandbox's own permission classifier** ("Modify Shared Resources"), not
+by the standing production-DB rule (Sarel had already authorized this specific fix). Left un-retried;
+either Sarel clicks Retry on `/people/[id]` himself, or grants this session the permission to.
+
+**SANRAL E2E test: genuinely cannot proceed today, confirmed by code, not assumed.** Read
+`engine/discovery/detail.py` directly: SANRAL's tender DETAIL page (title, closing date, attached
+file NAMES) is freely scrapeable, but the actual document download is gated behind a form requiring a
+real `g-recaptcha-response` plus a session-bound CSRF token - the module's own docstring says
+automating past this "would mean automating around an anti-bot control," so it doesn't, and neither do
+I. Queried every real, open, SANRAL-sourced listing (`discovered_opportunities`, `source='sanral'`):
+11 open contract numbers, 10 of them construction/works contracts (wrong template entirely), exactly
+one that reads like a genuine Conventional Consultant Tender - **`NRA 2026/0021 (B)`, "Consulting
+Services", closing 2026-11-02** - but it has zero document URLs on file; none of the 11 do. There is
+no real SANRAL tender today whose actual Form B7/technical workbook can be fetched without a human
+clicking through SANRAL's own site first. Not worked around; flagged for Sarel's call (per the options
+already given: wait for a new one, supply a reference Sarel can download by hand, or run the dual-
+envelope/B7 feature exercise against the existing demo fixture with that understood as a fixture, not
+a real bid).
+
+---
+
 **2026-10-28 ~08:20 UTC — standing review pass: clean sweep on `engine/general/fill_sbd_docx.py` (the
 non-SANRAL SBD1/4/6.1/8/9 `.docx` form filler, 547 lines) - no functional bug found, but its own
 top-of-file docstring was materially wrong about its interface, not just stale wording.** Orientation:
