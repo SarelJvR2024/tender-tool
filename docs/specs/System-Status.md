@@ -14,6 +14,54 @@
 
 ---
 
+**2026-10-28 ~02:16 UTC — standing review pass: a real cross-script gap found and traced across
+three reminder/digest senders - none filter out a tender a company has already marked submitted -
+not fixed, flagged for Sarel's own call given it spans multiple pre-existing scripts, not one.**
+Orientation: `git fetch origin main` showed 1 new commit since this routine's own last pass
+(`db06ad3`) - `Finding 88` from a sibling QA routine (`engine/notify/send_pack_ready_email.py`'s
+idempotency-claim ordering), unrelated, no overlap. Two open PRs (`#164` savings-counter rework
+incl. a new not-yet-merged migration `0099`, `#165` four pre-demo production defect fixes) read via
+the GitHub API, both correctly still draft/unmerged - avoided every file either touches
+(`savingsCounter.ts`, `companyProfileUpdate.ts`, `whatsapp-contact-button.tsx`,
+`lib/whatsappMessages.ts`, `app/page.tsx`, `/demo`, `/privacy`). Stayed clear of the self-merge
+incident PRs per the standing guardrail.
+
+**The finding**: `scripts/send-returnables-digest.ts` (Phase 6, landed in the prior pass) queries
+`tenders` joined to `tender_packs!inner(company_id)` with no `pipeline_stage` filter at all, then
+checks only the 3-5 BUSINESS day closing window. A company can mark a tender `submitted` at any
+time via the Pipeline board's own "Mark submitted" button (not gated by closing date - physical
+hand-delivery days ahead of the deadline is a normal, real workflow this app explicitly supports) -
+and `pipeline_stage` moving to `submitted` doesn't retroactively mark the company's own vault
+documents/CSD/COID etc. as "have" in the system. So a company that already physically submitted
+their bid 4 business days before closing, with the system's own compliance tracking still showing a
+document gap, would still receive this digest's "you're missing mandatory returnables for this
+tender" nudge - confusing and wrong once a tender is genuinely out the door. **Confirmed this isn't
+unique to the new script, not invented in isolation**: `scripts/send-deadline-reminders.ts` (the
+"closing in 3/24 hours" reminder, pre-existing) has the exact same gap - same
+`tender_packs!inner(company_id)` join, no `pipeline_stage` selected or filtered anywhere in that
+file either. The only sender in this codebase that DOES filter closed stages is
+`send-operational-alerts.ts`'s print-cutoff path, which separately fetches `pipeline_stage` per
+candidate and runs it through `printCutoffCandidates()`'s own `CLOSED_STAGES` check
+(`lib/printCutoffReminders.ts`) - that one deliberate guard exists, the other two senders never got
+it.
+
+**Why this stays a judgment call rather than a quick patch**: it's not a one-line fix in one place -
+it's the same missing guard in (at least) two pre-existing sender scripts plus the brand-new one,
+and the right fix shape is itself a real design decision: filter in the SQL query (`tender_packs`
+join on `pipeline_stage not in (...)`, cheapest, but duplicates the stage list in three places) vs.
+a shared helper both the query-row type and the candidate functions import (more consistent, but
+touches `returnablesWindowCandidates()`'s and `deadlineReminderCandidates()`'s own already-tested
+signatures). Fixing only the newest script would leave the older, already-live
+`send-deadline-reminders.ts` with the identical bug still unaddressed, which reads as worse than
+flagging both honestly together. Not reproduced against a live database (no live Supabase
+credentials in this sandbox) - reasoned from the actual query/candidate-function code directly, which
+is sufficient to establish the gap is real without needing a live run.
+
+**QA tooling**: sound - `tsc --noEmit` clean, `eslint` clean (0 errors, same 3 pre-existing
+warnings). No application code touched this pass.
+
+---
+
 **2026-10-28 ~00:14 UTC — standing review pass: clean sweep of `engine/general/requirements.py`
 (the non-SANRAL requirement-extraction engine) - no new bug found after real digging; QA tooling
 re-confirmed sound; no collisions.** Orientation: `git fetch origin main` showed no new commits
