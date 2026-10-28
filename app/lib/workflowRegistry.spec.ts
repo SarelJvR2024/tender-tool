@@ -59,4 +59,42 @@ describe("heartbeatStatusFor", () => {
     const completedAt = new Date(NOW - 2 * 60 * 60 * 1000).toISOString(); // 2h ago
     expect(heartbeatStatusFor(scout, row({ workflow_key: scout.key, last_completed_at: completedAt }), NOW)).toBe("stale");
   });
+
+  describe("corrigendum_alerts (business-hours + weekday-only cron: '0 5-17/2 * * 1-5')", () => {
+    const corrigendum = WORKFLOW_REGISTRY.find((w) => w.key === "corrigendum_alerts")!;
+
+    it("stays healthy over a weekend gap - Friday's last run to Monday morning, before Monday's window even opens", () => {
+      const fridayLastRun = new Date("2026-10-23T17:00:00Z").toISOString(); // Fri 17:00 UTC (last in-window firing)
+      const mondayMorning = new Date("2026-10-26T06:00:00Z").getTime(); // Mon 06:00 UTC, window opens 05:00
+      expect(heartbeatStatusFor(corrigendum, row({ workflow_key: corrigendum.key, last_completed_at: fridayLastRun }), mondayMorning)).toBe("healthy");
+    });
+
+    it("stays healthy overnight - Wednesday's last run to Thursday, before Thursday's window opens", () => {
+      const wedLastRun = new Date("2026-10-21T17:00:00Z").toISOString();
+      const thuEarlyMorning = new Date("2026-10-22T04:30:00Z").getTime(); // before the 05:00 UTC window opens
+      expect(heartbeatStatusFor(corrigendum, row({ workflow_key: corrigendum.key, last_completed_at: wedLastRun }), thuEarlyMorning)).toBe("healthy");
+    });
+
+    it("goes stale on a genuine multi-day mid-week outage, even though no weekend is involved", () => {
+      // Regression guard for a bug an earlier version of this same fix introduced: widening the
+      // allowed gap to cover the worst case (the Friday-to-Monday span) and applying that one flat
+      // number everywhere silently hid a real 3-day mid-week failure too, since all of Tue/Wed
+      // counted as "within the generous weekend-sized allowance" even though no weekend fell in it.
+      const mondayLastRun = new Date("2026-10-19T17:00:00Z").toISOString();
+      const thursdayMidday = new Date("2026-10-22T12:00:00Z").getTime(); // missed Tue + Wed + half of Thu entirely
+      expect(heartbeatStatusFor(corrigendum, row({ workflow_key: corrigendum.key, last_completed_at: mondayLastRun }), thursdayMidday)).toBe("stale");
+    });
+
+    it("goes stale after missing just one in-window firing, same business day", () => {
+      const lastRun = new Date("2026-10-22T09:00:00Z").toISOString(); // Thu 09:00 UTC
+      const missedNextFiring = new Date("2026-10-22T13:30:00Z").getTime(); // 11:00 firing never happened
+      expect(heartbeatStatusFor(corrigendum, row({ workflow_key: corrigendum.key, last_completed_at: lastRun }), missedNextFiring)).toBe("stale");
+    });
+
+    it("stays healthy within one normal in-window gap", () => {
+      const lastRun = new Date("2026-10-22T09:00:00Z").toISOString();
+      const soonAfter = new Date("2026-10-22T10:30:00Z").getTime();
+      expect(heartbeatStatusFor(corrigendum, row({ workflow_key: corrigendum.key, last_completed_at: lastRun }), soonAfter)).toBe("healthy");
+    });
+  });
 });

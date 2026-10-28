@@ -151,17 +151,89 @@ function staleGraceMs(intervalMs: number): number {
 /** A 'running' row older than this never got its own finish step called (a dead runner, a cancelled job) - treated as failed, not perpetually "in progress". Flat, not cadence-scaled: this is about one run taking impossibly long, not about how often the workflow fires. */
 const RUNNING_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
-function cronIntervalMs(cronUtc: string | null): number | null {
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+function hourRangeOf(cronUtc: string): { start: number; end: number; step: number } | null {
+  const hourField = cronUtc.trim().split(/\s+/)[1];
+  const match = hourField?.match(/^(\d+)-(\d+)\/(\d+)$/);
+  if (!match) return null;
+  return { start: Number(match[1]), end: Number(match[2]), step: Number(match[3]) };
+}
+
+function dowRangeOf(cronUtc: string): { start: number; end: number } | null {
+  const dowField = cronUtc.trim().split(/\s+/)[4];
+  if (!dowField || dowField === "*") return null;
+  const match = dowField.match(/^(\d+)-(\d+)$/);
+  return match ? { start: Number(match[1]), end: Number(match[2]) } : null;
+}
+
+/**
+ * The size of one normal gap between firings - used as the staleness
+ * threshold's baseline (before grace). For a plain "every N hours"/once-daily
+ * cron this is just that cadence; for an hour-range cron it's the step size
+ * (e.g. 2h for "5-17/2"), not the overnight/weekend gap - restricted-hours
+ * crons go quiet BY DESIGN outside their window, and that quiet time is
+ * handled by eligibleElapsedMs() below, not by inflating this number.
+ */
+function cronStepMs(cronUtc: string | null): number | null {
   if (!cronUtc) return null;
   if (cronUtc === "*/10 * * * *") return 10 * 60 * 1000;
-  // Every 5-17/2-style "every N hours" or once-daily - both are well
-  // covered by a 24h-or-less assumption for staleness purposes; a workflow
-  // this infrequent genuinely has no tighter guarantee than "once a day".
-  if (/^0?\s+\d+-\d+\/(\d+)\s/.test(cronUtc)) {
-    const everyHours = Number(cronUtc.match(/\/(\d+)/)?.[1] ?? 24);
-    return everyHours * 60 * 60 * 1000;
+  const hourRange = hourRangeOf(cronUtc);
+  if (hourRange) return hourRange.step * HOUR_MS;
+  return DAY_MS;
+}
+
+/**
+ * How much of [fromMs, toMs) actually falls inside this cron's own eligible
+ * window (its hour range and day-of-week range, when restricted) - the
+ * schedule-aware analogue of "wall-clock time elapsed".
+ *
+ * This is the fix for the real bug found live: a bounded-hours cron
+ * (corrigendum_alerts's own "0 5-17/2 * * 1-5", business hours only)
+ * genuinely goes quiet overnight and over the weekend BY DESIGN, and
+ * comparing raw wall-clock elapsed time against the step size alone flagged
+ * it "stale" every single morning and every weekend, even while it was
+ * working perfectly (the exact "cries wolf" failure mode this check exists
+ * to avoid). An EARLIER version of this fix tried to patch that by widening
+ * the allowed gap to the worst case (the Friday-to-Monday span) and applying
+ * that one flat number everywhere - which silently broke the opposite way:
+ * a genuine 3-day mid-week outage (no weekend involved) then read as
+ * "healthy" too, because the threshold had been sized for the worst case
+ * and applied uniformly regardless of when in the week the gap fell. Caught
+ * by this fix's own verification pass before it shipped (see
+ * System-Status.md), not left in.
+ *
+ * Counting only ELIGIBLE elapsed time fixes both directions at once: idle
+ * nights/weekends contribute zero regardless of how many of them fall in
+ * the gap, while every in-window hour - whether it's one missed firing or
+ * three straight days of them - counts fully and accumulates normally
+ * against the threshold.
+ */
+function eligibleElapsedMs(cronUtc: string, fromMs: number, toMs: number): number {
+  const hourRange = hourRangeOf(cronUtc);
+  if (!hourRange) return Math.max(0, toMs - fromMs); // unrestricted hours - every ms counts, same as before
+
+  const dowRange = dowRangeOf(cronUtc);
+  let elapsedMs = 0;
+  let cursor = fromMs;
+  const maxDays = 14; // registry gaps are small; this is just a sane runaway guard
+  for (let i = 0; i < maxDays && cursor < toMs; i++) {
+    const day = new Date(cursor);
+    const dayStartMs = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+    const nextDayStartMs = dayStartMs + DAY_MS;
+    const dow = new Date(dayStartMs).getUTCDay();
+    const dowEligible = !dowRange || (dow >= dowRange.start && dow <= dowRange.end);
+    if (dowEligible) {
+      const windowStartMs = dayStartMs + hourRange.start * HOUR_MS;
+      const windowEndMs = dayStartMs + hourRange.end * HOUR_MS;
+      const overlapStartMs = Math.max(cursor, windowStartMs);
+      const overlapEndMs = Math.min(toMs, windowEndMs, nextDayStartMs);
+      if (overlapEndMs > overlapStartMs) elapsedMs += overlapEndMs - overlapStartMs;
+    }
+    cursor = nextDayStartMs;
   }
-  return 24 * 60 * 60 * 1000;
+  return elapsedMs;
 }
 
 /** Pure function: given this workflow's own cadence and its latest heartbeat row (or none), what badge should the admin UI show. No network call, no `now` ambiguity - callers pass `nowMs` explicitly so this stays a pure function and is trivially testable. */
@@ -172,8 +244,9 @@ export function heartbeatStatusFor(entry: WorkflowRegistryEntry, row: WorkflowHe
     return nowMs - startedMs > RUNNING_TIMEOUT_MS ? "failed" : "running";
   }
   if (row.last_status === "failed") return "failed";
-  const intervalMs = cronIntervalMs(entry.cronUtc);
-  if (intervalMs === null || !row.last_completed_at) return "healthy";
-  const sinceMs = nowMs - new Date(row.last_completed_at).getTime();
-  return sinceMs > intervalMs + staleGraceMs(intervalMs) ? "stale" : "healthy";
+  const stepMs = cronStepMs(entry.cronUtc);
+  if (stepMs === null || !row.last_completed_at || !entry.cronUtc) return "healthy";
+  const lastCompletedMs = new Date(row.last_completed_at).getTime();
+  const elapsedMs = eligibleElapsedMs(entry.cronUtc, lastCompletedMs, nowMs);
+  return elapsedMs > stepMs + staleGraceMs(stepMs) ? "stale" : "healthy";
 }

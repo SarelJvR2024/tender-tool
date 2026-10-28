@@ -14,6 +14,67 @@
 
 ---
 
+**2026-10-28 ~06:25 UTC — standing review pass: a real, reachable bug fixed in `app/lib/workflowRegistry.ts`'s
+`cronIntervalMs()` - the new `/admin/telemetry` page (Phase 6) was falsely flagging the perfectly-healthy
+`corrigendum_alerts` workflow as "stale" every single morning and every weekend.** Orientation: `git fetch
+origin main` confirmed local HEAD already matched `origin/main` at `a987198` (the CV `completed_at` fix from
+the prior pass) - no new commits to catch up on. Two open PRs (`#164`, `#165`), both still draft/unmerged,
+re-confirmed via the GitHub API; neither overlapped the file this pass touched. Re-confirmed (did not
+re-flag as new) the already-known impersonation token-refresh gap by tracing the actual installed
+`@supabase/auth-js` SDK source, and ruled out the "submitted-tender nagging" gap extending to the newer
+Phase 6 digest scripts (`corrigendumAlerts.ts`, `clarificationWindowReminders.ts`, `complianceDigestCandidates.ts`,
+`discoveredTendersDigest.ts` all correctly handle or correctly don't need pipeline-stage filtering) - neither
+produced a new finding.
+
+**The finding**: of the 10 `WORKFLOW_REGISTRY` entries backing the admin Telemetry page's health badges,
+`corrigendum_alerts` is the only one with BOTH an hour-range restriction and a day-of-week restriction in its
+cron (`"0 5-17/2 * * 1-5"`, business hours only, Mon-Fri) - and `cronIntervalMs()` computed only the literal
+step size (2h), ignoring that this cron goes quiet overnight and over the weekend BY DESIGN. Reproduced live
+with a Node script calling the real `heartbeatStatusFor()`: a perfectly healthy last-completed timestamp
+(Friday's last run, or any weekday's last run the evening before) read as `"stale"` the following Monday
+morning or the following morning respectively - the existing `workflowRegistry.spec.ts` suite never caught
+this because it only exercises `compliance_digest` (once-daily) and `scout_alerts` (every-10-minutes), neither
+of which has this combination of restrictions.
+
+**First fix attempt was wrong, caught by this same pass's own verification before it shipped**: widening the
+allowed gap to the worst case (the Friday-to-Monday span) and applying that one flat number everywhere fixed
+the reported false positive, but silently broke the opposite way - a genuine 3-day mid-week outage (no
+weekend involved) then also read as `"healthy"`, because the threshold had been sized for the worst case and
+applied uniformly regardless of when in the week the gap actually fell. Caught by testing a mid-week negative
+control (`Monday 17:00 last run → Thursday 12:00 now`, which should read `"stale"`) before considering the fix
+done, per this routine's own "verify properly" discipline - not shipped with that flaw.
+
+**Actual fix**: replaced the flat-interval model with one that sums only the cron's own *eligible* elapsed
+time between the last completion and now (`eligibleElapsedMs()`), rather than raw wall-clock elapsed time -
+nights/weekends outside the cron's window contribute zero regardless of how many fall in the gap, while every
+in-window hour (one missed firing or three straight days of them) counts fully and accumulates normally
+against the step-size threshold. This correctly fixes both directions at once. `cronIntervalMs()` was renamed
+to `cronStepMs()` (now just the per-firing step size, not a worst-case gap) to match what it actually returns;
+confirmed via grep that nothing else in the repo referenced the old name.
+
+**Verified properly**: live-reproduced both the original false positive (weekend + overnight) and the
+mid-week false negative my own first attempt would have shipped, confirmed the final fix resolves all of them
+plus two more within-window sanity checks (a normal gap stays healthy, a single missed firing goes stale) -
+six scenarios total, all correct. Added 5 new permanent regression tests to `workflowRegistry.spec.ts`
+covering `corrigendum_alerts` specifically (none existed before this pass). `git stash`'d the source fix,
+confirmed the two bug-reproducing tests fail with exactly the predicted wrong result (`"stale"` instead of
+`"healthy"`) against the old code, restored the fix, confirmed all 13 tests in the file pass. Ran the full
+suite afterward: 289/289 passing across all 31 spec files, no regressions. `tsc --noEmit` and `eslint` both
+clean on the touched files.
+
+**Pushed directly to `main` - no PR, per the standing guardrail**: a pure-logic fix in one `.ts` file with
+its own new, passing regression coverage, no schema change, no UI change needing visual review, no live-DB
+mutation.
+
+**Backlog re-confirmed, unchanged**: migration `0096` (pack-quota trial-expiry), the `narrative_documents`
+PostgREST schema-cache reload, a PayFast idempotency design question (not urgent), the "missing ISO 9001
+flagged as urgent" UX question, the `fingerprint.py` named_ranges baseline-mismatch heads-up, the Dashboard
+"Decision needed" bucket over-triggering finding, the Form B7 compulsory-vs-matrix disagreement on a real
+template, the impersonation-feature token-refresh gap, and the submitted-tender nagging gap across reminder
+scripts - all still waiting on Sarel's own call.
+
+---
+
 **2026-10-28 ~04:16 UTC — standing review pass: a real, reachable bug fixed in `engine/cv/process_cv_jobs.py`
 - a genuine CV-generation crash never set `completed_at`, silently hiding the failure from both the
 admin Telemetry page and the tender's own activity feed.** Orientation: `git fetch origin main` showed
