@@ -5367,3 +5367,43 @@ name, not a real invocation).
 **Regression:** `engine/discovery/kouga.py` (one truthiness-to-`is not None` fix),
 `engine/discovery/test_kouga.py` (5 new end-to-end tests for `fetch_releases()`),
 `.github/workflows/bridge-worker-ci.yml` (27 new steps). No other production code touched.
+
+### Finding 93 (CONFIRMED, FIXED, minor - process_cv_jobs.py's own module docstring claimed it calls generate_as_is() for the "use as-is" CV path; it never has)
+
+**Where:** CV rotation this cycle (last dedicated pass: Finding 80, run 99 - a sibling fixed a real
+`completed_at`-on-crash bug in this same file, `a987198`, earlier today; avoided that exact code
+path and looked at the rest of the file instead). `engine/cv/process_cv_jobs.py` - the bridge
+between `generated_cvs` requests and `generate_cv.py`.
+
+**What was tested:** the module's own docstring states, as fact: *"it calls generate_cv.py's own
+functions directly... for the sanral_keyperson/world_bank formats, and generate_as_is() for the
+use-as-is path's provenance record."* Checked whether that's actually true, the same "does the real
+call path match what the comment claims" question several earlier findings in this file have asked
+of other modules.
+
+**Finding (CONFIRMED, minor - a documentation/dead-import defect, not a broken feature).** It
+wasn't. Grepped every real call site of `generate_as_is(` repo-wide: exactly one, inside
+`generate_cv.py`'s own CLI `main()` - none anywhere in `process_cv_jobs.py`, despite importing it
+by name (`from generate_cv import generate_as_is`). `process_job()`'s own builder dict only ever
+has two keys (`{"sanral_keyperson": ..., "world_bank": ...}[job["format"]]`) - no third branch for
+an "as-is" format exists at all. Traced the REAL "use as-is" feature to confirm this isn't a missing
+dispatch that would crash on a real job: `app/app/people/actions.ts`'s `uploadCv()` handles
+`mode === "as_is"` entirely in TypeScript - uploads the file to storage and inserts a `cv_uploads`
+row with `status: "uploaded"`, by its own comment's own words, "No AI involvement at all... recorded
+in cv_uploads and nothing else happens." It never inserts a `generated_cvs` row, so this bridge
+(which only ever polls `generated_cvs`) never sees an as-is job to dispatch in the first place - no
+real feature is broken, no crash is reachable. Confirmed nothing else in `engine/` reads
+`cv_uploads` either (grepped every file that mentions the table name - only comment references).
+
+**Fix:** corrected the docstring to state the real behaviour plainly (this bridge does not touch the
+as-is path at all; the real logic lives entirely in `uploadCv()`), and removed the now-provably-dead
+`from generate_cv import generate_as_is` import (the function itself is untouched and still works
+fine as a CLI-only utility - only the unused import in this one file was removed).
+
+**Verified**: `py_compile` clean; `--self-test` still produces both real formats correctly
+(`Self-test OK`); `engine/worker/test_poll_loop.py` (the full poll-loop/bridge-runner suite that
+exercises this exact file end to end, including a real `--loop` subprocess run) still `All bridge-
+loop smoke tests passed`, no regression from removing the import.
+
+**Regression:** `engine/cv/process_cv_jobs.py` only (one docstring correction, one dead import
+removed). No behaviour change - `generate_as_is()` itself untouched.

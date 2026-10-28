@@ -5771,6 +5771,39 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-seventeenth run): Finding 93 (minor) - process_cv_jobs.py's own docstring claimed it calls generate_as_is() for the "use as-is" CV path; it never has, confirmed by tracing the real feature to app/app/people/actions.ts instead
+
+Orientation: `git fetch origin main` showed 2 new sibling commits (`47497ac` `confirm_pack.py`
+recording silently-dropped incomplete projects, `ba00473` Tender Command Center's drifted "days to
+close" math vs `lib/dates.ts` - both TypeScript/pack_generator, avoided). Open PR `#170` now also
+carries real code (signatory fallback in `process_general_jobs.py`, a `process_pack_jobs.py`
+`KeyError` fix, a regenerated fingerprint, Mzansi seed-data fixes) - touches
+`engine/general/process_general_jobs.py`, `engine/pack/process_pack_jobs.py`,
+`fingerprints/Conventional_Consultant_Tender.json`, and several test files; avoided all of them
+entirely this pass. Other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to CV - genuinely overdue (last dedicated pass: Finding 80, run 99); a sibling fixed a real
+`completed_at`-on-crash bug in `process_cv_jobs.py` earlier today, so avoided that exact code path
+and read the rest of the file instead.
+
+**The finding**: the module's own docstring states, as fact, that it "calls generate_cv.py's own
+functions directly... for the sanral_keyperson/world_bank formats, and generate_as_is() for the
+use-as-is path's provenance record." Grepped every real call site of `generate_as_is(` repo-wide:
+exactly one, inside `generate_cv.py`'s own CLI - none in `process_cv_jobs.py`, despite importing it
+by name. `process_job()`'s builder dict only ever has two keys (`sanral_keyperson`/`world_bank`) -
+no third branch for "as-is" exists. Traced the real "use as-is" feature to confirm nothing is
+actually broken: `app/app/people/actions.ts`'s `uploadCv()` handles it entirely in TypeScript -
+"recorded in cv_uploads and nothing else happens" (its own comment) - never inserting a
+`generated_cvs` row, so this bridge never sees an as-is job to dispatch in the first place. No real
+feature broken, no crash reachable - a documentation/dead-import defect, not a functional bug.
+
+**Fix:** corrected the docstring, removed the dead `from generate_cv import generate_as_is` import.
+Verified: `py_compile` clean, `--self-test` still produces both real formats, and
+`engine/worker/test_poll_loop.py` (the full suite that exercises this exact file end to end,
+including a real `--loop` subprocess) still passes with no regression.
+
+Full writeup: Finding 93, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-sixteenth run): rotated to notify (engine/notify/daily_digest.py's less-tested functions) - thorough review, no new bug found this time
 
 Orientation: `git fetch origin main` showed 2 new sibling commits (`3b2f7f2`, a docs-only
