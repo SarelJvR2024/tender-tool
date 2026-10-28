@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byBuyer, byCategory, byProvince, tenderFrequencyTrend, type MarketRow } from "./marketPricing";
+import { byBuyer, byCategory, byProvince, ownPosition, tenderFrequencyTrend, type Bidder, type MarketRow, type TenderOutcome } from "./marketPricing";
 
 /** A minimal, otherwise-"empty" market row - every field a real
  * public_tender_outcomes row has, defaulted to its own honest "nothing here"
@@ -88,6 +88,73 @@ describe("byCategory", () => {
 // fetchAllRows's own tests moved to lib/supabasePaging.spec.ts when the
 // helper itself moved to its own shared module (lib/supabasePaging.ts) -
 // see that file for why (so dashboard/analytics could reuse this exact fix).
+
+/** A minimal, otherwise-"empty" register entry - a bidder with one priced column. */
+function bidder(name: string, amount: number, overrides: Partial<Bidder> = {}): Bidder {
+  return { name, amounts: [{ column: "Price", amount_zar: amount, amount_raw: String(amount) }], ...overrides };
+}
+
+/** A minimal TenderOutcome - a single-column register with the given bidders. */
+function outcome(bidders: Bidder[], overrides: Partial<TenderOutcome> = {}): TenderOutcome {
+  return {
+    id: "id",
+    outcome_key: "sanral:1",
+    reference: null,
+    buyer: null,
+    title: null,
+    project_type: null,
+    procurement_type: null,
+    province: null,
+    categories: [],
+    competitive: true,
+    status: "register_published",
+    closing_date: null,
+    award_date: null,
+    winner_name: null,
+    winner_amount_zar: null,
+    winner_points: null,
+    winner_count: bidders.length,
+    bidders,
+    bidders_source: "sanral_register",
+    register_columns: 1,
+    bidder_count: bidders.length,
+    priced_bidder_count: bidders.length,
+    median_bid_zar: null,
+    winner_rank: null,
+    winner_vs_median: null,
+    lowest_bid_won: null,
+    winner_match_basis: null,
+    data_notes: [],
+    sources: ["sanral_closed"],
+    source_urls: [],
+    attribution: null,
+    refreshed_at: "2026-10-28T00:00:00Z",
+    ...overrides,
+  };
+}
+
+describe("ownPosition", () => {
+  // OUTLIER_FACTOR excludes a bid >5x (or <1/5) the field's median from
+  // field.amounts/median/low/high - correct for the aggregate, but when the
+  // excluded bid is the COMPANY'S OWN it must not also drop out of "of" (the
+  // field size rank is read against): otherwise rank can read past of
+  // ("rank 4 of 3"), a contradiction no honest display should ever show.
+  it("never reports a rank past the field size when the company's own price is itself an outlier", () => {
+    const you = bidder("You Pty Ltd", 700); // 100,105,110 median 107.5; 700 > 107.5*5
+    const o = outcome([bidder("A", 100), bidder("B", 110), bidder("C", 105), you]);
+    const pos = ownPosition(o, ["You Pty Ltd"], 700);
+    expect(pos.found).toBe("name_and_price");
+    expect(pos.rank).not.toBeGreaterThan(pos.of);
+  });
+
+  it("counts the company's own outlier bid in the field size, not just the other bidders", () => {
+    const you = bidder("You Pty Ltd", 10); // 1/10th of the 100/105/110 median - also an outlier
+    const o = outcome([bidder("A", 100), bidder("B", 110), bidder("C", 105), you]);
+    const pos = ownPosition(o, ["You Pty Ltd"], 10);
+    expect(pos.rank).toBe(1);
+    expect(pos.of).toBe(4); // 4 real bids on this tender, including yours
+  });
+});
 
 describe("byBuyer / byProvince", () => {
   it("groups by the exact buyer name, skipping rows with no buyer recorded", () => {

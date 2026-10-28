@@ -204,6 +204,12 @@ export function ownPosition(outcome: TenderOutcome, companyNames: (string | null
   // A winner is only known per tender, not per contract of a batch.
   const winnerAmount = columns === 1 ? winner?.amounts[0]?.amount_zar ?? toNumber(outcome.winner_amount_zar) : null;
   const rank = price !== null && field.amounts.length > 0 && entry ? 1 + field.amounts.filter((a) => a < price).length : null;
+  // Your own price can itself be excluded from field.amounts (OUTLIER_FACTOR,
+  // or a non-positive published value) - "of" must still count you there, or
+  // rank can read past it ("rank 4 of 3"), a contradiction no honest display
+  // should ever show.
+  const ownCounted = price !== null && field.amounts.includes(price);
+  const of = entry && price !== null && !ownCounted ? field.amounts.length + 1 : field.amounts.length;
   return {
     found,
     entry,
@@ -211,7 +217,7 @@ export function ownPosition(outcome: TenderOutcome, companyNames: (string | null
     field,
     price,
     rank,
-    of: field.amounts.length,
+    of,
     winnerAmount,
     vsWinnerPct: entry ? pct(price, winnerAmount) : null,
     vsMedianPct: entry ? pct(price, field.median) : null,

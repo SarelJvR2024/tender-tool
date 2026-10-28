@@ -14,6 +14,46 @@
 
 ---
 
+**2026-10-28 — standing review pass, real bug fixed: `ownPosition()` could show an impossible
+"rank past the field size" when the company's own bid was itself an outlier
+(`app/lib/marketPricing.ts`).**
+
+Picked `app/lib/marketPricing.ts` (523 lines - money-adjacent bid/award analysis logic, only 105
+lines of test coverage and zero tests for `ownPosition()` specifically, the function that computes
+"Rank X of Y" for the Market Intelligence pages) as this pass's under-reviewed candidate.
+
+The bug: `columnField()` excludes any bid more than `OUTLIER_FACTOR` (5x) off the field's median from
+`amounts`/`low`/`median`/`high` - correct, it's how a register's own typing errors are kept out of the
+aggregate. But `ownPosition()`'s `rank`/`of` were both read off that same outlier-filtered
+`field.amounts` with no account taken of whether the company's *own* price was itself one of the
+excluded values. When it was, `of` (the field size) silently dropped the company from its own count
+while `rank` (counted by `1 + amounts below price`) did not - producing a result like **"Rank 4 of
+3"**, a contradiction (rank can't exceed the field size) that would have read as broken or confusing
+on the Market Intelligence page for any company whose own submitted price happened to be a genuine
+(if unusual) 5x-off-median outlier - a real, if not everyday, scenario: a fat-fingered price, or a
+company legitimately bidding far outside the pack on a complex scope.
+
+Fixed by confirming whether the company's own `price` is present in `field.amounts` (`ownCounted`)
+and, when it isn't, adding the company back into `of` (`field.amounts.length + 1`) so rank and field
+size are always self-consistent in both directions - a high-outlier price now correctly reads "last
+of N+1", a low-outlier price "first of N+1", not "Nth of N" or "1st of N" undercounting the company's
+own presence in the field.
+
+Verified with the full revert-confirm-restore-confirm discipline: wrote two new tests in
+`app/lib/marketPricing.spec.ts` (`describe("ownPosition", ...)`) reproducing the exact "rank 4 of 3"
+case and the symmetric low-outlier undercount, confirmed both failed against the unfixed code
+(`expected 4 to be not greater than 3` / `expected 3 to be 4`), applied the fix, confirmed both pass,
+then ran the full app test suite (`npx vitest run`, 291/291 passing, 31/31 files) and `tsc --noEmit`
+(clean) with no regressions. Committed and pushed directly to `main` (self-contained logic fix inside
+one file plus its own new tests, no schema/API/behavioural surface beyond this function - no PR, per
+this routine's convention).
+
+No other open items touched this pass. Open PRs #164, #165, #169 are all still correctly
+draft/unmerged (checked via `git fetch origin main` + `list_pull_requests` before starting - no new
+self-merge, no file overlap with this change).
+
+---
+
 **2026-10-28 — standing review pass, clean sweep: Form B7 (Targeted Enterprise subcontracting)
 plan-mode handling in `engine/pack/assemble_pack.py` + `engine/sanral_b7.py`, no real bug found.**
 
