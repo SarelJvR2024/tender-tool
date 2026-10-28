@@ -14,6 +14,32 @@
 
 ---
 
+**2026-10-28 — standing review pass, clean sweep: job-bridge `completed_at`-on-crash bug class
+checked across all 5 sibling bridges, none affected beyond the one already fixed
+(`process_cv_jobs.py`, commit `a987198`).**
+
+Follow-up to the prior pass's real fix: `process_cv_jobs.py`'s top-level crash handler marked a job
+`failed` without setting `completed_at`, undercounting Telemetry failures and leaving a failed
+request invisible in the customer's own tender activity feed. Checked whether the same gap exists in
+every sibling job-processing bridge the always-on worker runs:
+
+- `engine/pack/process_pack_jobs.py`, `engine/general/process_general_jobs.py`,
+  `engine/narrative/process_narrative_jobs.py` - clean. Each top-level crash handler sets its own
+  `completed_at`-equivalent field on the failure path.
+- `engine/onboarding/process_onboarding_jobs.py` - clean. `process_upload()`'s top-level
+  `except Exception` (line 144) routes through `_safe_update(lambda: fail_upload(...), ...)`, and
+  `fail_upload()` (lines 72-74) sets `classification_completed_at`.
+- `engine/cv/extract_cv_fields.py` - clean. `process_upload()`'s top-level `except Exception`
+  (line 859, "a bug, not a user problem - still never leave it 'extracting'") routes through the same
+  `_safe_update(lambda: fail_upload(...), ...)` pattern, and `fail_upload()` (lines 790-792) sets
+  `extraction_completed_at`.
+
+No fix needed here - documenting the clean sweep per this routine's own standing instruction, rather
+than forcing a weak finding elsewhere. The bug class is now confirmed closed across every bridge the
+worker runs.
+
+---
+
 **2026-10-28 — standing review pass, real bug fixed: `ownPosition()` could show an impossible
 "rank past the field size" when the company's own bid was itself an outlier
 (`app/lib/marketPricing.ts`).**
