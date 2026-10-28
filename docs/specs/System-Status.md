@@ -5682,6 +5682,46 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-sixteenth run): rotated to notify (engine/notify/daily_digest.py's less-tested functions) - thorough review, no new bug found this time
+
+Orientation: `git fetch origin main` showed 2 new sibling commits (`3b2f7f2`, a docs-only
+confirmation that the `completed_at`-on-crash bug class found in `process_cv_jobs.py` is already
+closed across pack/general/narrative/onboarding/cv_extract - worker/job-queue area, so skipped that
+rotation this cycle to avoid duplicating; `2012f89`/PR #169 merged, the COID/B-BBEE document-mismatch
+guard - non-SANRAL pack, no overlap). New PR `#170` (docs-only prefill diagnosis) - no code, no
+overlap. Other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to notify - picked `daily_digest.py`'s less-reviewed functions (`find_readiness_changes()`,
+`load_roster_live()`, `submission_due_signals()`, `listing_change_signals()`, `company_signals()`'s
+own `own()` tenant-isolation filter), since prior passes in this area focused on
+`send_pack_ready_email.py`/`send_digest_emails.py`/`record_heartbeat.py`.
+
+Specifically chased one real-looking lead: `save_readiness_seen_db()` only upserts a `prov::` seen-
+store row when `owners.get(k)` is truthy, and `find_readiness_changes()` sets `owners[key] = None`
+whenever a field_provenance row's `tender_pack_id` doesn't resolve to a pack in `packs_by_id` - if
+that ever happened, the status change would be computed in-memory this run but never persisted,
+causing the SAME row to be treated as "never seen" again on every future run (a permanent, repeating
+false "readiness change" notification for an assumed_default/missing status, or a silently-reset
+seen-store entry for a confirmed/computed one). Traced whether this is actually reachable rather than
+assuming: read the real schema directly (`field_provenance.tender_pack_id uuid not null references
+tender_packs(id) on delete cascade`, and `tender_packs.company_id uuid not null`) - both are `not
+null`, and the cascade delete means a field_provenance row can never outlive its own tender_pack
+(so the only way to hit this is a tender_pack deleted in the exact window between this function's
+own two queries - a real but vanishingly low-probability race, not a reachable bug worth forcing a
+fix for).
+
+Confirmed `find_readiness_changes()`'s own normal-case behaviour (first-sighting-and-already-fine
+suppressed, a genuine status change correctly reported and persisted, a second run with no change
+reports nothing) is already exercised end to end by `test_digest_live.py`'s own 3-scenario live-mode
+test - not zero coverage, just not unit-tested by function name directly, which is fine. `own()`'s
+tenant-isolation filter (document_expiry/tender_tasks/readiness_changes/tender_updates/
+reassessed_tenders, all narrowed to `company_id`) read correctly - a readiness change with no
+resolvable `company_id` (the same race-condition case above) is excluded from EVERY company's
+digest, not leaked to any of them, the safe direction.
+
+No code change this pass - a thorough look turned up nothing reachable, so a clean sweep is logged
+honestly rather than a forced weak finding.
+
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-fifteenth run): Finding 92 - a real kouga.py boundary bug (`--max-pages 0` silently fetched every page instead of none more) plus a repo-wide CI-wiring gap far bigger than Findings 87-89: 28 engine/test_*.py files, 18 of them in engine/discovery/ alone, had never once run in CI
 
 Orientation: `git fetch origin main` showed 4 new sibling commits (`184ec61` Form B7 plan-mode
