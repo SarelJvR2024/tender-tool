@@ -5224,3 +5224,67 @@ classification" step) - no new CI step needed, unlike Findings 87-89.
 
 **Regression:** `engine/intake/test_classify_tender.py` only (6 new test functions, additive). No
 production code touched - this pass closed a test-coverage gap, not a code bug.
+
+### Finding 91 (CONFIRMED, NOT FIXED, severe - a real, tested compliance safety-net has been silently dead in production since 2026-10-27 ~20:30 UTC: a document that's fine today but will lapse before a SPECIFIC open tender's closing date has had no delivery channel at all for ~13 hours, contradicting this repo's own explicit prior decision not to disable that channel until the gap was closed)
+
+**Where:** compliance/reminders rotation this cycle. Not a code bug in `watch_deadlines.py` itself -
+a production-reachability regression caused by a trigger-disable decision in a merged PR, found by
+tracing the real, current delivery path end to end rather than trusting a PR description's own
+"built and verified" claim.
+
+**What was tested:** `find_documents_lapsing_before_closing()` (the "a PI insurance/SARS PIN/ISO
+9001/etc. is fine under the normal 60-day window, but will have lapsed by the closing date of a
+tender the company is actually pursuing" early warning - the whole reason this function exists, per
+its own docstring) is only ever CALLED from `watch_deadlines.main()`'s own CLI (line 557 of
+`watch_deadlines.py`) - confirmed by grepping every `engine/` and `app/` file for its name. Checked
+every real path that could reach that CLI in production:
+- `daily_digest.py`'s live mode (the one thing `daily-digest.yml`'s scheduled GitHub Action actually
+  runs) calls `find_due_documents`/`find_due_person_credentials`/`registration_reminders.find_due_
+  registrations`/`find_due_property_documents`/`find_due_tasks` - **never**
+  `find_documents_lapsing_before_closing`. Confirmed by reading its own live-mode orchestration
+  directly, not assumed from the function list in its module docstring.
+- `scripts/send-compliance-digest.ts` (the new Tier 2 notification-engine replacement, migration
+  2026-10-27) explicitly disclaims this exact category in its OWN header comment: *"Scope note vs the
+  old Claude-scheduled 'Compliance deadline reminder check-in'... that script's `documents_before_
+  closing` category... is a different shape of fact entirely - not covered here, and not claimed to
+  be."* Confirmed directly in `complianceDigestCandidates.ts` too: zero mentions of `closing`/
+  `tender_pack` anywhere in that file - purely a flat 30/14/7-day threshold on expiry alone, no
+  cross-check against any tender's own closing date at all.
+- The only remaining path was the Claude-scheduled trigger that used to run `watch_deadlines.py`'s
+  CLI directly (`trig_01HQHdLaBfKDJ7oUBMBU1hAt`, "Compliance deadline reminder check-in") - **confirmed
+  via `list_triggers`: `enabled: false`, `updated_at: 2026-10-27T20:30:13Z`**. Its own stored prompt
+  says plainly: *"This trigger was added because the compliance reminder logic... existed and was
+  fully tested but nothing was ever scheduling it... If you discover this trigger is now redundant
+  with something else... say so and consider recommending to Sarel that one of the two be retired
+  rather than running both"* - the exact judgment call it was asking for before being disabled.
+
+**Finding (CONFIRMED, severe).** `docs/specs/System-Status.md`'s own prior entry (the pass
+immediately preceding PR #166's merge) recorded this explicit decision: *"The compliance-deadline-
+reminder Claude trigger should NOT be disabled yet - its Resend replacement has a real, documented
+scope gap (`documents_before_closing`, generic tender `tasks`...) that A6 above would have closed;
+stays enabled until that gap is closed or Sarel explicitly accepts the gap."* PR #166 (merged,
+`728d221`) nonetheless disabled it, describing both legacy triggers as simply "built and verified" -
+with no evidence anywhere in the repo that Sarel explicitly accepted this specific gap first. Since
+2026-10-27 ~20:30 UTC, **no channel anywhere delivers this category of warning to anyone**: a
+company's PI insurance/SARS TCS PIN/ISO 9001/bank letter/BEE proof that is comfortably inside its
+normal renewal window today, but will have lapsed by the time a tender they are actively pursuing
+closes, gets no early warning at all - the gap is silent until the real compliance report at
+submission time, by which point it may be too late to renew in time. (`find_due_tasks()`, the
+OTHER category this same trigger covered, is NOT similarly orphaned - `daily_digest.py`'s live mode
+calls it directly, independently of this trigger, so generic tender-task reminders are unaffected.)
+
+**Why this is flagged, not fixed directly**: the right remedy is a real design decision with at
+least three shapes - (1) re-enable the disabled trigger as a stopgap, (2) extend `send-compliance-
+digest.ts`/`complianceDigestCandidates.ts` to add this category (a `tender_packs` join against open
+tenders' own closing dates, the TS equivalent of this Python function - a genuine feature port, not
+a one-line fix), or (3) Sarel explicitly accepting the gap as a known, deliberate reduction in scope
+for the new notification engine. None of these is this pass's call to make unilaterally - re-enabling
+a trigger or shipping a TS port of cross-cutting compliance logic is exactly the kind of production-
+automation/design decision this repo's own standing conventions (and this exact trigger's own stored
+prompt) ask to be routed to Sarel, not decided silently by whichever pass happens to notice it.
+Reported directly to Sarel in chat this cycle, not left only in this file, per the standing "never
+leave a real finding only in chat" rule working in the other direction too - a real finding doesn't
+stay ONLY in a doc either.
+
+**Regression:** none - no code or configuration was changed by this pass. Purely a documentation/
+escalation entry and a live `list_triggers` read (no mutation).

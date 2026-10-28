@@ -5427,6 +5427,44 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-fourteenth run): Finding 91 (severe, FLAGGED NOT FIXED) - the compliance "document lapses before this tender's closing date" early-warning check has had zero delivery channel in production since 2026-10-27 ~20:30 UTC, contradicting this repo's own explicit prior decision not to disable its trigger until the replacement's documented gap was closed
+
+Orientation: `git fetch origin main` showed one new sibling commit (`d4d3800`, a docstring-only
+clean sweep of `fill_sbd_docx.py` - non-SANRAL pack, no overlap). New PR `#168` (documentation-only,
+recording an already-executed `is_test_company` flip under the new production-DB standing rule) -
+draft, no code, no overlap. Both other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to compliance/reminders. `watch_deadlines.py`/`registration_reminders.py` have both had
+thorough passes recently (clean sweeps), so this pass asked a different question of the same file:
+not "is the logic correct" (already checked many times) but "does anything in production actually
+still call it." `find_documents_lapsing_before_closing()` - the check that a document fine under the
+normal 60-day window will nonetheless have lapsed by the closing date of a tender the company is
+actually pursuing - is reachable in this codebase from exactly one place: `watch_deadlines.main()`'s
+own CLI. Traced every real production path: `daily_digest.py`'s live mode (what the scheduled
+`daily-digest.yml` Action actually runs) never calls it; `scripts/send-compliance-digest.ts` (the new
+Tier 2 replacement) explicitly disclaims this exact category in its own header comment and
+`complianceDigestCandidates.ts` confirms it with zero `closing`/`tender_pack` logic anywhere; the
+only remaining path - the Claude-scheduled "Compliance deadline reminder check-in" trigger
+(`trig_01HQHdLaBfKDJ7oUBMBU1hAt`) that used to run the CLI directly - is confirmed via `list_triggers`
+to be `enabled: false` as of `2026-10-27T20:30:13Z`.
+
+**This directly contradicts this file's own prior entry** (the pass immediately before PR #166
+merged): "The compliance-deadline-reminder Claude trigger should NOT be disabled yet - its Resend
+replacement has a real, documented scope gap (`documents_before_closing`, generic tender `tasks`)...
+stays enabled until that gap is closed or Sarel explicitly accepts the gap." PR #166 disabled it
+anyway, describing both legacy triggers as simply "built and verified," with no record anywhere that
+Sarel explicitly accepted this specific gap first. Since then, no channel delivers this warning to
+anyone - the gap stays silent until the real compliance report at submission time. (`find_due_tasks()`,
+the trigger's other category, is NOT affected - `daily_digest.py` calls it independently.)
+
+**Flagged, not fixed**: the remedy is a real design decision (re-enable the trigger as a stopgap /
+port this check into the new TS notification engine / Sarel explicitly accepts the gap as scope) -
+not this pass's call to make unilaterally, and not a quick contained patch. Reported to Sarel
+directly in chat this cycle given the severity and that it's actively ongoing, not left only in this
+file.
+
+Full writeup: Finding 91, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-thirteenth run): Finding 90 (coverage-gap closure, no new bug) - 6 of classify_tender.py's functions, each carrying its own documented ambiguous-detection fix, had zero dedicated tests anywhere in the repo
 
 Orientation: `git fetch origin main` showed two new sibling commits (`a987198` CV generation failure
