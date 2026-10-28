@@ -5380,6 +5380,40 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-thirteenth run): Finding 90 (coverage-gap closure, no new bug) - 6 of classify_tender.py's functions, each carrying its own documented ambiguous-detection fix, had zero dedicated tests anywhere in the repo
+
+Orientation: `git fetch origin main` showed two new sibling commits (`a987198` CV generation failure
+never set `completed_at`, hiding it from telemetry/activity feed - real `engine/cv/process_cv_jobs.py`
+fix; `e67dc18` `workflowRegistry.ts`'s `cronIntervalMs()` false "stale" on weekends/overnight, a
+TypeScript telemetry fix) - fast-forwarded cleanly, no overlap with this pass. Both open PRs
+(`#164`, `#165`) re-confirmed TypeScript-only via the GitHub API.
+
+Rotated to intake - CV (just touched by a sibling) and non-SANRAL pack (touched 2 cycles ago)
+skipped as too-recent; intake's last dedicated pass was Finding 78 (run 97), genuinely overdue.
+
+Read `classify_tender.py` end to end and checked which of its functions `test_classify_tender.py`/
+`test_manual_intake.py` actually call. Found `classify_workbook()`, `read_setup()`,
+`find_nra_reference()`, `find_delivery_address()`, `find_closing_time()`, and `discrepancies()` had
+**zero dedicated tests anywhere** - including three (`find_nra_reference`/`find_delivery_address`/
+`find_closing_time`) that each carry their own detailed "ambiguous" docstring documenting a real,
+specific bug class an earlier pass (2026-10-23/24) fixed, with nothing regression-testing that it
+still holds.
+
+**What was found: nothing new - all six held up correctly** under real adversarial cases (a stale
+NRA number repeated 5× correctly not outvoting a single correcting addendum; the same closing time
+in three different real separator formats correctly collapsing to one value while a genuinely
+extended time correctly flags ambiguous; the same for a moved delivery address, including confirming
+line-collection stops at a blank line and never pulls in a footer code; `discrepancies()`'s
+normalization and "nothing to compare yet" cases; `classify_workbook()`/`read_setup()` against the
+real template fixtures already used elsewhere in this suite).
+
+Sanity-checked the new tests aren't passing by construction: deliberately broke
+`find_nra_reference()`'s ambiguous detection on a scratch copy - the new test caught it immediately.
+15 new checks across 6 new test functions, `0 failure(s)`. Already wired into CI via the existing
+"Intake classification" step - no new CI step needed this time.
+
+Full writeup: Finding 90, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-twelfth run): Finding 89 (severe) - a YAML `.nan`/`.inf` capture value bypassed the Financial Submission hours guard and wrote a non-numeric cell into a real SANRAL workbook; also closed 3 engine/test_*.py CI-wiring gaps, including Finding 81's own regression test
 
 Orientation: `git fetch origin main` showed one new sibling commit (`6930b17`, a standing-review

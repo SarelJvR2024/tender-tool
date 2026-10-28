@@ -176,6 +176,129 @@ def test_docx_already_marked_unreadable_is_skipped_without_a_note():
     check("no note is added for a doc_entry with no _local path at all", decision["notes"] == [])
 
 
+FIN_WORKBOOK = os.path.join(os.path.dirname(HERE), "..", "templates", "samples", "financial",
+                            "R.334-030-2025.1F_Financial_Submission_ran.xlsm")
+
+
+def test_classify_workbook_real_technical_financial_and_corrupt(tmp_path="/tmp"):
+    print("classify_workbook: real technical workbook, real financial workbook, a corrupt file")
+    # None of classify_workbook()/read_setup()/find_nra_reference()/
+    # find_delivery_address()/find_closing_time()/discrepancies() had any
+    # dedicated test anywhere in the repo before this pass (test_manual_intake.py
+    # needs Postgres and never calls any of them directly either) - despite
+    # find_nra_reference/find_delivery_address/find_closing_time each
+    # carrying their own documented "ambiguous" edge-case fix (QA passes,
+    # 2026-10-23/24) with nothing regression-testing that it still holds.
+    tech = ct.classify_workbook(TECH_WORKBOOK)
+    check("the real Technical Submission workbook is classified as technical, with its family",
+          tech["kind"] == "technical" and tech["family"] == "Conventional Consultant Tender", tech)
+    fin = ct.classify_workbook(FIN_WORKBOOK)
+    check("the real Financial Submission workbook is classified as financial, no family",
+          fin["kind"] == "financial" and fin["family"] is None, fin)
+    corrupt_path = os.path.join(tmp_path, "corrupt.xlsm")
+    with open(corrupt_path, "wb") as f:
+        f.write(b"not a real xlsm, just bytes")
+    bad = ct.classify_workbook(corrupt_path)
+    check("a corrupt/garbage file is reported unreadable, not raised or silently 'other'",
+          bad["kind"] == "unreadable" and bad["sheets"] == [] and bad["error"], bad)
+    os.remove(corrupt_path)
+
+
+def test_read_setup_against_the_real_fixture():
+    print("read_setup: the real Technical Submission workbook's own SETUP sheet")
+    setup = ct.read_setup(TECH_WORKBOOK)
+    check("contract_no read from SETUP!C2", setup["contract_no"] == "R.352-020-2025/1F", setup)
+    check("closing_date read from SETUP!C3 as a real ISO date (Excel serial decoded)",
+          setup["closing_date"] == "2026-10-22", setup)
+    check("the two real key positions are read, each with its own managerial flag and alternate",
+          {p["code"] for p in setup["positions"]} == {"PL", "DS1"}
+          and all(p["managerial"] is False for p in setup["positions"]), setup)
+
+
+def test_find_nra_reference_single_ambiguous_and_none():
+    print("find_nra_reference: single match, most-repeated-wins when ambiguous, no match at all")
+    check("a single NRA reference is read in the seed's own format",
+          ct.find_nra_reference("Book 1 cover page. NRA: No. 2026/0071. Footer repeats NRA 2026/0071.")
+          == {"value": "NRA 2026/0071", "ambiguous": False})
+    check("no NRA reference anywhere returns None, not a guess",
+          ct.find_nra_reference("This document mentions no NRA number at all.") is None)
+    check("an empty/None input returns None without raising", ct.find_nra_reference(None) is None)
+    # The real shape this ambiguity exists for: a stale number repeated on
+    # every page footer (counted many times) vs. a single correcting
+    # addendum mention - repetition count alone must not silently win.
+    text = "NRA: 2026/0071\n" * 5 + "Addendum 1: the correct reference is NRA 2026/9999."
+    result = ct.find_nra_reference(text)
+    check("more than one distinct NRA number sets ambiguous=True even though one is repeated far more",
+          result["ambiguous"] is True, result)
+    check("the most-repeated value is still the default 'value' (unchanged normal-case behaviour)",
+          result["value"] == "NRA 2026/0071", result)
+
+
+def test_find_closing_time_single_ambiguous_and_formats():
+    print("find_closing_time: single match, multiple SEPARATOR formats of the same time are not "
+          "ambiguous, genuinely different times are")
+    check("a single closing time is read as HH:MM",
+          ct.find_closing_time("The closing time for the receipt of tenders is at 12:00 on 22 October 2026.")
+          == {"value": "12:00", "ambiguous": False})
+    check("'h' and '.' separators and a single-digit hour all normalize to the same HH:MM, not ambiguous",
+          ct.find_closing_time(
+              "The closing time and date for receipt of tenders is 9h00. "
+              "The closing date and time for receipt of tenders is 09.00."
+          ) == {"value": "09:00", "ambiguous": False})
+    check("no closing-time sentence anywhere returns None", ct.find_closing_time("Nothing about a closing time here.") is None)
+    # The real shape: an addendum extending the deadline from 12:00 to 14:00.
+    text = ("The closing time for the receipt of tenders is at 12:00 on 22 October 2026. "
+            "Addendum 2: the closing time for the receipt of tenders is at 14:00 on 29 October 2026.")
+    result = ct.find_closing_time(text)
+    check("a genuinely different closing time elsewhere in the text sets ambiguous=True", result["ambiguous"] is True, result)
+    check("'value' stays the FIRST match found (unchanged default), not the later/extended one",
+          result["value"] == "12:00", result)
+
+
+def test_find_delivery_address_single_ambiguous_and_stops_correctly():
+    print("find_delivery_address: single address, a genuinely different second address is ambiguous, "
+          "line collection stops at a footer/blank/sentence")
+    text = ("The tender box situated at:\n"
+            "The Reception Area\n"
+            "20 Shoreward Drive\n"
+            "Bay West\n"
+            "Gqeberha\n"
+            "6025\n"
+            "\n"
+            "T-6\n")
+    result = ct.find_delivery_address(text)
+    check("the real multi-line address under the heading is read in full",
+          result["lines"] == ["The Reception Area", "20 Shoreward Drive", "Bay West", "Gqeberha", "6025"], result)
+    check("not ambiguous when only one address appears", result["ambiguous"] is False, result)
+    check("collection stops at the blank line, never pulling in the page-footer code below it",
+          "T-6" not in result["lines"], result)
+    check("no delivery-address heading anywhere returns None", ct.find_delivery_address("Nothing about a tender box here.") is None)
+    # The real shape: an addendum moving the delivery venue to a different address.
+    moved = text + "\nAddendum 3: tenders must be deposited at the following address:\nUnit 4, Freedom Square\nPort Elizabeth\n7001\n"
+    result = ct.find_delivery_address(moved)
+    check("a genuinely different second address sets ambiguous=True", result["ambiguous"] is True, result)
+    check("'lines' stays the FIRST address found (unchanged default), not the moved/later one",
+          result["lines"][0] == "The Reception Area", result)
+
+
+def test_discrepancies_contract_no_and_closing_date():
+    print("discrepancies: contract number normalization, closing date mismatch, matching values, "
+          "and a missing side on either end skips the check entirely")
+    setup = {"contract_no": "R.352-020-2025/1F", "closing_date": "2026-10-22"}
+    # Punctuation-only difference must NOT be reported - both sides normalize
+    # to the same alphanumeric string.
+    same = ct.discrepancies({"contract_no": "r352 020 2025 1f", "closing_date": "2026-10-22"}, setup)
+    check("a punctuation/case-only difference in contract_no is not a discrepancy", same == [], same)
+    mismatch = ct.discrepancies({"contract_no": "R.352-020-2025/2F", "closing_date": "2026-10-22"}, setup)
+    check("a genuinely different contract number IS reported", len(mismatch) == 1 and "R.352-020-2025/2F" in mismatch[0], mismatch)
+    date_mismatch = ct.discrepancies({"contract_no": "R.352-020-2025/1F", "closing_date": "2026-11-05"}, setup)
+    check("a genuinely different closing date IS reported", len(date_mismatch) == 1 and "2026-11-05" in date_mismatch[0], date_mismatch)
+    missing_user_side = ct.discrepancies({"contract_no": None, "closing_date": None}, setup)
+    check("nothing the user typed yet (both None) is never a discrepancy, not a crash", missing_user_side == [], missing_user_side)
+    missing_setup_side = ct.discrepancies({"contract_no": "anything", "closing_date": "2026-10-22"}, {"contract_no": None, "closing_date": None})
+    check("no SETUP value to compare against is never a discrepancy either", missing_setup_side == [], missing_setup_side)
+
+
 def test_assess_fit_from_text_categorized_tender_no_disciplines_not_duplicated():
     print("assess_fit_from_text: categorized tender, company has no disciplines on file - "
           "the actionable message appears once, not duplicated")
@@ -217,6 +340,12 @@ def main():
     test_duplicate_technical_workbooks_signal_names_the_same_file_it_actually_used()
     test_real_a_forms_heading_deep_in_the_document_is_still_found()
     test_docx_already_marked_unreadable_is_skipped_without_a_note()
+    test_classify_workbook_real_technical_financial_and_corrupt()
+    test_read_setup_against_the_real_fixture()
+    test_find_nra_reference_single_ambiguous_and_none()
+    test_find_closing_time_single_ambiguous_and_formats()
+    test_find_delivery_address_single_ambiguous_and_stops_correctly()
+    test_discrepancies_contract_no_and_closing_date()
     test_assess_fit_from_text_categorized_tender_no_disciplines_not_duplicated()
     test_assess_fit_from_text_uncategorized_tender_no_disciplines_still_appends()
     print(f"\n{len(FAILS)} failure(s)")

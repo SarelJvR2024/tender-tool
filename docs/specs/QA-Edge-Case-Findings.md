@@ -5183,3 +5183,44 @@ SANRAL Form B7 step.
 **Regression:** `engine/fill_financial_hours.py` (one guard condition, one new `import math`),
 `engine/test_fill_financial_hours.py` (3 new cases in the existing adversarial loop),
 `.github/workflows/bridge-worker-ci.yml` (3 new steps). No schema or other call-site changes.
+
+### Finding 90 (coverage-gap closure, no new bug found - 6 of `classify_tender.py`'s functions, each carrying its own documented ambiguous-detection fix from an earlier pass, had zero dedicated tests anywhere in the repo)
+
+**Where:** intake rotation this cycle (last dedicated passes: Finding 78 at run 97, plus several
+2026-10-20/23/24/26/27 fixes layered into `classify_documents()`/`_docx_head()` since - genuinely
+overdue for a fresh look at the REST of the file). `engine/intake/classify_tender.py`.
+
+**What was tested:** `test_classify_tender.py` only ever called `classify_documents()` and
+`assess_fit_from_text()`; `test_manual_intake.py` (the only other test file in this directory) needs
+a real Postgres and never calls any of the others either. That left `classify_workbook()`,
+`read_setup()`, `find_nra_reference()`, `find_delivery_address()`, `find_closing_time()`, and
+`discrepancies()` with **zero dedicated tests anywhere** - despite three of them
+(`find_nra_reference`/`find_delivery_address`/`find_closing_time`) each carrying their own detailed
+"ambiguous" docstring explaining a real, specific bug class an earlier pass (2026-10-23/24) fixed
+(an addendum correcting/extending/moving a value must not be silently outvoted by the original
+value's own repeat count, or silently picked over without telling anyone there were two). A fix with
+no test for it can regress silently - the same risk category Findings 87-89 cared about for CI
+wiring, here at the level of one file's own test coverage.
+
+**What was found: nothing new - all six held up correctly** under real adversarial cases built from
+the module's own documented real examples (SANRAL's NRA reference format, the real R.396 Book 1 T-6
+delivery/closing-time wording, the real `R.352-020-2025.1F_ran.xlsm`/`R.334-030-2025.1F_Financial_
+Submission_ran.xlsm` fixtures already used elsewhere in this test suite). Specifically constructed:
+a stale NRA number repeated 5× outvoted by a single correcting addendum mention (still correctly
+`ambiguous: True`, still correctly defaults to the most-repeated value); the same closing time written
+with three different real separators (`:`/`h`/`.`) correctly collapsing to one non-ambiguous value
+while a genuinely different (extended) time correctly flips `ambiguous` to `True`; the same discipline
+for a moved delivery address, including confirming line-collection genuinely stops at a blank line and
+never pulls in a page-footer code like "T-6"; `discrepancies()`'s punctuation/case-insensitive contract-
+number comparison and its "nothing to compare yet on either side is never a discrepancy" cases; and
+`classify_workbook()`/`read_setup()` against the two real template fixtures (confirmed the real
+contract number, ISO closing date, and both key positions' managerial flags read correctly).
+
+**Verified the new tests actually test something, not just pass by construction**: deliberately broke
+`find_nra_reference()`'s own ambiguous-detection on a scratch copy (hard-coded `"ambiguous": False`)
+and confirmed the new test caught it immediately. Full file re-run clean: `0 failure(s)`, 15 new
+checks across 6 new test functions. Already wired into CI (`bridge-worker-ci.yml`'s existing "Intake
+classification" step) - no new CI step needed, unlike Findings 87-89.
+
+**Regression:** `engine/intake/test_classify_tender.py` only (6 new test functions, additive). No
+production code touched - this pass closed a test-coverage gap, not a code bug.
