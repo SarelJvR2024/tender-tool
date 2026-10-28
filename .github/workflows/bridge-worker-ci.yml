@@ -254,6 +254,134 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/narrative/test_process_narrative_jobs.py
 
+      # ----------------------------------------------------------------
+      # Finding 92 (2026-10-28): a repo-wide sweep found 28 engine/test_*.py
+      # files that ran clean standalone but had never once run in CI - the
+      # same gap shape as Findings 87/88/89, just far larger in scope (18 of
+      # them in engine/discovery/ alone). Each confirmed, individually, to
+      # pass with exit 0 and no live Supabase/Postgres/API key before being
+      # added here (several self-skip their own live-only part gracefully,
+      # e.g. test_market_trend.py/test_key_person_minimums.py - that's
+      # correct, pre-existing behaviour, not something this pass changed).
+      # engine/intake/test_manual_intake.py deliberately stays out: without
+      # INTAKE_PSQL it skips every real check (0 assertions), so wiring it
+      # in bare would be theatre, not coverage - it would need its own
+      # dedicated Postgres service (like the tenant-isolation-db job below),
+      # which is a separate piece of work, not a one-line CI add.
+      # ----------------------------------------------------------------
+
+      - name: CV generation - cover page "why this person fits this position" (suggest_pack scoring read-back)
+        if: ${{ !cancelled() }}
+        run: python3 engine/cv/test_generate_cv.py
+
+      - name: General engine - process_general_jobs.py's fail_stale_jobs()
+        if: ${{ !cancelled() }}
+        run: python3 engine/general/test_process_general_jobs.py
+
+      - name: General engine - extract_requirements()'s MBD/SBD suite-decision logic (Finding 29)
+        if: ${{ !cancelled() }}
+        run: python3 engine/general/test_requirements.py
+
+      - name: General engine - submission_plan.compile_plan() assessment engine
+        if: ${{ !cancelled() }}
+        run: python3 engine/general/test_submission_plan.py
+
+      - name: Onboarding - classify_documents.py / process_onboarding_jobs.py (no live Supabase/API key needed)
+        if: ${{ !cancelled() }}
+        run: python3 engine/onboarding/test_classify_documents.py
+
+      - name: Onboarding - process_onboarding_jobs.py's process_upload() storage-path guard
+        if: ${{ !cancelled() }}
+        run: python3 engine/onboarding/test_process_onboarding_jobs.py
+
+      - name: Pack bridge - process_pack_jobs.adapt_company() Supabase-row-to-profile adapter
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack/test_adapt_company.py
+
+      - name: Pack bridge - pdf_merge.py's naive-UTC "today" bug class (Finding 37/38)
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack/test_pdf_merge.py
+
+      - name: Pack generator - suggest_pack.py's suggest()/score_candidate() ranking
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack_generator/test_suggest_pack.py
+
+      - name: Compliance - directors/shareholders/bank-accounts/property registrations catalog (migration 0050)
+        if: ${{ !cancelled() }}
+        run: python3 engine/compliance/test_principals_registrations.py
+
+      - name: Discovery - boq_extraction.py real BOQ line-item parsing off a workbook
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_boq_extraction.py
+
+      - name: Discovery - company_profiles.RestClient.select()'s own pagination (the marketPricing.ts PR #111 bug class)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_company_profiles.py
+
+      - name: Discovery - download_discovered_documents.py (synthetic HTTP fixtures, fake Supabase, no live network)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_download_discovered_documents.py
+
+      - name: Discovery - etenders_portal.py's dedupe_rows()
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_etenders_portal.py
+
+      - name: Discovery - a tender's own C3.1.11(d) key-person minimums
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_key_person_minimums.py
+
+      - name: Discovery direct buyer reader - Kouga Local Municipality (Finding 92 - fetch_releases()'s multi-page loop)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_kouga.py
+
+      - name: Discovery direct buyer reader - Lephalale Local Municipality
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_lephalale.py
+
+      - name: Discovery - market-tendering-trend aggregation (migration 0062)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_market_trend.py
+
+      - name: Discovery - opportunity_requirements.py (fake Supabase, real committed sample documents)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_opportunity_requirements.py
+
+      - name: Discovery direct buyer reader - Rand Water
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_randwater.py
+
+      - name: Discovery - scope_llm.py (no live Supabase/API key needed)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_scope_llm.py
+
+      - name: Discovery - score_outlook.py's match_locality()/_area_matches()
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_score_outlook.py
+
+      - name: Discovery - source_http.py's shared helpers not already covered by a specific reader's own test
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_source_http.py
+
+      - name: Discovery - store_award_outcomes.py's find_winner()/merge()
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_store_award_outcomes.py
+
+      - name: Discovery - tender_changes.py's own logic (first-sighting, closing/briefing moves, cancellations, re-adverts)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_tender_changes.py
+
+      - name: Discovery - tender_enrichment.py's industry/discipline tag classifier (any industry, not just roads/civil)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_tender_enrichment.py
+
+      - name: Discovery - tender_enrichment.py's own CLI wiring (document-fetch helpers, BOQ-candidate picker, counts())
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_tender_enrichment_cli.py
+
+      - name: Discovery direct buyer reader - Vaal Central Water
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_vaal_central_water.py
+
   tenant-isolation-db:
     # Part 2 of engine/security/test_tenant_isolation.py: real RLS + the
     # tt_check_same_company trigger, enforced by an actual Postgres with

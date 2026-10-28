@@ -5568,6 +5568,50 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-fifteenth run): Finding 92 - a real kouga.py boundary bug (`--max-pages 0` silently fetched every page instead of none more) plus a repo-wide CI-wiring gap far bigger than Findings 87-89: 28 engine/test_*.py files, 18 of them in engine/discovery/ alone, had never once run in CI
+
+Orientation: `git fetch origin main` showed 4 new sibling commits (`184ec61` Form B7 plan-mode
+clean sweep, `5384d71`/`7320904` recording a real DBSA pack-generation test + CV/COID/SANRAL
+findings, `d38d107` `marketPricing.ts`'s `ownPosition()` rank-exceeds-field-size fix) - all
+TypeScript/`app/`-area or documentation, no `engine/` overlap. New PR `#169` (Mzansi pack re-run +
+a document-mismatch guard) touches `engine/general/build_general_pack.py` - avoided entirely.
+Other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to discovery - genuinely the most overdue area by this routine's own rotation history
+(last dedicated pass: run 109, Lephalale). Picked `kouga.py` (Kouga Local Municipality, a real
+28-page listing) since `test_kouga.py` thoroughly unit-tests its parse functions but never
+`fetch_releases()` itself end to end.
+
+**The bug**: `fetch_releases()`'s own page-cap logic read `if max_pages: last = min(last,
+max_pages)` - `0` is falsy, so `--max-pages 0` (a real, reasonable "just page 1" debug request)
+was silently ignored, fetching every one of the site's real pages instead of none more. CLI-only
+reachability (production never passes `max_pages`), so moderate not severe - but a genuine,
+confirmed boundary-value defect. Fixed (`is not None`), verified red-then-green with 5 new
+end-to-end tests for `fetch_releases()` (multi-page assembly, the `max_pages=0` boundary, early-
+stop on an empty later page, 0-cards-on-page-1 raise, past-the-safety-cap raise).
+
+**The much bigger finding, found while checking `test_kouga.py`'s own CI wiring**: a full
+repo-wide sweep (`for f in $(find engine -name "test_*.py"); do grep -q "$(basename $f)"
+.github/workflows/*.yml || echo "$f"; done`) found 27 more files never once run in CI - 18 in
+`engine/discovery/` alone, the rest spread across `engine/cv/`, `engine/general/`,
+`engine/onboarding/`, `engine/pack/`, `engine/pack_generator/`, and `engine/compliance/`. Every one
+confirmed, individually, to run clean standalone (several already self-skip their own live-only
+part gracefully by design - `test_market_trend.py` without `MARKET_TREND_PSQL`,
+`test_scope_llm.py` without `ANTHROPIC_API_KEY` - correct, unchanged behaviour) before being wired
+in. Added 27 new CI steps, one per file (not bundled - consistent with this workflow's own stated
+reasoning for why every step already carries `if: ${{ !cancelled() }}`).
+
+**One file deliberately left out**: `engine/intake/test_manual_intake.py` needs `INTAKE_PSQL` to
+run any real assertion at all (0 assertions without it, confirmed) - wiring it in bare would be
+theatre; a real Postgres service for it is separate infrastructure work, flagged in the workflow's
+own new comment, not silently skipped.
+
+A YAML syntax error (an unquoted colon inside one new step's own name) was caught with `python3 -c
+"import yaml; yaml.safe_load(...)"` before committing. Re-ran the sweep after fixing it: only the
+one deliberately-excluded file remains outside CI.
+
+Full writeup: Finding 92, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-fourteenth run): Finding 91 (severe, FLAGGED NOT FIXED) - the compliance "document lapses before this tender's closing date" early-warning check has had zero delivery channel in production since 2026-10-27 ~20:30 UTC, contradicting this repo's own explicit prior decision not to disable its trigger until the replacement's documented gap was closed
 
 Orientation: `git fetch origin main` showed one new sibling commit (`d4d3800`, a docstring-only

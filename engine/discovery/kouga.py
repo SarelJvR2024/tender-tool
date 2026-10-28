@@ -97,8 +97,9 @@ def fetch_releases(max_pages=None, log=print):
             f"safety cap of {MAX_PAGES_CAP}. Confirm that's real before raising the cap (a parsing bug "
             "reading some unrelated number as a page link would look exactly like this)."
         )
-    if max_pages:
-        last = min(last, max_pages)
+    if max_pages is not None:  # `is not None`, not truthiness: --max-pages 0 (just page 1, for a
+        last = min(last, max_pages)  # quick debug run) is a real, valid value that `if max_pages:`
+                                      # silently ignored, fetching every page instead of none more.
     rels = [normalize(*c) for c in cards]
     for p in range(2, last + 1):
         html = sh.http_get(f"{LIST_URL}/page/{p}", timeout=90).decode("utf-8", errors="replace")

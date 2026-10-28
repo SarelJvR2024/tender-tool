@@ -300,6 +300,119 @@ check("the BUYER_FAMILY pattern actually matches 'Kouga Local Municipality'",
 check("...and does not match an unrelated buyer (no false-positive fold)",
       not gov_sources.BUYER_FAMILY["kouga"].search("Lephalale Local Municipality"))
 
+# --- fetch_releases()'s own multi-page loop: never tested end to end ------
+
+# Every check above exercises parse_cards()/max_page()/normalize() in
+# isolation - fetch_releases() itself (the real function every production
+# run actually calls: the MAX_PAGES_CAP safety raise, the "0 cards on page 1"
+# raise, the "0 cards on a LATER page stops early rather than guessing
+# further" break, and the multi-page assembly loop) had no test anywhere.
+# QA pass, 2026-10-28.
+
+PAGE_2 = FIXTURE_PAGE_1.replace("225/2026", "225/2026-p2").replace(
+    "<div>1</div>", "<a href='https://www.kouga.gov.za/tenders/page/1'>1</a>")
+PAGE_3 = FIXTURE_PAGE_1.replace("225/2026", "225/2026-p3")
+EMPTY_PAGE = "<html><body>nothing here</body></html>"
+_real_http_get = sh.http_get
+
+
+def _serve(pages):
+    def fake(url, timeout=90):
+        for suffix, html in pages.items():
+            if url.endswith(suffix):
+                return html.encode("utf-8")
+        raise AssertionError(f"unexpected URL requested: {url}")
+    return fake
+
+
+def test_fetch_releases_assembles_every_page_up_to_the_real_last_page():
+    # FIXTURE_PAGE_1's own pagination names page 28 as last; max_pages=3 caps
+    # it down to a real, small multi-page fetch for the test. The real
+    # per-page URL is LIST_URL + "/page/N" (LIST_URL already ends in
+    # "/status/open") - "/status/open/page/2", not a bare "/page/2".
+    sh.http_get = _serve({"/tenders/status/open": FIXTURE_PAGE_1,
+                         "/status/open/page/2": PAGE_2, "/status/open/page/3": PAGE_3})
+    try:
+        rels = kouga.fetch_releases(max_pages=3)
+    finally:
+        sh.http_get = _real_http_get
+    check("all 3 pages' cards are assembled (10 per page = 30 total)", len(rels) == 30, len(rels))
+    check("page 2's own distinct ref made it into the result", any(r["contract_number"] == "225/2026-p2" for r in rels))
+    check("page 3's own distinct ref made it into the result", any(r["contract_number"] == "225/2026-p3" for r in rels))
+
+
+def test_fetch_releases_max_pages_zero_means_page_1_only_not_ignored():
+    # The real bug: `if max_pages:` treats 0 the same as "not given at all"
+    # (falsy), silently fetching every one of the real site's pages instead
+    # of stopping after page 1 as a caller explicitly asking for 0 MORE
+    # pages intended. Confirmed this test fails against the pre-fix code by
+    # reverting the fix and re-running (see QA-Edge-Case-Findings.md).
+    calls = []
+
+    def fake(url, timeout=90):
+        calls.append(url)
+        return FIXTURE_PAGE_1.encode("utf-8")
+    sh.http_get = fake
+    try:
+        rels = kouga.fetch_releases(max_pages=0)
+    finally:
+        sh.http_get = _real_http_get
+    check("max_pages=0 fetches ONLY page 1, not every page the site reports",
+          len(calls) == 1, calls)
+    check("...and still returns page 1's own 10 real cards", len(rels) == 10, len(rels))
+
+
+def test_fetch_releases_stops_early_on_an_empty_later_page():
+    sh.http_get = _serve({"/tenders/status/open": FIXTURE_PAGE_1,
+                         "/status/open/page/2": PAGE_2, "/status/open/page/3": EMPTY_PAGE})
+    logs = []
+    try:
+        rels = kouga.fetch_releases(max_pages=5, log=logs.append)
+    finally:
+        sh.http_get = _real_http_get
+    check("stops after the empty page, not guessing page 4/5 too",
+          len(rels) == 20, len(rels))
+    check("a warning names the specific empty page, doesn't raise or go silent",
+          any("page 3" in ln and "0 cards" in ln for ln in logs), logs)
+
+
+def test_fetch_releases_raises_when_page_1_itself_has_zero_cards():
+    sh.http_get = _serve({"/tenders/status/open": EMPTY_PAGE})
+    try:
+        kouga.fetch_releases()
+        check("0 cards on page 1 raises rather than reporting a silent empty result", False)
+    except RuntimeError as e:
+        check("0 cards on page 1 raises rather than reporting a silent empty result",
+              "0 tender cards parsed" in str(e), str(e))
+    finally:
+        sh.http_get = _real_http_get
+
+
+def test_fetch_releases_raises_past_the_safety_cap_without_fetching_further():
+    over_cap = FIXTURE_PAGE_1.replace("page/28", "page/61")
+    calls = []
+
+    def fake(url, timeout=90):
+        calls.append(url)
+        return over_cap.encode("utf-8")
+    sh.http_get = fake
+    try:
+        kouga.fetch_releases()
+        check("a last-page number past MAX_PAGES_CAP raises rather than fetching 61 pages", False)
+    except RuntimeError as e:
+        check("a last-page number past MAX_PAGES_CAP raises rather than fetching 61 pages",
+              "past this reader's safety cap" in str(e), str(e))
+    finally:
+        sh.http_get = _real_http_get
+    check("...and never even tries to fetch a second page before raising", calls == ["https://www.kouga.gov.za/tenders/status/open"], calls)
+
+
+test_fetch_releases_assembles_every_page_up_to_the_real_last_page()
+test_fetch_releases_max_pages_zero_means_page_1_only_not_ignored()
+test_fetch_releases_stops_early_on_an_empty_later_page()
+test_fetch_releases_raises_when_page_1_itself_has_zero_cards()
+test_fetch_releases_raises_past_the_safety_cap_without_fetching_further()
+
 if FAILS:
     print(f"\n{len(FAILS)} FAILURE(S): {FAILS}")
     sys.exit(1)
