@@ -31,15 +31,21 @@ confirmed-merged tip per the standing git-workflow rule, this time checking `pul
 vault-document checklist items (CSD, SARS TCS PIN, B-BBEE, COID, CIDB, CIPC, PI/PL insurance), which
 are a separate, additional gap already recorded in the prior entry below. Five real categories, by
 cause:
-- **A - never automatable (5 fields):** every `*.signature_and_date` field. By design - a real
-  signature is never typed in.
-- **B - document-format limited (13 fields):** all of SBD 6.1 (8) and SBD 8 (5). DBSA published only a
-  flat PDF edition of the Tender Volume for this specific RFP; `fill_flat_pdf.py` has no fillable
-  layout to write into. Not an engine gap - improves only if a fillable edition is ever published.
-- **C - layout-detection misses (4 fields):** `form_of_offer.tenderer`/`.address`,
-  `sbd9.bid_number_and_description`/`.name_of_bidder`. The data is known; `fill_flat_pdf.py`
-  (`"no blank cell or dotted line next to the label"`, line ~568) found no safe place to type it onto
-  *this* PDF's layout without risking an overlap. Tunable - a real engine improvement, not a data gap.
+- **A - never automatable (5 fields):** the one `*.signature_and_date` (or equivalent) field inside
+  each of form_of_offer, SBD4, SBD6.1, SBD8 and SBD9. By design - a real signature is never typed in.
+- **B - document-format limited (11 fields):** SBD 6.1's other 7 fields (`address`,
+  `bidder_s_representative`, `company_registration_number`, `name_of_company_firm`,
+  `specific_goal_points_claimed`, `type_of_company_firm`, `vat_registration_number`) and SBD 8's other 4
+  (`contract_with_an_organ_of_state_terminated_in_the_past_5_years`,
+  `convicted_of_fraud_corruption_in_the_past_5_years`, `listed_on_the_database_of_restricted_suppliers`,
+  `listed_on_the_register_for_tender_defaulters`). DBSA published only a flat PDF edition of the Tender
+  Volume for this specific RFP; `fill_flat_pdf.py` has no fillable layout to write into. Not an engine
+  gap - improves only if a fillable edition is ever published.
+- **C - layout/fit misses on the flat PDF (4 fields):** `form_of_offer.tenderer`/`.address` and
+  `sbd9.name_of_bidder` ("no blank cell or dotted line next to the label" - `fill_flat_pdf.py` line
+  ~568) plus `sbd9.bid_number_and_description` ("too long for the line on the form" - same function,
+  a value-fit limit, not a placement miss). The data is known in every case; the flat PDF's own layout
+  is what's blocking it. Tunable - a real engine improvement, not a data gap.
 - **D - signatory not selected for this tender run (4 fields):** `form_of_offer.capacity`,
   `form_of_offer.signatory_name`, `sbd4.designation_footer`, `sbd9.position_footer`. Verified against
   `process_general_jobs.py gather_pack_inputs()` (line 633-645): the signatory is read **only** from
@@ -54,11 +60,11 @@ cause:
   profile.
 - **E - already filled (1 field):** `sbd4.name_of_bidder_footer`.
 
-**Realistic ceiling, concrete not aspirational:** A (5) and B (13) - 18 of 26 (69%) - stay by-hand no
+**Realistic ceiling, concrete not aspirational:** A (5) and B (11) - 16 of 26 (62%) - stay by-hand no
 matter how good the matching gets; that is not a product gap, that is what "signature required" and
-"buyer published a flat PDF" actually mean. Of the other 8: D/D2's 5 fields are 100% recoverable today
+"buyer published a flat PDF" actually mean. Of the other 10: D/D2's 5 fields are 100% recoverable today
 with zero engine work - pick a signatory on the Tender Workspace, capture that person's ID number -
-taking Mzansi to 6/26 (23%) immediately. C's 4 fields need real layout-detection tuning on
+taking Mzansi to 6/26 (23%) immediately. C's 4 fields need real layout/fit tuning on
 `fill_flat_pdf.py`; optimistic but plausible recovery on most of them would take it to roughly 9-10/26
 (~35-38%). The 8 vault-document checklist items are separate from this 26 and 100% recoverable the
 moment real compliance documents are uploaded to a company's vault - already recorded below, no engine
