@@ -14,6 +14,40 @@
 
 ---
 
+**2026-10-28 — standing review pass, clean sweep: Form B7 (Targeted Enterprise subcontracting)
+plan-mode handling in `engine/pack/assemble_pack.py` + `engine/sanral_b7.py`, no real bug found.**
+
+Picked `engine/pack/assemble_pack.py` (543 lines, the central SANRAL submission-pack orchestrator -
+no dedicated `test_assemble_pack.py` exists) as an under-reviewed area for this pass. Traced a
+hypothesis that `b7_filled = (b7_plan or {}).get("mode") == "subcontract" or (bool(legacy_te) and not
+b7_plan)` (line 243) could let a third, uncaught `subcontracting_plan.mode` value fall through both
+the "included" branch and `sanral_b7.applicability()`'s checks, silently omitting a required Form B7
+with no warning.
+
+Ruled out, end to end:
+- `app/lib/sanralB7.ts:187` normalizes `mode` to only ever `"waived_by_tender"`, `"subcontract"`, or
+  `null` before a plan is ever written to `tender_subcontracting_plans` - no third mode can reach this
+  code path from the app at all.
+- `sanral_b7.check_plan()` (line 155) has its own catch-all for a corrupted/unexpected mode
+  (`f"unknown plan type '{mode}'"` as a hard error), and `assemble_pack.py` calls `check_plan()` and
+  raises before `b7_filled` is ever computed when `b7_plan` is a non-empty dict - so a bad mode refuses
+  the pack rather than silently omitting the form.
+- The one real precedent for this exact class of bug - an explicit plan losing to the legacy
+  `targeted_enterprise` block - was already found and fixed in the 2026-10-26 QA pass
+  (`engine/fill_conventional.py`/`fill_tender.py`: `elif te and not td.get("subcontracting_plan")`,
+  covered by `engine/test_fill_b7_legacy_precedence.py`). `assemble_pack.py`'s own `b7_filled`
+  computation mirrors that same precedence rule exactly (`bool(legacy_te) and not b7_plan`) - confirmed
+  consistent, not re-drifted.
+- `engine/test_sanral_b7.py` (ALL PASSED) and `engine/test_fill_b7_legacy_precedence.py` (0 failures)
+  both re-run clean against current `main` as part of this pass.
+
+No code change made - a thorough look turned up nothing real here, so documenting the clean sweep
+rather than forcing a weak finding. Verified via `git fetch origin main`: only #164 (savings-counter
+rework) and #165 (4 pre-demo defects) open, both still correctly unmerged drafts - no self-merge this
+pass.
+
+---
+
 **2026-10-28 ~10:08 UTC — real end-to-end general-engine pack-generation test, authorized by Sarel:
 Reviewer Civils & Consulting (now `is_test_company`) against a real, live DBSA tender (RFP165/2026).
 Succeeded, 112-page real pack - and the compilation itself surfaced the misfiled-COID-document finding
