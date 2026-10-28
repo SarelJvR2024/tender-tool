@@ -14,6 +14,7 @@ import {
   type ClassifyInput,
   type DispatchLogisticsInput,
 } from "./dispatchTriage.ts";
+import { daysUntil } from "./dates.ts";
 
 const baseLogistics: DispatchLogisticsInput = {
   closingDate: "2026-11-01T11:00:00+02:00",
@@ -90,6 +91,21 @@ test("classifyDispatchBucket: radar when closing is more than 7 days away and no
   const now = new Date("2026-10-01T10:00:00+02:00");
   const input: ClassifyInput = { ...baseLogistics, pipelineStage: "bidding", decisionNeeded: "none" };
   assert.equal(classifyDispatchBucket(input, now), "radar");
+});
+
+test("classifyDispatchBucket: the 7-day boundary agrees with lib/dates.ts's own daysUntil() - no second, disagreeing day count", () => {
+  // Real drift found 2026-10-28: this file used to compute "days to close"
+  // inline from the raw now-vs-target instant, while every card's own
+  // displayed DeadlineChip uses dates.ts's daysUntil() (midnight-normalized).
+  // A tender closing 2026-11-04T09:00+02:00, viewed this afternoon, landed in
+  // the "in_progress" (Urgent Actions) lane via the inline math (7 days) while
+  // its own chip read daysUntil()'s 8 days left - the lane said urgent, the
+  // number on the same card said otherwise. Pinning that the two now agree.
+  const now = new Date("2026-10-28T15:00:00+02:00");
+  const closingDate = "2026-11-04T09:00:00+02:00";
+  const input: ClassifyInput = { ...baseLogistics, closingDate, pipelineStage: "bidding", decisionNeeded: "none" };
+  assert.equal(daysUntil(closingDate, now), 8);
+  assert.equal(classifyDispatchBucket(input, now), "radar"); // 8 days > 7, same boundary daysUntil() itself uses
 });
 
 test("classifyDispatchBucket: null once the tender is submitted, won or lost - not triaged at all", () => {

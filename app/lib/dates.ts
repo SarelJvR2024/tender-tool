@@ -54,14 +54,14 @@ export function formatClosingDateTime(dateStr: string | null | undefined): strin
 // (company vault). Normalizes "today" to midnight first so the count is
 // stable all day rather than decrementing as the clock ticks forward within
 // the same day.
-export function daysUntil(dateStr: string | null): number | null {
+export function daysUntil(dateStr: string | null, now: Date = new Date()): number | null {
   if (!dateStr) return null;
   const target = new Date(dateStr);
   // An unreadable date gave NaN, and every NaN comparison is false - so
   // expiryStatus() showed a malformed expiry as "Current" (green). Unknown
   // instead, the same as no date: never a confident wrong answer.
   if (Number.isNaN(target.getTime())) return null;
-  const today = new Date();
+  const today = new Date(now);
   today.setHours(0, 0, 0, 0);
   const msPerDay = 1000 * 60 * 60 * 24;
   return Math.ceil((target.getTime() - today.getTime()) / msPerDay);

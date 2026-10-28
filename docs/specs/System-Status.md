@@ -14,6 +14,59 @@
 
 ---
 
+**2026-10-28 ~18:30 UTC — Standing review: Tender Command Center's own "days to close" math had
+drifted into a second, disagreeing copy of `lib/dates.ts`'s canonical `daysUntil()`; fixed.**
+
+Found while cross-checking the Command Center feature (dashboard/page.tsx's dispatch lanes,
+`command-center.tsx`) against the same "never a second number that could disagree" rule this app
+already documents and enforces elsewhere (`dispatchTriage.ts`'s own module header literally states
+this rule for blocking-item lists - just not for day counts). `lib/dispatchTriage.ts` had two inline
+`Math.ceil((closingDate - now) / day)` computations (in `deriveDecisionNeeded` and
+`classifyDispatchBucket`, the latter deciding the `in_progress`/`radar` 7-day bucket boundary), and
+`lib/dispatchDashboard.ts` had a third copy as its own local `daysUntilFrom()` helper (the 14-day
+`DEEP_CHECK_WINDOW_DAYS` gate) - none of the three imported or called `lib/dates.ts`'s own
+`daysUntil()`, which every card's own displayed `DeadlineChip` uses instead. The difference: the
+inline copies measured from the exact current instant (`now.getTime()`); `daysUntil()` measures from
+today's midnight, by design, "so the count is stable all day" (its own doc comment).
+
+Concrete, reproducible failure: a tender closing `2026-11-04T09:00+02:00`, viewed at
+`2026-10-28T15:00+02:00` (an ordinary afternoon) - `classifyDispatchBucket()`'s inline math computed
+7 days left and placed the card in the **Urgent Actions & Blocked Items** lane (`in_progress`,
+"closing within 7 days"), while the very same card's own `DeadlineChip` (driven by `daysUntil()`)
+read **8 days left** right next to it. Since midnight-of-today is always earlier than "now", the
+canonical `daysUntil()` is mathematically always ≥ the inline copies' answer - so this wasn't a rare
+edge case, it fires every afternoon/evening for any tender sitting near the 7-day or 14-day boundary.
+
+Fix: gave `daysUntil()` an optional injectable `now` param (defaults to `new Date()`, so every
+existing single-arg call site is unaffected) and made it the one shared function; removed all three
+duplicate copies, replacing them with calls to `daysUntil(dateStr, now)`.
+
+- `app/lib/dates.ts`: `daysUntil(dateStr, now = new Date())`.
+- `app/lib/dispatchTriage.ts`: both inline day-count computations replaced; now imports `daysUntil`.
+- `app/lib/dispatchDashboard.ts`: local `daysUntilFrom()` deleted; now imports `daysUntil`.
+- `app/lib/dispatchTriage.test.ts`: new regression test pins the exact `2026-11-04`/afternoon-viewing
+  case above (reverted the fix first, confirmed the test fails - the old code put the card in
+  `in_progress` while `daysUntil()` said 8 days - then restored the fix, confirmed it passes, same
+  discipline as every other pass).
+
+Verified: `node --experimental-strip-types --test lib/*.test.ts` 178/178 passed (including the new
+regression test and every other existing `dispatchTriage.test.ts`/`dates.test.ts` case, none of
+which sit near the midnight-vs-now boundary, so none broke from the signature change); `tsc --noEmit`
+and `eslint` on all four touched files clean. Pushed directly to `main` (small, fully verified, no
+PR/self-merge involved, per this routine's standing guardrail).
+
+Backlog waiting on Sarel, reconfirmed unchanged this pass: migration `0096` (pack-quota trial-expiry)
+still not applied to the live DB; the `narrative_documents` PostgREST schema-cache reload; the
+PayFast idempotency design question (not urgent); the "missing ISO 9001 flagged as urgent" UX
+question; the fingerprint.py `named_ranges()` fix's expected baseline mismatch on the next real
+SANRAL fingerprint check (not a regression); the Dashboard "Decision needed" bucket over-triggering
+finding; the Form B7 compulsory-vs-matrix disagreement on a real template; the impersonation-feature
+token-refresh gap; the submitted-tender nagging gap across two reminder scripts. No new judgment call
+added this pass. Open PRs checked before starting (`#164`, `#165`, `#170`, all still correctly
+unmerged drafts, none touching the files above) - no collision.
+
+---
+
 **2026-10-28 ~16:15 UTC — `confirm_pack.py` was silently dropping a key person's incomplete
 project citations with zero trace, anywhere, violating this gate's own "refuses loudly, not
 silently" docstring; fixed.**
