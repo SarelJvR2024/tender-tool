@@ -5126,3 +5126,60 @@ after confirming both run clean from the repo root first.
 **Regression:** `engine/notify/send_pack_ready_email.py` (the ordering fix only - no RPC/behaviour
 shape changed), `engine/notify/test_send_pack_ready_email.py` (one new test, one `setdefault` line),
 `.github/workflows/bridge-worker-ci.yml` (two new steps). No schema or other call-site changes.
+
+### Finding 89 (CONFIRMED, FIXED, severe - a YAML `.nan`/`.inf` literal in a Financial Submission hours capture file bypassed the "must be a non-negative number" guard and was written as a literal, non-numeric `<v>nan</v>`/`<v>inf</v>` cell into a real SANRAL submission workbook)
+
+**Where:** SANRAL pack rotation this cycle (last dedicated bug-hunting pass: Finding 81, run 100 -
+`fill_tender.py`/`fill_conventional.py`'s Form B7 precedence bug - so this cycle looked at the
+adjacent, less-reviewed financial-forms code instead). `engine/fill_financial_hours.py` - fills the
+7 "Hours <Discipline>" sheets of a real SANRAL Financial Submission workbook from a human-edited
+`capture.yaml`, feeding FORM C2.4 FIN / the Workplan Appropriateness score (30 of 100 evaluation
+points) and, via that sheet's own formulas, the tendered fee rollup.
+
+**What was tested:** read the existing guard added by a sibling pass (2026-10-24, logged as this
+same file's own test docstring) - `if not isinstance(hours, (int, float)) or isinstance(hours,
+bool) or hours < 0: raise ValueError(...)` - and asked the standard adversarial question for a
+numeric-boundary guard: does every path that produces a Python `float` actually get caught? YAML
+1.1 (what PyYAML's `safe_load` implements) defines `.nan`, `.inf` and `-.inf` as valid float
+literals - a real, no-typo-needed way for a capture file to produce `float('nan')`/`float('inf')`.
+Checked whether `hours < 0` actually excludes either: `float('nan') < 0` is `False` (NaN compares
+False to everything, by IEEE 754 definition) and `float('inf') < 0` is also `False` - so both sail
+straight past the guard exactly as the string/bool/negative cases used to before the 2026-10-24 fix.
+
+**Finding (CONFIRMED, severe).** Reproduced directly against the real fixture
+(`templates/samples/financial/R.334-030-2025.1F_Financial_Submission_ran.xlsm`): a capture.yaml with
+`PL: .nan` / `DS1: .inf` passed validation with no error, and `fill()` wrote the workbook. Read the
+real output XML back: `<c r="E8" s="895"><v>nan</v></c>` and `<c r="E9" s="895"><v>inf</v></c>` -
+lowercase `nan`/`inf`, which is not even valid per `xsd:double`'s own required capitalization
+(`NaN`/`INF`/`-INF`), let alone whatever Excel's own OOXML numeric-cell parser actually accepts. The
+cell these two rows feed, `G8`/`G9` (confirmed by the module's own existing test as a real formula,
+`ROUND(F8*E8, 2)`), would compute against this garbage on a workbook that gets submitted to SANRAL -
+at best a visible `#VALUE!`/`#NUM!` error inside the real Workplan Appropriateness evaluation sheet,
+at worst Excel flagging the whole file as needing repair when SANRAL's own evaluators open it.
+`-.inf` (negative infinity) was separately confirmed to already be caught by the existing `hours < 0`
+check (`-inf < 0` is `True`) - only the NaN and positive-infinity cases were the real gap.
+
+**Fix:** added `math.isfinite(hours)` to the guard (`not math.isfinite(hours) or hours < 0` in place
+of just `hours < 0`), which correctly excludes NaN and both infinities while still accepting every
+real number. Error message widened from "a non-negative number" to "a real, finite, non-negative
+number" so the refusal reason stays accurate for the new cases too.
+
+**Verified red-then-green.** Added 3 new cases to the existing adversarial loop in
+`test_fill_financial_hours.py` (`.nan`, `.inf`, `-.inf` - kept even though `-.inf` was already
+caught, as a permanent regression guard for that boundary too). Reverted the real fix (`git apply
+-R`): exactly the 2 predicted cases (`.nan`, `.inf`) failed, `-.inf` correctly still passed (the
+pre-existing `hours < 0` check already caught it) - confirms the test is precise, not just broad.
+Restored: `ALL PASSED`, full existing suite (string typo, stray boolean, negative number, valid int/
+float/zero, null-is-missing) unaffected.
+
+**A third, independent CI-wiring gap, same shape as Findings 87/88, found and fixed in the same
+pass**: a sweep of every `engine/test_*.py` file against `bridge-worker-ci.yml` found THREE files
+never wired in - `test_fill_financial_hours.py` (this finding's own test, added 2026-10-24 and
+apparently never wired in even then), `test_fill_b7_legacy_precedence.py` (Finding 81's own
+regression test, run 100 - missed at the time), and `test_fill_docx_forms.py`. All three confirmed
+to run clean from the repo root first. Added 3 new CI steps for them, placed next to the existing
+SANRAL Form B7 step.
+
+**Regression:** `engine/fill_financial_hours.py` (one guard condition, one new `import math`),
+`engine/test_fill_financial_hours.py` (3 new cases in the existing adversarial loop),
+`.github/workflows/bridge-worker-ci.yml` (3 new steps). No schema or other call-site changes.

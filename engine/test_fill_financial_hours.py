@@ -71,7 +71,9 @@ check("G8 (Category A, PL amount) is a real formula reading E8 - confirms E8 isn
 #     straight through with no error, silently corrupting a real formula ---
 #     input on a real SANRAL financial submission -----------------------
 
-for bad, label in [("40h", "a string typo"), (True, "a stray YAML boolean"), (-5, "a negative number")]:
+for bad, label in [("40h", "a string typo"), (True, "a stray YAML boolean"), (-5, "a negative number"),
+                   (float("nan"), "a YAML .nan literal"), (float("inf"), "a YAML .inf literal"),
+                   (float("-inf"), "a YAML -.inf literal")]:
     try:
         _fill(bad)
         check(f"a non-numeric/invalid hours value ({label}: {bad!r}) is refused, not silently written",

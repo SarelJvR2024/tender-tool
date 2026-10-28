@@ -30,6 +30,7 @@ Usage:
     python3 fill_financial_hours.py suggest <pack.yaml> <out_capture.yaml>
     python3 fill_financial_hours.py fill <financial.xlsm> <capture.yaml> <out.xlsm> [provenance_out.json]
 """
+import math
 import sys
 import yaml
 from sanral_fill import Workbook
@@ -93,10 +94,21 @@ def fill(tpl, capture_path, out, provenance_out=None):
                 if hours is None:
                     missing.append(f"{sheet_key}/{cat}/{pos}")
                     continue
-                if not isinstance(hours, (int, float)) or isinstance(hours, bool) or hours < 0:
+                # math.isfinite() rules out NaN/+-inf too - `hours < 0` alone
+                # does not: NaN compares False to everything, and inf/nan are
+                # both `isinstance(..., float)`, so a capture.yaml value of
+                # `.nan`/`.inf` (valid YAML 1.1 float literals PyYAML's own
+                # safe_load parses without complaint) used to sail straight
+                # through this guard and get written as a literal <v>nan</v>/
+                # <v>inf</v> numeric-cell value - not valid per the numeric
+                # cell's own XML Schema type, and a real corruption risk on
+                # the actual SANRAL Financial Submission workbook. QA pass,
+                # 2026-10-28.
+                if (not isinstance(hours, (int, float)) or isinstance(hours, bool)
+                        or not math.isfinite(hours) or hours < 0):
                     raise ValueError(
-                        f"{sheet_key}/{cat}/{pos}: hours must be a non-negative number, got {hours!r} "
-                        f"({type(hours).__name__}) - fix the capture file, don't guess"
+                        f"{sheet_key}/{cat}/{pos}: hours must be a real, finite, non-negative number, got "
+                        f"{hours!r} ({type(hours).__name__}) - fix the capture file, don't guess"
                     )
                 row = base + KEY_PERSON_OFFSET[pos]
                 wb.set_value(sheet, f"E{row}", hours)

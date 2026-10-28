@@ -5273,6 +5273,43 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-twelfth run): Finding 89 (severe) - a YAML `.nan`/`.inf` capture value bypassed the Financial Submission hours guard and wrote a non-numeric cell into a real SANRAL workbook; also closed 3 engine/test_*.py CI-wiring gaps, including Finding 81's own regression test
+
+Orientation: `git fetch origin main` showed one new sibling commit (`6930b17`, a standing-review
+flag - not fix - of submitted-tender nagging across `send-deadline-reminders.ts`/
+`send-returnables-digest.ts`, TypeScript/`scripts/` only, no overlap) - fast-forwarded cleanly. Two
+open PRs (`#164`, `#165`), both re-confirmed TypeScript-only via the GitHub API, no `engine/`
+overlap.
+
+Rotated to SANRAL pack - last dedicated bug-hunting pass was Finding 81 (run 100, the Form B7
+precedence bug), so picked the adjacent, less-reviewed financial-forms code:
+`fill_financial_hours.py` (fills the 7 "Hours <Discipline>" sheets of a real Financial Submission
+workbook, feeding FORM C2.4 FIN's Workplan Appropriateness score).
+
+**The finding.** A sibling pass (2026-10-24) had already added a guard rejecting a non-numeric/
+boolean/negative `hours` value in the capture.yaml - but asked the standard follow-up question for
+any numeric guard: does `hours < 0` actually exclude every float a YAML parser can produce? YAML
+1.1's `.nan`/`.inf`/`-.inf` literals are valid float syntax PyYAML's `safe_load` parses without
+complaint, and `float('nan') < 0` / `float('inf') < 0` are both `False` (IEEE 754 comparison rules)
+- so both sailed straight past the guard. Reproduced directly against the real fixture
+(`R.334-030-2025.1F_Financial_Submission_ran.xlsm`): the written workbook's real XML held literal
+`<v>nan</v>` / `<v>inf</v>` in a numeric cell - not valid per `xsd:double`'s own required
+capitalization, feeding a real `ROUND(F8*E8, 2)` formula on a document meant for actual SANRAL
+evaluators. `-.inf` was separately confirmed already caught by the existing check (`-inf < 0` is
+`True`) - only NaN and positive infinity were the real gap.
+
+**Fix:** `math.isfinite(hours)` added to the guard. Verified red-then-green: reverting the fix made
+exactly the 2 predicted new cases fail (not `-.inf`, confirming test precision); restored, full
+suite (6 adversarial cases plus the pre-existing valid-value checks) passes clean.
+
+**A third CI-wiring gap, same shape as Findings 87/88, found in the same pass**: swept every
+`engine/test_*.py` against `bridge-worker-ci.yml` and found 3 files never wired in -
+`test_fill_financial_hours.py` (this finding's own test), `test_fill_b7_legacy_precedence.py`
+(Finding 81's OWN regression test, run 100 - missed at the time it was written), and
+`test_fill_docx_forms.py`. All 3 confirmed to run clean from the repo root; added as 3 new CI steps.
+
+Full writeup: Finding 89, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-eleventh run): Finding 88 (severe) - the pack-ready notification claimed its one-time idempotency token BEFORE checking RESEND_API_KEY was configured, permanently losing a company's "bid pack ready" email if the key happened to be unset at that moment
 
 Orientation: `git fetch origin main` showed one new sibling commit (`db06ad3`, a standing-review

@@ -194,6 +194,22 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/test_sanral_b7.py
 
+      - name: SANRAL Form B7 - an explicit waived/subcontract plan takes precedence over a stale legacy Targeted Enterprise (Finding 81, real template)
+        # Was never wired into CI despite being added for Finding 81's own
+        # fix - found via a sweep of every engine/test_*.py file against
+        # this workflow, same gap shape as Findings 87/88. Fixed in the
+        # same pass as Finding 89 below.
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fill_b7_legacy_precedence.py
+
+      - name: Key-person docx forms - unrecognized title now logged missing instead of silently skipped (real template)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fill_docx_forms.py
+
+      - name: Financial Submission hours sheets - malformed/NaN/Infinity capture values refused, not silently written (Finding 89, real template)
+        if: ${{ !cancelled() }}
+        run: python3 engine/test_fill_financial_hours.py
+
       - name: Pack bridge sync functions - tender_requirements/B7-setup/position-suggestion writes (fake Supabase, real sample workbook)
         if: ${{ !cancelled() }}
         run: python3 engine/pack/test_sync_functions.py
