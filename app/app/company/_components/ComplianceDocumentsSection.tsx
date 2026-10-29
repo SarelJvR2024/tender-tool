@@ -1,5 +1,5 @@
 import type { StatusChip } from "@/lib/dates";
-import { expiryStatus, formatDate } from "@/lib/dates";
+import { documentStatus, formatDate } from "@/lib/dates";
 import { formatZAR } from "@/lib/formatZAR";
 import { BANK_LETTER_RENEW_SOON_DAYS, beeProofLabel } from "@/lib/vaultDocuments";
 import type { VaultDocumentKind } from "@/lib/vaultDocuments";
@@ -23,7 +23,7 @@ export type ComplianceDocEntry = {
 
 export function ComplianceDocumentsSection({ company, docUrls }: { company: CompanyRow; docUrls: DocUrls }) {
   const isoStatus = company.iso_9001_certified === true
-    ? expiryStatus(company.iso_9001_expiry)
+    ? documentStatus(company.iso_9001_document_path !== null, company.iso_9001_expiry)
     : company.iso_9001_certified === false
       ? NotStated("Not certified")
       : NotStated("Not stated");
@@ -76,7 +76,7 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
       lines: coidLines,
       detail: coidLines[0],
       expiry: company.coid_letter_of_good_standing_expiry,
-      status: expiryStatus(company.coid_letter_of_good_standing_expiry),
+      status: documentStatus(company.coid_letter_document_path !== null, company.coid_letter_of_good_standing_expiry),
       path: company.coid_letter_document_path,
       url: docUrls.coid,
     },
@@ -86,7 +86,7 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
       lines: cidbLines,
       detail: cidbLines[0],
       expiry: company.cidb_expiry,
-      status: company.cidb_grading || company.cidb_expiry ? expiryStatus(company.cidb_expiry) : NotStated("Not on file"),
+      status: documentStatus(company.cidb_document_path !== null || !!company.cidb_grading || !!company.cidb_expiry, company.cidb_expiry),
       path: company.cidb_document_path,
       url: docUrls.cidb,
     },
@@ -96,7 +96,7 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
       lines: sarsLines,
       detail: sarsLines[0],
       expiry: company.sars_tcs_pin_expiry,
-      status: company.sars_tcs_pin || company.sars_tcs_pin_expiry ? expiryStatus(company.sars_tcs_pin_expiry) : NotStated("Not on file"),
+      status: documentStatus(company.sars_tcs_pin_document_path !== null || !!company.sars_tcs_pin || !!company.sars_tcs_pin_expiry, company.sars_tcs_pin_expiry),
       path: company.sars_tcs_pin_document_path,
       url: docUrls.sars_tcs_pin,
     },
@@ -106,7 +106,7 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
       lines: piLines,
       detail: piLines[0],
       expiry: company.pi_insurance_expiry,
-      status: expiryStatus(company.pi_insurance_expiry),
+      status: documentStatus(company.pi_insurance_document_path !== null || !!company.pi_insurance_policy_number, company.pi_insurance_expiry),
       path: company.pi_insurance_document_path,
       url: docUrls.pi_insurance,
     },
@@ -126,7 +126,11 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
       lines: bankLines,
       detail: bankLines[0],
       expiry: company.bank_confirmation_letter_valid_until,
-      status: expiryStatus(company.bank_confirmation_letter_valid_until, BANK_LETTER_RENEW_SOON_DAYS),
+      status: documentStatus(
+        company.bank_confirmation_letter_path !== null || !!company.bank_confirmation_letter_date,
+        company.bank_confirmation_letter_valid_until,
+        BANK_LETTER_RENEW_SOON_DAYS,
+      ),
       path: company.bank_confirmation_letter_path,
       url: docUrls.bank_letter,
     },
@@ -136,7 +140,7 @@ export function ComplianceDocumentsSection({ company, docUrls }: { company: Comp
       lines: beeLines,
       detail: beeLines[0],
       expiry: company.bee_proof_expiry,
-      status: expiryStatus(company.bee_proof_expiry),
+      status: documentStatus(company.bee_proof_document_path !== null || !!company.bee_level, company.bee_proof_expiry),
       path: company.bee_proof_document_path,
       url: docUrls.bee_proof,
     },

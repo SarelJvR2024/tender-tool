@@ -104,6 +104,27 @@ export function expiryStatus(dateStr: string | null, renewSoonWithinDays = 60): 
 }
 
 /**
+ * Like expiryStatus(), but file-aware - for the Document Vault specifically,
+ * where a document that's genuinely been uploaded must never read "Not on
+ * file" just because its expiry date hasn't been captured/extracted yet.
+ * Real bug, 2026-10-29 (Sarel: uploaded a COID Letter of Good Standing, the
+ * row's own file link rendered correctly, but the status badge still said
+ * "Not on file"): every caller passed expiryStatus() the expiry date alone,
+ * with no check for whether a file/path was actually attached - "no date
+ * on file yet" and "no document at all" are different, real states, and
+ * conflating them is the exact bug this app's own expiryStatus() comment
+ * already warns against for a different case (never a confident wrong
+ * answer). hasFile is the document's own *_document_path column being
+ * non-null - the one fact the real upload action (uploadVaultDocument(),
+ * app/app/company/actions.ts) actually sets.
+ */
+export function documentStatus(hasFile: boolean, dateStr: string | null, renewSoonWithinDays = 60): StatusChip {
+  if (!hasFile) return { label: "Not on file", tone: "muted" };
+  if (dateStr === null) return { label: "Needs date verification", tone: "warning" };
+  return expiryStatus(dateStr, renewSoonWithinDays);
+}
+
+/**
  * "Closes in X days / Y hours" - the exact wording Sarel asked for on the
  * Opportunities cards (2026-10-22 live feedback). The one shared deadline-
  * countdown calculation for any tender closing time - time-aware on purpose

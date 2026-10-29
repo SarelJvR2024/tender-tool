@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { LayoutGrid, Table2 } from "lucide-react";
+import { LayoutGrid, Pencil, Table2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
 import { VaultSection, ChipBadge } from "./shared";
 import { DocumentRow, DocumentUploadAction } from "./DocumentRow";
 import { filenameFromPath } from "@/lib/vaultDocuments";
@@ -10,6 +11,7 @@ import type { ComplianceDocEntry } from "./ComplianceDocumentsSection";
 import { formatDate } from "@/lib/dates";
 
 const fmtDate = (d: string | null) => (d ? (formatDate(d) ?? "—") : "—");
+const EDIT_HREF = "/company?edit=1#compliance-documents";
 
 /**
  * Sarel's own live feedback on this exact section: "these cards take up a
@@ -38,13 +40,18 @@ export function ComplianceDocumentsView({
       id="compliance-documents"
       title="Compliance documents"
       actions={
-        <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
-          <ViewToggleButton active={view === "table"} label="Table view" onClick={() => setView("table")}>
-            <Table2 className="size-4" />
-          </ViewToggleButton>
-          <ViewToggleButton active={view === "cards"} label="Card view" onClick={() => setView("cards")}>
-            <LayoutGrid className="size-4" />
-          </ViewToggleButton>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-0.5 rounded-lg border border-border bg-muted/40 p-0.5">
+            <ViewToggleButton active={view === "table"} label="Table view" onClick={() => setView("table")}>
+              <Table2 className="size-4" />
+            </ViewToggleButton>
+            <ViewToggleButton active={view === "cards"} label="Card view" onClick={() => setView("cards")}>
+              <LayoutGrid className="size-4" />
+            </ViewToggleButton>
+          </div>
+          <a href={EDIT_HREF} className={buttonVariants({ variant: "ghost", size: "sm", className: "gap-1 text-xs text-muted-foreground" })}>
+            <Pencil className="size-3.5" /> Edit
+          </a>
         </div>
       }
     >
