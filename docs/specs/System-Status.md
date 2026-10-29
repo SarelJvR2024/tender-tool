@@ -6115,6 +6115,43 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-first run): rotated to CV (engine/cv/extract_cv_fields.py's validate_proposal()/normalise_date()/find_and_redact_sa_ids()) - thorough review, no new bug found this time
+
+Orientation: `git fetch origin main` showed two new sibling commits (`1a29cb5` a real fix - a
+date-only SANRAL closing time defaulted to noon instead of this codebase's own 11:00 convention,
+`adbd633` the topbar notifications bell nagging about a bank letter a month early - discovery/TS,
+no overlap) - fast-forwarded cleanly. Open PRs unchanged (`#164`/`#165`/`#170`), no new overlap.
+
+Rotated to CV - last dedicated pass was Finding 93 (a docstring/dead-import fix, 3 cycles ago) and,
+before that, Finding 80 (run 99). Read `extract_cv_fields.py` end to end, specifically chasing three
+real-looking leads:
+
+1. `find_and_redact_sa_ids()`/`_plausible_sa_id()` - a POPIA-sensitive function (ID-number
+   redaction). `_plausible_sa_id()`'s birth-date check (`1 <= mm <= 12 and 1 <= dd <= 31`) doesn't
+   validate `dd` against the real days-in-month for `mm` (e.g. "31 February" would pass) - checked
+   whether this is a bug or a deliberate tradeoff. It's deliberate: a stricter check would make the
+   function MORE likely to reject a real ID number as implausible (a false negative, under-
+   redacting), the worse failure mode for a privacy feature that already has a dedicated
+   `redact_all_13_digit` fallback specifically to over-redact rather than under-redact OCR'd text.
+   Not a bug.
+2. `normalise_date()`'s `raw.strip()` - would crash on a non-string `raw`. Traced whether the LLM
+   could ever hand it one: `output_schema()`'s `PERSON_FIELD_ENTRY_SCHEMA`/`project_props` both type
+   every date-bearing field as `_nullable({"type": "string"})` in the real structured-output schema
+   sent to the model - not reachable under normal schema enforcement, consistent with this
+   module's own documented trust in schema enforcement elsewhere (the 2026-10-23 person-fields-as-
+   array fix). Not pursued further without evidence of a real schema-enforcement failure.
+3. `validate_proposal()`'s `value_rm` coercion (`v if isinstance(v, (int, float)) ... else None`) -
+   same reasoning: `project_props`'s own schema types `value_rm` as `_nullable({"type": "number"})`,
+   so a string value from the model isn't a realistic path.
+
+Also read `generate_cv.py`'s `add_cover_page()` (the one function in that file not already covered
+by Findings 49/80) end to end - clean, including the 2026-10-19 `!r`-interpolation fix already in
+place and correct.
+
+No code change this pass - three plausible leads chased, each ruled out with real evidence (the
+module's own schema enforcement, the deliberate safety-first asymmetry in ID redaction), not
+assumed away. Logged as a genuine clean sweep.
+
 ## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twentieth run): Finding 95 (severe) - a whitespace-only value was reported "placed" on the real Form of Offer/MBD1, its own read-back verification vacuously passing, while the printed page showed nothing at all
 
 Orientation: `git fetch origin main` showed two new sibling commits (`85d5c84`/`4bdf22e`, clean sweep
