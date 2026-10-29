@@ -14,6 +14,62 @@
 
 ---
 
+## This pass (2026-10-29, standing solution-architect review): clean sweep - no new code bug found; one unconfirmed observation flagged but NOT shipped as a fix (insufficient evidence)
+
+Oriented from `0183c26` (the immediately-prior pass's DBSA closing-time fix); `git fetch origin main`
+showed nothing new since - local `main` already matched `origin/main` exactly. **Note:** the GitHub
+MCP tools were unavailable to this pass (server disconnected/not loaded) - open-PR collision-checking
+fell back to `git branch -r` only (no PR state/diff visibility). Spot-checked that none of the remote
+branches appeared to be an in-flight rename/rewrite of the two files this pass ultimately touched
+(`dbsa_procurement.py`'s siblings, `System-Status.md` itself) before proceeding; this is weaker than
+the usual GitHub-API collision check and should be treated as such, not as a confirmed "no collision."
+
+Per this pass's own directive, followed up on the two real "a source states a real time/value but our
+own parser discards or mis-defaults it" bugs the last two passes found (SANRAL's `_sanral_closing()`,
+then DBSA's `_strip_time_suffix()`) by checking every *other* discovery source for the same shape:
+`capetown_procurement.py`, `eskom_bulletin.py`, `transnet_etenders.py`, `etenders_portal.py`,
+`randwater.py`, `kouga.py`, `lephalale.py`, `vaal_central_water.py`. The four that call
+`sh.iso_sast_closing()` (Rand Water/Kouga/Lephalale/Vaal Central Water) are already correctly on the
+documented 11:00-SAST-default convention - no bug. `transnet_etenders.py` and `etenders_portal.py`
+pass structured API fields straight through `sh.iso_sast()` with no regex/stripping step of our own in
+the way - confirmed via their real JSON fixtures (`TRANSNET_ROW`'s `closingDate`/`briefingDate` carry
+two genuinely different times; `PORTAL_WTE1062`'s `closing_Date` is `11:00:00`, distinct from other
+portal rows' `12:00:00`) that these are real, source-supplied times, not something our own code is
+defaulting or discarding - no information-loss bug of the shape we're looking for.
+
+`capetown_procurement.py` was the one genuinely ambiguous case, and it's worth recording honestly
+rather than silently dropping: `normalize_rfq()` prefers cells[4] ("Closing Date Sortable", e.g.
+`"10/28/2026 12:00:00 PM"`) over cells[3] ("Closing Date", e.g. `"2026/10/28"` - date only, no time
+shown to the public at all) whenever the sortable cell is present. Every closing time seen in the one
+real fixture row available is exactly noon with zero seconds, which is consistent with either (a) the
+City genuinely setting a round 12:00 noon deadline (a real, common SA public-tender convention) or (b)
+the portal's own grid padding a date-only value to a fixed placeholder time. The adjacent "Posted Date
+Sortable" field in the same fixture row (`"10/17/2026 2:20:39 PM"`) has real, non-round seconds - a
+genuine timestamp, not a placeholder - which argues against (b) for that column, and by analogy
+somewhat against (b) for the closing column too, but this is inference from a single row, not proof
+either way. **Not fixed, not elevated to the backlog** - one ambiguous data point is exactly what this
+session's own discipline says not to ship a fix on (the DBSA/SANRAL fixes were backed by explicit
+source text or a real committed-baseline mismatch; this has neither). Left as a one-line note here
+for whichever pass next has more real Cape Town RFQ rows to look at - if a second row ever shows a
+closing time that ISN'T exactly noon, that would confirm these are real per-row times and close this
+question for good; if every row keeps landing on exactly 12:00:00, that would be worth a closer look.
+
+Also checked every migration from `0098` through `0105` for a table created without `enable row level
+security`/`create policy` (the same shape the `narrative_documents` tenant-integrity fix closed
+earlier this session) - `0098`/`0100`/`0101`/`0103` are all `SECURITY DEFINER` admin-read functions
+with their own internal gating (already reviewed by earlier passes), `0104` is a column+index
+addition to an existing, already-RLS'd table, and the two migrations that DO create a new table
+(`0099_workflow_heartbeats`, `0102_impersonation_audit_logs`) both correctly enable RLS. No gap found.
+
+No code changed this pass - this commit touches `docs/specs/System-Status.md` only. QA: nothing
+touched, existing suites unaffected (last known: `python3 engine/discovery/test_gov_sources.py` ALL
+PASSED, `node --experimental-strip-types --test lib/*.test.ts` 194/194, `npx vitest run` passing).
+
+**Backlog unchanged at 12 items** - this pass found nothing that clears Sarel's own judgment-call bar
+for either a fix or a new backlog entry.
+
+---
+
 ## This pass (2026-10-29, standing solution-architect review): Finding 99 - DBSA's real stated closing TIME (`@ 23H55`) was being discarded, not just defaulted - the actual bug was worse than the "date-only default" shape found earlier this session
 
 Oriented from `12a4908` (a different session's `fix(notify)` for `daily_digest.py`'s silently-dropped
