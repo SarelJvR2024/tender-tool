@@ -14,6 +14,66 @@
 
 ---
 
+## This pass (2026-10-29, standing solution-architect review): clean sweep - the "hand-rolled vs shared helper" compliance-check pattern confirmed exhausted; onboarding/billing/RLS spot-checks all check out
+
+Oriented from `d19b809`; `git fetch origin main` found one new commit since (`9ece8d7`, a different
+session's fix for a corrupted SANRAL fingerprint baseline crashing the real pack build - read the
+real diff, touches `engine/pack/assemble_pack.py` only, no overlap) and fast-forwarded local `main`.
+Open PRs re-checked via the GitHub API: `#172`, `#165`, `#164`, all unchanged, no collision.
+
+Per this pass's own directive, followed up on the immediately-prior pass's COID "renew soon" fix by
+checking every OTHER item in `sanralConventionalDocumentChecks()` and `generalTender.ts`'s equivalent
+`checkReturnable()` for the same "one item doesn't match its siblings' shared helper" shape. Result:
+genuinely exhausted now. Every dated `ComplianceItem` in both files (tax PIN, B-BBEE, PI insurance,
+bank letter, ISO 9001, and now COID) calls `validityAtClosing()` and threads `expiring` through
+correctly. The key-person registration checks (`registrationValidity()`, used for SACNASP/SACPCMP/
+SAGC/the 0050 catalog bodies) looked like a candidate at first glance - they discard the `expiring`
+boolean entirely - but traced it through to `checkMinimumRequirement()`'s actual return shape and
+confirmed the "(renew soon)" wording is embedded directly in `validityAtClosing()`'s own `text` field,
+which IS surfaced in the final `detail` string either way; a different presentation (inline text vs a
+separate chip+boolean), not a silently-dropped signal. Not a bug.
+
+Pivoted to onboarding per the directive. Traced a thing that looked like a strong candidate at first -
+`confirmVaultDocument()` (`app/app/company/document-scan/actions.ts`) writes
+`bank_confirmation_letter_date` on confirm but never touches `bank_confirmation_letter_valid_until` -
+but checked the actual schema (`0014_vault_compliance_documents.sql`) and confirmed that column is a
+Postgres `generated always as (bank_confirmation_letter_date + interval '3 months') stored` column, so
+it derives automatically; no bug. `lib/onboardingNudges.ts` and `scripts/send-onboarding-nudges.ts`
+checked for a frequency/dedup gap given this session's digest-email finds - correct: every nudge type
+uses a fixed per-company-per-user idempotency key with no date component, a deliberate one-time-ever
+design matching their own "Tier 0" one-shot nature, not a recurring reminder that needs date-scoping.
+`engine/onboarding/classify_documents.py`'s `validate_proposal()` already has a hardened,
+well-commented handling of its own prior "silently dropped unreadable date" bug class - nothing new
+there either.
+
+Checked `company_subscriptions`' RLS (`0078_company_subscriptions.sql`) given this session's two real
+PayFast/billing fixes - correctly read-only for members, every write gated through the two narrow
+`SECURITY DEFINER` functions; no client-writable gap.
+
+One minor, NOT fixed, note: `app/app/company/team/actions.ts`'s seat-limit check
+(`max_users`) reads the current member count, then inserts, as two separate round-trips - a classic
+TOCTOU race if two admins invite at the exact same instant, both could pass the check and the company
+would end up one seat over its plan. Not fixed this pass: requires precise concurrent timing to
+trigger, the "exploit" is a company accidentally getting itself one extra seat (not a security
+escalation or data exposure), and the existing code already has the right intent/shape - fixing it
+properly would mean moving the count-and-insert into one atomic SQL statement, a larger change than
+this pass's "small, safe, well-verified" bar for a direct-to-main push. Noted here rather than silently
+dropped; low priority, Sarel's call whether it's worth a dedicated migration.
+
+No code bug found and fixed this pass - a genuine clean sweep, not forced. No code touched; existing
+test suites unaffected (none run, none needed).
+
+Backlog unchanged at 12 items (migrations `0096`/`0105` awaiting application to the live DB,
+`narrative_documents` PostgREST schema-cache reload, PayFast idempotency design question, "missing ISO
+9001 flagged as urgent" UX question, Form B7 compulsory-vs-matrix disagreement, dashboard
+"Decision needed" over-triggering, impersonation token-refresh gap, submitted-tender nagging gap,
+SANRAL fingerprint heads-up, dangling `signatory_person_id` fallback design question (Finding 96), no
+reconciliation for a silently-lapsed `active` subscription (Finding 97)) - nothing resolved, nothing new
+added; the team-seat race above is noted in this entry, not elevated to a numbered backlog item, since
+it's genuinely low-stakes and not yet a decision Sarel needs to make now.
+
+---
+
 ## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-sixth run): Finding 100 (severe) - a corrupted SANRAL fingerprint baseline raised a raw JSONDecodeError out of the real pack build's own first step, misclassified as a worker crash instead of a clean refusal - second independent occurrence of Finding 97's bug class
 
 Oriented from `d19b809` (a sibling standing-review pass's compliance fix - COID "renew soon" warning
