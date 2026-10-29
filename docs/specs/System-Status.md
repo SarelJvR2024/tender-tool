@@ -14,6 +14,74 @@
 
 ---
 
+**2026-10-29 ~06:20 UTC — standing review: the topbar notifications bell nagged about a bank
+confirmation letter up to a month before the vault itself considered it due for renewal; fixed.**
+
+Oriented from `1a29cb5` (the previous pass's SANRAL closing-time fix); fetched `origin/main` - no
+new commits had landed since, confirmed local `main` already matched it exactly before starting.
+Open PRs (`#164`, `#165`, `#170`) checked via the GitHub REST API, unchanged, no collision.
+
+Per this pass's own directive, moved to a different area: `engine/pack_generator/suggest_pack.py`'s
+scoring and tie-break logic, cross-checked against `engine/pack/process_pack_jobs.py`'s own
+`rank_candidates()` (the exact "two places computing the same real-world fact" shape this session
+has repeatedly found bugs in) - confirmed these are NOT a drifted duplicate: `process_pack_jobs.py`
+imports `score_candidate`/`read_required_positions` directly from `suggest_pack.py` (`from
+suggest_pack import read_required_positions, score_candidate`), and its own `rank_candidates()`
+tie-break (`-score, -years_experience, name`) is identical to - and explicitly documented as
+deliberately matching - the one in `suggest_pack.py`. `adapt_person()`'s DB-row-to-scorer-shape
+mapping also lines up field-for-field with what `score_candidate()`/`candidate_person_text()`/
+`years_experience_at()` expect. No bug there.
+
+**The finding**, in `app/lib/notifications.ts`'s `getNotifications()` (the topbar bell): every
+`COMPANY_EXPIRY_FIELDS` entry was checked against one flat `DOCUMENT_WINDOW_DAYS = 60` "renew soon"
+window - including `bank_confirmation_letter_valid_until`. But that field is NOT a 60-day document
+everywhere else it's checked: the Company vault page (`ReadOnlyView.tsx`,
+`ComplianceDocumentsSection.tsx`) and the real compliance checks (`tenderCompliance.ts`,
+`generalTender.ts`) all correctly use a 30-day window for it specifically
+(`vaultDocuments.ts`'s `BANK_LETTER_RENEW_SOON_DAYS`, since the letter is only valid 3 months from
+its own date - the same 30-day override `engine/compliance/watch_deadlines.py`'s own
+`TRACKED_EXPIRY_FIELDS` already carries, with an identical cross-reference comment). This file's own
+header comment claims the bell "agrees with what the vault and dashboard already say" - true for
+every other field, but false for this one: a bank letter 31-60 days from expiry would ring the bell
+("Expires in 45 days", warning) while the vault page itself still showed it "Current" (green). Same
+bug SHAPE as the SANRAL closing-time default fixed last pass and the day-count drift fixed three
+passes before that - a shared real-world fact (when is this document due for renewal) computed with
+a silently disagreeing constant in one of its several call sites.
+
+Fixed by giving `COMPANY_EXPIRY_FIELDS` entries (`lib/companyExpiryFields.ts`) an optional
+`windowDays` override - a plain numeric literal on the bank-letter entry, not an import of
+`BANK_LETTER_RENEW_SOON_DAYS`, since this file deliberately stays at zero imports so a standalone
+script can import it directly (its own header comment explains why) - and having
+`getNotifications()`'s company-fields loop use `windowDays ?? DOCUMENT_WINDOW_DAYS` instead of the
+flat constant. `lib/documentExpiry.ts` (the vault's own full, unwindowed list) and
+`lib/complianceDigestCandidates.ts` (fixed-threshold reminders, not a window) were both checked and
+don't need the same fix - the former deliberately uses one flat, tighter 30-day window for every
+field on purpose (its own header comment), the latter fires on exact day thresholds, not a window,
+same for every field already.
+
+No test file existed for `lib/notifications.ts` at all (it has its own extensionless `./dates`
+import, same limitation `lib/companyExpiryFields.ts`'s and `lib/deadlineReminders.ts`'s own header
+comments already document, so it needs vitest rather than a direct `node --experimental-strip-types`
+run - same reason `lib/complianceDigestCandidates.spec.ts` exists for its own Supabase-querying
+function rather than a `.test.ts`). Added `lib/notifications.spec.ts`, a minimal Supabase stub (same
+shape as `complianceDigestCandidates.spec.ts`'s own `stubSupabase()`, extended with the `tenders`
+table this function also reads) and four cases: a 60-day field flagged at 45 days (unaffected),
+the bank letter NOT flagged at 45 days (the fix), the bank letter flagged at 25 days (inside its own
+window), and an already-expired bank letter flagged regardless of window. Confirmed the regression
+test actually catches the original bug by temporarily stashing the two source-file fixes and
+re-running - the "not flagged at 45 days" case failed exactly as expected against the unfixed code,
+then restored the fix and re-ran clean. `npx vitest run` - 295/295 passing (full suite, no
+regressions). `npx tsc --noEmit` and `npx eslint` on all three touched files - clean.
+`node --experimental-strip-types --test lib/*.test.ts` - 178/178 (unaffected, different test
+runner/file set, run as the full-sweep sanity check this pass's own directive asked for).
+
+Pushed directly to `main` (small, fully verified, no PR): `app/lib/notifications.ts`,
+`app/lib/companyExpiryFields.ts`, `app/lib/notifications.spec.ts`, this file.
+
+Backlog unchanged at 9 items - this finding was standalone, nothing resolved or added to the list.
+
+---
+
 **2026-10-29 ~04:20 UTC — standing review: a SANRAL closing date with no time given defaulted to
 noon instead of this codebase's own established 11:00 SAST convention; fixed.**
 

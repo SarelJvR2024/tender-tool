@@ -16,6 +16,18 @@ export type AppNotification = {
 // Same "renew soon" window as expiryStatus()'s default, and the same
 // DeadlineChip "soon" band for tenders - these are read-only glances at
 // data the vault and dashboard already track, not a new source of truth.
+// The default for any COMPANY_EXPIRY_FIELDS entry with no windowDays of its
+// own (held_registrations/ECSA/SACPCMP below always use this one directly -
+// none of those has a shorter-validity override). Found 2026-10-29: the
+// company-fields loop used to apply this flat 60 to EVERY field, including
+// bank_confirmation_letter_valid_until - which the vault page
+// (ReadOnlyView.tsx/ComplianceDocumentsSection.tsx) and the real compliance
+// checks (tenderCompliance.ts, generalTender.ts) all correctly treat as
+// "renew soon" at 30 days, not 60 (a letter is only valid 3 months). The
+// bell would nag about a letter 31-60 days out that the vault itself still
+// showed "Current" - this file's own header comment's claim that the bell
+// "agrees with what the vault and dashboard already say" was false for
+// exactly this one field until the per-field windowDays override below.
 const DOCUMENT_WINDOW_DAYS = 60;
 // DEADLINE_WINDOW_DAYS itself now lives in ./deadlineReminders (re-exported
 // here for every existing caller of this module) - see that file's own
@@ -81,9 +93,9 @@ export async function getNotifications(supabase: SupabaseClient): Promise<AppNot
 
   const company = (companyRow ?? null) as Record<string, string | null> | null;
   if (company) {
-    for (const { field, label } of COMPANY_EXPIRY_FIELDS) {
+    for (const { field, label, windowDays } of COMPANY_EXPIRY_FIELDS) {
       const left = daysUntil(company[field]);
-      if (!withinWindow(left, DOCUMENT_WINDOW_DAYS)) continue;
+      if (!withinWindow(left, windowDays ?? DOCUMENT_WINDOW_DAYS)) continue;
       notifications.push({
         id: `company:${field}`,
         kind: "document",
