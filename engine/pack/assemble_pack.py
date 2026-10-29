@@ -141,7 +141,20 @@ def _excel_date(v):
 
 def check_template(technical_tpl, store=None):
     """fingerprint.py's own build/diff - refuses on a blocking mismatch, the
-    same rule its CLI enforces. Returns (family, warnings)."""
+    same rule its CLI enforces. Returns (family, warnings).
+
+    QA pass, 2026-10-29: a corrupted/truncated baseline file (a bad merge, an
+    interrupted regeneration - the exact kind of file PR #170's own
+    fingerprint regeneration writes) used to raise a raw JSONDecodeError
+    straight out of this function - and since this is build_submission_pack()'s
+    own STEP 1, straight out of the real SANRAL pack build for every company
+    requesting that template family. process_pack_jobs.py's own exception
+    handler treats a ValueError here as a clean, actionable refusal ("warning"
+    severity) but anything else as a genuine crash ("error" severity) - so this
+    wasn't just a confusing message, it misclassified a known, recoverable
+    condition as a worker crash. Same bug class, and the same fix, as
+    engine/intake/classify_tender.py's check_fingerprint() (Finding 97) - a
+    separate, independent occurrence of it in the pack-assembly path."""
     store = store or fingerprint.DEFAULT_STORE
     current = fingerprint.build_fingerprint(technical_tpl)
     family = current["family"]
@@ -154,7 +167,12 @@ def check_template(technical_tpl, store=None):
         warnings.append(f"No stored fingerprint baseline for '{family}' - template-change check not possible. "
                         "Run engine/fingerprint.py on a known-good copy to store one.")
         return family, warnings
-    changes, soft = fingerprint.diff(json.load(open(store_path)), current)
+    try:
+        stored = json.load(open(store_path))
+    except Exception as e:
+        raise ValueError(f"Could not read the stored '{family}' fingerprint baseline ({type(e).__name__}: {e}) - "
+                         "not filling it. Re-run engine/fingerprint.py to regenerate the baseline.") from e
+    changes, soft = fingerprint.diff(stored, current)
     if changes:
         keys = ", ".join(k for k, _, _ in changes[:6])
         raise ValueError(f"Template fingerprint MISMATCH against the stored '{family}' baseline ({keys}). "

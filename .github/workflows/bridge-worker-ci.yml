@@ -222,6 +222,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/pack/test_process_pack_jobs.py
 
+      - name: SANRAL pack assembly - check_template() survives a corrupted fingerprint baseline (Finding 100)
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack/test_assemble_pack.py
+
       - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
         if: ${{ !cancelled() }}
         run: python3 engine/security/test_tenant_isolation.py

@@ -14,6 +14,33 @@
 
 ---
 
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-sixth run): Finding 100 (severe) - a corrupted SANRAL fingerprint baseline raised a raw JSONDecodeError out of the real pack build's own first step, misclassified as a worker crash instead of a clean refusal - second independent occurrence of Finding 97's bug class
+
+Oriented from `d19b809` (a sibling standing-review pass's compliance fix - COID "renew soon" warning
+gap, no overlap); `git fetch origin main` found nothing new since. Open PRs checked (`#172`/`#165`/
+`#164`, all draft, none touching `engine/pack/`).
+
+SANRAL pack rotation. `engine/pack/assemble_pack.py`'s `check_template()` - `build_submission_pack()`'s
+own STEP 1 - read its stored fingerprint baseline with a bare `json.load(open(store_path))`, no
+try/except, exactly the same unguarded pattern Finding 97 fixed in `classify_tender.py`'s
+`check_fingerprint()`, independently present here too. Reproduced directly against a real sample
+workbook: a corrupted baseline raised a raw `JSONDecodeError` straight out of the real pack build.
+Worse than Finding 97's blast radius: `process_pack_jobs.py`'s own exception handler explicitly
+distinguishes a clean `ValueError` refusal ("warning" severity) from any other exception ("error"
+severity, treated as a crash) - and while `JSONDecodeError` is itself technically a `ValueError`
+subclass, its raw message is bare internal parser detail, nothing like this function's own other
+actionable refusals. Fixed with the same try/except pattern, raising the same clean `ValueError` shape
+check_template()'s sibling guards already use. New file `engine/pack/test_assemble_pack.py`
+(`check_template()` had no dedicated test at all before this pass) - no-baseline/match/mismatch/
+corrupted-baseline plus an unfillable-family control. Revert-and-confirm-red: reverting made exactly
+the 2 message-content checks fail, the other 4 stayed green (noted precisely why an `isinstance`
+check alone can't distinguish this case). Wired into CI, YAML validated before committing.
+Regression-checked every other `engine/pack/test_*.py` file plus `engine/intake/test_classify_tender.py`
+and `engine/test_fingerprint.py` - all pass. Full write-up: `docs/specs/QA-Edge-Case-Findings.md`,
+Finding 100.
+
+---
+
 ## This pass (2026-10-29, standing solution-architect review): COID Letter of Good Standing never carried a "renew soon" warning in the SANRAL compliance report - the single most emphasized document in this codebase's own real-incident history had the one gap every OTHER dated document here already closed
 
 Oriented from `6b6290d` (the immediately-prior standing-review pass's clean sweep); `git fetch origin

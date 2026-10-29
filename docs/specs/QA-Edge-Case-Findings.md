@@ -5698,3 +5698,49 @@ still pass.
 `fail_stale_uploads`, no other behavior change), five existing test files extended (1 new row + updated
 checks each), one new test file (`engine/pack/test_process_pack_jobs.py`, first ever for this bridge's
 job-queue logic), one CI workflow file (one new step). No schema or other call-site changes.
+
+### Finding 100 (CONFIRMED, FIXED, severe - a corrupted SANRAL fingerprint baseline raised a raw JSONDecodeError out of the real pack build's own STEP 1, and that raw exception was misclassified as a worker crash instead of the clean, actionable refusal process_pack_jobs.py's own handler already distinguishes)
+
+**Where:** SANRAL pack rotation this cycle. `engine/pack/assemble_pack.py`'s `check_template()` -
+`build_submission_pack()`'s own first step, called before anything else, for every company's real
+pack build.
+
+**What was tested:** `check_template()` reads the stored fingerprint baseline for the workbook's
+template family and diffs it against the current workbook (`fingerprint.diff()`), raising a clean
+`ValueError` on a genuine mismatch ("SANRAL may have changed the template..."). The baseline file read
+itself (`json.load(open(store_path))`) had no try/except. Reproduced directly against a real sample
+workbook (`templates/samples/R.334-030-2025.1F_ran.xlsm`): a corrupted baseline file (the exact shape
+a bad merge or an interrupted fingerprint regeneration - PR #170's own regeneration script - would
+produce) raised a raw `JSONDecodeError` straight out of `check_template()`. Checked
+`process_pack_jobs.py`'s own exception handling around `build_submission_pack()`
+(`process_job()`, ~line 703): it explicitly distinguishes a `ValueError` ("the confirm gate / a filler
+refusing on purpose... recorded as a warning") from any other exception ("anything else is a crash" -
+`error` severity). A raw `JSONDecodeError` is itself a `ValueError` subclass in Python, so it wasn't
+rejected outright - but its message is the bare internal parser detail
+("Expecting property name enclosed in double quotes..."), nothing like this function's own other,
+deliberately actionable refusal messages, and nowhere near as diagnosable for whoever reads the failed
+job. **Independent, second occurrence of Finding 97's exact bug class** (`engine/intake/
+classify_tender.py`'s `check_fingerprint()`) - same unguarded `json.load(open(path))` next to an
+already-careful sibling, this time in the pack-assembly path itself rather than the intake pre-check,
+so the practical blast radius is larger: it blocks the real pack BUILD, company-wide, for the affected
+template family, not just an advisory intake classification.
+
+**Fix:** wrapped the baseline read in `try/except`, raising the same clean, actionable `ValueError`
+shape `check_template()`'s own other two guards already use (names the family, says what to do -
+"Re-run engine/fingerprint.py to regenerate the baseline").
+
+**Verified red-then-green:** new file `engine/pack/test_assemble_pack.py` (`check_template()` had no
+dedicated test at all before this pass) - no-baseline/match/mismatch/corrupted-baseline against the
+real sample workbook, plus a control case for the "unfillable family" guard. Revert-and-confirm-red:
+reverting the fix made exactly the 2 checks that assert the fix's own clean wording fail (with the raw
+parser detail in their place), the other 4 stayed green - note `json.JSONDecodeError` being itself a
+`ValueError` subclass means an `isinstance` check alone can't distinguish fixed from unfixed here; the
+real signal, and what the test asserts, is the message content. Restored, `0 failure(s)`. Wired the
+new test file into CI (`bridge-worker-ci.yml`, next to `test_process_pack_jobs.py`) - validated the
+YAML with `yaml.safe_load` before committing. Regression-checked every other `engine/pack/test_*.py`
+file, `engine/intake/test_classify_tender.py`, `engine/test_fingerprint.py`, and
+`engine/test_fill_b7_legacy_precedence.py` - all still pass.
+
+**Regression:** `engine/pack/assemble_pack.py` (one `try/except` added, no other behavior change),
+new file `engine/pack/test_assemble_pack.py` (first dedicated test for `check_template()` ever), one
+CI workflow file (one new step). No schema or other call-site changes.
