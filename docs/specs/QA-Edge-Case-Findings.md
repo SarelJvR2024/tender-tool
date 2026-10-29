@@ -5407,3 +5407,44 @@ loop smoke tests passed`, no regression from removing the import.
 
 **Regression:** `engine/cv/process_cv_jobs.py` only (one docstring correction, one dead import
 removed). No behaviour change - `generate_as_is()` itself untouched.
+
+### Finding 94 (coverage-gap closure, no new bug found - process_onboarding_jobs.py's claim/fulfil mechanism had never been tested against a real filtering fake, the same shape as Finding 87)
+
+**Where:** worker/job-queue rotation this cycle (last dedicated pass: Finding 87, run 110 -
+`poll_loop.py`/`run_bridges.py` themselves already thoroughly reviewed then, and `notify` was just
+reviewed by a sibling this morning, so this pass looked at the one bridge in this area without a
+dedicated adversarial pass of its own claim/fulfil mechanism). `engine/onboarding/
+process_onboarding_jobs.py` - the bulk onboarding document scan bridge (migration 0063).
+
+**What was tested:** `test_process_onboarding_jobs.py` existed (added for a real path-traversal-
+guard fix, 2026-10-20) but its own `_fake_supabase_request` ignores the querystring entirely - any
+GET/PATCH "succeeds" on every row regardless of filter. That left `claim_upload()`'s atomic
+`classification_requested -> classifying` claim, `fail_stale_uploads()`'s stuck-row recovery, and
+`process_upload()`'s full success/error paths (the SetupError-re-raises-vs-TransientError-swallowed
+asymmetry already established in `process_narrative_jobs.py`/Finding 87, `ClassificationFailed`'s
+own handling) never actually exercised against the real atomic-claim contract. Built the same
+`FakeDB` shape Finding 87 used (real `eq.` filtering on GET/PATCH, not a trivial stub) and wrote 6
+new adversarial tests: two sequential claims on the same row, a stale `classifying` row beside a
+fresh one, a full happy-path run with `storage_download`/`extract_from_file` stubbed (every one of
+`document_kind`/`fields`/`warnings`/`text_method` must land in the written `onboarding_document_
+results` row), and the TransientError/SetupError/ClassificationFailed error-path trio.
+
+**What was found: nothing new - all six contracts held** under real adversarial cases, confirmed
+correct. Sanity-checked the new atomicity test isn't passing by construction: temporarily removed
+`claim_upload()`'s own `status=eq.classification_requested` filter on a scratch copy and confirmed
+the test went red for exactly that regression.
+
+**A small test-hygiene gap fixed in passing**: the new error-path tests call the real
+`system_alerts.record()` (unlike the 4 pre-existing guard tests, which fully monkeypatch it to a
+list-append lambda) - without `SYSTEM_ALERTS_DISABLED=1`, this made a real HTTP attempt against this
+sandbox's own placeholder Supabase credentials on every run (degraded gracefully with a logged 401,
+never a crash, but still a live network call an offline test file should never make). Added the
+same `os.environ["SYSTEM_ALERTS_DISABLED"] = "1"` escape hatch Finding 88's test file already uses.
+
+**Verified**: full file re-run, `0 failure(s)` (23 checks total, 19 new), no more network attempts.
+`test_classify_documents.py` (the sibling onboarding test) re-run clean, `ALL PASSED`, unaffected.
+Already wired into CI via Finding 92's own sweep - no new CI step needed.
+
+**Regression:** `engine/onboarding/test_process_onboarding_jobs.py` only (6 new test functions, one
+`SYSTEM_ALERTS_DISABLED` line, both additive). No production code touched - this pass closed a
+test-coverage gap, not a code bug.

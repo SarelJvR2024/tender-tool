@@ -5930,6 +5930,38 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-nineteenth run): Finding 94 (coverage-gap closure, no new bug) - process_onboarding_jobs.py's claim/fulfil mechanism had never been tested against a real filtering fake, the same shape as Finding 87
+
+Orientation: `git fetch origin main` showed two new sibling commits (`85d5c84` clean sweep confirming
+the days-to-close drift fix fully closed, `4bdf22e` a real fix in `send_digest_emails.py` - every
+digest's "Documents & registrations due" line was showing a raw internal field name/slug instead of
+the human label sitting in the same dict - notify area, so skipped that rotation this cycle to avoid
+duplicating). Open PRs unchanged (`#164`/`#165`/`#170`), no new overlap.
+
+Rotated to worker/job-queue - `poll_loop.py`/`run_bridges.py` already thoroughly reviewed (Finding
+77), so picked the one bridge in this area without its own dedicated adversarial pass:
+`process_onboarding_jobs.py`. `test_process_onboarding_jobs.py` existed (a real path-traversal-guard
+fix, 2026-10-20) but its own fake ignores the querystring entirely - `claim_upload()`'s atomic claim,
+`fail_stale_uploads()`'s stuck-row recovery, and `process_upload()`'s full success/error paths had
+never been exercised against the real claim contract, the exact gap shape Finding 87 closed for the
+narrative bridge.
+
+**What was found: nothing new - all six contracts held** under real adversarial cases (built the
+same `FakeDB` shape as Finding 87: real `eq.` filtering on GET/PATCH). Sanity-checked by temporarily
+removing `claim_upload()`'s own status filter on a scratch copy - the new atomicity test correctly
+went red for that regression.
+
+**A small test-hygiene gap fixed in passing**: the new error-path tests call the real
+`system_alerts.record()` (unlike the 4 pre-existing tests, which fully monkeypatch it) - without
+`SYSTEM_ALERTS_DISABLED=1` this made a real HTTP attempt against this sandbox's own placeholder
+Supabase credentials (degraded gracefully, never crashed, but still a live call an offline test
+should never make). Added the same escape hatch Finding 88's test file already uses.
+
+Verified: `0 failure(s)` (23 checks, 19 new), no more network attempts; sibling
+`test_classify_documents.py` re-run clean. Already wired into CI via Finding 92's own sweep.
+
+Full writeup: Finding 94, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-eighteenth run): rotated to compliance/reminders (watch_deadlines.py's find_due_tasks()) - two plausible leads chased, both ruled out against the real schema, no new bug found this time
 
 Orientation: `git fetch origin main` showed one new sibling commit (`3699e4a`, closing a second site
