@@ -13,20 +13,35 @@ import { setOpportunityInterest, setOpportunityTag, type OpportunityInterestMark
  * setOpportunityTag()/setOpportunityInterest() (actions.ts), not the earlier
  * browser-only localStorage preview this PR first shipped with.
  *
- * `tags`/`interest` come straight from the opportunity row the server
- * component already loaded (discovered_opportunities.company_tags /
- * .interest_marker) - no client-side store, no useSyncExternalStore. Every
- * write goes through startTransition() + a direct server-action call, the
- * same "tap it, it persists" shape as tenders/[id]/task-status-button.tsx
- * and task-assignee-select.tsx: no local optimistic copy of the value itself
- * (only `isPending`, to disable controls mid-flight) - the next render
- * after revalidatePath("/discovery") is what actually shows the new state,
- * consistent with every other inline control in this codebase.
+ * `tags`/`interest` prefill the local optimistic state below from the
+ * opportunity row the server component already loaded
+ * (discovered_opportunities.company_tags / .interest_marker) - no client-
+ * side store, no useSyncExternalStore.
+ *
+ * Real bug, 2026-10-29 (Sarel: "the interested button doesn't work well,
+ * need to click multiple times"): this used to have NO local optimistic
+ * copy of the value at all - only `isPending`, to disable controls mid-
+ * flight - relying entirely on the next render after
+ * setOpportunityInterest()/setOpportunityTag()'s own revalidatePath("/discovery")
+ * to show the new state. That revalidate re-runs discovery/page.tsx's own
+ * deliberately heavy renderDiscovery() (8 parallel queries, N+1 lookups, up
+ * to 40 market-pricing lookups), so the button could sit unchanged for
+ * several seconds. A user who clicked again before that resolved was reading
+ * the STALE `interest` prop from the still-unrefreshed render, so a second
+ * click on "Interested" could toggle it straight back off - not a double
+ * click doing nothing, an actual flip-flop. Now mirrors
+ * OpportunityPreferencesPanel.tsx's own proven pattern: optimistic local
+ * state updates immediately, a failed save reverts it. The slow background
+ * revalidate still runs (interest_marker genuinely gates the Declined/
+ * Interested tabs' own full-history filter - see lib/discoveryPagination.ts
+ * - so it can't just be dropped the way the preferences panel's own
+ * revalidatePath("/discovery") was), but it no longer blocks what the user
+ * sees on click.
  */
 export function OpportunityQuickActions({
   opportunityId,
-  tags,
-  interest,
+  tags: initialTags,
+  interest: initialInterest,
   suggestions,
 }: {
   opportunityId: string;
@@ -39,27 +54,39 @@ export function OpportunityQuickActions({
    * not a separate full-history query. */
   suggestions: string[];
 }) {
+  const [tags, setTags] = useState(initialTags);
+  const [interest, setInterest] = useState(initialInterest);
   const [isPending, startTransition] = useTransition();
   const [draft, setDraft] = useState("");
 
   function addTag(raw: string) {
     const tag = raw.trim().toLowerCase().replace(/\s+/g, " ");
     if (!tag || tags.includes(tag)) return;
+    const prevTags = tags;
     setDraft("");
-    startTransition(() => {
-      setOpportunityTag(opportunityId, tag, "add");
+    setTags([...tags, tag]);
+    startTransition(async () => {
+      const result = await setOpportunityTag(opportunityId, tag, "add");
+      if (!result?.ok) setTags(prevTags);
     });
   }
 
   function removeTag(tag: string) {
-    startTransition(() => {
-      setOpportunityTag(opportunityId, tag, "remove");
+    const prevTags = tags;
+    setTags(tags.filter((t) => t !== tag));
+    startTransition(async () => {
+      const result = await setOpportunityTag(opportunityId, tag, "remove");
+      if (!result?.ok) setTags(prevTags);
     });
   }
 
   function toggleInterest(mark: Exclude<OpportunityInterestMarker, null>) {
-    startTransition(() => {
-      setOpportunityInterest(opportunityId, interest === mark ? null : mark);
+    const prevInterest = interest;
+    const next = interest === mark ? null : mark;
+    setInterest(next);
+    startTransition(async () => {
+      const result = await setOpportunityInterest(opportunityId, next);
+      if (!result?.ok) setInterest(prevInterest);
     });
   }
 

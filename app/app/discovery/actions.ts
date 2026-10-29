@@ -64,11 +64,11 @@ export type OpportunityInterestMarker = "interested" | "declined" | null;
  * through set_opportunity_tag(), a SECURITY DEFINER function that checks
  * is_company_member() itself and does the add/remove + normalisation
  * server-side. Called directly from OpportunityQuickActions inside
- * startTransition() - same "tap it, it persists" shape as
- * tenders/[id]/task-status-button.tsx - not a <form action>, so failures are
- * logged, not surfaced inline; a failed tag write just leaves the chip
- * unchanged on the next render; consistent with every other inline control in
- * this codebase (task-status-button.tsx, task-assignee-select.tsx).
+ * startTransition(). Returns {ok} (not void) since 2026-10-29
+ * (OpportunityQuickActions' own optimistic-update fix, see that file's
+ * header comment): the caller needs to know whether to revert its own
+ * optimistic local state, the same reason setOpportunityPreferences
+ * (preferencesActions.ts) already returns {ok}/{error}.
  */
 export async function setOpportunityTag(opportunityId: string, tag: string, action: "add" | "remove") {
   const supabase = await createClient();
@@ -82,16 +82,18 @@ export async function setOpportunityTag(opportunityId: string, tag: string, acti
   });
   if (error) {
     console.error("set_opportunity_tag rpc failed", error);
-    return;
+    return { ok: false as const };
   }
   revalidatePath("/discovery");
+  return { ok: true as const };
 }
 
 /**
  * Set (or clear, with null) this company's quick interest/decline mark on a
  * Discovery row (migration 0089). Same shape as setOpportunityTag above -
  * set_opportunity_interest() is the SECURITY DEFINER write path, since
- * discovered_opportunities itself still has no client update policy.
+ * discovered_opportunities itself still has no client update policy. Returns
+ * {ok}, same reason as setOpportunityTag above.
  */
 export async function setOpportunityInterest(opportunityId: string, marker: OpportunityInterestMarker) {
   const supabase = await createClient();
@@ -104,7 +106,8 @@ export async function setOpportunityInterest(opportunityId: string, marker: Oppo
   });
   if (error) {
     console.error("set_opportunity_interest rpc failed", error);
-    return;
+    return { ok: false as const };
   }
   revalidatePath("/discovery");
+  return { ok: true as const };
 }
