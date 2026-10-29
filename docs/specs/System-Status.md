@@ -14,6 +14,69 @@
 
 ---
 
+**2026-10-29 ~14:30 UTC — standing review: new design-question finding, no code fix this pass (the
+right call needs Sarel's own judgment, same as the existing idempotency question).**
+
+Oriented from `ee36c9e`; `git fetch origin main` found one new commit since - `fa6bc27` (a different
+session's fix(intake) for `check_fingerprint()` raising a raw `JSONDecodeError` on a corrupted
+baseline, plus a new `docs/specs/QA-Edge-Case-Findings.md`) - no overlap, fast-forwarded local `main`
+before starting. Open PRs checked via the GitHub API: `#172` (Document Vault badge fix), `#165`,
+`#164` all unchanged, none touching anything reviewed this pass - no collision.
+
+Per this pass's own directive, took one more close look at PayFast/billing-adjacent SQL for a sibling
+of the `apply_payfast_itn()` bug the immediately-prior pass fixed (a status check missing somewhere
+it should exist). Checked `company_can_request_pack()` (`0096`, already correctly scoped and already
+on the backlog as "needs applying", not re-flagged again), `tt_plan_limits()`/the rescue path in
+`0083`/`0105` (both already correctly guarded to `v_new_status = 'active'` before touching
+`max_users`/`max_packs_per_month` - no bug), and `platform_admin_billing_overview()` (`0101`, a plain
+read-only admin view, no mutation to get wrong). No sibling SQL bug of the same shape found.
+
+**Found something different, and real, while reading `app/lib/billing.ts`'s
+`effectiveSubscriptionStatus()`:** it reconciles exactly ONE stale-status case - a `'trialing'`
+company whose `trial_ends_at` has already passed is treated as effectively `past_due` on every read,
+because (its own header comment) "nothing in this app runs a clock-driven job to rewrite [the stored
+status column]". But that reconciliation only covers the trial case. An `'active'` company whose
+`current_period_end` has already passed - because a recurring PayFast ITN for the next billing cycle
+never arrived at all (webhook downtime, a network blip, PayFast-side delivery failure - anything
+short of an ITN that *did* arrive with `payment_status=FAILED`) - has no equivalent reconciliation
+anywhere. Confirmed by grep: there is no reconciliation cron/job on either side of this codebase
+(`engine/` has zero files referencing `payfast`/`subscription` outside the already-reviewed ITN
+path) - `apply_payfast_itn()` is the ONLY code that ever changes `company_subscriptions.status`.
+
+**Why this matters, concretely:** `isSubscriptionLapsed()`'s own header comment says "trialing/active
+keep full access... past_due/cancelled... show a banner" - so a stuck-`'active'` row with a
+long-expired `current_period_end` would keep showing full access with NO lapsed-subscription banner,
+indefinitely, with nothing anywhere ever correcting it. The per-pack quota gate
+(`company_can_request_pack()`) also only branches on `status = 'active'`, never on
+`current_period_end` - so this isn't just a missing banner, it's the same quota gate the trial case
+was fixed for (`0096`) having an unguarded twin on the paid side.
+
+**Not fixed - this is a design question, not a mechanical bug**, same category as the existing
+PayFast "idempotency design question" already on the backlog (and NOT the same question - that one
+is about the ITN dedup key choice for a recurring subscription; this one is about what happens when
+an ITN never arrives at all). Reconciling it the way `trial_ends_at` is reconciled would mean picking
+a grace period before auto-treating a silent `'active'` row as lapsed - a product call, not something
+to decide and ship unilaterally in a standing-review pass, and this app currently has no cron
+infrastructure to run such a reconciliation even if the grace period were chosen today. Flagged for
+Sarel's own judgment; not touched.
+
+No code changed this pass - this commit touches `docs/specs/System-Status.md` only.
+
+QA: no code touched, nothing to re-run beyond the existing suites (last known: `node
+--experimental-strip-types --test lib/*.test.ts` 194/194, `npx vitest run` passing, both unaffected).
+
+**Backlog is now 12 items** (the prior 11 plus this pass's new finding): migration `0096`
+(pack-quota trial-expiry), migration `0105` (PayFast failed-payment period-end fix), **new: the
+missing `'active'`-with-expired-`current_period_end` reconciliation gap**, `narrative_documents`
+PostgREST schema-cache reload, PayFast idempotency design question (the dedup-key one, separate,
+unchanged), "missing ISO 9001 flagged as urgent" UX question, Form B7 compulsory-vs-matrix
+disagreement, dashboard "Decision needed" over-triggering, impersonation token-refresh gap,
+submitted-tender nagging gap, SANRAL fingerprint heads-up (no action needed), and Finding 96
+(dangling `signatory_person_id` fallback) - all still Sarel's own judgment calls, none resolved or
+acted on by this pass.
+
+---
+
 **2026-10-29 ~12:40 UTC — standing review: fixed a real bug in `apply_payfast_itn()` (migration
 `0105`, NOT YET APPLIED to the live DB - needs Sarel's sign-off, same as `0096`).**
 
