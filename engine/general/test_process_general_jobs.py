@@ -136,9 +136,54 @@ def test_within_missing_closing_date_uses_real_sast_today_not_naive_utc():
         pgj.datetime.datetime = real_datetime
 
 
+def test_gather_pack_inputs_signatory_fallback():
+    print("gather_pack_inputs(): signatory falls back to the company's own designated signatory")
+    job = {"company_id": "co-a", "tender_id": "t-a"}
+    tender = {"id": "t-a"}
+    manifest = {"experience_evidence": {}, "roles": []}
+    company = {"id": "co-a", "legal_name": "Mzansi Roads & Civils (Pty) Ltd"}
+
+    # No tender_answers.signatory_person_id for THIS tender, but a person on
+    # file has a signatory capacity - the real Mzansi/RFP165 incident,
+    # 2026-10-28: "Not on file" even though a Director was on record.
+    rows = [
+        company,
+        {"id": "p-engineer", "company_id": "co-a", "name": "A Candidate", "signatory_capacity": None,
+         "id_number": "1", "created_at": "2026-01-01T00:00:00Z"},
+        {"id": "p-director", "company_id": "co-a", "name": "Lindiwe Dlamini", "signatory_capacity": "Director",
+         "id_number": "9001015000087", "created_at": "2026-01-02T00:00:00Z"},
+    ]
+    client = FakeClient(rows)
+    company_r, answers, files, signatory, evidence, cvs = pgj.gather_pack_inputs(client, job, tender, manifest, "/tmp")
+    check("falls back to the person with a signatory capacity on file, not left blank",
+          signatory is not None and signatory["name"] == "Lindiwe Dlamini", signatory)
+    check("carries that person's real capacity through, not a guessed one",
+          signatory["capacity"] == "Director", signatory)
+    check("carries that person's ID number through (e.g. for SBD4's representative ID field)",
+          signatory["id_number"] == "9001015000087", signatory)
+
+    # An explicit per-tender answer still wins over the fallback.
+    rows2 = list(rows) + [{"field_key": "signatory_person_id", "company_id": "co-a", "tender_id": "t-a",
+                           "value": "p-engineer"}]
+    rows2[1] = dict(rows2[1], signatory_capacity="Candidate")  # give the explicit pick its own capacity too
+    client2 = FakeClient(rows2)
+    _, _, _, signatory2, _, _ = pgj.gather_pack_inputs(client2, job, tender, manifest, "/tmp")
+    check("an explicit tender_answers.signatory_person_id is never overridden by the fallback",
+          signatory2 is not None and signatory2["name"] == "A Candidate", signatory2)
+
+    # Nobody at the company has a signatory capacity on file at all: stays
+    # honestly missing, never fabricated.
+    rows3 = [company, {"id": "p-nobody", "company_id": "co-a", "name": "Nobody", "signatory_capacity": None}]
+    client3 = FakeClient(rows3)
+    _, _, _, signatory3, _, _ = pgj.gather_pack_inputs(client3, job, tender, manifest, "/tmp")
+    check("no person at the company has a signatory capacity on file -> stays None, not fabricated",
+          signatory3 is None, signatory3)
+
+
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()
     test_within_missing_closing_date_uses_real_sast_today_not_naive_utc()
+    test_gather_pack_inputs_signatory_fallback()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

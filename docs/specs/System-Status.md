@@ -407,6 +407,181 @@ blocking anything).
 
 ---
 
+**2026-10-28 ~18:40 UTC — real SANRAL pack-assembly test against Mzansi, succeeded end to end; found and
+fixed 3 real bugs along the way; signatory fallback shipped; 1/26 prefill benchmark re-verified at 4/26,
+not the 6/26 estimated earlier - correction below, not quietly dropped.**
+
+**1. SANRAL pack-assembly test (Sarel-approved fixture stand-in) - real result, not a stub:**
+Attached the repository's own already-legitimate `R.334-030-2025.1F` sample set (Technical + Financial
+xlsm, A-Forms/C.1.1.1/C.1.2.3 docx) to the demo tender `N.007-030-2026/1F`'s existing Mzansi
+`tender_packs` row, confirmed PL/DS1 to Mzansi's real people, answered Form B7 with one clearly-labelled
+synthetic Targeted Enterprise ("Demo Targeted Enterprise (Pty) Ltd - SYNTHETIC TEST DATA", never a real
+company), queued a real `engine='sanral'` job, ran `process_pack_jobs.py --once` for real.
+
+- **Dual-envelope separation: confirmed clean.** Two independently-verified PDFs (`verify_pack()` on
+  each) - Envelope 1 (Technical Submission), 58 pages; Envelope 2 (Financial Submission), a SEPARATE
+  file, 29 pages. 87 pages total.
+- **Form B7 / Key Personnel schedule: confirmed populated from Mzansi's real people, not placeholders.**
+  Pulled the actual PDF text back out (`pdftotext`) rather than trusting the manifest: Forms B1/B2 (pages
+  44-51) carry Lindiwe Dlamini (PL, real ECSA number 20050123, registered 2005-04-12, BEng Civil
+  Engineering/University of Pretoria/2000) and Naledi Khumalo (DS1); Form B7 (page 58) correctly reads
+  Mzansi's real `status` ("QSE") and this tender's own category from its SETUP sheet, with the synthetic
+  Targeted Enterprise answer rendered under its own clearly-marked test label.
+- **Compile time: 3m15s** (engine/pack/process_pack_jobs.py, one job, cold - includes LibreOffice
+  conversions). **107 technical-workbook cell writes, 3 financial-workbook writes** (mechanical fields
+  only - hours/pricing sheets correctly left untouched, same "never typed in" rule as everywhere else in
+  this engine).
+- First attempt used the ALREADY-fingerprint-verified `R.396-010-2025.1F` sample instead (same real
+  family, already used for the earlier classification-only check) - genuinely blocked, not swapped on a
+  whim: see finding 2 below.
+
+**2. Three real bugs found and fixed while running this test, not worked around:**
+
+- **`process_pack_jobs.py` `gather()` crashed with `KeyError` on a stale key-position assignment.**
+  `tender_pack_assignments` keeps one row per `position_code` for a pack's whole lifetime (0001's unique
+  constraint, no delete on re-upload); this tender's pack had a leftover confirmed "RE" row from an
+  earlier seed, and the CURRENT workbook's own SETUP sheet asks only for PL/DS1. The `pack_suggestions.json`
+  build iterated every row ever assigned (`by_code.items()`) instead of only what THIS workbook currently
+  requires (`required` - the exact pattern the three lines right below it already used correctly).
+  Extracted into a new, independently unit-tested pure function, `pack_suggestions_positions()`
+  (`engine/pack/process_pack_jobs.py`, new `engine/pack/test_pack_suggestions.py`, 6/6) - real-world
+  consequence: ANY company that re-uploads a corrected/different Technical workbook after an earlier one
+  was confirmed would have hit this exact crash on every subsequent pack build, not just this test.
+- **The SANRAL fingerprint safety check (`fingerprint.py`) was blocking 100% of real "Conventional
+  Consultant Tender" packs - a previously-flagged-but-never-closed regression, closed now.** Commit
+  `61a44c6` (2026-10-27) correctly fixed `named_ranges()` to stop collapsing sheet-scoped print areas -
+  but never regenerated the committed baseline (`fingerprints/Conventional_Consultant_Tender.json`) that
+  fix's own new output is compared against, so EVERY real workbook of this family - including the exact
+  file the baseline was captured from - now read as "MISMATCH" and refused to fill. This had already been
+  logged as an expected, non-regression heads-up across several standing-review passes since, but nobody
+  had actually regenerated it - this session's SANRAL test is what finally triggered it for real.
+  Regenerated the baseline from its own original source file (`R.334-030-2025.1F_ran.xlsm`, preserving the
+  true `_first_seen: 2026-10-15` provenance date); diffed old vs new - the ONLY change is the named-ranges
+  re-keying the 2026-10-27 fix intended, nothing else (macro hash, dropdowns, zip parts, sheet names all
+  identical) - confirmed, not assumed. `engine/test_fingerprint.py` still 6/6 clean.
+- **Mzansi's own seed data used the wrong shape for two SANRAL dropdown fields.** `people.ecsa_level`
+  held informal shorthand ("Pr Eng", "Pr Tech Eng") instead of the template's exact dropdown strings
+  ("Professional Engineer", "Professional Engineering Technologist") - the real ECSA designation,
+  spelled out correctly, not a different fact. `people.highest_level` held the actual degree name
+  ("BEng (Civil Engineering)") where the template expects an NQF/SAQA band
+  ("Bachelors Degree and Advanced Diplomas") - `highest_description` (sitting null) is the column
+  actually meant for the degree name. Fixed for all 3 of Mzansi's people (Lindiwe Dlamini, Johan van der
+  Merwe, Naledi Khumalo) - a one-time data-hygiene fix, not an engine change.
+
+**3. Engine signatory fallback shipped (Sarel's ask, item 2.1) + Mzansi fixture fix (item 2.2), both
+verified against the real RFP165/2026 benchmark, not just asserted:**
+
+`engine/general/process_general_jobs.py gather_pack_inputs()`: when no `tender_answers.signatory_person_id`
+is recorded for a specific tender, falls back to the company's own first person (oldest `created_at`)
+with a `signatory_capacity` on file - mirroring the exact convention `engine/pack/process_pack_jobs.py`'s
+SANRAL engine already uses for the same decision (`gather()`, "signatories[0]... first person given a
+signatory capacity"), so a company isn't blank on one engine and populated on the other for the identical
+fact. New test, `test_process_general_jobs.py::test_gather_pack_inputs_signatory_fallback` (5/5): the
+fallback fires, an explicit per-tender answer still wins over it, and "nobody has a signatory capacity on
+file at all" stays honestly `None`, never fabricated. Separately gave Lindiwe Dlamini a synthetic test
+RSA ID number (`9001015000087`, Luhn-valid test pattern, clearly a test identity) so SBD4's representative
+ID field has something to read.
+
+**Re-ran the real RFP165/2026 (DBSA) `generate_pack` job against Mzansi with both fixes live - real
+result, not predicted:** confirmed rows went from **1/26 to 4/26** - `form_of_offer.capacity`,
+`sbd4.designation_footer` and `sbd9.position_footer` now correctly read "Director" straight off the
+fallback signatory, exactly as predicted.
+
+**Correction to this session's own earlier estimate, said plainly rather than quietly fixed:** the
+previous entry (below) predicted the signatory fallback + ID number would take Mzansi to 6/26 - it only
+reached 4/26, because two of those five fields turned out to have a SECOND, independent problem the
+missing data had been masking. `form_of_offer.signatory_name` and `sbd4.representative_id_number` both
+now carry the real value (confirmed live - the ID number literally appears in
+`sbd4.representative_id_number`'s own "write by hand" note) but still can't be placed: `fill_flat_pdf.py`
+finds no blank cell or dotted line for either on this tender's actual PDF layout, same as the four
+already-known layout/fit-limited fields. These were never really "Category D only" - they were
+D *stacked on* C, indistinguishable while the data was genuinely missing too. Real, final counts for
+RFP165/2026, all 26 fields: **A (never automatable, signature/date) = 5; B (flat-PDF format limit) = 11;
+C (layout/fit limit on a flat PDF, now 6, not 4) = `form_of_offer.tenderer`/`.address`/`.signatory_name`,
+`sbd9.bid_number_and_description`/`.name_of_bidder`, `sbd4.representative_id_number`; D (signatory not
+selected) = 0, fully closed; E (confirmed) = 4.** 16/26 (62%) stay by-hand regardless of any further
+engine work - unchanged from the last entry. The realistic ceiling without the layout/fit tuning this
+session didn't attempt is **4/26 (15%)**, not the 6/26 guessed before trying it for real; closing out
+category C's 6 fields would take it to **10/26 (~38%)**, the same ceiling named before, just reached by
+closing different fields than assumed.
+
+---
+
+**2026-10-28 ~14:30 UTC — PR #169 merged; root-caused the 1/26 Mzansi/RFP165 prefill rate field-by-
+field; confirmed the SANRAL demo tenders carry zero real document content, so a live pack-assembly
+test needs a decision before it can run.**
+
+**PR #169 merged** (squash, `2012f89`) after rebasing onto main's new tip (`3b2f7f2`, the
+`ownPosition`/kouga/clean-sweep commits that landed while #169 was in review) - one conflict, same
+anchor point in this file as the previous near-miss, resolved the same way (kept both entries,
+newest-first). Re-verified after the rebase: `tsc --noEmit` clean, `vitest run` 291/291 (291, not 289 -
+main's own `ownPosition` fix added 2), `test_build_general_pack.py` 11/11. Branch restarted from the
+confirmed-merged tip per the standing git-workflow rule, this time checking `pull_request_read` for
+`merged: true` before resetting (not just chat approval) - the exact check skipped last time.
+
+**1/26 prefill root cause, verified against the real field_provenance rows and the real filler code
+(not guessed):** all 26 rows are fields inside SBD4/SBD6.1/SBD8/SBD9/Form of Offer - none are the 8
+vault-document checklist items (CSD, SARS TCS PIN, B-BBEE, COID, CIDB, CIPC, PI/PL insurance), which
+are a separate, additional gap already recorded in the prior entry below. Five real categories, by
+cause:
+- **A - never automatable (5 fields):** the one `*.signature_and_date` (or equivalent) field inside
+  each of form_of_offer, SBD4, SBD6.1, SBD8 and SBD9. By design - a real signature is never typed in.
+- **B - document-format limited (11 fields):** SBD 6.1's other 7 fields (`address`,
+  `bidder_s_representative`, `company_registration_number`, `name_of_company_firm`,
+  `specific_goal_points_claimed`, `type_of_company_firm`, `vat_registration_number`) and SBD 8's other 4
+  (`contract_with_an_organ_of_state_terminated_in_the_past_5_years`,
+  `convicted_of_fraud_corruption_in_the_past_5_years`, `listed_on_the_database_of_restricted_suppliers`,
+  `listed_on_the_register_for_tender_defaulters`). DBSA published only a flat PDF edition of the Tender
+  Volume for this specific RFP; `fill_flat_pdf.py` has no fillable layout to write into. Not an engine
+  gap - improves only if a fillable edition is ever published.
+- **C - layout/fit misses on the flat PDF (4 fields):** `form_of_offer.tenderer`/`.address` and
+  `sbd9.name_of_bidder` ("no blank cell or dotted line next to the label" - `fill_flat_pdf.py` line
+  ~568) plus `sbd9.bid_number_and_description` ("too long for the line on the form" - same function,
+  a value-fit limit, not a placement miss). The data is known in every case; the flat PDF's own layout
+  is what's blocking it. Tunable - a real engine improvement, not a data gap.
+- **D - signatory not selected for this tender run (4 fields):** `form_of_offer.capacity`,
+  `form_of_offer.signatory_name`, `sbd4.designation_footer`, `sbd9.position_footer`. Verified against
+  `process_general_jobs.py gather_pack_inputs()` (line 633-645): the signatory is read **only** from
+  `tender_answers.signatory_person_id` for *this* tender - never a fallback to `companies.director_name`
+  or any person's `signatory_capacity` - a deliberate decision per the code's own comment, dated
+  2026-10-18. Mzansi has a person on file with `signatory_capacity="Director"` (Lindiwe Dlamini); nobody
+  picked her as RFP165/2026's signatory before this test run. **Not a mapping bug** - one unperformed
+  UI step, not a naming/tag mismatch.
+- **D2 - genuine data gap (1 field):** `sbd4.representative_id_number` reads
+  `signatory["id_number"]` -> `people.id_number`, which is `null` for every one of Mzansi's 3 people.
+  Stays missing even after a signatory is picked, until an ID number is captured on that person's
+  profile.
+- **E - already filled (1 field):** `sbd4.name_of_bidder_footer`.
+
+**Realistic ceiling, concrete not aspirational:** A (5) and B (11) - 16 of 26 (62%) - stay by-hand no
+matter how good the matching gets; that is not a product gap, that is what "signature required" and
+"buyer published a flat PDF" actually mean. Of the other 10: D/D2's 5 fields are 100% recoverable today
+with zero engine work - pick a signatory on the Tender Workspace, capture that person's ID number -
+taking Mzansi to 6/26 (23%) immediately. C's 4 fields need real layout/fit tuning on
+`fill_flat_pdf.py`; optimistic but plausible recovery on most of them would take it to roughly 9-10/26
+(~35-38%). The 8 vault-document checklist items are separate from this 26 and 100% recoverable the
+moment real compliance documents are uploaded to a company's vault - already recorded below, no engine
+change needed.
+
+**SANRAL pack-assembly test (Sarel's task #4) - blocked on a decision, not attempted blind:** checked
+live before running anything. Both SANRAL demo tenders (`N.007-030-2026/1F` id `009bfe1c...`,
+`N.003-120-2025/1F` id `5039736d...`) have `document_urls: []`, `document_requirements: null`, and
+`sanral_b7_setup: null` - no real Technical/Financial Submission workbook has ever been attached to
+either in this database, and zero `pack_generation_jobs` rows with `engine='sanral'` have ever existed,
+for any company. The earlier Form B7/personnel-parsing verification (previous entry below) ran directly
+against the local sample file - it never touched these DB rows. Running the real pipeline
+(`process_pack_jobs.py`) needs a `tender_documents` row (bucket `tender-documents`) pointing at an
+actual workbook, `tender_requirements`/`tender_pack_assignments.confirmed_person_id` filled in per
+position, then a `pack_generation_jobs` row - several live writes to a shared demo-fixture tender, not
+a single scoped insert like the DBSA run. The only workbook available without a CAPTCHA bypass is the
+already-legitimate repo sample (`templates/samples/R.396-010-2025.1F_ran.xlsm`, contract no.
+`R.396-010-2025/1F`) - real, but a *different* contract number than either demo tender's. Per the
+standing live-DB-mutation rule and the same caution that redirected the vault-fixtures work to Mzansi,
+this needs Sarel's explicit sign-off before attaching a mismatched-contract-number sample to either
+demo tender, rather than silently relabelling it as that tender's own document.
+
+---
+
 **2026-10-28 ~18:30 UTC — Standing review: Tender Command Center's own "days to close" math had
 drifted into a second, disagreeing copy of `lib/dates.ts`'s canonical `daysUntil()`; fixed.**
 
