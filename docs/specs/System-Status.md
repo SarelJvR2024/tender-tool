@@ -14,6 +14,76 @@
 
 ---
 
+**2026-10-29 ~00:15 UTC — standing review: every "Documents & registrations due" digest email line
+showed a raw internal field name/slug instead of the human label sitting right next to it in the
+same dict; fixed.**
+
+Oriented from `85d5c84` (clean sweep); fetched `origin/main`, nothing new landed since. Open PRs
+(`#164`, `#165`, `#170`) checked, unchanged, no collision. Looked at a genuinely different area
+this pass (the compliance/notify engine, not the `app/` frontend the last three passes stayed in),
+per this pass's own directive.
+
+Traced `registration_reminders.py` (the 0050 catalog-registrations/property-documents reminder
+source) end to end first - its `_mark_company()` workaround (patching `company_id` into the
+`seen`-store entry after the fact, since it calls `watch_deadlines._expiry_window()` without passing
+`company_id` directly) looked suspicious on first read but is correct: `_expiry_window()` already
+wrote the dict into `seen[seen_key]` by reference, so mutating the returned `entry` in place does
+update the stored copy before `save_seen_db()` runs. No bug there. Also confirmed
+`daily_digest.py`'s live-mode build (`company_signals()`/`build_digest_for_person()`) routes
+`registration_reminders` items by `company_id` and `type` ("document"/"person_credential")
+correctly across the finance/cv_admin/validator role matrix - no bug there either.
+
+Found the real one one level further down the pipe, in `engine/notify/send_digest_emails.py`
+(the module that actually sends the email - `daily_digest.py` only assembles the report):
+`render_text()`'s per-item display-text fallback chain was `title or description or field or
+field_key or contract_number or "item"`. Every `document_expiry` item - from
+`watch_deadlines.find_due_documents()`/`find_due_person_credentials()` AND from
+`registration_reminders.py` - always carries both a raw `"field"` (e.g.
+`coid_letter_of_good_standing_expiry`, or `held_registrations:psira_grading` for a catalog
+registration) and a human `"label"` (e.g. "COID Letter of Good Standing", "PSIRA Grading
+Certificate") - but never sets `"title"` or `"description"`. The chain picked `"field"`, since it
+never checked `"label"` at all, so EVERY line in EVERY sent digest's "Documents & registrations
+due" section showed the raw column name/slug to the customer, not the human text that already
+existed in the same dict.
+
+Confirmed real and reachable before touching anything: built a `document_expiry` item exactly as
+`find_due_documents()` constructs it and ran it through the unmodified `render_text()` - body read
+`- coid_letter_of_good_standing_expiry (2026-11-10)`, not `- COID Letter of Good Standing
+(2026-11-10)`.
+
+Fix: `send_digest_emails.py`'s fallback chain now checks `item.get("label")` between `description`
+and `field`. Confirmed by grep this is safe and precisely targeted - no other section
+(`new_tenders`/`tender_tasks`/`readiness_changes`/`tender_updates`/`listing_changes`/
+`reassessed_tenders`) ever sets a `"label"` key, so this only changes `document_expiry`'s own
+rendering; `readiness_changes`' existing `field_key` fallback (its own, differently-sourced raw
+key, with no nicer label available) is untouched.
+
+Verified with the revert-confirm-fail-restore-confirm-pass discipline: reproduced the bug against
+the unmodified file (confirmed above), applied the fix, same input now shows the human label and
+the raw field no longer appears anywhere in the body - for both a `watch_deadlines.py`-shaped item
+and a `registration_reminders.py`-shaped one. Added
+`test_render_text_uses_document_expiry_label_not_raw_field()` to
+`engine/notify/test_send_digest_emails.py` (both item shapes, plus a case pinning that
+`readiness_changes`' `field_key` fallback is unaffected, since it has no `"label"` key to prefer).
+Full `python3 engine/notify/test_send_digest_emails.py` run: 0 failures (new test plus all existing
+ones, including the dry-run/retry/429-handling cases). `python3 engine/notify/test_digest_live.py`
+and `test_digest_opt_in.py` also run clean as an adjacent-file sanity sweep. `py_compile` clean on
+both touched files. No dedicated unit-test file exists for `registration_reminders.py` itself
+(noted while reading it, not a new finding - already implicit in this module having never had its
+own test file; not fixed here, outside this pass's scope).
+
+Pushed directly to `main` (small, fully verified, no PR/self-merge, per this routine's standing
+guardrail): `engine/notify/send_digest_emails.py`, `engine/notify/test_send_digest_emails.py`.
+
+Backlog unchanged at 9 items (migration `0096`, `narrative_documents` PostgREST schema-cache
+reload, PayFast idempotency design question, "missing ISO 9001 flagged as urgent" UX question,
+fingerprint.py baseline-mismatch heads-up, Dashboard "Decision needed" over-triggering finding,
+Form B7 compulsory-vs-matrix disagreement, impersonation token-refresh gap, submitted-tender
+nagging gap) - none resolved, none newly added; this pass's finding was a standalone bug, not tied
+to any of the 9.
+
+---
+
 **2026-10-28 ~22:15 UTC — standing review: clean sweep, no new finding.**
 
 Oriented from `3699e4a` (second "days to close" drift site fixed); fetched `origin/main` and found one

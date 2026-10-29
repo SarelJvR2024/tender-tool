@@ -89,6 +89,40 @@ def test_render_text_includes_real_content_and_caps_at_ten():
           "Closing soon: 2" in vbody)
 
 
+def test_render_text_uses_document_expiry_label_not_raw_field():
+    print("render_text(): document_expiry shows the human label, not the raw internal field/slug")
+    # Real bug found 2026-10-29: every document_expiry item (watch_deadlines.py's
+    # company documents, person credentials, and registration_reminders.py's
+    # catalog registrations/property documents) carries both "field" (a raw
+    # column name or "held_registrations:<slug>") and "label" (the human text) -
+    # but neither ever sets "title"/"description", so the old fallback chain
+    # picked "field" and every sent digest showed e.g.
+    # "coid_letter_of_good_standing_expiry" instead of "COID Letter of Good
+    # Standing".
+    items = [{"type": "document", "field": "coid_letter_of_good_standing_expiry",
+              "label": "COID Letter of Good Standing", "expiry_date": "2026-11-10"}]
+    body = sde.render_text(_digest(document_expiry=items))
+    check("the human label appears", "COID Letter of Good Standing" in body)
+    check("the raw field name does not leak into the body",
+          "coid_letter_of_good_standing_expiry" not in body)
+
+    # A registration_reminders.py item has an even less readable "field"
+    # ("held_registrations:<slug>") - same fix must cover it too.
+    reg_items = [{"type": "person_credential", "field": "held_registrations:psira_grading",
+                  "label": "PSIRA Grading Certificate", "expiry_date": "2026-11-20"}]
+    reg_body = sde.render_text(_digest(document_expiry=reg_items))
+    check("a registration-catalog item's label appears too", "PSIRA Grading Certificate" in reg_body)
+    check("its raw field:slug does not leak into the body",
+          "held_registrations:psira_grading" not in reg_body)
+
+    # readiness_changes has no "label" key at all (confirmed by grep) - must
+    # keep falling back to "field_key" exactly as before, unaffected by this fix.
+    rc_items = [{"field_key": "bee_proof", "status": "confirmed"}]
+    rc_body = sde.render_text(_digest(readiness_changes=rc_items))
+    check("a section with no 'label' key still falls back to field_key, unaffected",
+          "bee_proof" in rc_body)
+
+
 # --- send_one(): every status path, no real network -------------------------
 
 def test_send_one_skips_cleanly_without_email_or_content():
@@ -252,6 +286,7 @@ def main():
     test_section_count_and_has_content()
     test_item_date_picks_first_present_key()
     test_render_text_includes_real_content_and_caps_at_ten()
+    test_render_text_uses_document_expiry_label_not_raw_field()
     test_send_one_skips_cleanly_without_email_or_content()
     test_send_one_dry_run_never_touches_the_network()
     test_send_one_reports_sent_on_a_real_looking_success()
