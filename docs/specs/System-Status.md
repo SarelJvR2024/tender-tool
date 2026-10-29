@@ -14,6 +14,76 @@
 
 ---
 
+**2026-10-29 ~04:20 UTC — standing review: a SANRAL closing date with no time given defaulted to
+noon instead of this codebase's own established 11:00 SAST convention; fixed.**
+
+Oriented from `e342bae`; fetched `origin/main`, found one new commit (`e269974`, a different
+session's fix for whitespace-only values falsely reported "placed" on flat PDF forms, in
+`engine/general/fill_flat_pdf.py` - no overlap) and fast-forwarded local `main` before starting.
+Open PRs (`#164`, `#165`, `#170`) checked, unchanged, no collision.
+
+The last two passes both found real bugs in `engine/notify/send_digest_emails.py`'s `render_text()`
+- that function has now had a close look twice, so this pass looked at a different area per its own
+directive. Looked at `app/lib/tenderActivity.ts` first (no dedicated test file at all, despite being
+a pure, testable module like every sibling in `lib/`) - read it end to end; its stage-move/
+submitted-at sequencing, answer-save grouping and accepted-date formatting are all more carefully
+reasoned than they first look (e.g. the `pack:submitted` vs `pack:stage` split is deliberate: the
+dedicated "Submitted" entry only fires when the pack later moved on to won/lost, since the
+current-stage entry already covers "currently sitting at Submitted"). No bug found there - noting
+the missing test file as a nicety, not a new backlog item, out of scope for this pass.
+
+Also reviewed PayFast's own code (`app/lib/payfast.ts`, the ITN route handler) given the open
+"idempotency design question" backlog item - re-read `apply_payfast_itn()` (0078, last redefined in
+`0083`) end to end to confirm I understood the EXISTING flagged gap correctly before looking
+elsewhere (dedup key would need to be `pf_payment_id`, not `m_payment_id`, for a recurring
+subscription - already correctly documented as Sarel's own call, not re-investigated or re-fixed
+here).
+
+**The finding**, in `engine/discovery/watch_tender_updates.py`'s `_sanral_closing()`: SANRAL's
+detail page sometimes publishes a closing date with no time component (the function's own regex
+already made the time group optional, `(?:\s+(\d{1,2}):(\d{2}))?`) - when that happens, the
+date-only value defaulted to **noon (12:00)**. But this codebase already has an established,
+documented convention for exactly this situation - "a source confirmed to give a date only, never a
+time" - in `source_http.py`'s `iso_sast_closing()`: default to **11:00 SAST**, the standard closing
+time, specifically BECAUSE "no SA public-tender submission window runs through the night" (its own
+header comment, also citing Rand Water/Kouga/Vaal Central Water/Lephalale as the sources that
+already use it correctly). `_sanral_closing()` had quietly grown a second, disagreeing "unknown
+time" default for the identical real-world fact - the same bug SHAPE this session has now found
+repeatedly (two code paths disagreeing about one thing), just in the compliance/discovery engine
+this time rather than the day-count math fixed three passes ago.
+
+This isn't cosmetic: `_sanral_closing()`'s return value is passed into `tender_updates.classify_document()`
+as the listing's own closing date, and when it agrees with a re-read document, `apply_closing_date()`
+(same file) writes it straight to `tenders.closing_date` - the live, customer-facing field
+`dates.ts`'s `formatClosingDateTime()` reads. Because only an exact SAST midnight triggers that
+function's "(Time TBC in RFP)" caveat, a date-only SANRAL page would show "12:00" to the customer as
+if SANRAL had stated a real closing time, with no indication it was ever a default.
+
+Reproduced first against the unmodified file: `watch._sanral_closing({"closing_date": "2026/11/19"})`
+returned `2026-11-19T12:00:00+02:00`. Fixed by changing the default hour from `12` to `11`. Re-ran
+the same call: now returns `2026-11-19T11:00:00+02:00`. Verified three adjacent cases are unaffected
+- a real stated time (`"2026/11/19 14:30"`), a real stated EXACT midnight (`"2026/11/19 00:00"` - a
+genuine value, not a default, so it must stay exactly midnight, not get bumped to 11:00), and the
+existing "unreal date" (month 13) error path, which still returns `None` and still raises exactly
+one `system_alerts` warning, unchanged.
+
+`watch_tender_updates.py` has no dedicated test file of its own, but `test_tender_updates.py`
+already imports it directly (`import watch_tender_updates as watch`) and tests several of its
+functions - added a new `Part 0b` there (`part0b_sanral_closing_date_only_default()`, right after
+the existing `Part 0`) covering all four cases above, wired into the file's own `__main__` runner.
+Full `python3 engine/discovery/test_tender_updates.py` run: **ALL PASSED** (new Part 0b plus every
+existing part, Parts 1/2/2b unaffected; Part 3 skipped as usual without `TU_PSQL`). `py_compile`
+clean on both touched files, and a compile sweep of every other `.py` file in `engine/discovery/`
+also clean. Grepped for other callers of `_sanral_closing`/`watch_tender_updates` - only comments
+elsewhere reference it, nothing else depends on the old default.
+
+Pushed directly to `main` (small, fully verified, no PR): `engine/discovery/watch_tender_updates.py`,
+`engine/discovery/test_tender_updates.py`, this file.
+
+Backlog unchanged at 9 items - this finding was standalone, nothing resolved or added to the list.
+
+---
+
 **2026-10-29 ~02:16 UTC — standing review: a person_credential digest line named the expiring
 credential but never the person it belonged to; fixed.**
 
