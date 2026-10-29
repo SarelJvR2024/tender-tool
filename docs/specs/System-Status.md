@@ -14,6 +14,63 @@
 
 ---
 
+**2026-10-29 ~12:40 UTC — standing review: fixed a real bug in `apply_payfast_itn()` (migration
+`0105`, NOT YET APPLIED to the live DB - needs Sarel's sign-off, same as `0096`).**
+
+Oriented from `499ae0b`; `git fetch origin main` found nothing new since. Open PRs checked via the
+GitHub API: `#172` (Document Vault badge fix), `#165`, `#164` all unchanged, none touching anything
+reviewed this pass - no collision.
+
+Per this pass's own directive, looked at the PayFast integration directly rather than re-touching the
+already-flagged idempotency design question. `lib/payfast.ts`'s signature verification and
+`app/app/api/billing/payfast/itn/route.ts`'s 3-check security flow (signature, source IP, PayFast's
+own `/eng/query/validate` server confirmation) are both already careful and correct - no bug there.
+
+**Found and fixed a real bug in `apply_payfast_itn()`** (the `SECURITY DEFINER` function the ITN route
+calls after all 3 checks pass, `0083`'s version): its primary `UPDATE` moved `current_period_end`
+forward to `p_period_end` unconditionally - for BOTH a successful payment (`status -> active`) AND a
+failed one (`status -> past_due`). The route handler computes `p_period_end` from the decoded
+plan/interval (`custom_str2`) whenever it's present, with no `payment_status` check of its own, so a
+genuinely FAILED ITN still handed this function a real future date. `current_period_start` already had
+the correct "only advance when the new status is active" guard (`0083`); `current_period_end` never
+did.
+
+**Reachability, confirmed, not assumed:** `app/app/admin/billing/page.tsx` renders `Status` and
+`"Period end / trial end"` as two columns on the SAME row for every company - so a failed payment
+would show Sarel "Past due" directly beside a date reading as "paid through next month" - the
+identical "two things on one screen disagree" bug shape this session's other standing-review passes
+have repeatedly found and fixed elsewhere (day counts, closing-time defaults, expiry windows), just a
+third fact (subscription period) and a new file.
+
+**Verified against a real scratch Postgres replay, not just read by eye** (this repo has no SQL test
+harness - no `supabase/tests`, no pgTAP - so this is the right-weight verification, same as prior
+migrations' own manual checks): started the local `postgresql@16` service, reproduced the bug first
+against a standalone scratch table mirroring the relevant 3 columns (a FAILED ITN genuinely moved
+`current_period_end` from `2026-10-01` to `2026-11-29` under the unfixed logic), then confirmed the
+fixed logic (1) leaves `current_period_end` untouched on `past_due` and (2) still correctly advances
+it on a genuine `active` result - both adjacent cases checked, not just the one being fixed. Scratch
+table dropped afterward; no live/project database touched.
+
+Migration `0105` (`apply_payfast_itn`'s `current_period_end` now uses the identical `case when
+v_new_status = 'active'` guard already governing `current_period_start`) is **written, committed, and
+pushed - but NOT applied to the live database**, per the standing production-DB-mutation rule above:
+this pass has no DB credentials and wouldn't apply it unilaterally even if it did. Same
+write-then-wait-for-sign-off state as migration `0096`.
+
+QA: no JS/TS files touched, so `lib/payfast.spec.ts`'s existing 16 tests were only re-run as a sanity
+check (unaffected, still 16/16) - the real verification is the scratch-table replay above.
+
+**Backlog is now 11 items** (the prior 10 plus this migration needing to be applied): migration `0096`
+(pack-quota trial-expiry), **migration `0105`** (this pass's PayFast failed-payment period-end fix),
+`narrative_documents` PostgREST schema-cache reload, PayFast idempotency design question (separate,
+unchanged, not this fix), "missing ISO 9001 flagged as urgent" UX question, Form B7
+compulsory-vs-matrix disagreement, dashboard "Decision needed" over-triggering, impersonation
+token-refresh gap, submitted-tender nagging gap, SANRAL fingerprint heads-up (no action needed), and
+Finding 96 (dangling `signatory_person_id` fallback) - all still Sarel's own judgment calls or his own
+sign-off to apply, none resolved or acted on live by this pass.
+
+---
+
 **2026-10-29 ~10:20 UTC — standing review: clean sweep, no new code finding.**
 
 Oriented from `3df29b4` (the previous pass's "drifted constant" exhaustion sweep); `git fetch
