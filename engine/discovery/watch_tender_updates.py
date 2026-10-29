@@ -182,13 +182,24 @@ def sanral_documents(page):
 
 
 def _sanral_closing(page):
+    """SANRAL's own stated closing date/time for this tender, from its detail
+    page's free text. The time is optional there (SANRAL sometimes publishes
+    a date with no time) - a bare date defaults to 11:00 SAST, the same
+    standard-closing-time convention source_http.py's own iso_sast_closing()
+    documents and uses for every other source confirmed to give a date only
+    (Rand Water, Kouga, Vaal Central Water, Lephalale). Found 2026-10-29:
+    this previously defaulted to noon (12:00) instead - a second, disagreeing
+    "unknown time" convention for the identical real-world fact, which also
+    gets written straight to tenders.closing_date (apply_closing_date() below)
+    and shown to the customer as if it were a real stated time, never flagged
+    the way a midnight default would be by dates.ts's formatClosingDateTime()."""
     c = (page.get("closing_date") or "").strip()
     m = re.match(r"(\d{4})/(\d{2})/(\d{2})(?:\s+(\d{1,2}):(\d{2}))?", c)
     if not m:
         return None
     y, mo, d, h, mi = m.groups()
     try:
-        return datetime.datetime(int(y), int(mo), int(d), int(h or 12), int(mi or 0), tzinfo=SAST).isoformat()
+        return datetime.datetime(int(y), int(mo), int(d), int(h or 11), int(mi or 0), tzinfo=SAST).isoformat()
     except ValueError:
         # "2026/13/19" or "2026/11/19 24:00" on SANRAL's page: the regex matched
         # but the date isn't real. Raising here escaped check_tender() and

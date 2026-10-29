@@ -151,8 +151,31 @@ def render_text(digest):
         items = digest[key]
         if isinstance(items, list):
             for item in items[:10]:
-                bit = (item.get("title") or item.get("description") or item.get("field")
+                # "label" (document_expiry's human text, e.g. "COID Letter of
+                # Good Standing") must outrank "field" (its raw internal
+                # column/slug, e.g. "coid_letter_of_good_standing_expiry" or
+                # "held_registrations:psira") - found 2026-10-29: every
+                # document_expiry line in every sent digest showed the raw
+                # field instead, since this chain never checked "label" at
+                # all. No other section sets "label" (confirmed by grep), so
+                # this only changes document_expiry's own rendering.
+                bit = (item.get("title") or item.get("description") or item.get("label") or item.get("field")
                        or item.get("field_key") or item.get("contract_number") or "item")
+                # person_credential items (find_due_person_credentials, and
+                # registration_reminders.find_due_registrations for a
+                # person/principal holder) carry a "person_name" alongside
+                # "label" - e.g. "ECSA professional registration" alone,
+                # with two different key people each renewing one, gives the
+                # reader no way to tell who to chase. watch_deadlines.py's
+                # own console summary already prints the holder's name next
+                # to the label (see its main(), "{company} {person} {label}");
+                # this plain-text email never did. Found 2026-10-29. No
+                # other section sets "person_name" (confirmed by grep), so
+                # this only changes document_expiry's own person_credential
+                # rendering; a company-held document (no person_name) is
+                # unaffected.
+                if item.get("person_name"):
+                    bit = f"{item['person_name']} - {bit}"
                 date = _item_date(item)
                 lines.append(f"  - {bit}" + (f" ({date})" if date else ""))
             if len(items) > 10:

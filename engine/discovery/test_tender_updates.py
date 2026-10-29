@@ -106,6 +106,34 @@ def part0_demo_slug_skip():
 
 
 # ---------------------------------------------------------------------------
+# Part 0b - a SANRAL closing date with no time given defaults to 11:00 SAST,
+# the same standard-closing-time convention source_http.iso_sast_closing()
+# uses for every other date-only closing source, not noon (found 2026-10-29:
+# _sanral_closing() previously disagreed with that convention).
+# ---------------------------------------------------------------------------
+
+def part0b_sanral_closing_date_only_default():
+    print("Part 0b - a SANRAL closing date with no time defaults to 11:00 SAST, not noon")
+    check(watch._sanral_closing({"closing_date": "2026/11/19"}) == "2026-11-19T11:00:00+02:00",
+          "date-only SANRAL closing date defaults to 11:00 SAST")
+    check(watch._sanral_closing({"closing_date": "2026/11/19 14:30"}) == "2026-11-19T14:30:00+02:00",
+          "a SANRAL closing date WITH a real stated time is unaffected")
+    check(watch._sanral_closing({"closing_date": "2026/11/19 00:00"}) == "2026-11-19T00:00:00+02:00",
+          "a real stated midnight (not a default) is unaffected")
+    sys.path.insert(0, os.path.join(ROOT, "engine", "alerts"))
+    import system_alerts
+    alerts = []
+    system_alerts.set_sink(lambda p: alerts.append(p) or "alert-id")
+    try:
+        check(watch._sanral_closing({"closing_date": "2026/13/19"}) is None,
+              "an unreal date (month 13) still returns None, not a crash")
+        check(len(alerts) == 1, f"the unreal-date case still raises exactly one system alert ({alerts})")
+    finally:
+        system_alerts.set_sink(None)
+    check(watch._sanral_closing({"closing_date": ""}) is None, "no closing date on the page returns None")
+
+
+# ---------------------------------------------------------------------------
 # Part 1 - classifier on real documents
 # ---------------------------------------------------------------------------
 
@@ -739,6 +767,7 @@ def part3(psql):
 
 if __name__ == "__main__":
     part0_demo_slug_skip()
+    part0b_sanral_closing_date_only_default()
     part1()
     scenario(MemClient(), "2 - the watch end to end (in-memory rows)", seed_mem)
     part2b()

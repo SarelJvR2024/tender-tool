@@ -5367,3 +5367,143 @@ name, not a real invocation).
 **Regression:** `engine/discovery/kouga.py` (one truthiness-to-`is not None` fix),
 `engine/discovery/test_kouga.py` (5 new end-to-end tests for `fetch_releases()`),
 `.github/workflows/bridge-worker-ci.yml` (27 new steps). No other production code touched.
+
+### Finding 93 (CONFIRMED, FIXED, minor - process_cv_jobs.py's own module docstring claimed it calls generate_as_is() for the "use as-is" CV path; it never has)
+
+**Where:** CV rotation this cycle (last dedicated pass: Finding 80, run 99 - a sibling fixed a real
+`completed_at`-on-crash bug in this same file, `a987198`, earlier today; avoided that exact code
+path and looked at the rest of the file instead). `engine/cv/process_cv_jobs.py` - the bridge
+between `generated_cvs` requests and `generate_cv.py`.
+
+**What was tested:** the module's own docstring states, as fact: *"it calls generate_cv.py's own
+functions directly... for the sanral_keyperson/world_bank formats, and generate_as_is() for the
+use-as-is path's provenance record."* Checked whether that's actually true, the same "does the real
+call path match what the comment claims" question several earlier findings in this file have asked
+of other modules.
+
+**Finding (CONFIRMED, minor - a documentation/dead-import defect, not a broken feature).** It
+wasn't. Grepped every real call site of `generate_as_is(` repo-wide: exactly one, inside
+`generate_cv.py`'s own CLI `main()` - none anywhere in `process_cv_jobs.py`, despite importing it
+by name (`from generate_cv import generate_as_is`). `process_job()`'s own builder dict only ever
+has two keys (`{"sanral_keyperson": ..., "world_bank": ...}[job["format"]]`) - no third branch for
+an "as-is" format exists at all. Traced the REAL "use as-is" feature to confirm this isn't a missing
+dispatch that would crash on a real job: `app/app/people/actions.ts`'s `uploadCv()` handles
+`mode === "as_is"` entirely in TypeScript - uploads the file to storage and inserts a `cv_uploads`
+row with `status: "uploaded"`, by its own comment's own words, "No AI involvement at all... recorded
+in cv_uploads and nothing else happens." It never inserts a `generated_cvs` row, so this bridge
+(which only ever polls `generated_cvs`) never sees an as-is job to dispatch in the first place - no
+real feature is broken, no crash is reachable. Confirmed nothing else in `engine/` reads
+`cv_uploads` either (grepped every file that mentions the table name - only comment references).
+
+**Fix:** corrected the docstring to state the real behaviour plainly (this bridge does not touch the
+as-is path at all; the real logic lives entirely in `uploadCv()`), and removed the now-provably-dead
+`from generate_cv import generate_as_is` import (the function itself is untouched and still works
+fine as a CLI-only utility - only the unused import in this one file was removed).
+
+**Verified**: `py_compile` clean; `--self-test` still produces both real formats correctly
+(`Self-test OK`); `engine/worker/test_poll_loop.py` (the full poll-loop/bridge-runner suite that
+exercises this exact file end to end, including a real `--loop` subprocess run) still `All bridge-
+loop smoke tests passed`, no regression from removing the import.
+
+**Regression:** `engine/cv/process_cv_jobs.py` only (one docstring correction, one dead import
+removed). No behaviour change - `generate_as_is()` itself untouched.
+
+### Finding 94 (coverage-gap closure, no new bug found - process_onboarding_jobs.py's claim/fulfil mechanism had never been tested against a real filtering fake, the same shape as Finding 87)
+
+**Where:** worker/job-queue rotation this cycle (last dedicated pass: Finding 87, run 110 -
+`poll_loop.py`/`run_bridges.py` themselves already thoroughly reviewed then, and `notify` was just
+reviewed by a sibling this morning, so this pass looked at the one bridge in this area without a
+dedicated adversarial pass of its own claim/fulfil mechanism). `engine/onboarding/
+process_onboarding_jobs.py` - the bulk onboarding document scan bridge (migration 0063).
+
+**What was tested:** `test_process_onboarding_jobs.py` existed (added for a real path-traversal-
+guard fix, 2026-10-20) but its own `_fake_supabase_request` ignores the querystring entirely - any
+GET/PATCH "succeeds" on every row regardless of filter. That left `claim_upload()`'s atomic
+`classification_requested -> classifying` claim, `fail_stale_uploads()`'s stuck-row recovery, and
+`process_upload()`'s full success/error paths (the SetupError-re-raises-vs-TransientError-swallowed
+asymmetry already established in `process_narrative_jobs.py`/Finding 87, `ClassificationFailed`'s
+own handling) never actually exercised against the real atomic-claim contract. Built the same
+`FakeDB` shape Finding 87 used (real `eq.` filtering on GET/PATCH, not a trivial stub) and wrote 6
+new adversarial tests: two sequential claims on the same row, a stale `classifying` row beside a
+fresh one, a full happy-path run with `storage_download`/`extract_from_file` stubbed (every one of
+`document_kind`/`fields`/`warnings`/`text_method` must land in the written `onboarding_document_
+results` row), and the TransientError/SetupError/ClassificationFailed error-path trio.
+
+**What was found: nothing new - all six contracts held** under real adversarial cases, confirmed
+correct. Sanity-checked the new atomicity test isn't passing by construction: temporarily removed
+`claim_upload()`'s own `status=eq.classification_requested` filter on a scratch copy and confirmed
+the test went red for exactly that regression.
+
+**A small test-hygiene gap fixed in passing**: the new error-path tests call the real
+`system_alerts.record()` (unlike the 4 pre-existing guard tests, which fully monkeypatch it to a
+list-append lambda) - without `SYSTEM_ALERTS_DISABLED=1`, this made a real HTTP attempt against this
+sandbox's own placeholder Supabase credentials on every run (degraded gracefully with a logged 401,
+never a crash, but still a live network call an offline test file should never make). Added the
+same `os.environ["SYSTEM_ALERTS_DISABLED"] = "1"` escape hatch Finding 88's test file already uses.
+
+**Verified**: full file re-run, `0 failure(s)` (23 checks total, 19 new), no more network attempts.
+`test_classify_documents.py` (the sibling onboarding test) re-run clean, `ALL PASSED`, unaffected.
+Already wired into CI via Finding 92's own sweep - no new CI step needed.
+
+**Regression:** `engine/onboarding/test_process_onboarding_jobs.py` only (6 new test functions, one
+`SYSTEM_ALERTS_DISABLED` line, both additive). No production code touched - this pass closed a
+test-coverage gap, not a code bug.
+
+### Finding 95 (CONFIRMED, FIXED, severe - a whitespace-only value, a real data-entry shape, was reported "placed" on the real Form of Offer/MBD1, with its own read-back verification vacuously passing, while the printed form showed nothing at all)
+
+**Where:** non-SANRAL pack rotation this cycle (notify was being actively worked by a sibling this
+exact morning - two digest-label fixes landed mid-cycle - so avoided it; `process_general_jobs.py`/
+`process_pack_jobs.py`/`fingerprints/Conventional_Consultant_Tender.json` stayed avoided too, still
+in-flight on open PR `#170`). `engine/general/fill_flat_pdf.py` - the flat (non-fillable) PDF form
+filler for municipal MBD editions and CIDB-style returnables, 1000+ lines, zero dedicated test file
+anywhere in the repo before this pass (confirmed by grep: only `test_form_field_audit.py` touches
+it, and only `values_for()`'s own Klipcorp-default audit - none of `fill_flat_pdf()`/
+`place_text_fields()`/`place_captions()` had ever run under test).
+
+**What was tested:** read the whole file, since it had never had a dedicated adversarial pass.
+`place_text_fields()`/`place_captions()` both gate "is there a real value to place" with a bare
+`if not value:`. Asked the standard question for that shape of guard: does `not value` really
+exclude everything that should count as "nothing to place"? `values_for()` can produce a non-None,
+non-empty string straight from a company/signatory record with no normalization
+(`signatory_name_upper = (s.get("name") or "").upper() or None` - `.upper()` on an all-whitespace
+string is still all-whitespace, which is truthy) - a realistic data shape (leading/trailing spaces
+left over from a copy-paste into a name field) that `not value` does not catch.
+
+**Finding (CONFIRMED, severe).** Traced the full consequence, then reproduced it end to end against
+a real synthetic MBD1 page (built with reportlab, already a test-only dependency in this repo's own
+CI): a whitespace-only signatory name sails past the `if not value:` guard (not `not value`:
+non-empty strings are always truthy); Helvetica's own space-character width is non-zero, so `_fit()`
+"fits" it fine; the overlay write types invisible blank space onto the page; and
+`verify_placements()`'s own read-back check (`want in got`, after stripping ALL whitespace from
+both sides for comparison) reduces `want` to the empty string for a whitespace-only value - which is
+a substring of literally anything, so the write is reported `verified = True` regardless of what is
+actually on the printed page. End to end, confirmed with the real pipeline (not reasoned about in
+the abstract): `fill_flat_pdf()` reported `{"status": "placed", "value": "   "}` for the
+`sbd1.contact_person` field (the same `signatory_name`/`signatory_name_upper` path feeds the real
+Form of Offer's own signatory-name field too) - exactly the "silent wrong data" risk this module's
+own docstring says it exists to prevent ("nothing is assumed to have worked"). A company whose
+signatory's name is a data-entry glitch would see "placed" on the report and have no reason to
+check the actual printed page, where the field is blank.
+
+**Fix:** changed both guards from `if not value:` to `if not (value or "").strip():` - rejects a
+whitespace-only value as "missing" (same reason, same wording, as a genuinely absent one) while
+leaving a real value's own internal/surrounding whitespace untouched (a name like "Jane Smith", or
+even "  Jane Smith  ", is still placed exactly as given - only an ALL-whitespace value is now
+caught). `place_choices()` was checked too and is naturally immune (`ans not in ("yes", "no")` can
+never accidentally match whitespace).
+
+**Verified red-then-green against the real pipeline, not a stub.** New file
+`engine/general/test_fill_flat_pdf.py`: builds a real, minimal synthetic MBD1 page with reportlab
+(the real "INVITATION TO BID" heading, "NAME OF BIDDER"/"POSTAL ADDRESS"/"VAT REGISTRATION NUMBER"
+needed for `find_form_pages()`'s own detection, a real dotted leader line after "CONTACT PERSON:"),
+then runs the REAL `fill_flat_pdf()` end to end. Reverted the fix (`git apply -R`): the whitespace-
+only and tab/newline-only cases both failed exactly as predicted (`status: "placed"`, the real
+written-but-invisible value); the empty-string/`None`/real-name/whitespace-padded-real-name cases
+(unchanged behaviour) correctly stayed green throughout, confirming the fix is precise. Restored:
+`ALL PASSED`, 10/10 checks. `engine/test_form_field_audit.py` (the sibling consumer of this same
+file) re-run clean, `0 failure(s)`, no regression. Wired into CI (`bridge-worker-ci.yml`) - reportlab
+is already installed earlier in the same job for `test_general_bridge.py`'s own fixtures.
+
+**Regression:** `engine/general/fill_flat_pdf.py` (two guard conditions), new
+`engine/general/test_fill_flat_pdf.py` (10 checks), `.github/workflows/bridge-worker-ci.yml` (one
+new step). No schema or other call-site changes.

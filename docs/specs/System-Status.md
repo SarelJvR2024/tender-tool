@@ -14,6 +14,399 @@
 
 ---
 
+**2026-10-29 ~08:16 UTC — standing review: clean sweep, no new finding.**
+
+Oriented from `adbd633` (the previous pass's notifications-bell fix); fetched `origin/main`, found
+one new commit (`37c4c2a`, a different session's clean sweep of `extract_cv_fields.py`'s
+validation/redaction logic, docs-only - no overlap) and fast-forwarded local `main` before starting.
+Open PRs (`#164`, `#165`, `#170`) checked via the GitHub API, unchanged, no collision.
+
+This session has now found and fixed 5 real bugs in a row, 4 of them the exact same shape (two code
+paths computing one real-world fact with a silently disagreeing constant/default). Per this pass's
+own directive, re-grepped every `*_DAYS`/`*_WINDOW` numeric constant across `app/lib` and `engine`
+(14 hits) to check whether that shape still has a live instance anywhere:
+
+- `app/lib/tenderCompliance.ts` (`RENEW_SOON_DAYS = 60`) and `app/lib/generalTender.ts` both already
+  special-case `bank_confirmation_letter_valid_until` to a literal `30` at their own call sites
+  (`validityAtClosing(..., 30)`) - independently confirmed by reading both, not assumed from the
+  prior pass's own commit message. Consistent with `vaultDocuments.ts`'s `BANK_LETTER_RENEW_SOON_DAYS`
+  and `watch_deadlines.py`'s override for the same column. No bug.
+- `app/lib/documentExpiry.ts`'s flat `EXPIRING_SOON_WINDOW_DAYS = 30` for every field (including the
+  six 60-day-elsewhere fields) is a deliberate, documented, tighter window for that one list
+  ("what needs attention before my next bid" vs the bell's "worth a heads-up eventually") - read its
+  own header comment and confirmed this is by design, not a drifted duplicate.
+- The four `14`-day constants (`readiness.ts`, `complianceExpiryReminders.ts`,
+  `deadlineReminders.ts`, `dispatchDashboard.ts`) and the two `60`-day constants
+  (`notifications.ts`, `watch_deadlines.py`'s `DEFAULT_DOC_LEAD_DAYS`) all genuinely agree with each
+  other and with their own cited sibling constant in a comment.
+
+Conclusion: the "drifted duplicate constant" shape this session kept finding is now genuinely
+exhausted across every numeric day-count/window constant in the codebase - not just the two files
+already fixed.
+
+Pivoted to a different kind of review per the directive: read `0100_quality_scout_triage.sql`,
+`0102_impersonation_audit_logs.sql`, and the newest migration `0103_tender_catalog.sql` end to end
+(the three newest, least-reviewed areas) for tenant-isolation and dead-wiring bugs, the two bug
+shapes a standing-review pass has found live ones of before this session (the `narrative_documents`
+cross-tenant gap, the missing `narrative` entry in `run_bridges.py`'s `BRIDGES` dict). Specifically
+checked: `platform_admin_tender_catalog()`'s `security definer` + `where is_platform_admin()` gating
+(correct, same convention as every other platform-admin function since 0043); `0102`'s immutable-
+audit-log guardrails (`platform_admin_end_impersonation()` pinned to both `admin_user_id = auth.uid()`
+and `ended_at is null`, confirmed correct); `0100`'s `kind = 'extract_requirements'` claim against
+`process_general_jobs.py`'s `process_job()` (confirmed real, line 794) and its `pack_generation_jobs_one_open_key`
+unique-violation handling (confirmed the index's actual column list in `0026_unified_job_queue.sql`
+matches what the reprocess function relies on). All three migrations check out - no bug found.
+
+QA tooling confirmed sound: `node --experimental-strip-types --test app/lib/*.test.ts` - 178/178.
+
+No code change this pass. Backlog unchanged at 9 items - nothing resolved, nothing newly added.
+
+---
+
+**2026-10-29 ~06:20 UTC — standing review: the topbar notifications bell nagged about a bank
+confirmation letter up to a month before the vault itself considered it due for renewal; fixed.**
+
+Oriented from `1a29cb5` (the previous pass's SANRAL closing-time fix); fetched `origin/main` - no
+new commits had landed since, confirmed local `main` already matched it exactly before starting.
+Open PRs (`#164`, `#165`, `#170`) checked via the GitHub REST API, unchanged, no collision.
+
+Per this pass's own directive, moved to a different area: `engine/pack_generator/suggest_pack.py`'s
+scoring and tie-break logic, cross-checked against `engine/pack/process_pack_jobs.py`'s own
+`rank_candidates()` (the exact "two places computing the same real-world fact" shape this session
+has repeatedly found bugs in) - confirmed these are NOT a drifted duplicate: `process_pack_jobs.py`
+imports `score_candidate`/`read_required_positions` directly from `suggest_pack.py` (`from
+suggest_pack import read_required_positions, score_candidate`), and its own `rank_candidates()`
+tie-break (`-score, -years_experience, name`) is identical to - and explicitly documented as
+deliberately matching - the one in `suggest_pack.py`. `adapt_person()`'s DB-row-to-scorer-shape
+mapping also lines up field-for-field with what `score_candidate()`/`candidate_person_text()`/
+`years_experience_at()` expect. No bug there.
+
+**The finding**, in `app/lib/notifications.ts`'s `getNotifications()` (the topbar bell): every
+`COMPANY_EXPIRY_FIELDS` entry was checked against one flat `DOCUMENT_WINDOW_DAYS = 60` "renew soon"
+window - including `bank_confirmation_letter_valid_until`. But that field is NOT a 60-day document
+everywhere else it's checked: the Company vault page (`ReadOnlyView.tsx`,
+`ComplianceDocumentsSection.tsx`) and the real compliance checks (`tenderCompliance.ts`,
+`generalTender.ts`) all correctly use a 30-day window for it specifically
+(`vaultDocuments.ts`'s `BANK_LETTER_RENEW_SOON_DAYS`, since the letter is only valid 3 months from
+its own date - the same 30-day override `engine/compliance/watch_deadlines.py`'s own
+`TRACKED_EXPIRY_FIELDS` already carries, with an identical cross-reference comment). This file's own
+header comment claims the bell "agrees with what the vault and dashboard already say" - true for
+every other field, but false for this one: a bank letter 31-60 days from expiry would ring the bell
+("Expires in 45 days", warning) while the vault page itself still showed it "Current" (green). Same
+bug SHAPE as the SANRAL closing-time default fixed last pass and the day-count drift fixed three
+passes before that - a shared real-world fact (when is this document due for renewal) computed with
+a silently disagreeing constant in one of its several call sites.
+
+Fixed by giving `COMPANY_EXPIRY_FIELDS` entries (`lib/companyExpiryFields.ts`) an optional
+`windowDays` override - a plain numeric literal on the bank-letter entry, not an import of
+`BANK_LETTER_RENEW_SOON_DAYS`, since this file deliberately stays at zero imports so a standalone
+script can import it directly (its own header comment explains why) - and having
+`getNotifications()`'s company-fields loop use `windowDays ?? DOCUMENT_WINDOW_DAYS` instead of the
+flat constant. `lib/documentExpiry.ts` (the vault's own full, unwindowed list) and
+`lib/complianceDigestCandidates.ts` (fixed-threshold reminders, not a window) were both checked and
+don't need the same fix - the former deliberately uses one flat, tighter 30-day window for every
+field on purpose (its own header comment), the latter fires on exact day thresholds, not a window,
+same for every field already.
+
+No test file existed for `lib/notifications.ts` at all (it has its own extensionless `./dates`
+import, same limitation `lib/companyExpiryFields.ts`'s and `lib/deadlineReminders.ts`'s own header
+comments already document, so it needs vitest rather than a direct `node --experimental-strip-types`
+run - same reason `lib/complianceDigestCandidates.spec.ts` exists for its own Supabase-querying
+function rather than a `.test.ts`). Added `lib/notifications.spec.ts`, a minimal Supabase stub (same
+shape as `complianceDigestCandidates.spec.ts`'s own `stubSupabase()`, extended with the `tenders`
+table this function also reads) and four cases: a 60-day field flagged at 45 days (unaffected),
+the bank letter NOT flagged at 45 days (the fix), the bank letter flagged at 25 days (inside its own
+window), and an already-expired bank letter flagged regardless of window. Confirmed the regression
+test actually catches the original bug by temporarily stashing the two source-file fixes and
+re-running - the "not flagged at 45 days" case failed exactly as expected against the unfixed code,
+then restored the fix and re-ran clean. `npx vitest run` - 295/295 passing (full suite, no
+regressions). `npx tsc --noEmit` and `npx eslint` on all three touched files - clean.
+`node --experimental-strip-types --test lib/*.test.ts` - 178/178 (unaffected, different test
+runner/file set, run as the full-sweep sanity check this pass's own directive asked for).
+
+Pushed directly to `main` (small, fully verified, no PR): `app/lib/notifications.ts`,
+`app/lib/companyExpiryFields.ts`, `app/lib/notifications.spec.ts`, this file.
+
+Backlog unchanged at 9 items - this finding was standalone, nothing resolved or added to the list.
+
+---
+
+**2026-10-29 ~04:20 UTC — standing review: a SANRAL closing date with no time given defaulted to
+noon instead of this codebase's own established 11:00 SAST convention; fixed.**
+
+Oriented from `e342bae`; fetched `origin/main`, found one new commit (`e269974`, a different
+session's fix for whitespace-only values falsely reported "placed" on flat PDF forms, in
+`engine/general/fill_flat_pdf.py` - no overlap) and fast-forwarded local `main` before starting.
+Open PRs (`#164`, `#165`, `#170`) checked, unchanged, no collision.
+
+The last two passes both found real bugs in `engine/notify/send_digest_emails.py`'s `render_text()`
+- that function has now had a close look twice, so this pass looked at a different area per its own
+directive. Looked at `app/lib/tenderActivity.ts` first (no dedicated test file at all, despite being
+a pure, testable module like every sibling in `lib/`) - read it end to end; its stage-move/
+submitted-at sequencing, answer-save grouping and accepted-date formatting are all more carefully
+reasoned than they first look (e.g. the `pack:submitted` vs `pack:stage` split is deliberate: the
+dedicated "Submitted" entry only fires when the pack later moved on to won/lost, since the
+current-stage entry already covers "currently sitting at Submitted"). No bug found there - noting
+the missing test file as a nicety, not a new backlog item, out of scope for this pass.
+
+Also reviewed PayFast's own code (`app/lib/payfast.ts`, the ITN route handler) given the open
+"idempotency design question" backlog item - re-read `apply_payfast_itn()` (0078, last redefined in
+`0083`) end to end to confirm I understood the EXISTING flagged gap correctly before looking
+elsewhere (dedup key would need to be `pf_payment_id`, not `m_payment_id`, for a recurring
+subscription - already correctly documented as Sarel's own call, not re-investigated or re-fixed
+here).
+
+**The finding**, in `engine/discovery/watch_tender_updates.py`'s `_sanral_closing()`: SANRAL's
+detail page sometimes publishes a closing date with no time component (the function's own regex
+already made the time group optional, `(?:\s+(\d{1,2}):(\d{2}))?`) - when that happens, the
+date-only value defaulted to **noon (12:00)**. But this codebase already has an established,
+documented convention for exactly this situation - "a source confirmed to give a date only, never a
+time" - in `source_http.py`'s `iso_sast_closing()`: default to **11:00 SAST**, the standard closing
+time, specifically BECAUSE "no SA public-tender submission window runs through the night" (its own
+header comment, also citing Rand Water/Kouga/Vaal Central Water/Lephalale as the sources that
+already use it correctly). `_sanral_closing()` had quietly grown a second, disagreeing "unknown
+time" default for the identical real-world fact - the same bug SHAPE this session has now found
+repeatedly (two code paths disagreeing about one thing), just in the compliance/discovery engine
+this time rather than the day-count math fixed three passes ago.
+
+This isn't cosmetic: `_sanral_closing()`'s return value is passed into `tender_updates.classify_document()`
+as the listing's own closing date, and when it agrees with a re-read document, `apply_closing_date()`
+(same file) writes it straight to `tenders.closing_date` - the live, customer-facing field
+`dates.ts`'s `formatClosingDateTime()` reads. Because only an exact SAST midnight triggers that
+function's "(Time TBC in RFP)" caveat, a date-only SANRAL page would show "12:00" to the customer as
+if SANRAL had stated a real closing time, with no indication it was ever a default.
+
+Reproduced first against the unmodified file: `watch._sanral_closing({"closing_date": "2026/11/19"})`
+returned `2026-11-19T12:00:00+02:00`. Fixed by changing the default hour from `12` to `11`. Re-ran
+the same call: now returns `2026-11-19T11:00:00+02:00`. Verified three adjacent cases are unaffected
+- a real stated time (`"2026/11/19 14:30"`), a real stated EXACT midnight (`"2026/11/19 00:00"` - a
+genuine value, not a default, so it must stay exactly midnight, not get bumped to 11:00), and the
+existing "unreal date" (month 13) error path, which still returns `None` and still raises exactly
+one `system_alerts` warning, unchanged.
+
+`watch_tender_updates.py` has no dedicated test file of its own, but `test_tender_updates.py`
+already imports it directly (`import watch_tender_updates as watch`) and tests several of its
+functions - added a new `Part 0b` there (`part0b_sanral_closing_date_only_default()`, right after
+the existing `Part 0`) covering all four cases above, wired into the file's own `__main__` runner.
+Full `python3 engine/discovery/test_tender_updates.py` run: **ALL PASSED** (new Part 0b plus every
+existing part, Parts 1/2/2b unaffected; Part 3 skipped as usual without `TU_PSQL`). `py_compile`
+clean on both touched files, and a compile sweep of every other `.py` file in `engine/discovery/`
+also clean. Grepped for other callers of `_sanral_closing`/`watch_tender_updates` - only comments
+elsewhere reference it, nothing else depends on the old default.
+
+Pushed directly to `main` (small, fully verified, no PR): `engine/discovery/watch_tender_updates.py`,
+`engine/discovery/test_tender_updates.py`, this file.
+
+Backlog unchanged at 9 items - this finding was standalone, nothing resolved or added to the list.
+
+---
+
+**2026-10-29 ~02:16 UTC — standing review: a person_credential digest line named the expiring
+credential but never the person it belonged to; fixed.**
+
+Oriented from `4bdf22e` (the previous pass's digest-label fix); fetched `origin/main`, found one new
+commit (`5de8f6e`, a different session's coverage-gap closure for
+`process_onboarding_jobs.py` - docs + a new test file only, no overlap) and fast-forwarded local
+`main` before starting. Open PRs (`#164`, `#165`, `#170`) checked via the GitHub REST API, unchanged,
+no collision.
+
+Per this pass's own directive, looked at `registration_reminders.py` for a genuinely new finding (it
+still has no dedicated test file of its own - noted again, not fixed this pass, out of scope for a
+single check-in). Read it end to end plus its schema (`held_registrations`/`property_documents` in
+migration `0050`, both `registration_type_id`/`company_id`/`property_id` are `not null`, so the
+`sorted(type_ids)`/`sorted(ids)` calls in `_names()` can't be handed a `None` and crash - checked
+because it looked like a plausible failure mode on first read, confirmed it isn't one). No bug in
+that file itself.
+
+Found the real one one level further down, in the same `render_text()` function the last pass just
+fixed (`engine/notify/send_digest_emails.py`). `find_due_person_credentials()`
+(`engine/compliance/watch_deadlines.py:379`) and `registration_reminders.find_due_registrations()`
+both put a generic credential-type `"label"` on every `person_credential` item (e.g. "ECSA
+professional registration", "PSIRA Grading Certificate" - the *type* of credential, not whose it is)
+and a separate `"person_name"` key naming the actual holder - but `render_text()` only ever read
+`"label"`, never `"person_name"`. With two different key people on the same company each renewing
+the same credential type, the digest showed two identical, unattributed lines; the reader had no way
+to tell who to chase without opening the app. `watch_deadlines.py`'s own CLI console summary
+(`main()`, line ~575/581) already prints the holder's name right next to the label - the customer
+email was the one surface that silently dropped it. Confirmed via grep that `person_name` is set
+*only* on `document_expiry` items (never on `new_tenders`/`tender_tasks`/`readiness_changes`/etc.),
+so this change is scoped to exactly the section it needs to be.
+
+Fixed by prefixing the display line with `person_name` when present: `"{person_name} - {label}"`.
+A company-held document (no `person_name` key) renders exactly as before - verified explicitly, no
+stray `"None -"` prefix leaks in. New test
+`test_render_text_names_the_person_on_a_person_credential_item()` covers the named case, the
+unaffected company-document case, and two different people with the same credential label rendering
+as two distinguishable lines. `python3 engine/notify/test_send_digest_emails.py` - all cases pass
+(old + 4 new). `test_digest_live.py`/`test_digest_opt_in.py` - clean, unaffected. `py_compile` clean
+on both touched files.
+
+Pushed directly to `main` (small, fully verified, no PR): `engine/notify/send_digest_emails.py`,
+`engine/notify/test_send_digest_emails.py`, this file.
+
+Backlog unchanged at 9 items - this finding was standalone, nothing resolved or added to the list.
+
+---
+
+**2026-10-29 ~00:15 UTC — standing review: every "Documents & registrations due" digest email line
+showed a raw internal field name/slug instead of the human label sitting right next to it in the
+same dict; fixed.**
+
+Oriented from `85d5c84` (clean sweep); fetched `origin/main`, nothing new landed since. Open PRs
+(`#164`, `#165`, `#170`) checked, unchanged, no collision. Looked at a genuinely different area
+this pass (the compliance/notify engine, not the `app/` frontend the last three passes stayed in),
+per this pass's own directive.
+
+Traced `registration_reminders.py` (the 0050 catalog-registrations/property-documents reminder
+source) end to end first - its `_mark_company()` workaround (patching `company_id` into the
+`seen`-store entry after the fact, since it calls `watch_deadlines._expiry_window()` without passing
+`company_id` directly) looked suspicious on first read but is correct: `_expiry_window()` already
+wrote the dict into `seen[seen_key]` by reference, so mutating the returned `entry` in place does
+update the stored copy before `save_seen_db()` runs. No bug there. Also confirmed
+`daily_digest.py`'s live-mode build (`company_signals()`/`build_digest_for_person()`) routes
+`registration_reminders` items by `company_id` and `type` ("document"/"person_credential")
+correctly across the finance/cv_admin/validator role matrix - no bug there either.
+
+Found the real one one level further down the pipe, in `engine/notify/send_digest_emails.py`
+(the module that actually sends the email - `daily_digest.py` only assembles the report):
+`render_text()`'s per-item display-text fallback chain was `title or description or field or
+field_key or contract_number or "item"`. Every `document_expiry` item - from
+`watch_deadlines.find_due_documents()`/`find_due_person_credentials()` AND from
+`registration_reminders.py` - always carries both a raw `"field"` (e.g.
+`coid_letter_of_good_standing_expiry`, or `held_registrations:psira_grading` for a catalog
+registration) and a human `"label"` (e.g. "COID Letter of Good Standing", "PSIRA Grading
+Certificate") - but never sets `"title"` or `"description"`. The chain picked `"field"`, since it
+never checked `"label"` at all, so EVERY line in EVERY sent digest's "Documents & registrations
+due" section showed the raw column name/slug to the customer, not the human text that already
+existed in the same dict.
+
+Confirmed real and reachable before touching anything: built a `document_expiry` item exactly as
+`find_due_documents()` constructs it and ran it through the unmodified `render_text()` - body read
+`- coid_letter_of_good_standing_expiry (2026-11-10)`, not `- COID Letter of Good Standing
+(2026-11-10)`.
+
+Fix: `send_digest_emails.py`'s fallback chain now checks `item.get("label")` between `description`
+and `field`. Confirmed by grep this is safe and precisely targeted - no other section
+(`new_tenders`/`tender_tasks`/`readiness_changes`/`tender_updates`/`listing_changes`/
+`reassessed_tenders`) ever sets a `"label"` key, so this only changes `document_expiry`'s own
+rendering; `readiness_changes`' existing `field_key` fallback (its own, differently-sourced raw
+key, with no nicer label available) is untouched.
+
+Verified with the revert-confirm-fail-restore-confirm-pass discipline: reproduced the bug against
+the unmodified file (confirmed above), applied the fix, same input now shows the human label and
+the raw field no longer appears anywhere in the body - for both a `watch_deadlines.py`-shaped item
+and a `registration_reminders.py`-shaped one. Added
+`test_render_text_uses_document_expiry_label_not_raw_field()` to
+`engine/notify/test_send_digest_emails.py` (both item shapes, plus a case pinning that
+`readiness_changes`' `field_key` fallback is unaffected, since it has no `"label"` key to prefer).
+Full `python3 engine/notify/test_send_digest_emails.py` run: 0 failures (new test plus all existing
+ones, including the dry-run/retry/429-handling cases). `python3 engine/notify/test_digest_live.py`
+and `test_digest_opt_in.py` also run clean as an adjacent-file sanity sweep. `py_compile` clean on
+both touched files. No dedicated unit-test file exists for `registration_reminders.py` itself
+(noted while reading it, not a new finding - already implicit in this module having never had its
+own test file; not fixed here, outside this pass's scope).
+
+Pushed directly to `main` (small, fully verified, no PR/self-merge, per this routine's standing
+guardrail): `engine/notify/send_digest_emails.py`, `engine/notify/test_send_digest_emails.py`.
+
+Backlog unchanged at 9 items (migration `0096`, `narrative_documents` PostgREST schema-cache
+reload, PayFast idempotency design question, "missing ISO 9001 flagged as urgent" UX question,
+fingerprint.py baseline-mismatch heads-up, Dashboard "Decision needed" over-triggering finding,
+Form B7 compulsory-vs-matrix disagreement, impersonation token-refresh gap, submitted-tender
+nagging gap) - none resolved, none newly added; this pass's finding was a standalone bug, not tied
+to any of the 9.
+
+---
+
+**2026-10-28 ~22:15 UTC — standing review: clean sweep, no new finding.**
+
+Oriented from `3699e4a` (second "days to close" drift site fixed); fetched `origin/main` and found one
+newer commit already landed by a different session, `8968a21` ("QA cycle (compliance): clean sweep of
+`watch_deadlines.py`'s `find_due_tasks()`") - docs-only, no code changed, no overlap with this pass's
+work. Fast-forwarded local `main` to match before starting, per this session's own standing discipline
+about not trusting a stale checkout.
+
+Open PRs checked (`#164`, `#165`, `#170`) - all still correctly unmerged drafts, unchanged, no
+collision.
+
+Due diligence on the last two passes' "days to close" drift fix (`ba00473`, `3699e4a`): re-grepped the
+whole `app/` tree for the same `Math.ceil((... .getTime() - now.getTime()) / <ms-per-day>)` shape
+(several variants: `86_400_000`, `86400000`, `1000 * 60 * 60 * 24`, `24 * 60 * 60 * 1000`). Confirmed
+the only remaining match combined with a closing-date field is `lib/dates.ts`'s own `daysUntil()`
+implementation itself - genuinely fully closed, not just claimed. The broader day-math grep turned up a
+handful of other, unrelated day-count computations (`billing.ts` trial-days-left, `principals.ts`
+certification-age, a few `onboardingNudges.ts`/experience-page "days since" displays) - each is a
+standalone calculation with no second, competing source of truth for the same value anywhere else in
+the app, so none of these are the same bug class (the original bug was specifically two different
+functions disagreeing about the identical real-world fact for the same card/tender). Read `billing.ts`
+end to end given its tie to the still-open migration `0096` backlog item - `effectiveSubscriptionStatus()`/
+`isSubscriptionLapsed()`/`trialDaysLeft()` are internally consistent and already correctly reasoned
+through; no code bug here, migration `0096` application itself remains the only open item.
+
+Checked for stray TODOs across `app/` and `engine/` - the one genuine hit
+(`app/app/tenders/[id]/actions.ts` reviewed_at TODO) is already documented and deliberately deferred,
+not a new finding. Checked `app/supabase/migrations/` for numbering collisions - none, latest is `0103`.
+
+QA tooling confirmed sound: `node --experimental-strip-types --test lib/*.test.ts` 178/178 passing.
+
+No code change this pass - genuine clean sweep, not a forced fix. Backlog unchanged at 9 items (migration
+`0096`, `narrative_documents` PostgREST schema-cache reload, PayFast idempotency design question,
+"missing ISO 9001 flagged as urgent" UX question, fingerprint.py baseline-mismatch heads-up, Dashboard
+"Decision needed" over-triggering finding, Form B7 compulsory-vs-matrix disagreement, impersonation
+token-refresh gap, submitted-tender nagging gap) - none resolved, none newly added.
+
+---
+
+**2026-10-28 ~20:15 UTC — standing review: the prior pass's "days to close" drift fix
+(`daysUntil()`/`ba00473`) missed a second, pre-existing site with the exact same bug; fixed.**
+
+Grepped the whole `app/` tree for the same `Math.ceil((... .getTime() - now.getTime()) / 86_400_000)`
+shape the last pass just removed from `dispatchTriage.ts`/`dispatchDashboard.ts`, to check whether it
+was truly fully closed. One more site: `app/app/analytics/page.tsx`'s "Upcoming deadlines" widget
+computed its own inline, instant-based day count instead of importing `lib/dates.ts`'s canonical,
+midnight-normalized `daysUntil()` - the same disagreement, same mechanism, same 7-day warning
+boundary, just on a different page.
+
+Concretely verified with the exact same reproducible case the last pass used (`2026-11-04T09:00+02:00`
+closing, viewed `2026-10-28T15:00+02:00`): the old inline math here gives **7 days** (triggers the
+`text-warning` styling), `daysUntil()` gives **8** - so a tender could show up flagged urgent on the
+Analytics page while the Command Center (now fixed) correctly shows it's not, for the identical
+tender at the identical moment.
+
+Fix: `app/app/analytics/page.tsx` now imports `daysUntil` from `@/lib/dates` and calls
+`daysUntil(tender.closing_date as string, now)` in place of the inline formula; `now` was already a
+locally-defined `Date` in this file, reused as-is (same param the last pass's signature change was
+designed to take). No other call site repeats this shape anywhere else in `app/` (re-grepped after the
+fix - one remaining match, `lib/dates.ts`'s own `daysUntil()` implementation itself, which is correct
+by definition).
+
+Verified: reproduced the 7-vs-8 disagreement numerically against the unmodified file first (confirmed
+the bug), then with the fix applied the same scenario correctly agrees with `daysUntil()`'s own answer
+(8, no warning) by construction, since it now calls the same function. `node --experimental-strip-types
+--test lib/*.test.ts` still 178/178 (this file has no existing unit test harness of its own - it's a
+Next.js server component, not an extracted pure function like `dispatchTriage.ts`/`dispatchDashboard.ts`
+were, so there was nothing to add a regression test to without a larger refactor out of this pass's
+scope - flagging that as a smaller follow-up: extracting the "Upcoming deadlines" day-count/label logic
+into a testable `lib/` function, the same shape the Command Center fix already has, would close this
+gap). `tsc --noEmit` clean; `eslint` on the touched file shows only a pre-existing, unrelated
+`STAGE_META` unused-import warning (present before this change, not touched by it, not in scope here).
+
+Pushed directly to `main` (small, fully verified, no PR/self-merge, per this routine's standing
+guardrail).
+
+Open PRs checked before starting (`#164`, `#165`, `#170`, all still correctly unmerged drafts) - no
+collision; none touch `analytics/page.tsx` or `dates.ts`.
+
+Backlog waiting on Sarel, reconfirmed unchanged this pass (9 items: migration `0096`, `narrative_documents`
+PostgREST schema-cache reload, PayFast idempotency design question, "missing ISO 9001 flagged as
+urgent" UX question, fingerprint.py baseline-mismatch heads-up, Dashboard "Decision needed"
+over-triggering finding, Form B7 compulsory-vs-matrix disagreement, impersonation token-refresh gap,
+submitted-tender nagging gap) - no new judgment-call item added this pass, only the small follow-up
+noted above (extract analytics' day-count logic into a tested `lib/` function - low priority, not
+blocking anything).
+
+---
+
 **2026-10-28 ~18:40 UTC — real SANRAL pack-assembly test against Mzansi, succeeded end to end; found and
 fixed 3 real bugs along the way; signatory fallback shipped; 1/26 prefill benchmark re-verified at 4/26,
 not the 6/26 estimated earlier - correction below, not quietly dropped.**
@@ -5945,6 +6338,177 @@ bridged by `engine/general/process_general_jobs.py`.
     - **Ranked list:** §4 of that doc. Nothing is built yet.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
+
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-first run): rotated to CV (engine/cv/extract_cv_fields.py's validate_proposal()/normalise_date()/find_and_redact_sa_ids()) - thorough review, no new bug found this time
+
+Orientation: `git fetch origin main` showed two new sibling commits (`1a29cb5` a real fix - a
+date-only SANRAL closing time defaulted to noon instead of this codebase's own 11:00 convention,
+`adbd633` the topbar notifications bell nagging about a bank letter a month early - discovery/TS,
+no overlap) - fast-forwarded cleanly. Open PRs unchanged (`#164`/`#165`/`#170`), no new overlap.
+
+Rotated to CV - last dedicated pass was Finding 93 (a docstring/dead-import fix, 3 cycles ago) and,
+before that, Finding 80 (run 99). Read `extract_cv_fields.py` end to end, specifically chasing three
+real-looking leads:
+
+1. `find_and_redact_sa_ids()`/`_plausible_sa_id()` - a POPIA-sensitive function (ID-number
+   redaction). `_plausible_sa_id()`'s birth-date check (`1 <= mm <= 12 and 1 <= dd <= 31`) doesn't
+   validate `dd` against the real days-in-month for `mm` (e.g. "31 February" would pass) - checked
+   whether this is a bug or a deliberate tradeoff. It's deliberate: a stricter check would make the
+   function MORE likely to reject a real ID number as implausible (a false negative, under-
+   redacting), the worse failure mode for a privacy feature that already has a dedicated
+   `redact_all_13_digit` fallback specifically to over-redact rather than under-redact OCR'd text.
+   Not a bug.
+2. `normalise_date()`'s `raw.strip()` - would crash on a non-string `raw`. Traced whether the LLM
+   could ever hand it one: `output_schema()`'s `PERSON_FIELD_ENTRY_SCHEMA`/`project_props` both type
+   every date-bearing field as `_nullable({"type": "string"})` in the real structured-output schema
+   sent to the model - not reachable under normal schema enforcement, consistent with this
+   module's own documented trust in schema enforcement elsewhere (the 2026-10-23 person-fields-as-
+   array fix). Not pursued further without evidence of a real schema-enforcement failure.
+3. `validate_proposal()`'s `value_rm` coercion (`v if isinstance(v, (int, float)) ... else None`) -
+   same reasoning: `project_props`'s own schema types `value_rm` as `_nullable({"type": "number"})`,
+   so a string value from the model isn't a realistic path.
+
+Also read `generate_cv.py`'s `add_cover_page()` (the one function in that file not already covered
+by Findings 49/80) end to end - clean, including the 2026-10-19 `!r`-interpolation fix already in
+place and correct.
+
+No code change this pass - three plausible leads chased, each ruled out with real evidence (the
+module's own schema enforcement, the deliberate safety-first asymmetry in ID redaction), not
+assumed away. Logged as a genuine clean sweep.
+
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twentieth run): Finding 95 (severe) - a whitespace-only value was reported "placed" on the real Form of Offer/MBD1, its own read-back verification vacuously passing, while the printed page showed nothing at all
+
+Orientation: `git fetch origin main` showed two new sibling commits (`85d5c84`/`4bdf22e`, clean sweep
++ a real `send_digest_emails.py` fix - every digest's "Documents & registrations due" line showed a
+raw field name instead of its human label), then a THIRD landed mid-cycle (`e342bae`, naming the
+person on a `person_credential` renewal line too) - notify is being actively worked by a sibling
+right now, so stayed clear of it again. Open PR `#170` unchanged, still touching
+`process_general_jobs.py`/`process_pack_jobs.py`/the fingerprint baseline/Mzansi seed data - avoided
+entirely.
+
+Rotated to non-SANRAL pack - genuinely never had a dedicated pass of its own; picked
+`engine/general/fill_flat_pdf.py` (1000+ lines, municipal MBD/CIDB flat-PDF form filling) since it
+had zero dedicated test file anywhere (only `test_form_field_audit.py` touches it, and only a tiny
+slice).
+
+**The finding**: `place_text_fields()`/`place_captions()` both gate "is there a real value to
+place" with a bare `if not value:`. A whitespace-only string (a real shape: leading/trailing spaces
+from a copy-paste into a name field) is truthy, so it sails past the guard; Helvetica's own space
+width is non-zero so `_fit()` "fits" it; the overlay write types invisible blank space; and
+`verify_placements()`'s own read-back check strips all whitespace before comparing, so an all-
+whitespace value's `want` becomes the empty string - a substring of anything, so it's reported
+`verified = True` no matter what's actually on the page. Confirmed end to end against a real
+synthetic MBD1 page built with reportlab (not reasoned about in the abstract): the real
+`fill_flat_pdf()` reported `{"status": "placed", "value": "   "}` for the contact-person field - the
+same `signatory_name`/`signatory_name_upper` path the real Form of Offer's own signatory-name field
+uses too.
+
+**Fix:** both guards changed to `if not (value or "").strip():` - rejects whitespace-only as
+missing, leaves a real value's own internal/surrounding whitespace untouched. `place_choices()`
+checked too and is naturally immune.
+
+**Verified red-then-green against the real pipeline**: new file `test_fill_flat_pdf.py` builds a
+real synthetic MBD1 page and runs the real `fill_flat_pdf()`. Reverted the fix: the whitespace-only
+and tab/newline-only cases failed exactly as predicted; the unchanged-behaviour cases stayed green
+throughout. Restored: `ALL PASSED`, 10/10. `test_form_field_audit.py` re-run clean, no regression.
+Wired into CI.
+
+Full writeup: Finding 95, `docs/specs/QA-Edge-Case-Findings.md`.
+
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-nineteenth run): Finding 94 (coverage-gap closure, no new bug) - process_onboarding_jobs.py's claim/fulfil mechanism had never been tested against a real filtering fake, the same shape as Finding 87
+
+Orientation: `git fetch origin main` showed two new sibling commits (`85d5c84` clean sweep confirming
+the days-to-close drift fix fully closed, `4bdf22e` a real fix in `send_digest_emails.py` - every
+digest's "Documents & registrations due" line was showing a raw internal field name/slug instead of
+the human label sitting in the same dict - notify area, so skipped that rotation this cycle to avoid
+duplicating). Open PRs unchanged (`#164`/`#165`/`#170`), no new overlap.
+
+Rotated to worker/job-queue - `poll_loop.py`/`run_bridges.py` already thoroughly reviewed (Finding
+77), so picked the one bridge in this area without its own dedicated adversarial pass:
+`process_onboarding_jobs.py`. `test_process_onboarding_jobs.py` existed (a real path-traversal-guard
+fix, 2026-10-20) but its own fake ignores the querystring entirely - `claim_upload()`'s atomic claim,
+`fail_stale_uploads()`'s stuck-row recovery, and `process_upload()`'s full success/error paths had
+never been exercised against the real claim contract, the exact gap shape Finding 87 closed for the
+narrative bridge.
+
+**What was found: nothing new - all six contracts held** under real adversarial cases (built the
+same `FakeDB` shape as Finding 87: real `eq.` filtering on GET/PATCH). Sanity-checked by temporarily
+removing `claim_upload()`'s own status filter on a scratch copy - the new atomicity test correctly
+went red for that regression.
+
+**A small test-hygiene gap fixed in passing**: the new error-path tests call the real
+`system_alerts.record()` (unlike the 4 pre-existing tests, which fully monkeypatch it) - without
+`SYSTEM_ALERTS_DISABLED=1` this made a real HTTP attempt against this sandbox's own placeholder
+Supabase credentials (degraded gracefully, never crashed, but still a live call an offline test
+should never make). Added the same escape hatch Finding 88's test file already uses.
+
+Verified: `0 failure(s)` (23 checks, 19 new), no more network attempts; sibling
+`test_classify_documents.py` re-run clean. Already wired into CI via Finding 92's own sweep.
+
+Full writeup: Finding 94, `docs/specs/QA-Edge-Case-Findings.md`.
+
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-eighteenth run): rotated to compliance/reminders (watch_deadlines.py's find_due_tasks()) - two plausible leads chased, both ruled out against the real schema, no new bug found this time
+
+Orientation: `git fetch origin main` showed one new sibling commit (`3699e4a`, closing a second site
+of the "days to close" drift fix in `app/app/analytics/page.tsx` - TypeScript, no overlap). Open PR
+`#170` unchanged, still touching `engine/general/process_general_jobs.py`,
+`engine/pack/process_pack_jobs.py`, `fingerprints/Conventional_Consultant_Tender.json` and Mzansi
+seed data - avoided entirely again. Other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to compliance/reminders (intake was heavily covered 4 cycles ago via Finding 90; its only
+other file, `scenario_driver.py`, is a manual debugging CLI with no assertions of its own, not a
+fruitful adversarial-testing target). Picked `watch_deadlines.py`'s `find_due_tasks()` - the generic
+tender-task reminder category, genuinely still live in production (confirmed last cycle via Finding
+91's investigation: `daily_digest.py` calls it directly, unlike the orphaned `find_documents_
+lapsing_before_closing()`).
+
+Chased two real-looking leads, both ruled out by reading the actual schema rather than assumed:
+1. `task["tender_id"]` is read with bracket access after a `t.get("tender_id")` guard earlier in the
+   same function implied it could be missing/null for some tasks - would print a literal `None` as
+   `tender_label` for a generic (non-tender) task. Ruled out: `tender_tasks.tender_id uuid not null`
+   (migration `0009`) - every task is always tender-specific, the `.get()` guard is defensive but
+   unreachable.
+2. Whether `seen_key`'s inclusion of both `due_date` and `status` could let an overdue-then-
+   deadline-extended-then-overdue-again task get silently suppressed on its second escalation -
+   traced the actual key construction: `due_date` changing OR `status` changing (`due_soon` ->
+   `overdue`) both produce a genuinely different `seen_key`, so both transitions correctly re-report,
+   matching the same "overdue escalates" pattern `find_due_documents()` already uses. Not a bug.
+
+No code change this pass - two plausible leads investigated and closed with real evidence, not
+assumed away, but neither panned out. Logged as a genuine clean sweep.
+
+## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-seventeenth run): Finding 93 (minor) - process_cv_jobs.py's own docstring claimed it calls generate_as_is() for the "use as-is" CV path; it never has, confirmed by tracing the real feature to app/app/people/actions.ts instead
+
+Orientation: `git fetch origin main` showed 2 new sibling commits (`47497ac` `confirm_pack.py`
+recording silently-dropped incomplete projects, `ba00473` Tender Command Center's drifted "days to
+close" math vs `lib/dates.ts` - both TypeScript/pack_generator, avoided). Open PR `#170` now also
+carries real code (signatory fallback in `process_general_jobs.py`, a `process_pack_jobs.py`
+`KeyError` fix, a regenerated fingerprint, Mzansi seed-data fixes) - touches
+`engine/general/process_general_jobs.py`, `engine/pack/process_pack_jobs.py`,
+`fingerprints/Conventional_Consultant_Tender.json`, and several test files; avoided all of them
+entirely this pass. Other open PRs (`#164`, `#165`) re-confirmed TypeScript-only.
+
+Rotated to CV - genuinely overdue (last dedicated pass: Finding 80, run 99); a sibling fixed a real
+`completed_at`-on-crash bug in `process_cv_jobs.py` earlier today, so avoided that exact code path
+and read the rest of the file instead.
+
+**The finding**: the module's own docstring states, as fact, that it "calls generate_cv.py's own
+functions directly... for the sanral_keyperson/world_bank formats, and generate_as_is() for the
+use-as-is path's provenance record." Grepped every real call site of `generate_as_is(` repo-wide:
+exactly one, inside `generate_cv.py`'s own CLI - none in `process_cv_jobs.py`, despite importing it
+by name. `process_job()`'s builder dict only ever has two keys (`sanral_keyperson`/`world_bank`) -
+no third branch for "as-is" exists. Traced the real "use as-is" feature to confirm nothing is
+actually broken: `app/app/people/actions.ts`'s `uploadCv()` handles it entirely in TypeScript -
+"recorded in cv_uploads and nothing else happens" (its own comment) - never inserting a
+`generated_cvs` row, so this bridge never sees an as-is job to dispatch in the first place. No real
+feature broken, no crash reachable - a documentation/dead-import defect, not a functional bug.
+
+**Fix:** corrected the docstring, removed the dead `from generate_cv import generate_as_is` import.
+Verified: `py_compile` clean, `--self-test` still produces both real formats, and
+`engine/worker/test_poll_loop.py` (the full suite that exercises this exact file end to end,
+including a real `--loop` subprocess) still passes with no regression.
+
+Full writeup: Finding 93, `docs/specs/QA-Edge-Case-Findings.md`.
 
 ## This pass (2026-10-28, standing QA/robustness review - one-hundred-and-sixteenth run): rotated to notify (engine/notify/daily_digest.py's less-tested functions) - thorough review, no new bug found this time
 

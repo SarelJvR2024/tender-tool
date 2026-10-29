@@ -24,10 +24,21 @@ error_message). The UI only ever shows status, never waits on this script.
 
 This was NOT built as a second, parallel CV-generation implementation in
 JavaScript - it calls generate_cv.py's own functions directly (import, not a
-reimplementation) for the sanral_keyperson/world_bank formats, and
-generate_as_is() for the use-as-is path's provenance record. generate_cv.py
+reimplementation) for the sanral_keyperson/world_bank formats. generate_cv.py
 remains the one real implementation; this script is only an adapter between
 Supabase's row shapes and generate_cv.py's existing profile-dict shape.
+
+This script does NOT touch the "use as-is" path at all, despite an earlier
+version of this comment claiming it called generate_cv.py's own
+generate_as_is() for it (confirmed wrong by grep: no real call site anywhere
+in this file, QA pass 2026-10-28). The real as-is flow is entirely
+self-contained in app/app/people/actions.ts's uploadCv() - "the uploaded
+file IS the submission attachment... recorded in cv_uploads and nothing else
+happens" (that file's own comment) - it never inserts a generated_cvs row,
+so this bridge never sees an as-is job to dispatch to generate_as_is() in
+the first place. generate_as_is() remains a real, working function - just a
+CLI-only utility (see generate_cv.py's own main()), not something this
+bridge's real job loop ever calls.
 
 NOT LIVE-TESTED against a real Supabase project - none exists in this
 environment (same limitation every session building this app has hit
@@ -72,7 +83,6 @@ import urllib.error
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "worker"))
-from generate_cv import generate_as_is  # noqa: E402
 import generate_cv  # noqa: E402
 from poll_loop import poll_forever, DEFAULT_INTERVAL_SECONDS, system_alerts  # noqa: E402
 
