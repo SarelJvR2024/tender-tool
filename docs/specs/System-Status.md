@@ -6531,6 +6531,37 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-third run): Finding 97 (moderate) - a corrupted SANRAL fingerprint baseline file raised a raw JSONDecodeError out of the real intake job instead of the clean "error" status every other failure mode in the same function already reports
+
+Orientation: `git fetch origin main` showed two new sibling commits (`499ae0b` a standing-review
+clean sweep across job-queue claims/impersonation/migration 0104/PDF verify, `ee36c9e` a real fix -
+`apply_payfast_itn()` moved `current_period_end` forward even on a FAILED payment, migration `0105`
+written and pushed but not yet applied to the live DB per the standing rule) - both no overlap. PR
+`#172` (Document Vault badge fix) still open/unchanged, TypeScript-only. Other open PRs (`#164`/
+`#165`) re-confirmed TS-only.
+
+Rotated to intake. `classify_tender.py` has had two dedicated passes already (Findings 78/90), so
+looked specifically for the ONE established pattern not yet checked everywhere: `check_fingerprint()`
+wraps `build_fingerprint()` in its own try/except and checks for a missing baseline file, but the
+baseline file's own `json.load(open(path))` read had no guard at all - the same asymmetric-guard
+shape (one branch handles a failure cleanly, a sibling doesn't) already found and fixed
+independently in Findings 82/83/84.
+
+**The finding**: a corrupted/truncated baseline JSON file (the exact kind PR #170's own fingerprint
+regeneration just replaced one of) raises a raw `JSONDecodeError` straight out of
+`check_fingerprint()`. Traced the real consequence: `process_general_jobs.py`'s `process_job()` has
+its own top-level `except Exception`, so this doesn't crash the worker - but it turns an
+already-anticipated failure mode into a confusing raw-exception message on that one job, instead of
+the clear "could not read the stored baseline" text every sibling failure mode already produces.
+
+**Fix:** wrapped the baseline read in the identical try/except pattern already used for
+`build_fingerprint()` two lines above it. **Verified red-then-green**: new test - the first
+dedicated test for `check_fingerprint()` at all - covers no-baseline/match/mismatch/corrupted-file;
+reverting the fix made only the corrupted-file case fail, exactly as predicted. Restored: `0
+failure(s)`. `test_fingerprint.py`/`test_general_bridge.py` re-run clean. Already wired into CI.
+
+Full writeup: Finding 97, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-second run): Finding 96 (coverage-gap closure, no bug fixed) - a dangling signatory_person_id leaves the signatory blank rather than falling back; real, previously-untested behaviour, flagged as a design question not decided here
 
 Orientation: `git fetch origin main` showed PR `#170` MERGED (`8180c19` - the signatory fallback +

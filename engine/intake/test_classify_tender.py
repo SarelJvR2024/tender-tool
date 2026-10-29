@@ -204,6 +204,49 @@ def test_classify_workbook_real_technical_financial_and_corrupt(tmp_path="/tmp")
     os.remove(corrupt_path)
 
 
+def test_check_fingerprint_no_baseline_match_mismatch_and_corrupted_baseline(tmp_path="/tmp"):
+    print("check_fingerprint: no stored baseline yet, a real match, a real mismatch, "
+          "and a corrupted baseline file on disk")
+    store = os.path.join(tmp_path, f"fp_store_{os.getpid()}")
+    os.makedirs(store, exist_ok=True)
+    family = "Conventional Consultant Tender"
+
+    no_bl = ct.check_fingerprint(TECH_WORKBOOK, family, store=store)
+    check("no stored baseline at all is reported honestly, not a guessed match",
+          no_bl["status"] == "no_baseline", no_bl)
+
+    baseline_path = os.path.join(store, family.replace(" ", "_") + ".json")
+    real_fp = ct.fingerprint.build_fingerprint(TECH_WORKBOOK)
+    with open(baseline_path, "w") as f:
+        ct.json.dump(real_fp, f)
+    ok = ct.check_fingerprint(TECH_WORKBOOK, family, store=store)
+    check("the real workbook's own fingerprint matches its own freshly-written baseline",
+          ok["status"] == "ok", ok)
+
+    tampered = dict(real_fp, sheet_names=list(real_fp["sheet_names"]) + ["A Brand New Sheet"])
+    with open(baseline_path, "w") as f:
+        ct.json.dump(tampered, f)
+    mismatch = ct.check_fingerprint(TECH_WORKBOOK, family, store=store)
+    check("a genuinely different stored baseline is reported as a mismatch", mismatch["status"] == "mismatch", mismatch)
+
+    # Finding, 2026-10-29: a corrupted/truncated baseline file (a bad merge,
+    # an interrupted regeneration - the exact kind of file PR #170's own
+    # fingerprint regeneration writes) used to raise a raw JSONDecodeError
+    # straight out of this function, instead of the clean "error" status
+    # every OTHER failure mode here already reports.
+    with open(baseline_path, "w") as f:
+        f.write("{not valid json at all!!")
+    try:
+        corrupted = ct.check_fingerprint(TECH_WORKBOOK, family, store=store)
+        check("a corrupted baseline file is reported as a clean error, not raised", corrupted["status"] == "error", corrupted)
+        check("...and names the real family, not a generic message", family in corrupted["detail"], corrupted)
+    except Exception as e:
+        check("a corrupted baseline file is reported as a clean error, not raised", False, f"raised {type(e).__name__}: {e}")
+
+    import shutil
+    shutil.rmtree(store, ignore_errors=True)
+
+
 def test_read_setup_against_the_real_fixture():
     print("read_setup: the real Technical Submission workbook's own SETUP sheet")
     setup = ct.read_setup(TECH_WORKBOOK)
@@ -341,6 +384,7 @@ def main():
     test_real_a_forms_heading_deep_in_the_document_is_still_found()
     test_docx_already_marked_unreadable_is_skipped_without_a_note()
     test_classify_workbook_real_technical_financial_and_corrupt()
+    test_check_fingerprint_no_baseline_match_mismatch_and_corrupted_baseline()
     test_read_setup_against_the_real_fixture()
     test_find_nra_reference_single_ambiguous_and_none()
     test_find_closing_time_single_ambiguous_and_formats()

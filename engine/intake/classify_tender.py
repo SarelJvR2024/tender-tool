@@ -275,7 +275,19 @@ def check_fingerprint(technical_path, family, store=None):
                 "detail": f"No stored '{family}' baseline to compare against yet - the pack run will record this "
                           "template as the first one seen; have a person check the filled workbook carefully.",
                 "changes": []}
-    stored = json.load(open(path))
+    try:
+        stored = json.load(open(path))
+    except Exception as e:
+        # Same discipline as the build_fingerprint() guard above - a corrupted/
+        # truncated baseline file (a bad merge, an interrupted regeneration)
+        # must report cleanly, not raise a raw JSONDecodeError straight out of
+        # the real production intake job (process_general_jobs.py's own
+        # try/except around the whole job would catch it either way, but as
+        # an unhelpful generic failure instead of this function's own clear,
+        # actionable message - the same asymmetric-guard shape already found
+        # and fixed independently in 3 other files this session). QA pass,
+        # 2026-10-29.
+        return {"status": "error", "detail": f"could not read the stored '{family}' baseline: {e}"[:300], "changes": []}
     changes, warnings = fingerprint.diff(stored, current)
     if changes:
         return {"status": "mismatch",

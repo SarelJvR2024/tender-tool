@@ -5555,3 +5555,45 @@ no regression. Already wired into CI.
 **Regression:** `engine/general/test_process_general_jobs.py` only (2 new checks inside an existing
 test function, additive). No production code touched - this pass closed a test-coverage gap on a
 real, previously-undocumented behaviour, not a code bug.
+
+### Finding 97 (CONFIRMED, FIXED, moderate - a corrupted/truncated SANRAL fingerprint baseline file raised a raw JSONDecodeError straight out of the real intake job, instead of the clean "error" status every OTHER failure mode in the same function already reports)
+
+**Where:** intake rotation this cycle. `engine/intake/classify_tender.py`'s `check_fingerprint()` -
+compares a tender's uploaded Technical Submission workbook against the stored baseline for its
+SANRAL family, called from the real production intake path
+(`engine/general/process_general_jobs.py`'s `register_sanral_tender()`, with no try/except of its
+own around the call) and from `opportunity_requirements.py`'s own per-tender classification.
+
+**What was tested:** the function already has a clear, established pattern: `fingerprint.
+build_fingerprint(technical_path)` is wrapped in its own try/except returning a clean `{"status":
+"error", ...}`, and a missing baseline file returns `{"status": "no_baseline", ...}` honestly. Asked
+whether the ONE remaining read in the same function - `json.load(open(path))`, loading the stored
+baseline itself - follows the same discipline. It didn't: no guard at all.
+
+**Finding (CONFIRMED, moderate).** Reproduced directly: a corrupted/truncated baseline JSON file
+(the exact kind of file PR #170's own fingerprint-regeneration work just replaced one of, and the
+kind a bad merge or an interrupted write could produce) makes `check_fingerprint()` raise a raw
+`json.JSONDecodeError` instead of returning a status dict. Traced the real production consequence:
+`process_general_jobs.py`'s `process_job()` DOES have its own top-level `except Exception` around
+the whole job (confirmed by reading it), so this doesn't crash the worker or hang anything - but it
+turns a specific, already-anticipated failure mode into a confusing raw-exception message on that
+one job, instead of the clear, actionable "could not read the stored baseline" text every sibling
+failure mode in this exact function already produces. The same asymmetric-guard shape (one branch
+of a function handles a failure cleanly, a sibling branch doesn't) already found and fixed
+independently in three other files this session (Findings 82/83/84).
+
+**Fix:** wrapped `json.load(open(path))` in the identical try/except pattern already used two lines
+above it for `build_fingerprint()`, returning `{"status": "error", "detail": f"could not read the
+stored '{family}' baseline: {e}"...}`.
+
+**Verified red-then-green.** New test
+`test_check_fingerprint_no_baseline_match_mismatch_and_corrupted_baseline` - the first dedicated
+test for `check_fingerprint()` at all - covers all four real outcomes: no baseline yet, a genuine
+match (the real workbook's own freshly-written fingerprint), a genuine mismatch (a tampered copy),
+and the corrupted-file case. Reverted the fix (`git apply -R`): only the corrupted-file case failed,
+raising the exact predicted `JSONDecodeError`; the other three stayed green, confirming the test is
+precise. Restored: `0 failure(s)`. `engine/test_fingerprint.py`/`engine/general/
+test_general_bridge.py` re-run clean, no regression. Already wired into CI.
+
+**Regression:** `engine/intake/classify_tender.py` (one new try/except), `engine/intake/
+test_classify_tender.py` (1 new test function, 5 checks). No schema or other call-site changes.
