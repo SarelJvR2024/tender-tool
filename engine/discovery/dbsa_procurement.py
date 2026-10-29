@@ -75,33 +75,34 @@ def normalize(row):
         documents=row["documents"],
         source=SOURCE, source_id=row["ref"] or sh.norm_ref(row["title"]), source_url=LIST_URL,
         status="advertised",
-        closing_date=sh.iso_sast(_strip_time_suffix(row["closing"])),
+        closing_date=_parse_dbsa_closing(row["closing"]),
         published_date=sh.iso_sast(row["published"]),
     )
 
 
-_AT_TIME = re.compile(r"\s*@\s*\d{1,2}H\d{2}", re.I)
+_AT_TIME = re.compile(r"\s*@\s*(\d{1,2})H(\d{2})", re.I)
 
 
-def _strip_time_suffix(s):
+def _parse_dbsa_closing(s):
     """DBSA writes closing times as '02 November 2026 @ 23H55' -
-    parse_sast() reads neither the day-month-year word order nor the 'H'
-    time separator, so only the date part is usable here; the exact
-    closing time is still on the tender's own detail/advert, not lost."""
+    parse_sast() reads the day-month-year word order but not the 'H' time
+    separator, so convert '@ 23H55' to the '23:55' form parse_sast() already
+    understands (Rand Water's own format) rather than discarding it. Found
+    2026-10-29: the previous version stripped the time suffix entirely and
+    fed the bare date through iso_sast(), which defaults a time-only-unknown
+    date to SAST midnight - but DBSA HAD stated a real time here, so this
+    quietly turned a 23:55 close into a 00:00 one shown as "(Time TBC in
+    RFP)" on the same day, nearly a full day earlier than DBSA's own stated
+    deadline. Only a genuinely time-less closing (none seen in practice, but
+    not ruled out) falls back to iso_sast_closing()'s 11:00 SAST convention,
+    the same as every other confirmed date-only source."""
     if not s:
         return None
-    s = _AT_TIME.sub("", s).strip()
-    m = re.match(r"(\d{1,2})\s+(\w+)\s+(20\d{2})", s)
+    m = _AT_TIME.search(s)
     if not m:
-        return None
-    day, month_name, year = m.groups()
-    months = {name: i for i, name in enumerate(
-        ["january", "february", "march", "april", "may", "june", "july",
-         "august", "september", "october", "november", "december"], start=1)}
-    month = months.get(month_name.lower())
-    if not month:
-        return None
-    return f"{year}-{month:02d}-{int(day):02d}"
+        return sh.iso_sast_closing(s)
+    s = _AT_TIME.sub(f" {int(m.group(1)):02d}:{m.group(2)}", s).strip()
+    return sh.iso_sast(s)
 
 
 def fetch_releases(log=print):

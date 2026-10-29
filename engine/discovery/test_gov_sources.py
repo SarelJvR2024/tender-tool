@@ -189,10 +189,16 @@ def test_new_sources():
     rows = dbsa_procurement.parse_table(DBSA_TABLE_HTML)
     check("DBSA: header row skipped, 2 tenders parsed", len(rows) == 2, len(rows))
     rels = [dbsa_procurement.normalize(r) for r in rows]
-    check("DBSA ref + closing date", rels[0]["contract_number"] == "RFP164/2026"
-          and rels[0]["closing_date"] == "2026-11-02T00:00:00+02:00")
+    check("DBSA ref + closing date - real stated time (23:55) preserved, not defaulted to midnight",
+          rels[0]["contract_number"] == "RFP164/2026"
+          and rels[0]["closing_date"] == "2026-11-02T23:55:00+02:00")
     check("DBSA doc link resolved to an absolute URL", rels[0]["documents"][0]["url"].startswith("https://www.dbsa.org/"))
     check("DBSA: a typo'd month ('Ocober') in the closing date -> unset, not a crash", rels[1]["closing_date"] is None)
+    check("DBSA: single-digit hour ('9H00') parsed as 09:00, not dropped",
+          dbsa_procurement._parse_dbsa_closing("9 January 2027 @ 9H00") == "2027-01-09T09:00:00+02:00")
+    check("DBSA: a genuinely date-only closing (no '@ HH:MM' seen) defaults to the 11:00 SAST "
+          "convention, not midnight - same as every other confirmed date-only source",
+          dbsa_procurement._parse_dbsa_closing("12 October 2026") == "2026-10-12T11:00:00+02:00")
 
     check("new sources registered in ALL_SOURCES", {"sars_procurement", "cidb_tenders", "dbsa_procurement"}
           <= set(gov_sources.ALL_SOURCES))

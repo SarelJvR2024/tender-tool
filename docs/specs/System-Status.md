@@ -14,6 +14,60 @@
 
 ---
 
+## This pass (2026-10-29, standing solution-architect review): Finding 99 - DBSA's real stated closing TIME (`@ 23H55`) was being discarded, not just defaulted - the actual bug was worse than the "date-only default" shape found earlier this session
+
+Oriented from `12a4908` (a different session's `fix(notify)` for `daily_digest.py`'s silently-dropped
+ownerless seen-row, found after my own last-known commit `05acc4f`) - `git fetch origin main` showed
+this one new commit; verified its real diff (not just its commit message) before fast-forwarding
+local `main`, no overlap with anything touched this pass. Open PRs re-checked via the GitHub API:
+`#172`, `#165`, `#164`, all unchanged, none touching `engine/discovery/` - no collision.
+
+Per this pass's own directive, looked at the discovery scrapers for a non-SANRAL source for a sibling
+of the "closing-time convention" bug class this session has repeatedly found (day-count drift, the
+SANRAL date-only default). Found something **more serious than that shape, not just another
+instance of it**, in `engine/discovery/dbsa_procurement.py` (the Development Bank of Southern
+Africa's open-RFP/RFR table, wired live into `gov_sources.py`, 14 open tenders as of the last real
+check 2026-10-18): DBSA's own closing-date cells always carry a real, explicit time in the form
+`02 November 2026 @ 23H55` - but the old `_strip_time_suffix()` discarded that `@ 23H55` suffix
+entirely before handing the bare date to `sh.iso_sast()`, which then defaulted it to SAST midnight
+(the generic "no time given" marker). That's not the earlier "picked the wrong default for an
+unknown time" bug - DBSA's time here is **known and real**, and the old code threw it away, turning
+a 23:55 deadline into one `tenders.closing_date` recorded as `00:00:00` on the same calendar day (and
+rendered by `dates.ts` as `"(Time TBC in RFP)"`, actively telling the customer the time was unstated
+when DBSA had in fact stated it) - up to a full day earlier than the real deadline, in the wrong
+direction a customer could act on.
+
+Confirmed the existing test fixture (`test_gov_sources.py`'s `DBSA_TABLE_HTML`, a real row captured
+2026-10-18) already encoded this as the *expected* result (`closing_date ==
+"2026-11-02T00:00:00+02:00"`) - the bug was baked into the test, not merely untested.
+
+Fixed by replacing `_strip_time_suffix()` with `_parse_dbsa_closing()`: it now converts DBSA's
+`@ HH'H'MM` suffix into the `HH:MM` form `parse_sast()` already understands for a `DD Month YYYY`
+date (same format Rand Water uses) and keeps calling `sh.iso_sast()` on the result - preserving the
+real time instead of discarding it. Only a genuinely time-less DBSA closing (none seen in practice,
+not ruled out) now falls back to `sh.iso_sast_closing()`'s existing 11:00 SAST convention, the same
+default every other confirmed date-only source already uses - previously even that bare-date case
+would have defaulted to midnight via `iso_sast()`, so this closes that latent gap too.
+
+Verified: updated the existing fixture assertion to the correct value
+(`"2026-11-02T23:55:00+02:00"`), added two new checks (a single-digit-hour case, `9H00` -> `09:00`;
+and a genuinely date-only case confirming the 11:00 fallback), and did a revert-and-confirm-red pass -
+stashed the fix and re-ran: the main assertion failed exactly as expected (red), the typo-month case
+stayed green (unaffected), restored, clean. `python3 engine/discovery/test_gov_sources.py` -> ALL
+PASSED; `test_source_http.py` and `test_tender_updates.py` run as an adjacent sanity sweep, both
+clean; `py_compile` clean on both touched files.
+
+Committed and pushed directly to `main` (small, fully verified, no PR):
+- `engine/discovery/dbsa_procurement.py`
+- `engine/discovery/test_gov_sources.py`
+- `docs/specs/System-Status.md`
+
+No live-database access, no mutation attempted - this is a pure code/parsing fix, not a migration.
+Backlog unchanged at 12 items - this finding was standalone, nothing resolved or added to Sarel's own
+judgment-call list.
+
+---
+
 ## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-fourth run): Finding 98 (minor) - a readiness-change whose field_provenance row's tender_pack went missing was dropped from the daily digest's seen store with zero trace, unlike the identical shape of problem (`watch_deadlines.save_seen_db()`) elsewhere in the same codebase
 
 Oriented from `05acc4f` (a sibling pass's Finding 97 - no reconciliation for an `'active'`
