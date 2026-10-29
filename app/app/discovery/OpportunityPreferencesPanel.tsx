@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Settings2 } from "lucide-react";
+import { Settings2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { setOpportunityPreferences } from "./preferencesActions";
 import { taxonomyGroups, type DisciplineTaxonomy } from "@/lib/disciplineTaxonomy";
@@ -9,6 +9,18 @@ import { taxonomyGroups, type DisciplineTaxonomy } from "@/lib/disciplineTaxonom
 /** Pure: on/off toggle for a slug in a discipline list, used by the panel's chip handler. */
 function toggleDiscipline(current: string[], slug: string): string[] {
   return current.includes(slug) ? current.filter((s) => s !== slug) : [...current, slug];
+}
+
+/** Pure: case/whitespace-insensitive add, same normalisation as
+ * lib/opportunityBuyerMatch.ts's own sanitizePreferredBuyers() dedupe - kept
+ * tiny and local here since the panel only needs "is this already in the
+ * list", not the server-side cap/length rules (preferencesActions.ts
+ * re-sanitises on save regardless, so a crafted client call can't bypass
+ * those). */
+function addBuyer(current: string[], raw: string): string[] {
+  const trimmed = raw.trim().replace(/\s+/g, " ");
+  if (!trimmed || current.some((b) => b.toLowerCase() === trimmed.toLowerCase())) return current;
+  return [...current, trimmed];
 }
 
 /**
@@ -39,33 +51,51 @@ export function OpportunityPreferencesPanel({
   taxonomy,
   initialHideSanral,
   initialDisciplines,
+  initialPreferredBuyers,
 }: {
   taxonomy: DisciplineTaxonomy;
   initialHideSanral: boolean;
   initialDisciplines: string[];
+  initialPreferredBuyers: string[];
 }) {
   const [hideSanral, setHideSanral] = useState(initialHideSanral);
   const [disciplines, setDisciplines] = useState(initialDisciplines);
+  const [preferredBuyers, setPreferredBuyers] = useState(initialPreferredBuyers);
+  const [buyerDraft, setBuyerDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const groups = taxonomyGroups(taxonomy);
 
-  function save(nextHideSanral: boolean, nextDisciplines: string[]) {
+  function save(nextHideSanral: boolean, nextDisciplines: string[], nextPreferredBuyers: string[]) {
     const prevHideSanral = hideSanral;
     const prevDisciplines = disciplines;
+    const prevPreferredBuyers = preferredBuyers;
     setHideSanral(nextHideSanral);
     setDisciplines(nextDisciplines);
+    setPreferredBuyers(nextPreferredBuyers);
     setError(null);
     startTransition(async () => {
-      const result = await setOpportunityPreferences(nextHideSanral, nextDisciplines);
+      const result = await setOpportunityPreferences(nextHideSanral, nextDisciplines, nextPreferredBuyers);
       if (!result.ok) {
         // Revert the optimistic update - a save that didn't actually land
         // should never leave the UI claiming otherwise.
         setHideSanral(prevHideSanral);
         setDisciplines(prevDisciplines);
+        setPreferredBuyers(prevPreferredBuyers);
         setError(result.error);
       }
     });
+  }
+
+  function addPreferredBuyer(raw: string) {
+    const next = addBuyer(preferredBuyers, raw);
+    if (next === preferredBuyers) return; // empty or already there - addBuyer() is pure, no-op returns the same reference
+    setBuyerDraft("");
+    save(hideSanral, disciplines, next);
+  }
+
+  function removePreferredBuyer(buyer: string) {
+    save(hideSanral, disciplines, preferredBuyers.filter((b) => b !== buyer));
   }
 
   return (
@@ -94,7 +124,7 @@ export function OpportunityPreferencesPanel({
           <input
             type="checkbox"
             checked={hideSanral}
-            onChange={(e) => save(e.target.checked, disciplines)}
+            onChange={(e) => save(e.target.checked, disciplines, preferredBuyers)}
             className="size-4 accent-accent"
           />
           Don&apos;t show me SANRAL / road-construction tenders - my company doesn&apos;t do that work
@@ -117,7 +147,7 @@ export function OpportunityPreferencesPanel({
                       key={c.slug}
                       type="button"
                       disabled={isPending}
-                      onClick={() => save(hideSanral, toggleDiscipline(disciplines, c.slug))}
+                      onClick={() => save(hideSanral, toggleDiscipline(disciplines, c.slug), preferredBuyers)}
                       className={cn(
                         "min-h-8 rounded-full border px-2.5 text-[11px] font-semibold",
                         active ? "border-accent bg-accent/10 text-accent" : "border-border bg-card text-muted-foreground",
@@ -131,6 +161,45 @@ export function OpportunityPreferencesPanel({
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="mb-1 mt-4 text-xs font-semibold text-foreground">Clients we work with</div>
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          Name a buyer (e.g. a municipality, SANRAL, a specific department) and tenders from them sort to the top of
+          whichever tab you&apos;re already on - same as disciplines above, this never hides or re-scores anything,
+          it just surfaces your own clients first.
+        </p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {preferredBuyers.map((b) => (
+            <span key={b} className="flex items-center gap-1 rounded-full bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent">
+              {b}
+              <button
+                type="button"
+                disabled={isPending}
+                onClick={() => removePreferredBuyer(b)}
+                aria-label={`Remove ${b} from preferred clients`}
+                className="flex size-3.5 items-center justify-center rounded-full hover:bg-accent/20"
+              >
+                <X className="size-2.5" />
+              </button>
+            </span>
+          ))}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              addPreferredBuyer(buyerDraft);
+            }}
+            className="flex items-center"
+          >
+            <input
+              type="text"
+              value={buyerDraft}
+              disabled={isPending}
+              onChange={(e) => setBuyerDraft(e.target.value)}
+              placeholder="+ add client"
+              className="min-h-8 w-32 rounded-full border border-dashed border-border bg-transparent px-2.5 text-[11px] text-foreground placeholder:text-muted-foreground focus:w-44 focus:outline-none disabled:opacity-60"
+            />
+          </form>
         </div>
       </div>
     </details>

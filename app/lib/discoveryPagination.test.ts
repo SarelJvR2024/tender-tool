@@ -15,6 +15,7 @@ import {
   nextShow,
   PAGE_SIZE,
   parseShowParam,
+  shouldExcludeDeclined,
   verdictQuerySpec,
 } from "./discoveryPagination.ts";
 
@@ -80,7 +81,26 @@ test("verdictQuerySpec: declined is a real column predicate (interest_marker = '
   assert.deepEqual(verdictQuerySpec("declined"), { kind: "eq", column: "interest_marker", value: "declined" });
 });
 
+test("verdictQuerySpec: interested is a real column predicate (interest_marker = 'interested', migration 0104), symmetric with declined", () => {
+  assert.deepEqual(verdictQuerySpec("interested"), { kind: "eq", column: "interest_marker", value: "interested" });
+});
+
+test("verdictQuerySpec: likely_fit groups strong_fit + possible ONLY - deliberately not the same grouping as needs_review (possible + needs_review)", () => {
+  assert.deepEqual(verdictQuerySpec("likely_fit"), { kind: "in", column: "verdict", values: ["strong_fit", "possible"] });
+  assert.notDeepEqual(verdictQuerySpec("likely_fit"), verdictQuerySpec("needs_review"));
+});
+
+test("shouldExcludeDeclined: true for every tab except declined itself", () => {
+  assert.equal(shouldExcludeDeclined("declined"), false);
+  for (const f of ["all", "strong_fit", "likely_fit", "needs_review", "not_a_fit", "changed", "reassessed", "interested"] as const) {
+    assert.equal(shouldExcludeDeclined(f), true, f);
+  }
+});
+
 test("COUNTABLE_FILTERS: every filter except changed has a cheap exact count available", () => {
-  assert.deepEqual([...COUNTABLE_FILTERS].sort(), ["all", "declined", "needs_review", "not_a_fit", "reassessed", "strong_fit"].sort());
+  assert.deepEqual(
+    [...COUNTABLE_FILTERS].sort(),
+    ["all", "declined", "interested", "likely_fit", "needs_review", "not_a_fit", "reassessed", "strong_fit"].sort(),
+  );
   assert.equal(COUNTABLE_FILTERS.includes("changed" as never), false);
 });

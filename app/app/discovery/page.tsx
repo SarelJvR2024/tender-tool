@@ -26,7 +26,16 @@ import { ErrorState } from "@/components/tt/error-state";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Inbox } from "lucide-react";
-import { canLoadMore, COUNTABLE_FILTERS, hasMore, nextShow, parseShowParam, verdictQuerySpec } from "@/lib/discoveryPagination";
+import {
+  canLoadMore,
+  COUNTABLE_FILTERS,
+  hasMore,
+  nextShow,
+  parseShowParam,
+  shouldExcludeDeclined,
+  verdictQuerySpec,
+  type VerdictFilter,
+} from "@/lib/discoveryPagination";
 import { closingCountdown, formatClosingDateTime } from "@/lib/dates";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { buildDoneHistory, pricingCategoriesFor, pricingSegmentKey, similarTendersBefore } from "@/lib/opportunityInsights";
@@ -35,6 +44,7 @@ import { formatRand } from "@/lib/dealEconomics";
 import { OpportunityPreferencesPanel } from "./OpportunityPreferencesPanel";
 import { hasNoTaggedDisciplines } from "@/lib/disciplineTaggingNudge";
 import { matchesInterestedDisciplines } from "@/lib/opportunityDisciplineMatch";
+import { matchesPreferredBuyers } from "@/lib/opportunityBuyerMatch";
 import { OpportunityQuickActions } from "./OpportunityQuickActions";
 import { displayTenderTitle } from "@/lib/titleCase";
 
@@ -125,7 +135,12 @@ const XREF_STYLE: Record<string, { label: string; chipClass: string }> = {
   unmapped: { label: "not cross-referenced yet", chipClass: "bg-muted text-muted-foreground" },
 };
 
-type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed" | "declined";
+// VerdictFilter used to be redefined locally here, drifted from
+// lib/discoveryPagination.ts's own export (same name, same values, two
+// places that could silently disagree - the exact bug shape this session's
+// own standing-review passes keep finding elsewhere in this codebase, see
+// docs/specs/System-Status.md). Fixed while adding "likely_fit"/"interested"
+// (2026-10-29): now imported, not redeclared.
 
 // "Declined" (migration 0089, task item 4) is a different axis from the rest
 // of this list - the company's own quick-decline mark (interest_marker),
@@ -146,6 +161,12 @@ type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "chan
 const FILTERS: { key: VerdictFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "strong_fit", label: "Strong fit" },
+  // "High likelihood of compliance" (Sarel, 2026-10-29: "a filter ... so I
+  // can see all tenders I potentially qualify for") - strong_fit + possible
+  // only, a DIFFERENT grouping than "Needs review" below (which groups
+  // possible + needs_review) - see lib/discoveryPagination.ts's own
+  // VerdictFilter comment for why these answer different questions.
+  { key: "likely_fit", label: "Likely to qualify" },
   { key: "needs_review", label: "Needs review" },
   { key: "not_a_fit", label: "Not a fit" },
   // Tenders whose listing changed since it was found: cancelled, closing
@@ -153,7 +174,12 @@ const FILTERS: { key: VerdictFilter; label: string }[] = [
   { key: "changed", label: "Changed" },
   // 0055: a re-assessment made the verdict worse (still flagged or already seen).
   { key: "reassessed", label: "Re-assessed" },
+  // 0104: this company marked it "Interested" - symmetric with Declined below.
+  { key: "interested", label: "Interested" },
   // 0089: this company marked it "Not interested" - see the module comment above.
+  // Hidden from every OTHER tab by default (withVerdictSpec() below,
+  // shouldExcludeDeclined()) - this is the one place a declined row is
+  // still shown, by design.
   { key: "declined", label: "Declined" },
 ];
 
@@ -181,18 +207,24 @@ function verdictChip(verdict: string): { label: string; chipClass: string } {
 export default async function DiscoveryPage({
   searchParams,
 }: {
-  searchParams: Promise<{ verdict?: string; error?: string; show?: string }>;
+  searchParams: Promise<{ verdict?: string; error?: string; show?: string; buyer?: string }>;
 }) {
-  const { verdict: verdictParam, error: actionError, show: showParam } = await searchParams;
+  const { verdict: verdictParam, error: actionError, show: showParam, buyer: buyerParam } = await searchParams;
   const activeFilter: VerdictFilter = FILTERS.some((f) => f.key === verdictParam)
     ? (verdictParam as VerdictFilter)
     : "all";
   // Scaling fix (see lib/discoveryPagination.ts): a growing "show" window
   // instead of fetching this company's entire scored history on every load.
   const show = parseShowParam(showParam);
+  // Client/buyer filter (Sarel, 2026-10-29: "add a filter for clients") -
+  // free text, no fixed taxonomy to validate against (same reasoning as
+  // preferred_buyers, lib/opportunityBuyerMatch.ts). Capped and trimmed here
+  // rather than thrown on a garbage value, same "degrade, don't error"
+  // discipline as parseShowParam() right above.
+  const buyerFilter = (Array.isArray(buyerParam) ? buyerParam[0] : buyerParam ?? "").trim().slice(0, 120);
 
   try {
-    return await renderDiscovery(activeFilter, actionError, show);
+    return await renderDiscovery(activeFilter, actionError, show, buyerFilter);
   } catch (e) {
     console.error("discovery page failed to load", e);
     return (
@@ -215,18 +247,35 @@ export default async function DiscoveryPage({
 // discovered_opportunities query builder. Kept as one tiny function so the
 // main row query and every count query build their WHERE clause from the
 // exact same pure mapping - no risk of the two drifting apart.
-function withVerdictSpec<Q extends { eq: (c: string, v: string) => Q; in: (c: string, v: string[]) => Q; not: (c: string, op: string, v: null) => Q }>(
-  query: Q,
-  filter: VerdictFilter,
-): Q {
+//
+// Also applies shouldExcludeDeclined() (Sarel, 2026-10-29: declining a
+// tender should remove it from view everywhere except the Declined tab
+// itself) - composed here rather than in verdictQuerySpec() because it
+// ANDs with whatever spec the tab already has, not a replacement for it.
+// NULL-safe on purpose: a plain `.neq("interest_marker", "declined")` would
+// also exclude every row with interest_marker IS NULL (`<> 'declined'`
+// evaluates to NULL, not TRUE, when the column is NULL - Postgres's own
+// three-valued WHERE semantics), which is almost every row today (declining
+// something is the rare case). `.or("interest_marker.is.null,interest_marker.neq.declined")`
+// keeps both "never marked" and "marked anything but declined".
+function withVerdictSpec<
+  Q extends {
+    eq: (c: string, v: string) => Q;
+    in: (c: string, v: string[]) => Q;
+    not: (c: string, op: string, v: null) => Q;
+    or: (s: string) => Q;
+  },
+>(query: Q, filter: VerdictFilter): Q {
   const spec = verdictQuerySpec(filter);
-  if (spec.kind === "eq") return query.eq(spec.column, spec.value);
-  if (spec.kind === "in") return query.in(spec.column, spec.values);
-  if (spec.kind === "not_null") return query.not(spec.column, "is", null);
-  return query;
+  let q = query;
+  if (spec.kind === "eq") q = q.eq(spec.column, spec.value);
+  else if (spec.kind === "in") q = q.in(spec.column, spec.values);
+  else if (spec.kind === "not_null") q = q.not(spec.column, "is", null);
+  if (shouldExcludeDeclined(filter)) q = q.or("interest_marker.is.null,interest_marker.neq.declined");
+  return q;
 }
 
-async function renderDiscovery(activeFilter: VerdictFilter, actionError: string | undefined, show: number) {
+async function renderDiscovery(activeFilter: VerdictFilter, actionError: string | undefined, show: number, buyerFilter: string) {
   const supabase = await createClient();
   const taxonomy = await loadDisciplineTaxonomy(supabase); // category labels (0040)
 
@@ -248,6 +297,14 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
     .order("first_seen", { ascending: false })
     .order("id", { ascending: false }); // deterministic tiebreak only - not an indexed column, just keeps "top N" stable across requests
   opportunityQuery = withVerdictSpec(opportunityQuery, activeFilter);
+  // Client/buyer filter (Sarel, 2026-10-29: "add a filter for clients") -
+  // a plain `ilike` substring match on the raw buyer column (no canonical
+  // buyer list exists anywhere in this schema - see
+  // lib/opportunityBuyerMatch.ts's own header comment), applied here and to
+  // every per-tab count query below so counts stay accurate for whatever
+  // buyer is currently typed in, same reasoning withVerdictSpec() already
+  // documents for verdict.
+  if (buyerFilter) opportunityQuery = opportunityQuery.ilike("buyer", `%${buyerFilter}%`);
 
   const [
     { data: opportunities, error },
@@ -319,7 +376,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
     // applied live - degrades to "no preferences saved" rather than
     // failing the whole page (same discipline as loadDisciplineTaxonomy's
     // own table-missing fallback).
-    supabase.from("company_tender_preferences").select("hide_sanral_board, interested_disciplines").maybeSingle(),
+    supabase.from("company_tender_preferences").select("hide_sanral_board, interested_disciplines, preferred_buyers").maybeSingle(),
   ]);
   if (error) console.error("discovered_opportunities select failed", error);
   if (openDowngradeError) console.error("open-downgrade banner count failed", openDowngradeError);
@@ -330,8 +387,11 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   // read error and, until Sarel applies migration 0088 live, the table not
   // existing at all yet.
   if (preferencesError) console.error("company_tender_preferences select failed", preferencesError);
-  const preferences = (preferencesRow ?? null) as { hide_sanral_board: boolean; interested_disciplines: string[] } | null;
+  const preferences = (preferencesRow ?? null) as
+    | { hide_sanral_board: boolean; interested_disciplines: string[]; preferred_buyers: string[] }
+    | null;
   const interestedDisciplines = preferences?.interested_disciplines ?? [];
+  const preferredBuyers = preferences?.preferred_buyers ?? [];
   const noTaggedDisciplines = hasNoTaggedDisciplines((experienceDisciplineRows ?? []) as { tagged_at: string | null; disciplines: string[] | null }[]);
   const { data: { user } } = await supabase.auth.getUser();
   const stageByTender = new Map<string, string>();
@@ -381,6 +441,11 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   // never set a preference (interestedDisciplines.length === 0) sees
   // exactly the order it always has (matchesInterestedDisciplines()
   // returns true for everything in that case, so this sort key is a no-op).
+  // preferredBuyers (migration 0104) is the same additive, never-a-filter
+  // sort boost, one tier below discipline match - a row matching BOTH sorts
+  // ahead of one matching only discipline, which sorts ahead of one matching
+  // neither; see lib/opportunityBuyerMatch.ts's own header comment for why
+  // buyer matching is a substring check rather than an exact comparison.
   const rows = fetchedRows
     .slice(0, show)
     .map((r, i) => ({ r, i }))
@@ -389,6 +454,8 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
         Number(isOpenDowngrade(b.r)) - Number(isOpenDowngrade(a.r)) ||
         Number(matchesInterestedDisciplines(taxonomy, interestedDisciplines, b.r.categories)) -
           Number(matchesInterestedDisciplines(taxonomy, interestedDisciplines, a.r.categories)) ||
+        Number(matchesPreferredBuyers(preferredBuyers, b.r.buyer)) -
+          Number(matchesPreferredBuyers(preferredBuyers, a.r.buyer)) ||
         a.i - b.i,
     )
     .map(({ r }) => r);
@@ -409,6 +476,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
     COUNTABLE_FILTERS.map(async (f) => {
       let q = supabase.from("discovered_opportunities").select("id", { count: "exact", head: true });
       q = withVerdictSpec(q, f);
+      if (buyerFilter) q = q.ilike("buyer", `%${buyerFilter}%`);
       const { count, error: countError } = await q;
       if (countError) console.error(`discovered_opportunities count failed for filter=${f}`, countError);
       return [f, count ?? 0] as const;
@@ -455,6 +523,15 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
   // history outside the current window won't suggest until that row is
   // loaded too.
   const allCompanyTags = [...new Set(fetchedRows.flatMap((r) => r.company_tags ?? []))].sort();
+
+  // Client/buyer filter suggestions (Sarel, 2026-10-29: "add a filter for
+  // clients") - same scoped-to-current-window limitation as allCompanyTags
+  // just above, for the same reason: no canonical buyer list exists
+  // anywhere in this schema to draw a full-history suggestion list from
+  // (lib/opportunityBuyerMatch.ts's own header comment). Also offers this
+  // company's own preferred_buyers (migration 0104) even if none of them
+  // happen to be in the current window yet.
+  const allBuyers = [...new Set([...fetchedRows.map((r) => r.buyer).filter((b): b is string => !!b), ...preferredBuyers])].sort();
 
   // Scope/pricing-model/value-band record (0060) for tenders this company has
   // already pursued - per already-pursued row, not history-wide, so it's
@@ -552,6 +629,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
           taxonomy={taxonomy}
           initialHideSanral={preferences?.hide_sanral_board ?? false}
           initialDisciplines={interestedDisciplines}
+          initialPreferredBuyers={preferredBuyers}
         />
 
         {noTaggedDisciplines && (
@@ -588,14 +666,52 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
           </div>
         )}
 
+        {/* Client/buyer filter (Sarel, 2026-10-29: "add a filter for
+            clients") - a plain GET form so no client JS is needed; the
+            verdict tab (if any) is preserved as a hidden field so typing a
+            buyer never resets whichever tab is open. Tab links below also
+            carry this forward (buyerQuerySuffix) so switching tabs never
+            silently drops a typed-in buyer filter either. */}
+        <form method="get" action="/discovery" className="mb-3 flex items-center gap-2">
+          {activeFilter !== "all" && <input type="hidden" name="verdict" value={activeFilter} />}
+          <input
+            type="text"
+            name="buyer"
+            defaultValue={buyerFilter}
+            placeholder="Filter by client / buyer…"
+            list="buyer-suggestions"
+            className="min-h-10 w-full max-w-xs rounded-lg border border-border bg-card px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none sm:w-64"
+          />
+          <datalist id="buyer-suggestions">
+            {allBuyers.map((b) => (
+              <option key={b} value={b} />
+            ))}
+          </datalist>
+          <button type="submit" className={cn(buttonVariants({ variant: "outline", size: "sm" }), "min-h-10")}>
+            Filter
+          </button>
+          {buyerFilter && (
+            <a href={activeFilter === "all" ? "/discovery" : `/discovery?verdict=${activeFilter}`} className="text-xs font-semibold text-muted-foreground underline">
+              Clear
+            </a>
+          )}
+        </form>
+
         <div className="relative mb-5">
           <div className="flex gap-2 overflow-x-auto pb-1" style={{ WebkitOverflowScrolling: "touch" }}>
             {FILTERS.map((f) => {
               const isActive = f.key === activeFilter;
+              const buyerQuerySuffix = buyerFilter ? `&buyer=${encodeURIComponent(buyerFilter)}` : "";
               return (
                 <a
                   key={f.key}
-                  href={f.key === "all" ? "/discovery" : `/discovery?verdict=${f.key}`}
+                  href={
+                    f.key === "all"
+                      ? buyerFilter
+                        ? `/discovery?buyer=${encodeURIComponent(buyerFilter)}`
+                        : "/discovery"
+                      : `/discovery?verdict=${f.key}${buyerQuerySuffix}`
+                  }
                   className={cn(
                     "flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-xs font-semibold no-underline",
                     isActive ? "border-foreground bg-foreground text-background" : "border-border bg-card text-foreground",
@@ -966,7 +1082,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
         {canLoadMore(show, moreBeyondWindow) && (
           <div className="mt-4 flex justify-center">
             <a
-              href={`/discovery?verdict=${activeFilter}&show=${nextShow(show)}`}
+              href={`/discovery?verdict=${activeFilter}&show=${nextShow(show)}${buyerFilter ? `&buyer=${encodeURIComponent(buyerFilter)}` : ""}`}
               className={buttonVariants({ variant: "outline", className: "min-h-11" })}
             >
               Load more

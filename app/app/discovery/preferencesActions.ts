@@ -4,6 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { SLUG_RE } from "@/lib/disciplineTaxonomy";
+import { sanitizePreferredBuyers } from "@/lib/opportunityBuyerMatch";
 
 /**
  * Tenant check, same pattern as app/app/tenders/[id]/actions.ts's own
@@ -38,8 +39,9 @@ async function requireCompanyId() {
  * hideSanralBoard gates app/app/pipeline/page.tsx's shared "found" column
  * (every open SANRAL-conventional tender from the un-tenant-scoped `tenders`
  * table, shown to every company by default today - see that file's own
- * renderPipeline() comment); interestedDisciplines feeds
- * app/app/discovery/page.tsx's own additive match/deprioritize logic.
+ * renderPipeline() comment); interestedDisciplines and preferredBuyers both
+ * feed app/app/discovery/page.tsx's own additive match/deprioritize logic
+ * (lib/opportunityDisciplineMatch.ts / lib/opportunityBuyerMatch.ts).
  * Neither this action nor either page ever changes what the scoring engine
  * itself computes (discovered_opportunities.verdict) - this is a UI-level
  * filter/sort only, same distinction the table's own comment draws.
@@ -52,7 +54,11 @@ async function requireCompanyId() {
  * the signed-in user's own company_members row, so there is nothing a
  * crafted client call could spoof.
  */
-export async function setOpportunityPreferences(hideSanralBoard: boolean, interestedDisciplines: string[]) {
+export async function setOpportunityPreferences(
+  hideSanralBoard: boolean,
+  interestedDisciplines: string[],
+  preferredBuyers: string[] = [],
+) {
   const companyId = await requireCompanyId();
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -65,12 +71,17 @@ export async function setOpportunityPreferences(hideSanralBoard: boolean, intere
   const disciplines = Array.from(
     new Set((interestedDisciplines ?? []).filter((d): d is string => typeof d === "string" && SLUG_RE.test(d))),
   );
+  // preferredBuyers has no fixed taxonomy to validate against (buyer names
+  // aren't normalised anywhere in this schema) - sanitizePreferredBuyers()
+  // caps shape (trim, length, count, dedupe) instead of a slug check.
+  const buyers = sanitizePreferredBuyers(preferredBuyers);
 
   const { error } = await supabase.from("company_tender_preferences").upsert(
     {
       company_id: companyId,
       hide_sanral_board: hideSanralBoard === true,
       interested_disciplines: disciplines,
+      preferred_buyers: buyers,
       updated_at: new Date().toISOString(),
       updated_by: user?.id ?? null,
     },
@@ -82,11 +93,24 @@ export async function setOpportunityPreferences(hideSanralBoard: boolean, intere
     return { ok: false as const, error: "Could not save your opportunity preferences - try again. If it keeps happening, let us know." };
   }
 
-  // Both pages read this table directly (same pattern as every other
-  // company-scoped setting - see app/app/company/actions.ts) - revalidate
-  // both so a change here is reflected immediately, not just on this page's
-  // own next natural reload.
-  revalidatePath("/discovery");
+  // Only /pipeline, and only revalidated here - not every write needs to
+  // force a fresh render. Real finding, 2026-10-29 (Sarel: "opportunity
+  // preferences are taking very long to save when clicking on any"):
+  // revalidatePath("/discovery") used to run unconditionally on every single
+  // chip/checkbox click, forcing discovery/page.tsx's renderDiscovery() to
+  // redo its full, deliberately-heavy pipeline (8 parallel queries, N+1
+  // listing-change/scope lookups, up to MAX_PRICING_LOOKUPS=40 market-pricing
+  // lookups) before the click could visually resolve - exactly what made
+  // every toggle feel like it "took forever". interested_disciplines only
+  // ever re-SORTS rows that page already fetched (matchesInterestedDisciplines(),
+  // never a WHERE clause) - see this file's own header comment - so there is
+  // nothing there that genuinely needs a synchronous refetch; the panel's own
+  // optimistic local state already shows the new chip state instantly, and
+  // the next natural /discovery load picks up the new sort order for free.
+  // hide_sanral_board is different: pipeline/page.tsx's renderPipeline()
+  // actually filters its "found" column by this value (a real WHERE-adjacent
+  // branch, not just a sort), so that page's own cache genuinely needs
+  // invalidating - and renderPipeline() isn't the expensive one.
   revalidatePath("/pipeline");
   return { ok: true as const };
 }

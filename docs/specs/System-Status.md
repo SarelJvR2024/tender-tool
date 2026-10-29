@@ -14,6 +14,78 @@
 
 ---
 
+**2026-10-29 ~08:50 UTC — Discovery page: fixed the slow Opportunity-preferences save and the flaky
+"Interested" button (same root cause), added a preferred-clients preference, and three new filters
+(Sarel's own live feedback, 2026-10-29).**
+
+**Root cause, confirmed by reading the code, not guessed:** `preferencesActions.ts`'s
+`setOpportunityPreferences()` and `actions.ts`'s `setOpportunityTag()`/`setOpportunityInterest()` all
+called `revalidatePath("/discovery")` on every single checkbox/chip/button click - forcing
+`page.tsx`'s own deliberately heavy `renderDiscovery()` (8 parallel queries, N+1 listing-change/scope
+lookups, up to `MAX_PRICING_LOOKUPS=40` market-pricing lookups) to re-run synchronously before the
+click could visually resolve. `OpportunityQuickActions.tsx`'s "Interested"/tag controls had NO local
+optimistic state at all (by design, per its own prior header comment) - they relied entirely on that
+slow revalidate to show the new value, so a user who clicked again before it resolved was reading the
+STALE `interest` prop and could flip it straight back off - not "nothing happened", an actual
+flip-flop. Two fixes, not one band-aid:
+- `preferencesActions.ts`: dropped `revalidatePath("/discovery")` entirely (confirmed by reading the
+  file's own header comment that `interested_disciplines` is "a UI-level filter/sort only" - a pure
+  in-memory re-sort of rows the page already fetched, never a WHERE clause - so nothing there
+  genuinely needs a synchronous refetch); kept `revalidatePath("/pipeline")` (`hide_sanral_board`
+  really does gate that page's own "found" column, a real branch, not just a sort).
+- `OpportunityQuickActions.tsx`: added the exact optimistic-update-then-revert-on-failure pattern
+  `OpportunityPreferencesPanel.tsx` already used successfully - `setOpportunityTag`/
+  `setOpportunityInterest` (`actions.ts`) now return `{ok}` so the component knows whether to revert.
+  Their own `revalidatePath("/discovery")` stays (interest_marker genuinely gates the Declined/
+  Interested tabs' real full-history filter), it just no longer blocks what the user sees on click.
+
+**Preferred clients (Sarel: "add a list of clients as preferences"):** new `preferred_buyers text[]`
+column on `company_tender_preferences` (migration `0104`, GIN index, same shape as `interested_disciplines`
+0088) - a tag-style add/remove list in the Opportunity preferences panel, saved through the same
+action. Same additive, non-authoritative sort-boost role as disciplines - never a filter, never
+changes `verdict`. New `lib/opportunityBuyerMatch.ts` (`sanitizePreferredBuyers()`/
+`matchesPreferredBuyers()`, 13 tests): matching is a case-insensitive substring check either direction
+(e.g. "SANRAL" matches "South African National Roads Agency SOC Ltd (SANRAL)"), not an exact
+comparison - confirmed by grep that `discovered_opportunities.buyer` has no canonical taxonomy
+anywhere in this schema, unlike disciplines (migration 0040).
+
+**"Likely to qualify" filter (Sarel: "a filter for high likelihood of compliance ... tenders I
+potentially qualify for"):** new `VerdictFilter` value `likely_fit` = `verdict IN ('strong_fit',
+'possible')` (`lib/discoveryPagination.ts`) - deliberately a DIFFERENT grouping than the existing
+"Needs review" tab (`possible` + `needs_review`): `possible` means "you likely qualify, with some
+uncertainty", a bare `needs_review` means "we don't know yet" - reusing needs_review's grouping here
+would have answered a different question than the one asked.
+
+**Client/buyer filter (Sarel: "add a filter for clients"):** a plain GET-form text input (no client
+JS needed), `ilike` substring match on `buyer`, applied to the main query AND every per-tab count
+query so counts stay accurate for whatever's typed - same reasoning `withVerdictSpec()` already
+documents for verdict. Suggestions (`<datalist>`) come from the currently-loaded window plus the
+company's own preferred_buyers, same documented "scoped to current window" limitation `allCompanyTags`
+already has (no canonical buyer list to draw a full-history list from).
+
+**"Interested" filter + hide Declined everywhere else (Sarel: "add a filter for Interested... once i
+click on not interested then it should be removed from the list ... unless i specifically want to
+filter and look at all not interested"):** new `VerdictFilter` value `interested` (symmetric with the
+existing `declined`), and a new `shouldExcludeDeclined()` pure function - true for every tab except
+"declined" itself - composed into `withVerdictSpec()` via a NULL-safe `.or("interest_marker.is.null,interest_marker.neq.declined")`.
+Deliberately NOT a plain `.neq()`: Postgres's three-valued WHERE logic means `interest_marker <>
+'declined'` evaluates to NULL (excluded) when the column IS NULL, which is almost every row today - a
+naive `.neq()` here would have hidden everything, not just declined rows. Caught this before shipping,
+not after.
+
+**Real finding while wiring these in:** `page.tsx` had its OWN locally-redeclared `VerdictFilter` type
+- identical values, but a second, silently-driftable copy of `lib/discoveryPagination.ts`'s own
+export, the exact "two places computing/declaring the same real-world fact" bug shape this session's
+other standing-review passes have repeatedly found and fixed elsewhere (see the entries below). Fixed
+in passing: now imported, not redeclared.
+
+Verified: `npx tsc --noEmit` clean; `npx eslint` on all 7 touched files clean; `node
+--experimental-strip-types --test lib/*.test.ts` 194/194 (13 new in `opportunityBuyerMatch.test.ts`, 5
+new in `discoveryPagination.test.ts`); `npx vitest run` 295/295; `npm run build` clean, `/discovery`'s
+own route classification unchanged.
+
+---
+
 **2026-10-29 ~08:16 UTC — standing review: clean sweep, no new finding.**
 
 Oriented from `adbd633` (the previous pass's notifications-bell fix); fetched `origin/main`, found

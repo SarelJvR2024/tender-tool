@@ -89,15 +89,33 @@ export function canLoadMore(show: number, fetchedHasMore: boolean): boolean {
   return fetchedHasMore && show < MAX_SHOW;
 }
 
-// "declined" (migration 0089) is a different axis from the rest of this list
-// - it's the company's own interest_marker column, not the engine-computed
-// verdict - but it's kept in the same exclusive, single-select tab list as
-// "reassessed" (downgraded_from) and "changed" (no column at all): this list
-// was never strictly "verdict values" to begin with, it's "what the
-// Opportunities page's one row of filter tabs can show at a time". See
-// page.tsx's own FILTERS array comment for why this composes as one more
-// exclusive tab rather than a second, independent toggle.
-export type VerdictFilter = "all" | "strong_fit" | "needs_review" | "not_a_fit" | "changed" | "reassessed" | "declined";
+// "declined"/"interested" (migrations 0089/0104) are a different axis from
+// the rest of this list - the company's own interest_marker column, not the
+// engine-computed verdict - but kept in the same exclusive, single-select
+// tab list as "reassessed" (downgraded_from) and "changed" (no column at
+// all): this list was never strictly "verdict values" to begin with, it's
+// "what the Opportunities page's one row of filter tabs can show at a
+// time". See page.tsx's own FILTERS array comment for why this composes as
+// one more exclusive tab rather than a second, independent toggle.
+//
+// "likely_fit" (Sarel, 2026-10-29: "a filter for high likelihood of
+// compliance so I can see all tenders I potentially qualify for") groups
+// strong_fit + possible - deliberately NOT the same grouping "needs_review"
+// already uses (possible + needs_review): "possible" genuinely means
+// "you likely qualify, with some uncertainty", while a bare "needs_review"
+// means "we don't know yet", which isn't the same claim. Reusing
+// needs_review's existing possible+needs_review grouping here would answer
+// a different question than the one asked.
+export type VerdictFilter =
+  | "all"
+  | "strong_fit"
+  | "likely_fit"
+  | "needs_review"
+  | "not_a_fit"
+  | "changed"
+  | "reassessed"
+  | "interested"
+  | "declined";
 
 /**
  * The verdict-to-query-filter mapping (task item 3 + 4): a declarative,
@@ -122,6 +140,11 @@ export function verdictQuerySpec(filter: VerdictFilter): VerdictQuerySpec {
   switch (filter) {
     case "strong_fit":
       return { kind: "eq", column: "verdict", value: "strong_fit" };
+    // "Likely to qualify" (2026-10-29): strong_fit + possible only - see the
+    // VerdictFilter type's own comment for why this is a DIFFERENT grouping
+    // than needs_review, not a relabel of it.
+    case "likely_fit":
+      return { kind: "in", column: "verdict", values: ["strong_fit", "possible"] };
     // Groups assess_tender.py's "possible" and "needs_review" verdicts, same
     // grouping the page's own matchesFilter() used to do in JS.
     case "needs_review":
@@ -130,10 +153,12 @@ export function verdictQuerySpec(filter: VerdictFilter): VerdictQuerySpec {
       return { kind: "eq", column: "verdict", value: "not_a_fit" };
     case "reassessed":
       return { kind: "not_null", column: "downgraded_from" };
-    // 0089: the company's own quick-decline mark, a real indexed column
-    // (discovered_opportunities_interest_marker_idx) just like verdict/
-    // downgraded_from above, so this is a genuine full-history filter, not a
-    // page-scoped one - same reasoning as "reassessed".
+    // 0089/0104: the company's own quick interest/decline mark, a real
+    // indexed column (discovered_opportunities_interest_marker_idx) just
+    // like verdict/downgraded_from above, so this is a genuine full-history
+    // filter, not a page-scoped one - same reasoning as "reassessed".
+    case "interested":
+      return { kind: "eq", column: "interest_marker", value: "interested" };
     case "declined":
       return { kind: "eq", column: "interest_marker", value: "declined" };
     case "all":
@@ -142,10 +167,34 @@ export function verdictQuerySpec(filter: VerdictFilter): VerdictQuerySpec {
   }
 }
 
+/**
+ * Whether the CURRENT filter tab should also exclude declined rows (Sarel,
+ * 2026-10-29: "once i click on not interested then it should be removed
+ * from the list of opportunities, unless i specifically want to filter and
+ * look at all not interested opportunities"). True for every tab except
+ * "declined" itself - viewing the Declined tab must obviously still show
+ * declined rows. Kept as its own pure function (not folded into
+ * verdictQuerySpec's switch) because it composes WITH whatever spec a tab
+ * already has, rather than replacing it - page.tsx's withVerdictSpec()
+ * applies both.
+ */
+export function shouldExcludeDeclined(filter: VerdictFilter): boolean {
+  return filter !== "declined";
+}
+
 // Tabs with an exact, cheap, indexed-adjacent count available ({count:
 // "exact", head: true} - no row data transferred). "changed" is excluded
 // deliberately: a true count needs the tender_listing_changes cross-reference
 // over the company's FULL history, which is exactly the heavy, schema-shaped
 // work this batch is scoped to avoid (see app/AGENTS.md's follow-up
 // proposal for a dedicated view/function).
-export const COUNTABLE_FILTERS: readonly VerdictFilter[] = ["all", "strong_fit", "needs_review", "not_a_fit", "reassessed", "declined"];
+export const COUNTABLE_FILTERS: readonly VerdictFilter[] = [
+  "all",
+  "strong_fit",
+  "likely_fit",
+  "needs_review",
+  "not_a_fit",
+  "reassessed",
+  "interested",
+  "declined",
+];
