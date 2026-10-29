@@ -14,6 +14,53 @@
 
 ---
 
+**2026-10-29 ~02:16 UTC — standing review: a person_credential digest line named the expiring
+credential but never the person it belonged to; fixed.**
+
+Oriented from `4bdf22e` (the previous pass's digest-label fix); fetched `origin/main`, found one new
+commit (`5de8f6e`, a different session's coverage-gap closure for
+`process_onboarding_jobs.py` - docs + a new test file only, no overlap) and fast-forwarded local
+`main` before starting. Open PRs (`#164`, `#165`, `#170`) checked via the GitHub REST API, unchanged,
+no collision.
+
+Per this pass's own directive, looked at `registration_reminders.py` for a genuinely new finding (it
+still has no dedicated test file of its own - noted again, not fixed this pass, out of scope for a
+single check-in). Read it end to end plus its schema (`held_registrations`/`property_documents` in
+migration `0050`, both `registration_type_id`/`company_id`/`property_id` are `not null`, so the
+`sorted(type_ids)`/`sorted(ids)` calls in `_names()` can't be handed a `None` and crash - checked
+because it looked like a plausible failure mode on first read, confirmed it isn't one). No bug in
+that file itself.
+
+Found the real one one level further down, in the same `render_text()` function the last pass just
+fixed (`engine/notify/send_digest_emails.py`). `find_due_person_credentials()`
+(`engine/compliance/watch_deadlines.py:379`) and `registration_reminders.find_due_registrations()`
+both put a generic credential-type `"label"` on every `person_credential` item (e.g. "ECSA
+professional registration", "PSIRA Grading Certificate" - the *type* of credential, not whose it is)
+and a separate `"person_name"` key naming the actual holder - but `render_text()` only ever read
+`"label"`, never `"person_name"`. With two different key people on the same company each renewing
+the same credential type, the digest showed two identical, unattributed lines; the reader had no way
+to tell who to chase without opening the app. `watch_deadlines.py`'s own CLI console summary
+(`main()`, line ~575/581) already prints the holder's name right next to the label - the customer
+email was the one surface that silently dropped it. Confirmed via grep that `person_name` is set
+*only* on `document_expiry` items (never on `new_tenders`/`tender_tasks`/`readiness_changes`/etc.),
+so this change is scoped to exactly the section it needs to be.
+
+Fixed by prefixing the display line with `person_name` when present: `"{person_name} - {label}"`.
+A company-held document (no `person_name` key) renders exactly as before - verified explicitly, no
+stray `"None -"` prefix leaks in. New test
+`test_render_text_names_the_person_on_a_person_credential_item()` covers the named case, the
+unaffected company-document case, and two different people with the same credential label rendering
+as two distinguishable lines. `python3 engine/notify/test_send_digest_emails.py` - all cases pass
+(old + 4 new). `test_digest_live.py`/`test_digest_opt_in.py` - clean, unaffected. `py_compile` clean
+on both touched files.
+
+Pushed directly to `main` (small, fully verified, no PR): `engine/notify/send_digest_emails.py`,
+`engine/notify/test_send_digest_emails.py`, this file.
+
+Backlog unchanged at 9 items - this finding was standalone, nothing resolved or added to the list.
+
+---
+
 **2026-10-29 ~00:15 UTC — standing review: every "Documents & registrations due" digest email line
 showed a raw internal field name/slug instead of the human label sitting right next to it in the
 same dict; fixed.**

@@ -123,6 +123,46 @@ def test_render_text_uses_document_expiry_label_not_raw_field():
           "bee_proof" in rc_body)
 
 
+def test_render_text_names_the_person_on_a_person_credential_item():
+    print("render_text(): a person_credential item names WHICH person, not just the credential type")
+    # Real bug found 2026-10-29: find_due_person_credentials() and
+    # registration_reminders.find_due_registrations() both set "label" to a
+    # generic credential type ("ECSA professional registration", "PSIRA
+    # Grading Certificate") - the same text for every person who holds one -
+    # and a separate "person_name" that render_text() never read. With two
+    # key people each renewing the same credential type, the digest listed
+    # two identical, unattributed lines; the reader had no way to tell who
+    # to chase without opening the app. watch_deadlines.py's own console
+    # summary (main()) already prints the holder's name next to the label -
+    # the email was the one surface that dropped it.
+    items = [{"type": "person_credential", "label": "ECSA professional registration",
+              "person_name": "Pat Engineer", "expiry_date": "2026-11-10"}]
+    body = sde.render_text(_digest(document_expiry=items))
+    check("the person's name appears next to the credential label",
+          "Pat Engineer - ECSA professional registration" in body)
+
+    # A company-held document (property document, or a held_registrations
+    # row with no person/principal holder) has no "person_name" key at all -
+    # must render exactly as before, with no stray "None -" prefix.
+    doc_items = [{"type": "document", "label": "COID Letter of Good Standing", "expiry_date": "2026-11-10"}]
+    doc_body = sde.render_text(_digest(document_expiry=doc_items))
+    check("a company document with no person_name is unaffected", "  - COID Letter of Good Standing" in doc_body)
+    check("no stray 'None -' prefix leaks in for an item with no person_name", "None -" not in doc_body)
+
+    # Two different people with the same credential label must now read as
+    # two distinguishable lines, not two copies of the same text.
+    two_people = [
+        {"type": "person_credential", "label": "ECSA professional registration",
+         "person_name": "Pat Engineer", "expiry_date": "2026-11-10"},
+        {"type": "person_credential", "label": "ECSA professional registration",
+         "person_name": "Sipho Director", "expiry_date": "2026-11-12"},
+    ]
+    two_body = sde.render_text(_digest(document_expiry=two_people))
+    check("both named lines are present and distinct",
+          "Pat Engineer - ECSA professional registration" in two_body
+          and "Sipho Director - ECSA professional registration" in two_body)
+
+
 # --- send_one(): every status path, no real network -------------------------
 
 def test_send_one_skips_cleanly_without_email_or_content():
@@ -287,6 +327,7 @@ def main():
     test_item_date_picks_first_present_key()
     test_render_text_includes_real_content_and_caps_at_ten()
     test_render_text_uses_document_expiry_label_not_raw_field()
+    test_render_text_names_the_person_on_a_person_credential_item()
     test_send_one_skips_cleanly_without_email_or_content()
     test_send_one_dry_run_never_touches_the_network()
     test_send_one_reports_sent_on_a_real_looking_success()
