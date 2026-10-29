@@ -5448,3 +5448,62 @@ Already wired into CI via Finding 92's own sweep - no new CI step needed.
 **Regression:** `engine/onboarding/test_process_onboarding_jobs.py` only (6 new test functions, one
 `SYSTEM_ALERTS_DISABLED` line, both additive). No production code touched - this pass closed a
 test-coverage gap, not a code bug.
+
+### Finding 95 (CONFIRMED, FIXED, severe - a whitespace-only value, a real data-entry shape, was reported "placed" on the real Form of Offer/MBD1, with its own read-back verification vacuously passing, while the printed form showed nothing at all)
+
+**Where:** non-SANRAL pack rotation this cycle (notify was being actively worked by a sibling this
+exact morning - two digest-label fixes landed mid-cycle - so avoided it; `process_general_jobs.py`/
+`process_pack_jobs.py`/`fingerprints/Conventional_Consultant_Tender.json` stayed avoided too, still
+in-flight on open PR `#170`). `engine/general/fill_flat_pdf.py` - the flat (non-fillable) PDF form
+filler for municipal MBD editions and CIDB-style returnables, 1000+ lines, zero dedicated test file
+anywhere in the repo before this pass (confirmed by grep: only `test_form_field_audit.py` touches
+it, and only `values_for()`'s own Klipcorp-default audit - none of `fill_flat_pdf()`/
+`place_text_fields()`/`place_captions()` had ever run under test).
+
+**What was tested:** read the whole file, since it had never had a dedicated adversarial pass.
+`place_text_fields()`/`place_captions()` both gate "is there a real value to place" with a bare
+`if not value:`. Asked the standard question for that shape of guard: does `not value` really
+exclude everything that should count as "nothing to place"? `values_for()` can produce a non-None,
+non-empty string straight from a company/signatory record with no normalization
+(`signatory_name_upper = (s.get("name") or "").upper() or None` - `.upper()` on an all-whitespace
+string is still all-whitespace, which is truthy) - a realistic data shape (leading/trailing spaces
+left over from a copy-paste into a name field) that `not value` does not catch.
+
+**Finding (CONFIRMED, severe).** Traced the full consequence, then reproduced it end to end against
+a real synthetic MBD1 page (built with reportlab, already a test-only dependency in this repo's own
+CI): a whitespace-only signatory name sails past the `if not value:` guard (not `not value`:
+non-empty strings are always truthy); Helvetica's own space-character width is non-zero, so `_fit()`
+"fits" it fine; the overlay write types invisible blank space onto the page; and
+`verify_placements()`'s own read-back check (`want in got`, after stripping ALL whitespace from
+both sides for comparison) reduces `want` to the empty string for a whitespace-only value - which is
+a substring of literally anything, so the write is reported `verified = True` regardless of what is
+actually on the printed page. End to end, confirmed with the real pipeline (not reasoned about in
+the abstract): `fill_flat_pdf()` reported `{"status": "placed", "value": "   "}` for the
+`sbd1.contact_person` field (the same `signatory_name`/`signatory_name_upper` path feeds the real
+Form of Offer's own signatory-name field too) - exactly the "silent wrong data" risk this module's
+own docstring says it exists to prevent ("nothing is assumed to have worked"). A company whose
+signatory's name is a data-entry glitch would see "placed" on the report and have no reason to
+check the actual printed page, where the field is blank.
+
+**Fix:** changed both guards from `if not value:` to `if not (value or "").strip():` - rejects a
+whitespace-only value as "missing" (same reason, same wording, as a genuinely absent one) while
+leaving a real value's own internal/surrounding whitespace untouched (a name like "Jane Smith", or
+even "  Jane Smith  ", is still placed exactly as given - only an ALL-whitespace value is now
+caught). `place_choices()` was checked too and is naturally immune (`ans not in ("yes", "no")` can
+never accidentally match whitespace).
+
+**Verified red-then-green against the real pipeline, not a stub.** New file
+`engine/general/test_fill_flat_pdf.py`: builds a real, minimal synthetic MBD1 page with reportlab
+(the real "INVITATION TO BID" heading, "NAME OF BIDDER"/"POSTAL ADDRESS"/"VAT REGISTRATION NUMBER"
+needed for `find_form_pages()`'s own detection, a real dotted leader line after "CONTACT PERSON:"),
+then runs the REAL `fill_flat_pdf()` end to end. Reverted the fix (`git apply -R`): the whitespace-
+only and tab/newline-only cases both failed exactly as predicted (`status: "placed"`, the real
+written-but-invisible value); the empty-string/`None`/real-name/whitespace-padded-real-name cases
+(unchanged behaviour) correctly stayed green throughout, confirming the fix is precise. Restored:
+`ALL PASSED`, 10/10 checks. `engine/test_form_field_audit.py` (the sibling consumer of this same
+file) re-run clean, `0 failure(s)`, no regression. Wired into CI (`bridge-worker-ci.yml`) - reportlab
+is already installed earlier in the same job for `test_general_bridge.py`'s own fixtures.
+
+**Regression:** `engine/general/fill_flat_pdf.py` (two guard conditions), new
+`engine/general/test_fill_flat_pdf.py` (10 checks), `.github/workflows/bridge-worker-ci.yml` (one
+new step). No schema or other call-site changes.

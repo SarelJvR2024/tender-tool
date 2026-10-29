@@ -234,6 +234,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/test_form_field_audit.py
 
+      - name: Flat-PDF form filling - a whitespace-only value is never reported "placed" (Finding 95, synthetic MBD1 fixture via reportlab)
+        # fill_flat_pdf.py (1000+ lines - municipal MBD/CIDB flat-PDF forms)
+        # had no dedicated test file at all before this pass. reportlab
+        # (installed above, "General engine - bridge end to end") builds the
+        # synthetic fixture this test runs the real fill_flat_pdf() against.
+        if: ${{ !cancelled() }}
+        run: python3 engine/general/test_fill_flat_pdf.py
+
       - name: SBD/MBD form filling - the four real Yes/No layouts, SBD4's assumed-default vs SBD8's never-assumed declarations (synthetic docx fixtures)
         if: ${{ !cancelled() }}
         run: python3 engine/general/test_fill_sbd_docx.py

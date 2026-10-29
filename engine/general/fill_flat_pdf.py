@@ -518,7 +518,15 @@ def place_text_fields(model, page_no, fields, vals, scope_fn, done, results):
         if line is None:
             continue
         used.add((li, m.start()))
-        if not value:
+        # `not value` alone lets a whitespace-only value (a real data-entry
+        # glitch - leading/trailing spaces from a copy-paste, a blank-but-not-
+        # NULL column) through as "present": it measures and "fits" fine
+        # (Helvetica's own space-character width is non-zero), gets typed as
+        # invisible blank space, and verify_placements()'s own `want in got`
+        # check is vacuously true once the value's whitespace is stripped for
+        # comparison - "placed" is reported for a field that is actually
+        # blank on the real printed form. QA pass, 2026-10-29.
+        if not (value or "").strip():
             results.setdefault(f["key"], ("missing", None, "not on file"))
             continue
         label_x1 = _x_at(line, m.end())
@@ -639,7 +647,7 @@ def place_captions(model, page_no, captions, vals, done, results):
                     results.setdefault(f["key"], ("prefilled", None, "already printed on the form by the buyer"))
                     done.add(f["key"])
                     break
-                if not value:
+                if not (value or "").strip():  # same whitespace-only-value gap as place_text_fields(), QA pass 2026-10-29
                     results.setdefault(f["key"], ("missing", None, "not on file"))
                     break
                 size = _fit(value, run[1] - run[0] - 2)

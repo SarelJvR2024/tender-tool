@@ -5977,6 +5977,45 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twentieth run): Finding 95 (severe) - a whitespace-only value was reported "placed" on the real Form of Offer/MBD1, its own read-back verification vacuously passing, while the printed page showed nothing at all
+
+Orientation: `git fetch origin main` showed two new sibling commits (`85d5c84`/`4bdf22e`, clean sweep
++ a real `send_digest_emails.py` fix - every digest's "Documents & registrations due" line showed a
+raw field name instead of its human label), then a THIRD landed mid-cycle (`e342bae`, naming the
+person on a `person_credential` renewal line too) - notify is being actively worked by a sibling
+right now, so stayed clear of it again. Open PR `#170` unchanged, still touching
+`process_general_jobs.py`/`process_pack_jobs.py`/the fingerprint baseline/Mzansi seed data - avoided
+entirely.
+
+Rotated to non-SANRAL pack - genuinely never had a dedicated pass of its own; picked
+`engine/general/fill_flat_pdf.py` (1000+ lines, municipal MBD/CIDB flat-PDF form filling) since it
+had zero dedicated test file anywhere (only `test_form_field_audit.py` touches it, and only a tiny
+slice).
+
+**The finding**: `place_text_fields()`/`place_captions()` both gate "is there a real value to
+place" with a bare `if not value:`. A whitespace-only string (a real shape: leading/trailing spaces
+from a copy-paste into a name field) is truthy, so it sails past the guard; Helvetica's own space
+width is non-zero so `_fit()` "fits" it; the overlay write types invisible blank space; and
+`verify_placements()`'s own read-back check strips all whitespace before comparing, so an all-
+whitespace value's `want` becomes the empty string - a substring of anything, so it's reported
+`verified = True` no matter what's actually on the page. Confirmed end to end against a real
+synthetic MBD1 page built with reportlab (not reasoned about in the abstract): the real
+`fill_flat_pdf()` reported `{"status": "placed", "value": "   "}` for the contact-person field - the
+same `signatory_name`/`signatory_name_upper` path the real Form of Offer's own signatory-name field
+uses too.
+
+**Fix:** both guards changed to `if not (value or "").strip():` - rejects whitespace-only as
+missing, leaves a real value's own internal/surrounding whitespace untouched. `place_choices()`
+checked too and is naturally immune.
+
+**Verified red-then-green against the real pipeline**: new file `test_fill_flat_pdf.py` builds a
+real synthetic MBD1 page and runs the real `fill_flat_pdf()`. Reverted the fix: the whitespace-only
+and tab/newline-only cases failed exactly as predicted; the unchanged-behaviour cases stayed green
+throughout. Restored: `ALL PASSED`, 10/10. `test_form_field_audit.py` re-run clean, no regression.
+Wired into CI.
+
+Full writeup: Finding 95, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-nineteenth run): Finding 94 (coverage-gap closure, no new bug) - process_onboarding_jobs.py's claim/fulfil mechanism had never been tested against a real filtering fake, the same shape as Finding 87
 
 Orientation: `git fetch origin main` showed two new sibling commits (`85d5c84` clean sweep confirming
