@@ -7,7 +7,8 @@ import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { getNotifications } from "@/lib/notifications";
 import { IN_PROGRESS_STAGES } from "@/lib/pipeline";
 import { computeDashboardStats, stageOf } from "@/lib/dashboardStats";
-import { loadDocumentExpiryOverview } from "@/lib/documentExpiry";
+import { loadDocumentExpiryOverview, type DocumentExpiryStatus } from "@/lib/documentExpiry";
+import type { StatusChip } from "@/lib/dates";
 import { fetchSavingsCounterSummary } from "@/lib/savingsCounterData";
 import { fetchAllRows } from "@/lib/supabasePaging";
 import { loadDispatchCards, type ActiveBidInput } from "@/lib/dispatchDashboard";
@@ -22,6 +23,7 @@ import { NextBestActionCard, type NextBestAction } from "@/components/tt/next-be
 import { SetupChecklistCard, type SetupChecklistItem } from "@/components/tt/setup-checklist-card";
 import { CriticalDispatchBanner, NeedsDecisionLane, UrgentActionsLane, DispatchLane, RadarSection } from "@/components/tt/command-center";
 import { buttonVariants } from "@/components/ui/button";
+import { ChipBadge } from "../company/_components/shared";
 
 // This page depends on the signed-in user's session (via RLS) on every
 // request, so it can't be prerendered - "instant = false" is Next.js 16's
@@ -73,6 +75,17 @@ type OpportunityRow = {
   title: string | null;
   closing_date: string | null;
   verdict: string;
+};
+
+// Vault & Compliance Health / Team & CV Bench widgets (Sarel's own ask) -
+// the same 4-state vocabulary lib/documentExpiry.ts's own statusFor()
+// already computes, just painted as a ChipBadge instead of this page's own
+// (currently unused for this) tone pairs.
+const VAULT_STATUS_CHIP: Record<DocumentExpiryStatus, StatusChip> = {
+  valid: { label: "Valid", tone: "success" },
+  expiring_soon: { label: "Expiring soon", tone: "warning" },
+  expired: { label: "Expired", tone: "destructive" },
+  missing: { label: "Missing", tone: "muted" },
 };
 
 const VERDICT_LABEL: Record<string, string> = { strong_fit: "Strong fit", possible: "Possible", needs_review: "Needs review" };
@@ -152,7 +165,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary] = await Promise.all([
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary, documentExpiryRows, { count: peopleCount }] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -175,6 +188,14 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
       .limit(5),
     supabase.from("companies").select("legal_name, csd_trading_name, savings_baseline_hours_per_tender, savings_baseline_hourly_cost_zar").maybeSingle(),
     fetchSavingsCounterSummary(supabase),
+    // Vault & Compliance Health / Team & CV Bench widgets (below) - the
+    // SAME real rows the Company vault's own "Document expiry" overview
+    // already computes (lib/documentExpiry.ts), not a second, possibly-
+    // disagreeing read. Was only loaded for isNewCompany before; now always,
+    // since both new widgets need it regardless of whether this is a new
+    // company.
+    loadDocumentExpiryOverview(supabase),
+    supabase.from("people").select("id", { count: "exact", head: true }),
   ]);
 
   if (error) console.error("tenders select failed for dashboard", error);
@@ -262,7 +283,6 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   const isNewCompany = myRows.length === 0 && readiness.percent < 50;
   let setupChecklistItems: SetupChecklistItem[] = [];
   if (isNewCompany) {
-    const documentExpiryRows = await loadDocumentExpiryOverview(supabase);
     const taxRow = documentExpiryRows.find((r) => r.label === "SARS Tax Compliance PIN");
     const basics = readiness.criteria.find((c) => c.key === "company_basics");
     const csd = readiness.criteria.find((c) => c.key === "csd");
@@ -286,6 +306,19 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
       },
     ];
   }
+
+  // Vault & Compliance Health / Team & CV Bench (Sarel's own ask) - split
+  // from the SAME documentExpiryRows the Company vault page already shows,
+  // by the id prefix loadDocumentExpiryOverview() already gives each row
+  // (company:* for the 7 vault documents, person:* for per-person ECSA/
+  // SACPCMP registrations - "only shown once someone has one on file",
+  // same as the vault page itself). Never a second, independently-computed
+  // status for either.
+  const vaultRows = documentExpiryRows.filter((r) => r.id.startsWith("company:"));
+  const personExpiryRows = documentExpiryRows.filter((r) => r.id.startsWith("person:"));
+  const vaultValidCount = vaultRows.filter((r) => r.status === "valid").length;
+  const vaultNeedsAttention = vaultRows.length - vaultValidCount;
+  const vaultCompliancePct = vaultRows.length === 0 ? 100 : Math.round((vaultValidCount / vaultRows.length) * 100);
 
   return (
     <AppShell>
@@ -326,6 +359,61 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
           <StatCard label="Packs ready" value={packsReadyCount} tone={packsReadyCount > 0 ? "success" : "default"} />
           <StatCard label="Closing this week" value={closingThisWeekCount} tone={closingThisWeekCount > 0 ? "warning" : "default"} />
           <StatCard label="Documents expiring" value={documentsExpiringCount} tone={documentsExpiringCount > 0 ? "destructive" : "default"} />
+        </div>
+
+        <div className="mb-5 grid gap-3 lg:grid-cols-2">
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-sm font-medium text-foreground">Vault &amp; compliance health</h2>
+              <span
+                className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                  vaultNeedsAttention === 0 ? "border-success/20 bg-success/10 text-success" : "border-warning/20 bg-warning/10 text-warning"
+                }`}
+              >
+                {vaultCompliancePct}% compliant{vaultNeedsAttention > 0 ? ` · ${vaultNeedsAttention} need${vaultNeedsAttention === 1 ? "s" : ""} attention` : ""}
+              </span>
+            </div>
+            {vaultRows.length === 0 ? (
+              <div className="text-xs text-muted-foreground">No compliance documents tracked yet.</div>
+            ) : (
+              <div className="flex flex-col">
+                {vaultRows.map((r) => (
+                  <Link key={r.id} href={r.href} className="flex items-center justify-between gap-2 border-t border-border py-2 text-inherit no-underline first:border-t-0 hover:bg-muted/50">
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{r.label}</span>
+                    <ChipBadge status={VAULT_STATUS_CHIP[r.status]} />
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-display text-sm font-medium text-foreground">Team &amp; CV bench</h2>
+              <Link href="/people" className="text-xs font-semibold text-accent no-underline hover:underline">
+                View team →
+              </Link>
+            </div>
+            <div className="text-xs text-foreground">
+              <span className="font-semibold">{peopleCount ?? 0}</span> team profile{(peopleCount ?? 0) === 1 ? "" : "s"} ·{" "}
+              <span className="font-semibold">{readiness.peopleWithCvCount}</span> with a CV on file
+            </div>
+            {personExpiryRows.length > 0 ? (
+              <div className="mt-2 flex flex-col">
+                {personExpiryRows.map((r) => (
+                  <Link key={r.id} href={r.href} className="flex items-center justify-between gap-2 border-t border-border py-2 text-inherit no-underline first:border-t-0 hover:bg-muted/50">
+                    <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">{r.label}</span>
+                    <ChipBadge status={VAULT_STATUS_CHIP[r.status]} />
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="mt-2 text-xs text-muted-foreground">No ECSA/SACPCMP registrations on file need attention.</div>
+            )}
+            <Link href="/people" className={buttonVariants({ variant: "outline", size: "sm", className: "mt-3 min-h-9 w-full" })}>
+              Upload a CV
+            </Link>
+          </div>
         </div>
 
         <div className="mb-5">
