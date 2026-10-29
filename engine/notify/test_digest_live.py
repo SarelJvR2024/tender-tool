@@ -26,7 +26,9 @@ exists, System-Status gap 9).
 
     python3 engine/notify/test_digest_live.py
 """
+import contextlib
 import datetime
+import io
 import json
 import os
 import sys
@@ -312,5 +314,49 @@ def main():
     sys.exit(1 if FAILS else 0)
 
 
+def test_orphaned_field_provenance_owner_not_silently_dropped():
+    """field_provenance.tender_pack_id is NOT NULL and cascades from
+    tender_packs, so in normal operation it always resolves - the one way
+    it doesn't is the narrow window find_readiness_changes() leaves between
+    its own two Supabase reads (field_provenance, then tender_packs): a
+    tender_pack deleted in between means owners[prov::<id>] comes back
+    None. QA pass, 2026-10-29: save_readiness_seen_db() used to drop that
+    key with zero trace - no print, no alert, nothing - unlike
+    watch_deadlines.save_seen_db()'s own message for the identical shape of
+    problem (a seen entry nobody can attribute to a company)."""
+    print("\nfind_readiness_changes()/save_readiness_seen_db(): an orphaned field_provenance "
+          "row (its pack gone before the second read) is not silently lost with no trace")
+    pgrest.ROWS.clear()
+    pgrest.ROWS.update({
+        "field_provenance": [{"id": "fp-orphan", "tender_pack_id": "pk-deleted-mid-run", "field_key": "x.y",
+                              "status": "missing", "reason": "r", "updated_at": "2026-10-29"}],
+        "tender_packs": [],  # the pack fp-orphan references no longer resolves
+    })
+    watch_deadlines.supabase_request = pgrest.fake_request
+
+    seen, owners = {}, {}
+    today = datetime.date(2026, 10, 29)
+    changes = daily_digest.find_readiness_changes("u", "k", seen, today, owners)
+    check(len(changes) == 1 and changes[0]["company_id"] is None,
+          f"the orphaned row still surfaces as a change, but with no company to deliver it to ({changes})")
+    check(owners.get("prov::fp-orphan") is None, f"its owner is recorded as unknown, not guessed ({owners})")
+
+    recorded_upserts = []
+
+    class RecordingClient:
+        def upsert(self, table, rows, on_conflict):
+            recorded_upserts.append((table, rows))
+            return rows
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        written = daily_digest.save_readiness_seen_db(RecordingClient(), seen, {}, owners)
+    out = buf.getvalue()
+    check(written == 0 and not recorded_upserts, "the ownerless row is not written to digest_readiness_seen")
+    check("fp-orphan" in out and "has no company" in out and "not stored" in out,
+          f"...and that skip is now visible in the run's own output, not silent ({out!r})")
+
+
 if __name__ == "__main__":
+    test_orphaned_field_provenance_owner_not_silently_dropped()
     main()

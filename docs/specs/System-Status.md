@@ -14,6 +14,33 @@
 
 ---
 
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-fourth run): Finding 98 (minor) - a readiness-change whose field_provenance row's tender_pack went missing was dropped from the daily digest's seen store with zero trace, unlike the identical shape of problem (`watch_deadlines.save_seen_db()`) elsewhere in the same codebase
+
+Oriented from `05acc4f` (a sibling pass's Finding 97 - no reconciliation for an `'active'`
+subscription past `current_period_end`, a design question not a code fix); `git fetch origin main`
+found nothing new since. Open PRs checked (`#172`/`#165`/`#164`, all draft, none touching
+`engine/compliance/`, `engine/notify/`, or any `*compliance*`/`*reminder*`/`*notify*` file).
+
+compliance/reminders rotation. Re-checked Finding 91 (the disabled "Compliance deadline reminder
+check-in" trigger) via `list_triggers` directly rather than trusting the backlog entry - still
+`enabled: false`, `updated_at: 2026-10-27T20:30:13Z`, unchanged since it was found; that stays
+Sarel's own call, not re-decided here. Looking past that already-reported gap found something new in
+the same area: `daily_digest.py`'s `find_readiness_changes()`/`save_readiness_seen_db()` (the
+field_provenance "readiness changed" pipeline live mode actually runs daily) silently drops a seen
+entry with no owner (possible only in the narrow window between the function's own two separate
+Supabase reads, since `field_provenance.tender_pack_id` is `not null`/cascades) with **zero print,
+alert, or trace** - unlike `watch_deadlines.save_seen_db()`'s own explicit message for the identical
+shape of problem. Fixed to match that existing pattern (same message, same place in the loop,
+behavior otherwise unchanged - the row still isn't written, correctly, just now visibly). New test
+(`test_orphaned_field_provenance_owner_not_silently_dropped`, 4 checks) added to
+`engine/notify/test_digest_live.py`. Revert-and-confirm-red: reverting made exactly the new
+visibility check fail, the other 3 stayed green; restored, clean. Already wired into CI
+(`bridge-worker-ci.yml:164`). Regression-checked every `engine/notify/test_*.py` and
+`engine/compliance/test_*.py` file - all pass. Full write-up: `docs/specs/QA-Edge-Case-Findings.md`,
+Finding 98.
+
+---
+
 **2026-10-29 ~14:30 UTC — standing review: new design-question finding, no code fix this pass (the
 right call needs Sarel's own judgment, same as the existing idempotency question).**
 

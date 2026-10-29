@@ -217,10 +217,28 @@ def load_readiness_seen_db(client):
 def save_readiness_seen_db(client, seen, loaded, owners):
     """Upserts every prov:: status that is new or changed. `owners` maps a
     prov:: key to its company (find_readiness_changes fills it from the
-    row's tender pack). Returns rows written."""
+    row's tender pack) - None when the field_provenance row's own
+    tender_pack_id didn't resolve to a pack (tender_pack_id is NOT NULL and
+    cascades, so this only happens if the pack was deleted in the narrow
+    window between find_readiness_changes()'s two Supabase reads). Returns
+    rows written.
+
+    QA pass, 2026-10-29: that case used to vanish with zero trace - skipped
+    here with no print/alert at all, unlike watch_deadlines.save_seen_db()'s
+    own "(seen key {k!r} has no company - not stored)" message for the
+    identical shape of problem (a seen entry nobody can attribute to a
+    company). Matched here so an operator reading the run's output can
+    actually see why one fewer row was written than changes were found,
+    instead of the write just silently being one short."""
     now = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    rows = [{"company_id": owners[k], "field_provenance_id": k.split("::", 1)[1], "status": v, "updated_at": now}
-            for k, v in seen.items() if k.startswith("prov::") and loaded.get(k) != v and owners.get(k)]
+    rows = []
+    for k, v in seen.items():
+        if not k.startswith("prov::") or loaded.get(k) == v:
+            continue
+        if not owners.get(k):
+            print(f"  (seen key {k!r} has no company - not stored)")
+            continue
+        rows.append({"company_id": owners[k], "field_provenance_id": k.split("::", 1)[1], "status": v, "updated_at": now})
     for i in range(0, len(rows), 200):
         client.upsert(READINESS_TABLE, rows[i:i + 200], "company_id,field_provenance_id")
     loaded.update({f"prov::{r['field_provenance_id']}": r["status"] for r in rows})

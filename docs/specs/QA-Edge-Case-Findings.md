@@ -5597,3 +5597,49 @@ test_general_bridge.py` re-run clean, no regression. Already wired into CI.
 
 **Regression:** `engine/intake/classify_tender.py` (one new try/except), `engine/intake/
 test_classify_tender.py` (1 new test function, 5 checks). No schema or other call-site changes.
+
+### Finding 98 (CONFIRMED, FIXED, minor - a readiness-change whose field_provenance row's tender_pack went missing was dropped from the seen store with zero trace, unlike the identical shape of problem elsewhere in the same codebase)
+
+**Where:** compliance/reminders rotation this cycle (Finding 91, the disabled "Compliance deadline
+reminder check-in" trigger, is still open and unchanged since the pass that found it - `list_triggers`
+confirmed `enabled: false`, `updated_at: 2026-10-27T20:30:13Z`, same as before; re-decided nothing,
+that stays Sarel's call). Looked past that already-reported gap for something new in the same area
+and found this in `engine/notify/daily_digest.py`'s `find_readiness_changes()`/
+`save_readiness_seen_db()` - the field_provenance "readiness changed" pipeline `main()`'s live mode
+runs for real every day.
+
+**What was tested:** `find_readiness_changes()` reads `field_provenance` rows, then separately reads
+the `tender_packs` those rows point to, and fills an `owners` dict mapping each `prov::<id>` seen-key
+to that pack's `company_id`. `field_provenance.tender_pack_id` is `not null` and `references
+tender_packs(id) on delete cascade` (0002/0001), so in normal operation this always resolves - the
+one way it doesn't is the narrow window between those two separate Supabase reads: a tender_pack
+deleted in between leaves `owners[key]` as `None`. Reproduced directly (no race needed to prove the
+code path - the end state is the same either way): a `field_provenance` row whose `tender_pack_id`
+doesn't resolve to any row in `tender_packs`. `find_readiness_changes()` still returns the item (with
+`company_id: None`, which every per-company `own()` filter downstream then drops - correctly, since
+there's no company to send it to). But `save_readiness_seen_db()` had `... and owners.get(k)` as a
+silent filter in its list comprehension - the row is skipped with **no print, no alert, nothing**.
+Compare `watch_deadlines.save_seen_db()` (the sibling seen-store writer, same shared mechanism this
+whole area is built on): it prints `"  (seen key {k!r} has no company - not stored)"` for the exact
+same shape of problem. The asymmetry is the bug - not a crash, but a seen-store write that quietly
+writes one row fewer than the run found changes for, with no way for whoever reads the run's own
+output to know why.
+
+**Fix:** `save_readiness_seen_db()` now prints the same `"(seen key {k!r} has no company - not
+stored)"` message `save_seen_db()` already uses, in the same place in the loop, before skipping the
+row - behavior is unchanged (the row still isn't written, correctly), only visibility changed.
+
+**Verified red-then-green:** added `test_orphaned_field_provenance_owner_not_silently_dropped()` to
+`engine/notify/test_digest_live.py`, calling `find_readiness_changes()`/`save_readiness_seen_db()`
+directly against an orphaned row (4 checks: the change still surfaces with `company_id: None`, its
+owner is recorded as unknown not guessed, the row is genuinely not written, and the skip is now in
+the run's own stdout). `python3 test_digest_live.py`: `0 failure(s)`. Revert-and-confirm-red: `git
+diff engine/notify/daily_digest.py > /tmp/finding98.patch`, `git apply -R`, re-ran - exactly the
+visibility check failed (`''` instead of the message), the other 3 new checks stayed green; restored,
+re-ran clean. Already wired into CI (`bridge-worker-ci.yml:164`). Regression-checked
+`engine/notify/test_digest_opt_in.py`, `test_send_digest_emails.py`, `test_record_heartbeat.py`,
+`test_send_pack_ready_email.py`, and every `engine/compliance/test_*.py` file - all still pass.
+
+**Regression:** `engine/notify/daily_digest.py` (one function's internal loop restructured, no
+behavior change besides the new print), `engine/notify/test_digest_live.py` (1 new test function, 4
+checks). No schema or other call-site changes.
