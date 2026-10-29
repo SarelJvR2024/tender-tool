@@ -179,6 +179,29 @@ def test_gather_pack_inputs_signatory_fallback():
     check("no person at the company has a signatory capacity on file -> stays None, not fabricated",
           signatory3 is None, signatory3)
 
+    # A DANGLING explicit pick (the person no longer resolves at this
+    # company - a stale/corrupted reference; migration 0044's own deletion
+    # trigger is supposed to clean this up when a person is actually
+    # deleted, but nothing guarantees it in every path) - confirmed,
+    # genuinely untested until now, that `if sid:` short-circuits past the
+    # company-wide fallback entirely: the signatory stays None even though
+    # a real Director IS on file at this exact company. This is the "never
+    # silently substitute a different person than the one explicitly
+    # picked" choice, not a crash - worth knowing, not fixed here (a
+    # design call, same as every other "flag, don't silently decide for
+    # Sarel" case in this session), but now locked in by a real test
+    # instead of being an accidental, undocumented side effect.
+    rows4 = [company,
+            {"id": "p-director", "company_id": "co-a", "name": "Lindiwe Dlamini", "signatory_capacity": "Director",
+             "id_number": "9001015000087", "created_at": "2026-01-02T00:00:00Z"},
+            {"field_key": "signatory_person_id", "company_id": "co-a", "tender_id": "t-a", "value": "p-ghost"}]
+    client4 = FakeClient(rows4)
+    _, answers4, _, signatory4, _, _ = pgj.gather_pack_inputs(client4, job, tender, manifest, "/tmp")
+    check("answers still records the dangling pick as-is (not silently dropped)",
+          answers4.get("signatory_person_id") == "p-ghost", answers4)
+    check("a dangling explicit pick does NOT fall back to the company's own Director - stays None, "
+          "does not crash", signatory4 is None, signatory4)
+
 
 def main():
     test_fail_stale_jobs_recovers_a_stuck_general_job()

@@ -5507,3 +5507,51 @@ is already installed earlier in the same job for `test_general_bridge.py`'s own 
 **Regression:** `engine/general/fill_flat_pdf.py` (two guard conditions), new
 `engine/general/test_fill_flat_pdf.py` (10 checks), `.github/workflows/bridge-worker-ci.yml` (one
 new step). No schema or other call-site changes.
+
+### Finding 96 (coverage-gap closure, no bug fixed - a dangling signatory_person_id answer leaves the signatory blank rather than falling back, a real but untested behaviour, flagged as a design question not decided here)
+
+**Where:** rotation this cycle, after PR #170 merged (unblocking `process_general_jobs.py`, no
+longer in-flight). Picked the brand-new signatory-fallback logic `gather_pack_inputs()` gained in
+that PR (2026-10-28, a real fix for Mzansi/RFP165's "Not on file" incident) - fresh code is always
+worth a QA pass of its own, and the merge PR's own test coverage (3 cases: fallback fires, explicit
+pick wins, nobody on file) left one real path untested.
+
+**What was tested:** `gather_pack_inputs()`'s signatory logic is `if sid: ... (look up that one
+person, by id+company_id) ... else: (company-wide fallback, first person with a signatory_capacity)`.
+Asked the standard question: what happens when `sid` is truthy but the lookup finds nobody - a
+genuinely possible data shape (a stale/dangling `tender_answers.signatory_person_id` reference)?
+Checked whether migration `0044`'s own deletion-cleanup trigger (which explicitly deletes this exact
+`tender_answers` row when the referenced person is deleted, specifically because there's no real FK
+to cascade automatically - `signatory_person_id` is stored as generic text in a key-value table, not
+an actual foreign key column) rules this out: it only fires on a person's own deletion, not on a
+cross-company mismatch or any other way the reference could go stale.
+
+**Finding (CONFIRMED behaviour, not a bug - a real, previously-untested path).** Reproduced
+directly: an explicit `signatory_person_id` pointing to a person id that doesn't resolve at this
+company (`client.select("people", {"id": sid, "company_id": ...})` returns empty) leaves `person =
+None`, and because this is still inside the `if sid:` branch, the company-wide fallback is never
+reached - `signatory` stays `None` even when a real Director IS on file at that exact company. Not
+a crash, not silently wrong data (it's an honest "missing," matching this codebase's own
+"never silently substitute" discipline) - but a genuinely different outcome from the sibling "nobody
+has a signatory_capacity at all" case, and one the merge PR's own test suite never exercised.
+
+**Not fixed - flagged as a design question.** Whether a dangling pick SHOULD fall back to the
+company's own designated signatory, or whether staying blank (and visibly so, on the Tender
+Workspace) is the safer choice precisely because the original intent was a SPECIFIC person, not
+"whoever else is available," is a real product call - the same "flag, don't silently decide for
+Sarel" discipline this session applies to every judgment call of this shape. Realistic trigger
+likelihood is low (requires the dangling reference to arise some way other than person deletion,
+which migration 0044 already cleans up), so this doesn't rise to the severity of a "fix now" finding
+either way.
+
+**What was done**: locked in the CURRENT behaviour with 2 new checks in the existing
+`test_gather_pack_inputs_signatory_fallback()` (same function the merge PR's own 3 cases live in,
+extended rather than duplicated) - confirms `answers` still records the dangling value as-is (not
+silently dropped from the pack job's own audit trail) and that `signatory` stays `None` without
+raising. Verified: `0 failure(s)`, all 6 checks in this function (3 original + 2 new + the "answers
+still records it" check) pass; `test_build_general_pack.py`/`test_general_bridge.py` re-run clean,
+no regression. Already wired into CI.
+
+**Regression:** `engine/general/test_process_general_jobs.py` only (2 new checks inside an existing
+test function, additive). No production code touched - this pass closed a test-coverage gap on a
+real, previously-undocumented behaviour, not a code bug.

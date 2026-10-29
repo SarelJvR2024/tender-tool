@@ -6411,6 +6411,36 @@ bridged by `engine/general/process_general_jobs.py`.
 
 15. **Tender regulatory compliance (2026-10-17, `Tender-Regulatory-Compliance-Review.md`).** The Public Procurement Act 28 of 2024 never commenced and was declared invalid by the Constitutional Court on 17 Sept 2026; PPPFA + PPR 2022 remain the law and the product matches them. Open, in priority order: **P0** Klipcorp's QSE sworn affidavit vs SANRAL Form A12 / the amended Construction Sector Code (A12 takes an affidavit only from an EME under R1.8m) - confirm with a B-BBEE verification agency; **P1** SBD 4 directors' tables and default-No declarations (G2), ~~SANRAL Form B7 (G3)~~ **closed 2026-10-18** (migration `0056`, see the pass entry), CIDB grade/class/PE/JV comparison (G5), SANRAL functionality threshold hardcoded to 70 (Book 1: 70/80/85 per tender, G7). Full list: §9 there.
 
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-second run): Finding 96 (coverage-gap closure, no bug fixed) - a dangling signatory_person_id leaves the signatory blank rather than falling back; real, previously-untested behaviour, flagged as a design question not decided here
+
+Orientation: `git fetch origin main` showed PR `#170` MERGED (`8180c19` - the signatory fallback +
+3 real SANRAL pack-assembly bugs fix, meaning `process_general_jobs.py`/`process_pack_jobs.py`/the
+fingerprint baseline are no longer in-flight, now safe to touch) plus new PR `#171` merged (Discovery
+save-speed fix + preferred-clients/filters, `app/`-only). New PR `#172` (Document Vault badge fix +
+CIDB editing) - TypeScript only, no overlap. Other open PRs (`#164`/`#165`) re-confirmed TS-only.
+
+Picked the brand-new signatory-fallback logic `gather_pack_inputs()` gained in the just-merged PR
+#170 (2026-10-28, a real fix for Mzansi/RFP165's "Not on file" incident) - fresh code always
+deserves its own QA pass, and the merge's own 3-case test left one real path untested: `if sid:`
+(an explicit per-tender signatory pick) and the lookup finds nobody at this company. Traced whether
+this is reachable: migration `0044`'s own deletion-cleanup trigger removes this exact
+`tender_answers` row when the referenced person is actually deleted (there's no real FK to cascade
+automatically - the id is stored as generic text in a key-value table), but that only covers
+deletion, not a cross-company mismatch or any other way the reference could go stale.
+
+**What was found**: a dangling `signatory_person_id` leaves `signatory` as `None` even when a real
+Director IS on file at that exact company - because being inside the `if sid:` branch means the
+company-wide fallback is never reached. Not a crash, not silently wrong data (an honest "missing"),
+but a genuinely different, previously-untested outcome from the sibling "nobody has a signatory_
+capacity at all" case. **Not fixed** - whether this should fall back or stay honestly blank is a
+real product call (the same "flag, don't silently decide for Sarel" discipline this session applies
+throughout), and the realistic trigger likelihood is low given migration 0044's own cleanup. Locked
+in the current behaviour with 2 new checks in the existing
+`test_gather_pack_inputs_signatory_fallback()`. Verified `0 failure(s)`;
+`test_build_general_pack.py`/`test_general_bridge.py` re-run clean, no regression.
+
+Full writeup: Finding 96, `docs/specs/QA-Edge-Case-Findings.md`.
+
 ## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-first run): rotated to CV (engine/cv/extract_cv_fields.py's validate_proposal()/normalise_date()/find_and_redact_sa_ids()) - thorough review, no new bug found this time
 
 Orientation: `git fetch origin main` showed two new sibling commits (`1a29cb5` a real fix - a
