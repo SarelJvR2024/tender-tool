@@ -227,7 +227,7 @@ export default async function CompanyPage({
               <div className="flex flex-col gap-6 lg:flex-row">
                 <CompanySubNav items={subNavItems} />
                 <div className="flex min-w-0 flex-1 flex-col gap-6">
-                  <DocumentExpiryOverview />
+                  <DocumentExpiryOverview companyId={row.id} />
                   <ReadOnlyView company={row} docUrls={docUrls} />
                   {saved === "digest" && <Banner tone="success">Email preference updated.</Banner>}
                   <Notifications />

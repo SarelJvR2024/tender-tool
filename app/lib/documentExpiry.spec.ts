@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { byUrgency, detailFor, statusFor, type DocumentExpiryRow } from "./documentExpiry";
+import { COMPANY_EXPIRY_FIELDS } from "./companyExpiryFields";
+import { VAULT_DOCUMENTS } from "./vaultDocuments";
 
 function row(overrides: Partial<DocumentExpiryRow>): DocumentExpiryRow {
   return { id: "x", label: "X", status: "valid", daysLeft: 100, detail: "", href: "/company", ...overrides };
@@ -32,6 +34,27 @@ describe("detailFor", () => {
   it("expiring_soon and valid count days ahead, singular for 1 day", () => {
     expect(detailFor(10, "expiring_soon")).toBe("Expires in 10 days.");
     expect(detailFor(1, "expiring_soon")).toBe("Expires in 1 day.");
+  });
+});
+
+describe("COMPANY_EXPIRY_FIELDS kind/pathField wiring", () => {
+  // loadDocumentExpiryOverview() casts `kind` with `as VaultDocumentKind`
+  // (companyExpiryFields.ts deliberately stays import-free - see its own
+  // header comment - so it can't import the real union type to check
+  // itself against). This guards the one thing that cast can't: every
+  // literal `kind` here must be a real VAULT_DOCUMENTS key, or the Document
+  // expiry overview's inline upload row would silently render for a kind
+  // DocumentUploadAction/VAULT_DOCUMENTS has never heard of.
+  it("every kind is a real Document Vault key, and every vault key is covered", () => {
+    const fieldKinds = COMPANY_EXPIRY_FIELDS.map((f) => f.kind).sort();
+    const vaultKinds = Object.keys(VAULT_DOCUMENTS).sort();
+    expect(fieldKinds).toEqual(vaultKinds);
+  });
+
+  it("every pathField matches that kind's own VAULT_DOCUMENTS column - so hasExisting reads the right company column", () => {
+    for (const { kind, pathField } of COMPANY_EXPIRY_FIELDS) {
+      expect(pathField).toBe(VAULT_DOCUMENTS[kind as keyof typeof VAULT_DOCUMENTS].column);
+    }
   });
 });
 

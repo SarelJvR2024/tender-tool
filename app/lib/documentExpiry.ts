@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { daysUntil } from "./dates";
 import { COMPANY_EXPIRY_FIELDS } from "./notifications";
+import type { VaultDocumentKind } from "./vaultDocuments";
 
 /**
  * Company vault's document-expiry overview: every document this app already
@@ -22,6 +23,17 @@ export type DocumentExpiryRow = {
   daysLeft: number | null;
   detail: string;
   href: string;
+  /**
+   * Set only for the 7 rows sourced from COMPANY_EXPIRY_FIELDS - these are
+   * the ones with a real Document Vault upload slot (lib/vaultDocuments.ts's
+   * VAULT_DOCUMENTS). held_registrations and per-person ECSA/SACPCMP rows
+   * have no such slot (they're uploaded/managed on their own pages,
+   * /company/registrations and /people/[id]) and must stay link-only -
+   * fabricating an upload control for them would be a control with nothing
+   * real behind it.
+   */
+  kind?: VaultDocumentKind;
+  hasExisting?: boolean;
 };
 
 // "Expires in 30 days" per Sarel's own spec - a tighter window than the
@@ -56,7 +68,7 @@ type HeldRegistrationRow = { id: string; expiry_date: string | null; registratio
 type PersonExpiryRow = { id: string; name: string | null; ecsa_expiry: string | null; sacpcmp_expiry: string | null };
 
 export async function loadDocumentExpiryOverview(supabase: SupabaseClient): Promise<DocumentExpiryRow[]> {
-  const companyFields = COMPANY_EXPIRY_FIELDS.map((f) => f.field).join(", ");
+  const companyFields = [...COMPANY_EXPIRY_FIELDS.map((f) => f.field), ...COMPANY_EXPIRY_FIELDS.map((f) => f.pathField)].join(", ");
 
   const [{ data: companyRow }, { data: heldRows }, { data: typeRows }, { data: peopleRows }] = await Promise.all([
     supabase.from("companies").select(companyFields).maybeSingle(),
@@ -70,10 +82,19 @@ export async function loadDocumentExpiryOverview(supabase: SupabaseClient): Prom
 
   const company = (companyRow ?? null) as Record<string, string | null> | null;
   if (company) {
-    for (const { field, label } of COMPANY_EXPIRY_FIELDS) {
+    for (const { field, label, kind, pathField } of COMPANY_EXPIRY_FIELDS) {
       const daysLeft = daysUntil(company[field]);
       const status = statusFor(daysLeft);
-      rows.push({ id: `company:${field}`, label, status, daysLeft, detail: detailFor(daysLeft, status), href: "/company" });
+      rows.push({
+        id: `company:${field}`,
+        label,
+        status,
+        daysLeft,
+        detail: detailFor(daysLeft, status),
+        href: "/company#compliance-documents",
+        kind: kind as VaultDocumentKind,
+        hasExisting: !!company[pathField],
+      });
     }
   }
 

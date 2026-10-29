@@ -2,6 +2,8 @@ import { createClient } from "@/lib/supabase/server";
 import { loadDocumentExpiryOverview, type DocumentExpiryStatus } from "@/lib/documentExpiry";
 import { SectionCard } from "@/components/tt/section-card";
 import { cn } from "@/lib/utils";
+import { DocumentUploadAction } from "./_components/DocumentRow";
+import { VAULT_DOCUMENTS } from "@/lib/vaultDocuments";
 
 /**
  * "2 documents need attention before your next bid" - Sarel's own ask: every
@@ -13,6 +15,20 @@ import { cn } from "@/lib/utils";
  * bell's 60-day window. Card shell restyled to the design system for this
  * sub-PR (prompt 10.1, Company vault shell); the data/logic above is
  * untouched.
+ *
+ * Real finding, 2026-10-29 (Sarel: make every row here "an interactive
+ * upload target with click-to-upload and inline drag-and-drop"): every row
+ * was a plain link down to the matching vault section - never an upload
+ * target itself. The 7 rows sourced from a company field (lib/documentExpiry
+ * .ts's `kind`) each have a real Document Vault upload slot
+ * (lib/vaultDocuments.ts), so those now render the SAME DocumentUploadAction
+ * (and the SAME FileDropzone underneath it - click or drag, one control,
+ * spec v3 O12) the vault's own Compliance documents section already uses -
+ * not a second, parallel upload implementation that could silently drift
+ * from it. held_registrations and per-person ECSA/SACPCMP rows have no
+ * vault slot at all (they live on /company/registrations and /people/[id])
+ * and keep their original link-only row - inventing an upload control with
+ * nothing real behind it would be worse than the plain link.
  */
 
 const STATUS_STYLE: Record<DocumentExpiryStatus, { label: string; tone: "destructive" | "warning" | "muted" | "success" }> = {
@@ -29,7 +45,7 @@ const TONE_CLASS = {
   success: "border-success/20 bg-success/10 text-success",
 };
 
-export async function DocumentExpiryOverview() {
+export async function DocumentExpiryOverview({ companyId }: { companyId: string }) {
   const supabase = await createClient();
   const rows = await loadDocumentExpiryOverview(supabase);
   const needsAttention = rows.filter((r) => r.status === "expired" || r.status === "expiring_soon" || r.status === "missing").length;
@@ -47,25 +63,44 @@ export async function DocumentExpiryOverview() {
         <div className="flex flex-col">
           {rows.map((r) => {
             const st = STATUS_STYLE[r.status];
-            return (
-              <a
-                key={r.id}
-                href={r.href}
-                className="flex items-start gap-2 border-t border-border py-2.5 text-inherit no-underline first:border-t-0 hover:bg-muted/50"
+            const chip = (
+              <span
+                className={cn(
+                  "mt-px inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
+                  TONE_CLASS[st.tone],
+                )}
               >
-                <span
-                  className={cn(
-                    "mt-px inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap",
-                    TONE_CLASS[st.tone],
-                  )}
+                {st.label}
+              </span>
+            );
+            if (!r.kind) {
+              return (
+                <a
+                  key={r.id}
+                  href={r.href}
+                  className="flex items-start gap-2 border-t border-border py-2.5 text-inherit no-underline first:border-t-0 hover:bg-muted/50"
                 >
-                  {st.label}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold text-foreground">{r.label}</div>
-                  <div className="text-xs text-muted-foreground">{r.detail}</div>
+                  {chip}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-foreground">{r.label}</div>
+                    <div className="text-xs text-muted-foreground">{r.detail}</div>
+                  </div>
+                </a>
+              );
+            }
+            return (
+              <div key={r.id} className="flex flex-wrap items-start justify-between gap-2 border-t border-border py-2.5 first:border-t-0">
+                <div className="flex min-w-0 flex-1 items-start gap-2">
+                  {chip}
+                  <div className="min-w-0 flex-1">
+                    <div className="text-xs font-semibold text-foreground">{r.label}</div>
+                    <div className="text-xs text-muted-foreground">{r.detail}</div>
+                  </div>
                 </div>
-              </a>
+                <div className="w-full sm:w-auto">
+                  <DocumentUploadAction companyId={companyId} kind={r.kind} title={VAULT_DOCUMENTS[r.kind].label} hasExisting={!!r.hasExisting} />
+                </div>
+              </div>
             );
           })}
         </div>
