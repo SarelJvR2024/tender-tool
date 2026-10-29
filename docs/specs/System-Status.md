@@ -14,6 +14,74 @@
 
 ---
 
+## This pass (2026-10-29, standing solution-architect review): COID Letter of Good Standing never carried a "renew soon" warning in the SANRAL compliance report - the single most emphasized document in this codebase's own real-incident history had the one gap every OTHER dated document here already closed
+
+Oriented from `6b6290d` (the immediately-prior standing-review pass's clean sweep); `git fetch origin
+main` found one new commit since (`9d50a36`, a different session's fix for a malformed job timestamp
+crashing every bridge's own stale-job sweep - verified the real diff, no overlap) and fast-forwarded
+local `main`. Open PRs re-checked via the GitHub API both before and after this fix: `#172`, `#165`,
+`#164`, all unchanged; `#172`'s own changed-file list was read directly (not just its title) to
+confirm it touches `generalTender.ts`/`documentExpiry.ts`/`companyExpiryFields.ts` but never
+`tenderCompliance.ts` or its test file - no collision.
+
+Per this pass's own directive, reviewed the credential/compliance-checking logic
+(`app/lib/personCredentials.ts`, `app/lib/tenderCompliance.ts`) - only lightly touched this session
+compared to the discovery/billing areas. `personCredentials.ts` checked out clean. In
+`tenderCompliance.ts`'s `sanralConventionalDocumentChecks()`, every dated document item (A9 tax PIN,
+A12 B-BBEE proof, A17 PI insurance, A18 bank letter, B4 ISO 9001) calls the shared
+`validityAtClosing()` helper and threads its `expiring` flag through to the `ComplianceItem`, which
+`compliance-report.tsx` renders as an amber "Renew soon" chip. The A20 COID Letter of Good Standing
+item is the one exception: it hand-rolls its own valid-at-closing arithmetic (duplicating
+`validityAtClosing()`'s own date math, apparently so it could distinguish "expires before this
+tender's closing date" from "already expired" with SANRAL-specific wording) - and that hand-rolled
+copy never set `expiring` at all. Confirmed by grep across the whole file: every other item sets
+`expiring` on its pushed `ComplianceItem`; the COID block's `items.push(...)` had no such field.
+Confirmed reachable and user-visible: `compliance-report.tsx:588` renders the chip from exactly that
+field, for every item in the array alike - a COID letter 1-60 days from expiry showed as plain "On
+file", with no warning, right up to the day it actually lapsed, then jumped straight to "missing"/
+"Expired" with no advance notice. Also confirmed `generalTender.ts`'s own separate "coid" case (for
+non-SANRAL tenders) already does this correctly via `validityAtClosing()` - this was a SANRAL-only
+gap, not a systemic one.
+
+This is the same real incident `app/lib/dates.ts`'s own header comment names as the reason the
+renew-soon band exists at all ("the CLI engine flagging a COID Letter of Good Standing as expired on
+every generated tender because nobody had a clear view of the expiry date on file") - just the
+opposite failure direction: that incident was about a false "expired" reading with no visibility into
+the real date; this gap was the mirror image, a real upcoming expiry with no advance visibility
+either, for the one document this codebase has already been burned by once.
+
+Fixed by computing the same `expLeft <= RENEW_SOON_DAYS` check (the identical band every other item
+here uses, via the shared `RENEW_SOON_DAYS` constant already defined in this file) in the COID
+block's own "have" branch, threading `expiring` through to the pushed item and into its own detail
+text ("(renew soon)"), matching every sibling item's wording. The two existing SANRAL-specific
+branches (missing before closing; already expired) are untouched - `expiring` stays `false` for both,
+same as every other item's own missing-branches already behave.
+
+Verified: reproduced first (stashed the fix, confirmed a COID letter 30 days from expiry showed
+`expiring: undefined` with no warning - the real bug, not a hypothetical), then confirmed fixed.
+Added 3 new tests to `app/lib/tenderCompliance.test.ts` (30-days-out flags `expiring: true`; 400-days-
+out stays `expiring: false`; an already-expired letter stays `missing`/`expiring: false`, no
+regression on the existing case) - computed relative to the real wall-clock date (this function has
+no injectable `now`, unlike `lib/dates.ts`'s own `daysUntil()`), so the tests stay valid as the
+calendar moves forward. Revert-and-confirm-red: reverting the source fix (keeping the new tests) made
+exactly the 3 new assertions fail with the real `undefined`/`false` mismatch the bug produces, nothing
+else; restored, clean.
+
+QA: `node --experimental-strip-types --test lib/tenderCompliance.test.ts` -> 9/9 pass (up from 6);
+`node --experimental-strip-types --test lib/*.test.ts` -> 197/197 (up from 194); `npx vitest run` ->
+295/295, full suite, no regressions; `npx tsc --noEmit` and `npx eslint` on both touched files -> clean.
+
+Committed and pushed directly to `main` (small, fully verified, no PR):
+- `app/lib/tenderCompliance.ts`
+- `app/lib/tenderCompliance.test.ts`
+- `docs/specs/System-Status.md`
+
+No live-database access, no mutation attempted - pure application code, no migration involved.
+Backlog unchanged at 12 items - this finding was standalone, nothing resolved or added to Sarel's own
+judgment-call list.
+
+---
+
 ## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-fifth run): Finding 99 (severe) - a malformed timestamp on ANY ONE stuck job crashed every bridge's own stale-job-recovery sweep, blocking every OTHER genuinely stuck job's recovery AND every new pending job in that queue, repeatedly, until a human fixed the bad row by hand - found and fixed repo-wide, across all six queue consumers
 
 Oriented from `6b6290d` (a sibling standing-review pass's clean sweep - discovery closing-time

@@ -249,6 +249,7 @@ export function sanralConventionalDocumentChecks(input: {
     const expLeft = daysUntil(exp);
     let status: ComplianceStatus;
     let detail: string;
+    let expiring = false;
     if (!c?.coid_letter_of_good_standing_number && !exp) {
       status = "missing";
       detail = "No COID Letter of Good Standing on file - a valid one is a mandatory requirement.";
@@ -263,11 +264,20 @@ export function sanralConventionalDocumentChecks(input: {
       detail = `Expired ${fmt(exp)}.`;
     } else {
       status = "have";
-      detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${fmt(exp)} - covers the closing date.` + copyNote(c?.coid_letter_document_path ?? null);
+      // Same RENEW_SOON_DAYS band every other dated document here uses
+      // (validityAtClosing()) - this block computes its own status by hand
+      // (mandatory-specific wording, the "expires before closing" case) but
+      // had never carried the matching "renew soon" signal through at all,
+      // so a COID letter 1-60 days from expiry showed as plain "On file"
+      // with no warning right up to the day it lapsed. Found 2026-10-29:
+      // generalTender.ts's own "coid" case already sets this correctly via
+      // validityAtClosing() - this hand-rolled SANRAL copy was the one gap.
+      expiring = expLeft !== null && expLeft <= RENEW_SOON_DAYS;
+      detail = `Letter ${c?.coid_letter_of_good_standing_number ?? ""} valid until ${fmt(exp)} - covers the closing date.${expiring ? " (renew soon)" : ""}` + copyNote(c?.coid_letter_document_path ?? null);
     }
     const fill = formFillNote(input.provenance, ["a_forms.A20"], input.hasPack);
     const exp_ = !!exp && expiredCopy(status, c?.coid_letter_document_path);
-    items.push({ key: "coid", form: "A20", label: "COID Letter of Good Standing", mandatory: true, status: status === "have" && fill.status ? fill.status : status, expiredCopy: exp_, detail: detail + (exp_ ? EXPIRED_COPY_NOTE : "") + fill.note });
+    items.push({ key: "coid", form: "A20", label: "COID Letter of Good Standing", mandatory: true, status: status === "have" && fill.status ? fill.status : status, expiring, expiredCopy: exp_, detail: detail + (exp_ ? EXPIRED_COPY_NOTE : "") + fill.note });
   }
 
   // C1.1.1 / Stage 2 #1 - Form of Offer completed in full and signed.
