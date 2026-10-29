@@ -68,6 +68,14 @@ def test_fail_stale_jobs_recovers_a_stuck_general_job():
          "started_at": iso(stale_started), "company_id": "co-a", "tender_id": "t-c"},
         {"id": "job-ready", "kind": "generate_pack", "status": "ready", "engine": "general",
          "started_at": iso(stale_started), "company_id": "co-a", "tender_id": "t-d"},
+        # QA Finding, 2026-10-29: a malformed started_at (a hand-edited row, a
+        # bad migration backfill) used to raise straight out of this
+        # function's own for loop - with no per-row guard, this ONE bad value
+        # aborted the stale-reclaim sweep for every OTHER genuinely stuck job
+        # too (job-stale, below, included), same bug class as watch_deadlines.
+        # days_until()'s own malformed-date guard.
+        {"id": "job-corrupt", "kind": "generate_pack", "status": "generating", "engine": "general",
+         "started_at": "not-a-real-timestamp", "company_id": "co-a", "tender_id": "t-e"},
     ]
     client = FakeClient(rows)
 
@@ -92,8 +100,12 @@ def test_fail_stale_jobs_recovers_a_stuck_general_job():
           by_id["job-sanral"]["status"] == "generating", by_id["job-sanral"])
     check("an already-'ready' job is left untouched regardless of its started_at age",
           by_id["job-ready"]["status"] == "ready", by_id["job-ready"])
-    check("exactly one alert was recorded, for the one genuinely stale job",
-          len(alerts) == 1 and alerts[0][0][0] == "general", alerts)
+    check("a malformed started_at does not crash the sweep and is left generating, not guessed at",
+          by_id["job-corrupt"]["status"] == "generating", by_id["job-corrupt"])
+    check("exactly two alerts were recorded: the one genuinely stale job (error) and the "
+          "malformed-timestamp row (warning) - the malformed row did not silently cost job-stale its own alert",
+          len(alerts) == 2 and sorted(a[0][0] for a in alerts) == ["general", "general"]
+          and sorted(a[0][2] for a in alerts) == ["error", "warning"], alerts)
 
 
 class FixedDateTime(datetime.datetime):

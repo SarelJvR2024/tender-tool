@@ -298,7 +298,13 @@ def fail_stale_jobs(url, key, now=None):
     'failed' with a plain reason, so the UI stops showing "Generating..." and
     the person can request again. Deliberately not re-queued: a job that
     crashed the worker once would crash it again in a loop - same rule
-    process_pack_jobs.py's own fail_stale_jobs() already follows."""
+    process_pack_jobs.py's own fail_stale_jobs() already follows.
+
+    QA pass, 2026-10-29: a malformed claimed_at on ANY one stuck row used to
+    raise straight out of this loop, with no per-row try/except - aborting
+    the stale-reclaim sweep for every OTHER genuinely stuck job too (same bug
+    class as watch_deadlines.days_until()'s own malformed-date guard).
+    Skip and alert on just the one row, never the whole sweep."""
     import datetime
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
@@ -307,7 +313,13 @@ def fail_stale_jobs(url, key, now=None):
         claimed = job.get("claimed_at")
         if not claimed:
             continue
-        claimed_dt = datetime.datetime.fromisoformat(claimed.replace("Z", "+00:00"))
+        try:
+            claimed_dt = datetime.datetime.fromisoformat(claimed.replace("Z", "+00:00"))
+        except ValueError:
+            system_alerts.record("cv", f"A CV job's claimed_at ({claimed!r}) is not a valid timestamp - "
+                                 "its stale-reclaim check was skipped, not treated as stale.",
+                                 "warning", context={"job_id": job["id"], "claimed_at": claimed})
+            continue
         if claimed_dt < cutoff:
             supabase_request(url, key, "PATCH", f"generated_cvs?id=eq.{job['id']}&status=eq.generating", {
                 "status": "failed", "completed_at": _now_iso(),

@@ -793,11 +793,26 @@ def fail_upload(url, key, upload, reason):
 
 
 def fail_stale_uploads(url, key, now=None):
+    """QA pass, 2026-10-29: a malformed extraction_claimed_at on ANY one
+    stuck row used to raise straight out of this loop, with no per-row
+    try/except - aborting the stale-reclaim sweep for every OTHER genuinely
+    stuck upload too (same bug class as watch_deadlines.days_until()'s own
+    malformed-date guard). Skip and alert on just the one row, never the
+    whole sweep."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
     for up in supabase_request(url, key, "GET", "cv_uploads?status=eq.extracting&select=id,extraction_claimed_at"):
         claimed = up.get("extraction_claimed_at")
-        if claimed and datetime.datetime.fromisoformat(claimed.replace("Z", "+00:00")) < cutoff:
+        if not claimed:
+            continue
+        try:
+            claimed_dt = datetime.datetime.fromisoformat(claimed.replace("Z", "+00:00"))
+        except ValueError:
+            system_alerts.record("cv_extract", f"A CV extraction's extraction_claimed_at ({claimed!r}) is "
+                                 "not a valid timestamp - its stale-reclaim check was skipped, not treated "
+                                 "as stale.", "warning", context={"cv_upload_id": up["id"], "claimed_at": claimed})
+            continue
+        if claimed_dt < cutoff:
             supabase_request(url, key, "PATCH", f"cv_uploads?id=eq.{up['id']}&status=eq.extracting", {
                 "status": "extraction_failed", "extraction_completed_at": _now_iso(),
                 "extraction_error": f"The extraction worker stopped mid-job (no result after {STALE_AFTER_MINUTES} "

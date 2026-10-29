@@ -106,7 +106,13 @@ def fail_stale_jobs(url, key, now=None):
     """Same reasoning as every other bridge's own fail_stale_jobs(): a
     worker killed mid-job leaves its row stuck in 'generating' forever
     without this. Not re-queued - a job that crashed the worker once would
-    crash it again."""
+    crash it again.
+
+    QA pass, 2026-10-29: a malformed started_at on ANY one stuck row used to
+    raise straight out of this loop, with no per-row try/except - aborting
+    the stale-reclaim sweep for every OTHER genuinely stuck job too (same bug
+    class as watch_deadlines.days_until()'s own malformed-date guard).
+    Skip and alert on just the one row, never the whole sweep."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
     stuck = supabase_request(url, key, "GET", "narrative_documents?status=eq.generating&select=*")
@@ -114,7 +120,13 @@ def fail_stale_jobs(url, key, now=None):
         started = job.get("started_at")
         if not started:
             continue
-        started_dt = datetime.datetime.fromisoformat(started.replace("Z", "+00:00"))
+        try:
+            started_dt = datetime.datetime.fromisoformat(started.replace("Z", "+00:00"))
+        except ValueError:
+            system_alerts.record("narrative", f"A narrative document job's started_at ({started!r}) is not "
+                                 "a valid timestamp - its stale-reclaim check was skipped, not treated as stale.",
+                                 "warning", context={"job_id": job["id"], "started_at": started})
+            continue
         if started_dt < cutoff:
             supabase_request(
                 url, key, "PATCH", f"narrative_documents?id=eq.{job['id']}&status=eq.generating",

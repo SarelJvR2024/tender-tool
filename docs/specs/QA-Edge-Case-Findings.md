@@ -5643,3 +5643,58 @@ re-ran clean. Already wired into CI (`bridge-worker-ci.yml:164`). Regression-che
 **Regression:** `engine/notify/daily_digest.py` (one function's internal loop restructured, no
 behavior change besides the new print), `engine/notify/test_digest_live.py` (1 new test function, 4
 checks). No schema or other call-site changes.
+
+### Finding 99 (CONFIRMED, FIXED, severe - a malformed timestamp on ANY ONE stuck job crashed every bridge's own stale-job-recovery sweep, blocking every OTHER genuinely stuck job's recovery AND every brand-new pending job in that queue, repeatedly, until a human fixed the one bad row by hand)
+
+**Where:** worker/job-queue rotation this cycle. `fail_stale_jobs()`/`fail_stale_uploads()` - the
+"a worker died mid-job, don't leave the row stuck in 'generating'/'extracting'/'classifying' forever"
+safety net every one of the six queue-consuming bridges has its own copy of:
+`engine/pack/process_pack_jobs.py`, `engine/general/process_general_jobs.py`,
+`engine/narrative/process_narrative_jobs.py`, `engine/cv/process_cv_jobs.py`,
+`engine/cv/extract_cv_fields.py`, `engine/onboarding/process_onboarding_jobs.py`.
+
+**What was tested:** every one of the six functions above parses a stuck row's own
+`started_at`/`claimed_at`/`extraction_claimed_at`/`classification_claimed_at` with a bare
+`datetime.datetime.fromisoformat(...)` call - no try/except anywhere. Reproduced directly (a
+`FakeClient`/`FakeDB` row with `started_at: "not-a-real-timestamp"` alongside a genuinely, separately
+stale row for a different company): the malformed row's `ValueError` raised straight out of the
+function, and since `fail_stale_jobs()`/`fail_stale_uploads()` is each bridge's own **first** call in
+its job-processing entrypoint (`process_pending()` for pack/general, `poll_once()` for
+cv/cv_extract/onboarding, the main loop body for narrative), the exception aborted everything after
+it in that pass too - not just the other genuinely stuck job (confirmed never recovered), but every
+brand-new, perfectly healthy pending job in that SAME queue, for every company, every cycle, until a
+human manually fixed the one corrupted DB row. In `--loop` mode (`run_bridges.py`/`poll_forever`) this
+surfaces as a `critical` system alert for a non-zero exit (not silent), but the underlying queue stays
+completely stalled regardless - exactly the "one malformed item aborts the whole run for everyone, not
+just the one with bad data" bug class `watch_deadlines.days_until()` was fixed for (QA pass,
+2026-10-23), found here independently, repo-wide, across every queue consumer in the codebase.
+Realistic cause: a hand-edited row (a hotfix, a bad migration backfill, a manual DB correction) - these
+timestamp columns are always system-written via `_now_iso()` at claim time, so this never occurs
+without outside interference, but when it does the blast radius is the entire queue, not one row.
+
+**Fix:** each function now wraps its own `fromisoformat()` parse/compare in a `try/except ValueError`,
+recording a `"warning"` system alert naming the bad value and skipping just that one row - matching
+`watch_deadlines.days_until()`'s own established pattern exactly (warning severity, not error; alert,
+never a guess; the sweep continues for every other row).
+
+**Verified red-then-green, per file:** for each of the six, built/extended a test with a genuinely
+stale row (must still be recovered), a fresh row (must stay untouched), and a malformed-timestamp row
+(must not crash, must get its own warning alert, must stay as-is) -
+`engine/pack/test_process_pack_jobs.py` (**new file - `process_pack_jobs.py` had no test touching its
+job-queue logic at all before this pass**), `engine/general/test_process_general_jobs.py` (extended),
+`engine/narrative/test_process_narrative_jobs.py` (extended), `engine/cv/test_process_cv_jobs.py`
+(extended), `engine/cv/test_extract_cv_fields.py` (extended), `engine/onboarding/
+test_process_onboarding_jobs.py` (extended). For each file: reverted that file's own production fix
+(`git apply -R`), re-ran - exactly the malformed-timestamp case failed (the real `ValueError` traceback,
+confirming the exact predicted crash), every other check in that file stayed green; restored, re-ran -
+clean again. Wired `test_process_pack_jobs.py` into CI (new step, `bridge-worker-ci.yml`, right after
+the existing `test_sync_functions.py` step) - validated the YAML with `python3 -c "import yaml;
+yaml.safe_load(...)"` before committing (Finding 92/95's own lesson). The other five test files were
+already wired in. Regression-checked every other `engine/pack/test_*.py`,
+`engine/worker/test_poll_loop.py`, and every file in this write-up's own "Verified" list above - all
+still pass.
+
+**Regression:** six production files (one `try/except` added per `fail_stale_jobs`/
+`fail_stale_uploads`, no other behavior change), five existing test files extended (1 new row + updated
+checks each), one new test file (`engine/pack/test_process_pack_jobs.py`, first ever for this bridge's
+job-queue logic), one CI workflow file (one new step). No schema or other call-site changes.

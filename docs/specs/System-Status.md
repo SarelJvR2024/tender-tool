@@ -14,6 +14,34 @@
 
 ---
 
+## This pass (2026-10-29, standing QA/robustness review - one-hundred-and-twenty-fifth run): Finding 99 (severe) - a malformed timestamp on ANY ONE stuck job crashed every bridge's own stale-job-recovery sweep, blocking every OTHER genuinely stuck job's recovery AND every new pending job in that queue, repeatedly, until a human fixed the bad row by hand - found and fixed repo-wide, across all six queue consumers
+
+Oriented from `6b6290d` (a sibling standing-review pass's clean sweep - discovery closing-time
+sweep + RLS check on 0098-0105, no overlap); `git fetch origin main` found nothing new since. Open
+PRs checked (`#172`/`#165`/`#164`, all draft, none touching `engine/worker/` or any `process_*_jobs.py`
+file).
+
+worker/job-queue rotation. `fail_stale_jobs()`/`fail_stale_uploads()` - the "a worker died mid-job,
+recover the stuck row" safety net every one of the six queue-consuming bridges carries its own copy
+of (pack/general/narrative/cv/cv_extract/onboarding) - parsed a stuck row's own
+started_at/claimed_at with a bare `datetime.fromisoformat()`, no try/except, in all six. Reproduced
+directly: a malformed timestamp on one row crashed the function, and since it's each bridge's own
+FIRST call in its job-processing entrypoint, the crash aborted recovery of every OTHER genuinely
+stuck job too, AND every brand-new pending job in that same queue, for every company, every cycle -
+same bug class as `watch_deadlines.days_until()`'s own malformed-date guard (QA pass, 2026-10-23),
+found here independently, repo-wide. Fixed all six with a `try/except ValueError` + a "warning"
+system alert naming the bad row, matching `days_until()`'s own established pattern exactly. Built/
+extended a test per file (stale row recovered, fresh row untouched, malformed row survives with its
+own alert) - `engine/pack/test_process_pack_jobs.py` is a **new file** (`process_pack_jobs.py` had no
+test touching its job-queue logic at all before this pass); the other five existing test files were
+extended. Revert-and-confirm-red on all six: reverting made exactly the malformed-timestamp case fail
+with the real `ValueError`, nothing else; restored, clean. Wired the new test file into CI
+(`bridge-worker-ci.yml`, validated with `yaml.safe_load` before committing). Regression-checked every
+other test file in `engine/pack/`, `engine/worker/test_poll_loop.py`, and every file touched - all
+pass. Full write-up: `docs/specs/QA-Edge-Case-Findings.md`, Finding 99.
+
+---
+
 ## This pass (2026-10-29, standing solution-architect review): clean sweep - no new code bug found; one unconfirmed observation flagged but NOT shipped as a fix (insufficient evidence)
 
 Oriented from `0183c26` (the immediately-prior pass's DBSA closing-time fix); `git fetch origin main`

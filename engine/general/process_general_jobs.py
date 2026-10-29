@@ -785,12 +785,27 @@ def fail_stale_jobs(client, now=None):
     detectable here, mirroring process_pack_jobs.py's own fail_stale_jobs()
     exactly, just scoped to engine='general' on the same shared table. Deliberately
     not re-queued: a job that crashed the worker once would crash it again in a loop,
-    same rule the other two queues already follow."""
+    same rule the other two queues already follow.
+
+    QA pass, 2026-10-29: a malformed started_at on ANY one stuck row used to
+    raise straight out of this loop, with no per-row try/except - aborting
+    the stale-reclaim sweep for every OTHER genuinely stuck job too (same bug
+    class as watch_deadlines.days_until()'s own malformed-date guard).
+    Skip and alert on just the one row, never the whole sweep."""
     now = now or datetime.datetime.now(datetime.timezone.utc)
     cutoff = now - datetime.timedelta(minutes=STALE_AFTER_MINUTES)
     for job in client.select(JOBS_TABLE, {"status": "generating", "engine": ENGINE}):
         started = job.get("started_at")
-        if started and datetime.datetime.fromisoformat(started.replace("Z", "+00:00")) < cutoff:
+        if not started:
+            continue
+        try:
+            started_dt = datetime.datetime.fromisoformat(started.replace("Z", "+00:00"))
+        except ValueError:
+            system_alerts.record("general", f"A general engine job's started_at ({started!r}) is not a "
+                                 "valid timestamp - its stale-reclaim check was skipped, not treated as stale.",
+                                 "warning", context={"job_id": job["id"], "started_at": started})
+            continue
+        if started_dt < cutoff:
             client.update(JOBS_TABLE, {"id": job["id"], "status": "generating"}, {
                 "status": "failed", "completed_at": _now(),
                 "error_message": f"The general engine stopped mid-job (no result after {STALE_AFTER_MINUTES} "

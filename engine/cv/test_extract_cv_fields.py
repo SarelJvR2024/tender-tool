@@ -467,6 +467,28 @@ def test_queue(docx_path, tmp):
     u4 = [r for r in db.tables["cv_uploads"] if r["id"] == "u4"][0]
     check(u4["status"] == "extraction_failed" and "stopped mid-job" in u4["extraction_error"], "stale 'extracting' reclaimed as failed")
 
+    # QA Finding, 2026-10-29: a malformed extraction_claimed_at on ANY one
+    # stuck row used to raise straight out of fail_stale_uploads()'s own for
+    # loop, with no per-row guard - since fail_stale_uploads() is poll_once()'s
+    # own FIRST call, one bad value crashed the whole pass: no other stuck
+    # row got reclaimed and no new, genuinely pending CV request got
+    # processed either, that cycle. Same bug class as watch_deadlines.
+    # days_until()'s own malformed-date guard.
+    db.tables["cv_uploads"].append(dict(base, id="u6", status="extracting", storage_path="x",
+                                        extraction_claimed_at="not-a-real-timestamp", created_at="6"))
+    alerts = []
+    real_record = x.system_alerts.record
+    x.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
+    try:
+        x.poll_once("u", "k", quiet_when_empty=True, client_factory=lambda: stub)
+    finally:
+        x.system_alerts.record = real_record
+    u6 = [r for r in db.tables["cv_uploads"] if r["id"] == "u6"][0]
+    check(u6["status"] == "extracting", "a malformed extraction_claimed_at does not crash the pass "
+          "and is left as-is, not guessed at")
+    check(any(a[0][0] == "cv_extract" and a[0][2] == "warning" for a in alerts),
+          f"...and is reported as its own warning alert ({alerts})")
+
     # A write that REPORTS an outcome (fail_upload) must never itself crash
     # the pass if IT fails (a transient Supabase blip right as a different
     # error is being reported) - found missing, UX audit 2026-10-23: a prior

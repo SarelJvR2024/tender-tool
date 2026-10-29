@@ -218,6 +218,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/pack/test_sync_functions.py
 
+      - name: Pack bridge fail_stale_jobs() - stuck SANRAL job recovery survives a malformed started_at (Finding 99)
+        if: ${{ !cancelled() }}
+        run: python3 engine/pack/test_process_pack_jobs.py
+
       - name: Cross-tenant isolation - service-role bridges read only the job company's rows and files (in-memory rows)
         if: ${{ !cancelled() }}
         run: python3 engine/security/test_tenant_isolation.py

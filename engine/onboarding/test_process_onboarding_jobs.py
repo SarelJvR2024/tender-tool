@@ -191,19 +191,34 @@ def test_fail_stale_uploads_marks_old_classifying_rows_failed_and_leaves_fresh_o
     db = FakeDB([
         {"id": "stuck", "status": "classifying", "classification_claimed_at": old},
         {"id": "running", "status": "classifying", "classification_claimed_at": fresh},
+        # QA Finding, 2026-10-29: a malformed classification_claimed_at on
+        # ANY one stuck row used to raise straight out of this function's
+        # own for loop, with no per-row guard - one bad value aborted the
+        # stale-reclaim sweep for every OTHER genuinely stuck upload too
+        # (same bug class as watch_deadlines.days_until()'s own
+        # malformed-date guard).
+        {"id": "corrupt", "status": "classifying", "classification_claimed_at": "not-a-real-timestamp"},
     ])
-    original = poj.supabase_request
+    alerts = []
+    original, original_record = poj.supabase_request, poj.system_alerts.record
     poj.supabase_request = db
+    poj.system_alerts.record = lambda *a, **kw: alerts.append((a, kw)) or "test-alert"
     try:
         poj.fail_stale_uploads("url", "key", now=now)
     finally:
         poj.supabase_request = original
+        poj.system_alerts.record = original_record
     rows = {r["id"]: r for r in db.tables["onboarding_uploads"]}
     check("a row stuck 'classifying' for longer than STALE_AFTER_MINUTES is marked failed",
           rows["stuck"]["status"] == "classification_failed", rows["stuck"])
     check("...with a customer-facing reason, not left blank", bool(rows["stuck"].get("classification_error")))
     check("a row that only just started is left alone, not prematurely failed",
           rows["running"]["status"] == "classifying", rows["running"])
+    check("a malformed classification_claimed_at does not crash the sweep and is left classifying, not guessed at",
+          rows["corrupt"]["status"] == "classifying", rows["corrupt"])
+    check("both the real stale row and the malformed row got their own alert, each correctly severed",
+          sorted((a[0][0], a[0][2]) for a in alerts) == [("onboarding_scan", "error"), ("onboarding_scan", "warning")],
+          alerts)
 
 
 def test_process_upload_happy_path_writes_classified_with_every_result_field():

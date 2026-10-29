@@ -129,7 +129,14 @@ def test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_
     db = FakeDB({"narrative_documents": [
         {"id": "stuck", "status": "generating", "started_at": old},
         {"id": "running", "status": "generating", "started_at": fresh},
+        # QA Finding, 2026-10-29: a malformed started_at used to raise
+        # straight out of this function's own for loop, with no per-row
+        # guard - one bad value aborted the stale-reclaim sweep for every
+        # OTHER genuinely stuck job too (same bug class as watch_deadlines.
+        # days_until()'s own malformed-date guard).
+        {"id": "corrupt", "status": "generating", "started_at": "not-a-real-timestamp"},
     ]})
+    ALERTS.clear()
     original = pnj.supabase_request
     pnj.supabase_request = db
     try:
@@ -143,6 +150,11 @@ def test_fail_stale_jobs_marks_old_generating_jobs_failed_and_leaves_fresh_ones_
           bool(rows["stuck"].get("error_message")))
     check("a job that only just started is left alone, not prematurely failed",
           rows["running"]["status"] == "generating", rows["running"])
+    check("a malformed started_at does not crash the sweep and is left generating, not guessed at",
+          rows["corrupt"]["status"] == "generating", rows["corrupt"])
+    check("the malformed row got its own warning alert (this function doesn't alert on a normal "
+          "stale-recovery, only on this malformed-timestamp case)",
+          [(a["p_source"], a["p_severity"]) for a in ALERTS] == [("narrative", "warning")], ALERTS)
 
 
 def test_process_one_happy_path_writes_ready_with_every_generation_field():
