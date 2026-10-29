@@ -14,6 +14,55 @@
 
 ---
 
+**2026-10-29 ~08:16 UTC — standing review: clean sweep, no new finding.**
+
+Oriented from `adbd633` (the previous pass's notifications-bell fix); fetched `origin/main`, found
+one new commit (`37c4c2a`, a different session's clean sweep of `extract_cv_fields.py`'s
+validation/redaction logic, docs-only - no overlap) and fast-forwarded local `main` before starting.
+Open PRs (`#164`, `#165`, `#170`) checked via the GitHub API, unchanged, no collision.
+
+This session has now found and fixed 5 real bugs in a row, 4 of them the exact same shape (two code
+paths computing one real-world fact with a silently disagreeing constant/default). Per this pass's
+own directive, re-grepped every `*_DAYS`/`*_WINDOW` numeric constant across `app/lib` and `engine`
+(14 hits) to check whether that shape still has a live instance anywhere:
+
+- `app/lib/tenderCompliance.ts` (`RENEW_SOON_DAYS = 60`) and `app/lib/generalTender.ts` both already
+  special-case `bank_confirmation_letter_valid_until` to a literal `30` at their own call sites
+  (`validityAtClosing(..., 30)`) - independently confirmed by reading both, not assumed from the
+  prior pass's own commit message. Consistent with `vaultDocuments.ts`'s `BANK_LETTER_RENEW_SOON_DAYS`
+  and `watch_deadlines.py`'s override for the same column. No bug.
+- `app/lib/documentExpiry.ts`'s flat `EXPIRING_SOON_WINDOW_DAYS = 30` for every field (including the
+  six 60-day-elsewhere fields) is a deliberate, documented, tighter window for that one list
+  ("what needs attention before my next bid" vs the bell's "worth a heads-up eventually") - read its
+  own header comment and confirmed this is by design, not a drifted duplicate.
+- The four `14`-day constants (`readiness.ts`, `complianceExpiryReminders.ts`,
+  `deadlineReminders.ts`, `dispatchDashboard.ts`) and the two `60`-day constants
+  (`notifications.ts`, `watch_deadlines.py`'s `DEFAULT_DOC_LEAD_DAYS`) all genuinely agree with each
+  other and with their own cited sibling constant in a comment.
+
+Conclusion: the "drifted duplicate constant" shape this session kept finding is now genuinely
+exhausted across every numeric day-count/window constant in the codebase - not just the two files
+already fixed.
+
+Pivoted to a different kind of review per the directive: read `0100_quality_scout_triage.sql`,
+`0102_impersonation_audit_logs.sql`, and the newest migration `0103_tender_catalog.sql` end to end
+(the three newest, least-reviewed areas) for tenant-isolation and dead-wiring bugs, the two bug
+shapes a standing-review pass has found live ones of before this session (the `narrative_documents`
+cross-tenant gap, the missing `narrative` entry in `run_bridges.py`'s `BRIDGES` dict). Specifically
+checked: `platform_admin_tender_catalog()`'s `security definer` + `where is_platform_admin()` gating
+(correct, same convention as every other platform-admin function since 0043); `0102`'s immutable-
+audit-log guardrails (`platform_admin_end_impersonation()` pinned to both `admin_user_id = auth.uid()`
+and `ended_at is null`, confirmed correct); `0100`'s `kind = 'extract_requirements'` claim against
+`process_general_jobs.py`'s `process_job()` (confirmed real, line 794) and its `pack_generation_jobs_one_open_key`
+unique-violation handling (confirmed the index's actual column list in `0026_unified_job_queue.sql`
+matches what the reprocess function relies on). All three migrations check out - no bug found.
+
+QA tooling confirmed sound: `node --experimental-strip-types --test app/lib/*.test.ts` - 178/178.
+
+No code change this pass. Backlog unchanged at 9 items - nothing resolved, nothing newly added.
+
+---
+
 **2026-10-29 ~06:20 UTC — standing review: the topbar notifications bell nagged about a bank
 confirmation letter up to a month before the vault itself considered it due for renewal; fixed.**
 
