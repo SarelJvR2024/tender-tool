@@ -14,6 +14,69 @@
 
 ---
 
+**2026-10-29 ~10:20 UTC — standing review: clean sweep, no new code finding.**
+
+Oriented from `3df29b4` (the previous pass's "drifted constant" exhaustion sweep); `git fetch
+origin main` found 3 new commits since then - PR #171 (Discovery save-speed fix + preferred-clients
+preference + 3 filters, merged `be85be9`/migration `0104`) and `8180c19` (PR #170, signatory fallback
++ real SANRAL pack-assembly test), plus `bc4b3ea` (Finding 96, a new design-question backlog item:
+`gather_pack_inputs()`'s signatory fallback only covers a MISSING `signatory_person_id` answer, not a
+dangling one pointing at a person who no longer resolves at this company - rare, not a crash, an
+honest blank rather than wrong data, flagged not fixed). Fast-forwarded local `main` to `bc4b3ea`
+before starting. Open PRs checked via the GitHub API: `#164`/`#165` unchanged, plus a new `#172`
+("Fix Document Vault 'Not on file' badge bug; add Edit entry points + CIDB editing") - noted and left
+alone, no collision with anything reviewed this pass.
+
+Per this pass's own directive, pivoted away from the now-exhausted "drifted constant" shape and
+looked at four different areas:
+
+- **Job-queue claim/retry logic** (`engine/cv/process_cv_jobs.py`, `engine/pack/process_pack_jobs.py`,
+  `engine/narrative/process_narrative_jobs.py`, `engine/onboarding/process_onboarding_jobs.py`): all
+  four use the identical, correct pattern - a conditional `UPDATE ... WHERE id = ? AND status = ?`
+  that only one concurrent claimant can ever match, with PostgREST's `Prefer: return=representation`
+  turning "no row updated" into an empty array the caller checks (`if not claimed: skip`). Confirmed
+  `poll_loop.py`'s `poll_forever()` runs each bridge's stale-job sweep and its claim/process step
+  sequentially within one single-threaded cycle (never concurrently with itself) - the only real race
+  window is across multiple horizontally-scaled replicas of the SAME bridge, and System-Status's own
+  Railway notes earlier this session recorded "1 Replica" for the worker service. No bug found.
+- **Admin impersonation session logic** (`app/lib/impersonation.ts`, `app/lib/supabase/server.ts`,
+  `app/app/admin/customers/impersonation-actions.ts`, `app/app/_components/ImpersonationBanner.tsx`),
+  read line by line rather than re-trusting the existing design-level flag. Confirmed the already-known
+  gap (backlog item: impersonation token-refresh) is exactly as previously described and is an explicit,
+  documented tradeoff in `server.ts`'s own header comment ("cannot itself verify the impersonation audit
+  row is still open... the cookie's own short, fixed max-age is the bound") - not a new angle, not
+  re-flagged separately. The exit path (`endImpersonation()` deleting the one cookie) and the audit
+  functions' `admin_user_id = auth.uid()` / `ended_at is null` guardrails (migration `0102`) both check
+  out correctly. No new bug found here.
+- **Migration `0104`** (the just-merged `preferred_buyers` column) and `lib/opportunityBuyerMatch.ts`:
+  a plain column add to an already-RLS-scoped table, no new policy needed; `matchesPreferredBuyers()`'s
+  empty-preference/empty-buyer short-circuits (`return true`) and its use in `page.tsx`'s sort
+  comparator are symmetric with the existing, already-correct discipline-match sort term (same
+  `Number(match(b)) - Number(match(a))` direction, matches sort first, a no-op when nothing is set).
+  No bug found.
+- **`engine/pack/pdf_merge.py`'s `verify_pack()`** (the merged-PDF read-back check): read end to end: it
+  already does the kind of correctness check this session's other passes have found real bugs
+  elsewhere (page count, section coverage, page-number stamps, contents-page cross-references, outline
+  bookmarks) - but it's also the area PR #170 just added "3 real bugs fixed" + a new real SANRAL
+  pack-assembly test for, so it's already had fresh, direct scrutiny from that merge. No further bug
+  found on this read.
+
+QA tooling confirmed sound: `node --experimental-strip-types --test lib/*.test.ts` (run from `app/`) -
+194/194, up from the 178/178 several earlier passes cited, since the just-merged Discovery PR (#171)
+added `opportunityBuyerMatch.test.ts` and extended `discoveryPagination.test.ts` - consistent with that
+PR's own commit message, not a discrepancy.
+
+No code change this pass - genuine clean sweep across 4 different areas, not a forced fix. Backlog is
+now 10 items (the original 9 plus Finding 96's new dangling-signatory design question): migration
+`0096` (pack-quota trial-expiry), `narrative_documents` PostgREST schema-cache reload, PayFast
+idempotency design question, "missing ISO 9001 flagged as urgent" UX question, Form B7
+compulsory-vs-matrix disagreement, dashboard "Decision needed" over-triggering, impersonation
+token-refresh gap, submitted-tender nagging gap, SANRAL fingerprint heads-up (no action needed), and
+now Finding 96 (dangling `signatory_person_id` fallback) - all still Sarel's own judgment calls, none
+resolved or acted on by this pass.
+
+---
+
 **2026-10-29 ~08:50 UTC — Discovery page: fixed the slow Opportunity-preferences save and the flaky
 "Interested" button (same root cause), added a preferred-clients preference, and three new filters
 (Sarel's own live feedback, 2026-10-29).**
