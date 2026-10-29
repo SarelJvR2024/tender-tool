@@ -734,17 +734,44 @@ def match_locality(loc, offices):
 
 FUNCTIONALITY_NA_RE = re.compile(r"functionality\s*\n?\s*N/?A\b", re.IGNORECASE)
 
+# Manifest v2 (Sarel's own brief: "Replace the single functionality:70
+# integer with a structured scorecard... sub_minimum_rule... criteria").
+# Both generic - no specific point split or rule wording is hardcoded, only
+# the SHAPE a real sub-minimum clause or scoring table reliably has.
+SUB_MINIMUM_RE = re.compile(
+    r"minimum(?:\s+(?:rating|score))?\s+of\s+(\d{1,2})\s*(?:out\s+of|/)\s*(\d{1,2})\s+(?:in|on)\s+(?:every|each)\s+(?:of\s+the\s+)?criteri\w+",
+    re.IGNORECASE)
+# A scoring-table row: "<criterion name> ... <N> points/pts", on its own
+# line - the format a real functionality criteria table almost always
+# renders as once pdftotext -layout flattens it. Requires 2+ matching rows
+# before being trusted as a real breakdown (see below) - a single hit is
+# too weak to tell from an unrelated "40 points" mentioned in passing.
+CRITERION_LINE_RE = re.compile(r"^\s*([A-Z][A-Za-z()&,./' ]{3,60}?)\s*[-:]?\s*\(?\s*(\d{1,3})\s*(?:points?|pts)\)?\s*$", re.MULTILINE)
+FUNC_CRITERIA_WINDOW = 4000
+
 
 def _functionality(text):
     if FUNCTIONALITY_NA_RE.search(text) and not THRESHOLD_RE.search(text):
-        return {"present": False, "threshold": None,
+        return {"present": False, "threshold": None, "has_sub_minimum": False, "sub_minimum_rule": None, "criteria": [],
                 "reason": "The document marks functionality scoring as not applicable - price and specific goals only."}
-    if not FUNCTIONALITY_RE.search(text):
-        return {"present": None, "threshold": None,
+    func_match = FUNCTIONALITY_RE.search(text)
+    if not func_match:
+        return {"present": None, "threshold": None, "has_sub_minimum": False, "sub_minimum_rule": None, "criteria": [],
                 "reason": "No functionality/quality evaluation mentioned in the available text."}
     m = THRESHOLD_RE.search(text) or THRESHOLD_ALT_RE.search(text)
     threshold = int(m.group(1)) if m else None
     sanral = bool(SANRAL_METHOD_RE.search(text))
+    sub_min_m = SUB_MINIMUM_RE.search(text)
+    sub_minimum_rule = _flat(sub_min_m.group(0)) if sub_min_m else None
+    criteria = []
+    window = text[func_match.start(): func_match.start() + FUNC_CRITERIA_WINDOW]
+    for cm in CRITERION_LINE_RE.finditer(window):
+        name, weight = _flat(cm.group(1)), int(cm.group(2))
+        if weight > 100 or any(c["name"] == name for c in criteria):
+            continue
+        criteria.append({"name": name, "weight": weight})
+    if len(criteria) < 2:
+        criteria = []  # a single stray "<N> points" line isn't a real breakdown
     if sanral:
         reason = ("Uses SANRAL's published consultant scoring (technical 30, management 15, quality "
                   "system 10, past performance 15, workplan 30). Key-person points can be estimated in the "
@@ -754,7 +781,10 @@ def _functionality(text):
                   "not estimated here.")
     if threshold:
         reason = f"Minimum functionality score {threshold} to proceed to price. " + reason
-    return {"present": True, "threshold": threshold, "sanral_methodology": sanral, "reason": reason}
+    if sub_minimum_rule:
+        reason += f" {sub_minimum_rule[0].upper()}{sub_minimum_rule[1:]}."
+    return {"present": True, "threshold": threshold, "sanral_methodology": sanral, "reason": reason,
+            "has_sub_minimum": bool(sub_min_m), "sub_minimum_rule": sub_minimum_rule, "criteria": criteria}
 
 
 def estimate_score_outlook(text, depth, profile, cidb_required=None):

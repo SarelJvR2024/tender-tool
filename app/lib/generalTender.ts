@@ -103,6 +103,16 @@ export type RequirementManifest = {
   }[];
   returnables: ManifestReturnable[];
   roles: { role_code: string; mentions: number; document: string; quote: string; from_ocr?: boolean; confidence?: number; confidence_reason?: string }[];
+  // Manifest v2 (2026-10-29) - additive. Absent on manifests extracted
+  // before this, same convention as document_depth below.
+  extracted_roles?: { title: string; min_years: number; qualifications_and_certs: string[]; cover_page: string | null; document: string; quote: string }[];
+  mandatory_gates?: { type: "iso_certification" | "mandatory_credential" | "jv_agreement"; label: string; fatal: boolean; cure_days: number | null; quote: string | null }[];
+  pricing_schedule?: {
+    type: string | null;
+    deliverables: { item: number; description: string }[];
+    vat_percentage: number | null;
+    quote: string | null;
+  } | null;
   // 0040 / audit Q5: per-person registrations this tender requires that are
   // not on every person's record (requirements.py find_person_registrations).
   // Absent when the tender doesn't ask - the People page then keeps the
@@ -113,7 +123,15 @@ export type RequirementManifest = {
   briefing: { compulsory: boolean; quote: string; confidence?: number; confidence_reason?: string } | null;
   scoring: {
     preference_system: { system: string; reason?: string };
-    functionality: { present?: boolean | null; threshold?: number | null; reason?: string };
+    functionality: {
+      present?: boolean | null;
+      threshold?: number | null;
+      reason?: string;
+      // Manifest v2 - absent on manifests extracted before this.
+      has_sub_minimum?: boolean;
+      sub_minimum_rule?: string | null;
+      criteria?: { name: string; weight: number }[];
+    };
     specific_goal_bases: string[];
   };
   experience_evidence: { source: string; rules: EvidenceRule[] };

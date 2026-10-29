@@ -602,6 +602,30 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
           ))}
         </>
       )}
+      {/* Manifest v2: roles this tender names that aren't among the 17
+          coded construction roles above (e.g. "Data Engineer", "Power BI
+          Specialist") - from the tender's own Key Resource/Section 6/
+          Annexure B schedule. No person-tagging exists for these (there's
+          no role_code to tag against), so the status is deliberately
+          neutral, not a pass/fail claim. */}
+      {(manifest.extracted_roles ?? []).length > 0 && (
+        <>
+          <SubTitle text="Other roles named in this tender's own schedule" />
+          {manifest.extracted_roles!.map((r, i) => (
+            <RequirementRow
+              key={`${r.title}-${i}`}
+              label={r.title}
+              detail={
+                `Minimum ${r.min_years} year${r.min_years === 1 ? "" : "s"} experience` +
+                (r.qualifications_and_certs.length > 0 ? ` - ${r.qualifications_and_certs.join(", ")}` : "") +
+                (r.cover_page ? ` (cover page: ${r.cover_page})` : "")
+              }
+              quote={r.quote}
+              status={{ label: "Not matched to a company role yet", tone: "muted" }}
+            />
+          ))}
+        </>
+      )}
       {chosen && (
         <>
           <SubTitle text="Company experience this tender accepts" />
@@ -726,6 +750,37 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const overview = (
     <>
       {privateCard}
+      {/* Manifest v2 (Sarel's own brief): mandatory gates, shown before any
+          scope summary. Deliberately does NOT claim "Verified on File" /
+          "Missing from Vault" against the extracted label - requirements.py
+          extracts whatever named credential a tender's own text states
+          (e.g. "SACPCMP", "DAMA CDMP"), and there is no real mapping from an
+          arbitrary extracted string to a specific company vault field (the
+          fixed csd/tax/bbbee/coid/cidb/bank/insurance set generalTender.ts
+          already checks is NOT the same thing as a one-off named
+          credential/registration) - inventing a status here would be
+          exactly the fabricated compliance match this app's own rule
+          forbids. Shows the real extracted fact and lets a human check it. */}
+      {(manifest.mandatory_gates ?? []).length > 0 && (
+        <div id="mandatory-gates" style={card}>
+          <SectionTitle title="Mandatory disqualification gates" />
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>
+            Named directly in this tender&apos;s own text - check each one against your own documents and team.
+          </div>
+          {(manifest.mandatory_gates ?? []).map((g, i) => (
+            <div key={i} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border)", padding: "8px 0", display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ minWidth: 0, flex: "1 1 280px" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "var(--foreground)" }}>{g.label}</div>
+                {g.quote && <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>&quot;{g.quote}&quot;</div>}
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "flex-start" }}>
+                {g.fatal && <Chip label="Disqualifying if missing" className="bg-destructive/10 text-destructive" />}
+                {g.cure_days != null && <Chip label={`${g.cure_days}-day cure window`} className="bg-muted text-foreground" />}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
       {/* 1. What this tender needs */}
       <div id="general-preparation" style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
@@ -808,9 +863,29 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
             <Chip label={`Preference: ${manifest.scoring.preference_system.system}`} className="bg-muted text-foreground" />
           )}
           {manifest.scoring.functionality.threshold ? <Chip label={`Functionality minimum ${manifest.scoring.functionality.threshold}`} className="bg-muted text-foreground" /> : null}
+          {manifest.scoring.functionality.has_sub_minimum && (
+            <Chip label="Sub-minimum per criterion applies" className="bg-warning/10 text-warning" />
+          )}
           {manifest.cidb && <Chip label={`CIDB ${manifest.cidb.grading}`} className="bg-muted text-foreground" />}
           {manifest.briefing?.compulsory && <Chip label="Compulsory briefing" className="bg-destructive/10 text-destructive" />}
         </div>
+        {/* Manifest v2: the real per-criterion breakdown, when the document's
+            own scoring table was actually readable - never an invented
+            40/40/20-style split for a buyer whose table this couldn't parse. */}
+        {(manifest.scoring.functionality.criteria?.length ?? 0) > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <SubTitle text="Functionality scoring breakdown" />
+            {manifest.scoring.functionality.criteria!.map((c, i) => (
+              <div key={i} style={{ borderTop: i === 0 ? "none" : "1px solid var(--border)", padding: "6px 0", display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}>
+                <span style={{ color: "var(--foreground)" }}>{c.name}</span>
+                <span style={{ color: "var(--muted-foreground)", fontWeight: 600 }}>{c.weight} pts</span>
+              </div>
+            ))}
+            {manifest.scoring.functionality.sub_minimum_rule && (
+              <div style={{ fontSize: 11, color: "var(--warning)", marginTop: 4 }}>{manifest.scoring.functionality.sub_minimum_rule}.</div>
+            )}
+          </div>
+        )}
       </div>
     </>
   );
