@@ -14,6 +14,73 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): Finding 103 - no upper bound anywhere in the stack on `bee_level` or any percentage field, so a typo prints an impossible value straight onto a real SANRAL form
+
+Oriented from `6468e79`; `git fetch origin main` found one new commit (`5576507`, a different session's
+real fix for `scan_ocr.py`'s silent OCR-failure alert gap - read the real diff, touches `engine/ocr/`
+only, no overlap) and fast-forwarded local `main`. Open PRs re-checked via the GitHub API: `#172`,
+`#165`, `#164`, all open and unchanged.
+
+Per this pass's own directive (pick one area not yet named in any prior pass this session), started
+with `engine/discovery/score_outlook.py` (the relevance/preference-point scoring engine) - read it end
+to end, traced several promising-looking regex/heuristic shapes, found nothing conclusively wrong
+within the available fixture evidence (its existing `test_score_outlook.py` already covers the one
+real finding this module has had). Pivoted to company settings/profile editing (`app/app/company/`),
+not yet reviewed this session.
+
+**Found and fixed a real, reachable bug**: `buildCompanyUpdate()` (`lib/companyProfileUpdate.ts`), the
+one shared validator both the company edit form and the onboarding wizard use, only ever rejected a
+NEGATIVE number for any of its numeric fields - no upper bound existed anywhere in the stack (the
+`NumberInput` component has no `max` prop at all; this function had none; there is no Postgres check
+constraint on `bee_level`/`black_ownership_pct`/`bee_procurement_recognition_pct`/`typical_jv_share_pct`
+either). Confirmed this isn't cosmetic: `black_ownership_pct`/`bee_procurement_recognition_pct`/
+`typical_jv_share_pct` are written VERBATIM onto real tender submission documents -
+`engine/sanral_fill.py`'s L33, `engine/fill_a_forms.py`'s A12 confirmation line
+(`f", {own}% black owned"`), and `confirm_pack.py`'s `jv_share_pct` - and `bee_level` goes straight into
+SANRAL's own K33 cell. A typo like "500" (meant "50.0") or "47" would print unchanged on an actual
+government bid, with nothing anywhere in the pipeline ever refusing it.
+
+Reproduced directly first (`black_ownership_pct: "500"`, `bee_level: "47"`, `typical_jv_share_pct: "250"`
+all returned `error: null` against the unfixed source). While reproducing, hit a second small, real bug
+in the same file: its own import of `./vaultDocuments` was missing the `.ts` extension (the same
+convention-drift class a prior pass already fixed in `personCredentials.ts`/`tenderCompliance.ts`) -
+harmless under Next.js's own bundler, but it meant this file couldn't be loaded directly by
+`node --experimental-strip-types`, blocking any dedicated test for it. Fixed both: capped
+`black_ownership_pct`/`bee_procurement_recognition_pct`/`typical_jv_share_pct` at 100,
+and `bee_level` at 9 - not 8: SANRAL's own template ships K33 = 9 as "non-compliant contributor"
+(`docs/specs/Form-Field-Audit.md`, row K33) when no real level is on file, so 9 is a real, documented
+value a company's own level can legitimately be, and 1-9 (not 1-8) is the correct range.
+
+**Collision note, not a blocker**: PR `#172` (open, unmerged) also touches `companyProfileUpdate.ts` -
+but its one hunk there only adds `cidb_grading`/`cidb_registration_number`/`cidb_contractor_name`/
+`cidb_expiry` to `COMPANY_TEXT_FIELDS`/`COMPANY_DATE_FIELDS` at the top of the file; this fix is in
+`COMPANY_NUMERIC_FIELDS`/`INTEGER_FIELDS`/the numeric validation loop, a different region. Confirmed by
+reading `#172`'s actual diff (not just its title) - no line-level overlap, and it adds its own
+`companyProfileUpdate.spec.ts` (vitest, CIDB-only coverage) alongside this pass's new
+`companyProfileUpdate.test.ts` (node test runner, percentage/bee_level-bounds coverage) - different
+filenames, no collision, both will merge cleanly.
+
+New file `lib/companyProfileUpdate.test.ts` (first ever for this module under the node test runner; 10
+checks: the 3 percentage fields over 100, `bee_level` over 9, the real boundary values 100/9 both still
+accepted, a non-percentage count field (`other_offices`) confirmed still unbounded on purpose, the
+pre-existing negative-number rejection, and the pre-existing "absent field left out of the update"
+behaviour). Revert-and-confirm-red: stashing the fix made exactly those tests fail (the import itself
+failed to resolve, since the `.ts`-extension fix was stashed with it), restoring made all 10 pass again.
+
+Committed and pushed directly to `main` (small, fully verified, no PR):
+- `app/lib/companyProfileUpdate.ts`
+- `app/lib/companyProfileUpdate.test.ts` (new)
+- `docs/specs/System-Status.md`
+
+Verification: `node --experimental-strip-types --test lib/companyProfileUpdate.test.ts` - 10/10;
+`node --experimental-strip-types --test lib/*.test.ts` - 207/207 (up from 197); `npx vitest run` -
+295/295 unaffected; `npx tsc --noEmit` and `npx eslint` on both touched files - clean.
+
+Backlog: unchanged at 13 items - this finding was standalone, nothing resolved or added. Old count 13 +
+0 new = **13**.
+
+---
+
 ## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-twenty-eighth run): Finding 102 (moderate) - a corrupted/unopenable image upload broke OCR silently as far as system_alerts was concerned, unlike every other OCR-infrastructure failure in the same module
 
 Oriented from `6468e79` (a sibling standing-review pass's clean sweep - Discovery filter/sort/count,

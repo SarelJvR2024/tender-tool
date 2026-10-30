@@ -1,4 +1,4 @@
-import { BEE_PROOF_TYPES } from "./vaultDocuments";
+import { BEE_PROOF_TYPES } from "./vaultDocuments.ts";
 
 /**
  * Fields the company edit form (app/company/page.tsx) and the onboarding
@@ -74,6 +74,21 @@ const BLANK_NOT_ALLOWED = new Set(["savings_baseline_hours_per_tender", "savings
 // Integer columns: a fractional count is refused rather than sent to Postgres.
 const INTEGER_FIELDS = new Set(["other_offices", "ecsa_registered_staff_count", "sacpcmp_registered_staff_count", "total_employees", "bee_level"]);
 
+// Found 2026-10-30: every field above only ever rejected a NEGATIVE number -
+// there was no upper bound at all, for a percentage field or for bee_level,
+// client-side (NumberInput has no max) or here. black_ownership_pct/
+// bee_procurement_recognition_pct/typical_jv_share_pct are written verbatim
+// onto real tender submission documents (engine/sanral_fill.py L33,
+// engine/fill_a_forms.py's A12 confirmation line, engine/pack_generator/
+// confirm_pack.py's jv_share_pct) - "500%" or "250%" would print on an actual
+// government bid with nothing anywhere in the stack ever refusing it.
+// bee_level is written straight into SANRAL's own K33 cell (whole 1-9;
+// SANRAL's template itself ships 9 = "non-compliant contributor" when no
+// level is on file - docs/specs/Form-Field-Audit.md row K33), so 1-9 is the
+// real, documented range, not 1-8.
+const PERCENTAGE_FIELDS = new Set(["black_ownership_pct", "bee_procurement_recognition_pct", "typical_jv_share_pct"]);
+const FIELD_MAX: Partial<Record<(typeof COMPANY_NUMERIC_FIELDS)[number], number>> = { bee_level: 9 };
+
 const BEE_PROOF_VALUES = BEE_PROOF_TYPES.map((t) => t.value) as string[];
 
 // Matches companies_how_we_work_length (0030).
@@ -115,8 +130,11 @@ export function buildCompanyUpdate(formData: FormData): { update: CompanyUpdate;
       return { update, error: `"${field.replace(/_/g, " ")}" can't be blank.` };
     }
     const n = trimmed === "" ? null : Number(trimmed);
-    if (n !== null && (!Number.isFinite(n) || n < 0 || (INTEGER_FIELDS.has(field) && !Number.isInteger(n)))) {
-      return { update, error: `"${field.replace(/_/g, " ")}" must be a ${INTEGER_FIELDS.has(field) ? "whole " : ""}number of 0 or more.` };
+    const max = PERCENTAGE_FIELDS.has(field) ? 100 : FIELD_MAX[field];
+    if (n !== null && (!Number.isFinite(n) || n < 0 || (INTEGER_FIELDS.has(field) && !Number.isInteger(n)) || (max !== undefined && n > max))) {
+      const label = `"${field.replace(/_/g, " ")}"`;
+      const whole = INTEGER_FIELDS.has(field) ? "whole " : "";
+      return { update, error: max !== undefined ? `${label} must be a ${whole}number between 0 and ${max}.` : `${label} must be a ${whole}number of 0 or more.` };
     }
     update[field] = n;
   }
