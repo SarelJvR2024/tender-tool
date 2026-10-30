@@ -84,12 +84,22 @@ def _base_client(claimed=True, recipients=None):
     )
 
 
-def test_skips_cleanly_when_already_claimed():
+def test_skips_cleanly_when_already_claimed(monkeypatch):
+    """claim_notification() now runs AFTER the recipients lookup/render
+    (2026-10-30 fix, see test_render_failure_never_wastes_the_one_time_claim
+    below) - so an already-claimed job still does that work first, then
+    discovers the claim fails and sends nothing. Render must be mocked here
+    or this test would really shell out to node."""
     client = _base_client(claimed=False)
+
+    def fake_run(cmd, cwd, capture_output, text, timeout):
+        return FakeCompletedProcess(0, stdout=json.dumps({"subject": "s", "html": "<p>h</p>", "text": "t"}))
+
+    monkeypatch_module(pr.subprocess, "run", fake_run)
     pr.send_pack_ready_email(client, _job(), 42, "https://tenderready.app")
     rpc_names = [c[0] for c in client.rpc_calls]
     check("claim_notification was attempted", "claim_notification" in rpc_names)
-    check("no recipients lookup happened once the claim failed", "company_notification_recipients" not in rpc_names)
+    check("nothing was sent/logged once the claim came back already-taken", "record_notification_sent" not in rpc_names)
 
 
 def test_skips_cleanly_with_no_opted_in_recipients():
@@ -179,6 +189,55 @@ def test_render_failure_is_caught_and_never_raises(monkeypatch):
     check("a render failure never raises into the caller - the pack job must not be failed by an email problem", raised is False)
     log_calls = [c for c in client.rpc_calls if c[0] == "record_notification_sent"]
     check("nothing was logged as sent when rendering itself failed", len(log_calls) == 0)
+    rpc_names = [c[0] for c in client.rpc_calls]
+    check("claim_notification was NEVER called - a render failure must not burn the one-time claim "
+          "(this job never runs again for the same job id, so claiming before a render failure would "
+          "have lost this pack's one and only 'ready' email forever)",
+          "claim_notification" not in rpc_names, rpc_names)
+
+
+def test_render_failure_never_wastes_the_one_time_claim():
+    """Regression test for the 2026-10-30 standing-review finding: this
+    function used to call claim_notification() BEFORE the recipients
+    lookup, the tender/company select AND _render() - every one of which
+    can raise (a network blip, a bad render-script exit, an empty lookup).
+    Since no cron/retry ever re-invokes this function for the same job id,
+    any failure after the old claim point permanently burned the claim with
+    nothing ever sent - the exact bug class the missing-API-key check
+    above was already written to avoid, just not closed for these other
+    failure modes. Fixed by moving the claim to immediately before the
+    first real send, after render has already succeeded - this test
+    asserts the claim is reached at all once render DOES succeed (the
+    happy path above already proves the actual send still happens)."""
+    client = _base_client()
+    rendered = {"subject": "s", "html": "<p>h</p>", "text": "t"}
+
+    def fake_run(cmd, cwd, capture_output, text, timeout):
+        return FakeCompletedProcess(0, stdout=json.dumps(rendered))
+
+    def fake_urlopen(req, timeout):
+        class FakeResp:
+            def read(self):
+                return json.dumps({"id": "resend-999"}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        return FakeResp()
+
+    monkeypatch_module(pr.subprocess, "run", fake_run)
+    monkeypatch_module(pr.urllib.request, "urlopen", fake_urlopen)
+    pr.send_pack_ready_email(client, _job(), 42, "https://tenderready.app")
+
+    call_order = [c[0] for c in client.rpc_calls]
+    claim_idx = call_order.index("claim_notification") if "claim_notification" in call_order else -1
+    recipients_idx = call_order.index("company_notification_recipients") if "company_notification_recipients" in call_order else -1
+    check("claim_notification was called", claim_idx != -1, call_order)
+    check("the recipients lookup (and therefore render too, in the real flow) happened BEFORE the claim",
+          recipients_idx != -1 and recipients_idx < claim_idx, call_order)
 
 
 def monkeypatch_module(obj, attr, value, env=None):
@@ -190,11 +249,12 @@ def monkeypatch_module(obj, attr, value, env=None):
 
 
 def main():
-    test_skips_cleanly_when_already_claimed()
+    test_skips_cleanly_when_already_claimed(None)
     test_skips_cleanly_with_no_opted_in_recipients()
     test_missing_api_key_does_not_claim_so_the_email_can_still_be_sent_once_one_is_added()
     test_happy_path_renders_sends_and_logs(None)
     test_render_failure_is_caught_and_never_raises(None)
+    test_render_failure_never_wastes_the_one_time_claim()
 
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

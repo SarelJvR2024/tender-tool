@@ -14,6 +14,62 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): fixed `send_pack_ready_email.py` claiming its one-time notification token before every failure-prone step, not just the missing-API-key one
+
+Oriented from `b2550a6`; `git fetch origin main` found one new commit since (`8cf31b5`, a sibling
+standing-review session's clean sweep of `engine/compliance/` + a confirmation that
+`tenderCompliance.ts`'s COID "renew soon" fix was the only hand-rolled sibling - no overlap) and
+fast-forwarded local `main`. Open PRs re-checked via the GitHub API: `#172`/`#165`/`#164`, all
+unchanged, no collision.
+
+Per the directive, read the actual email-sending retry/error-handling mechanics (not the content
+bugs already fixed this session) across `engine/notify/`. `send_digest_emails.py`'s bounded
+429-retry and per-recipient failure isolation are already careful and correct - no bug there.
+
+**Found and fixed a real bug** in `send_pack_ready_email.py`'s `send_pack_ready_email()`: it called
+`claim_notification()` - the one-time, atomic, *never-unclaimed* idempotency token (migration 0093)
+- BEFORE the recipients lookup, the tender/company `select()`s, and `_render()` (a 30s subprocess
+call to a Node render script). Every one of those can genuinely fail (a transient Supabase/network
+error, an empty lookup, a bad render-script exit), and since no cron or retry ever re-invokes this
+function for the same job id once a pack is "ready" (its own docstring says so explicitly), any
+failure after the old claim point permanently burned the claim with the email never actually sent -
+the pack-ready notification for that job would be lost forever, with only a `system_alerts` entry to
+show it happened. This is the *exact* bug class a 2026-10-28 QA pass already fixed one instance of
+here (claiming with no `RESEND_API_KEY` configured) and that `lib/notificationEngine.ts`'s own
+`sendNotification()` is deliberately written to avoid (claim immediately before the real send, never
+before it) - the earlier fix closed the API-key case specifically but left every other failure mode
+between claim and send still open.
+
+Reproduced directly first with a standalone repro mirroring the file's own test harness: forced
+`_render()` to fail and confirmed `claim_notification` was still called and "consumed" even though
+nothing was ever sent. Fixed by moving the claim to immediately before the first real send, after
+recipients/tender/company/render have all already succeeded - the same position the canonical
+TypeScript sender claims in.
+
+Updated `test_send_pack_ready_email.py`: `test_skips_cleanly_when_already_claimed` now mocks render
+(it genuinely runs before the claim check in the new order) and asserts on the final outcome instead
+of call ordering that no longer holds; `test_render_failure_is_caught_and_never_raises` gained an
+assertion that `claim_notification` is now never even called when render fails (the actual
+regression check); added `test_render_failure_never_wastes_the_one_time_claim`, which asserts the
+recipients lookup happens before the claim on the happy path. Revert-and-confirm-red: stashing only
+`send_pack_ready_email.py` made exactly those two new assertions fail with the old call order, every
+other test still passed; restoring made all 17 checks pass again.
+
+Verification: `python3 engine/notify/test_send_pack_ready_email.py` -> 17/17 (0 failures); `py_compile`
+clean on both touched files; `test_send_digest_emails.py` and `test_record_heartbeat.py` re-run as an
+adjacent sanity sweep, both unaffected and both reporting `0 failure(s)` (the digest suite's own
+printed "1 failed" line is its own test deliberately exercising a malformed-entry case, not a real
+test failure - neither file was touched by this change).
+
+Committed and pushed directly to `main` (no PR - small, fully verified, no live-DB access):
+- `engine/notify/send_pack_ready_email.py`
+- `engine/notify/test_send_pack_ready_email.py`
+
+**Backlog unchanged at 13 items** - this was a standalone fix within existing scope, not a new
+judgment-call item for Sarel. Old count 13 + 0 new = **13**.
+
+---
+
 ## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirtieth run): clean sweep - compliance/reminders rotation, no new bug found
 
 Oriented from `b2550a6` (a sibling standing-review pass's own compliance-adjacent fix - a third

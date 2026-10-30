@@ -92,11 +92,6 @@ def send_pack_ready_email(client, job, page_count, app_url):
                   "(would be lost forever once claimed with no key to send with).")
             return
 
-        idempotency_key = f"pack-ready-{job['id']}"
-        claimed = client.rpc("claim_notification", {"p_idempotency_key": idempotency_key, "p_notification_type": "pack_ready"})
-        if not claimed:
-            return
-
         recipients_raw = client.rpc("company_notification_recipients", {"p_company_id": company_id})
         recipients = [r["email"] for r in recipients_raw if r.get("daily_digest_opt_in") and r.get("email") and "@" in r["email"]]
         if not recipients:
@@ -116,6 +111,22 @@ def send_pack_ready_email(client, job, page_count, app_url):
             "appUrl": app_url,
             "tenderId": tender_id,
         })
+
+        # Claimed only now, immediately before the first real send - same
+        # position lib/notificationEngine.ts's own sendNotification() claims
+        # in (render happens in its caller, before it's ever invoked). Found
+        # 2026-10-30: this used to claim BEFORE the recipients lookup, the
+        # tender/company select and _render() - every one of those can raise
+        # (a network blip, a bad render-script exit, an empty lookup), and
+        # since this job never runs again for this job id, any one of them
+        # failing AFTER the old claim point would have permanently burned
+        # this pack's one and only "ready" email - the exact bug class the
+        # API-key check above was already written to avoid, just not closed
+        # for these other failure modes too.
+        idempotency_key = f"pack-ready-{job['id']}"
+        claimed = client.rpc("claim_notification", {"p_idempotency_key": idempotency_key, "p_notification_type": "pack_ready"})
+        if not claimed:
+            return
 
         for to in recipients:
             result = _send_via_resend(to, email["subject"], email["html"], email["text"])
