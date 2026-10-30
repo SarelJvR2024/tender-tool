@@ -14,6 +14,35 @@
 
 ---
 
+## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirty-third run): Finding 106 (severe) - a transient failure marking ONE system alert as reported crashed the alerting system's own report, hiding every other alert (including a critical one in the real repro) from the Claude-scheduled check-in that emails Sarel
+
+Oriented from `26398f1` (a sibling standing-review pass's clean sweep of the rest of PR #172's own
+changes - no overlap). Open PRs checked: `#173` (ready, touches `engine/discovery/`), `#165`/`#164`
+(draft, `app/` only) - none touch `engine/alerts/` or `engine/worker/`, no collision.
+
+worker/job-queue rotation. Traced the per-job isolation already fixed this session
+(`fail_stale_jobs`/`fail_stale_uploads` across six bridges, `opportunity_requirements.classify_all()`)
+and checked whether the SAME bug class existed anywhere in the alerting mechanism itself - the one
+system that exists specifically to catch "something went wrong." Found it in `engine/alerts/
+check_system_alerts.py`'s `check()`: the `mark_reported()` loop had no try/except at all. Reproduced
+directly: a transient failure marking the MIDDLE of three genuinely-new alerts (one `critical`, one
+`error`, one `warning`) as reported crashed `check()` entirely; `main()`'s own try/except caught
+that and returned exit 1 with **no `--out` file written at all** - the Claude-scheduled trigger that
+emails Sarel from this script's report got nothing that run, not even the critical alert that had
+nothing to do with the failure. Scored severe (not moderate, like the job-queue instances of this
+bug class) specifically because this is the system meant to catch exactly this kind of failure going
+completely blind in exactly that scenario. Fixed with a `try/except` around each `mark_reported()`
+call, logging and continuing rather than crashing - an alert whose own mark fails simply stays
+eligible to be reported again next run. Added `test_check_survives_a_failed_mark_reported` to
+`engine/alerts/test_system_alerts.py` (3 new checks). Revert-and-confirm-red: reverting reproduced
+the exact crash, with every pre-existing Part 1 check in the file (the real CV/general bridge
+subprocess runs, the full reported/still_occurring/resolved lifecycle) having already passed green.
+Already wired into CI. Regression-checked `test_poll_loop.py`, `test_process_general_jobs.py`,
+`test_process_cv_jobs.py`, and `test_process_pack_jobs.py` - all pass. Full write-up:
+`docs/specs/QA-Edge-Case-Findings.md`, Finding 106.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): clean sweep of the rest of PR #172's own changes (Manifest v2 frontend rendering, CIDB fields, Document Expiry upload wiring, Dashboard widgets) - no bug found
 
 Oriented from `47c16f8`; `git fetch origin main` found one new commit, `7ca1e5d` (a sibling pass's

@@ -125,12 +125,30 @@ def classify(alerts, min_severity="warning"):
 
 
 def check(client, min_severity="warning", dry_run=False, now=None, log=print):
+    """QA pass, 2026-10-30: the mark_reported() loop below used to have no
+    try/except at all - a transient PATCH failure on any ONE alert (a
+    Supabase blip, or the alert row resolved/deleted between open_alerts()'s
+    read and this write) raised straight out of this function. main()'s own
+    try/except then caught that and returned exit code 1 with NO --out file
+    written at all - so the Claude-scheduled trigger that reads this
+    script's report to email Sarel got NOTHING that run, not even the
+    OTHER, perfectly fine new/still-occurring alerts already identified
+    before the failing PATCH (confirmed directly: a failure on the second
+    of three alerts lost the first, CRITICAL one from the report too, along
+    with the third). The one system this exists to catch "something went
+    wrong" going silent is exactly the worst place for this bug class
+    (watch_deadlines.days_until(), Finding 99's fail_stale_jobs(), Finding
+    104's opportunity_requirements.classify_all()) to recur."""
     now = now or datetime.datetime.now(datetime.timezone.utc).isoformat()
     alerts = client.open_alerts()
     new, again, open_total = classify(alerts, min_severity)
     if not dry_run:
         for a in new + again:
-            client.mark_reported(a["id"], a.get("occurrences") or 1, now)
+            try:
+                client.mark_reported(a["id"], a.get("occurrences") or 1, now)
+            except Exception as e:
+                log(f"  WARNING: could not mark alert {a['id']} as reported ({type(e).__name__}: {e}) - "
+                    "it may be reported again next time.")
 
     def line(a):
         n = a.get("occurrences") or 1

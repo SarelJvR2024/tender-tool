@@ -215,6 +215,52 @@ class PsqlAlerts:
                                      else r.stderr.strip())
 
 
+class FlakyMarkReportedClient:
+    """A minimal direct stand-in (not FakeSupabase - this needs to fail ONE
+    specific PATCH, which the full HTTP fake has no hook for) proving
+    check_system_alerts.check() survives a transient mark_reported()
+    failure on one alert without losing the whole report."""
+    def __init__(self, alerts, fail_id):
+        self._alerts = alerts
+        self._fail_id = fail_id
+        self.marked = []
+
+    def open_alerts(self):
+        return self._alerts
+
+    def mark_reported(self, alert_id, occurrences, when):
+        if alert_id == self._fail_id:
+            raise RuntimeError("simulated transient PATCH failure")
+        self.marked.append(alert_id)
+
+
+def test_check_survives_a_failed_mark_reported():
+    # QA Finding, 2026-10-30: the mark_reported() loop in check() had no
+    # try/except at all - a transient PATCH failure on any ONE alert raised
+    # straight out of check(), and main()'s own try/except then caught that
+    # and returned exit 1 with NO --out file written - so the Claude-
+    # scheduled trigger that emails Sarel from this script's report got
+    # NOTHING that run, not even the OTHER, perfectly fine alerts (including
+    # a CRITICAL one in this exact repro) that were already correctly
+    # identified as new before the failing PATCH.
+    print("Part 1b - check() survives one alert's mark_reported() failing (direct, no FakeSupabase needed)")
+    base_alerts = [
+        {"id": "a1", "source": "pack", "severity": "critical", "message": "Pack job crashed",
+         "occurrences": 1, "reported_at": None, "last_seen_at": "2026-10-30T10:00:00Z"},
+        {"id": "a2", "source": "cv", "severity": "error", "message": "CV extraction crashed",
+         "occurrences": 1, "reported_at": None, "last_seen_at": "2026-10-30T10:01:00Z"},
+        {"id": "a3", "source": "discovery", "severity": "warning", "message": "A source failed",
+         "occurrences": 1, "reported_at": None, "last_seen_at": "2026-10-30T10:02:00Z"},
+    ]
+    client = FlakyMarkReportedClient(base_alerts, fail_id="a2")
+    rep = check_system_alerts.check(client, log=lambda m: None)
+    check(len(rep["new"]) == 3 and {a["id"] for a in rep["new"]} == {"a1", "a2", "a3"},
+          f"check() still returns every alert, including the one whose own mark_reported failed ({rep['new']})")
+    check(rep["open_unresolved_total"] == 3, "open_unresolved_total is unaffected by the failure")
+    check(sorted(client.marked) == ["a1", "a3"],
+          f"the two alerts whose PATCH succeeded really were marked reported, the failing one wasn't ({client.marked})")
+
+
 def part2(psql):
     print("Part 2 - the real 0042 table and record_system_alert() on a replayed scratch Postgres")
     db = PsqlAlerts(psql)
@@ -286,6 +332,7 @@ def part2(psql):
 
 if __name__ == "__main__":
     part1()
+    test_check_survives_a_failed_mark_reported()
     psql = os.environ.get("ALERTS_PSQL")
     if psql:
         part2(psql)

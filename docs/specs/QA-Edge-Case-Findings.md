@@ -6011,3 +6011,54 @@ validated the YAML with `yaml.safe_load` before committing (Finding 92/95's own 
 change), `engine/general/test_requirements_manifest_v2.py` (1 new test function, 3 checks), one CI
 workflow file (two new steps, for the two test files this same upstream merge had already added but
 never wired in).
+
+### Finding 106 (CONFIRMED, FIXED, severe - a transient failure marking ONE system alert as reported crashed the alerting system's own report, silently hiding every OTHER alert - including a critical one in the real repro - from the exact Claude-scheduled check-in that emails Sarel)
+
+**Where:** worker/job-queue rotation this cycle. `engine/alerts/check_system_alerts.py`'s `check()` -
+the consumer side of this app's one real failure-notification mechanism (`system_alerts.record()`
+is the write side), run by the "System alerts check-in" Claude-scheduled trigger that reads this
+script's own `--out` JSON to compose Sarel's alert email.
+
+**What was tested:** `check()`'s `mark_reported()` loop (marking every newly-surfaced alert as
+reported, so it isn't re-reported next run) had no try/except at all. Asked the now-familiar
+question for this exact shape (already found and fixed independently several times this session:
+`watch_deadlines.days_until()`, Finding 99's six `fail_stale_jobs()`/`fail_stale_uploads()`
+bridges, Finding 104's `opportunity_requirements.classify_all()`) - what happens to the OTHER,
+unrelated alerts in the same batch if marking ONE of them as reported fails (a transient Supabase
+PATCH blip, or the alert row got resolved/deleted between `open_alerts()`'s read and this write)?
+
+**Finding (CONFIRMED, severe).** Reproduced directly with a minimal client (three alerts - one
+`critical`, one `error`, one `warning` - all genuinely new): a simulated transient failure marking
+just the middle (`error`) alert as reported raised straight out of `check()`. `main()`'s own
+try/except catches that, prints an error, and returns exit code 1 - **with no `--out` file written
+at all**. The Claude-scheduled trigger that emails Sarel from this exact file gets NOTHING that
+run: not the failing alert, and not the `critical` one either, even though it was already correctly
+identified as new before the failure. The one system that exists specifically to catch "something
+went wrong" going completely blind, in exactly the scenario ("something going wrong") it exists
+for, is the highest-stakes occurrence of this bug class found this session - scored severe, not
+moderate, on that basis (CI/UX impact alone would be moderate; the ops-blindness consequence here
+is severe).
+
+**Fix:** wrapped each `mark_reported()` call in its own `try/except`, logging (not re-raising) a
+warning naming the alert and the real exception when one PATCH fails, then continuing to mark and
+report every other alert in the batch. An alert whose own mark fails simply stays eligible to be
+reported again next run (its `reported_at` stays unset) - never lost, and no worse than the
+pre-existing "flaky write, retried next cycle" tolerance every other fixed instance of this bug
+class in this codebase already has.
+
+**Verified red-then-green.** Added `test_check_survives_a_failed_mark_reported` to `engine/alerts/
+test_system_alerts.py` (a minimal direct client, not the file's own `FakeSupabase` HTTP stand-in,
+since this needs to fail one specific PATCH which that fake has no hook for): 3 new checks - `check()`
+still returns all three alerts including the one whose own mark failed; `open_unresolved_total` is
+unaffected; the two alerts whose PATCH succeeded were genuinely marked, the failing one wasn't.
+Revert-and-confirm-red: reverting reproduced the exact predicted crash (a raw `RuntimeError`
+traceback at the exact `mark_reported()` call site), with every one of this test file's own
+pre-existing Part 1 checks (fingerprinting, the real CV/general bridge subprocess runs, run_bridges.py's
+own critical-alert path, the full reported/still_occurring/resolved lifecycle) having already passed
+green first. Restored, `0 failure(s)`. Already wired into CI (`bridge-worker-ci.yml:243`).
+Regression-checked `engine/worker/test_poll_loop.py`, `engine/general/test_process_general_jobs.py`,
+`engine/cv/test_process_cv_jobs.py`, and `engine/pack/test_process_pack_jobs.py` - all pass.
+
+**Regression:** `engine/alerts/check_system_alerts.py` (one `try/except` added around the per-alert
+mark_reported call, no other behavior change), `engine/alerts/test_system_alerts.py` (1 new test
+function, 3 checks). No schema or other call-site changes.
