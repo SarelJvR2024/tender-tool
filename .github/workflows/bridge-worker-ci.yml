@@ -98,6 +98,10 @@ jobs:
           pip install jsonschema  # test only: checks the test-double answer against the output schema
           python3 engine/cv/test_extract_cv_fields.py
 
+      - name: OCR module - a corrupted/unopenable image is alerted, not silently invisible (Finding 102)
+        if: ${{ !cancelled() }}
+        run: python3 engine/ocr/test_scan_ocr.py
+
       - name: Polling-loop smoke test (fake Supabase, no secrets)
         if: ${{ !cancelled() }}
         run: python3 engine/worker/test_poll_loop.py

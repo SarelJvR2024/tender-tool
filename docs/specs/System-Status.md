@@ -14,6 +14,32 @@
 
 ---
 
+## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-twenty-eighth run): Finding 102 (moderate) - a corrupted/unopenable image upload broke OCR silently as far as system_alerts was concerned, unlike every other OCR-infrastructure failure in the same module
+
+Oriented from `6468e79` (a sibling standing-review pass's clean sweep - Discovery filter/sort/count,
+API routes, `bank_accounts` RLS scoping; no overlap). Open PRs checked: none touch `engine/cv/` or
+`engine/ocr/` - no collision.
+
+CV rotation (`generate_cv.py` already re-checked clean by a sibling pass today, so picked
+`engine/ocr/scan_ocr.py` instead - the shared OCR module with zero dedicated test coverage anywhere
+in the repo before this pass). `ocr_image_file()`'s own `Image.open()` failure path (a corrupted
+upload, a mislabeled file) returned early without ever calling `_alert_failures()` - unlike every
+other OCR-infrastructure break in this module (Tesseract missing, a PDF page that couldn't be
+rendered, a page OCR errored/timed out), all of which do. Reproduced directly (monkeypatched
+`available()` to isolate the exact branch): a corrupted PNG upload recorded zero `system_alerts`
+entries, confirmed by sink. The user-facing outcome was always correct (`read_cv_text()` already
+raises a clean refusal either way) - purely an operator-visibility gap, scoped moderate not severe.
+Fixed with the one missing `_alert_failures()` call. New file `engine/ocr/test_scan_ocr.py` (first
+ever for this module, 8 checks: corrupted image, missing file, and a regression control that forces
+the pre-existing "Tesseract unavailable" branch directly rather than depending on whether the real
+environment has Tesseract installed). Revert-and-confirm-red: reverting made exactly the 3 new-alert
+checks fail, everything else stayed green. Wired into CI, YAML validated before committing.
+Regression-checked `engine/cv/test_extract_cv_fields.py` and
+`engine/onboarding/test_classify_documents.py` (both indirect consumers) - both pass. Full write-up:
+`docs/specs/QA-Edge-Case-Findings.md`, Finding 102.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): clean sweep - Discovery page's filter/sort/count logic, the 3 Next.js API routes, and bank_accounts' RLS-only tenant scoping all check out
 
 Oriented from `2e3bf81`; `git fetch origin main` found one new commit since (`b18dd4d`, a sibling

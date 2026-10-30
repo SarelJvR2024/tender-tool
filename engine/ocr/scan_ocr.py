@@ -315,7 +315,19 @@ def ocr_image_file(path, work_dir=None):
             im = Image.open(path)
             frames = [f.copy() for f in ImageSequence.Iterator(im)]
         except Exception as e:
+            # QA pass, 2026-10-30: every OTHER OCR-infrastructure break here
+            # (Tesseract missing, a PDF page that couldn't be rendered, a
+            # page OCR errored/timed out) reaches _alert_failures() below -
+            # this one returned early and never did, so a corrupted/
+            # mislabeled image upload (a real shape: a renamed .txt, a
+            # truncated download) was silently invisible to system_alerts,
+            # unlike its exact analogue in ocr_pdf_pages() ("the page could
+            # not be rendered to an image for OCR", which _alert_failures()
+            # already matches on). The user-facing refusal via
+            # read_cv_text()/failure_sentence() was already correct either
+            # way - only the operator-visible alert was missing.
             res["error"] = f"the image could not be opened ({type(e).__name__})"
+            _alert_failures(res, path)
             return res
         limit = max_pages()
         for n, frame in enumerate(frames, start=1):

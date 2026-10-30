@@ -5797,3 +5797,51 @@ unrelated to this fix, not a regression it introduced).
 **Regression:** `engine/general/fill_sbd_docx.py` (one new helper + five one-line guards + one
 classification fix, no other behavior change), `engine/general/test_fill_sbd_docx.py` (1 new test
 function, 10 checks). No schema or other call-site changes.
+
+### Finding 102 (CONFIRMED, FIXED, moderate - a corrupted/unopenable image upload broke OCR silently as far as system_alerts was concerned, unlike every OTHER OCR-infrastructure failure in the same module)
+
+**Where:** CV rotation this cycle (`generate_cv.py` was already re-checked clean by a sibling pass
+earlier today; picked `engine/ocr/scan_ocr.py` instead - the shared OCR module `extract_cv_fields.py`'s
+own `read_cv_text()` calls for image uploads with no text layer, genuinely untouched: confirmed by
+grep that no dedicated test file for this module existed anywhere in the repo before this pass).
+
+**What was tested:** `ocr_image_file()`'s own `Image.open(path)` call is wrapped in try/except - when
+it fails (a corrupted upload, a file renamed to an image extension that isn't really one, a Pillow
+incompatibility), the function sets `res["error"]` to a clear reason and returns early. Checked
+whether this reaches `_alert_failures()` - the one place every OTHER OCR-infrastructure break in this
+module (Tesseract missing/unstartable, a PDF page `pdftoppm` couldn't render, a page OCR errored or
+timed out) is reported to `system_alerts`, per the module's own docstring ("Broke = Tesseract missing
+or unstartable... or a page that couldn't be rendered... One alert per document, never raises"). It
+didn't - the early `return res` happens before the function's own closing `_alert_failures(res, path)`
+call.
+
+**Finding (CONFIRMED).** Reproduced directly (`available()` monkeypatched to force the Tesseract-
+present branch, isolating the exact failure under test): a corrupted PNG upload returned the correct
+`res["error"]` ("the image could not be opened (UnidentifiedImageError)") but recorded **zero**
+`system_alerts` entries - confirmed by sink. The PDF path's exact analogue ("the page could not be
+rendered to an image for OCR") IS already matched by `_alert_failures()`'s own string check, so this
+is a genuine asymmetry between the two input types, not a design choice. The user-facing outcome was
+never wrong - `extract_cv_fields.read_cv_text()` already checks `if not res["read"]:` and raises a
+clean `ExtractionFailed` either way - only the operator-visible alert was missing, so a real, repeated
+instance of this (a library incompatibility, a corrupted-upload bug affecting many uploads) would have
+been invisible to Sarel while every sibling OCR failure mode was reported. Scoped moderate, not severe:
+no data-correctness or crash risk, purely an observability gap.
+
+**Fix:** added the missing `_alert_failures(res, path)` call in that one early-return branch, matching
+every other failure path in the same two functions (`ocr_image_file`/`ocr_pdf_pages`).
+
+**Verified red-then-green.** New file `engine/ocr/test_scan_ocr.py` (first dedicated test for this
+module ever) - a corrupted image, a missing file, and a forced-"Tesseract unavailable" regression
+control (monkeypatches `available()` directly rather than depending on whether the real environment
+happens to have Tesseract installed, since CI's own sibling CV-extraction step installs it via
+`apt-get` in the same job). Revert-and-confirm-red: reverting made exactly the 3 checks tied to the
+new alert fail (the corrupted-file and missing-file cases both lost their alert), the regression
+control and the non-alert checks stayed green. Restored, `0 failure(s)`. Wired into CI
+(`bridge-worker-ci.yml`, right after the existing CV AI-extraction step that already installs
+`tesseract-ocr`) - validated the YAML with `yaml.safe_load` before committing. Regression-checked
+`engine/cv/test_extract_cv_fields.py` and `engine/onboarding/test_classify_documents.py` (both
+indirect consumers of this module) - both still `ALL PASSED`.
+
+**Regression:** `engine/ocr/scan_ocr.py` (one added function call, no other behavior change), new
+file `engine/ocr/test_scan_ocr.py` (first dedicated test for this module ever, 8 checks), one CI
+workflow file (one new step). No schema or other call-site changes.
