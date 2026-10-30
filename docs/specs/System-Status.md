@@ -14,7 +14,51 @@
 
 ---
 
-## This pass (2026-10-29, standing solution-architect review): clean sweep - the "hand-rolled vs shared helper" compliance-check pattern confirmed exhausted; onboarding/billing/RLS spot-checks all check out
+## This pass (2026-10-30, standing solution-architect review): clean sweep - assemble_pack.py's other file reads ruled OUT as Finding-97 siblings (different risk shape); seat-limit TOCTOU left unfixed by design; CV engine re-checked, already hardened
+
+Oriented from `7aeed2c`; `git fetch origin main` found nothing new - local already matched
+`origin/main` exactly at `7aeed2c`. Open PRs re-checked via the GitHub API: `#172`, `#165`, `#164`,
+all unchanged, no collision.
+
+Per this pass's own directive, first read `9ece8d7` (a different session's fix for
+`assemble_pack.py`'s `check_template()` - an unguarded `json.load(open(store_path))` on the stored
+SANRAL fingerprint baseline, now wrapped in `try/except` raising `ValueError`, the "clean refusal"
+the rest of the build-job error handling expects) to orient, then read the REST of that file for a
+sibling of the same bug class (Finding 97: a bare `json.load`/`yaml.safe_load` on a persisted,
+cross-time/cross-process artifact that can be corrupted/truncated independently of the current job,
+raising a raw non-`ValueError` exception that `process_pack_jobs.py`'s own handler then misclassifies
+as a crash ("error" severity) instead of a clean refusal ("warning" severity)).
+
+Found two other bare reads in the same file (`field_provenance.json` at the old line ~357,
+`pack.yaml` at the old line ~242) but traced both to their actual write sites
+(`run_forms_pipeline.main()`'s `merge_and_save()`, `confirm_pack.confirm()`) and confirmed both are
+written by THIS SAME job, moments earlier in the SAME function call chain, not a separately-persisted
+artifact from an earlier run or process. A write failure there would already have raised before this
+job ever reached the re-read; the risk shape genuinely isn't the same as the fingerprint baseline
+(which persists across unrelated runs and can go stale/corrupted independently). Not fixed - correctly
+ruled out as a non-match rather than force-fit as a "third sibling" for the sake of finding one.
+
+Evaluated the seat-limit TOCTOU race flagged last pass (`team/actions.ts`) for whether an atomic SQL
+fix is now tractable. It is (a `SECURITY DEFINER` function with `select ... for update` on the
+subscription row, serializing concurrent invites) but judged not worth this pass's time against its
+low severity (a company accidentally ending up one seat over its own paid plan cap - not a security
+or data-exposure issue) when it's already correctly flagged and documented. Left as-is, Sarel's call
+on priority, unchanged from last pass.
+
+Re-read `engine/cv/generate_cv.py` end to end (not closely reviewed this session). Already carries
+visible scars from real prior fixes (CWE-22 path traversal via a person's free-text name, XML-invalid
+control characters from OCR'd text, a "None" literal leaking into a provenance log entry, Finding
+37's SAST-vs-UTC rounding bug) - no new bug found. Checked its two near-identical project-list-sorting
+blocks (`sanral_keyperson` and `world_bank` formats) for drift against each other - genuinely
+consistent, not a duplicate-logic bug.
+
+**No code bug found this pass - a genuine clean sweep**, arrived at by ruling candidates out with
+real evidence rather than by not looking hard enough. Backlog unchanged at 13 items - nothing
+resolved, nothing new added.
+
+---
+
+## Previous pass (2026-10-29, standing solution-architect review): clean sweep - the "hand-rolled vs shared helper" compliance-check pattern confirmed exhausted; onboarding/billing/RLS spot-checks all check out
 
 Oriented from `d19b809`; `git fetch origin main` found one new commit since (`9ece8d7`, a different
 session's fix for a corrupted SANRAL fingerprint baseline crashing the real pack build - read the
