@@ -6,6 +6,7 @@ import { JOB_STATUS_STYLE, type EngineJob } from "@/lib/generalTender";
 import type { TenderIntake } from "@/lib/manualTender";
 import { AutoRefresh } from "../../_components/AutoRefresh";
 import { AddTenderDocumentsForm } from "../new/manual-tender-form";
+import { scoreOutlookChips, SCORE_CHIP_CLASS, type ScoreOutlook } from "@/lib/scoreOutlookChips";
 
 /**
  * "How this tender was read" - the intake step every tender's documents go
@@ -43,7 +44,13 @@ const JOB_BADGE_CLASS: Record<string, string> = {
   failed: "bg-destructive/10 text-destructive",
 };
 
-type Opportunity = Downgrade & { id: string; verdict: string; reasons: string[] | null; score_outlook: { summary?: string[] } | null; source: string };
+type Opportunity = Downgrade & {
+  id: string;
+  verdict: string;
+  reasons: string[] | null;
+  score_outlook: (NonNullable<ScoreOutlook> & { summary?: string[] }) | null;
+  source: string;
+};
 const OPP_COLUMNS = `id, verdict, reasons, score_outlook, source, ${DOWNGRADE_COLUMNS}`;
 
 export async function IntakeCard({ tenderId }: { tenderId: string }) {
@@ -169,10 +176,47 @@ export async function IntakeCard({ tenderId }: { tenderId: string }) {
               <span className={`${chip("bg-card text-muted-foreground")} border border-border line-through`}>was {verdictLabel(opp.downgraded_from)}</span>
             )}
           </div>
-          <ul className="m-0 pl-4 text-xs text-muted-foreground">
-            {(opp.reasons ?? []).map((r, i) => <li key={i}>{stripLeakedTaxonomySlugs(r)}</li>)}
-            {(opp.score_outlook?.summary ?? []).map((r, i) => <li key={`s${i}`} className="text-muted-foreground">{r}</li>)}
-          </ul>
+          {(opp.reasons ?? []).length > 0 && (
+            <ul className="m-0 mb-1.5 pl-4 text-xs text-muted-foreground">
+              {(opp.reasons ?? []).map((r, i) => <li key={i}>{stripLeakedTaxonomySlugs(r)}</li>)}
+            </ul>
+          )}
+          {/* Real finding, 2026-10-29 (Sarel: remove raw OCDS/scoring diagnostic
+              text from this page): this used to dump score_outlook.summary as a
+              flat, equal-weight bullet list - the same raw engine strings
+              Discovery's own list page stopped showing (lib/scoreOutlookChips.ts).
+              Reusing that SAME helper here, not a second copy of its logic, so
+              the two pages can't silently disagree on what a chip means. */}
+          {(() => {
+            const chips = scoreOutlookChips(opp.score_outlook);
+            const summary = opp.score_outlook?.summary ?? [];
+            if (chips.length === 0 && summary.length === 0) return null;
+            return (
+              <div>
+                {chips.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {chips.map((c, i) => (
+                      <span key={i} title={c.title} className={`${chipClassName} ${SCORE_CHIP_CLASS[c.tone]}`}>
+                        {c.label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {summary.length > 0 && (
+                  <details className="mt-1 text-xs text-muted-foreground">
+                    <summary className="min-h-5 cursor-pointer content-center text-[11px] font-semibold">
+                      {chips.length > 0 ? "Full scoring notes" : "Scoring notes"}
+                    </summary>
+                    <ul className="m-0 mt-1 pl-4">
+                      {summary.map((line, i) => (
+                        <li key={i}>{line}</li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            );
+          })()}
         </div>
       )}
 

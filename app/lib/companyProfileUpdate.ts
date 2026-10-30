@@ -34,6 +34,14 @@ export const COMPANY_TEXT_FIELDS = [
   "iso_9001_certificate_number",
   // SANRAL Form B3 head office (form-field audit 2026-10-18)
   "head_office",
+  // CIDB registration (migrations 0018/0063/0069) - real finding, 2026-10-29:
+  // these existed on `companies` and were already READ everywhere
+  // (ComplianceDocumentsSection's own CIDB entry, BeeCidbSection) but were
+  // never writable from either edit surface - no manual-entry path existed
+  // at all for CIDB specifically, unlike every sibling document type here.
+  "cidb_grading",
+  "cidb_registration_number",
+  "cidb_contractor_name",
 ] as const;
 
 export const COMPANY_DATE_FIELDS = [
@@ -43,6 +51,7 @@ export const COMPANY_DATE_FIELDS = [
   "iso_9001_expiry",
   "bank_confirmation_letter_date",
   "bee_proof_expiry",
+  "cidb_expiry",
 ] as const;
 
 export const COMPANY_NUMERIC_FIELDS = [

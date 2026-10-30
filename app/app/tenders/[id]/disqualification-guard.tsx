@@ -136,6 +136,27 @@ export async function DisqualificationGuard({
 
         {mapped && (
           <div className="flex flex-col">
+            {/* Real finding, 2026-10-29 (Sarel: "a visual, tag-based Compliance
+                & Eligibility Snapshot"): the full list below already carries
+                every real status and its own explanatory detail - this adds
+                an at-a-glance tag row ABOVE it from the exact same `rows`
+                array, not a second read of the underlying data. The detail
+                text stays in the full list below (and in each tag's title
+                tooltip) rather than being dropped - a disqualification risk
+                is exactly the kind of thing that shouldn't only be visible on
+                hover. */}
+            <div className="mb-2.5 flex flex-wrap gap-1.5">
+              {rows.map((r) => (
+                <span
+                  key={`tag-${r.label}`}
+                  title={r.detail}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/30 px-2.5 py-1"
+                >
+                  <BidTaskBadge status={r.status} className="shrink-0" />
+                  <span className="text-xs font-semibold text-foreground">{r.label}</span>
+                </span>
+              ))}
+            </div>
             {rows.map((r) => (
               <div key={r.label} className="flex items-start gap-2 border-t border-border py-2.5 first:border-t-0">
                 <BidTaskBadge status={r.status} className="mt-0.5 shrink-0">

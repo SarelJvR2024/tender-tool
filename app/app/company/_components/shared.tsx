@@ -48,17 +48,33 @@ export function Field({
   label,
   value,
   fullWidth,
+  editHref,
 }: {
   label: string;
   value: string | number | null;
   fullWidth?: boolean;
+  /** Real finding, 2026-10-29 (Sarel: "fields ... cannot be manually
+   * clicked or edited"): when a field is missing, "Not on file" becomes a
+   * link straight into the edit form (same destination the card's own
+   * header "Edit" link already points to) instead of a dead span - no new
+   * dialog, same whole-profile edit page every other save in this app
+   * already uses. Optional and off by default: most Field() callers (e.g.
+   * Size & offices, Bank details) don't pass this, and render exactly as
+   * before. */
+  editHref?: string;
 }) {
   return (
     <div className={fullWidth ? "col-span-full" : undefined}>
       <div className="mb-0.5 text-xs text-muted-foreground">{label}</div>
       <div className="text-sm font-medium text-foreground">
         {value === null || value === undefined || value === "" ? (
-          <span className="text-muted-foreground/70">Not on file</span>
+          editHref ? (
+            <a href={editHref} className="cursor-pointer text-muted-foreground/70 hover:text-primary hover:underline">
+              Not on file
+            </a>
+          ) : (
+            <span className="text-muted-foreground/70">Not on file</span>
+          )
         ) : (
           value
         )}

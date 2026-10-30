@@ -46,7 +46,10 @@ export function isPipelineStage(value: unknown): value is PipelineStage {
 // task classifier (see app/AGENTS.md "Bids pipeline" for why V/P/F doesn't
 // apply here) - same judgment call as Home's own StatusBadge vocabulary.
 export const STAGE_META: Record<PipelineStage, { label: string; chipClass: string; hint: string }> = {
-  found: { label: "Discovered", chipClass: "border-muted-foreground/20 bg-muted text-muted-foreground", hint: "On our radar, not yet decided" },
+  // "Evaluating (Go/No-Go)" (Sarel, 2026-10-29) - a 1:1 relabel, same as
+  // "Awarded" below; the stored value stays 'found' (migration 0021's own
+  // check constraint), same reasoning as every other rename in this map.
+  found: { label: "Evaluating (Go/No-Go)", chipClass: "border-muted-foreground/20 bg-muted text-muted-foreground", hint: "On our radar, not yet decided" },
   bidding: { label: "Assessing & building", chipClass: "border-warning/20 bg-warning/10 text-warning", hint: "Assessing fit and preparing the submission" },
   submitted: { label: "Submitted", chipClass: "border-accent/30 bg-accent/10 text-accent", hint: "Handed in, awaiting outcome" },
   won: { label: "Awarded", chipClass: "border-success/30 bg-success/15 text-success", hint: "Awarded to us" },

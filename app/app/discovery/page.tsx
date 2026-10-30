@@ -37,6 +37,7 @@ import {
   type VerdictFilter,
 } from "@/lib/discoveryPagination";
 import { closingCountdown, formatClosingDateTime } from "@/lib/dates";
+import { scoreOutlookChips, SCORE_CHIP_CLASS } from "@/lib/scoreOutlookChips";
 import { fetchCompanyReadiness } from "@/lib/companyReadinessData";
 import { buildDoneHistory, pricingCategoriesFor, pricingSegmentKey, similarTendersBefore } from "@/lib/opportunityInsights";
 import { MIN_SAMPLE, benchmark, loadSegment, segmentsFor, type Benchmark } from "@/lib/marketPricing";
@@ -105,8 +106,18 @@ type OpportunityRow = Downgrade & {
   document_urls: DocumentUrl[] | null;
   first_seen: string;
   // engine/discovery/score_outlook.py's result (migration 0013) - null for
-  // rows assessed before it existed.
-  score_outlook: { estimable?: string; summary?: string[] } | null;
+  // rows assessed before it existed. Only the fields the Scoring scorecard
+  // actually reads are typed here, matching estimate_score_outlook()'s own
+  // return shape (score_outlook.py) field-for-field - not the full shape,
+  // so this can't silently drift onto a field that function doesn't emit.
+  score_outlook: {
+    estimable?: string;
+    summary?: string[];
+    preference_system?: { system: "80/20" | "90/10" | "ambiguous" | "not_found"; reason: string } | null;
+    specific_goals?: { bases: string[]; points_estimate: string | null; reason: string } | null;
+    functionality?: { present: boolean | null; threshold: number | null; sanral_methodology?: boolean; reason: string } | null;
+    locality?: { match: { status: "matched" | "no_match" | "unknown"; points: number | null; reason: string } | null } | null;
+  } | null;
   // 0024: the tender this opportunity became (pursued, or loaded manually).
   tender_id: string | null;
   source: string | null;
@@ -134,6 +145,11 @@ const XREF_STYLE: Record<string, { label: string; chipClass: string }> = {
   generic: { label: "catch-all bucket", chipClass: "bg-muted text-muted-foreground" },
   unmapped: { label: "not cross-referenced yet", chipClass: "bg-muted text-muted-foreground" },
 };
+
+// scoreOutlookChips()/SCORE_CHIP_CLASS: see lib/scoreOutlookChips.ts for the
+// "How it's scored" chip logic itself (extracted there 2026-10-29 so it has
+// a test file, the established pattern for page.tsx helper logic in this
+// codebase).
 
 // VerdictFilter used to be redefined locally here, drifted from
 // lib/discoveryPagination.ts's own export (same name, same values, two
@@ -916,7 +932,14 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
 
                   {o.etenders_category && (
                     // The buyer's own pick on eTenders, as a cross-reference
-                    // only - Tender Ready's categories (above) drive the fit.
+                    // only - our own categories (above) drive the fit. Real
+                    // finding, 2026-10-29 (Sarel: remove internal mapping
+                    // chatter from this card): the "differs" case used to
+                    // read "(on Tender Ready's list that is X, Y)" - plain
+                    // internal taxonomy-matching mechanics exposed as if it
+                    // were buyer-facing copy. Reworded to say what a bidder
+                    // actually wants to know - our closest match - without
+                    // naming the internal list it was matched against.
                     <div title={o.etenders_category_check?.note ?? undefined} className="mb-1.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                       <span>Buyer&apos;s eTenders category: <span className="font-semibold text-foreground">{o.etenders_category}</span></span>
                       {o.etenders_category_check && XREF_STYLE[o.etenders_category_check.status] && (
@@ -926,7 +949,7 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                       )}
                       {o.etenders_category_check?.status === "differs" && o.etenders_category_check.matching_categories.length > 0 && (
                         <span>
-                          (on Tender Ready&apos;s list that is {o.etenders_category_check.matching_categories.slice(0, 3).map((c) => taxonomyLabel(taxonomy, c)).join(", ")})
+                          - closest match: {o.etenders_category_check.matching_categories.slice(0, 3).map((c) => taxonomyLabel(taxonomy, c)).join(", ")}
                         </span>
                       )}
                     </div>
@@ -954,19 +977,46 @@ async function renderDiscovery(activeFilter: VerdictFilter, actionError: string 
                   )}
 
                   {/* Fit (above) answers "is this our kind of work"; this answers
-                      "how would we be scored" - kept visibly separate on purpose. */}
-                  {(o.score_outlook?.summary ?? []).length > 0 && (
-                    <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2">
-                      <div className="mb-0.5 text-[11px] font-bold text-foreground">How it&apos;s scored</div>
-                      <ul className="list-disc pl-4 text-xs text-muted-foreground">
-                        {(o.score_outlook?.summary ?? []).map((line, i) => (
-                          <li key={i} className="mb-0.5">
-                            {line}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                      "how would we be scored" - kept visibly separate on purpose.
+                      Chips first (real numbers/stances score_outlook.py already
+                      computes); the full summary stays underneath, collapsed,
+                      for everything a chip doesn't cover (price, experience
+                      proof, SANRAL workspace link, partial-document caveat) -
+                      nothing is dropped, just not all shown flat and equal-weight
+                      the way it was before. */}
+                  {(() => {
+                    const chips = scoreOutlookChips(o.score_outlook);
+                    const summary = o.score_outlook?.summary ?? [];
+                    if (chips.length === 0 && summary.length === 0) return null;
+                    return (
+                      <div className="mt-2 rounded-lg border border-border bg-card px-3 py-2">
+                        <div className="mb-1 text-[11px] font-bold text-foreground">How it&apos;s scored</div>
+                        {chips.length > 0 && (
+                          <div className="mb-1 flex flex-wrap gap-1.5">
+                            {chips.map((c, i) => (
+                              <span key={i} title={c.title} className={cn("rounded-full px-2 py-0.5 text-[10px] font-semibold", SCORE_CHIP_CLASS[c.tone])}>
+                                {c.label}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        {summary.length > 0 && (
+                          <details className="text-xs text-muted-foreground">
+                            <summary className="min-h-6 cursor-pointer content-center text-[11px] font-semibold">
+                              {chips.length > 0 ? "Full scoring notes" : "Scoring notes"}
+                            </summary>
+                            <ul className="mt-1 list-disc pl-4">
+                              {summary.map((line, i) => (
+                                <li key={i} className="mb-0.5">
+                                  {line}
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* "Done N similar tenders before" / market pricing range
                       (Sarel's live feedback, 2026-10-22). "Done before" needs

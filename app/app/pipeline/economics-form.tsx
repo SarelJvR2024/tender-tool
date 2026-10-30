@@ -65,7 +65,7 @@ export function EconomicsForm({
         : null;
 
   return (
-    <details className="mt-2">
+    <details id={`econ-${tenderId}`} className="mt-2">
       <summary
         className={cn(
           "min-h-7 cursor-pointer text-xs font-semibold",

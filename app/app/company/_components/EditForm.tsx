@@ -15,7 +15,7 @@ export function EditForm({ company }: { company: CompanyRow }) {
 
   return (
     <form action={updateWithId} className="flex flex-col gap-6">
-      <VaultSection title="Company identity">
+      <VaultSection id="company-identity" title="Company identity">
         <div className={fieldGridClass}>
           <TextInput name="legal_name" label="Legal name" defaultValue={company.legal_name} required />
           <TextInput name="csd_trading_name" label="CSD trading name" defaultValue={company.csd_trading_name} />
@@ -105,7 +105,7 @@ export function EditForm({ company }: { company: CompanyRow }) {
         <div className="mt-1.5 text-xs text-muted-foreground">Up to 10 000 characters.</div>
       </VaultSection>
 
-      <VaultSection title="Compliance documents">
+      <VaultSection id="compliance-documents" title="Compliance documents">
         <div className={fieldGridClass}>
           <TextInput name="coid_registration_number" label="COID registration number" defaultValue={company.coid_registration_number} />
           <TextInput name="coid_letter_of_good_standing_number" label="COID Letter of Good Standing number" defaultValue={company.coid_letter_of_good_standing_number} />
@@ -132,7 +132,7 @@ export function EditForm({ company }: { company: CompanyRow }) {
         </div>
       </VaultSection>
 
-      <VaultSection title="B-BBEE & CIDB">
+      <VaultSection id="bee-cidb" title="B-BBEE & CIDB">
         <div className={fieldGridClass}>
           <NumberInput name="bee_level" label="B-BBEE level" defaultValue={company.bee_level} />
           <NumberInput name="black_ownership_pct" label="Black ownership %" defaultValue={company.black_ownership_pct} step="0.1" />
@@ -145,6 +145,14 @@ export function EditForm({ company }: { company: CompanyRow }) {
             options={[{ value: "", label: "Not recorded" }, ...BEE_PROOF_TYPES.map((t) => ({ value: t.value, label: t.label }))]}
           />
           <DateInput name="bee_proof_expiry" label="B-BBEE proof expiry" defaultValue={company.bee_proof_expiry} />
+          {/* Real finding, 2026-10-29: CIDB registration existed on
+              `companies` and was already read everywhere (ComplianceDocumentsSection,
+              BeeCidbSection) but had no manual-entry path at all - unlike every
+              sibling document type on this page. */}
+          <TextInput name="cidb_grading" label="CIDB grading (e.g. 7CE)" defaultValue={company.cidb_grading} />
+          <TextInput name="cidb_registration_number" label="CIDB registration number" defaultValue={company.cidb_registration_number} />
+          <TextInput name="cidb_contractor_name" label="Contractor name on CIDB certificate" defaultValue={company.cidb_contractor_name} />
+          <DateInput name="cidb_expiry" label="CIDB registration expiry" defaultValue={company.cidb_expiry} />
         </div>
       </VaultSection>
 

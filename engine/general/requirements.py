@@ -55,8 +55,20 @@ import scan_ocr  # noqa: E402  (EXPERIMENTAL - docs/specs/OCR-Evaluation.md)
 from score_outlook import estimate_score_outlook, extract_experience_evidence, extract_locality  # noqa: E402
 from key_person_minimums import extract_key_person_minimums  # noqa: E402
 from assess_tender import CIDB_RE, BRIEFING_RE  # noqa: E402
+from tender_enrichment import extract_pricing_model  # noqa: E402
 
-MANIFEST_VERSION = 1
+# Manifest v2 (2026-10-29, Sarel's own brief: "Upgrade Tender Extraction
+# Engine to Emit Manifest v2"): 3 new, additive fields - mandatory_gates,
+# extracted_roles, pricing_schedule. Deliberately generic (no tender-specific
+# term is hardcoded anywhere below - no "ISO 27001", no "DAMA CDMP", no
+# "PRASA") because the brief's own named example tender/PDF does not exist
+# anywhere in this environment (confirmed: no file of that name on disk, no
+# such tender id in this repo's fixtures) - there is nothing to verify a
+# hardcoded fact against, so none is written. Every pattern here extracts
+# whatever a given tender's OWN text actually states, the same discipline
+# every existing extractor in this module already follows (see this file's
+# own module docstring: "Nothing is added that the documents don't mention").
+MANIFEST_VERSION = 2
 
 # ---------------------------------------------------------------------------
 # Text extraction for every format seen in the real corpus
@@ -941,6 +953,200 @@ COMPANY_FIELDS = [
 
 
 # ---------------------------------------------------------------------------
+# Manifest v2: mandatory gates - hard disqualification gates named in the
+# text, as their own array separate from the generic `returnables` list
+# (Sarel's own ask: "surface Stage 1 Mandatory Disqualification Gates
+# separately"). Two real, generic signals, never a hardcoded cert name:
+#   - ISO_CERT_RE: "ISO 9001", "ISO/IEC 27001", "ISO 27001:2013" - the
+#     standard's own numbering is the anchor, works for any ISO standard any
+#     tender might name, not just one.
+#   - a disqualification-consequence sentence (the exact CONSEQUENCE_DISQUALIFY
+#     wording score_outlook.py already uses for the same judgment elsewhere -
+#     "non-responsive"/"disqualif...") naming a capitalised credential/
+#     acronym run (e.g. "DAMA CDMP", "HCIE/HCIP", "SACPCMP", "PSIRA") is
+#     reported as a generic mandatory_credential gate, with the matched
+#     phrase and the sentence itself as its own quote - so the UI shows
+#     exactly what the document said, never a guessed label.
+# JV is NOT re-extracted here - find_returnables() already detects
+# jv_agreement; this just surfaces that SAME fact as a gate, never a second,
+# possibly-disagreeing read of it.
+# ---------------------------------------------------------------------------
+
+ISO_CERT_RE = re.compile(r"\bISO(?:\s*/\s*IEC)?\s*\d{4,5}(?::\d{4})?\b", re.IGNORECASE)
+GATE_DISQUALIFY_RE = re.compile(
+    r"(?:mandatory|compulsory)\s+(?:disqualification\s+)?(?:gate|requirement|criteri\w+|condition)s?"
+    r"|non-?\s*responsive|disqualif(?:y|ies|ied|ication)|will\s+not\s+be\s+considered",
+    re.IGNORECASE)
+# A run of 2+ capitalised tokens (acronym or Title-Case words/slashes) - the
+# one shape a named credential/certification/practitioner-level title
+# reliably has, whatever the specific body or technology is.
+CREDENTIAL_TOKEN_RE = re.compile(
+    r"\b(?:[A-Z]{2,}(?:[/-][A-Z0-9]{2,})*(?:\s+[A-Z][a-zA-Z]*){0,2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3}\s+(?:Practitioner|Certified|Certification|Accreditation|Accredited))\b")
+CURE_WINDOW_RE = re.compile(r"within\s+(\d{1,2})\s*(?:\(\w+\)\s*)?(?:business\s+|working\s+|calendar\s+)?days", re.IGNORECASE)
+GATE_WINDOW = 350
+
+
+def extract_mandatory_gates(text, returnables):
+    text = text or ""
+    gates = []
+    iso_by_base = {}
+    for m in ISO_CERT_RE.finditer(text):
+        full = re.sub(r"\s+", " ", m.group(0)).upper()
+        # "ISO/IEC 27001:2013" and a later bare "ISO/IEC 27001" mention are
+        # the same real standard, not two gates - dedup on the standard
+        # number without its edition year, keeping whichever mention is more
+        # specific (carries the edition year) as the shown label.
+        base = re.sub(r":\d{4}$", "", full)
+        if base in iso_by_base:
+            existing = iso_by_base[base]
+            if len(full) > len(existing["label"]):
+                existing["label"] = full
+            continue
+        window = text[max(0, m.start() - GATE_WINDOW): m.end() + GATE_WINDOW]
+        fatal = bool(GATE_DISQUALIFY_RE.search(window))
+        cure = CURE_WINDOW_RE.search(window)
+        gate = {
+            "type": "iso_certification", "label": full, "fatal": fatal,
+            "cure_days": int(cure.group(1)) if cure else None,
+            "quote": _quote(text, m.start(), m.end()),
+        }
+        iso_by_base[base] = gate
+        gates.append(gate)
+    for dm in GATE_DISQUALIFY_RE.finditer(text):
+        window = text[max(0, dm.start() - GATE_WINDOW): dm.end() + GATE_WINDOW]
+        for cm in CREDENTIAL_TOKEN_RE.finditer(window):
+            label = re.sub(r"\s+", " ", cm.group(0)).strip()
+            # Skip anything already caught as an ISO gate, and short/common
+            # all-caps words that aren't really a named credential (SA
+            # provincial abbreviations, etc. would be noise here - require
+            # at least 3 letters so "OR"/"TO"-shaped false positives drop out).
+            if "ISO" in label.upper() or len(re.sub(r"[^A-Za-z]", "", label)) < 3:
+                continue
+            if any(g["label"] == label for g in gates):
+                continue
+            cure = CURE_WINDOW_RE.search(window)
+            gates.append({
+                "type": "mandatory_credential", "label": label, "fatal": True,
+                "cure_days": int(cure.group(1)) if cure else None,
+                "quote": _quote(text, dm.start(), dm.end()),
+            })
+    if any(r["key"] == "jv_agreement" for r in returnables):
+        jv = next(r for r in returnables if r["key"] == "jv_agreement")
+        gates.append({"type": "jv_agreement", "label": jv["label"], "fatal": jv.get("strength") == "required", "cure_days": None, "quote": jv.get("quote")})
+    return gates
+
+
+# ---------------------------------------------------------------------------
+# Manifest v2: dynamic role extraction. ADDITIVE to find_roles()'s existing
+# 17 coded roles (migration 0016's tender_roles - left completely untouched,
+# since the pack generator and CV-matching key off that `role_code`) - this
+# is a SEPARATE array for whatever role titles a tender's own Key
+# Resource/Section 6/Annexure B schedule names that the 17 codes don't cover
+# (Sarel's own ask: "does not restrict extraction to the 17 static
+# construction codes"). A role row needs BOTH a title-shaped phrase AND a
+# "N years" figure on the same line/table-row - either alone is too noisy
+# (a role title with no experience figure is usually prose, a bare "8 years"
+# is usually something else, e.g. a CIDB grading clause).
+# ---------------------------------------------------------------------------
+
+KEY_RESOURCE_SECTION_RE = re.compile(
+    r"key\s+resource|key\s+personnel\s+schedule|section\s+6\b|annexure\s+B\b|resource\s+schedule",
+    re.IGNORECASE)
+ROLE_TITLE_RE = re.compile(r"^\s*(?:\d{1,2}[.)]\s*)?([A-Z][A-Za-z][A-Za-z &/]{2,45}?(?:Lead|Specialist|Engineer|Analyst|Architect|Manager|Scientist|Officer|Consultant))\s*[:\-|]?\s*$", re.MULTILINE)
+YEARS_RE = re.compile(r"(\d{1,2})\s*\+?\s*(?:years?|yrs?)\b", re.IGNORECASE)
+COVER_PAGE_RE = re.compile(r"\bAnnexure\s+[A-Z0-9]+\b|\bForm\s+[A-Z0-9.]+\b", re.IGNORECASE)
+# Certification-shaped tokens on the same line as a role - reuses the exact
+# same generic "named credential" shape as the gates extractor above, not a
+# second pattern.
+ROLE_CERT_RE = CREDENTIAL_TOKEN_RE
+
+
+def extract_dynamic_roles(docs):
+    out = []
+    seen_titles = set()
+    for d in docs:
+        text = d.get("text") or ""
+        if not KEY_RESOURCE_SECTION_RE.search(text):
+            continue
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            tm = ROLE_TITLE_RE.match(line)
+            if not tm:
+                continue
+            title = re.sub(r"\s+", " ", tm.group(1)).strip()
+            key = title.lower()
+            if key in seen_titles:
+                continue
+            # Experience/certs/cover-page are usually on the same or next
+            # couple of lines of a schedule row - never further than that,
+            # so a plain nearby-lines window stays honest about what's
+            # actually attached to THIS role, not the whole document.
+            window = "\n".join(lines[i: min(len(lines), i + 4)])
+            ym = YEARS_RE.search(window)
+            if not ym:
+                continue  # no experience figure nearby - too weak to call this a real role row
+            seen_titles.add(key)
+            certs = sorted({re.sub(r"\s+", " ", c.group(0)).strip() for c in ROLE_CERT_RE.finditer(window) if c.group(0) != title})
+            cover = COVER_PAGE_RE.search(window)
+            out.append({
+                "title": title, "min_years": int(ym.group(1)),
+                "qualifications_and_certs": certs,
+                "cover_page": cover.group(0) if cover else None,
+                "document": d["name"], "quote": _quote(window, 0, len(window)),
+            })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Manifest v2: pricing schedule. `type` reuses tender_enrichment.py's own
+# extract_pricing_model() (lump_sum/schedule_of_rates/boq_based/
+# cost_reimbursable/remeasurement/time_based) - never a second, independently-
+# computed pricing-model classification. `deliverables` is new: a numbered
+# list under a pricing/schedule-of-prices heading, which that function
+# deliberately never parses (its own module docstring: "presence only - no
+# line-item parsing"). `vat_percentage` is read from the text, never assumed
+# - SA's standard rate is 15%, but asserting that without the document
+# actually saying so would be exactly the kind of invented fact this module's
+# own rule forbids.
+# ---------------------------------------------------------------------------
+
+PRICING_SECTION_RE = re.compile(
+    r"schedule\s+of\s+(?:prices|rates|deliverables)|pricing\s+schedule|deliverable\s+(?:schedule|pricing)|annexure\s+[A-Z]\s*[:\-]?\s*(?:pricing|price|deliverable)",
+    re.IGNORECASE)
+DELIVERABLE_ITEM_RE = re.compile(r"^\s*(?:item\s*)?(\d{1,2})[.):]\s+([A-Za-z][^\n]{2,90})$", re.MULTILINE | re.IGNORECASE)
+VAT_RE = re.compile(r"(\d{1,2}(?:\.\d+)?)\s*%\s*(?:VAT|value[\s-]added\s+tax)", re.IGNORECASE)
+
+
+def extract_pricing_schedule(text):
+    text = text or ""
+    model = extract_pricing_model(text)
+    sec = PRICING_SECTION_RE.search(text)
+    deliverables = []
+    if sec:
+        # Items are read from the schedule section onward only - a numbered
+        # list anywhere else in the document (e.g. a table of contents) isn't
+        # this tender's actual pricing schedule.
+        window = text[sec.start(): sec.start() + 6000]
+        seen_nums = set()
+        for m in DELIVERABLE_ITEM_RE.finditer(window):
+            n = int(m.group(1))
+            if n in seen_nums or n == 0 or n > 50:
+                continue
+            seen_nums.add(n)
+            deliverables.append({"item": n, "description": re.sub(r"\s+", " ", m.group(2)).strip()})
+        deliverables.sort(key=lambda x: x["item"])
+    vat_m = VAT_RE.search(text)
+    if model is None and not deliverables and not vat_m:
+        return None
+    return {
+        "type": "fixed_deliverables" if deliverables else model,
+        "deliverables": deliverables,
+        "vat_percentage": float(vat_m.group(1)) if vat_m else None,
+        "quote": _quote(text, sec.start(), sec.end()) if sec else None,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Manifest
 # ---------------------------------------------------------------------------
 
@@ -1158,6 +1364,14 @@ def extract_requirements(paths, work_dir=None, source_label=None, keep_text=Fals
         "buyer_forms": buyer_forms,
         "returnables": returnables,
         "roles": roles,
+        # Manifest v2 - additive, never a replacement for `roles` (see
+        # extract_dynamic_roles()'s own header comment for why the 17 coded
+        # roles stay separate). Empty list, not omitted, when nothing
+        # matched - the frontend can tell "checked, found nothing" apart
+        # from "this manifest predates v2" via `version`.
+        "extracted_roles": extract_dynamic_roles(usable_docs),
+        "mandatory_gates": extract_mandatory_gates(all_text, returnables),
+        "pricing_schedule": extract_pricing_schedule(all_text),
         # 0040: only present when the tender asks (People page shows the
         # SACNASP / SAGC fields because of it)
         **({"person_registrations": person_registrations} if person_registrations else {}),
