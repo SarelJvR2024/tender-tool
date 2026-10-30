@@ -185,6 +185,17 @@ export async function saveProject(formData: FormData) {
   if (!clientAndNumber) redirect(`/people/${personId}?error=project_client_required`);
 
   const valueRaw = str(formData, "value_rm");
+  // Found 2026-10-30: this field had NO validation at all (not even NaN or
+  // negative) - unlike the sibling "add experience" form, which at least
+  // rejects NaN. A garbage string silently became null on insert (JSON.
+  // stringify(NaN) -> null), but a negative number passed straight through
+  // and is written verbatim onto the person's real SANRAL Form B1/B2
+  // experience row (engine/fill_tender.py/fill_conventional.py's
+  // `wb.set_value(T, f"I{r}", pr["value_rm"])`) on an actual government bid.
+  const value = valueRaw ? Number(valueRaw) : null;
+  if (value !== null && (Number.isNaN(value) || value < 0)) {
+    redirect(`/people/${personId}?error=${encodeURIComponent("Project value (R million) must be a number of 0 or more.")}`);
+  }
   const row = {
     company_id: companyId,
     person_id: personId,
@@ -193,7 +204,7 @@ export async function saveProject(formData: FormData) {
     project_type: str(formData, "project_type"),
     position_code: str(formData, "position_code"),
     position_held: str(formData, "position_held"),
-    value_rm: valueRaw ? Number(valueRaw) : null,
+    value_rm: value,
     contact_name: str(formData, "contact_name"),
     contact_phone: str(formData, "contact_phone"),
     contact_email: str(formData, "contact_email"),

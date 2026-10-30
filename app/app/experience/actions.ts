@@ -130,7 +130,14 @@ export async function saveExperienceTags(formData: FormData) {
   if (disciplines.length === 0) {
     redirect(err(back, "Pick at least one discipline - it's what tenders are matched on."));
   }
-  if (value !== null && Number.isNaN(value)) redirect(err(back, "Value must be a number (R millions)."));
+  // Found 2026-10-30: this only ever rejected NaN, never a negative number -
+  // the same gap people/actions.ts's saveProject() had for the identical
+  // unit (R millions, same column convention per 0012_experience_items.sql's
+  // own comment). This value feeds engine/narrative/build_prompt.py's
+  // "R{value_rm}m" text in a real customer-facing AI narrative, and the
+  // match_experience() RPC's >= filter (0012) - a negative value would read
+  // as broken in the narrative and corrupt that filter's own comparison.
+  if (value !== null && (Number.isNaN(value) || value < 0)) redirect(err(back, "Value must be a number of 0 or more (R millions)."));
 
   const update: Record<string, unknown> = {
     project_name: projectName,

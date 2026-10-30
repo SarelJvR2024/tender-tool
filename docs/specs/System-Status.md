@@ -14,6 +14,70 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): Finding 104 - a person's project value had NO validation at all (not even negative/garbage), written verbatim onto a real SANRAL Form B1/B2 experience row; the sibling "company experience" form had the same gap minus the negative check
+
+Oriented from `8ceaf9a`; `git fetch origin main` found nothing new since, local already matched. Open
+PRs re-checked via the GitHub API: `#172`, `#165`, `#164`, all open and unchanged, no collision.
+
+Per this pass's own directive - follow up on the immediately-prior pass's finding (`companyProfileUpdate.ts`'s
+missing upper bound on percentage/`bee_level` fields that get written onto real government documents) by
+looking for the same bug SHAPE elsewhere - searched every `build*Update()`-style function (only one exists)
+and then every form-action file under `app/app/**/actions.ts` that parses a numeric field from `FormData`.
+`company/principals/actions.ts`'s `ownership_pct` already correctly bounds 0-100 - not a bug, a sibling that
+got it right.
+
+**Found and fixed a real, reachable bug**: `app/app/people/actions.ts`'s `saveProject()` - the "add a
+project to this person's experience" form, used from the person's CV/project-history page - had NO
+validation on `value_rm` (the project value in R millions) AT ALL: not NaN, not negative, nothing. Traced
+where this value actually goes: `engine/fill_tender.py`/`engine/fill_conventional.py` both read it straight
+from the `projects` table and write it with `wb.set_value(T, f"I{r}", pr["value_rm"])` onto a real SANRAL
+Form B1/B2 experience-schedule cell on an actual government bid submission - there is no check constraint
+on `projects.value_rm` either (`0001_init_schema.sql`, plain `numeric`). A negative value (e.g. "-50", maybe
+a typo for a minus sign meant as a dash) would print unchanged on a real tender document. Reproduced
+directly (`node -e`): `"-50"` -> `-50` (accepted), `"999999999"` -> `999999999` (accepted, though no
+documented sane ceiling exists for this one the way `bee_level`'s 1-9 did, so this fix does NOT add an
+upper bound - only an unambiguous, defensible lower one); garbage text like `"abc"` silently became `null`
+on insert (Supabase-js JSON-serializes `NaN` to `null`) rather than being rejected with an error, so the
+user's typed value just vanished with no feedback.
+
+Fixed by rejecting `NaN` and negative values with a clear error redirect, matching this file's own existing
+`?error=` query-param convention. While tracing this, found the identical gap (missing negative check, NaN
+already handled) in the sibling `app/app/experience/actions.ts`'s `saveExperienceTags()` - the
+company-level "experience" item, same `value_rm` unit per `0012_experience_items.sql`'s own comment ("R
+millions, same unit as projects.value_rm and Form B1"). That value feeds
+`engine/narrative/build_prompt.py`'s `"R{value_rm}m"` text in a real, customer-facing AI-generated
+narrative, and `0012`'s own `match_experience()` RPC's `>=` filter - a negative value would read as visibly
+broken in the narrative and silently corrupt that filter's comparison. Fixed the same way, matching that
+file's own `err(back, "...")` convention.
+
+Verification: `npx tsc --noEmit` clean on both touched files; `npx eslint` clean on both; a standalone
+Node reproduction confirmed the exact before/after behavior (`-50`/`"abc"` now rejected, `150`/empty still
+accepted unchanged). No dedicated test file exists for either action file (both are `"use server"` Next.js
+actions calling `redirect()`/Supabase `createClient()`/`requireCompanyId()` - heavier to unit-test directly
+than a pure `lib/` function like the prior pass's fix - noted as a gap, not filled this pass, to keep this
+change small and focused). Ran the full existing suites as a sanity sweep instead: `node
+--experimental-strip-types --test lib/*.test.ts` -> 207/207 (one transient single-test flake on the first
+run, cleared on 3 immediate reruns at 207/207 each - pre-existing and unrelated, since neither touched file
+is under `lib/`); `npx vitest run` -> 295/295, unaffected.
+
+**Honest limitation of this fix**: unlike `bee_level`'s 1-9 (a real, documented SANRAL range) or a
+percentage's 0-100 (mathematically fixed), there is no equally defensible upper bound for a monetary value
+in R millions - South Africa's largest real infrastructure contracts run into the tens of thousands of
+R-millions, so inventing a round "big enough" ceiling without a source would risk rejecting a real large
+contract. This fix closes the unambiguous half of the gap (negative/garbage) and deliberately leaves the
+upper-bound question open rather than guessing at a number with no documented basis - flagging it here
+rather than quietly deciding it myself.
+
+Committed and pushed directly to `main` (small, well-verified, no PR, no live-DB access):
+- `app/app/people/actions.ts`
+- `app/app/experience/actions.ts`
+- `docs/specs/System-Status.md`
+
+Backlog: unchanged at 13 items - this finding was standalone (negative/garbage rejection, not a new
+judgment-call item), nothing resolved or added. Old count 13 + 0 new = **13**.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): Finding 103 - no upper bound anywhere in the stack on `bee_level` or any percentage field, so a typo prints an impossible value straight onto a real SANRAL form
 
 Oriented from `6468e79`; `git fetch origin main` found one new commit (`5576507`, a different session's
