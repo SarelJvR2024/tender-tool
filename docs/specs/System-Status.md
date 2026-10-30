@@ -14,6 +14,61 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): clean sweep - Discovery page's filter/sort/count logic, the 3 Next.js API routes, and bank_accounts' RLS-only tenant scoping all check out
+
+Oriented from `2e3bf81`; `git fetch origin main` found one new commit since (`b18dd4d`, a sibling
+standing-review pass's Finding 101 - a third independent occurrence of the whitespace-only-value bug
+class in `engine/general/fill_sbd_docx.py`, verified via the real diff, touches `engine/general/` only,
+no overlap) and fast-forwarded local `main`. Open PRs re-checked via the GitHub API: `#172`, `#165`,
+`#164`, all unchanged, no collision.
+
+Per this pass's own directive, picked the least-recently-reviewed areas: Discovery's own search/filter/
+sort logic (`app/app/discovery/page.tsx`, `lib/discoveryPagination.ts`, `lib/opportunityBuyerMatch.ts`),
+the 3 real Next.js API routes (`api/billing/checkout`, `api/unsubscribe` - `api/billing/payfast/itn`
+already thoroughly reviewed), and `company/bank-accounts/actions.ts` (financial, not yet touched this
+session).
+
+Discovery page: traced the verdict-filter/buyer-filter/count-query wiring (`withVerdictSpec()`,
+`COUNTABLE_FILTERS`, the per-tab `{count:"exact", head:true}` queries) end to end - the buyer `ilike`
+filter is applied consistently to the main query AND every count query, matching its own header
+comment; `shouldExcludeDeclined()` composes correctly with every verdict spec including `"all"`.
+Checked `matchesPreferredBuyers()`/`sanitizePreferredBuyers()` (migration 0104, the newest piece of
+this page) - the "return true for everything when no preference is set" shape is deliberate and
+correctly documented (an additive sort boost, never a filter - matches `matchesInterestedDisciplines()`'s
+same, older pattern) and `sanitizePreferredBuyers()` is correctly called at the one write site
+(`preferencesActions.ts`) before the array ever reaches the database - no unsanitised path in. No bug.
+
+API routes: `api/billing/checkout/route.ts` - signature/field-order discipline is intact
+(`orderedCheckoutEntries()` is the single source both the signature string and the rendered form read),
+every submitted field is correctly typed as a pre-stringified value (`priceForPayfastAmount()` already
+returns a string via `.toFixed(2)`, not a number silently coerced), and the sandboxed-billing guard is
+real (checked server-side, not just a disabled button). `api/unsubscribe/route.ts` - the RFC 8058
+one-click path is a genuine no-auth-needed shape (an unguessable bearer token IS the authorization,
+same pattern as the PayFast ITN route), and `unsubscribe_lifecycle_email()` never raises for an unknown
+token (`returns false`, not an exception) - the route's 500 on `error` only fires for a genuine
+infra-level RPC failure, not "bad token", so the module's own "always 200, token valid or not" claim
+holds. No bug.
+
+`company/bank-accounts/actions.ts`: `deleteBankAccount()`/`saveBankAccount()`'s `update()`/`delete()`
+calls filter only by `id`, with no `company_id` check in the query itself - looked like a real
+cross-tenant gap at first glance, but traced the RLS policy (`0050_principals_registrations_properties.sql`):
+`tt_is_company_admin(company_id)` is evaluated against the TARGET ROW's own `company_id` (`using
+(tt_is_company_admin(company_id))`), not the caller's - so a user from company A attempting to touch a
+company B row fails the policy check regardless of what `id` they guess, and the update/delete affects
+zero rows. Deliberate, correct RLS-as-the-real-boundary pattern, same as elsewhere in this schema. No
+bug.
+
+Also confirmed there is no notification "mark as read" persistence anywhere in this codebase to check
+for a stale-state bug - `getNotifications()` is fully recomputed on every load, nothing stored, same
+"recomputed fresh" idiom `lib/documentExpiry.ts`/`lib/billing.ts` already use.
+
+**No code bug found this pass - a genuine clean sweep**, reached by tracing several promising-looking
+leads (the buyer-filter wiring, the bank-accounts `id`-only queries) to a real, correct explanation
+rather than stopping at "looks suspicious." No code touched; no QA tooling run (nothing changed).
+Backlog unchanged at 13 items - nothing resolved, nothing new added.
+
+---
+
 ## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-twenty-seventh run): Finding 101 (severe) - a whitespace-only value was written as invisible spaces into a real non-SANRAL SBD form and logged "confirmed" - third independent occurrence of Finding 95's bug class
 
 Oriented from `2e3bf81` (a sibling standing-review pass's clean sweep - ruled out `assemble_pack.py`
