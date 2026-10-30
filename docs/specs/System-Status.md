@@ -14,6 +14,60 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): escalating the PR #173 migration-collision item (it has now LANDED on main, not just an open-PR risk) + new finding - pack-generation quota has the same check-then-insert race the seat-limit TOCTOU item already named
+
+Oriented from `7c14789` (this review's own last pass - the `redeem_company_invite()` row-lock fix,
+migration `0107`, not yet applied live). `git fetch`/`git log` showed 2 new commits since: PR #173
+("Bids pipeline 7-stage migration: app code + 0105/0106, task #48") merged as `99e431f`, and a
+sibling QA/robustness pass's real CV fix (`da773f6`, `suggest_pack.py`'s `candidate_person_text()`
+crash on `projects: null` - verified via its own commit body, no overlap with anything here). Local
+checkout fast-forwarded and confirmed to match `origin/main` exactly before proceeding. Open PRs
+re-checked via the GitHub API: only `#164`/`#165` remain open, both unchanged, no collision with
+anything below.
+
+**Escalating backlog item 16, not re-flagging it new:** the migration-numbering collision flagged two
+passes ago as a risk for Sarel to resolve *before* PR #173 merged has now landed for real - PR #173
+merged with its own `0105_tender_pipeline_stage_v2.sql` and `0106_tender_update_resolution_v2.sql`
+unrenumbered, so `app/supabase/migrations/` now genuinely contains two different files both prefixed
+`0105` (confirmed by `ls`: `0105_payfast_itn_failed_payment_period_end.sql` AND
+`0105_tender_pipeline_stage_v2.sql` sit side by side). Neither has been applied to the live database
+yet (both still open items of their own), so nothing has actually run out of order - but the risk is
+no longer hypothetical, and the eventual fix (renumbering the pipeline pair, almost certainly to
+`0108`/`0109` since `0107` is now also taken) touches migrations two other open items already depend
+on being run - Sarel's call on sequencing, not something to rename unilaterally from here.
+
+**New finding, flagged not fixed:** per this pass's own directive, checked other `SECURITY DEFINER`
+functions for the same missing-row-lock shape the prior pass fixed in `redeem_company_invite()`.
+`company_can_request_pack()` itself is read-only (`stable`, no write) and already correctly handles
+its two real past bugs (0084's in-flight-job count, 0096's lapsed-trial check) - not where the race
+is. The race is in how its two callers use it: `app/app/tenders/[id]/actions.ts` (`requestSubmissionPack`)
+and `app/app/tenders/[id]/general-actions.ts` (`requestJob`'s `generate_pack` path) both call
+`company_can_request_pack()` as one Supabase RPC, then - as a **separate**, later call - insert a new
+`pack_generation_jobs` row if it returned true. Nothing locks the company's subscription row or the
+job count in between. Two near-simultaneous "Generate pack" clicks for the same company (two tabs, a
+slow double-click, or two team members both requesting the same tender's pack within the same second)
+could both read `company_can_request_pack() = true` before either's insert lands, and both succeed -
+the same `pack_generation_jobs` quota this migration exists to enforce bypassed by exactly one, the
+same severity and shape as the already-tracked seat-limit TOCTOU (`team/actions.ts`), just on the
+revenue-metering side instead of the seat-count side.
+
+Not fixed this pass: a correct fix isn't a one-line lock addition like `redeem_company_invite()`'s own
+`for update` (there, the check and the write were one function) - here the check and the write are
+two separate RPCs from two different TypeScript call sites, so the real fix is a new, single atomic
+SQL function (quota check + job insert in one transaction, locking the subscription row for its
+duration) that both `actions.ts` and `general-actions.ts` would need to switch to calling instead of
+their current two-step pattern. That's a larger, multi-call-site change touching the revenue-metering
+path directly - genuinely riskier than this pass's "small, safe, well-verified, direct-to-main" bar,
+and the two known TOCTOU items (seats, packs) are now plausibly worth fixing together in one
+considered pass rather than two more one-off patches. Flagged as a new backlog item instead of
+guessed at.
+
+No code or migration pushed this pass beyond this documentation update. Backlog: 16 items carried
+forward (item 16's own description updated above to reflect the collision having landed, not newly
+counted) + 1 new = **17**.
+
+---
+
 ## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirty-fourth run): Finding 107 - a person with "projects": null on file crashed candidate scoring for EVERY position on the tender, not just that one person's suggestion
 
 Oriented from `99e431f` (fast-forwarded cleanly; PR #173 "Bids pipeline 7-stage migration" merged to
