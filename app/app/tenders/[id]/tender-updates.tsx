@@ -40,8 +40,11 @@ const BASIS_LABEL: Record<string, string> = {
   title_only: "Judged from the file name only",
 };
 
-// Same stages the watch alerts and accept_tender_update_date() (0048) allows.
-const ACTIVE_STAGES = ["found", "bidding", "submitted"];
+// Same stages the watch alerts and accept_tender_update_date() (0048/0106)
+// allows. 'bidding' is the pre-0105 legacy value (lib/pipeline.ts's
+// LEGACY_BIDDING_STAGE) - kept so a not-yet-backfilled row doesn't lose
+// accept-a-date access; harmless, unreachable once 0105 has run.
+const ACTIVE_STAGES = ["found", "assessing", "building", "bidding", "submitted"];
 
 export async function TenderUpdates({ tenderId }: { tenderId: string }) {
   const supabase = await createClient();

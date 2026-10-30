@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { loadTenderCompliance, packReadiness, PACK_REQUIRED_TEMPLATES } from "./compliance-data";
 import { loadB7State } from "./b7-data";
-import { advanceFoundToBidding } from "@/lib/pipeline";
+import { advanceFoundToAssessing } from "@/lib/pipeline";
 import { staleSyncedProjectRows } from "./won-project-sync-logic";
 
 /**
@@ -231,7 +231,7 @@ export async function requestSubmissionPack(formData: FormData) {
     fail("Could not request this submission pack - try again. If it keeps happening, let us know.");
   }
   // Pipeline board (0021): asking for a pack means we're bidding.
-  await advanceFoundToBidding(supabase, tenderPackId!);
+  await advanceFoundToAssessing(supabase, tenderPackId!);
 
   revalidatePath(`/tenders/${tenderId}`);
   revalidatePath("/pipeline");

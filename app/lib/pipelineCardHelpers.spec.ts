@@ -24,7 +24,7 @@ describe("primaryActionLabel", () => {
   });
 
   it("a blocked pre-submission tender shows the real mandatory-item count, not a generic label", () => {
-    expect(primaryActionLabel("bidding", { status: "blocked", score: 60, confirmedCount: 3, totalCount: 5, fixCount: 2 })).toBe("Fix returnables (2) →");
+    expect(primaryActionLabel("building", { status: "blocked", score: 60, confirmedCount: 3, totalCount: 5, fixCount: 2 })).toBe("Fix returnables (2) →");
   });
 
   it("a tender with no workspace started yet reads 'Start workspace'", () => {
@@ -32,8 +32,8 @@ describe("primaryActionLabel", () => {
   });
 
   it("an in-progress or ready pre-submission tender reads 'Continue workspace'", () => {
-    expect(primaryActionLabel("bidding", { status: "in_progress", score: 50, confirmedCount: 1, totalCount: 2, fixCount: 0 })).toBe("Continue workspace →");
-    expect(primaryActionLabel("bidding", { status: "ready", score: 100, confirmedCount: 2, totalCount: 2, fixCount: 0 })).toBe("Continue workspace →");
-    expect(primaryActionLabel("bidding", null)).toBe("Continue workspace →");
+    expect(primaryActionLabel("assessing", { status: "in_progress", score: 50, confirmedCount: 1, totalCount: 2, fixCount: 0 })).toBe("Continue workspace →");
+    expect(primaryActionLabel("building", { status: "ready", score: 100, confirmedCount: 2, totalCount: 2, fixCount: 0 })).toBe("Continue workspace →");
+    expect(primaryActionLabel("assessing", null)).toBe("Continue workspace →");
   });
 });

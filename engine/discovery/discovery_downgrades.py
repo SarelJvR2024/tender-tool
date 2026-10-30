@@ -43,7 +43,7 @@ VERDICT_LABEL = {"strong_fit": "Strong fit", "possible": "Possible", "needs_revi
 TABLE = "discovered_opportunities"
 FLAG_COLUMNS = ("downgraded_from", "downgraded_at", "downgrade_cause", "reasons_before",
                 "downgrade_acknowledged_at", "downgrade_acknowledged_by", "downgrade_digested_at")
-ACTIVE_STAGES = ("found", "bidding", "submitted")  # tender_packs.pipeline_stage = actively pursuing (0021/0039)
+ACTIVE_STAGES = ("found", "assessing", "building", "bidding", "submitted")  # tender_packs.pipeline_stage = actively pursuing (0021/0039/0105) - 'bidding' is the pre-0105 legacy value, kept so a not-yet-backfilled row doesn't drop out
 
 
 def is_downgrade(old, new):

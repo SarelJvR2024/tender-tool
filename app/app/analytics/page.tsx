@@ -88,7 +88,10 @@ export default async function AnalyticsPage() {
 
   // ----- 2. Upcoming deadlines (active tenders, closing in the future) -----
   const now = new Date();
-  const ACTIVE: PipelineStage[] = ["found", "bidding", "submitted"];
+  // 'bidding' is the pre-0105 legacy value - kept so a not-yet-backfilled
+  // row doesn't drop out of "upcoming deadlines" (see lib/pipeline.ts's
+  // LEGACY_BIDDING_STAGE); harmless, unreachable once 0105 has run.
+  const ACTIVE: (PipelineStage | "bidding")[] = ["found", "assessing", "building", "bidding", "submitted"];
   const upcoming = packed
     .filter((r) => ACTIVE.includes(r.pack.pipeline_stage) && r.tender.closing_date && new Date(r.tender.closing_date) >= now)
     .sort((a, b) => (a.tender.closing_date as string).localeCompare(b.tender.closing_date as string))
@@ -140,12 +143,17 @@ export default async function AnalyticsPage() {
         {/* 1. Bid activity & outcomes */}
         <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard label="Tenders tracked" value={packed.length} />
-          <StatCard label="Submitted to date" value={byStage.submitted + byStage.won + byStage.lost} />
+          {/* submitted_at IS NOT NULL, not a sum of current-stage buckets -
+              briefing_shortlisted (0105) has also been submitted, but
+              summing byStage.submitted/won/lost alone would miss it. Same
+              "has it ever reached submitted" signal /pipeline's own
+              submittedToDate already uses. */}
+          <StatCard label="Submitted to date" value={packed.filter((r) => r.pack.submitted_at).length} />
           <StatCard label="Win rate" value={winRate === null ? "-" : `${winRate}%`} tone={winRate !== null && winRate >= 50 ? "success" : "default"} />
           <StatCard label="Total submitted value" value={formatRand(totalSubmittedValue)} tone="money" />
         </div>
         <p className="-mt-3 mb-6 text-xs text-muted-foreground">
-          {byStage.found} discovered · {byStage.bidding} being prepared · {byStage.submitted} awaiting outcome · {byStage.won} won ·{" "}
+          {byStage.found} discovered · {byStage.assessing + byStage.building} being prepared · {byStage.submitted + byStage.briefing_shortlisted} awaiting outcome · {byStage.won} won ·{" "}
           {byStage.lost} lost
         </p>
 

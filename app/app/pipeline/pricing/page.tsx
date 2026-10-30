@@ -3,7 +3,7 @@ import Link from "next/link";
 import { ClipboardList } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { loadDisciplineTaxonomy, taxonomyGroups } from "@/lib/disciplineTaxonomy";
-import { STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { normalizeStage, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import {
   clientLabel,
   commissionText,
@@ -112,7 +112,11 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
     supabase
       .from("tender_packs")
       .select(`tender_id, pipeline_stage, submitted_at, ${ECONOMICS_COLUMNS}, tenders(contract_no, title, description, buyer, family, ocid)`)
-      .in("pipeline_stage", ["bidding", "submitted", "won", "lost"]),
+      // 'bidding' is the pre-0105 legacy value (lib/pipeline.ts's
+      // LEGACY_BIDDING_STAGE) - kept so a not-yet-backfilled row isn't
+      // dropped from pricing history; harmless, unreachable once 0105 has
+      // run and every row is assessing/building instead.
+      .in("pipeline_stage", ["assessing", "building", "bidding", "submitted", "won", "lost"]),
     supabase.from("people").select("id, name").order("name"),
     // Scaling fix (see app/lib/discoveryPagination.ts's module comment for
     // the root-cause writeup): only used below to look up `categories` for
@@ -152,7 +156,11 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
       client: clientLabel(t?.buyer ?? null, t?.family ?? null),
       sector: p.price_sector ?? derived,
       sectorDerived: !p.price_sector && !!derived,
-      stage: p.pipeline_stage,
+      // normalizeStage(): p.pipeline_stage can still be the pre-0105 legacy
+      // 'bidding' until Sarel runs that migration - STAGE_META has no entry
+      // for it, so indexing it unnormalized below would throw, not just
+      // mis-label (see lib/pipeline.ts's own comment on normalizeStage()).
+      stage: normalizeStage(p.pipeline_stage),
       submittedAt: p.submitted_at,
       price: toNumber(p.submitted_price_zar),
       inclVat: p.submitted_price_incl_vat !== false,
@@ -165,7 +173,7 @@ async function renderPricingHistory(sp: { type?: string; client?: string; sector
 
   const priced = all.filter((r) => r.price !== null);
   // Handed in but never priced: the gap this page exists to close.
-  const unpriced = all.filter((r) => r.price === null && r.stage !== "bidding");
+  const unpriced = all.filter((r) => r.price === null && r.stage !== "assessing" && r.stage !== "building");
 
   const types = [...new Set(priced.map((r) => r.type))].sort();
   const clients = [...new Set(priced.map((r) => r.client))].sort();

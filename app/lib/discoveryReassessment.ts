@@ -48,5 +48,8 @@ export function causeLine(cause: string | null | undefined): string {
 }
 
 // Pipeline stages at which the company is actively working on the tender
-// (the same set the tender-update watch alerts, 0039/0048).
-export const ACTIVE_PURSUIT_STAGES = ["found", "bidding", "submitted"];
+// (the same set the tender-update watch alerts, 0039/0048/0106). 'bidding'
+// is the pre-0105 legacy value (see lib/pipeline.ts's LEGACY_BIDDING_STAGE) -
+// kept here so a not-yet-backfilled row doesn't silently drop out of this
+// list; harmless, unreachable once 0105 has run.
+export const ACTIVE_PURSUIT_STAGES = ["found", "assessing", "building", "bidding", "submitted"];
