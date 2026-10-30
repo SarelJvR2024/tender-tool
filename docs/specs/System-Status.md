@@ -14,6 +14,37 @@
 
 ---
 
+## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirty-second run): Finding 105 in QA-Edge-Case-Findings.md (moderate) - Manifest v2's pricing_schedule silently discarded a real, correctly-detected pricing model whenever a deliverables list was also present; plus two new test files from the same merge were missing from CI
+
+Oriented from `97ae9c8` (PR #172 just merged - Document Vault fixes, Bids pipeline overhaul,
+**Manifest v2 engine**, Dashboard widgets; also `29e2042`, a sibling's Finding 105 flagging no
+storage-level upload-size/type limit, not fixed, Sarel's call - different numbering track, no
+overlap). Open PRs re-checked after the merge: `#164`/`#165` remain, both draft, both confined to
+`app/`, no overlap with `engine/`.
+
+Picked up the freshly-merged Manifest v2 extraction code in `engine/general/requirements.py`
+(`extract_pricing_schedule()`, `extract_mandatory_gates()`, `extract_dynamic_roles()`) since it's
+brand new and had never been through this standing QA process. Found `extract_pricing_schedule()`'s
+own `type` field directly contradicted its own documented promise ("reuses `extract_pricing_model()`
+- never a second, independently-computed classification"): `"fixed_deliverables" if deliverables
+else model` unconditionally discarded a real, already-detected pricing model (lump_sum,
+schedule_of_rates, ...) whenever a numbered deliverables list was ALSO present - the ordinary,
+common real shape, not an edge case, and exactly the combination neither of the merge's own two new
+tests (each covering one signal in isolation) happened to exercise. Fixed to `model or
+("fixed_deliverables" if deliverables else None)` - the real model now wins when one was found.
+Added a new combined-signal test to `engine/general/test_requirements_manifest_v2.py` (3 checks).
+Revert-and-confirm-red: reverting failed exactly the one `type` assertion, both pre-existing tests
+in the same file stayed green. Regression-checked `general_harness.py --no-pack` against the real
+eTenders corpus - no new drift.
+
+While confirming CI wiring, found the SAME merge had added two new test files
+(`test_requirements_manifest_v2.py`, `engine/discovery/test_score_outlook_functionality.py`) that
+were never wired into `bridge-worker-ci.yml` - the recurring CI-wiring-gap bug class (Findings
+87/88/89/92). Added both as new steps, YAML validated before committing. Full write-up:
+`docs/specs/QA-Edge-Case-Findings.md`, Finding 105.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): fixed a real gap in PR #172's own just-merged Pack Health feature - a bidding-stage GENERAL-family tender with no document_requirements manifest extracted yet still fell through to the bare "-" dash this feature exists to replace
 
 Oriented from `29e2042`; `git fetch origin main` found PR #172 had just merged as `97ae9c8` -

@@ -302,6 +302,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: python3 engine/general/test_requirements.py
 
+      - name: General engine - Manifest v2 (mandatory gates, dynamic roles, pricing schedule) (Finding 105)
+        if: ${{ !cancelled() }}
+        run: python3 engine/general/test_requirements_manifest_v2.py
+
       - name: General engine - submission_plan.compile_plan() assessment engine
         if: ${{ !cancelled() }}
         run: python3 engine/general/test_submission_plan.py
@@ -377,6 +381,10 @@ jobs:
       - name: Discovery - score_outlook.py's match_locality()/_area_matches()
         if: ${{ !cancelled() }}
         run: python3 engine/discovery/test_score_outlook.py
+
+      - name: Discovery - score_outlook.py's _functionality() sub-minimum/criteria breakdown (Finding 105)
+        if: ${{ !cancelled() }}
+        run: python3 engine/discovery/test_score_outlook_functionality.py
 
       - name: Discovery - source_http.py's shared helpers not already covered by a specific reader's own test
         if: ${{ !cancelled() }}

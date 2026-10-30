@@ -1138,8 +1138,22 @@ def extract_pricing_schedule(text):
     vat_m = VAT_RE.search(text)
     if model is None and not deliverables and not vat_m:
         return None
+    # QA pass, 2026-10-30: `type` used to be `"fixed_deliverables" if
+    # deliverables else model` - whenever a numbered deliverables list was
+    # found, it unconditionally overrode a REAL, already-detected pricing
+    # model (extract_pricing_model()'s own lump_sum/schedule_of_rates/...),
+    # the exact opposite of this function's own documented intent ("`type`
+    # reuses tender_enrichment.py's existing extract_pricing_model() - never
+    # a second, independently-computed pricing-model classification").
+    # Reproduced directly: "This is a lump sum contract... 1. Site
+    # establishment 2. Design development..." - a completely ordinary real
+    # tender shape (a stated pricing basis WITH its own numbered schedule) -
+    # reported type "fixed_deliverables" instead of the real, correctly-
+    # detected "lump_sum". The real model is more specific and must win
+    # whenever one was actually found; "fixed_deliverables" is only the
+    # right label when no real model keyword was present at all.
     return {
-        "type": "fixed_deliverables" if deliverables else model,
+        "type": model or ("fixed_deliverables" if deliverables else None),
         "deliverables": deliverables,
         "vat_percentage": float(vat_m.group(1)) if vat_m else None,
         "quote": _quote(text, sec.start(), sec.end()) if sec else None,

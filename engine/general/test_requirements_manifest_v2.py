@@ -162,6 +162,39 @@ def test_lump_sum_without_a_deliverables_list_reuses_the_existing_classifier():
         check("no deliverables are invented when none were found", sched["deliverables"] == [])
 
 
+def test_a_stated_pricing_model_together_with_a_deliverables_list_keeps_the_real_model():
+    # QA Finding, 2026-10-30: `type` used to be hardcoded to "fixed_deliverables"
+    # whenever ANY numbered deliverables list was found, unconditionally
+    # discarding a real, already-detected pricing model from
+    # extract_pricing_model() - directly contradicting this function's own
+    # documented intent ("never a second, independently-computed pricing-
+    # model classification"). A tender stating its pricing basis AND listing
+    # a numbered schedule under it is the ordinary, common real shape this
+    # combination exists to handle well, not a rare edge case.
+    print("extract_pricing_schedule(): a real stated pricing model (lump sum) is NOT overridden by "
+          "the mere presence of a numbered deliverables list")
+    text = """
+    This is a lump sum contract. The tenderer must price the works as a lump sum.
+
+    SCHEDULE OF PRICES
+    Pricing Schedule
+
+    1. Site establishment and mobilisation
+    2. Design development phase
+    3. Construction supervision
+    4. As-built documentation
+
+    VAT at 15% VAT is included in all prices.
+    """
+    sched = req.extract_pricing_schedule(text)
+    check("a real numbered deliverable schedule is still found", sched is not None and len(sched["deliverables"]) == 4,
+          sched)
+    check("type is the REAL stated pricing model (lump_sum), not the generic 'fixed_deliverables' label",
+          sched is not None and sched["type"] == "lump_sum", sched)
+    check("the VAT percentage is still read correctly alongside the real model",
+          sched is not None and sched["vat_percentage"] == 15.0, sched)
+
+
 def test_no_pricing_signal_at_all_returns_none_not_a_guess():
     check("plain scope text with no pricing-model or deliverables language returns None, never a fabricated default",
           req.extract_pricing_schedule("This contract covers routine office cleaning services.") is None)
@@ -177,6 +210,7 @@ def main():
     test_existing_17_coded_roles_are_untouched_by_the_new_extractor()
     test_fixed_deliverables_extracted_with_vat()
     test_lump_sum_without_a_deliverables_list_reuses_the_existing_classifier()
+    test_a_stated_pricing_model_together_with_a_deliverables_list_keeps_the_real_model()
     test_no_pricing_signal_at_all_returns_none_not_a_guess()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)

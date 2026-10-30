@@ -5951,3 +5951,63 @@ and `engine/intake/test_classify_tender.py` (both touch the same shared helpers/
 **Regression:** `engine/discovery/opportunity_requirements.py` (one `try/except` added around the
 per-release loop body, one new import, no other behavior change), `engine/discovery/
 test_opportunity_requirements.py` (1 new scenario, 3 checks). No schema or other call-site changes.
+
+### Finding 105 (CONFIRMED, FIXED, moderate - a real, correctly-detected pricing model was silently discarded and replaced with a generic label whenever a numbered deliverables list was also present - the ordinary, common real-world shape this exact feature exists to classify well; plus two brand-new test files from the same merge were missing from CI)
+
+**Where:** non-SANRAL pack rotation this cycle, picked up opportunistically while orienting from the
+freshly-merged PR #172 ("Document Vault fixes, Bids pipeline overhaul, **Manifest v2 engine**,
+Dashboard widgets") - `engine/general/requirements.py`'s brand-new `extract_pricing_schedule()`
+(`MANIFEST_VERSION` 1 -> 2 in that same merge), never reviewed by this standing QA process before
+this pass.
+
+**What was tested:** the function's own header comment explicitly promises `type` "reuses
+`tender_enrichment.py`'s existing `extract_pricing_model()` ... never a second, independently-
+computed pricing-model classification." The actual code did the opposite: `"type": "fixed_deliverables"
+if deliverables else model` - whenever a numbered deliverables list was found (`deliverables`
+non-empty), `type` was hardcoded to the generic string `"fixed_deliverables"`, **unconditionally
+discarding** whatever real pricing model `extract_pricing_model()` had already correctly detected
+from the document's own text. The two tests already committed in the same merge
+(`test_fixed_deliverables_extracted_with_vat`, `test_lump_sum_without_a_deliverables_list_reuses_the_
+existing_classifier`) each covered exactly one signal in isolation - neither one's fixture text
+combined both, so this never surfaced.
+
+**Finding (CONFIRMED), reproduced directly:** fed `extract_pricing_schedule()` a realistic combined
+text - "This is a lump sum contract... SCHEDULE OF PRICES / Pricing Schedule / 1. Site establishment
+and mobilisation / 2. Design development phase / ..." (a tender stating its pricing basis AND
+listing a numbered schedule under it, which is the *ordinary*, expected real shape for this exact
+field, not a rare edge case) - and confirmed `extract_pricing_model()` alone correctly says
+`"lump_sum"`, while `extract_pricing_schedule()`'s own `type` came back `"fixed_deliverables"`
+instead - a generic label not even in `extract_pricing_model()`'s own documented enum
+(`lump_sum`/`schedule_of_rates`/`boq_based`/`cost_reimbursable`/`remeasurement`/`time_based`),
+silently losing a real, commercially-meaningful fact (the contract's actual pricing basis) that was
+already correctly read.
+
+**Fix:** `"type": model or ("fixed_deliverables" if deliverables else None)"` - the real model now
+wins whenever one was detected (matching the function's own documented promise); `"fixed_deliverables"`
+is used only as a weaker fallback label when no real model keyword was present at all, exactly
+preserving both pre-existing tests' own expectations.
+
+**Verified red-then-green.** Added `test_a_stated_pricing_model_together_with_a_deliverables_list_
+keeps_the_real_model` to `engine/general/test_requirements_manifest_v2.py` (3 new checks: the
+deliverables list is still found, `type` is the real `lump_sum` not the generic label, VAT is still
+read correctly alongside it). Revert-and-confirm-red: reverting made exactly the one `type`-assertion
+check fail (`'type': 'fixed_deliverables'` instead of `'lump_sum'`), every other check in the file -
+including both pre-existing pricing-schedule tests - stayed green. Restored, `0 failure(s)`.
+Regression-checked `engine/general/general_harness.py --no-pack` against the real eTenders corpus
+(`84 clean, 7 flagged, 0 failed` - the same pre-existing, unrelated `*_eskom_e3689: changed
+['roles']` drift already confirmed in Finding 101's own regression check, not a new issue this fix
+introduced).
+
+**Also found, while confirming CI wiring for the above (same "CI-wiring-gap" bug class as Findings
+87/88/89/92):** PR #172's own merge added TWO new test files - `engine/general/
+test_requirements_manifest_v2.py` (this finding's own test home) and `engine/discovery/
+test_score_outlook_functionality.py` (the sibling structured-functionality-breakdown feature added
+in the same merge) - **neither was wired into `bridge-worker-ci.yml`**, so both would have silently
+never run in CI despite passing locally (confirmed: both run clean standalone). Added both as new
+CI steps, next to their natural siblings (`test_requirements.py`, `test_score_outlook.py`) -
+validated the YAML with `yaml.safe_load` before committing (Finding 92/95's own lesson).
+
+**Regression:** `engine/general/requirements.py` (one `type` expression changed, no other behavior
+change), `engine/general/test_requirements_manifest_v2.py` (1 new test function, 3 checks), one CI
+workflow file (two new steps, for the two test files this same upstream merge had already added but
+never wired in).
