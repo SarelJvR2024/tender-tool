@@ -14,6 +14,81 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): real race-condition fix in invite
+## redemption (migration `0107`) + a genuine migration-numbering collision flagged in open PR #173
+
+Oriented from `26398f1`; `git fetch origin main` found one new commit, `d5a01b7` ("fix(alerts): a
+failed mark-as-reported crashed the whole alerting report" - a different session's fix, confined to
+`engine/compliance/check_system_alerts.py`, no overlap). Fast-forwarded local `main`.
+
+**PR collision check**: open PRs are `#173` (new, large - "Bids pipeline 7-stage migration", 17 files
+touching `app/lib/pipeline.ts`, `app/app/pipeline/page.tsx`/`pricing/page.tsx`,
+`app/app/tenders/[id]/actions.ts`/`general-actions.ts`/`tender-updates.tsx`,
+`clarificationWindowReminders.ts`, `discoveryReassessment.ts`, `send-founder-digest.ts`,
+`discovery_downgrades.py`, `watch_tender_updates.py`, `seed_demo_company.py`, and two new migrations
+`0105_tender_pipeline_stage_v2.sql`/`0106_tender_update_resolution_v2.sql`), `#164`, `#165` (both
+unchanged, long-standing). **Deliberately avoided every file #173 touches this pass** - it is large,
+fresh, in-flight work from another session, not mine to collide with.
+
+**Found a genuine problem in #173 itself, flagged here rather than edited into someone else's open
+PR**: this repo's `main` already has a committed `0105_payfast_itn_failed_payment_period_end.sql`
+(this session's own earlier fix, commit `ee36c9e`, 2026-10-29) - a real, numbered migration already
+in the sequence Sarel is tracking as "migration 0096/0105 still need to be applied to the live DB."
+PR #173's branch independently adds its OWN `0105_tender_pipeline_stage_v2.sql` and
+`0106_tender_update_resolution_v2.sql` (both genuinely new filenames, so no git merge conflict - but
+now TWO different migrations both called "0105" exist in the repo's history, with different content,
+for different purposes). This is exactly the kind of mix-up the sequential-numbering convention exists
+to prevent: whoever pastes "migration 0105" into Supabase's SQL Editor next could run the wrong one,
+or believe they've already run "0105" (having run the PayFast one) when the pipeline one is still
+outstanding, or vice versa. **Not fixed here** - it's a file inside another session's open, unmerged
+PR, not mine to edit; flagged plainly as a new backlog item (below) so Sarel (or whichever session
+reviews/merges #173) renumbers it (e.g. to `0107`/`0108`) before merging, and so the "run these SQL
+files" instructions in #173's own PR description don't silently collide with the still-outstanding
+`0096`/`0105` (PayFast) items already on his list.
+
+**Found and fixed a real, independently verified bug**, unrelated to #173: `redeem_company_invite()`
+(migration `0077`, the `SECURITY DEFINER` function behind every `/invite/<token>` accept) read the
+`company_invites` row with a plain `select ... where token = p_token` - no `for update` lock - before
+checking `accepted_at is not null` and, several statements later, marking it accepted. Two concurrent
+redemptions of the SAME single-use token (a link shared in a group channel instead of to one named
+person, or two browser tabs on a slow connection - a real, plausible scenario, not a contrived edge
+case) could both pass the "not yet accepted" check before either's own `UPDATE` committed, both
+successfully `INSERT ... ON CONFLICT` into `company_members`, and both succeed - admitting two
+different accounts from one invite meant for one, with the invite's own `accepted_by` column silently
+recording only whichever UPDATE committed last (the other admission leaves no trace of which invite
+it came through).
+
+Reproduced TWICE before fixing: first with a minimal scratch-schema stand-in for the function's
+read-then-write shape (two concurrent `psql` sessions redeeming the same token, both succeeded, both
+landed in `company_members`), then again loading the ACTUAL function body from the new migration file
+into a second, more faithful scratch schema (stubbed `auth.uid()`/`auth.users`, real
+`company_invites`/`company_members`/`people` shapes) to confirm the real SQL - not just a simplified
+copy - compiles and behaves correctly: the `linked_person_id` roster-link path still works, a second
+redemption attempt after a real one correctly raises "This invite has already been used", and a
+sleep-widened concurrent pair against the real logic left exactly one account in `company_members`
+with the loser cleanly raising the same "already used" error (not a crash, not a silent no-op). No
+live database touched at any point - both scratch databases were dropped at the end of this pass, per
+the standing production-DB-mutation rule.
+
+Fixed by adding `for update` to the initial select in a `create or replace function` (migration
+`0107_redeem_company_invite_race.sql`) - every other line of the function (including the re-join-
+with-updated-role path and the linked-person-already-claimed guard) is unchanged, verbatim from
+`0077`. **Not yet applied to the live database** - same as `0096`/`0105`, this needs Sarel to paste
+it into Supabase's SQL Editor (no DDL path exists from a Claude Code session).
+
+Committed and pushed directly to `main` (SQL-only, well-verified, no PR) as `edf826a`:
+- `app/supabase/migrations/0107_redeem_company_invite_race.sql` (new)
+- `docs/specs/System-Status.md`
+
+**Backlog: 14 + 2 new = 16.**
+- **New (15):** Migration `0107` (invite-redemption race fix) needs to be applied to the live DB,
+  alongside the already-outstanding `0096` and `0105` (PayFast).
+- **New (16):** PR #173 introduces its own `0105`/`0106` migration files that collide in NUMBER
+  (not filename) with the already-merged `0105` (PayFast) - needs renumbering before merge/running,
+  flagged for whoever reviews/merges that PR.
+
+---
+
 ## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirty-third run): Finding 106 (severe) - a transient failure marking ONE system alert as reported crashed the alerting system's own report, hiding every other alert (including a critical one in the real repro) from the Claude-scheduled check-in that emails Sarel
 
 Oriented from `26398f1` (a sibling standing-review pass's clean sweep of the rest of PR #172's own
