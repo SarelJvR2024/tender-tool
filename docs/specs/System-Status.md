@@ -14,6 +14,62 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): clean sweep of the rest of PR #172's own changes (Manifest v2 frontend rendering, CIDB fields, Document Expiry upload wiring, Dashboard widgets) - no bug found
+
+Oriented from `47c16f8`; `git fetch origin main` found one new commit, `7ca1e5d` (a sibling pass's
+own real fix: Manifest v2's `extract_pricing_schedule()` discarded a real pricing model whenever a
+deliverables list was also present) - read the actual diff, confined to `engine/general/requirements.py`
++ its own test file, no overlap. Fast-forwarded local `main`. Open PRs re-checked: `#164`/`#165`
+unchanged, `#172` now merged, no collision.
+
+The prior pass already reviewed and fixed a real gap in PR #172's Pack Health logic
+(`pipeline/page.tsx`, commit `5d3a3bf`), and this same pass's sibling already fixed the pricing-schedule
+bug above. Per this pass's own directive, gave the REST of #172's 33 files a genuinely careful look
+rather than a superficial skim of all of it:
+
+- `general-workspace.tsx`'s new `mandatory_gates`/`extracted_roles`/`functionality.criteria` rendering -
+  read end to end against `requirements.py`'s own `extract_mandatory_gates()`/`extract_dynamic_roles()`
+  and `score_outlook.py`'s `_functionality()`. Correctly honest throughout: no fabricated pass/fail
+  status against an arbitrary extracted credential string, no invented per-category weight. One shape
+  checked specifically for a reachable bug: `estimate_score_outlook()`'s own early "no document text"
+  return path omits `has_sub_minimum`/`sub_minimum_rule`/`criteria` from its `functionality` dict
+  entirely (only the normal, has-text path sets them) - traced every frontend read of those three
+  fields and confirmed each is a plain truthy/`?.`/`??` check, so the missing keys degrade to `undefined`
+  → falsy/0, never a crash. Not a bug, just confirmed safe.
+- CIDB manual-entry fields (`cidb_grading`/`cidb_registration_number`/`cidb_contractor_name`/`cidb_expiry`)
+  added to `companyProfileUpdate.ts`'s allowlists - confirmed all 4 columns genuinely exist (migrations
+  `0018`/`0063`/`0069`), all text/date (no numeric-bounds gap, the bug family 3 passes ago fixed 3
+  real instances of doesn't apply here).
+- Document Expiry's new upload wiring (`DocumentExpiryOverview.tsx`, `companyExpiryFields.ts`'s new
+  `kind`/`pathField`) - the commit's own message flagged a real typo risk here (`kind` is a plain
+  string literal, not the real `VaultDocumentKind` union, since `companyExpiryFields.ts` deliberately
+  has zero imports). Independently cross-checked all 7 `kind` strings and their `pathField` columns
+  against `vaultDocuments.ts`'s own `VAULT_DOCUMENTS` map by hand - every one matches exactly
+  (`coid`/`cidb`/`sars_tcs_pin`/`pi_insurance`/`iso_9001`/`bank_letter`/`bee_proof`, each column name
+  identical on both sides). Correctly wired.
+- Dashboard's two new widgets (`Vault & compliance health`, `Team & CV bench`) - both read
+  `loadDocumentExpiryOverview()`'s same rows the Company vault page already shows, split by the
+  `company:`/`person:` id prefix that function already gives each row, never a second,
+  independently-computed status. Confirmed no second pricing/scoring logic was invented anywhere in
+  either widget.
+
+**No code bug found this pass - a genuine clean sweep** of the remaining #172 surface, reached by
+actually tracing each candidate (the `estimate_score_outlook()` missing-keys shape, the CIDB columns,
+the 7 `kind`/`pathField` pairs) rather than skimming. One minor, NOT a backlog item, UX observation
+worth naming honestly rather than silently dropping: the "Team & CV bench" widget's person-registration
+list shows every person with an ECSA/SACPCMP registration on file regardless of status (same as the
+Vault widget's own all-rows-shown convention), so a company where everyone's registration happens to
+be valid will still see a plain list of names with green "Valid" chips rather than an empty, reassuring
+state - matches the Vault widget's own established pattern (which also shows every row, not just
+attention-needed ones), so treated as consistent with this feature's own design, not a defect.
+
+Committed and pushed directly to `main` (docs-only, no code change) as (SHA filled in below):
+- `docs/specs/System-Status.md`
+
+Backlog unchanged at 14 items - nothing resolved, nothing new added.
+
+---
+
 ## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirty-second run): Finding 105 in QA-Edge-Case-Findings.md (moderate) - Manifest v2's pricing_schedule silently discarded a real, correctly-detected pricing model whenever a deliverables list was also present; plus two new test files from the same merge were missing from CI
 
 Oriented from `97ae9c8` (PR #172 just merged - Document Vault fixes, Bids pipeline overhaul,
