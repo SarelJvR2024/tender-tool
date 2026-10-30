@@ -14,7 +14,62 @@
 
 ---
 
-## This pass (2026-10-30, standing solution-architect review): Finding 105 (not fixed, flagged for Sarel) - no storage-level size/type limit on ANY of this app's 9 upload buckets; the only guard is client-side JS, trivially bypassed by a user who already holds a valid session
+## This pass (2026-10-30, standing solution-architect review): fixed a real gap in PR #172's own just-merged Pack Health feature - a bidding-stage GENERAL-family tender with no document_requirements manifest extracted yet still fell through to the bare "-" dash this feature exists to replace
+
+Oriented from `29e2042`; `git fetch origin main` found PR #172 had just merged as `97ae9c8` -
+**merged by Sarel himself** (`merged_by: SarelJvR2024`, confirmed via the GitHub API's own `pull_request_read`,
+not a self-merge - no guardrail concern). Fast-forwarded local `main`. Open PRs re-checked: `#172` now
+closed/merged; `#164`/`#165` unchanged, no collision.
+
+Re-confirmed the "submitted-tender nagging gap" backlog item is still accurately worded (no change
+needed) and did not re-investigate any other unchanged backlog item.
+
+Given the size of `#172` (33 files, Bids pipeline overhaul + Manifest v2 engine + Dashboard widgets,
+merged minutes before this pass started) and this session's standing discipline of reviewing fresh
+code rather than only re-sweeping already-reviewed stable areas, read the new `app/app/pipeline/page.tsx`
+Pack Health logic end to end against its own stated purpose: "Pack health replaces every bare '-'".
+
+**Found and fixed a real gap**: `pipelineCardHelpers.ts`'s `packHealthStatusFromReadiness()` is only
+ever reached when `snap.mapped` is true. For a GENERAL-family tender, `loadGeneralPackReviewSnapshot()`
+(`general-pack-review-data.ts`) returns `mapped: false` whenever `document_requirements` hasn't been
+extracted yet - a real, reachable state for any tender a user has already moved to `bidding` before
+the AI extraction job finishes (or if it fails). The old code treated that identically to a genuine
+Supabase error (`readiness = null` -> `c.packHealth = null`), which `PackHealthBadge` renders as the
+bare `-` and `primaryActionLabel` falls through to the generic "Continue workspace -&gt;" - exactly the
+placeholder item 2 of the PR's own brief says this feature replaces, silently un-replaced for this one
+real case. (Traced the equivalent SANRAL branch too: `compliance-data.ts`'s `mapped` is only ever false
+when the family itself doesn't match SANRAL_CONVENTIONAL_FAMILY, which `page.tsx`'s own `c.family ===
+SANRAL_CONVENTIONAL_FAMILY` guard already rules out before calling it - not reachable there today, but
+left the same explicit `if (!snap.mapped) return NOT_STARTED` guard on that branch too for symmetry and
+because it costs nothing if a future SANRAL-side change ever makes it reachable.)
+
+Fixed by returning the same `not_started` `PackHealth` object already used for a `found`-stage card
+(real, known information - "not started" - not a blank to leave unstyled) whenever `snap.mapped` is
+false, keeping a genuine thrown exception as the one case that still renders the bare `-` (an unknown
+state from a real error is correctly different from "not started", and keeping it visible as a dash
+is more honest than guessing). Extracted the repeated object into one `NOT_STARTED` constant, reused
+by both the bidding-card branch and the existing `found`-stage assignment (previously two separately
+hand-written literals that could have silently drifted from each other over time).
+
+Verified: `npx tsc --noEmit` (whole project) clean; `npx eslint app/pipeline/page.tsx` clean; a
+standalone Node repro mirroring the exact before/after branch logic confirmed the unmapped case now
+returns `{status: "not_started", ...}` instead of `null` while the normal mapped case is byte-for-byte
+unchanged. `page.tsx` is a server component with no direct unit test (same as every other page this
+session has touched) - sanity-swept the full suites instead: `node --experimental-strip-types --test
+lib/*.test.ts` -&gt; 214/214, `npx vitest run` -&gt; 321/321 (including `pipelineCardHelpers.spec.ts`'s own
+7 tests, untouched and unaffected since the fix is in the page's call site, not that file).
+
+Pushed directly to `main` (small, well-verified, no PR - this session's established pattern) as
+`&lt;commit-sha-filled-in-below&gt;`:
+- `app/app/pipeline/page.tsx`
+- `docs/specs/System-Status.md`
+
+No new backlog item - this closes a real gap inside a feature that just merged, not a new judgment
+call. Backlog unchanged at 14 items.
+
+---
+
+## Prior pass (2026-10-30, standing solution-architect review): Finding 105 (not fixed, flagged for Sarel) - no storage-level size/type limit on ANY of this app's 9 upload buckets; the only guard is client-side JS, trivially bypassed by a user who already holds a valid session
 
 Oriented from `b9c5ed2`; `git fetch origin main` found one new commit since (`fd7b327`, a different
 session's `opportunity_requirements.py` per-release exception-isolation fix - read the real diff,

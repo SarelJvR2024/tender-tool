@@ -305,20 +305,34 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   // concern already flagged for Home's own "specific next step", see
   // "Home cockpit" above).
   const biddingCards = cards.filter((c) => c.stage === "bidding");
+  const NOT_STARTED: PackHealth = { status: "not_started", score: 0, confirmedCount: 0, totalCount: 0, fixCount: 0 };
   const packHealths = await Promise.all(
     biddingCards.map(async (c): Promise<PackHealth | null> => {
       try {
-        let readiness = null;
+        // snap.mapped === false means something distinct per family - for
+        // SANRAL it can't actually happen here (c.family already gates the
+        // call), but for GENERAL it means "no document_requirements manifest
+        // extracted yet" (general-pack-review-data.ts), a real, reachable
+        // state for a tender a user has already moved to 'bidding' before
+        // extraction finishes. That used to fall through to `readiness =
+        // null` and render the bare "-" this whole feature exists to
+        // replace, with the Action link silently defaulting to "Continue
+        // workspace" - found 2026-10-30, re-reviewing PR #172 the pass after
+        // it merged. Treated the same as a 'found'-stage card below: real,
+        // known information ("not started"), not a blank to leave unstyled.
         if (c.family === SANRAL_CONVENTIONAL_FAMILY) {
           const snap = await loadPackReviewSnapshot(c.id);
-          readiness = snap.mapped ? computeTenderReadiness(snap.sections) : null;
+          if (!snap.mapped) return NOT_STARTED;
+          const readiness = computeTenderReadiness(snap.sections);
+          const status = packHealthStatusFromReadiness(readiness.score, readiness.fix.length);
+          return { status, score: readiness.score, confirmedCount: readiness.confirmedCount, totalCount: readiness.totalCount, fixCount: readiness.fix.length };
         } else if (c.family === GENERAL_FAMILY) {
           const snap = await loadGeneralPackReviewSnapshot(c.id);
-          readiness = snap.mapped ? computeTenderReadiness(snap.sections) : null;
+          if (!snap.mapped) return NOT_STARTED;
+          const readiness = computeTenderReadiness(snap.sections);
+          const status = packHealthStatusFromReadiness(readiness.score, readiness.fix.length);
+          return { status, score: readiness.score, confirmedCount: readiness.confirmedCount, totalCount: readiness.totalCount, fixCount: readiness.fix.length };
         }
-        if (!readiness) return null;
-        const status = packHealthStatusFromReadiness(readiness.score, readiness.fix.length);
-        return { status, score: readiness.score, confirmedCount: readiness.confirmedCount, totalCount: readiness.totalCount, fixCount: readiness.fix.length };
       } catch (e) {
         console.error("readiness score failed for pipeline card", c.id, e);
       }
@@ -332,7 +346,7 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   // 'found' hasn't begun pack compilation at all, which IS itself real,
   // known information - not a missing value to leave blank.
   for (const c of cards) {
-    if (c.stage === "found") c.packHealth = { status: "not_started", score: 0, confirmedCount: 0, totalCount: 0, fixCount: 0 };
+    if (c.stage === "found") c.packHealth = NOT_STARTED;
   }
 
   const byStage = Object.fromEntries(PIPELINE_STAGES.map((s) => [s, [] as Card[]])) as Record<PipelineStage, Card[]>;
