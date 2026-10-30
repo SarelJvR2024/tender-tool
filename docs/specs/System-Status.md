@@ -14,6 +14,73 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): Finding 105 (not fixed, flagged for Sarel) - no storage-level size/type limit on ANY of this app's 9 upload buckets; the only guard is client-side JS, trivially bypassed by a user who already holds a valid session
+
+Oriented from `b9c5ed2`; `git fetch origin main` found one new commit since (`fd7b327`, a different
+session's `opportunity_requirements.py` per-release exception-isolation fix - read the real diff,
+`engine/discovery/` only, no overlap) and fast-forwarded local `main`. Open PRs `#172`/`#165`/`#164`
+re-confirmed unchanged via the GitHub API, no collision.
+
+**Re-checked the "submitted-tender nagging gap" backlog item first** (per this pass's own directive,
+having just touched `send-returnables-digest.ts` for an unrelated fix last pass): re-read both
+`send-returnables-digest.ts` and `send-deadline-reminders.ts` directly. The diagnosis is still
+exactly accurate - neither file selects or filters on `pipeline_stage` anywhere (confirmed by grep),
+and the prior pass's own fix to `send-returnables-digest.ts` only moved where `claim_notification` is
+called, a completely different part of the file; it didn't touch, and couldn't have accidentally
+fixed, this gap. `send-operational-alerts.ts`'s `CLOSED_STAGES` guard (`lib/printCutoffReminders.ts`)
+is still the one deliberate exception. No change needed to that backlog entry's wording - it already
+describes the real, current state correctly.
+
+**The new finding**: every one of this app's 9 `storage.buckets` inserts (`0008` CV uploads, `0012`
+experience documents, `0014` vault compliance documents, `0017` pack-generation output, `0018`
+submission packs, `0022` admin harness, `0063` onboarding documents, `0071` discovered-opportunity
+documents, `0087` narrative documents) only ever sets `(id, name, public)` - none sets Postgres
+Storage's own `file_size_limit` or `allowed_mime_types` columns (confirmed by grep across every
+migration). The RLS policy on each (e.g. `0063`'s own `"onboarding-documents: tenant isolation by path
+prefix"`) checks only `is_company_member((storage.foldername(name))[1]::uuid)` - tenant isolation,
+nothing about size or type.
+
+The ONLY size/type enforcement anywhere in this app is client-side: `FileDropzone`'s
+`validateFiles({ acceptedExtensions, maxBytes })`, called before every `uploadBatch()` call site
+(`upload-form.tsx`, `VaultDocumentUploader.tsx`, `quick-blocker-drawer.tsx` - all three checked, all
+three do call it). But `uploadBatch.ts`'s own header comment says plainly why uploads go straight from
+the browser to Supabase Storage rather than through a Server Action: "a Server Action body is capped
+at 4.5 MB; a batch of certificates together would blow past that" - which means the browser already
+holds a real, valid Supabase session token with write access to that bucket path. Client-side JS is
+not a security boundary for a user who already has a legitimate session: calling the Storage REST API
+directly with that same token (trivial - it's exactly what the browser's own `fetch` does, just not
+gated by `validateFiles()` first) uploads any size or type of file with nothing in Postgres or Storage
+ever refusing it.
+
+Traced one concrete consequence rather than stopping at "this looks bad": `engine/cv/extract_cv_fields.py`'s
+shared `storage_download()` (used by `process_onboarding_jobs.py`, `process_cv_jobs.py`, and others)
+streams the download straight to a local worker disk file via `shutil.copyfileobj` with no size check
+of its own - so this isn't a memory-exhaustion crash, but it IS an unbounded disk-fill / storage-cost
+vector: nothing stops a company from uploading a multi-GB file (or many of them) to a bucket meant for
+a few-page PDF certificate, consuming real Supabase Storage billing and, on a shared worker with
+limited disk, potentially starving a job for every other company's queue too.
+
+**Why this is flagged, not fixed**: Postgres Storage's `file_size_limit`/`allowed_mime_types` columns
+could be set via a straightforward migration, but the right VALUES are a real product decision I'm
+not positioned to guess at - a cap sized wrong (too small) would start silently rejecting legitimate
+scanned multi-page PDF certificates or CV documents that currently work fine, which is worse than the
+status quo; too large defeats the point. This also spans all 9 buckets at once, not one isolated file,
+same shape as the already-flagged submitted-tender nagging gap. Not reproduced against a live Supabase
+project (no live credentials in this sandbox) - reasoned directly from the migration SQL and RLS
+policy text, which is sufficient to establish every bucket genuinely has no server-side limit set,
+without needing a live run. One caveat stated honestly: if Sarel's Supabase project has a
+project-level global upload-size cap configured in the dashboard (outside this repo's migrations),
+that would already provide a partial backstop this review has no visibility into - worth confirming
+rather than assuming the worst case is the live case.
+
+QA tooling: nothing in this file/area touched; no code change this pass.
+
+No code fixed this pass - this is a genuine finding surfaced for Sarel's own call, following the same
+discipline as the submitted-tender nagging gap. Backlog: 13 -&gt; **14** (new item: no storage-level
+size/type limit on any upload bucket).
+
+---
+
 ## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirty-first run): Finding 104 (moderate) - a failure on any ONE discovered release aborted requirement-classification for every OTHER release still queued in the same run, with zero system_alerts visibility either way
 
 Oriented from `b9c5ed2` (a sibling standing-review pass actively working `notify` - two commits in a
