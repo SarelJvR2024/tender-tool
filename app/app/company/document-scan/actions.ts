@@ -227,6 +227,19 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
   const contractNumber = ticked(formData, "contract_number") ? str(formData, "f_contract_number") : null;
   const projectName = contractNumber || clientName || upload!.original_filename;
 
+  // Found 2026-10-30: a third entry point into experience_items.value_rm
+  // (0012) with the same gap app/app/experience/actions.ts's saveExperienceTags()
+  // had before this session's own prior standing-review pass fixed it there -
+  // num() here only ever rejected NaN, never a negative number, and this
+  // bulk-onboarding review screen's own number input has no min either. Same
+  // unit, same downstream readers (engine/narrative/build_prompt.py's real
+  // customer-facing AI narrative text, 0012's match_experience() RPC >= filter) -
+  // missed earlier because this is a different form (AI-proposed document
+  // review, not the manual "add experience" form), not because it's a
+  // different column.
+  const valueRm = ticked(formData, "project_value_rm") ? num(formData, "f_project_value_rm") : null;
+  if (valueRm !== null && valueRm < 0) fail("Project value (R million) must be a number of 0 or more.");
+
   const destPath = `${companyId}/experience/${randomUUID()}-${safeFileName(upload!.original_filename)}`;
   const copyErr = await copyBetweenBuckets(supabase, ONBOARDING_BUCKET, upload!.storage_path, "experience-documents", destPath, "application/octet-stream");
   if (copyErr) fail(copyErr);
@@ -239,7 +252,7 @@ export async function confirmExperienceReferenceLetter(formData: FormData) {
     original_filename: upload!.original_filename,
     client_name: clientName,
     contract_number: contractNumber,
-    value_rm: ticked(formData, "project_value_rm") ? num(formData, "f_project_value_rm") : null,
+    value_rm: valueRm,
     completion_date: ticked(formData, "completion_date") ? str(formData, "f_completion_date") : null,
     reference_contact_name: ticked(formData, "referee_name") ? str(formData, "f_referee_name") : null,
     reference_contact_phone: ticked(formData, "referee_phone") ? str(formData, "f_referee_phone") : null,

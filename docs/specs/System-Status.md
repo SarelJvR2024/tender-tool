@@ -14,6 +14,66 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): a third entry point into experience_items.value_rm had the same missing negative-value check the prior two standing-review passes fixed elsewhere
+
+Oriented from `ba2365c`; `git fetch origin main` found one new commit since (`cbda20d`, a sibling
+standing-review pass's Finding 103/104 - a text-typed SANRAL closing date silently dropped or falsely
+refused during intake/key-position suggestion, `engine/intake/`/`engine/pack_generator/` only) and
+fast-forwarded local `main`. Open PRs re-checked via the GitHub API: `#172`, `#165`, `#164`, all
+unchanged, no collision.
+
+Per this pass's own directive, continued the search for siblings of the last two passes' real,
+well-verified bug family: a numeric field with no/insufficient validation that flows onto a real
+generated document. Swept the remaining `"use server"` action files under `app/app/*/actions.ts`
+for a bare `Number()`/`parseFloat`/`parseInt` conversion. Two more candidates traced and correctly
+ruled out: `company/properties/actions.ts`'s `num()` helper (gross lettable area, parking bays) has
+the identical missing-negative-check shape, but `company_properties` is never read by anything in
+`engine/` - only this company's own properties page and `registration_reminders.py`'s expiry nag -
+so there is no real "prints wrong on a document" consequence to find; and
+`tenders/[id]/actions.ts`'s `syncWonProjectToTeam()` already correctly guards its own
+`project_completion_value_rm` (`!Number.isFinite(value) || value < 0`) before syncing it into the
+same `projects.value_rm` column the people/experience fix targeted - already safe, not a bug.
+
+**Found and fixed a real third sibling**: `company/document-scan/actions.ts`'s
+`confirmExperienceReferenceLetter()` - the bulk-onboarding "AI proposed this, you confirm it" review
+flow - writes `experience_items.value_rm` through its own, separately-written `num()` helper, which
+(like the other two before this session's fixes) only ever rejected `NaN`, never a negative number.
+This is the exact same column `experience/actions.ts`'s `saveExperienceTags()` writes (0012's own
+schema comment: "same unit as `projects.value_rm` and Form B1") - the prior standing-review pass
+fixed that manual "add experience" form but missed this separate bulk-review entry point into the
+identical column, because it's a different form, not a different field. Confirmed reachable: this
+action is live-wired from `document-scan/review.tsx`'s dynamic field renderer (`type="number"`, no
+`min` attribute, so a negative value types in cleanly), and the written value feeds
+`engine/narrative/build_prompt.py`'s real customer-facing AI narrative text plus 0012's
+`match_experience()` RPC's `>=` filter - both already identified as real consequences when the
+sibling bug was fixed two passes ago.
+
+Fixed with the same pattern as the two prior fixes in this family: reject a negative value with a
+clear redirect error, matching this file's own `fail()` convention; NaN/garbage already became
+`null` via the pre-existing `num()` helper and is left as-is (same precedent the prior two fixes
+set). Reproduced the exact before/after behaviour with a standalone Node script mirroring this
+file's own validation logic: `-50` passed through unchanged before the fix, is rejected after it;
+a valid decimal and garbage text are both unaffected.
+
+Verification: `npx tsc --noEmit` and `npx eslint` clean on the touched file; `node
+--experimental-strip-types --test lib/*.test.ts` → 207/207, unaffected (this file isn't under `lib/`,
+sanity sweep only). No dedicated test added - this is a `"use server"` Next.js action requiring a
+Supabase client, the same reason the two prior fixes in this family (`people/actions.ts`,
+`experience/actions.ts`) didn't get one either; noted as a standing gap across all three, not filled
+here, to keep this fix small and consistent with precedent.
+
+Committed and pushed directly to `main` (no PR - small, well-verified, matches an established,
+already-reviewed fix pattern):
+- `app/app/company/document-scan/actions.ts`
+- `docs/specs/System-Status.md`
+
+This pass's own search across the remaining server actions for the SAME bug family is now genuinely
+exhausted (every numeric-field-reaching-a-real-document candidate across `app/app/*/actions.ts` has
+been checked at least once across these three passes). Backlog unchanged at 13 items - this finding
+was a fix within the already-flagged family, not a new judgment-call item. Old count 13 + 0 new = 13.
+
+---
+
 ## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-twenty-ninth run): Finding 103 in QA-Edge-Case-Findings.md (moderate) - a SANRAL closing date typed as literal text instead of a numeric Excel serial was silently dropped during intake AND falsely refused during key-position suggestion, while the real pack build read it fine
 
 Oriented from `ba2365c` (a sibling standing-review pass's Finding 104 - project value had no
