@@ -14,6 +14,37 @@
 
 ---
 
+## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-twenty-ninth run): Finding 103 in QA-Edge-Case-Findings.md (moderate) - a SANRAL closing date typed as literal text instead of a numeric Excel serial was silently dropped during intake AND falsely refused during key-position suggestion, while the real pack build read it fine
+
+Oriented from `ba2365c` (a sibling standing-review pass's Finding 104 - project value had no
+negative/garbage check, `app/app/people/actions.ts`; no overlap, frontend validation not engine).
+Open PRs checked: none touch `engine/intake/` - no collision.
+
+intake rotation. `classify_tender.read_setup()` imports `suggest_pack.py`'s own `_excel_date()` to
+decode SETUP!C3; `engine/pack/assemble_pack.py` has a SEPARATE, independently written copy of the
+same conceptual helper. `Workbook.cached()` returns a genuine Excel date cell as a plain numeric
+serial, but a cell someone typed as literal text (an apostrophe-prefixed date, a paste-as-values
+from a different locale) comes back as a string - `suggest_pack._excel_date()` only ever tried
+`int()`, while `assemble_pack._excel_date()` already fell back to `fromisoformat()` for anything
+non-numeric. Reproduced end to end against a real copy of `templates/samples/
+R.334-030-2025.1F_ran.xlsm` with its own SETUP!C3 rewritten to text: `classify_tender.read_setup()`
+silently returned `closing_date: None`; `suggest_pack.suggest()` raised a false "not a readable
+Excel date" error, blocking key-position suggestions entirely; the real pack build
+(`assemble_pack.check_template()`'s caller) read the same cell correctly throughout. Fixed by
+widening `suggest_pack._excel_date()` to match `assemble_pack._excel_date()`'s own breadth, same
+raise-on-genuinely-bad-input contract preserved. Also found and fixed a second, smaller latent bug
+while there: neither function guarded against a stray `bool` (a subclass of `int` in Python) -
+added `not isinstance(x, bool)` to both. New/extended tests in `engine/pack_generator/
+test_suggest_pack.py` (9 checks, including a `suggest()` integration check) and `engine/intake/
+test_classify_tender.py` (2 checks, against the real fixture workbook). Revert-and-confirm-red:
+reverting reproduced both predicted failures exactly (a raw `ValueError` traceback; `closing_date:
+None`), everything else stayed green. Already wired into CI - no new step needed.
+Regression-checked `test_assemble_pack.py`, `test_process_pack_jobs.py`, `test_sync_functions.py`,
+and `test_fill_b7_legacy_precedence.py` - all pass. Full write-up:
+`docs/specs/QA-Edge-Case-Findings.md`, Finding 103.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): Finding 104 - a person's project value had NO validation at all (not even negative/garbage), written verbatim onto a real SANRAL Form B1/B2 experience row; the sibling "company experience" form had the same gap minus the negative check
 
 Oriented from `8ceaf9a`; `git fetch origin main` found nothing new since, local already matched. Open

@@ -258,6 +258,37 @@ def test_read_setup_against_the_real_fixture():
           and all(p["managerial"] is False for p in setup["positions"]), setup)
 
 
+def test_read_setup_closing_date_typed_as_text_is_still_read(tmp_path="/tmp"):
+    """QA Finding, 2026-10-30: SETUP!C3 stores a genuine Excel date as a plain
+    numeric serial (date FORMATTING is only a display style, not part of the
+    cell's own value) - but a cell someone typed as literal text (an
+    apostrophe-prefixed '2026-05-01 to stop Excel's own autoformat, a
+    paste-as-values from a different locale) comes back as a string
+    instead. read_setup() imports suggest_pack.py's own _excel_date(), which
+    only ever tried int(serial) - this exact SETUP!C3 cell, read the SAME
+    way, was silently dropped here while engine/pack/assemble_pack.py's own
+    separate, independently written _excel_date() already read it fine
+    during the real pack build. Reproduced against a copy of the real
+    fixture, not a synthetic one."""
+    print("read_setup: a closing date typed as literal text in SETUP!C3 (not a numeric Excel serial) "
+          "is still read, not silently dropped")
+    import shutil
+    import tempfile
+    store = tempfile.mkdtemp(prefix=f"text_date_{os.getpid()}_")
+    copy_path = os.path.join(store, "text_date.xlsm")
+    shutil.copy(TECH_WORKBOOK, copy_path)
+    wb = ct.Workbook(copy_path)
+    check("sanity: the real fixture's own SETUP!C3 is a plain numeric Excel serial before this edit",
+          isinstance(wb.cached("SETUP", "C3"), (int, float)), wb.cached("SETUP", "C3"))
+    wb.set_value("SETUP", "C3", "2026-05-01")
+    wb.save(copy_path)
+
+    setup = ct.read_setup(copy_path)
+    check("the text-typed closing date is read as the real ISO date, not silently dropped to None",
+          setup["closing_date"] == "2026-05-01", setup)
+    shutil.rmtree(store, ignore_errors=True)
+
+
 def test_find_nra_reference_single_ambiguous_and_none():
     print("find_nra_reference: single match, most-repeated-wins when ambiguous, no match at all")
     check("a single NRA reference is read in the seed's own format",
@@ -386,6 +417,7 @@ def main():
     test_classify_workbook_real_technical_financial_and_corrupt()
     test_check_fingerprint_no_baseline_match_mismatch_and_corrupted_baseline()
     test_read_setup_against_the_real_fixture()
+    test_read_setup_closing_date_typed_as_text_is_still_read()
     test_find_nra_reference_single_ambiguous_and_none()
     test_find_closing_time_single_ambiguous_and_formats()
     test_find_delivery_address_single_ambiguous_and_stops_correctly()

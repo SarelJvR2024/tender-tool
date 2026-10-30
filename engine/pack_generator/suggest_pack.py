@@ -37,7 +37,30 @@ def _keywords(text):
 
 
 def _excel_date(serial):
-    return datetime.date(1899, 12, 30) + datetime.timedelta(days=int(serial))
+    """A SETUP!C3 closing date, however the cell's raw XML value comes back
+    from Workbook.cached(): a genuine Excel date is stored as a plain
+    numeric serial (date FORMATTING is only a display style, not part of
+    the cell's own <v> value) - but a cell someone typed as literal text
+    (an apostrophe-prefixed '2026-05-01 to stop Excel's own autoformat, a
+    paste-as-values from a different locale) comes back as a string
+    instead. QA pass, 2026-10-30: this function only ever tried int(serial)
+    - a perfectly valid, if unusually-typed, closing date raised here,
+    while engine/pack/assemble_pack.py's own separate, independently
+    written _excel_date() already parsed both shapes - the SAME SETUP!C3
+    cell of the SAME tender was silently dropped during intake
+    (classify_tender.read_setup(), which imports this function) and a
+    FALSE "not a readable Excel date" error during key-position
+    suggestion (this file's own suggest()), while the real pack build
+    read it fine. Raises ValueError/TypeError on a genuinely unreadable
+    value either way - both of this function's own callers already catch
+    and handle that, unchanged.
+    `not isinstance(serial, bool)` matters: bool is a subclass of int in
+    Python, so a stray True/False value (a checkbox mistakenly placed in
+    this cell) would otherwise silently become the bogus date 1899-12-31
+    rather than being rejected as the clearly-wrong type it is."""
+    if isinstance(serial, (int, float)) and not isinstance(serial, bool):
+        return datetime.date(1899, 12, 30) + datetime.timedelta(days=int(serial))
+    return datetime.date.fromisoformat(str(serial).strip()[:10])
 
 
 def read_required_positions(wb):

@@ -5845,3 +5845,65 @@ indirect consumers of this module) - both still `ALL PASSED`.
 **Regression:** `engine/ocr/scan_ocr.py` (one added function call, no other behavior change), new
 file `engine/ocr/test_scan_ocr.py` (first dedicated test for this module ever, 8 checks), one CI
 workflow file (one new step). No schema or other call-site changes.
+
+### Finding 103 (CONFIRMED, FIXED, moderate - a SANRAL closing date typed as literal text instead of a numeric Excel serial was silently dropped during intake AND falsely refused during key-position suggestion, while the real pack build read it fine - two independently-written copies of the same helper function had drifted apart)
+
+**Where:** intake rotation this cycle. `engine/pack_generator/suggest_pack.py`'s `_excel_date()` -
+imported and reused as-is by `engine/intake/classify_tender.py`'s `read_setup()` - versus
+`engine/pack/assemble_pack.py`'s own, separately written `_excel_date()`.
+
+**What was tested:** `Workbook.cached()` (`engine/sanral_fill.py`) reads a cell's raw XML value
+directly - a genuine Excel date is stored as a plain numeric serial (date FORMATTING is only a
+display style, never part of the cell's own `<v>` value), but a cell someone typed as literal text
+(an apostrophe-prefixed `'2026-05-01` to stop Excel's own autoformat, a paste-as-values from a
+different locale) comes back as a plain string instead - a real, if uncommon, way SETUP!C3 can
+legitimately hold a perfectly valid date. Compared `suggest_pack._excel_date(serial)` (`return
+datetime.date(1899, 12, 30) + datetime.timedelta(days=int(serial))` - only ever tries `int()`)
+against `assemble_pack._excel_date(v)` (checks `isinstance(v, (int, float))` first, falls back to
+`datetime.date.fromisoformat(str(v)[:10])` for anything else) - two independently written copies of
+conceptually the same "decode SETUP!C3" logic that had quietly drifted apart.
+
+**Finding (CONFIRMED), reproduced end to end against a real sample workbook, not reasoned about in
+the abstract:** took a copy of `templates/samples/R.334-030-2025.1F_ran.xlsm`, used `Workbook.
+set_value()` to rewrite its own SETUP!C3 cell to the literal text `"2026-05-01"` (confirmed the real
+fixture's own C3 was a plain numeric serial beforehand), saved it, and ran the real pipeline against
+it: `classify_tender.read_setup()` returned `closing_date: None` - silently treating a perfectly
+valid date as unreadable, so intake never shows the user the workbook's own closing date and
+`discrepancies()` never checks it against what they typed (the `if setup.get("closing_date") and
+...` guard short-circuits on `None`); `suggest_pack.suggest()` raised `ValueError: ...SETUP!C3
+(closing date) is '2026-05-01', not a readable Excel date` - a **false alarm** blocking key-position
+candidate suggestions entirely for a perfectly fine tender; `assemble_pack.check_template()`'s own
+caller (the real pack BUILD) read the exact same cell correctly and proceeded normally. The same
+tender's same cell: silently wrong in one place, falsely blocked in another, correct in a third.
+
+**Fix:** widened `suggest_pack._excel_date()` to try `datetime.date.fromisoformat()` on anything
+that isn't already numeric, matching `assemble_pack._excel_date()`'s own breadth - while preserving
+its existing raise-on-genuinely-bad-input contract (both of its callers already catch and handle
+that correctly; widening what counts as *successfully parseable* needed no change to either
+caller). Also added `not isinstance(serial, bool)` to both functions: `bool` is a subclass of `int`
+in Python, so a stray `True`/`False` in this cell (a checkbox mistakenly placed there) would
+otherwise have silently become the bogus date `1899-12-31` in both functions rather than being
+rejected as the obviously-wrong type it is - confirmed this was ALSO a (separate, smaller) latent
+bug in `assemble_pack._excel_date()`, fixed there too for consistency between the two functions,
+not just the one this pass started from.
+
+**Verified red-then-green, against both consumers, with the real pipeline where it mattered.**
+`engine/pack_generator/test_suggest_pack.py`: `_excel_date()` directly (numeric unchanged;
+text-typed and whitespace-padded text-typed now parsed; `None`/`""`/garbage/`True`/`False` still
+raise) plus an integration check that `suggest()` no longer falsely refuses a text-typed closing
+date and the real date reaches `pack_suggestions.json` (9 new checks). `engine/intake/
+test_classify_tender.py`: a real copy of the fixture workbook with its own SETUP!C3 rewritten to
+text, confirming `read_setup()` now reads it instead of silently returning `None` (2 new checks,
+including a sanity check that the unmodified fixture's own C3 really is numeric first). Revert-and-
+confirm-red: reverting reproduced the exact predicted failures in both files (a raw `ValueError`
+traceback in `suggest_pack`'s own direct `_excel_date()` check; `closing_date: None` in
+`classify_tender`'s), every other check stayed green. Restored, both `0 failure(s)`. Already wired
+into CI (`bridge-worker-ci.yml` already runs both test files - no new step needed). Regression-
+checked `engine/pack/test_assemble_pack.py`, `test_process_pack_jobs.py`, `test_sync_functions.py`,
+and `engine/test_fill_b7_legacy_precedence.py` - all pass.
+
+**Regression:** `engine/pack_generator/suggest_pack.py` (`_excel_date()` widened, same
+raise-on-bad-input contract), `engine/pack/assemble_pack.py` (one added `isinstance` guard, no
+other behavior change), `engine/pack_generator/test_suggest_pack.py` (1 new test function, 9
+checks), `engine/intake/test_classify_tender.py` (1 new test function, 2 checks). No schema or
+other call-site changes.

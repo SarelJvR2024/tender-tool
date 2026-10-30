@@ -113,11 +113,65 @@ def test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell():
         sp.Workbook = real_workbook
 
 
+def test_excel_date_parses_a_text_typed_date_too_not_only_a_numeric_serial():
+    """QA Finding, 2026-10-30: Workbook.cached() returns a genuine Excel date
+    cell as a plain numeric serial (date FORMATTING is only a display style,
+    not part of the cell's own stored value) - but a cell someone typed as
+    literal text (an apostrophe-prefixed '2026-05-01 to stop Excel's own
+    autoformat, a paste-as-values from a different locale) comes back as a
+    string instead. _excel_date() only ever tried int(serial) - a
+    perfectly valid, if unusually-typed, closing date raised here, while
+    engine/pack/assemble_pack.py's own separate, independently written
+    _excel_date() already parsed both shapes. The SAME SETUP!C3 cell of the
+    SAME tender was silently dropped during intake (classify_tender.
+    read_setup(), which imports this function) and falsely refused during
+    key-position suggestion (this file's own suggest()), while the real
+    pack build read it fine."""
+    print("_excel_date(): a text-typed closing date ('2026-05-01') is parsed exactly like a numeric "
+          "Excel serial for the same real day")
+    check("a numeric Excel serial still works (unchanged)", sp._excel_date(46356) == datetime.date(2026, 11, 30))
+    check("a text-typed ISO date string is now parsed too", sp._excel_date("2026-05-01") == datetime.date(2026, 5, 1))
+    check("a text-typed date with incidental surrounding whitespace is still parsed",
+          sp._excel_date("  2026-05-01  ") == datetime.date(2026, 5, 1))
+    for bad in (None, "", "not-a-date", True, False):
+        try:
+            sp._excel_date(bad)
+            check(f"genuinely unreadable input ({bad!r}) still raises, not silently guessed", False)
+        except (TypeError, ValueError):
+            check(f"genuinely unreadable input ({bad!r}) still raises, not silently guessed", True)
+
+    print("suggest(): a text-typed SETUP!C3 closing date no longer falsely refused")
+    real_workbook = sp.Workbook
+
+    class FakeWB:
+        def __init__(self, path):
+            pass
+
+        def cached(self, sheet, ref):
+            return "R.396-010-2025/1F" if ref == "C2" else ("2026-05-01" if ref == "C3" else None)
+
+    sp.Workbook = FakeWB
+    d = tempfile.mkdtemp()
+    profile_path = os.path.join(d, "profile.json")
+    json.dump({"key_people": []}, open(profile_path, "w"))
+    try:
+        sp.suggest("fake_template.xlsm", profile_path, d)
+        check("suggest() no longer falsely raises on a valid, text-typed closing date", True)
+        written = json.load(open(os.path.join(d, "pack_suggestions.json")))
+        check("...and the real closing date reached the written output",
+              written.get("closing_date") == "2026-05-01", written)
+    except ValueError as e:
+        check("suggest() no longer falsely raises on a valid, text-typed closing date", False, str(e))
+    finally:
+        sp.Workbook = real_workbook
+
+
 def main():
     test_tied_score_breaks_by_years_regardless_of_profile_order()
     test_genuine_score_difference_still_wins_over_years()
     test_tied_score_and_years_breaks_by_name()
     test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell()
+    test_excel_date_parses_a_text_typed_date_too_not_only_a_numeric_serial()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 

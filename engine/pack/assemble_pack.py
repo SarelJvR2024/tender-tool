@@ -131,7 +131,12 @@ def _to_pdf(path, work_dir):
 
 
 def _excel_date(v):
-    if isinstance(v, (int, float)):
+    # not isinstance(v, bool): bool is a subclass of int in Python, so a
+    # stray True/False value would otherwise silently become the bogus
+    # date 1899-12-31 instead of being rejected as the clearly-wrong type
+    # it is - same guard added to suggest_pack.py's own, independently
+    # written sibling of this function, QA pass 2026-10-30 (Finding 103).
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
         return datetime.date(1899, 12, 30) + datetime.timedelta(days=int(v))
     try:
         return datetime.date.fromisoformat(str(v)[:10])
