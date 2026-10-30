@@ -14,6 +14,57 @@
 
 ---
 
+## This pass (2026-10-30, standing solution-architect review): fixed `send-returnables-digest.ts` claiming its one-time-ever notification token before the recipients lookup and render, the same ordering bug the immediately-prior pass fixed in `send_pack_ready_email.py`
+
+Oriented from `b162a63`; `git fetch origin main` found nothing new, local already matched exactly. Open
+PRs `#172`/`#165`/`#164` reconfirmed via the GitHub API, unchanged, no collision.
+
+Per the prior pass's own suggestion, swept every other caller of `claim_notification` for the same
+"claim before something that can genuinely fail" ordering bug. Checked `scripts/send-discovered-tenders.ts`,
+`scripts/send-compliance-digest.ts` and `scripts/send-scout-alerts.ts` first - all three claim per-item
+*before* the render/recipients/send step too, but each has an explicit, independently-written header
+comment giving the real reason: these are BATCHED sends (one email covers many claimed items), and
+claiming early is deliberate so a given item is only ever included in one digest, ever, even if that
+batch's send later fails - a documented, reasoned tradeoff from an earlier session, not an oversight.
+Not touched.
+
+`scripts/send-returnables-digest.ts` is different: it sends exactly one email per tender/company pair
+(no batching at all), its own header explicitly says this key "fires at most ONCE EVER per tender/company
+pair... never re-sent", and it still claimed before `operationalRecipients()` (a real Supabase round-trip)
+and `returnablesDigestEmail()` (template rendering) - both of which can fail. With nothing that ever
+retries this key, a failure in either step after the old claim point would have permanently lost that
+company's one and only "you're missing a mandatory returnable" nudge for that tender, days before it
+closes - the exact bug class the immediately-prior pass fixed in `engine/notify/send_pack_ready_email.py`,
+just in the TypeScript sender for a different notification type.
+
+Fixed by moving the claim to immediately before the send loop, after the recipients lookup and the
+render - same position `lib/notificationEngine.ts`'s own `sendNotification()` claims in, and the same
+fix shape the prior pass applied. The "no opted-in recipients" skip now correctly happens before any
+claim is taken, matching `send_pack_ready_email.py`'s identical treatment of its own no-recipients case.
+
+No dedicated test exists for this file or any other script under `app/scripts/` (none of the `claim_notification`
+caller scripts have one - testing lives at the `lib/` layer these scripts delegate to; a standalone script
+needing a live Supabase client is heavier to unit-test, same precedent the prior pass's fix also followed).
+Verified instead with: `npx tsc --noEmit` (clean, whole project), `npx eslint scripts/send-returnables-digest.ts`
+(clean), `node --experimental-strip-types --check scripts/send-returnables-digest.ts` (clean syntax/parse),
+and `node --experimental-strip-types --test lib/*.test.ts` -> 207/207, unaffected (sanity sweep; this file
+isn't under `lib/`).
+
+Committed and pushed directly to `main` (no PR - small, well-verified, no live-DB access needed):
+- `app/scripts/send-returnables-digest.ts`
+- `docs/specs/System-Status.md`
+
+**Backlog: unchanged at 13 items.** This was a fix within the already-known "claim idempotency token too
+early" bug class flagged by the prior pass, not a new judgment-call item for Sarel. The 13 standing items
+remain exactly as before (migrations `0096`/`0105` not yet applied to live DB; `narrative_documents`
+PostgREST schema-cache reload unconfirmed; PayFast idempotency design question; "missing ISO 9001 flagged
+as urgent" UX question; Form B7 compulsory-vs-matrix disagreement; Dashboard "Decision needed"
+over-triggering; impersonation token-refresh gap; submitted-tender nagging gap; SANRAL fingerprint
+heads-up; dangling `signatory_person_id` fallback design question; no reconciliation for a silently-lapsed
+`active` subscription; the seat-limit TOCTOU race in `team/actions.ts`).
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): fixed `send_pack_ready_email.py` claiming its one-time notification token before every failure-prone step, not just the missing-API-key one
 
 Oriented from `b2550a6`; `git fetch origin main` found one new commit since (`8cf31b5`, a sibling

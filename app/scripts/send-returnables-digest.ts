@@ -90,20 +90,6 @@ async function main() {
       continue;
     }
 
-    const idempotencyKey = `returnables-digest-${tender.id}-${companyId}`;
-    const { data: claimed, error: claimError } = await supabase.rpc("claim_notification", {
-      p_idempotency_key: idempotencyKey,
-      p_notification_type: NOTIFICATION_TYPE,
-    });
-    if (claimError) {
-      console.error(`claim_notification failed for tender ${tender.id}, company ${companyId}`, claimError);
-      continue;
-    }
-    if (!claimed) {
-      skippedAlreadyClaimed++;
-      continue;
-    }
-
     const recipients = await operationalRecipients(supabase, companyId);
     if (recipients.length === 0) {
       skippedNoOptedInMembers++;
@@ -121,6 +107,35 @@ async function main() {
       tenderId: tender.id,
       workspaceAnchor: result.workspaceAnchor,
     });
+
+    // Claimed only now, right before the real send - not earlier. Found
+    // 2026-10-30: this used to claim BEFORE the recipients lookup and the
+    // render above, both of which can genuinely fail (a network blip, bad
+    // input to the template) - and this key fires "at most ONCE EVER per
+    // tender/company pair" (this file's own header), with nothing that ever
+    // retries it. A failure between the old claim point and the send would
+    // have permanently burned this tender/company's one and only returnables
+    // nudge with nothing ever sent - the same bug class a 2026-10-30 pass
+    // fixed for engine/notify/send_pack_ready_email.py's identical shape.
+    // Unlike scripts/send-discovered-tenders.ts / send-scout-alerts.ts /
+    // send-compliance-digest.ts's own documented "claim-many before a
+    // BATCHED send" tradeoff (one claim per item, one email per company/
+    // batch - claiming early there is deliberate, to avoid a duplicate
+    // across runs), this script sends one email per tender/company pair
+    // with no batching reason to claim early at all.
+    const idempotencyKey = `returnables-digest-${tender.id}-${companyId}`;
+    const { data: claimed, error: claimError } = await supabase.rpc("claim_notification", {
+      p_idempotency_key: idempotencyKey,
+      p_notification_type: NOTIFICATION_TYPE,
+    });
+    if (claimError) {
+      console.error(`claim_notification failed for tender ${tender.id}, company ${companyId}`, claimError);
+      continue;
+    }
+    if (!claimed) {
+      skippedAlreadyClaimed++;
+      continue;
+    }
 
     for (const email of recipients) {
       const sendResult = await sendTransactionalEmail({ to: email, subject, html, text });
