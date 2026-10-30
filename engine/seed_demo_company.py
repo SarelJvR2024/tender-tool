@@ -267,8 +267,12 @@ def main():
             "submitted_by_person_id": lindiwe_id,
         },
         {
+            # 0105 split 'bidding' into 'assessing'/'building' - this row is
+            # the "preparing the submission" demo tender (tender_building,
+            # below), so it seeds as 'building' now rather than the retired
+            # legacy value.
             "company_id": company_id, "tender_id": tender_building, "status": "suggested",
-            "pipeline_stage": "bidding", "submitted_at": None,
+            "pipeline_stage": "building", "submitted_at": None,
             "submitted_price_zar": None, "submitted_price_incl_vat": True,
             "submitted_by_person_id": None,
         },

@@ -34,9 +34,12 @@ import { adminNotificationEmail } from "../lib/resendEmail.ts";
 
 type SupabaseService = SupabaseClient;
 
-// "Active bid" = the same pipeline_stage set migration 0048 already treats
-// as "still being worked" (found/bidding/submitted) - never won/lost.
-const ACTIVE_PIPELINE_STAGES = ["found", "bidding", "submitted"];
+// "Active bid" = the same pipeline_stage set migration 0048/0106 already
+// treats as "still being worked" (found/assessing/building/submitted) -
+// never won/lost. 'bidding' is the pre-0105 legacy value (lib/pipeline.ts's
+// LEGACY_BIDDING_STAGE) - kept so a not-yet-backfilled row doesn't drop out
+// of this count; harmless, unreachable once 0105 has run.
+const ACTIVE_PIPELINE_STAGES = ["found", "assessing", "building", "bidding", "submitted"];
 const CLOSING_WINDOW_HOURS = 48;
 
 async function countNewSignups24h(supabase: SupabaseService, now: Date): Promise<number> {

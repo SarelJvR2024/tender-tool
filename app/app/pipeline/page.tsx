@@ -4,7 +4,7 @@ import { createClient } from "@/lib/supabase/server";
 import { closingCountdown, daysUntil, formatClosingDateTime } from "@/lib/dates";
 import { GENERAL_FAMILY } from "@/lib/generalTender";
 import { SANRAL_CONVENTIONAL_FAMILY } from "@/lib/tenderCompliance";
-import { IN_PROGRESS_STAGES, NEXT_STAGES, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
+import { IN_PROGRESS_STAGES, LEGACY_BIDDING_STAGE, NEXT_STAGES, normalizeStage, OUTCOME_FIELD_KEYS, PIPELINE_STAGES, PREVIOUS_STAGE, STAGE_META, type PipelineStage } from "@/lib/pipeline";
 import { AppShell } from "../_components/AppShell";
 import { ScrollFade } from "../_components/ScrollFade";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -98,8 +98,10 @@ const VERDICT_CHIP: Record<string, { label: string; chipClass: string }> = {
 
 const ACTION_LABEL: Record<PipelineStage, string> = {
   found: "Back to found",
-  bidding: "Start bidding",
+  assessing: "Start assessing",
+  building: "Move to building",
   submitted: "Mark submitted",
+  briefing_shortlisted: "Mark briefing / shortlisted",
   won: "Won",
   lost: "Lost",
 };
@@ -108,8 +110,10 @@ const ACTION_LABEL: Record<PipelineStage, string> = {
 // generic "Nothing here" repeated five times - flagged in the whole-app UI review.
 const EMPTY_COPY: Record<PipelineStage, string> = {
   found: "Nothing found yet - tenders you decide to pursue from Discovery land here.",
-  bidding: "Nothing being prepared right now - move a tender here once you start bidding.",
+  assessing: "Nothing being assessed right now - move a tender here once you start deciding whether to bid.",
+  building: "Nothing being built right now - move a tender here once you've decided to bid and start preparing the submission.",
   submitted: "Nothing handed in yet - submitted bids wait here for an outcome.",
+  briefing_shortlisted: "Nothing here - tenders the buyer has briefed or shortlisted us for land here.",
   won: "No wins logged yet - they'll show up here.",
   lost: "Nothing here - long may it stay that way.",
 };
@@ -272,7 +276,7 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
     );
     cards.push({
       id: t.id,
-      stage: pack?.pipeline_stage ?? "found",
+      stage: normalizeStage(pack?.pipeline_stage ?? "found"),
       contractNo: t.contract_no,
       title: t.title || t.description || "(untitled)",
       buyer: t.buyer || (t.family && t.family !== GENERAL_FAMILY ? "SANRAL" : "(unknown buyer)"),
@@ -304,7 +308,7 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   // Pack Review read is real, multi-query Supabase cost per tender (same N+1
   // concern already flagged for Home's own "specific next step", see
   // "Home cockpit" above).
-  const biddingCards = cards.filter((c) => c.stage === "bidding");
+  const biddingCards = cards.filter((c) => c.stage === "assessing" || c.stage === "building");
   const NOT_STARTED: PackHealth = { status: "not_started", score: 0, confirmedCount: 0, totalCount: 0, fixCount: 0 };
   const packHealths = await Promise.all(
     biddingCards.map(async (c): Promise<PackHealth | null> => {
@@ -362,7 +366,11 @@ async function renderPipeline(supabase: Awaited<ReturnType<typeof createClient>>
   // i.e. not yet at an outcome), total value being bid, submitted this month
   // (submitted_at's calendar month = now's), win rate (Awarded / (Awarded +
   // Lost), the only two outcomes that exist).
-  const activeCards = IN_PROGRESS_STAGES.flatMap((s) => byStage[s]);
+  // IN_PROGRESS_STAGES also carries the pre-0105 legacy 'bidding' value
+  // (for the raw-DB-level allow-lists elsewhere) - byStage is keyed by
+  // normalizeStage()'d Card.stage, which is never literally 'bidding', so
+  // filter it out here rather than widening byStage's own key set.
+  const activeCards = IN_PROGRESS_STAGES.filter((s) => s !== LEGACY_BIDDING_STAGE).flatMap((s) => byStage[s as PipelineStage]);
   const activeBids = activeCards.length;
   // Deliberately a WIDER set than activeCards (Sarel's own ask: "accurately
   // sums active (unsubmitted/submitted) bid values") - a submitted bid is
@@ -602,7 +610,7 @@ function initials(name: string): string {
 
 function TenderCard({ card, people, taxonomy }: { card: Card; people: CreditPerson[]; taxonomy: DisciplineTaxonomy }) {
   const verdict = card.verdict ? VERDICT_CHIP[card.verdict] : null;
-  const open = card.stage === "found" || card.stage === "bidding";
+  const open = card.stage === "found" || card.stage === "assessing" || card.stage === "building";
   const back = PREVIOUS_STAGE[card.stage];
   const owner = card.economics?.submitted_by_person_id ? people.find((p) => p.id === card.economics!.submitted_by_person_id)?.name ?? null : null;
   const price = toNumber(card.economics?.submitted_price_zar);

@@ -27,6 +27,13 @@
 -- (confirmed assignment, any tender_answers row, or any financial_captures
 -- row) rather than hardcoding that one row's id, so it stays correct if
 -- more 'bidding' rows exist by the time this runs.
+--
+-- Run this together with 0106 (the companion migration widening
+-- accept_tender_update_date()'s own 'found'/'bidding'/'submitted' check to
+-- the new stage set) - app/lib/pipeline.ts and the ~6 real TS/Python
+-- "active pursuit" allow-lists were updated in the same change (2026-10-30)
+-- to accept both the new stages and the legacy 'bidding' value, so nothing
+-- drops regardless of which of 0105/0106 has been run yet.
 
 begin;
 

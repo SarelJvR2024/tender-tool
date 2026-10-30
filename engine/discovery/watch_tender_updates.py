@@ -104,7 +104,7 @@ sys.path.insert(0, os.path.join(HERE, "..", "alerts"))
 import system_alerts  # noqa: E402
 import tender_updates  # noqa: E402
 
-ACTIVE_STAGES = ("found", "bidding", "submitted")
+ACTIVE_STAGES = ("found", "assessing", "building", "bidding", "submitted")  # 0105 widened the stage set; 'bidding' is the pre-0105 legacy value, kept so a not-yet-backfilled row doesn't drop out
 WATCH_DAYS_AFTER_CLOSING = 7
 RECENT_DAYS = 3
 WALK_BACK_DAYS = 21

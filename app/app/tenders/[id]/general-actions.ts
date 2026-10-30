@@ -11,7 +11,7 @@ import { revalidatePath } from "next/cache";
 import { safeFileName } from "@/lib/safeFileName";
 import { MAX_UPLOAD_BYTES, VAULT_BUCKET } from "@/lib/vaultDocuments";
 import { GENERAL_ENGINE, JOBS_TABLE, UPLOAD_PREFIX, type RequirementManifest } from "@/lib/generalTender";
-import { advanceFoundToBidding } from "@/lib/pipeline";
+import { advanceFoundToAssessing } from "@/lib/pipeline";
 
 async function requireMember() {
   const supabase = await createClient();
@@ -185,7 +185,7 @@ async function requestJob(formData: FormData, kind: "extract_requirements" | "ge
   }
   // Pipeline board (0021): asking for a pack means we're bidding.
   if (kind === "generate_pack" && pack?.id) {
-    await advanceFoundToBidding(supabase, pack.id as string);
+    await advanceFoundToAssessing(supabase, pack.id as string);
     revalidatePath("/pipeline");
   }
   revalidatePath(`/tenders/${tenderId}`);

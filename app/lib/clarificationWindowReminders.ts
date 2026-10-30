@@ -48,7 +48,15 @@ export type ClarificationWindowCandidate = {
  * exclude by accident" rule isCorrigendumCandidate follows.
  */
 export function isClarificationCandidate(pipelineStage: string | null | undefined): boolean {
-  return pipelineStage !== "submitted" && pipelineStage !== "won" && pipelineStage !== "lost";
+  // briefing_shortlisted (0105) only ever follows submitted - same "already
+  // finalised, asking a clarification question is pointless" reasoning as
+  // submitted/won/lost above.
+  return (
+    pipelineStage !== "submitted" &&
+    pipelineStage !== "briefing_shortlisted" &&
+    pipelineStage !== "won" &&
+    pipelineStage !== "lost"
+  );
 }
 
 /** Every clarification task due a reminder today - kind='clarification', not already done (a completed task has nothing left to remind about), and not already past the point where asking a question still matters (see isClarificationCandidate). pipelineStageFor is injected (not read off the row) because tender_packs has no direct foreign key to tender_tasks - the caller resolves it with its own lookup. */
