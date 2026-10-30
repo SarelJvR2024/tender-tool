@@ -60,7 +60,7 @@ lib/*.test.ts` -&gt; 214/214, `npx vitest run` -&gt; 321/321 (including `pipelin
 7 tests, untouched and unaffected since the fix is in the page's call site, not that file).
 
 Pushed directly to `main` (small, well-verified, no PR - this session's established pattern) as
-`&lt;commit-sha-filled-in-below&gt;`:
+`5d3a3bf`:
 - `app/app/pipeline/page.tsx`
 - `docs/specs/System-Status.md`
 
