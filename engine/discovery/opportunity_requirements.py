@@ -58,11 +58,13 @@ import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENGINE_DIR = os.path.abspath(os.path.join(HERE, ".."))
-for p in (HERE, ENGINE_DIR, os.path.join(ENGINE_DIR, "intake"), os.path.join(ENGINE_DIR, "pack_generator")):
+for p in (HERE, ENGINE_DIR, os.path.join(ENGINE_DIR, "intake"), os.path.join(ENGINE_DIR, "pack_generator"),
+         os.path.join(ENGINE_DIR, "alerts")):
     if p not in sys.path:
         sys.path.insert(0, p)
 
 import company_profiles  # noqa: E402
+import system_alerts  # noqa: E402
 from classify_tender import classify_documents, check_fingerprint  # noqa: E402
 
 DOCS_TABLE = "discovered_opportunity_documents"
@@ -197,16 +199,36 @@ def classify_release(client, release_key, log=print):
 def classify_all(client, release_key=None, log=print):
     """Every release_key with at least one downloaded document (or just the
     one given), classified and upserted into discovered_opportunity_requirements.
-    Returns {classified, skipped_nothing_downloaded}."""
+    Returns {classified, skipped_nothing_downloaded, errors}.
+
+    QA pass, 2026-10-30: classify_release() used to be called with no
+    try/except at all in this loop - a transient failure on any ONE release
+    (a Supabase network blip during its own select()/upsert(), or anything
+    else classify_release() didn't already catch) raised straight out of
+    this function, aborting classification for every OTHER, perfectly fine
+    release still queued after it in the same run - confirmed directly: a
+    simulated failure on the middle release of three left the third one
+    never even attempted. Same bug class this codebase has fixed
+    independently several times (watch_deadlines.days_until(), every
+    fail_stale_jobs()). This file also had no system_alerts integration at
+    all before this fix, unlike every other engine/ script - a repeated
+    failure here would have had no trace beyond this call's own stdout."""
     if release_key:
         keys = [release_key]
     else:
         rows = client.select(DOCS_TABLE, {"status": "downloaded"})
         keys = sorted({r["release_key"] for r in rows if r.get("release_key")})
 
-    summary = {"classified": 0, "skipped_nothing_downloaded": 0}
+    summary = {"classified": 0, "skipped_nothing_downloaded": 0, "errors": 0}
     for key in keys:
-        result = classify_release(client, key, log=log)
+        try:
+            result = classify_release(client, key, log=log)
+        except Exception as e:
+            summary["errors"] += 1
+            system_alerts.record("discovery", f"Could not classify requirements for release {key}: "
+                                 f"{type(e).__name__}: {e}", "error", exc=e, context={"release_key": key})
+            log(f"  ERROR classifying {key}: {type(e).__name__}: {e} - skipped, other releases still run")
+            continue
         if result is None:
             summary["skipped_nothing_downloaded"] += 1
             continue
@@ -229,7 +251,8 @@ def main():
 
     summary = classify_all(client, args.release_key)
     print(f"\nDone - {summary['classified']} release(s) classified, "
-          f"{summary['skipped_nothing_downloaded']} had no downloaded documents to classify.")
+          f"{summary['skipped_nothing_downloaded']} had no downloaded documents to classify, "
+          f"{summary['errors']} failed and were skipped (see system_alerts).")
 
 
 if __name__ == "__main__":

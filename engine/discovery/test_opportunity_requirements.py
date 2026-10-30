@@ -43,6 +43,7 @@ ROOT = os.path.abspath(os.path.join(ENGINE, ".."))
 sys.path.insert(0, HERE)
 import company_profiles  # noqa: E402
 import opportunity_requirements as oreq  # noqa: E402
+import system_alerts  # noqa: E402
 
 SAMPLES = os.path.join(ROOT, "templates")
 R396_TECH = os.path.join(SAMPLES, "samples", "R.396-010-2025.1F_ran.xlsm")
@@ -261,6 +262,38 @@ def main():
     oreq.classify_all(client)
     check("classify_all: re-running upserts (no duplicate rows per release_key)",
           len(fake.rows(oreq.REQ_TABLE)) == rows_before, (rows_before, len(fake.rows(oreq.REQ_TABLE))))
+
+    # 8. QA Finding, 2026-10-30: classify_all()'s own per-release loop used to
+    # have no try/except at all - a failure on ANY one release (a transient
+    # Supabase blip, anything classify_release() itself didn't already
+    # catch) raised straight out of the loop, aborting every OTHER,
+    # perfectly fine release still queued after it in the same run.
+    # "crash-release" sorts alphabetically before "sanral-full-release" -
+    # proves a real, already-working release AFTER the crashing one in
+    # sort order is still reached and still gets its row written.
+    fake.seed_docs("crash-release", [("Technical Submission.xlsm", R396_TECH, "downloaded")]
+                   if os.path.exists(R396_TECH) else [("Notice.pdf", None, "failed")])
+    alerts = []
+    system_alerts.set_sink(lambda payload: alerts.append(payload) or "test-alert")
+    real_classify_release = oreq.classify_release
+
+    def crashing_classify_release(client, key, log=print):
+        if key == "crash-release":
+            raise RuntimeError("simulated transient Supabase failure on this one release")
+        return real_classify_release(client, key, log=log)
+    oreq.classify_release = crashing_classify_release
+    try:
+        fake.tables[oreq.REQ_TABLE] = []  # fresh, so this run's own writes are easy to count
+        summary8 = oreq.classify_all(client)
+    finally:
+        oreq.classify_release = real_classify_release
+        system_alerts.set_sink(None)
+    check("case 8: the crashing release is counted as an error, not silently dropped or fatal",
+          summary8["errors"] == 1, summary8)
+    check("case 8: a release sorting AFTER the crashing one is still classified in the same run",
+          req_row(fake, "sanral-full-release") is not None, summary8)
+    check("case 8: a system alert was recorded naming the real release key",
+          len(alerts) == 1 and alerts[0]["p_source"] == "discovery" and "crash-release" in alerts[0]["p_message"], alerts)
 
     fake.stop()
     print(f"\n{len(FAILS)} failure(s)" if FAILS else "\nAll checks passed.")

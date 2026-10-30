@@ -14,6 +14,32 @@
 
 ---
 
+## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirty-first run): Finding 104 (moderate) - a failure on any ONE discovered release aborted requirement-classification for every OTHER release still queued in the same run, with zero system_alerts visibility either way
+
+Oriented from `b9c5ed2` (a sibling standing-review pass actively working `notify` - two commits in a
+row on the pack-ready/returnables-digest token-claim ordering bug; deliberately avoided `notify`
+this round to not collide with in-flight work). Open PRs checked: `#172` touches
+`engine/discovery/score_outlook.py` specifically - avoided that file; `#165`/`#164` unchanged. No
+collision with the file this pass actually touched.
+
+discovery rotation. `engine/discovery/opportunity_requirements.py`'s `classify_all()` - the sweep
+that classifies every discovered-but-not-yet-pursued release's documents - had no try/except at all
+around its own per-release call, and the whole file had zero `system_alerts` integration (confirmed
+by grep, unlike every other `engine/` script). Reproduced directly: a simulated transient failure on
+the middle of three queued releases crashed the whole loop, leaving the third, perfectly fine
+release never even attempted - same bug class already fixed independently this session
+(`watch_deadlines.days_until()`, Finding 99's `fail_stale_jobs()`/`fail_stale_uploads()` across six
+bridges). Fixed with a `try/except` around the per-release call, a new `summary["errors"]` counter,
+and the file's first-ever `system_alerts` integration naming the real release key. Extended
+`engine/discovery/test_opportunity_requirements.py` (3 new checks: a crashing release is isolated,
+counted, alerted, and a release sorting after it in the same run still gets classified).
+Revert-and-confirm-red (loop body only): reproduced the exact predicted crash at the exact call
+site. Restored, all checks pass. Already wired into CI. Regression-checked
+`test_download_discovered_documents.py` and `engine/intake/test_classify_tender.py` - both pass.
+Full write-up: `docs/specs/QA-Edge-Case-Findings.md`, Finding 104.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): fixed `send-returnables-digest.ts` claiming its one-time-ever notification token before the recipients lookup and render, the same ordering bug the immediately-prior pass fixed in `send_pack_ready_email.py`
 
 Oriented from `b162a63`; `git fetch origin main` found nothing new, local already matched exactly. Open

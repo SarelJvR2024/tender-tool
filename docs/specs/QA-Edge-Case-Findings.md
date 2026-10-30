@@ -5907,3 +5907,47 @@ raise-on-bad-input contract), `engine/pack/assemble_pack.py` (one added `isinsta
 other behavior change), `engine/pack_generator/test_suggest_pack.py` (1 new test function, 9
 checks), `engine/intake/test_classify_tender.py` (1 new test function, 2 checks). No schema or
 other call-site changes.
+
+### Finding 104 (CONFIRMED, FIXED, moderate - a failure on ANY ONE discovered release aborted requirement-classification for every OTHER release still queued in the same run, with zero system_alerts visibility either way)
+
+**Where:** discovery rotation this cycle (avoided `notify` - a sibling pass was actively working it
+this exact run, two commits in a row on the same bug class; avoided `engine/discovery/
+score_outlook.py` specifically - open PR `#172` touches it). `engine/discovery/
+opportunity_requirements.py`'s `classify_all()` - the "classify every discovered-but-not-yet-pursued
+release's documents" sweep (`classify_release()` run once per release, a Supabase `select`/`upsert`
+each, plus the real `classify_tender.classify_documents()`/`check_fingerprint()` pass per release).
+
+**What was tested:** the per-release loop had no try/except of any kind, and the whole file had
+**zero `system_alerts` integration** - confirmed by grep, unlike every other `engine/` script.
+Reproduced directly with a fake client whose `select()` raises for the middle of three queued
+releases (simulating a transient Supabase network blip, the same realistic cause every other
+instance of this bug class in this codebase has had): the exception raised straight out of
+`classify_all()`, and the third, perfectly fine release was never even attempted - confirmed by a
+second check that the crash happens precisely at that call site, with every prior release's own
+check still green. Same bug class this codebase has fixed independently several times this session
+(`watch_deadlines.days_until()`, every bridge's own `fail_stale_jobs()`/`fail_stale_uploads()` -
+Finding 99) - a single bad or transiently-unreachable item must never cost every OTHER item its own
+chance to run, in the same batch.
+
+**Fix:** wrapped the per-release call in `try/except Exception`, recording a new `"discovery"`-
+sourced `system_alerts` entry naming the real `release_key` and incrementing a new `summary["errors"]`
+counter, then `continue`-ing to the next release rather than letting the exception propagate. Added
+the missing `import system_alerts` (and its `sys.path` entry) to this file for the first time.
+
+**Verified red-then-green, against the real pipeline (the existing test file's own `Fake`
+PostgREST+Storage server, real committed sample workbooks).** Extended `engine/discovery/
+test_opportunity_requirements.py` with case 8: seeds a `"crash-release"` release (sorts
+alphabetically before the already-seeded `"sanral-full-release"`), monkeypatches
+`classify_release()` to raise specifically for it, and confirms `classify_all()` still (a) counts it
+as an error rather than crashing, (b) still classifies the already-seeded release that sorts AFTER
+it in the same run, and (c) records exactly one `system_alerts` entry naming the real release key (3
+new checks, on top of the file's existing 7 scenarios). Revert-and-confirm-red (the loop body only,
+keeping the new import so the test file itself still loads): reverting reproduced the exact
+predicted crash, at the exact call site, with every prior check in the file having already passed
+green. Restored, `All checks passed.`. Already wired into CI (`bridge-worker-ci.yml:367` already
+runs this test file). Regression-checked `engine/discovery/test_download_discovered_documents.py`
+and `engine/intake/test_classify_tender.py` (both touch the same shared helpers/fixtures) - both pass.
+
+**Regression:** `engine/discovery/opportunity_requirements.py` (one `try/except` added around the
+per-release loop body, one new import, no other behavior change), `engine/discovery/
+test_opportunity_requirements.py` (1 new scenario, 3 checks). No schema or other call-site changes.
