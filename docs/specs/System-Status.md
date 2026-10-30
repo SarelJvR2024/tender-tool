@@ -14,6 +14,35 @@
 
 ---
 
+## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirtieth run): clean sweep - compliance/reminders rotation, no new bug found
+
+Oriented from `b2550a6` (a sibling standing-review pass's own compliance-adjacent fix - a third
+`experience_items.value_rm` entry point missing its negative check, `company/document-scan/
+actions.ts`; frontend-only, no overlap with `engine/compliance/`); `git fetch origin main` found
+nothing new since, local already matched. Open PRs re-checked: `#172`/`#165`/`#164`, all unchanged,
+no collision.
+
+compliance/reminders rotation. `engine/compliance/`'s two production files
+(`registration_reminders.py`, `watch_deadlines.py`) have both had multiple real findings fixed this
+session already (Findings 8, 33, 91, 92, 98 plus several earlier-session ones) and were re-read in
+full this pass looking for anything still missed - no new bug found in either. Re-checked Finding 91
+(the disabled "Compliance deadline reminder check-in" trigger) via `list_triggers` directly - still
+`enabled: false`, unchanged; stays Sarel's own call, not re-decided here.
+
+Also followed up on `d19b809`'s own COID "renew soon" fix (`app/lib/tenderCompliance.ts`) by reading
+the REST of `sanralConventionalDocumentChecks()` end to end for another hand-rolled-vs-
+`validityAtClosing()` sibling, the same way earlier passes found Finding 104's `value_rm` siblings:
+every other dated item (A9 tax, A12 B-BBEE, A17 PI insurance, A18 bank letter, B4 ISO 9001) already
+calls `validityAtClosing()` correctly - COID genuinely was the only hand-rolled one. Cross-checked
+`app/lib/generalTender.ts`'s own, separate document-check function too (the one the COID fix's own
+commit message pointed to as "already correct") - confirmed it uses `validityAtClosing()`
+consistently for every tracked document, COID included. Both files are clean; this specific bug
+shape is exhausted here too, same conclusion an earlier pass reached for `experience_items.value_rm`.
+
+**No code bug found this pass.** Backlog unchanged - nothing resolved, nothing new added.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): a third entry point into experience_items.value_rm had the same missing negative-value check the prior two standing-review passes fixed elsewhere
 
 Oriented from `ba2365c`; `git fetch origin main` found one new commit since (`cbda20d`, a sibling
