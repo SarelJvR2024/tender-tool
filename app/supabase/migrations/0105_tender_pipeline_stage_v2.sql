@@ -37,22 +37,19 @@
 
 begin;
 
--- 1. Widen the check constraint before any row is written with a new value.
--- Postgres's own default name for an unnamed column-level check (0021 added
--- it inline, never named) - confirmed via information_schema before writing
+-- 1. Drop the old 5-value constraint FIRST - both to let the backfill below
+-- write 'assessing'/'building' at all (the old constraint doesn't allow
+-- them either) and because `alter table ... add constraint` validates
+-- every existing row immediately: adding the new constraint before
+-- backfilling the live 'bidding' row away made this migration's own first
+-- real run fail with "check constraint ... is violated by some row" - caught
+-- live against production, fixed here by reordering (drop -> backfill ->
+-- add new constraint), not by weakening the constraint itself. Postgres's
+-- own default name for an unnamed column-level check (0021 added it
+-- inline, never named) - confirmed via information_schema before writing
 -- this file.
 alter table tender_packs
   drop constraint if exists tender_packs_pipeline_stage_check;
-
-alter table tender_packs
-  add constraint tender_packs_pipeline_stage_check
-    check (pipeline_stage in (
-      'found', 'assessing', 'building', 'submitted',
-      'briefing_shortlisted', 'won', 'lost'
-    ));
-
-comment on column tender_packs.pipeline_stage is
-  'This company''s business stage on the tender (pipeline board, /pipeline): found -> assessing -> building -> submitted -> briefing_shortlisted -> won | lost. Not tenders.status (the buyer''s public status) and not tender_packs.status (the key-person confirm gate). Widened from 5 to 7 values (0105) - briefing_shortlisted is purely additive (no existing row could have been in it); existing bidding rows were split into assessing/building by the backfill below.';
 
 -- 2. Backfill existing 'bidding' rows. Order matters: promote the ones with
 -- real work-in-progress signals to 'building' FIRST, then whatever is still
@@ -80,7 +77,19 @@ update tender_packs
 set pipeline_stage = 'assessing'
 where pipeline_stage = 'bidding';
 
--- 3. The stage-stamp trigger (0021) sets submitted_at the first time a pack
+-- 3. Now add the new constraint - every row already satisfies it, since no
+-- row can still be 'bidding' after step 2.
+alter table tender_packs
+  add constraint tender_packs_pipeline_stage_check
+    check (pipeline_stage in (
+      'found', 'assessing', 'building', 'submitted',
+      'briefing_shortlisted', 'won', 'lost'
+    ));
+
+comment on column tender_packs.pipeline_stage is
+  'This company''s business stage on the tender (pipeline board, /pipeline): found -> assessing -> building -> submitted -> briefing_shortlisted -> won | lost. Not tenders.status (the buyer''s public status) and not tender_packs.status (the key-person confirm gate). Widened from 5 to 7 values (0105) - briefing_shortlisted is purely additive (no existing row could have been in it); existing bidding rows were split into assessing/building by the backfill above.';
+
+-- 4. The stage-stamp trigger (0021) sets submitted_at the first time a pack
 -- reaches submitted/won/lost. briefing_shortlisted only ever follows
 -- submitted in the stage machine (see NEXT_STAGES, app/lib/pipeline.ts), so
 -- submitted_at will already be set by the time a row reaches it in normal
