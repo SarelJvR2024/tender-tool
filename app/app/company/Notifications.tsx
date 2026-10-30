@@ -4,12 +4,22 @@ import { VaultSection } from "./_components/shared";
 import { Button } from "@/components/ui/button";
 
 /**
- * "Email notifications" - the opt-in toggle for the role-based daily digest
- * email (migration 0073, Sarel 2026-10-20: "yes let's make this an optional
- * email that the customer can decide if they want to receive it."). Reads
- * and writes the SIGNED-IN USER'S OWN company_members row only - never
- * another member's - via set_my_daily_digest_opt_in() (that migration's own
- * comment explains why an RPC, not a plain update).
+ * "Email notifications" - the opt-in toggle for the daily NEW-OPPORTUNITY
+ * digest email only (migration 0073, Sarel 2026-10-20: "yes let's make this
+ * an optional email that the customer can decide if they want to
+ * receive it."). Reads and writes the SIGNED-IN USER'S OWN company_members
+ * row only - never another member's - via set_my_daily_digest_opt_in()
+ * (that migration's own comment explains why an RPC, not a plain update).
+ *
+ * Narrowed to "new opportunities only" (Sarel, 2026-10-30), after finding
+ * this one flag was ALSO gating corrigenda/addenda alerts, the returnables-
+ * blocker digest and closing-deadline reminders - all 3 critical, bid-
+ * protecting alerts, not a discretionary digest - and that 32 of 33 real
+ * companies had never turned it on. Those 3 now bypass this flag entirely
+ * (lib/notificationRecipients.ts's criticalBidRecipients(), used by
+ * scripts/send-corrigendum-alerts.ts, send-returnables-digest.ts and
+ * send-deadline-reminders.ts) - this toggle only ever controlled
+ * scripts/send-discovered-tenders.ts from here on.
  *
  * Self-contained server component, same reason as OfficeLocations.tsx: does
  * its own read under RLS, so company/page.tsx only mounts it.
@@ -43,11 +53,15 @@ export async function Notifications() {
     <VaultSection id="notifications" title="Email notifications">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="max-w-[520px]">
-          <div className="mb-0.5 text-sm font-semibold text-foreground">Daily digest</div>
+          <div className="mb-0.5 text-sm font-semibold text-foreground">Daily New Opportunity Alerts</div>
           <div className="text-xs leading-relaxed text-muted-foreground">
-            A once-a-day email built for your role (new matching tenders, documents and tasks due,
-            tenders closing soon). Off by default - this sets only your own preference, not the
-            whole company&apos;s.
+            A once-a-day email when a new tender matching your profile is found. Off by default -
+            this sets only your own preference, not the whole company&apos;s.
+          </div>
+          <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+            Active bid alerts (addenda/corrigenda, returnable checklists, and closing deadline
+            reminders for tenders you are actively bidding on) are always delivered to keep your
+            submissions compliant.
           </div>
         </div>
         <form action={setDailyDigestOptIn}>

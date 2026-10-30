@@ -27,8 +27,16 @@ export type DeadlineReminderTenderRow = {
   contract_no: string | null;
   description: string | null;
   closing_date: string | null;
-  tender_packs: { company_id: string }[];
+  tender_packs: { company_id: string; pipeline_stage: string }[];
 };
+
+// A submitted (or later) bid no longer needs a "closing in N days" reminder
+// - the deadline it's warning about has already been met. briefing_shortlisted
+// only ever follows submitted (lib/pipeline.ts's NEXT_STAGES), so it's
+// excluded for the same reason. See RETURNABLES_EXCLUDED_STAGES
+// (lib/returnablesDigestCandidates.ts) for the identical reasoning applied
+// to that digest.
+export const DEADLINE_REMINDER_EXCLUDED_STAGES = ["submitted", "briefing_shortlisted", "won", "lost"] as const;
 
 export type DeadlineReminderCandidate = {
   tender: DeadlineReminderTenderRow;
@@ -66,8 +74,10 @@ export function deadlineReminderCandidates(
     if (daysLeft === null || daysLeft > DEADLINE_WINDOW_DAYS) continue;
     const threshold = reminderThresholdFor(daysLeft);
     if (threshold === null) continue;
-    for (const companyId of (tender.tender_packs ?? []).map((p) => p.company_id).filter(Boolean)) {
-      out.push({ tender, companyId, daysLeft, threshold });
+    for (const pack of tender.tender_packs ?? []) {
+      if (!pack.company_id) continue;
+      if ((DEADLINE_REMINDER_EXCLUDED_STAGES as readonly string[]).includes(pack.pipeline_stage)) continue;
+      out.push({ tender, companyId: pack.company_id, daysLeft, threshold });
     }
   }
   return out;

@@ -58,7 +58,12 @@ export type DryRunRow = {
   recipients: string[];
   targetItems: string;
   subject: string;
-  status: "Simulated OK" | "No candidates" | "Skipped (no opted-in recipients)";
+  // "Skipped (no opted-in recipients)" is specific to the opt-in-gated
+  // senders (discovered-tenders digest); "Skipped (no recipients)" is the
+  // critical-alert senders (corrigenda/returnables/deadline reminders,
+  // 2026-10-30) which bypass that flag entirely - no company_members row at
+  // all is the only way they skip.
+  status: "Simulated OK" | "No candidates" | "Skipped (no opted-in recipients)" | "Skipped (no recipients)";
 };
 
 /** One consistent table format across all 4 sender scripts, per Sarel's own requested columns. */
