@@ -14,6 +14,36 @@
 
 ---
 
+## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-twenty-seventh run): Finding 101 (severe) - a whitespace-only value was written as invisible spaces into a real non-SANRAL SBD form and logged "confirmed" - third independent occurrence of Finding 95's bug class
+
+Oriented from `2e3bf81` (a sibling standing-review pass's clean sweep - ruled out `assemble_pack.py`
+siblings to Finding 97, re-checked the CV engine; no overlap). Open PRs checked: `#172` touches
+`app/lib/generalTender.ts` (frontend, non-SANRAL-adjacent) but not `engine/general/` itself; `#165`/
+`#164` unchanged - no collision.
+
+non-SANRAL pack rotation. `engine/general/fill_sbd_docx.py`'s `fill_sbd_document()` - the real
+SBD 1/4/6.1/8/9 filler - and its five low-level writer functions (`fill_cells`, `fill_phone_cells`,
+`fill_blank_paragraphs`, `fill_line_above_caption`, `fill_dotted_paragraph_count`) each write
+whatever `value` they're given with no guard of their own, relying on ~15 scattered call-site
+`if val else 0` checks and `_log_fill()`'s own `if value and n:` - all bare truthiness, none catch a
+whitespace-only value (the same realistic data-entry shape Finding 95 found in `fill_flat_pdf.py`).
+Reproduced directly with the real pipeline: a whitespace-only `legal_name`/`postal_address` got
+written as invisible spaces into a real bidder-table cell and a dotted paragraph, both logged
+"confirmed". Independent third occurrence of Finding 95's exact bug class (no shared code with
+`fill_flat_pdf.py` at all). Fixed with a shared `_has_value()` helper + a guard in each of the five
+writer functions (one chokepoint instead of patching 15 call sites), plus made `_log_fill()`'s own
+classification whitespace-aware too - which also fixed a secondary issue: the generic "No value on
+file" message now shows instead of a misleading "Label not found in this buyer's edition". Extended
+`engine/general/test_fill_sbd_docx.py` (10 new checks: both writer shapes, two whitespace variants,
+plus a real-value control proving no over-correction). Revert-and-confirm-red: reverting made exactly
+the 8 whitespace-case checks fail, the control stayed green. Already wired into CI - no new step
+needed. Regression-checked `engine/test_form_field_audit.py` and `engine/general/general_harness.py
+--no-pack` (confirmed its 7 flagged entries are pre-existing drift unrelated to this fix, by running
+the same harness against the unmodified baseline). Full write-up: `docs/specs/QA-Edge-Case-Findings.md`,
+Finding 101.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): clean sweep - assemble_pack.py's other file reads ruled OUT as Finding-97 siblings (different risk shape); seat-limit TOCTOU left unfixed by design; CV engine re-checked, already hardened
 
 Oriented from `7aeed2c`; `git fetch origin main` found nothing new - local already matched

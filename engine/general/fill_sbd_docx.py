@@ -144,11 +144,27 @@ def _set_cell(cell, value):
     cell.text = _xml_safe(str(value))
 
 
+def _has_value(value):
+    """True only for a real, non-whitespace value. A value that is non-empty
+    but entirely whitespace (a copy-paste data-entry glitch into a company
+    field - the same realistic shape Finding 95 found in fill_flat_pdf.py's
+    place_text_fields()/place_captions()) is truthy by Python's own rules, so
+    every one of this file's own writer functions below used to write it
+    unconditionally - replacing a visible blank/dots placeholder with
+    invisible spaces, worse than leaving the placeholder there, and then
+    reported as successfully "filled" (a positive write count) to
+    _log_fill(), which logged it as "confirmed" alongside every genuinely
+    filled field. QA pass, 2026-10-30."""
+    return bool(str(value or "").strip())
+
+
 def fill_cells(doc, label_re, value, scope="any", prefill_ok=None):
     """Writes value into the distinct cell right after every cell whose text
     starts with label_re, when that next cell is blank (or holds only a known
     prefix, e.g. DSTI's 'MAAA' CSD prefix). scope='bidder' limits it to SBD 1's
     supplier block. Returns the number of cells written."""
+    if not _has_value(value):
+        return 0
     rx = re.compile(r"^\s*(?:" + label_re + r")", re.IGNORECASE)
     n = 0
     for t in doc.tables:
@@ -169,6 +185,8 @@ def fill_cells(doc, label_re, value, scope="any", prefill_ok=None):
 def fill_phone_cells(doc, label_re, number):
     """TELEPHONE NUMBER | CODE | _ | NUMBER | _ (Treasury, DSTI): dialling code
     and number go into their own cells; anything else gets the whole number."""
+    if not _has_value(number):
+        return 0
     m = re.match(r"^\s*(\(?0\d{2}\)?)[\s-]*(.+)$", number)
     code, rest = (m.group(1).strip("()"), m.group(2)) if m else (None, number)
     rx = re.compile(r"^\s*(?:" + label_re + r")", re.IGNORECASE)
@@ -207,6 +225,8 @@ def fill_blank_paragraphs(doc, label_re, value, anchored=False):
     Mthashana SBD 1). Only replaces a real blank run (3+ dots/underscores) right
     after the label, so a label that merely appears in prose is left alone.
     Every occurrence is filled. Returns the count."""
+    if not _has_value(value):
+        return 0
     rx = re.compile(("^\\s*" if anchored else "") + r"(" + label_re + r")(\s*:?\s*)([.…_]{3,}[.…_\s]*)", re.IGNORECASE)
     n = 0
     for p in _all_paragraphs(doc):
@@ -276,6 +296,8 @@ def answer_yes_no(doc, question_re, answer):
 def fill_line_above_caption(doc, caption_re, value, line_must_contain=None):
     """SBD 9: '______________' line with the caption '(Name of Bidder)' /
     '(Bid Number and Description)' on the paragraph BELOW it."""
+    if not _has_value(value):
+        return 0
     paras = doc.paragraphs
     rx = re.compile(r"^\s*\(?\s*(?:" + caption_re + r")\s*\)?(?:\s*$|\s*\t)", re.IGNORECASE)
     n = 0
@@ -311,9 +333,14 @@ def bee_proof_lapse(comp, closing_date):
 
 
 def _log_fill(log, key, value, n, missing_reason):
-    if value and n:
+    # _has_value(), not a bare truthiness check: a whitespace-only value is
+    # never "confirmed" here even if some future caller's own n came from
+    # elsewhere - defense in depth alongside the guard now in every writer
+    # function above (QA pass, 2026-10-30, same reasoning as _has_value()'s
+    # own docstring).
+    if _has_value(value) and n:
         log.confirmed(key, value)
-    elif value:
+    elif _has_value(value):
         log.missing(key, missing_reason or "Label not found in this buyer's edition - fill by hand.")
     else:
         log.missing(key, missing_reason or "No value on file.")
@@ -524,6 +551,8 @@ def fill_dotted_paragraph_count(doc, label_substr, value):
     """fill_dotted_paragraph()'s whitespace-or-dots convention (Treasury SBD 4
     footer 'Designation ... Name of bidder'), applied to EVERY occurrence and
     without logging - the caller logs once. Skips paragraphs that are prose."""
+    if not _has_value(value):
+        return 0
     # the label must be followed by its blank (dots, a tab, or line end) - not
     # by more words ("Full Name of bidder or his or her representative:")
     pattern = re.compile(re.escape(label_substr) + r"(?=\s*(?:[.…]|\t|$))" + DOTS_RE, re.IGNORECASE)

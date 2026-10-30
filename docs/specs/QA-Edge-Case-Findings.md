@@ -5744,3 +5744,56 @@ file, `engine/intake/test_classify_tender.py`, `engine/test_fingerprint.py`, and
 **Regression:** `engine/pack/assemble_pack.py` (one `try/except` added, no other behavior change),
 new file `engine/pack/test_assemble_pack.py` (first dedicated test for `check_template()` ever), one
 CI workflow file (one new step). No schema or other call-site changes.
+
+### Finding 101 (CONFIRMED, FIXED, severe - a whitespace-only value was written as invisible spaces into a real non-SANRAL SBD form and logged "confirmed", the third independent occurrence of Finding 95's exact bug class)
+
+**Where:** non-SANRAL pack rotation this cycle. `engine/general/fill_sbd_docx.py`'s
+`fill_sbd_document()` - the real SBD 1/4/6.1/8/9 field-filling logic used on every non-SANRAL general
+tender submission - and its five low-level writer functions (`fill_cells`, `fill_phone_cells`,
+`fill_blank_paragraphs`, `fill_line_above_caption`, `fill_dotted_paragraph_count`).
+
+**What was tested:** every one of those five writer functions writes whatever `value` it's given
+straight into the document with no guard of its own; `fill_sbd_document()`'s own ~15 call sites each
+gate the call with a bare `if val else 0` / `if val:` style truthiness check, and `_log_fill()`
+(the function EVERY one of those call sites funnels through to decide "confirmed" vs "missing")
+checks `if value and n:`. A value that is non-empty but entirely whitespace - the same realistic
+data-entry shape Finding 95 found in `fill_flat_pdf.py`'s `place_text_fields()`/`place_captions()`
+(a copy-paste glitch into a company field) - is truthy by Python's own rules, so none of these guards
+catch it. Reproduced directly with the real pipeline, no stub: `fill_sbd_document()` against a
+synthetic docx with a bidder table ("NAME OF BIDDER" / blank cell) and a dotted "POSTAL ADDRESS:
+........" paragraph, `legal_name`/`postal_address` both set to `"   "` - the bidder cell was written
+with literal spaces (no longer blank, but nothing legible either), the dotted paragraph's own dots
+were overwritten with invisible spaces too, and `log.entries` showed `{"status": "confirmed", "value":
+"   "}` for both fields - the exact same "silent wrong data" shape as Finding 95, now independently
+confirmed in this file's own, separate writer functions (not shared code with `fill_flat_pdf.py` at
+all - a genuinely independent occurrence of the bug class, the third this session: Finding 95
+`fill_flat_pdf.py`, this one `fill_sbd_docx.py`).
+
+**Fix:** added a shared `_has_value(v)` helper (`bool(str(v or "").strip())`) and a guard at the top
+of each of the five writer functions (`if not _has_value(value): return 0`) - the lowest common point
+that covers every one of `fill_sbd_document()`'s ~15 call sites at once, rather than patching each
+call site individually. Also made `_log_fill()`'s own classification whitespace-aware
+(`_has_value(value)` in place of the bare `value` checks) as defense in depth, which turned out to
+have a second, welcome effect: with the writer now returning 0 for a whitespace-only value, a
+whitespace-only field now falls all the way through to `_log_fill()`'s own generic "No value on
+file." message (the same message a genuinely absent value gets) instead of the misleading "Label not
+found in this buyer's edition" a bare `n == 0` would otherwise have produced.
+
+**Verified red-then-green against the real pipeline.** Extended `engine/general/test_fill_sbd_docx.py`
+with `test_whitespace_only_value_is_never_placed_or_confirmed` (10 new checks): plain-spaces and
+tab/newline-only values against both writer shapes (the bidder table cell and the dotted paragraph)
+- both must stay untouched and both must log "missing", not "confirmed" - plus a control case
+proving a real value (even one with incidental surrounding whitespace, e.g. `"  Mzansi Roads & Civils
+(Pty) Ltd  "`) is still placed exactly as given and logged confirmed, so the fix doesn't over-correct.
+Revert-and-confirm-red: reverting made exactly the 8 new checks tied to the two whitespace-only cases
+fail (the real written-but-invisible text and the wrongly-"confirmed" log entries both showed up
+exactly as predicted), the real-value control case stayed green throughout. Restored, `0 failure(s)`.
+Already wired into CI (`bridge-worker-ci.yml:255`) - no new CI step needed. Regression-checked
+`engine/test_form_field_audit.py` (`0 failure(s)`) and `engine/general/general_harness.py --no-pack`
+(`84 clean, 7 flagged, 0 failed` - confirmed by running the SAME harness against the unmodified
+baseline that the 7 flagged `*_eskom_e3689: changed ['roles']` entries are pre-existing drift,
+unrelated to this fix, not a regression it introduced).
+
+**Regression:** `engine/general/fill_sbd_docx.py` (one new helper + five one-line guards + one
+classification fix, no other behavior change), `engine/general/test_fill_sbd_docx.py` (1 new test
+function, 10 checks). No schema or other call-site changes.

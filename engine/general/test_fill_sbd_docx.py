@@ -220,6 +220,53 @@ def test_fill_cells_prefill_ok_lets_a_known_prefix_through():
           and t2.rows[0].cells[1].text == "Some other pre-existing text", t2.rows[0].cells[1].text)
 
 
+def test_whitespace_only_value_is_never_placed_or_confirmed():
+    print("fill_sbd_document(): a whitespace-only value (a data-entry glitch) is never written "
+          "as invisible spaces, and never logged 'confirmed' - the same real shape Finding 95 "
+          "found independently in fill_flat_pdf.py")
+    for bad_value, label in (("   ", "plain spaces"), ("\t\n ", "tab/newline only")):
+        # Bidder table (fill_cells, scope='bidder') + a blank-paragraph layout
+        # (fill_blank_paragraphs) in the same document - both of this file's
+        # two main writer shapes, in one real end-to-end fill_sbd_document() pass.
+        d = docx.Document()
+        t = d.add_table(rows=1, cols=2)
+        t.rows[0].cells[0].text = "NAME OF BIDDER"
+        t.rows[0].cells[1].text = ""
+        d.add_paragraph("POSTAL ADDRESS: ................................")
+        log = ProvenanceLog("test")
+        ctx = {"company": {"legal_name": bad_value, "postal_address": bad_value}, "signatory": {},
+              "answers": {}, "tender": {}}
+        sbd.fill_sbd_document(d, ctx, log, {"1"})
+
+        check(f"[{label}] the bidder table cell is left blank, not filled with invisible whitespace",
+              t.rows[0].cells[1].text == "", repr(t.rows[0].cells[1].text))
+        check(f"[{label}] the dotted paragraph is left untouched, not filled with invisible whitespace",
+              d.paragraphs[0].text == "POSTAL ADDRESS: ................................",
+              repr(d.paragraphs[0].text))
+        name_entry = _entry(log, "sbd1.name_of_bidder")
+        addr_entry = _entry(log, "sbd1.postal_address")
+        check(f"[{label}] name_of_bidder is logged missing, never 'confirmed' with a whitespace value",
+              name_entry is not None and name_entry["status"] == "missing", name_entry)
+        check(f"[{label}] postal_address is logged missing, never 'confirmed' with a whitespace value",
+              addr_entry is not None and addr_entry["status"] == "missing", addr_entry)
+
+    # A real, non-whitespace value (including one with incidental surrounding
+    # whitespace) must still be placed exactly as before - the fix must not
+    # over-correct into refusing genuine values.
+    d = docx.Document()
+    t = d.add_table(rows=1, cols=2)
+    t.rows[0].cells[0].text = "NAME OF BIDDER"
+    t.rows[0].cells[1].text = ""
+    log = ProvenanceLog("test")
+    ctx = {"company": {"legal_name": "  Mzansi Roads & Civils (Pty) Ltd  "}, "signatory": {},
+          "answers": {}, "tender": {}}
+    sbd.fill_sbd_document(d, ctx, log, {"1"})
+    check("a real value (even one with incidental surrounding whitespace) is still placed exactly as given",
+          t.rows[0].cells[1].text == "  Mzansi Roads & Civils (Pty) Ltd  ", repr(t.rows[0].cells[1].text))
+    check("...and logged confirmed, not refused",
+          _entry(log, "sbd1.name_of_bidder")["status"] == "confirmed", _entry(log, "sbd1.name_of_bidder"))
+
+
 def main():
     test_separate_yes_no_cells()
     test_yes_slash_no_cell()
@@ -232,6 +279,7 @@ def main():
     test_sbd8_unanswered_question_is_never_assumed_unlike_sbd4()
     test_sbd8_real_answer_is_confirmed()
     test_fill_cells_prefill_ok_lets_a_known_prefix_through()
+    test_whitespace_only_value_is_never_placed_or_confirmed()
     print(f"\n{len(FAILS)} failure(s)")
     sys.exit(1 if FAILS else 0)
 
