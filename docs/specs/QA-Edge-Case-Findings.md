@@ -6062,3 +6062,56 @@ Regression-checked `engine/worker/test_poll_loop.py`, `engine/general/test_proce
 **Regression:** `engine/alerts/check_system_alerts.py` (one `try/except` added around the per-alert
 mark_reported call, no other behavior change), `engine/alerts/test_system_alerts.py` (1 new test
 function, 3 checks). No schema or other call-site changes.
+
+### Finding 107 (CONFIRMED, FIXED, moderate-severe - a person with "projects": null on file crashed candidate scoring for EVERY position on the tender, not just that one person's suggestion)
+
+**Where:** CV rotation this cycle. `engine/pack_generator/suggest_pack.py`'s `candidate_person_text()`,
+called by `score_candidate()` inside `rank_candidates()` (once per position, over every person in
+the profile) - the CLI path `suggest()` reads straight from a company's own `profile.json` file with
+no per-person try/except around any of it.
+
+**What was tested:** `generate_cv.py` already has an explicit, commented fix for this exact field
+("a row with an explicit `"projects": null`... sails through and crashes `sorted()` below" -
+`person.get("projects") or []`, in both `build_sanral_keyperson()` and `build_world_bank()`).
+Checked whether `suggest_pack.py`'s own, separately-written `candidate_person_text()` - which reads
+the identical `profile.json` shape - had the same guard. It didn't: line 130 was still
+`person.get("projects", [])`, which only substitutes `[]` when the key is **absent**, not when it's
+present with `None` - and oddly, the function's own comment already claimed this was "found... 2026-10-18"
+and fixed, describing the exact bug, while the code itself never carried the fix through.
+
+**Finding (CONFIRMED).** Reproduced directly: `candidate_person_text({"name": "X", "projects": None,
+"qualifications": {}})` raises `TypeError: 'NoneType' object is not iterable`. Confirmed the full
+blast radius with `rank_candidates()`: a two-person `people` dict where only ONE person has
+`"projects": None` and the other has a normal projects list - the call crashes for **both**
+candidates, not just the person with no projects on file. Since `suggest()` calls `rank_candidates()`
+once per required position with no try/except at all, one person entered with just a name (a
+signatory-only director - a real, plausible profile shape, not a contrived one) would abort
+`pack_suggestions.json` generation for the **entire tender**, for every position, not just fail to
+suggest that one person. Same "one bad item aborts the whole batch" bug class that's been the
+dominant theme this session (`watch_deadlines.days_until()`, Finding 99's six bridges' stale-job
+sweeps, Finding 104's `opportunity_requirements.classify_all()`, Finding 106's `check_system_alerts.check()`)
+and the same "one sibling function guards, the twin doesn't" shape as Findings 97/100/101/103 -
+this time the twin that was missing the guard is `suggest_pack.py`'s own separate copy of logic
+`generate_cv.py` had already fixed for the identical field.
+
+**Fix:** `person.get("projects") or []` - identical one-line change to the pattern `generate_cv.py`
+already uses in both its builders, degrading an explicit `null` the same as an absent key, never
+crashing on it.
+
+**Verified red-then-green.** Added `test_a_person_with_projects_explicitly_null_does_not_crash_scoring_for_everyone_else`
+to `engine/pack_generator/test_suggest_pack.py`: a two-candidate `rank_candidates()` call (one
+signatory-only person with `"projects": None`, one real candidate) - both are still scored (the
+null-projects person correctly scores 0 rather than being silently dropped or crashing the call).
+Revert-and-confirm-red: reverting the fix reproduced the exact predicted `TypeError` on only the
+new check, with every other pre-existing check in the file (tie-break ordering, the blank-SETUP!C3
+guard, the text-typed-Excel-date parsing) still green. Restored, `0 failure(s)`.
+Regression-checked `engine/pack/test_process_pack_jobs.py` (the SANRAL pack bridge's own separate
+`rank_candidates()`/`score_candidate()` copy, which already had this guard via its own `adapt_person()`
+always building `"projects"` as a list - untouched, still green), `engine/cv/test_generate_cv.py`,
+and `engine/cv/test_process_cv_jobs.py` - all pass.
+
+**Regression:** `engine/pack_generator/suggest_pack.py` (one line, `candidate_person_text()`'s
+`projects` read), `engine/pack_generator/test_suggest_pack.py` (1 new test function, 2 checks). No
+schema or other call-site changes - `engine/pack/process_pack_jobs.py`'s live Supabase-backed path
+was never exposed to this bug (its own `adapt_person()` always builds a list), so this only affects
+the `suggest_pack.py --profile` CLI path reading a hand-maintained `profile.json` directly.

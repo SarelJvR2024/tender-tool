@@ -127,13 +127,18 @@ def candidate_person_text(person):
     q = person.get("qualifications") or {}
     parts = [q.get("highest_description", ""), q.get("initial_description", ""),
              person.get("description", "")]
-    for proj in person.get("projects", []):
+    # `person.get("projects", [])` only substitutes [] when the key is ABSENT -
+    # a person entered with only a name (e.g. a signatory-only director) is a
+    # real profile.json shape with "projects": null present, not missing, and
+    # that sailed through into `for proj in None:` here, raising TypeError for
+    # EVERY position on the tender (rank_candidates() has no per-person
+    # try/except), not just that one person - same bug class as
+    # fail_stale_jobs()/classify_all(), and the identical fix generate_cv.py's
+    # own build_sanral_keyperson()/build_world_bank() already apply to this
+    # exact field ("or []" degrades null the same as missing). QA pass, 2026-10-30.
+    for proj in person.get("projects") or []:
         parts.append(proj.get("position_held", ""))
         parts.append(proj.get("client_and_number", ""))
-    # A key present with None (a person entered with only a name - e.g. a
-    # signatory-only director) used to raise TypeError here and stop the
-    # candidate scoring for every position on the tender (found by the
-    # form-field audit's bridge run, 2026-10-18).
     return " ".join(p for p in parts if p)
 
 

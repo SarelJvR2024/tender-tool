@@ -80,6 +80,30 @@ def test_tied_score_and_years_breaks_by_name():
           ranked1[0]["name"] == "Amy Person" and ranked2[0]["name"] == "Amy Person", (ranked1, ranked2))
 
 
+def test_a_person_with_projects_explicitly_null_does_not_crash_scoring_for_everyone_else():
+    """Finding (2026-10-30): candidate_person_text()'s `person.get("projects", [])`
+    only substitutes [] when the key is ABSENT - a signatory-only director
+    entered with just a name is a real profile.json shape with "projects":
+    null PRESENT, and `for proj in None:` raised TypeError straight out of
+    rank_candidates(), with no per-person try/except - losing every OTHER
+    candidate's suggestion for that position too, not just the one person
+    with no projects on file. generate_cv.py's own build_sanral_keyperson()/
+    build_world_bank() already guard this exact field with "or []"; this
+    sibling function didn't."""
+    print("a person with 'projects': null on file doesn't crash scoring for the whole position")
+    position = {"code": "DS1", "description": "Structures Specialist"}
+    signatory_only = {"name": "Director No Projects", "qualifications": {}, "description": "", "projects": None}
+    real_candidate = _person("Zelda Junior", "2020-01-01", "Structures specialist")
+    try:
+        ranked = _rank({"person_0": signatory_only, "person_1": real_candidate}, position)
+        check("both candidates are still scored - the null-projects person doesn't abort the whole call",
+              {c["name"] for c in ranked} == {"Director No Projects", "Zelda Junior"}, ranked)
+        check("the signatory-only director scores 0, not crashing or being silently dropped",
+              next(c["score"] for c in ranked if c["name"] == "Director No Projects") == 0, ranked)
+    except TypeError as e:
+        check("suggest_pack.py no longer crashes on a person whose projects is explicitly null", False, str(e))
+
+
 def test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell():
     """Finding (2026-10-25): suggest()'s own `_excel_date(wb.cached("SETUP",
     "C3"))` had no guard at all, unlike classify_tender.read_setup()'s
@@ -170,6 +194,7 @@ def main():
     test_tied_score_breaks_by_years_regardless_of_profile_order()
     test_genuine_score_difference_still_wins_over_years()
     test_tied_score_and_years_breaks_by_name()
+    test_a_person_with_projects_explicitly_null_does_not_crash_scoring_for_everyone_else()
     test_suggest_refuses_clearly_on_a_blank_or_unreadable_closing_date_cell()
     test_excel_date_parses_a_text_typed_date_too_not_only_a_numeric_serial()
     print(f"\n{len(FAILS)} failure(s)")

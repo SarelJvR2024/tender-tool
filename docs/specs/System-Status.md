@@ -14,6 +14,59 @@
 
 ---
 
+## This pass (2026-10-30, standing QA/robustness review - one-hundred-and-thirty-fourth run): Finding 107 - a person with "projects": null on file crashed candidate scoring for EVERY position on the tender, not just that one person's suggestion
+
+Oriented from `99e431f` (fast-forwarded cleanly; PR #173 "Bids pipeline 7-stage migration" merged to
+`main` since the last QA-cycle pass, plus a sibling solution-architect fix for a real invite-redemption
+race condition - migration `0107_redeem_company_invite_race.sql`). Noted but deliberately left alone:
+the architect session's own flagged backlog item that PR #173's merge landed a second `0105_*.sql`
+migration file (`0105_tender_pipeline_stage_v2.sql`) alongside the already-existing
+`0105_payfast_itn_failed_payment_period_end.sql` - a real numbering collision, but it's that review's
+own backlog-tracked item, not an engine-code robustness bug, so not touched here. Open PRs: none
+(both `#173` and the invite-race fix are already on `main`). CV rotation (hadn't had a dedicated pass
+this window - only its job-queue wrapper and shared OCR dependency were touched by Findings 99/102).
+
+Read through the whole CV pipeline (`extract_cv_fields.py`, `process_cv_jobs.py`, `generate_cv.py`)
+looking for a fresh instance of this session's own established bug classes. `extract_cv_fields.py`
+and `generate_cv.py` are both already heavily audited (multiple QA passes dated 2026-10-19 through
+2026-10-29 visible in their own comments) and came up clean on this pass's checks. Followed
+`generate_cv.py`'s own `years_experience_at`/`score_candidate` import back to `suggest_pack.py` and
+found a live sibling of the exact bug `generate_cv.py` itself had already fixed: `generate_cv.py`'s
+`build_sanral_keyperson()`/`build_world_bank()` both correctly read a person's `projects` field with
+`person.get("projects") or []` (guarding the real "key present, value explicitly `null`" shape -
+a signatory-only director entered with just a name), but `suggest_pack.py`'s own separately-written
+`candidate_person_text()` still had the unguarded `person.get("projects", [])` - which only
+substitutes `[]` when the key is **absent**, not when it's `null`.
+
+Reproduced directly: a `profile.json` person with `"projects": null` crashes `candidate_person_text()`
+with `TypeError: 'NoneType' object is not iterable`, and since `rank_candidates()`/`score_candidate()`
+has no per-person try/except, that ONE person's record crashes candidate scoring for the WHOLE
+position - confirmed with a two-person `rank_candidates()` call where only one of the two has
+`projects: null`: both candidates are lost, not just the one with no projects on file. `suggest()`
+has no try/except around any of this either, so a single signatory-only director on file would abort
+`pack_suggestions.json` generation for the entire tender, every position, not just skip suggesting
+that one person - the same "one bad item aborts the whole batch" shape as `watch_deadlines.
+days_until()`, Finding 99's six bridges, Finding 104, and Finding 106 this same session, and the same
+"one sibling guards, the twin doesn't" shape as Findings 97/100/101/103.
+
+Fixed with the identical one-line pattern `generate_cv.py` already uses: `person.get("projects") or
+[]`. Verified red-then-green: reverting reproduced the exact predicted `TypeError` on only the new
+test, every other pre-existing check in `test_suggest_pack.py` still green; restored, `0 failure(s)`.
+Confirmed `engine/pack/process_pack_jobs.py`'s own separate `rank_candidates()`/`score_candidate()`
+copy (used by the live Supabase-backed SANRAL pack bridge) was never actually exposed to this bug -
+its own `adapt_person()` always builds `"projects"` as a real list from the `projects` table, never
+`null` - so this only affects `suggest_pack.py`'s own `--profile` CLI path reading a hand-maintained
+profile JSON file directly. Regression-checked `engine/pack/test_process_pack_jobs.py`,
+`engine/cv/test_generate_cv.py`, `engine/cv/test_process_cv_jobs.py` - all pass.
+
+Committed and pushed directly to `main` (contained, well-verified, no PR):
+- `engine/pack_generator/suggest_pack.py` (one line)
+- `engine/pack_generator/test_suggest_pack.py` (1 new test function, 2 checks)
+- `docs/specs/QA-Edge-Case-Findings.md` (Finding 107)
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): real race-condition fix in invite
 ## redemption (migration `0107`) + a genuine migration-numbering collision flagged in open PR #173
 
