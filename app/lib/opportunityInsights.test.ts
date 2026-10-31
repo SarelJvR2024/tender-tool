@@ -31,6 +31,17 @@ test("buildDoneHistory: drops rows with no tender_id, no stage, or a stage short
   assert.deepEqual(history.map((h) => h.tenderId).sort(), ["t-submitted", "t-won"]);
 });
 
+test("buildDoneHistory: counts a tender at briefing_shortlisted - reached submitted, now awaiting an outcome, not 'done before' short of a bid", () => {
+  // Regression, 2026-10-31: DONE_STAGES used to be submitted/won/lost only,
+  // missing the briefing_shortlisted stage migration 0105 (PR #173) added
+  // between submitted and an outcome - a real pipeline_stage value a row
+  // can hold, not a hypothetical one.
+  const stageByTenderId = new Map([["t-briefed", "briefing_shortlisted"]]);
+  const rows = [{ tenderId: "t-briefed", buyer: "SANRAL", categories: ["roads_civil"] }];
+  const history = buildDoneHistory(rows, stageByTenderId);
+  assert.deepEqual(history.map((h) => h.tenderId), ["t-briefed"]);
+});
+
 test("similarTendersBefore: no history at all shows nothing (never a false negative rendered as a signal)", () => {
   assert.equal(similarTendersBefore({ tenderId: "x", buyer: "SANRAL", categories: ["roads_civil"] }, []), null);
 });

@@ -12,8 +12,16 @@
 // query, not the paginated/filtered `rows` window. See that page's own
 // comment at the call site.
 
-/** Reached at least a submitted bid - "found"/"bidding" alone isn't "done before". */
-const DONE_STAGES = new Set(["submitted", "won", "lost"]);
+// Reached at least a submitted bid - "found"/"assessing"/"building" (or the
+// pre-0105 legacy "bidding") alone isn't "done before". Found 2026-10-31:
+// migration 0105 (PR #173) added "briefing_shortlisted" as a real stage a
+// tender_packs row sits in AFTER submitted, awaiting an outcome (see
+// lib/pipeline.ts's NEXT_STAGES: submitted -> briefing_shortlisted -> won |
+// lost) - this set was never updated to include it, so a company's own
+// pursued tender currently at that stage was silently dropped from "Done N
+// similar tenders before", undercounting real history exactly the way this
+// file's own buildDoneHistory() doc comment says it must never do.
+const DONE_STAGES = new Set(["submitted", "briefing_shortlisted", "won", "lost"]);
 
 export type PursuedRecord = { tenderId: string | null; buyer: string | null; categories: string[] | null };
 

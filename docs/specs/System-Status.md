@@ -14,6 +14,70 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): Finding 111 - the Bids pipeline's briefing_shortlisted stage (0105/PR #173) was silently dropped from "Done N similar tenders before"
+
+Oriented from `d3b7dd7`; `git fetch origin main` found one new commit (`2ab5fb1`, a sibling pass's own
+non-SANRAL-pack-build clean sweep + Finding 110 bug-class exhaustion check, docs-only, no overlap) and
+fast-forwarded local `main` before starting. Open PRs re-checked via the GitHub API: `#174`
+("Split-recipient architecture") confirmed still **open/draft, not merged** - the "submitted-tender
+nagging gap" backlog item stays open, not resolved yet. `#164`/`#165` unchanged. No collision with
+anything touched below.
+
+The last several passes did a deep security-audit streak (SECURITY DEFINER functions, RLS policies,
+email escaping) that's now well-covered with clean follow-up sweeps. Pivoted back to an ordinary
+correctness bug, specifically re-checking PR #173's own 7-stage pipeline migration (0105) for a sibling
+of the "forgot to widen a stage allow-list" shape already fixed in ~6 real call sites by that PR itself -
+grepped every `["found", ...]`/`ACTIVE_STAGES`-shaped array across `app/` for one PR #173 missed.
+
+**Found and fixed a real, reachable one**: `lib/opportunityInsights.ts`'s `buildDoneHistory()` -
+the "Done N similar tenders before" signal on the Discovery page (Sarel's own live feedback,
+2026-10-22) - gates on `DONE_STAGES = new Set(["submitted", "won", "lost"])`. Migration `0105` (PR
+#173, merged 2026-10-30) added `briefing_shortlisted` as a real stage a `tender_packs` row sits in
+AFTER `submitted`, awaiting an outcome (`lib/pipeline.ts`'s own `NEXT_STAGES`: `submitted` ->
+`briefing_shortlisted` -> `won`/`lost`) - but `DONE_STAGES` was never updated to include it. A company
+whose own pursued tender is currently at `briefing_shortlisted` - it reached a real submitted bid,
+same as "submitted"/"won"/"lost" - was silently excluded from its own "done before" history, exactly
+the undercount this function's own doc comment says it must never produce. `discovery/page.tsx`'s own
+`stageByTenderAnyStage` map passes the RAW stored `pipeline_stage` value straight through with no
+filtering of its own, so this was directly reachable the moment any real tender reached that stage.
+
+Reproduced first, directly, before touching the fix:
+```
+node --experimental-strip-types -e '
+import { buildDoneHistory } from "./lib/opportunityInsights.ts";
+const stageByTenderId = new Map([["t-briefed", "briefing_shortlisted"]]);
+const rows = [{ tenderId: "t-briefed", buyer: "SANRAL", categories: ["roads_civil"] }];
+console.log(buildDoneHistory(rows, stageByTenderId).length); // 0 - the bug, confirmed
+'
+```
+Fixed by adding `"briefing_shortlisted"` to `DONE_STAGES`. Added a dedicated regression test to
+`lib/opportunityInsights.test.ts`; confirmed it fails against the unfixed source (`git stash` the fix,
+re-run - 9 pass/1 fail) and passes once restored.
+
+Verification: `node --experimental-strip-types --test lib/*.test.ts` -> 215/215 (up from 214, the one
+new test); `npx vitest run` -> 321/321 unaffected; `npx tsc --noEmit`/`npx eslint` on both touched
+files -> clean. No other `["found", ...]`-shaped stage array in `app/` was missing `briefing_shortlisted`
+or its siblings - this was the one genuine gap PR #173's own ~6-site sweep missed.
+
+Committed and pushed directly to `main` (no PR - small, fully verified, no live-DB access of any kind):
+- `app/lib/opportunityInsights.ts`
+- `app/lib/opportunityInsights.test.ts`
+- `docs/specs/System-Status.md`
+
+**Backlog: unchanged at 19 items.** This finding was standalone (a real bug, now fixed, not a new
+judgment call for Sarel) - none of the 19 open items changed status. For completeness, the full current
+list: migrations `0096`/`0107`/`0108`/`0109` awaiting Sarel's run via Supabase's SQL Editor; the two
+genuinely-duplicate `0105_*.sql` filenames needing reconciliation; the `narrative_documents` PostgREST
+schema-cache reload; the PayFast idempotency design question; the "missing ISO 9001 flagged as urgent"
+UX question; the Form B7 compulsory-vs-matrix disagreement; the Dashboard "Decision needed"
+over-triggering finding; the impersonation token-refresh gap; the submitted-tender nagging gap (watch
+PR #174); the SANRAL fingerprint heads-up (FYI only); the dangling `signatory_person_id` fallback
+design question (Finding 96); the unreconciled-'active'-subscription gap (Finding 97); the seat-limit
+TOCTOU race; the storage-bucket size/type-limit gap (Finding 105); and the pack-generation-quota
+TOCTOU race.
+
+---
+
 ## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-eighth run): clean sweep - non-SANRAL pack build (build_general_pack.py/process_general_jobs.py); a follow-up codebase-wide sweep for Finding 110's own bug class confirmed it exhausted
 
 Oriented from `8670a4e`; `git fetch origin main` found one new commit (`d3b7dd7`, a sibling standing-
