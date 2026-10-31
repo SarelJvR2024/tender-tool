@@ -14,6 +14,54 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): clean sweep - no second parallel-implementation pair found with the same drift risk; PR #175 spot-checked clean
+
+Oriented from `b889321`; `git fetch origin main` found PR #175 merged (`58f247f`, by Sarel himself -
+confirmed `merged_by: SarelJvR2024` via the GitHub API, not a self-merge) and fast-forwarded cleanly.
+Open PRs re-checked: `#164`/`#165` unchanged, no collision; `#175` is now closed/merged so its earlier
+`mergeable_state: "dirty"` no longer applies to anything live.
+
+Per the directive, tried to repeat the prior pass's successful technique (comparing two independently-
+written implementations of the same logic for drift) on a different pair. Two candidates were traced
+and ruled out rather than force-fit:
+- `engine/discovery/taxonomy.py` vs `app/lib/disciplineTaxonomy.ts` - looked promising (both are
+  "discipline taxonomy" modules) but the TS side only ever *reads* the shared `discipline_categories`
+  table (with a static fallback for when it can't); it does not independently reimplement the Python
+  side's own `fit_overlap()`/`group_tag_matches()` matching logic. No duplicate computation, so no
+  drift risk of the kind `submission_plan.py`/`submission-plan-logic.ts` had.
+- `engine/fill_a_forms.py`'s own COID/B-BBEE validity checks (`coid_expiry > _today_iso()`) looked like
+  a candidate hand-rolled duplicate of `tenderCompliance.ts`'s `validityAtClosing()` - but it's a
+  genuinely different, deliberate concern (is this document valid *right now*, at pack-assembly time,
+  for the provenance log) from the TS side's forward-looking "will it still be valid *at the tender's
+  closing date*" check (needed because the compliance report is shown weeks before closing). Not the
+  same computation under two names - correctly left alone.
+
+Spot-checked PR #175 itself (6 commits, Sarel's own live feature work plus Claude Code co-authorship,
+not a Claude Code standing-review pass) for a quick correctness read since it's fresh and unreviewed:
+the new `saveSignatoryCapacity()` server action (`general-actions.ts`) correctly scopes its update with
+both `.eq("id", personId)` AND `.eq("company_id", companyId)` - no cross-tenant write gap, same pattern
+already audited elsewhere this session. The new `SubmitButton` client component (`submit-button.tsx`)
+is a plain, correct `useFormStatus()` wrapper. No bug found.
+
+No code bug found this pass - a genuine clean sweep, reached by actually tracing two real candidates
+to ground rather than stopping at "looks similar." QA re-run as a sanity check:
+`node --experimental-strip-types --test lib/*.test.ts` (run from `app/`) -> 215/215, unaffected.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md` (this entry)
+
+Backlog unchanged at **18 items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` to apply to the
+live DB, `narrative_documents` PostgREST schema-cache reload, PayFast idempotency design question,
+"missing ISO 9001 flagged as urgent" UX question, Form B7 compulsory-vs-matrix disagreement, Dashboard
+"Decision needed" over-triggering finding, impersonation-feature token-refresh gap, the SANRAL
+fingerprint baseline-mismatch heads-up (FYI only), the dangling `signatory_person_id` fallback design
+question (Finding 96), no reconciliation for a silently-lapsed `active` subscription (Finding 97), the
+low-severity seat-limit TOCTOU race (`team/actions.ts`), no storage-level size/type limit on any of the
+9 upload buckets (Finding 105), and the pack-generation quota TOCTOU race
+(`company_can_request_pack()`'s two callers).
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): fixed a real gap - the Submission Plan screen's TypeScript CIDB-grading step silently dropped `requirements.py`'s own `cidb.ambiguous` warning
 
 Oriented from `8a50a17`; `git fetch origin main` found one new sibling commit (`7abd9bc`, a different
