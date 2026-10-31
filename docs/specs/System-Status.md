@@ -1,5 +1,55 @@
 # System Status
 
+> **STANDING RULE (Sarel, 2026-10-27, after Phase 7's live-database cleanup) - read this before any
+> live-database write, every session, not just this one:** never execute a direct `DELETE`/`UPDATE`
+> (or any other mutation) against the live production database without Sarel's prior sign-off, even
+> with the service-role key already available in the environment. Read-only queries for diagnosis
+> remain fine on their own (this is how Phase 7's own cleanup, and the earlier SANRAL-404 diagnosis,
+> were correctly investigated first). Before any destructive mutation: (1) post a dry-run summary -
+> exact table names, row counts, and record ids affected; (2) state the exact command/script that
+> would run; (3) wait for Sarel's explicit authorization before running it. This applies whether the
+> mutation would run via the service-role REST API directly (as Phase 7's cleanup did, before this
+> rule existed) or via a script/migration handed to Sarel to run himself - the former is now only ever
+> done with his explicit go-ahead on the exact statement, the same as the latter already was.
+
+---
+
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-forty-second run): clean sweep - discovery (tender_updates.py/watch_tender_updates.py/discovery_downgrades.py); restored the STANDING RULE block to the top of this file (a sibling pass's own insertion had pushed it below one entry)
+
+Note on housekeeping first: this file's own STANDING RULE block (every session must read it before
+any live-database write) had been pushed down below the immediately-preceding entry by the sibling
+pass that wrote it - an insertion-order slip, not a content change. Restored it to the very top,
+where every convention in this file (and every prior session's own entries) expects it to be read
+first; no content from any entry was changed or removed, only the block's position.
+
+Oriented from `b0117c0`; `git fetch origin main` found nothing new, local already matched
+`origin/main` exactly. Open PRs re-checked: only `#165`/`#164` remain, both unchanged, no collision.
+
+discovery rotation (worker/job-queue was last cycle - clean sweep, logged above). Picked up on the
+sibling QA session's own very recent `briefing_shortlisted` fixes to `engine/discovery/
+discovery_downgrades.py`/`watch_tender_updates.py` (both now fixed, confirmed by reading) and used
+the opportunity to read both files end to end for the first time this session - 765 combined lines,
+zero inline QA-pass markers despite being unusually mature code already (per-tender/per-document
+failure isolation already built in from the start, with the `check_tender()`/`run()` functions'
+own comments explicitly citing "QA Findings 5/6/8/9" as the reason for their existing try/except
+structure). Also read `engine/discovery/tender_updates.py` (365 lines, zero QA markers) - the pure
+document-classification logic (`classify_document()`, `find_closing_change()`, `find_briefing_change()`,
+`find_other_changes()`) behind every addendum/cancellation/briefing-move alert.
+
+Checked two specific leads against this session's own established bug shapes, both ruled out by
+schema/construction: `active_pursuits()`'s `p.get("pipeline_stage", "found")` looked like the
+null-vs-missing pattern, but migration `0021`'s own `pipeline_stage text not null default 'found'`
+means the column can never actually be null or absent - the fallback is unreachable dead code, not a
+bug. Empirically fuzzed `classify_document()` with malformed/boundary text (an invalid calendar date
+"31 February 2026", an invalid time "25:99", null bytes, and a ~200KB repeated-text stress case for
+ReDoS) - every case degraded cleanly with no crash and no excessive runtime.
+
+**No code bug found - a genuine clean sweep**, reached by reading two large, previously-unreviewed
+files end to end and fuzzing the classification logic directly rather than only reading. Committed:
+- `docs/specs/System-Status.md` (this entry, and the STANDING RULE block moved back to the top)
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): clean sweep - engine/narrative/ (AI-Call-Quality-Standard compliance) read end to end, no bug found
 
 Oriented from `b14176b`; `git fetch origin main` found one new commit since - a sibling QA/robustness
@@ -51,20 +101,6 @@ fingerprint baseline-mismatch heads-up (FYI only), the dangling `signatory_perso
 question (Finding 96), no reconciliation for a silently-lapsed `active` subscription (Finding 97), the
 low-severity seat-limit TOCTOU race (`team/actions.ts`), no storage-level size/type limit on any of the
 9 upload buckets (Finding 105), and the pack-generation quota TOCTOU race.
-
----
-
-> **STANDING RULE (Sarel, 2026-10-27, after Phase 7's live-database cleanup) - read this before any
-> live-database write, every session, not just this one:** never execute a direct `DELETE`/`UPDATE`
-> (or any other mutation) against the live production database without Sarel's prior sign-off, even
-> with the service-role key already available in the environment. Read-only queries for diagnosis
-> remain fine on their own (this is how Phase 7's own cleanup, and the earlier SANRAL-404 diagnosis,
-> were correctly investigated first). Before any destructive mutation: (1) post a dry-run summary -
-> exact table names, row counts, and record ids affected; (2) state the exact command/script that
-> would run; (3) wait for Sarel's explicit authorization before running it. This applies whether the
-> mutation would run via the service-role REST API directly (as Phase 7's cleanup did, before this
-> rule existed) or via a script/migration handed to Sarel to run himself - the former is now only ever
-> done with his explicit go-ahead on the exact statement, the same as the latter already was.
 
 ---
 
