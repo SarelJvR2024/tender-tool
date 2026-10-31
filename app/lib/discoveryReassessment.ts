@@ -51,5 +51,9 @@ export function causeLine(cause: string | null | undefined): string {
 // (the same set the tender-update watch alerts, 0039/0048/0106). 'bidding'
 // is the pre-0105 legacy value (see lib/pipeline.ts's LEGACY_BIDDING_STAGE) -
 // kept here so a not-yet-backfilled row doesn't silently drop out of this
-// list; harmless, unreachable once 0105 has run.
-export const ACTIVE_PURSUIT_STAGES = ["found", "assessing", "building", "bidding", "submitted"];
+// list; harmless, unreachable once 0105 has run. 'briefing_shortlisted' was
+// missing from this list for a few hours after 0105 introduced it (Finding
+// 111/112, a sibling QA pass, 2026-10-31) - a tender at that stage is
+// awaiting an outcome exactly like 'submitted' already is, which this list
+// deliberately keeps for the same reason.
+export const ACTIVE_PURSUIT_STAGES = ["found", "assessing", "building", "bidding", "submitted", "briefing_shortlisted"];

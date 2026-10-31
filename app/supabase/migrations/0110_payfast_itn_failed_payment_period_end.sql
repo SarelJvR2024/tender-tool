@@ -1,3 +1,18 @@
+-- Renumbered 0105 -> 0110 (2026-10-30/31): this file originally landed on main as
+-- 0105_payfast_itn_failed_payment_period_end.sql (commit ee36c9e, 2026-10-29).
+-- PR #173 independently added its own, unrelated 0105_tender_pipeline_stage_v2.sql
+-- and 0106_tender_update_resolution_v2.sql, so by the time both were on main there
+-- were two different migrations both named "0105" - flagged by a standing-review
+-- pass as backlog item 16 (docs/specs/System-Status.md), fixed here by giving
+-- THIS file (the one PR #173's own 0105_tender_pipeline_stage_v2.sql collided
+-- with, arriving second) the next free number - 0107 through 0109 were claimed
+-- by other sessions between the collision being flagged and this fix landing,
+-- so 0110, not the 0107 first suggested. No SQL content changed, filename only -
+-- whether this specific migration has already been run live is unconfirmed from
+-- here either way and unaffected by the rename (this repo has no CLI-tracked
+-- migration-history table; a filename change has no effect on a function
+-- already applied under the old one).
+--
 -- Bug found during the 2026-10-29 standing review: apply_payfast_itn()'s primary
 -- UPDATE (0083) always moved current_period_end forward to p_period_end regardless
 -- of the new status - including on a FAILED ITN (v_new_status = 'past_due'). The
@@ -85,4 +100,4 @@ begin
 end;
 $$;
 comment on function apply_payfast_itn(text, text, text, timestamptz) is
-  'Called only by app/api/billing/payfast/itn''s route handler, after it has independently verified the ITN''s signature AND confirmed the payload with PayFast''s own server (see lib/payfast.ts). Granted to anon because PayFast''s server calls us with no Supabase session - see 0078''s header comment for why that is safe. Falls back to payfast_payment_attempts (0081) for a successful payment whose m_payment_id a later checkout attempt has since superseded, restoring that attempt''s own plan, limits (0083) and reclaiming payfast_m_payment_id for it (0082) rather than silently dropping a real charge or leaving the wrong plan/limits showing. current_period_end only ever advances on a genuinely active result (0105) - a FAILED ITN must never show a future "paid through" date next to a "Past due" status.';
+  'Called only by app/api/billing/payfast/itn''s route handler, after it has independently verified the ITN''s signature AND confirmed the payload with PayFast''s own server (see lib/payfast.ts). Granted to anon because PayFast''s server calls us with no Supabase session - see 0078''s header comment for why that is safe. Falls back to payfast_payment_attempts (0081) for a successful payment whose m_payment_id a later checkout attempt has since superseded, restoring that attempt''s own plan, limits (0083) and reclaiming payfast_m_payment_id for it (0082) rather than silently dropping a real charge or leaving the wrong plan/limits showing. current_period_end only ever advances on a genuinely active result (0110, renumbered from its original 0105 to resolve a numbering collision with 0105_tender_pipeline_stage_v2.sql - see System-Status.md) - a FAILED ITN must never show a future "paid through" date next to a "Past due" status.';

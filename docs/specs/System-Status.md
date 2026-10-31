@@ -14,6 +14,66 @@
 
 ---
 
+## This pass (2026-10-31): backlog item 16 cleared - migration-numbering collision resolved; coordinated fix for the `briefing_shortlisted` gap in `accept_tender_update_date()` + its own TS gate
+
+Oriented from `4536c2d` (`git fetch origin main` showed nothing new at the time; one sibling commit,
+`dee58cc`, landed between this pass starting and its own commit - re-checked, no overlap, see below).
+PR #174 ("Split-recipient architecture") rebased cleanly onto this tip and merged as part of this same
+pass, per Sarel's explicit go-ahead.
+
+**Backlog item 16 (migration-numbering collision), closed, not just escalated this time.** PR #173's
+own `0105_tender_pipeline_stage_v2.sql` collided with the pre-existing
+`0105_payfast_itn_failed_payment_period_end.sql` (commit `ee36c9e`, 2026-10-29) - flagged two passes
+ago as a risk, then escalated last pass once #173 actually merged. Sarel's own suggested target
+(`0107`) was checked first and found already claimed - `0107`/`0108`/`0109` were all taken by other
+sessions' work (`redeem_company_invite_race`, `lifecycle_unsubscribe_token_for_grant`,
+`company_can_request_pack_membership_check`) in the time between the collision being flagged and this
+fix landing. Renumbered the PayFast file to `0110` instead (the actual next-free slot at push time,
+confirmed by `ls` immediately before committing) - filename only, no SQL content changed; its own
+internal self-reference to "(0105)" in a `comment on function` string updated to "(0110)" for
+accuracy, and a new header note added explaining the renumber and why `0107` wasn't used.
+
+**Found while rebasing PR #174 onto this tip, fixed in the same push - NOT a re-flag of `dee58cc`'s
+own "related gap", but the actual continuation of it**: that sibling pass's own Finding 112 fixed two
+Python `ACTIVE_STAGES` tuples missing `briefing_shortlisted` and explicitly named 3 more places with
+the identical gap, left unfixed on purpose as "needs a new, coordinated TS+SQL migration, bigger than
+a one-line tuple fix": `app/lib/discoveryReassessment.ts`'s `ACTIVE_PURSUIT_STAGES`,
+`app/app/tenders/[id]/tender-updates.tsx`'s `ACTIVE_STAGES`, and migration `0106`'s own
+`accept_tender_update_date()` function (both its IN clauses). All three are this session's own
+earlier work (task #48, PR #173) - fixed here as the coordinated pair that pass correctly said they
+had to be:
+- `discoveryReassessment.ts` widened alone first - safe standalone, no server-side counterpart to
+  keep in sync (it only ranks digest priority, nothing gates on it).
+- `tender-updates.tsx`'s `ACTIVE_STAGES` (gates whether the "Accept" button renders) and a NEW
+  migration `0111_tender_update_resolution_v3.sql` (widens `accept_tender_update_date()`'s two IN
+  clauses to add `briefing_shortlisted`) landed together, in the same commit - exactly the pairing
+  `dee58cc` itself warned was required: landing the TS side alone would have shown the "Accept" button
+  for a `briefing_shortlisted` tender whose click then failed server-side, a worse, visible bug than
+  the prior silent omission.
+
+**Verified `0111` for real**, same discipline as `0105`'s own fix: a scratch Postgres 16 instance,
+minimal replica of the real `tenders`/`tender_watched_documents`/`tender_tasks`/`tender_packs`/
+`company_members` shape, a stubbed `auth.uid()`. Reproduced red first - the exact same functional test
+against the unfixed `0106` function body raised `"Only a company working on this tender can accept a
+date from its documents"` for a `briefing_shortlisted` company, confirming the bug was real, not
+theorized - then green against `0111`'s replacement function body, a real `accept_tender_update_date()`
+call succeeding and correctly applying the closing-date change. Scratch database dropped after.
+
+Full app suite re-verified after both TS edits + the new migration: `tsc --noEmit` clean, `eslint`
+clean (3 pre-existing unrelated warnings only), full production build succeeds, 333/333 vitest +
+215/215 `node --test`.
+
+**Not fixed, not newly flagged either** (unchanged from `dee58cc`'s own assessment): nothing else
+found with this same gap shape this pass - the sweep was scoped to exactly the 3 locations that pass
+already named, not a fresh repo-wide search.
+
+Neither `0110` nor `0111` has been run against the live database from this session - no DDL path
+exists here, same as every migration this session has produced; both need Sarel to paste them into
+Supabase's SQL Editor. Backlog: item 16 cleared; the "related gap" item from the prior pass's entry is
+also now closed (superseded by this entry, not separately re-counted).
+
+---
+
 ## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-ninth run): clean sweep - intake (classify_tender.py/scenario_driver.py/process_general_jobs.py's run_extraction()); one lead investigated and ruled out
 
 Oriented from `2ab5fb1`; `git fetch origin main` found two new commits since - a DIFFERENT sibling
