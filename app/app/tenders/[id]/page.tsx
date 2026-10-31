@@ -203,6 +203,19 @@ const FIELD_KEY_LABELS: Record<string, string> = {
   "financial_hours.summary": "Financial & hours workbook",
 };
 
+// The exact field_keys engine/general/fill_flat_pdf.py sources from
+// people.signatory_capacity (confirmed by reading that file directly,
+// 2026-10-31, after an earlier wrong guess at company_members.tender_role -
+// that column is an unrelated, unused permission-level enum). One empty
+// field on file accounts for all of these going "missing" at once, so
+// they get their own banner rather than reading as 3-4 unrelated gaps.
+const SIGNATORY_CAPACITY_FIELD_KEYS = new Set([
+  "sbd1.capacity_under_which_signed",
+  "sbd4.designation_footer",
+  "sbd9.position_footer",
+  "form_of_offer.capacity",
+]);
+
 function humanizeFieldKey(fieldKey: string): string {
   if (FIELD_KEY_LABELS[fieldKey]) return FIELD_KEY_LABELS[fieldKey];
   const parts = fieldKey.split(".");
@@ -817,6 +830,31 @@ export default async function TenderWorkspacePage({
                     // confirmed facts - a safe collapse-by-default candidate.
                     // Any review/missing row (real work to do) keeps it open,
                     // same rule as Key positions below.
+                    // Sarel's own brief, 2026-10-31: these 3-4 keys all come
+                    // from the one same empty field (people.signatory_capacity)
+                    // - called out as its own banner rather than reading as
+                    // several unrelated gaps, with a fix link straight to
+                    // where it's actually set (the general family's own
+                    // inline fix, below "Choose who signs"; SANRAL/other
+                    // families fall back to /people, which also fixes it).
+                    const signatoryMissingCount = missingRows.filter((r) => SIGNATORY_CAPACITY_FIELD_KEYS.has(r.field_key)).length;
+                    const signatoryBanner = signatoryMissingCount > 0 ? (
+                      <div
+                        className="bg-warning/10 border-warning/30 text-warning"
+                        style={{ borderWidth: 1, borderStyle: "solid", borderRadius: 9, padding: "10px 14px", fontSize: 12, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}
+                      >
+                        <span>
+                          Signatory capacity missing (e.g. Director) - add it to unlock {signatoryMissingCount} returnable field{signatoryMissingCount === 1 ? "" : "s"}.
+                        </span>
+                        <a
+                          href={isGeneralFamily ? `/tenders/${id}#general-preparation` : "/people"}
+                          style={{ color: "var(--warning)", fontWeight: 600, textDecoration: "underline", whiteSpace: "nowrap" }}
+                        >
+                          Fix it →
+                        </a>
+                      </div>
+                    ) : null;
+
                     const grid = (
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
                         <ReportCard
@@ -863,13 +901,37 @@ export default async function TenderWorkspacePage({
                       </div>
                     );
                     const nothingOutstanding = missingRows.length === 0 && reviewRows.length === 0;
+                    // This report is only ever the typed-onto-forms facts
+                    // (field_provenance has no document-level rows at all -
+                    // confirmed directly: every row for a real pack is an
+                    // sbd*./form_of_offer.* key, never "csd"/"bee"/"coid").
+                    // The vault documents a pack actually includes (e.g. a
+                    // COID letter, "Included - p112-113") are a separate
+                    // concept shown on the Pack compiler tab's own "What's in
+                    // this pack" checklist (pack-checklist.tsx) - cross-
+                    // referenced here, not duplicated, so a short typed-field
+                    // list here is never read as "the whole pack is this
+                    // thin" (Sarel's own brief, 2026-10-31).
+                    const footnote = (showSubmissionPack || isGeneralFamily) && (
+                      <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 10 }}>
+                        This is what gets typed onto your forms - it&apos;s separate from which of your own documents (e.g. a COID
+                        letter) are already included as their own pages.{" "}
+                        <a href={showSubmissionPack ? `/tenders/${id}#submission-pack` : `/tenders/${id}#general-pack`} style={{ color: "var(--accent)", fontWeight: 600 }}>
+                          See what&apos;s in the pack →
+                        </a>
+                      </div>
+                    );
                     return nothingOutstanding ? (
                       <CollapsibleSection id="readiness-report" title="Readiness report" defaultOpen={false} closedSummary="All confirmed">
+                        {signatoryBanner}
                         {grid}
+                        {footnote}
                       </CollapsibleSection>
                     ) : (
                       <div id="readiness-report" style={{ marginBottom: 16 }}>
+                        {signatoryBanner}
                         {grid}
+                        {footnote}
                       </div>
                     );
                   })()}

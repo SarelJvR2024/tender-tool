@@ -23,7 +23,7 @@ import { describeRule, evaluateEvidence, acceptedDocTypes, type EvaluationRules 
 import { DOCUMENT_TYPES, findMatchingExperience, labelFor } from "@/lib/experience";
 import { COMPANY_OFFICE_COLUMNS, matchLocality, type CompanyOffice, type LocalityRow } from "@/lib/locality";
 import { TENDER_ROLE_COLUMNS, type RoleTag, type TenderRole } from "@/lib/tenderRoles";
-import { requestGeneralPack, requestRequirementsExtraction, saveGeneralAnswers, uploadTenderDocument } from "./general-actions";
+import { requestGeneralPack, requestRequirementsExtraction, saveGeneralAnswers, saveSignatoryCapacity, uploadTenderDocument } from "./general-actions";
 import { OcrNotice } from "./ocr-notice";
 import { PackChecklist, checklistOf } from "./pack-checklist";
 import { PrivateDocuments, type PrivateDoc } from "./private-documents";
@@ -161,7 +161,7 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
   const packJobs = jobs.filter((j) => j.kind === "generate_pack");
 
   const savedNote =
-    saved === "answers" ? "Answers saved." : saved === "doc" ? "Document uploaded." : saved === "pack" ? "Pack requested - it appears below when ready." : saved === "extract" ? "Requested - the tender's documents are being read." : null;
+    saved === "answers" ? "Answers saved." : saved === "doc" ? "Document uploaded." : saved === "pack" ? "Pack requested - it appears below when ready." : saved === "extract" ? "Requested - the tender's documents are being read." : saved === "signatory" ? "Signatory capacity saved - click \"Generate a new pack\" below to pick it up." : null;
 
   const privateCard =
     isShared && ownPack ? (
@@ -531,9 +531,22 @@ export async function GeneralTenderWorkspace({ tenderId, saved = null }: { tende
                       </select>
                     )}
                     {q.type === "person" && value && !people.find((p) => p.id === value)?.signatory_capacity && (
-                      <div style={{ fontSize: 11, color: "var(--warning)", marginTop: 4 }}>
-                        This person has no signatory capacity on file - add it on their People page so SBD 1 / SBD 4 can show it.
-                      </div>
+                      <form action={saveSignatoryCapacity} style={{ marginTop: 6, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                        <input type="hidden" name="tender_id" value={tenderId} />
+                        <input type="hidden" name="person_id" value={value} />
+                        <div style={{ fontSize: 11, color: "var(--warning)", width: "100%" }}>
+                          Signatory capacity missing (e.g. Director) - add it to unlock SBD 4, SBD 9 and Form of Offer.
+                        </div>
+                        <input
+                          type="text"
+                          name="signatory_capacity"
+                          placeholder="e.g. Director"
+                          style={{ ...input, maxWidth: 200 }}
+                        />
+                        <button type="submit" style={{ minHeight: 32, padding: "0 12px", borderRadius: 8, background: "var(--accent)", color: "var(--accent-foreground)", fontSize: 12, fontWeight: 600, border: "none", cursor: "pointer" }}>
+                          Save
+                        </button>
+                      </form>
                     )}
                   </div>
                 </div>

@@ -201,6 +201,41 @@ export async function requestGeneralPack(formData: FormData) {
 }
 
 /**
+ * Inline "signatory capacity missing" fix (Sarel's own brief, 2026-10-31):
+ * writes the one field (people.signatory_capacity, e.g. "Director") that
+ * engine/general/fill_flat_pdf.py sources SBD 4's designation footer, SBD
+ * 9's position footer and Form of Offer's capacity field from - confirmed
+ * live against Clevapp's own DBSA RFP165/2026 pack, where this one empty
+ * field accounted for the entire gap against Mzansi's seeded demo data.
+ * Deliberately does NOT re-queue a pack_generation_jobs row itself: that
+ * costs this company's monthly pack-generation allowance
+ * (company_can_request_pack) and needs a fresh "I've reviewed this"
+ * confirmation (requestJob's own generate_pack gate above) - an inline save
+ * silently spending either would be a real, undisclosed cost, not a "quick"
+ * fix. The existing "Generate a new pack" button (this same tab) is what
+ * actually picks the saved value up.
+ */
+export async function saveSignatoryCapacity(formData: FormData) {
+  const { supabase, companyId } = await requireMember();
+  const tenderId = formData.get("tender_id") as string | null;
+  const personId = formData.get("person_id") as string | null;
+  const capacity = (formData.get("signatory_capacity") as string | null)?.trim() || null;
+  if (!tenderId || !personId) redirect("/dashboard");
+
+  const { error } = await supabase
+    .from("people")
+    .update({ signatory_capacity: capacity })
+    .eq("id", personId)
+    .eq("company_id", companyId);
+  if (error) {
+    console.error("people signatory_capacity update failed", error);
+    redirect(back(tenderId, `?error=${encodeURIComponent("Could not save signatory capacity - try again. If it keeps happening, let us know.")}`));
+  }
+  revalidatePath(`/tenders/${tenderId}`);
+  redirect(back(tenderId, "?saved=signatory"));
+}
+
+/**
  * Remove one of this company's private documents from a shared tender (0032):
  * the row and its file. With others left, the tender is re-read without it;
  * with none left, this company goes back to the shared reading (its private
