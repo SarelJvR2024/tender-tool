@@ -1,5 +1,59 @@
 # System Status
 
+## This pass (2026-10-31, standing solution-architect review): clean sweep - engine/narrative/ (AI-Call-Quality-Standard compliance) read end to end, no bug found
+
+Oriented from `b14176b`; `git fetch origin main` found one new commit since - a sibling QA/robustness
+pass's clean sweep (`29e5e2b`, worker/job-queue infrastructure, `engine/worker/` only, no overlap) -
+and fast-forwarded cleanly. Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both
+unchanged, no collision.
+
+Per this session's own judgment call on where to look next, read `engine/narrative/` (the cover-
+letter/methodology-statement generator) end to end for the first time this session - CLAUDE.md's own
+"Writing or changing any call to an LLM? Read docs/specs/AI-Call-Quality-Standard.md first" pointer
+made it worth checking directly against that standard rather than assuming it already complies.
+Checked `build_prompt.py` (system/user-message construction, the anti-genericness system prompt),
+`generate_narrative.py` (the real `call_llm()` Anthropic call, its exception taxonomy, the mandatory
+`run_review_passes()` self-review loop - "never be satisfied with your first answer... run that 3
+times", verbatim from the standard - and the uniqueness-check retry flow), `uniqueness.py` (the
+stdlib-only anti-collusion similarity check), and `process_narrative_jobs.py` (the bridge: job
+claiming, context assembly, completion/failure handling).
+
+**No code bug found.** Specifically verified, not just skimmed:
+- The self-review loop is genuinely a real second pass in the SAME conversation (the draft is appended
+  as a prior assistant turn, not re-derived from a fresh prompt) - matches the standard's own
+  requirement that a review be a real check against the original, not a second guess.
+- The uniqueness check (`load_other_companies_text()`) is correctly scoped: same `tender_id`, same
+  `kind`, `status='ready'` only, explicitly excludes the requesting company's own id - no cross-tenant
+  leak and no self-comparison.
+- `claim_job()` uses the same atomic conditional-PATCH pattern (`status=eq.requested` in the WHERE
+  clause) every other bridge in this codebase already uses correctly - no TOCTOU risk of the kind this
+  session found real instances of elsewhere (`redeem_company_invite()`, `company_can_request_pack()`).
+- `process_one()`'s exception handling already distinguishes `SetupError`/`TransientError` (re-queued,
+  not the customer's fault) from `GenerationFailed` (a safe, customer-facing message) from a bare
+  `Exception` (logged to `system_alerts`, shown only a generic sentence) - the exact three-way split
+  this session has found MISSING elsewhere this session (e.g. `send_digest_emails.py`'s earlier finds).
+  Already correct here, with its own dated QA-pass comments (2026-10-25, 2026-10-29) showing this file
+  has already been through this exact kind of review before.
+
+This module's comments make clear it already absorbed at least two real QA passes before this
+session even started - a mature, previously-hardened area, not an untouched one. Re-ran its own test
+suite as a sanity check: `python3 engine/narrative/test_build_prompt.py`,
+`test_generate_narrative.py`, `test_uniqueness.py`, `test_process_narrative_jobs.py` - all green.
+
+Committed and pushed directly to `main` (docs-only):
+- `docs/specs/System-Status.md` (this entry)
+
+Backlog unchanged at **18 items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` to apply to the
+live DB, `narrative_documents` PostgREST schema-cache reload, PayFast idempotency design question,
+"missing ISO 9001 flagged as urgent" UX question, Form B7 compulsory-vs-matrix disagreement, Dashboard
+"Decision needed" over-triggering finding, impersonation-feature token-refresh gap, the SANRAL
+fingerprint baseline-mismatch heads-up (FYI only), the dangling `signatory_person_id` fallback design
+question (Finding 96), no reconciliation for a silently-lapsed `active` subscription (Finding 97), the
+low-severity seat-limit TOCTOU race (`team/actions.ts`), no storage-level size/type limit on any of the
+9 upload buckets (Finding 105), and the pack-generation quota TOCTOU race.
+
+---
+
 > **STANDING RULE (Sarel, 2026-10-27, after Phase 7's live-database cleanup) - read this before any
 > live-database write, every session, not just this one:** never execute a direct `DELETE`/`UPDATE`
 > (or any other mutation) against the live production database without Sarel's prior sign-off, even
