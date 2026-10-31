@@ -165,7 +165,7 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
   // tenders/tender_packs only come back for the signed-in user's own company,
   // via RLS - this query shape works the same regardless of which company
   // is asking. Same for discovered_opportunities/companies below.
-  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary, documentExpiryRows, { count: peopleCount }] = await Promise.all([
+  const [{ rows: tenders, error }, readiness, notifications, { data: opportunities }, { data: companyRow }, savingsSummary, documentExpiryRows, { data: peopleRows }] = await Promise.all([
     fetchAllRows<TenderRow>(
       (from, to) =>
         supabase
@@ -195,13 +195,18 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
     // since both new widgets need it regardless of whether this is a new
     // company.
     loadDocumentExpiryOverview(supabase),
-    supabase.from("people").select("id", { count: "exact", head: true }),
+    // Was a head:true count-only query; now also carries signatory_capacity
+    // so the setup checklist's "signatory on file" item (below) doesn't need
+    // its own extra round trip - same rows, one more column.
+    supabase.from("people").select("id, signatory_capacity"),
   ]);
 
   if (error) console.error("tenders select failed for dashboard", error);
 
   const rows = tenders as unknown as TenderRow[];
   const opportunityRows = (opportunities ?? []) as OpportunityRow[];
+  const peopleCount = peopleRows?.length ?? 0;
+  const hasSignatoryCapacity = (peopleRows ?? []).some((p: { signatory_capacity: string | null }) => !!p.signatory_capacity);
 
   // See lib/dashboardStats.ts's own header for why this can't just filter
   // `rows` directly in place: `rows` is every tender in the shared,
@@ -293,6 +298,18 @@ async function renderDashboard(supabase: Awaited<ReturnType<typeof createClient>
       { key: "bee", label: "B-BBEE certificate on file", done: bee?.satisfied ?? false, href: bee?.href ?? "/company#bee-cidb" },
       { key: "tax_pin", label: "Tax clearance (SARS TCS PIN) on file", done: !!taxRow && taxRow.status !== "missing", href: "/company#compliance-documents" },
       { key: "people_cvs", label: "At least one person with a CV uploaded", done: readiness.peopleWithCvCount >= 1, href: "/people" },
+      {
+        // The engine signs SBD 4/SBD 9/Form of Offer off whichever person has
+        // people.signatory_capacity set (e.g. "Director") - with none set, a
+        // real pack's own prefill score silently drops (confirmed live
+        // against Clevapp's real DBSA RFP165/2026 pack, 2026-10-31: 1/26 vs
+        // Mzansi demo data's 4/26, purely from this one field being empty).
+        // Same "on file or not" shape as the other items here.
+        key: "signatory_capacity",
+        label: "A signatory's capacity/position on file (e.g. Director)",
+        done: hasSignatoryCapacity,
+        href: "/people",
+      },
       {
         key: "savings_baseline",
         label: "Your time/cost baseline confirmed (for the savings counter)",

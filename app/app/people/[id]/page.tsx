@@ -454,7 +454,7 @@ export default async function PersonDetailPage({
             </Field>
             <Field><label className={labelClass}>Role / job title</label><input className={fieldClass} name="role" defaultValue={person?.role ?? ""} placeholder="e.g. Contracts Engineer" /></Field>
             <Field><label className={labelClass}>Description (position type)</label><input className={fieldClass} name="description" defaultValue={person?.description ?? ""} /></Field>
-            <Field><label className={labelClass}>Signatory capacity</label><input className={fieldClass} name="signatory_capacity" defaultValue={person?.signatory_capacity ?? ""} /></Field>
+            <Field><label className={labelClass}>Signatory Capacity</label><input className={fieldClass} name="signatory_capacity" placeholder="e.g. Director, Managing Member, Authorised Representative" defaultValue={person?.signatory_capacity ?? ""} /></Field>
             <Field>
               <label className={labelClass}>Employment (SANRAL Form B1)</label>
               <select className={fieldClass} name="employment_status" defaultValue={person?.employment_status ?? ""}>
