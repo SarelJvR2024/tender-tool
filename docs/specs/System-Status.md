@@ -14,6 +14,72 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): PR #174 merged - independently verified it closes 3 backlog items (submitted-tender nagging gap, the duplicate-`0105` migration collision, the coordinated `briefing_shortlisted` fix); no new code bug found
+
+Oriented from `dee58cc`; `git fetch origin main` showed 2 new commits: `4536c2d` (a sibling pass's
+clean sweep of `classify_tender.py`/`run_extraction()`, docs-only, no overlap) and `8623d38` - PR #174
+("Split-recipient architecture + migration-collision fix (backlog item 16) + briefing_shortlisted
+coordinated fix") merging. Fast-forwarded local `main` cleanly (`git pull --ff-only`). Open PRs
+re-checked via GitHub API: only `#164`/`#165` remain, unchanged, no collision. `#174` independently
+confirmed **merged by Sarel himself** (`merged_by: SarelJvR2024`), not a self-merge.
+
+Per the standing instruction to never trust another session's (or a merged PR's own) self-report
+unverified, read `#174`'s real diff end to end rather than its description alone, and confirmed three
+things it claims, concretely:
+
+1. **Submitted-tender nagging gap (backlog item, long open) - genuinely resolved.** `app/lib/
+   deadlineReminders.ts`'s new `DEADLINE_REMINDER_EXCLUDED_STAGES` and `app/lib/
+   returnablesDigestCandidates.ts`'s new `RETURNABLES_EXCLUDED_STAGES` both now read
+   `["submitted", "briefing_shortlisted", "won", "lost"]` and are actually applied in each file's own
+   filter loop (`send-deadline-reminders.ts`/`send-returnables-digest.ts`) - confirmed by reading the
+   real `.ts` source, not the PR body. This item is closed.
+2. **Duplicate `0105_*.sql` migration-numbering collision - genuinely resolved.** `ls app/supabase/
+   migrations/` now shows exactly one file prefixed `0105` (`0105_tender_pipeline_stage_v2.sql`); the
+   PayFast fix this session's own earlier pass wrote was renamed (filename only, confirmed via
+   `git show` on the rename commit - no SQL content changed) to `0110_payfast_itn_failed_payment_
+   period_end.sql`, the real next-free slot once `0107`/`0108`/`0109` (also this session's own prior
+   fixes) are accounted for. This item is closed.
+3. **Coordinated `briefing_shortlisted` fix across `discoveryReassessment.ts`/`tender-updates.tsx`/
+   `accept_tender_update_date()` - genuinely resolved.** All three now read/check `briefing_shortlisted`
+   alongside the other active-pursuit stages, confirmed by grepping the real source files and the new
+   `0111_tender_update_resolution_v3.sql` migration's own `pipeline_stage in (...)` clauses (not just
+   its header comment). The TS gate (`tender-updates.tsx`'s `ACTIVE_STAGES`, controlling whether the
+   "Accept" button even renders) and the SQL side landed in the same commit, as the backlog item itself
+   required - verified they're not split across two separate, independently-timed changes.
+
+Also spot-read the new `criticalBidRecipients()` function (`notificationRecipients.ts`) this PR adds -
+reuses the already-audited, correctly `service_role`-scoped `company_notification_recipients()` RPC,
+just without the opt-in filter, with a clearly reasoned "these are bid-critical alerts, not the generic
+digest the opt-in flag was ever about" justification and an explicit note that it's deliberately NOT
+sourced from `people.email` (would leak internal bid state to external roster contacts). No concern.
+
+QA re-confirmed independently, not just trusted from the PR's own claim: `node --experimental-strip-
+types --test lib/*.test.ts` -> 215/215; `npx vitest run` -> 333/333; `npx tsc --noEmit` -> clean. All
+three numbers match the PR body's own claims exactly.
+
+No new code bug found this pass beyond what the merge itself already fixed - the bulk of this pass's
+value was independently verifying a significant merge's real-diff claims rather than relaying them.
+Migrations `0110`/`0111` are written and merged but **not yet applied to the live database** - same
+status as `0096`/`0107`/`0108`/`0109`, all still needing Sarel's run via Supabase's SQL Editor.
+
+**Backlog count correction, said plainly rather than quietly carried forward:** the prior pass's own
+report rounded the running backlog to 20 items; recounting the actual list it itemized gives 19, not
+20 (no item was missing - just an off-by-one in that pass's own arithmetic). Using the correct 19 as
+the base: 19 - 3 resolved (submitted-tender nagging gap; the duplicate-`0105` migration collision; the
+`briefing_shortlisted`-missing coordinated-fix item) + 2 new (migrations `0110`/`0111` themselves now
+need Sarel's live-DB run, distinct from the already-tracked `0096`/`0107`/`0108`/`0109` apply-items) =
+**18 remaining**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` to apply to live DB (6 separate
+migrations, one bucketed concern), `narrative_documents` PostgREST schema-cache reload, PayFast
+idempotency design question, "missing ISO 9001 flagged as urgent" UX question, Form B7
+compulsory-vs-matrix disagreement, Dashboard "Decision needed" over-triggering finding,
+impersonation-feature token-refresh gap, the SANRAL fingerprint baseline-mismatch heads-up (no action
+needed, FYI only), the dangling `signatory_person_id` fallback design question (Finding 96), no
+reconciliation for a silently-lapsed `active` subscription (Finding 97), the low-severity seat-limit
+TOCTOU race (`team/actions.ts`), no storage-level size/type limit on any of the 9 upload buckets
+(Finding 105), and the pack-generation quota TOCTOU race (`company_can_request_pack()`'s two callers).
+
+---
+
 ## This pass (2026-10-31): backlog item 16 cleared - migration-numbering collision resolved; coordinated fix for the `briefing_shortlisted` gap in `accept_tender_update_date()` + its own TS gate
 
 Oriented from `4536c2d` (`git fetch origin main` showed nothing new at the time; one sibling commit,
