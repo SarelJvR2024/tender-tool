@@ -571,6 +571,38 @@ def test_sa_id_redaction_line_break():
     check(redacted2 == unrelated and ids2 == [], "unrelated digits split by a line break are never fused into a false ID")
 
 
+def test_email_verification_survives_line_wrap():
+    """Finding (2026-10-31): validate_proposal()'s email check compared the
+    raw value against the raw CV text with a literal substring match - no
+    whitespace normalisation at all, unlike every other check in this
+    function (evidence_in_text()'s own "squeezed" branch, and the
+    ecsa_number/sacpcmp_number/phone digits check via _digits()). A real
+    email address pdftotext -layout wraps across a line break in a narrow
+    contact-info column - the exact artifact test_sa_id_redaction_line_break()
+    above already proves happens in real CVs - was flagged "doesn't appear in
+    the CV text" even when evidence_in_text() independently confirmed the
+    model's own quote was genuinely in the CV. Reproduced directly: this
+    exact text/evidence pair returns True from evidence_in_text() but used to
+    return False (unverified) from validate_proposal() - the two checks
+    disagreed about the same real fact."""
+    print("8. Email verification survives a line-wrapped address (narrow contact-info column)")
+    cv_text = "Email:    john.doe@\n          example.com\n"
+    good = {"document_kind": "cv", "document_kind_reason": "A CV",
+            "person": [{"field": "email", "value": "john.doe@example.com", "evidence": "john.doe@\nexample.com"}],
+            "projects": [], "other_registrations": [], "parse_problems": []}
+    prop, _ = x.validate_proposal(good, cv_text, [])
+    check(x.evidence_in_text("john.doe@\nexample.com", x._norm(cv_text)),
+          "evidence_in_text() itself already confirms this exact quote is in the CV (sanity check)")
+    check(prop["person"]["email"]["verified"] and not prop["person"]["email"]["warnings"],
+          "a real, line-wrapped email is verified, not falsely flagged")
+    # Mirror case: a genuinely hallucinated email (nowhere in the CV at all) must still be caught.
+    bad = {"document_kind": "cv", "document_kind_reason": "A CV",
+           "person": [{"field": "email", "value": "someoneelse@nowhere.com", "evidence": "someoneelse@nowhere.com"}],
+           "projects": [], "other_registrations": [], "parse_problems": []}
+    prop2, _ = x.validate_proposal(bad, cv_text, [])
+    check(not prop2["person"]["email"]["verified"], "a hallucinated email with no basis in the CV is still flagged")
+
+
 def main():
     tmp = tempfile.mkdtemp(prefix="cv_extract_test_")
     try:
@@ -581,6 +613,7 @@ def main():
         test_queue(docx_path, tmp)
         test_ocr(docx_path, tmp)
         test_sa_id_redaction_line_break()
+        test_email_verification_survives_line_wrap()
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
     print(f"\n{'ALL PASSED' if not FAILS else f'{len(FAILS)} FAILED'}")

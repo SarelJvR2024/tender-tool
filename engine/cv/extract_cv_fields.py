@@ -654,7 +654,18 @@ def validate_proposal(data, text, local_ids):
         if f in ("ecsa_number", "sacpcmp_number", "phone") and _digits(value) and _digits(value) not in digits_text:
             warnings.append("These digits don't appear in the CV text - check them.")
             verified = False
-        if f == "email" and value.lower() not in text.lower():
+        # Whitespace-stripped on both sides, not a literal substring check -
+        # pdftotext -layout can wrap a narrow contact-info cell's email across
+        # a line break ("john.doe@\nexample.com"), the exact artifact that
+        # already broke SA ID redaction (SA_ID_RE's own [\s-]? groups, above)
+        # and that evidence_in_text()'s "squeezed" branch already exists to
+        # survive. This check used to compare the raw strings directly, so a
+        # correctly-extracted, correctly-evidenced email with that one real-
+        # world line wrap was flagged "doesn't appear in the CV text" - a
+        # false, confusing warning on an already-correct value. Found
+        # 2026-10-31 (reproduced: evidence_in_text() already returns True for
+        # this exact text/evidence pair; this check alone disagreed with it).
+        if f == "email" and re.sub(r"\s+", "", value.lower()) not in re.sub(r"\s+", "", text.lower()):
             warnings.append("This address doesn't appear in the CV text - check it.")
             verified = False
         person[f] = {"value": value, "evidence": evidence, "verified": verified, "warnings": warnings}

@@ -14,6 +14,66 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): fix - CV email verification falsely flagged a correctly-extracted, line-wrapped email address as unverified
+
+Oriented from `b0117c0`; `git fetch origin main` found one new commit since - a sibling QA/robustness
+pass's clean sweep (`e3afe62`, `engine/discovery/` only, no overlap) - and fast-forwarded cleanly.
+Open PRs re-checked via the GitHub API: only `#164`/`#165` remain, both unchanged, no collision.
+
+Per this session's own judgment call on where to look next (the narrative module turned out already-
+hardened last pass), read `engine/cv/extract_cv_fields.py` (979 lines) end to end for the first time
+this session, directly against `docs/specs/AI-Call-Quality-Standard.md` - an AI-call module CLAUDE.md
+itself names as one of the three real call sites that standard governs. The prompt-specificity and
+honesty-rule requirements are already well met (`SYSTEM_PROMPT`'s explicit "leave it null rather than
+inferring", per-field verbatim `evidence` quotes checked afterward); the mandatory 3-pass self-review
+loop is genuinely absent, but that standard's own text says so explicitly ("today's three call sites
+are single-pass... retrofitting them is separate follow-up work") - a known, already-accepted gap,
+not a new finding.
+
+**Found and fixed a real bug** in `validate_proposal()`'s per-field verification: every other check in
+this function normalises whitespace before comparing (`evidence_in_text()`'s own "squeezed" branch for
+a quote, `_digits()` for `ecsa_number`/`sacpcmp_number`/`phone`) specifically because `pdftotext
+-layout` wraps a narrow contact-info column's value across a line break - the exact, already-documented
+artifact `test_sa_id_redaction_line_break()` proves happens for real SA ID numbers in real CVs. The
+`email` field's own check was the one exception: a literal `value.lower() not in text.lower()`
+substring match with no whitespace handling at all. Reproduced directly: for a CV where the email
+reads `"Email:    john.doe@\n          example.com"` and the model correctly proposes
+`john.doe@example.com` with a correct evidence quote, `evidence_in_text()` itself already returns
+`True` for that exact quote/text pair - but the email check disagreed and flagged the value "doesn't
+appear in the CV text", a false warning on an already-correct value that would make a reviewer doubt a
+field that needed no doubting.
+
+Fixed by stripping all whitespace from both sides before the substring check (`re.sub(r"\s+", "", ...)`
+on both `value.lower()` and `text.lower()`), the same "survive a mid-token line wrap" fix already
+applied to `SA_ID_RE` for ID numbers. Verified a hallucinated email with no basis in the CV at all is
+still correctly flagged - the fix narrows a false positive, it doesn't weaken real detection.
+
+New test `test_email_verification_survives_line_wrap()` added to `test_extract_cv_fields.py` (test 8),
+covering both the line-wrapped-but-real case and the genuinely-wrong case. Revert-and-confirm-red
+performed: stashing the source fix alone made the new "real, line-wrapped email is verified" check
+fail exactly as expected, with the sanity-check assertion (`evidence_in_text()` already agrees) still
+passing - proving the two checks genuinely disagreed, not a flaky repro. Restored, full suite green.
+
+Verification: `python3 engine/cv/test_extract_cv_fields.py` - ALL PASSED (9 checks in the new test
+function, full suite unaffected); `python3 -m py_compile` clean on both touched files.
+
+Committed and pushed directly to `main` (no PR - small, fully verified, no live-DB access needed):
+- `engine/cv/extract_cv_fields.py`
+- `engine/cv/test_extract_cv_fields.py`
+- `docs/specs/System-Status.md` (this entry)
+
+No new backlog item - this was a standalone, now-fixed bug, not a judgment call. Backlog unchanged at
+**18 items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` to apply to the live DB,
+`narrative_documents` PostgREST schema-cache reload, PayFast idempotency design question, "missing ISO
+9001 flagged as urgent" UX question, Form B7 compulsory-vs-matrix disagreement, Dashboard "Decision
+needed" over-triggering finding, impersonation-feature token-refresh gap, the SANRAL fingerprint
+baseline-mismatch heads-up (FYI only), the dangling `signatory_person_id` fallback design question
+(Finding 96), no reconciliation for a silently-lapsed `active` subscription (Finding 97), the
+low-severity seat-limit TOCTOU race (`team/actions.ts`), no storage-level size/type limit on any of the
+9 upload buckets (Finding 105), and the pack-generation quota TOCTOU race.
+
+---
+
 ## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-forty-second run): clean sweep - discovery (tender_updates.py/watch_tender_updates.py/discovery_downgrades.py); restored the STANDING RULE block to the top of this file (a sibling pass's own insertion had pushed it below one entry)
 
 Note on housekeeping first: this file's own STANDING RULE block (every session must read it before
