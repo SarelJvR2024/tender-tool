@@ -14,6 +14,46 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): clean sweep - TOCTOU bug class confirmed exhausted across app/app/*/actions.ts; PR #174 noted (addresses the submitted-tender-nagging backlog item directly, not touched)
+
+Oriented from `d6bb74e`; `git fetch origin main` found nothing new, local already matched exactly.
+Open PRs: `#164`/`#165` unchanged, long-standing, no collision. New open PR `#174`
+("Split-recipient architecture: critical bid alerts bypass daily_digest_opt_in") touches
+`app/lib/notificationRecipients.ts`, `deadlineReminders.ts`, `returnablesDigestCandidates.ts`,
+`senderCliArgs.ts`, `scripts/send-corrigendum-alerts.ts`/`send-deadline-reminders.ts`/
+`send-returnables-digest.ts`, and `company/Notifications.tsx` - fresh, in-flight work from another
+session. **Deliberately avoided every file it touches.**
+
+**Worth flagging plainly, not as a new backlog item but as good news on an existing one**: PR #174's
+own diff adds `pipeline_stage` exclusion (`submitted`/`briefing_shortlisted`/`won`/`lost`) to BOTH
+`deadlineReminderCandidates()` and `returnablesWindowCandidates()` - this is exactly backlog item
+"submitted-tender nagging gap" (the two reminder scripts that didn't filter by `pipeline_stage`,
+re-confirmed accurate as recently as two passes ago). If this PR merges as-is, that backlog item
+should be considered resolved, not just worked around - Sarel's own call once he reviews and merges
+it, not mine to close preemptively from here while it's still open and unmerged.
+
+Per the directive, checked for a third instance of the "check a limit/quota via one RPC, then
+separately insert/update with no lock in between" TOCTOU shape (2 real instances already found this
+session: `redeem_company_invite()`, fixed; `company_can_request_pack()`'s two callers, flagged).
+Grepped every file under `app/app/*/actions.ts` and `app/app/*/*/actions.ts` for `max_users`/
+`max_packs`/`quota`/`seat`/length-vs-limit comparisons - confirmed the ONLY two matches in that
+entire surface are the two already on the backlog (`team/actions.ts`'s seat cap, and
+`company_can_request_pack()`'s two callers). This bug class is now genuinely exhausted across every
+Next.js server action in the app, not just the files already reviewed. Also re-read the rest of the
+just-fixed `redeem_company_invite()` (migration `0107`) for completeness: its `linked_person_id`
+re-link check reads `people` without its own row lock, a narrower, already-documented edge case (two
+different invites both pointing at the same person, which the invite-creation UI doesn't currently
+allow) - not a new finding, already named honestly in that migration's own header comment from the
+pass that wrote it.
+
+**No code bug found - a genuine clean sweep**, reached by actually grepping the full surface rather
+than spot-checking a few files. Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+Backlog unchanged at 17 items - nothing resolved (PR #174 isn't merged yet), nothing new added.
+
+---
+
 ## This pass (2026-10-30, standing solution-architect review): escalating the PR #173 migration-collision item (it has now LANDED on main, not just an open-PR risk) + new finding - pack-generation quota has the same check-then-insert race the seat-limit TOCTOU item already named
 
 Oriented from `7c14789` (this review's own last pass - the `redeem_company_invite()` row-lock fix,
