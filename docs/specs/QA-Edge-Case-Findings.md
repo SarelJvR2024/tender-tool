@@ -6115,3 +6115,52 @@ and `engine/cv/test_process_cv_jobs.py` - all pass.
 schema or other call-site changes - `engine/pack/process_pack_jobs.py`'s live Supabase-backed path
 was never exposed to this bug (its own `adapt_person()` always builds a list), so this only affects
 the `suggest_pack.py --profile` CLI path reading a hand-maintained `profile.json` directly.
+
+### Finding 108 (CONFIRMED, FIXED, moderate - a company's own disciplines, written as a bare string instead of a list in a hand-maintained profile.json, were silently shredded into individual characters and never matched any real tender again)
+
+**Where:** discovery rotation this cycle. `engine/discovery/assess_tender.py`'s `load_company_profile()`
+- the one function every CLI/manual-profile caller (`engine/intake/classify_tender.py`'s `--profile`
+path, this module's own CLI) uses to turn a hand-maintained `profile.json` into the dict
+`assess_fit()`/`estimate_score_outlook()` score against.
+
+**What was tested:** `"disciplines": company.get("disciplines", [])` had no type check at all. This
+function's own docstring says these files are hand-maintained ("`config/test_companies/<company>.json`,
+or that company's own exported profile"), and every OTHER field on `company` in a real profile
+genuinely IS a bare string (`bee_level`, `black_ownership_pct`, ...) - so typing `"disciplines":
+"roads_civil"` instead of `["roads_civil"]` is a realistic, easy mistake to make hand-editing this
+file, not a contrived one. Checked what `taxonomy.fit_overlap()` - the function this value is fed
+straight into - actually does with a bare string.
+
+**Finding (CONFIRMED).** `fit_overlap()`'s own `set(company_disciplines or [])` does not reject a
+bare string - Python iterates a string into its INDIVIDUAL CHARACTERS, so `"roads_civil"` becomes
+`{'r','o','a','d','s','_','c','i','v','l'}`, which never equals any real category slug. Reproduced
+directly: a company profile with `"disciplines": "roads_civil"` (not `["roads_civil"]`) scored its
+own `road_maintenance` tender - a tender that genuinely is that company's own discipline - as
+`"outside the company's disciplines"` / `not_a_fit`, silently, with no error, no crash, and no
+warning at all. This is exactly the "silent wrong data is the main risk" failure mode this module's
+own `find_delivery_address()`/`find_closing_time()` docstrings already name as the thing to guard
+against everywhere else in this file - just unguarded here. The live Discovery fan-out's own
+`company_profiles.py` always builds `disciplines` as a real list (`sorted()` of a set comprehension),
+so the live, automated discovery feed can never hit this; only this CLI/manual-profile path can - but
+that is exactly the path `classify_tender.py`'s own intake flow (and any manual fit check) uses.
+
+**Fix:** `load_company_profile()` now normalises the field: a bare string becomes a one-item list
+(the obviously intended reading of the typo - an empty string becomes `[]`, not `[""]`); anything
+else that is neither a list nor a string (an int, a dict, ...) becomes `[]` with a loud `WARNING`
+printed, matching this codebase's existing "never silently guess, say so" convention rather than
+shredding it into something worse than empty. A genuine list passes through completely unchanged.
+
+**Verified red-then-green.** Created `engine/discovery/test_assess_tender.py` - no dedicated test for
+`load_company_profile()` existed at all before this pass, confirmed by a repo-wide search. 4 new test
+functions, 5 checks: a bare-string discipline is wrapped into a one-item list and then genuinely
+matches via `taxonomy.fit_overlap()`; an empty string normalises to `[]`, not `[""]`; a wrong-typed
+value (an int) falls back to `[]` without crashing; a real list is passed through unchanged (control).
+Revert-and-confirm-red: reverting reproduced all 3 predicted failures exactly (the bare-string case,
+the blank-string case, the wrong-type case) with the control case still green; restored, `0 failure(s)`.
+Regression-checked `engine/discovery/test_taxonomy.py`, `engine/discovery/test_discovery_fanout.py`,
+and `engine/intake/test_classify_tender.py` - all pass.
+
+**Regression:** `engine/discovery/assess_tender.py` (`load_company_profile()`'s own `disciplines`
+read, ~15 lines, no other behavior change), `engine/discovery/test_assess_tender.py` (new file, 4
+test functions, 5 checks). No schema or other call-site changes - the live Discovery fan-out's own
+`company_profiles.py` was never exposed to this bug in the first place.

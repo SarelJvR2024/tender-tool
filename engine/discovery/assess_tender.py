@@ -526,8 +526,31 @@ def load_company_profile(path=None):
         # ("No CIDB grading document found anywhere"). Any other company's
         # profile records it in cidb_grading above.
         has_cidb = "no cidb grading" not in gaps if gaps else False
+    disciplines = company.get("disciplines", [])
+    if isinstance(disciplines, str):
+        # A hand-maintained profile.json (this function's own docstring:
+        # "config/test_companies/<company>.json, or that company's own
+        # exported profile") is realistic to type as "disciplines":
+        # "roads_civil" instead of ["roads_civil"] - every OTHER field on
+        # `company` genuinely is a bare string. taxonomy.fit_overlap()'s own
+        # `set(company_disciplines or [])` doesn't reject that: it iterates a
+        # string into its INDIVIDUAL CHARACTERS, so a company's own, exactly
+        # matching discipline tag then never equals any real category slug -
+        # confirmed directly: a company tagged "roads_civil" (not
+        # ["roads_civil"]) scored its own road_maintenance tender as "outside
+        # the company's disciplines" / not_a_fit, silently, with no error at
+        # all - the live Discovery fan-out's own company_profiles.py always
+        # builds a real list (a sorted() of a set comprehension) so it can
+        # never hit this; only this CLI/manual-profile path can. One real
+        # discipline string is the obviously intended single-item list, not
+        # a reason to fall back to empty.
+        disciplines = [disciplines] if disciplines.strip() else []
+    elif not isinstance(disciplines, list):
+        print(f"  WARNING: company profile's disciplines field is a {type(disciplines).__name__}, not a list "
+              "or string - treated as empty (every tender will need a human look). Fix it in the profile JSON.")
+        disciplines = []
     return {
-        "disciplines": company.get("disciplines", []),
+        "disciplines": disciplines,
         "bee_level": company.get("bee_level"),
         "black_ownership_pct": company.get("black_ownership_pct"),
         "has_cidb_grading": bool(has_cidb),

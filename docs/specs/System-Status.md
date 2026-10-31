@@ -14,6 +14,57 @@
 
 ---
 
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-fifth run): Finding 108 - a company's own disciplines, hand-typed as a bare string instead of a list, were silently shredded into individual characters and never matched a real tender again
+
+Oriented from `2115727` (fast-forwarded cleanly; two new solution-architect commits since the last
+QA-cycle pass - `d6bb74e` escalating the already-landed `0105` migration collision and flagging a
+new pack-quota TOCTOU race, `2115727` a clean sweep confirming that TOCTOU bug class exhausted across
+`app/app/*/actions.ts`; neither touches anything under `engine/`, no overlap). Open PRs re-checked via
+the GitHub API: `#174` (notification-recipient split, `app/lib`/`scripts` only), `#164`/`#165`
+(unchanged, `app/` only) - none touch `engine/discovery/` or `engine/intake/`.
+
+Discovery/intake rotation (CV was last cycle's area - see the entry below). Read through
+`engine/intake/classify_tender.py`, `engine/discovery/taxonomy.py`, and `engine/discovery/
+score_outlook.py` looking for a fresh instance of this session's own established bug classes;
+`classify_tender.py` is already heavily audited (QA-pass-dated comments from 2026-10-17 through
+2026-10-29) and came up clean. `taxonomy.py` and `score_outlook.py` carry no explicit QA-pass markers
+at all - read and fuzz-tested both directly (adversarial profiles: missing keys, wrong types, empty/
+pathological text) rather than only reading; every numeric regex-capture conversion in
+`score_outlook.py` survived (each capture group is restricted to clean digit patterns by its own
+regex, confirmed by direct fuzzing) and `taxonomy.fit_overlap()` didn't crash on unknown slugs or
+empty inputs either.
+
+Found a real, silent (non-crashing) data bug instead: `assess_tender.load_company_profile()` reads
+`company.get("disciplines", [])` straight from a hand-maintained `profile.json` with no type check.
+Every other field on a real profile's `company` object genuinely is a bare string (`bee_level`,
+`black_ownership_pct`), so typing `"disciplines": "roads_civil"` instead of `["roads_civil"]` is a
+realistic hand-editing mistake. `taxonomy.fit_overlap()`'s own `set(company_disciplines or [])`
+doesn't reject that - Python iterates a string into its individual characters - so the company's own,
+exactly-matching discipline tag then never equals any real category slug. Reproduced directly: a
+profile with `disciplines` as a bare string scored that company's own `road_maintenance` tender as
+"outside the company's disciplines" / `not_a_fit`, with no error or warning at all - the same "silent
+wrong data is the main risk" failure mode this same file's own `find_delivery_address()`/
+`find_closing_time()` already guard against everywhere else, just unguarded here. Confirmed the live,
+automated Discovery fan-out (`company_profiles.py`, always builds `disciplines` as a real
+`sorted()`-of-a-set list) can never hit this - only the CLI/manual-profile path
+(`classify_tender.py`'s own `--profile` flag, or any manual fit check) can.
+
+Fixed: a bare string normalises to a one-item list (the obviously intended reading); a genuinely
+wrong type (an int, a dict) falls back to `[]` with a loud `WARNING` printed, never silently
+iterated into garbage; a real list is unchanged. Verified red-then-green with a brand-new
+`engine/discovery/test_assess_tender.py` (no dedicated test for this function existed at all before
+this pass) - 4 test functions, 5 checks; reverting reproduced all 3 predicted failures exactly, the
+control case stayed green throughout. Regression-checked `engine/discovery/test_taxonomy.py`,
+`engine/discovery/test_discovery_fanout.py`, `engine/intake/test_classify_tender.py` - all pass.
+
+Committed and pushed directly to `main` (contained, well-verified, no PR):
+- `engine/discovery/assess_tender.py` (`load_company_profile()`'s own `disciplines` read)
+- `engine/discovery/test_assess_tender.py` (new file, 4 test functions, 5 checks)
+- `docs/specs/QA-Edge-Case-Findings.md` (Finding 108)
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): clean sweep - TOCTOU bug class confirmed exhausted across app/app/*/actions.ts; PR #174 noted (addresses the submitted-tender-nagging backlog item directly, not touched)
 
 Oriented from `d6bb74e`; `git fetch origin main` found nothing new, local already matched exactly.
