@@ -14,7 +14,45 @@
 
 ---
 
-## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-seventh run): Finding 110 in QA-Edge-Case-Findings.md (severe) - a signatory name or company legal name containing a literal backslash silently corrupted a signed SANRAL declaration, or crashed the whole pack build, via re.sub()'s own backreference syntax
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-eighth run): clean sweep - non-SANRAL pack build (build_general_pack.py/process_general_jobs.py); a follow-up codebase-wide sweep for Finding 110's own bug class confirmed it exhausted
+
+Oriented from `8670a4e`; `git fetch origin main` found one new commit (`d3b7dd7`, a sibling standing-
+architect pass's own RLS-policy + email-escaping audit, both clean - no overlap with anything below).
+Open PRs re-checked: `#174`/`#165`/`#164` unchanged, none touch `engine/`.
+
+Before rotating, grepped the WHOLE `engine/` tree for Finding 110's own bug shape
+(`.sub(f"..."`/`.subn(f"..."` - a dynamic value passed to `re.sub`/`subn` as a literal f-string
+replacement, vulnerable to backslash-escape injection) beyond the two files already fixed this
+session. Found exactly one more match, `engine/discovery/dbsa_procurement.py`'s own time-normalising
+`_AT_TIME.sub(f" {int(m.group(1)):02d}:{m.group(2)}", s)` - read it closely and confirmed it is NOT
+exploitable: both `m.group(1)`/`m.group(2)` are captured by `_AT_TIME = re.compile(r"\s*@\s*(\d{1,2})
+H(\d{2})")`, so they can only ever be clean digit strings, never containing a backslash. Bug class
+genuinely exhausted across the whole engine tree, not just the two files already fixed.
+
+non-SANRAL pack rotation (SANRAL pack was last cycle). Read `engine/general/build_general_pack.py`
+(607 lines, zero QA-pass markers - the least-reviewed file in this family) end to end, plus
+`process_general_jobs.py`'s `gather_pack_inputs()`/`run_pack()`. Found this area already well-guarded:
+every risky external call (`fill_sbd_docx.fill_sbd_file()`, `fill_flat_pdf.fill_flat_pdf()`, every PDF/
+image/Word-to-PDF conversion in `to_pdf()`) already has its own per-document try/except, and the whole-
+manifest-missing case (`tender_packs.document_requirements` can genuinely be set to a bare SQL `null`
+by `general-actions.ts`'s own reset action) is already caught by `run_pack()`'s own `if not manifest:
+raise JobRefusal(...)`.
+
+One lead investigated and ruled out rather than pursued further: `gather_pack_inputs()` reads
+`manifest["experience_evidence"].get("rules")` by direct index, not `.get()` - every OTHER key read
+off `manifest` in this same file uses `.get(key, default)`. Suspected a manifest-schema-evolution gap
+(this exact file has a `MANIFEST_VERSION`/"this manifest predates v2" comment acknowledging older
+manifests can lack newer fields) - but confirmed by reading `requirements.py`'s own manifest
+construction that `experience_evidence` is a v1 field, present since the very first manifest shape
+this project ever wrote, not something added later - so there is no real "predates vN" manifest in
+the wild that would be missing it. Not a confirmed bug; not fixed, per the standing instruction's own
+"genuinely clean, not a weak finding" allowance.
+
+**No code bug found - a genuine clean sweep**, reached by actually reading the full file and
+confirming one suspicious lead rather than forcing it. Committed docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
 
 (Numbered independently of the solution-architect review's own "Finding 110" immediately below - two
 separate tracks, same number by coincidence, no relation; see this file's own standing note on that.)
