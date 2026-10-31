@@ -119,7 +119,14 @@ export type RequirementManifest = {
   // SACNASP / SAGC fields out of the way.
   // plus the 0050 catalog bodies SACAP / SACPLAN / SACQSP / SACPVP / PSIRA.
   person_registrations?: { body: RequiredBody; mentions: number; document: string; quote: string; from_ocr?: boolean; confidence?: number; confidence_reason?: string }[];
-  cidb: { grading: string; quote: string; confidence?: number; confidence_reason?: string } | null;
+  // ambiguous (Finding, 2026-10-24, engine/general/requirements.py): more than
+  // one different CIDB grading was found across the documents read (e.g. an
+  // addendum correcting the original notice) - requirements.py has no
+  // reliable signal for which one is the actual, current requirement, so
+  // this flags it rather than silently trusting whichever grading happened
+  // to be picked. Optional because every manifest written before this field
+  // existed has no key for it at all - absent must read the same as false.
+  cidb: { grading: string; quote: string; confidence?: number; confidence_reason?: string; ambiguous?: boolean } | null;
   briefing: { compulsory: boolean; quote: string; confidence?: number; confidence_reason?: string } | null;
   scoring: {
     preference_system: { system: string; reason?: string };

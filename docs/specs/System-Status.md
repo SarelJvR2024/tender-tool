@@ -14,6 +14,72 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): fixed a real gap - the Submission Plan screen's TypeScript CIDB-grading step silently dropped `requirements.py`'s own `cidb.ambiguous` warning
+
+Oriented from `8a50a17`; `git fetch origin main` found one new sibling commit (`7abd9bc`, a different
+QA/robustness review session's own clean sweep of `watch_deadlines.py`/`registration_reminders.py`,
+docs-only, no overlap) and fast-forwarded cleanly (`git pull --ff-only`). Open PRs re-checked via the
+GitHub API: new `#175` ("Add signatory-capacity nudge to new-company setup checklist") is open/draft on
+the same reused branch as the earlier merged `#172`/`#173`/`#174`, already shows `mergeable_state:
+"dirty"` (its own cross-session conflict to resolve, not this pass's), and its stated file list
+(dashboard/notification/people/tender-workspace files) doesn't touch anything this pass changed - no
+collision. `#164`/`#165` unchanged.
+
+Reviewed the admin area (`app/app/admin/`) and the onboarding flow first - both came up clean
+(`discovered-opportunities/actions.ts`, `requirement-extractions/actions.ts`,
+`customers/impersonation-actions.ts`, `taxonomy/actions.ts` are all correctly admin-gated;
+`onboarding/actions.ts`'s own ignored `buildCompanyUpdate().error` return is real but not reachable
+today - Screen 1's form only ever submits two TEXT fields, which that function can never return an
+error for, so not flagged). Pivoted to `engine/general/submission_plan.py` (the "assessment engine"'s
+Python reference implementation) and its TypeScript port, `app/app/tenders/[id]/submission-plan-logic.ts`
+- a genuine side-by-side comparison of two independent implementations of the same logic, the exact
+shape this session has repeatedly found real bugs in.
+
+**Found and fixed a real gap**: `requirements.py` sets `cidb.ambiguous = true` on the stored manifest
+when more than one different CIDB grading is found across the documents read (e.g. an addendum
+correcting the original notice) - a real Finding from 2026-10-24, with its own warning text in the
+Python reference's `compile_plan()`. `process_general_jobs.py` writes this flag verbatim into
+`tenders.document_requirements`/`tender_packs.document_requirements`. But the TypeScript
+`RequirementManifest["cidb"]` type (`app/lib/generalTender.ts`) never declared an `ambiguous` field at
+all, and `cidbGradingStep()` (the TS port's own CIDB-grading classifier, the only call site, from
+`submission-plan-data.ts`) never read or surfaced it - so the live Submission Plan screen silently
+dropped a real, already-identified compliance warning the Python reference still carries for the exact
+same stored data. A company relying on the live screen for a tender with a genuinely conflicting CIDB
+grading across its documents would never see that warning at all.
+
+Fixed by adding `ambiguous?: boolean` to the `cidb` type and appending the same warning text
+`submission_plan.py`'s own `compile_plan()` uses when `cidbGradingStep()` sees `cidb.ambiguous`.
+Reproduced first with a `git stash` of just the two source files (keeping the new test): the new
+assertions failed exactly as expected against the unfixed code (`have.note` contained the plain
+grading note with no ambiguity warning at all); restored the fix, same test passed. Added 2 new
+regression tests to the existing `submission-plan-logic.spec.ts` (ambiguous case surfaces the warning
+for both the "have a grading" and "no grading" branches; the ordinary non-ambiguous case never mentions
+it, guarding against the warning leaking into every CIDB step by mistake).
+
+Verification: `npx vitest run app/tenders/[id]/submission-plan-logic.spec.ts` -> 37/37 (up from 35);
+full `npx vitest run` -> 335/335 (up from 333, unaffected elsewhere); `node --experimental-strip-types
+--test lib/*.test.ts` -> 215/215 unaffected (this file isn't under `lib/`); `npx tsc --noEmit` and
+`npx eslint` on all 3 touched files -> clean.
+
+Committed and pushed directly to `main` (no PR - small, fully verified, no live-DB access needed):
+- `app/lib/generalTender.ts`
+- `app/app/tenders/[id]/submission-plan-logic.ts`
+- `app/app/tenders/[id]/submission-plan-logic.spec.ts`
+- `docs/specs/System-Status.md` (this entry)
+
+No new backlog item - this finding was standalone (a real bug, now fixed), not a judgment call for
+Sarel. Backlog unchanged at **18 items**: migrations `0096`/`0107`/`0108`/`0109`/`0110`/`0111` to apply
+to the live DB, `narrative_documents` PostgREST schema-cache reload, PayFast idempotency design
+question, "missing ISO 9001 flagged as urgent" UX question, Form B7 compulsory-vs-matrix disagreement,
+Dashboard "Decision needed" over-triggering finding, impersonation-feature token-refresh gap, the
+SANRAL fingerprint baseline-mismatch heads-up (FYI only, no action needed), the dangling
+`signatory_person_id` fallback design question (Finding 96), no reconciliation for a silently-lapsed
+`active` subscription (Finding 97), the low-severity seat-limit TOCTOU race (`team/actions.ts`), no
+storage-level size/type limit on any of the 9 upload buckets (Finding 105), and the pack-generation
+quota TOCTOU race (`company_can_request_pack()`'s two callers).
+
+---
+
 ## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-fortieth run): clean sweep - compliance/reminders re-confirmed exhausted (watch_deadlines.py/registration_reminders.py)
 
 Oriented from `4536c2d`; `git fetch origin main` found two new commits since - PR #174 merged
