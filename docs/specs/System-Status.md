@@ -14,6 +14,46 @@
 
 ---
 
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-fortieth run): clean sweep - compliance/reminders re-confirmed exhausted (watch_deadlines.py/registration_reminders.py)
+
+Oriented from `4536c2d`; `git fetch origin main` found two new commits since - PR #174 merged
+(`8623d38`, app/-only: split-recipient notifications, the migration-collision renumbering, the
+coordinated `briefing_shortlisted` fix) and a solution-architect follow-up independently verifying it
+(`8a50a17`, docs-only). Neither touches `engine/`, no overlap. Fast-forwarded cleanly. Open PRs
+re-checked: new `#175` ("signatory-capacity nudge", app/-only) plus unchanged `#165`/`#164` - none
+touch `engine/compliance/`.
+
+compliance/reminders rotation - this area was already marked exhausted earlier in this session (and
+again by a sibling's own independent pass). Given the sibling session's concurrent `briefing_shortlisted`
+fixes this window specifically targeted a "which tenders still count as active" filtering gap, checked
+first whether `watch_deadlines.py`/`registration_reminders.py` have the same `pipeline_stage`/
+`ACTIVE_STAGES` filtering concept at all - grepped both files for `pipeline_stage`/`ACTIVE_STAGES`/
+`briefing_shortlisted`/`submitted` and found zero matches: these two files are about document/
+registration EXPIRY reminders, an entirely different concern from "is this tender still being
+pursued", so that specific bug class doesn't apply here. Re-checked for this session's two other
+established bug shapes (the null-vs-missing `.get(key, [])`/`.get(key, {})` pattern, and the
+backslash-replacement `.sub(f"..."` pattern) - found two `.get(id, {})` lookups (`watch_deadlines.py`'s
+`tenders_by_id.get(...)`, `registration_reminders.py`'s `types.get(...)`), but both are ID-keyed
+lookup-dict patterns (missing KEY in a dict of rows), not the "value present but null" shape - a
+different, already-safe pattern.
+
+Investigated one lead to ground: `registration_reminders.py`'s `_names()`/`find_due_registrations()`
+build `{r["company_id"] for r in rows}`/`{r["registration_type_id"] for r in rows}` sets with no
+truthy filter, then `sorted()` them - a `None` mixed with real UUID strings in that set would raise
+`TypeError` in `sorted()`. Checked migration `0050`'s own schema: `held_registrations.company_id` and
+`.registration_type_id` are both `not null` (the second also `on delete restrict`), and
+`property_documents.company_id`/`.property_id` are both `not null` too - the DB itself guarantees
+this can never happen. Not a reachable bug; not fixed.
+
+**No code bug found - a genuine clean sweep**, reached by re-deriving "exhausted" from first
+principles (checking for this session's own newly-established bug shapes specifically, not just
+re-reading) rather than assuming the earlier conclusion still holds. Re-ran `engine/compliance/
+test_watch_deadlines_urgency.py` and `test_watch_person_credentials.py` - both still green. Committed
+docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): PR #174 merged - independently verified it closes 3 backlog items (submitted-tender nagging gap, the duplicate-`0105` migration collision, the coordinated `briefing_shortlisted` fix); no new code bug found
 
 Oriented from `dee58cc`; `git fetch origin main` showed 2 new commits: `4536c2d` (a sibling pass's
