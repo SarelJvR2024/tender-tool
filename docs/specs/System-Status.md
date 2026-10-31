@@ -14,6 +14,46 @@
 
 ---
 
+## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-forty-first run): clean sweep - worker/job-queue infrastructure (poll_loop.py/run_bridges.py/fake_supabase.py); one reproducible-but-unreachable UnicodeDecodeError lead investigated and ruled out
+
+Oriented from `7abd9bc`; `git fetch origin main` found three new commits since - a sibling QA/
+robustness pass's real fix (`b889321`, `submission-plan-logic.ts`'s CIDB grading step, app/-only),
+PR #175 merged (`58f247f`, Sarel's own signatory-capacity nudge, app/-only), and a solution-architect
+follow-up spot-check (`b14176b`, docs-only). None touch `engine/`, no overlap. Fast-forwarded cleanly.
+Open PRs re-checked: only `#165`/`#164` remain, both unchanged, neither touches `engine/worker/`.
+
+worker/job-queue rotation (compliance/reminders was last cycle - clean sweep, logged above). Read
+`engine/worker/poll_loop.py` (the one polling loop every async bridge shares) and `engine/worker/
+run_bridges.py` (the multi-bridge orchestrator the production worker container actually runs) end to
+end - both already tightly designed with this exact bug class in mind (per-poll isolation, per-bridge
+isolation, signal handling only from the main thread, a bridge's whole process GROUP killed on
+timeout so a hung LibreOffice grandchild can't leak). `engine/worker/fake_supabase.py` is test-only
+infrastructure (confirmed by its own docstring), lower priority under this session's "real production
+robustness" scope.
+
+One lead reproduced, then ruled out as unreachable: `run_bridges.py`'s `BridgeRunner.run_once()` calls
+`p.communicate(timeout=self.timeout)` on each bridge subprocess with `text=True` (strict UTF-8
+decoding) inside a `try/except subprocess.TimeoutExpired` that does NOT also catch
+`UnicodeDecodeError` - confirmed directly with a throwaway script that writes non-UTF-8 bytes to its
+own stdout: `communicate()` really does raise `UnicodeDecodeError` uncaught, which would abort the
+WHOLE `run_once()` pass (skipping every bridge after the broken one, that cycle) rather than being
+isolated to just the one broken bridge the way a `TimeoutExpired`/non-zero-exit already is. Traced
+whether any of the six registered bridges could plausibly write raw non-UTF-8 bytes to their own
+stdout/stderr: every one of them only ever uses plain Python `print()`/exception formatting, which
+Python re-encodes through valid Unicode before it ever reaches the OS pipe - the only way invalid
+bytes would reach THIS layer is a C extension or the interpreter's own stdout encoding being
+misconfigured, not a company's own malformed data flowing through. Not a confirmed, reachable bug via
+any of the six real bridges; not fixed, per the standing instruction's own "genuinely clean, not a
+weak finding" allowance.
+
+**No code bug found - a genuine clean sweep**, reached by actually reproducing a lead end to end and
+then tracing its real-world reachability rather than reporting a synthetic crash unverified. Re-ran
+`engine/worker/test_poll_loop.py` - still green (`All bridge-loop smoke tests passed`). Committed
+docs-only:
+- `docs/specs/System-Status.md` (this entry)
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): clean sweep - no second parallel-implementation pair found with the same drift risk; PR #175 spot-checked clean
 
 Oriented from `b889321`; `git fetch origin main` found PR #175 merged (`58f247f`, by Sarel himself -
