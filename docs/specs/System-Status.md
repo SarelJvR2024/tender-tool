@@ -73,6 +73,70 @@ Committed and pushed directly to `main` (contained, well-verified, no PR):
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): RLS-policy audit + email-escaping audit - both clean, one non-issue ruled out
+
+Directive: the last two passes thoroughly audited `SECURITY DEFINER` function ownership checks (two
+real findings, then a confirmed-clean follow-up). This pass pivoted to two different security-adjacent
+angles per the brief: (a) RLS policies themselves (`using`/`with check` clauses), not functions, for a
+"forgot to scope by tenant" gap; (b) text-field escaping in generated emails/documents for an
+XSS/injection-shaped gap, not the function-ownership shape already covered.
+
+Oriented from `bb6f39c`; `git fetch origin main` found one new sibling commit (`8670a4e`, a different
+session's real backslash-in-`re.sub()` fix in `fill_a_forms.py`/`fill_sbd_docx.py`, confirmed via its
+own diff, no overlap with anything checked here). Open PRs re-checked via the GitHub API: `#174`
+("Split-recipient architecture") confirmed still **open and draft, not merged** - the "submitted-tender
+nagging gap" backlog item stays open. `#164`/`#165` unchanged. No collision.
+
+**(a) RLS policy audit.** Cross-referenced every `create table` against every `alter table ... enable
+row level security` across all 109 migrations (a small script, not manual reading) - zero tables were
+ever created without RLS being enabled on them. Cross-referenced RLS-enabled tables against every
+`create policy` (both quoted and bare policy-name syntax, having first caught and fixed a quoting bug
+in my own first pass of this check) to find tables locked out entirely (RLS on, no policy at all) -
+9 tables matched (`lifecycle_unsubscribe_tokens`, `notification_claims`, `payfast_payment_attempts`,
+`platform_admins`, `platform_settings`, `sent_deadline_reminders`, `sent_operational_alerts`,
+`tender_listing_snapshots`, `tender_watch_state`); spot-checked 2 of the most sensitive
+(`platform_admins`, `payfast_payment_attempts`) and confirmed no client-side code anywhere reads them
+directly - these are genuinely internal, service-role-only tables, secure by RLS's own default-deny,
+not an oversight. Also grepped for any permissive (non-`restrictive`) write policy (`insert`/`update`/
+`delete`) using a blanket `using (true)` - found none; the one `using (true)` write policy that exists
+(`tender_packs`'s update policy, 0032) is explicitly `as restrictive`, ANDs with the real tenant-scoped
+policy rather than replacing it, and was already reviewed by an earlier pass. Every bare `for select
+... using (true)` policy found (11 across 7 migrations) was individually checked against its own table
+and confirmed to be deliberately shared/public government-tender reference data (tenders,
+tender_requirements, tender_roles, discipline_categories, etc.) - documented as such in each
+migration's own comment, not private tenant data. **No RLS gap found - a genuine clean sweep.**
+
+**(b) Email/document text-escaping audit.** Read every `infoCard()`/`tenderHeader()`/`pill()`/
+`button()`/`checklist()`/`recipientContextLine()` call site across all 4 email-template tiers
+(`emailTemplatesTier0-3.ts`) plus the shared `emailTemplates.ts` and `emailBrand.ts` helpers
+themselves - roughly 15 render functions, 20+ individual interpolations of company names, person
+names, tender titles, buyer names, and free-text quotes. Every single one that carries real
+user-controlled text is wrapped in `escapeHtml()`, either at the call site or inside the shared helper
+itself (`infoCard()`'s own `label` column, `tenderHeader()`, `pill()`, `button()`,
+`recipientContextLine()` all escape internally - only `infoCard()`'s `value` column relies on the
+caller to escape first, and every current caller does). **No unescaped-interpolation gap found.**
+
+Also checked a different, real-world injection class while in this area: Excel formula injection (a
+malicious company name/field value starting with `=`/`+`/`-`/`@`, executed as a formula when a SANRAL
+evaluator opens a generated submission workbook). Confirmed this is a non-issue for this codebase's
+actual `.xlsx` writer (`engine/sanral_fill.py`'s `set_value()`): every string value is written with
+`t="inlineStr"` cell typing in the raw OOXML, which every real spreadsheet application (Excel,
+LibreOffice, Google Sheets) treats as a literal string regardless of its leading character - only a
+cell with an actual `<f>` formula element is ever evaluated, and this writer never emits one for a
+data field. The classic CSV-injection variant of this (where Excel's own CSV importer guesses a
+leading `=` is a formula) doesn't apply either - grepped for any CSV export anywhere in `app/`/`engine/`
+and found none exists in this codebase at all.
+
+No code changed this pass. QA tooling not re-run (nothing to verify - a documented audit, not a fix).
+Committed and pushed docs-only.
+
+Backlog unchanged at **19 items** - nothing resolved (PR #174 still unmerged), nothing new added. This
+is the third consecutive security-adjacent audit pass this session (SECURITY DEFINER functions ×2,
+now RLS policies + email escaping) to come back clean after a genuinely careful look - worth taking at
+face value as the codebase's actual current state in these areas, not as under-searching.
+
+---
+
 ## This pass (2026-10-31, standing solution-architect review): follow-up security audit after Findings 109/110 - no third instance found, a genuinely clean result
 
 Directive: following up on the last two passes' real cross-tenant/privacy leaks (Finding 109 -
