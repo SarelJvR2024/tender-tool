@@ -1,0 +1,35 @@
+-- Standing review finding, 2026-10-31: lifecycle_unsubscribe_token_for(p_user_id uuid)
+-- (0093) has no ownership check at all - it returns ANY user's real,
+-- unguessable unsubscribe token for whatever uuid is passed in - and was
+-- granted to anon AND authenticated, the same two roles PostgREST exposes
+-- every Supabase RPC call to using nothing but the app's own public anon
+-- key (shipped in the client bundle by design, not a secret).
+--
+-- Its only real caller, app/scripts/send-onboarding-nudges.ts, authenticates
+-- with SUPABASE_SERVICE_ROLE_KEY - a role that bypasses every grant/revoke
+-- here entirely, so it never needed the anon/authenticated grant to work.
+-- The sibling function with the same shape and the same sensitivity
+-- (returning another user's private data looked up by an id the caller
+-- supplies), company_notification_recipients() (0094/0095), is correctly
+-- granted to service_role only - this function alone broke that
+-- established pattern.
+--
+-- Concretely: anyone holding the app's public anon key (everyone) could
+-- call `rpc("lifecycle_unsubscribe_token_for", { p_user_id: "<any uuid>" })`
+-- directly against the Supabase REST endpoint and get back that user's real
+-- token, then use it via the public /api/unsubscribe endpoint (correctly
+-- anon-accessible, by RFC 8058 design - the token itself is the intended
+-- bearer credential there) to silently flip a stranger's
+-- lifecycle_email_opt_out to true. Requires already knowing the target's
+-- auth.users id (not guessable - a random v4 UUID) but nothing else; not
+-- exploitable from the UI alone today, since no page exposes another
+-- user's id to the browser, but the grant itself is wrong regardless of
+-- today's UI and is the one thing standing between "needs an id leak
+-- somewhere else first" and "needs nothing at all."
+--
+-- unsubscribe_lifecycle_email(p_token text) itself is correctly left as
+-- anon/authenticated (the actual RFC 8058 bearer-token redemption this
+-- grant exists for) - only the TOKEN GETTER above was over-granted.
+
+revoke all on function lifecycle_unsubscribe_token_for(uuid) from anon, authenticated;
+grant execute on function lifecycle_unsubscribe_token_for(uuid) to service_role;

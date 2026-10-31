@@ -14,6 +14,74 @@
 
 ---
 
+## This pass (2026-10-31, standing solution-architect review): Finding 109 - lifecycle_unsubscribe_token_for() granted the public anon role the power to fetch ANY user's secret unsubscribe token by uuid
+
+Oriented from `2115727`; `git fetch origin main` found one new commit (`e1de394`, a sibling QA-
+robustness pass's real `assess_tender.py`/`taxonomy` fix - Finding 108 above - confined to
+`engine/discovery/`, no overlap) and fast-forwarded cleanly. Open PRs re-checked via the GitHub API:
+`#174` ("Split-recipient architecture", still **open and draft**, not merged) and `#165`/`#164`
+(unchanged) - none touch anything below. **PR #174's own diff was read in full as independent,
+read-only verification** (fetched its branch locally, diffed against `main`, deleted the temp branch
+after) rather than trusted from its description: it genuinely adds `pipeline_stage` filtering to both
+`deadlineReminders.ts`/`returnablesDigestCandidates.ts` (new `DEADLINE_REMINDER_EXCLUDED_STAGES`/
+`RETURNABLES_EXCLUDED_STAGES`, both correctly wired into the sender scripts' own `select()` calls to
+actually fetch `pipeline_stage`), which would resolve the "submitted-tender nagging gap" backlog item
+- but it is **still unmerged**, so that item stays open, not resolved, until it actually lands.
+
+Checked `/auth/callback/route.ts` and `lib/safeRedirect.ts` (an API-route/auth-boundary sweep,
+following up on the session's "check every route handler" thread) - already correctly hardened from
+an earlier QA pass (both the `//`-protocol-relative and the WHATWG backslash-as-path-separator open-
+redirect bypasses are covered). Checked `/api/unsubscribe/route.ts` next, which led to a real finding:
+read `lifecycle_unsubscribe_tokens`/`lifecycle_unsubscribe_token_for()`/`unsubscribe_lifecycle_email()`
+(0093) end to end.
+
+**Found and fixed a real, independently-reproduced security bug**:
+`lifecycle_unsubscribe_token_for(p_user_id uuid)` - the function that looks up (or lazily creates) a
+user's real, secret, unguessable unsubscribe token - takes an arbitrary caller-supplied `p_user_id`
+with **no check that the caller is that user**, and was granted to `anon` AND `authenticated`. Those
+are exactly the two roles PostgREST exposes every Supabase RPC call to using nothing but the app's own
+public anon key (shipped in the client bundle by design, not a secret) - so anyone holding it could
+call this RPC directly against the REST endpoint for ANY uuid and get back that real user's token, then
+redeem it via the (correctly public, by RFC 8058 design) `/api/unsubscribe` endpoint to silently flip a
+stranger's `lifecycle_email_opt_out` to true. The sibling function with the identical shape and
+sensitivity - `company_notification_recipients()` (0094/0095), also a privileged by-id lookup with a
+caller-supplied argument - is correctly granted to `service_role` ONLY; this one alone broke that
+already-established pattern. Confirmed the one real caller
+(`app/scripts/send-onboarding-nudges.ts`) authenticates with `SUPABASE_SERVICE_ROLE_KEY`, a role that
+bypasses every grant/revoke here entirely - so the `anon`/`authenticated` grant was never actually
+needed for the function to work, only to be exploited. Grepped the whole repo for every other call
+site to confirm this is the only one.
+
+Not exploitable purely from today's UI by itself (no page currently hands another user's own
+`auth.users.id` to the browser), but the grant is wrong independent of that, and it's the one thing
+standing between "needs an id leak somewhere else first" and "needs nothing at all" - the id itself is
+an unguessable random v4 UUID, not brute-forceable.
+
+Reproduced and fixed safely in a disposable scratch Postgres database (`scratch_grant_test`, dropped
+immediately after - the live DB was never touched, per the standing production-DB-mutation rule):
+built a byte-for-byte copy of the real table/function/grant from 0093, confirmed `set role anon;
+select lifecycle_unsubscribe_token_for(<any uuid>)` genuinely returned a real token before the fix,
+then applied the exact revoke/grant from the new migration and confirmed the identical call now fails
+with `permission denied for function`, while `set role service_role` (the real caller's actual role)
+still succeeds unaffected.
+
+Fixed with new migration `0108_lifecycle_unsubscribe_token_for_grant.sql` (`revoke all ... from anon,
+authenticated; grant execute ... to service_role`) - a pure privilege change, no schema/data change,
+no app-code change needed (the real caller already uses the service-role key). Migration `0108` is
+written and pushed but **NOT applied to the live database** - needs Sarel's run via Supabase's SQL
+Editor, same as every other pending migration on this list. `unsubscribe_lifecycle_email(text)` itself
+(the actual RFC 8058 bearer-token redemption) is correctly left untouched - only its sibling token
+GETTER was over-granted.
+
+No JS/TS/Python touched, so no code-level QA tooling applies; the fix's own correctness was verified
+end-to-end against the scratch-database reproduction above, which is the real test here.
+
+**Backlog: 17 + 2 new = 19** (Finding 109 above: migration `0108` needs applying to close the
+over-grant; PR #174 remains open/draft, NOT YET a resolution of the submitted-tender nagging item -
+watch for it to merge before closing that one). All 17 prior items carried forward unchanged.
+
+---
+
 ## This pass (2026-10-31, standing QA/robustness review - one-hundred-and-thirty-fifth run): Finding 108 - a company's own disciplines, hand-typed as a bare string instead of a list, were silently shredded into individual characters and never matched a real tender again
 
 Oriented from `2115727` (fast-forwarded cleanly; two new solution-architect commits since the last
